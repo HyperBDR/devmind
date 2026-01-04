@@ -1,0 +1,170 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2024-12-30 14:07+0800\n"
+"PO-Revision-Date: 2025-01-01 12:00+0800\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: zh_Hans\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: accounts/views.py:32
+msgid "Code is required"
+msgstr "Code是必填的字段"
+
+#: articlehub/views/settings.py:453
+msgid "OSS storage is disabled, validation skipped"
+msgstr "OSS存储已禁用，跳过验证"
+
+#: articlehub/views/settings.py:473
+msgid "Missing required fields: {}"
+msgstr "缺少必填字段: {}"
+
+#: articlehub/views/settings.py:475
+msgid "{} is required"
+msgstr "{} 是必填的"
+
+#: articlehub/views/settings.py:506
+msgid "Failed to initialize storage: {}"
+msgstr "初始化存储失败: {}"
+
+#: articlehub/views/settings.py:520
+msgid "OSS configuration validated successfully"
+msgstr "OSS配置验证成功"
+
+#: articlehub/views/settings.py:363
+msgid "Invalid Access Key ID"
+msgstr "无效的 Access Key ID"
+
+#: articlehub/views/settings.py:365
+msgid "Access Key ID may be incorrect"
+msgstr "Access Key ID 可能输入错误"
+
+#: articlehub/views/settings.py:366
+msgid "Please check if Access Key ID is correct"
+msgstr "请检查 Access Key ID 是否正确"
+
+#: articlehub/views/settings.py:370
+msgid "Invalid Access Key Secret"
+msgstr "无效的 Access Key Secret"
+
+#: articlehub/views/settings.py:372
+msgid "Access Key Secret may be incorrect"
+msgstr "Access Key Secret 可能输入错误"
+
+#: articlehub/views/settings.py:373
+msgid "Please check if Access Key Secret is correct"
+msgstr "请检查 Access Key Secret 是否正确"
+
+#: articlehub/views/settings.py:379
+msgid "Cannot access Bucket \"{}\""
+msgstr "无法访问 Bucket \"{}\""
+
+#: articlehub/views/settings.py:382
+msgid "Bucket \"{}\" may not exist"
+msgstr "Bucket \"{}\" 可能不存在"
+
+#: articlehub/views/settings.py:383
+msgid "Bucket name may be incorrect"
+msgstr "Bucket 名称可能输入错误"
+
+#: articlehub/views/settings.py:384
+msgid "Please check if you have permission to access this Bucket"
+msgstr "请检查是否有访问该 Bucket 的权限"
+
+#: articlehub/views/settings.py:388
+msgid "The \"Use Virtual Host Style\" configuration may be incorrect, please try toggling this option"
+msgstr "可能是\"使用虚拟主机样式\"配置不正确，请尝试切换该选项"
+
+#: articlehub/views/settings.py:391
+msgid "Access denied"
+msgstr "访问被拒绝"
+
+#: articlehub/views/settings.py:393
+msgid "Access Key may not have permission to access this Bucket"
+msgstr "Access Key 可能没有访问该 Bucket 的权限"
+
+#: articlehub/views/settings.py:394
+msgid "Please check the Access Key permission configuration"
+msgstr "请检查 Access Key 的权限配置"
+
+#: articlehub/views/settings.py:395
+msgid "Please confirm the Bucket access policy settings"
+msgstr "请确认 Bucket 的访问策略设置"
+
+#: articlehub/views/settings.py:402
+msgid "Cannot connect to endpoint \"{}\""
+msgstr "无法连接到端点 \"{}\""
+
+#: articlehub/views/settings.py:405
+msgid "Endpoint \"{}\" may be incorrect"
+msgstr "端点 \"{}\" 可能不正确"
+
+#: articlehub/views/settings.py:406
+msgid "Please check if network connection is normal"
+msgstr "请检查网络连接是否正常"
+
+#: articlehub/views/settings.py:407
+msgid "Please confirm the endpoint address format is correct"
+msgstr "请确认端点地址格式是否正确"
+
+#: articlehub/views/settings.py:410
+msgid "Connection timeout"
+msgstr "连接超时"
+
+#: articlehub/views/settings.py:412
+msgid "Timeout when connecting to \"{}\""
+msgstr "连接到 \"{}\" 时超时"
+
+#: articlehub/views/settings.py:413
+msgid "Please check network connection"
+msgstr "请检查网络连接"
+
+#: articlehub/views/settings.py:414
+msgid "Please confirm the endpoint address is correct"
+msgstr "请确认端点地址是否正确"
+
+#: articlehub/views/settings.py:417
+msgid "Cannot retrieve Bucket information"
+msgstr "无法获取 Bucket 信息"
+
+#: articlehub/views/settings.py:420
+msgid "Access Key ID or Secret may be wrong"
+msgstr "Access Key ID 或 Secret 可能错误"
+
+#: articlehub/views/settings.py:421
+msgid "Endpoint address may be incorrect"
+msgstr "端点地址可能不正确"
+
+#: articlehub/views/settings.py:422
+msgid "Network connection may have issues"
+msgstr "网络连接可能有问题"
+
+#: articlehub/views/settings.py:537
+msgid "Possible causes:"
+msgstr "可能的原因："
+
+#: articlehub/views/settings.py:589
+msgid "Validation error: {}"
+msgstr "验证错误: {}"
+
+#: articlehub/views/settings.py:582
+msgid "Failed to initialize storage"
+msgstr "初始化存储失败"
+
+#: articlehub/views/settings.py:584
+msgid "Configuration parameters may be incorrect"
+msgstr "配置参数可能不正确"
+
+#: articlehub/views/settings.py:585
+msgid "Please check if all required fields are filled correctly"
+msgstr "请检查所有必填字段是否填写正确"

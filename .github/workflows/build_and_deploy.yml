@@ -1,0 +1,108 @@
+name: Build and Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: devmind-deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ${{ vars.REGISTRY }}
+  IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+  SSH_HOST: ${{ vars.SSH_HOST }}
+  SSH_USER: ${{ vars.SSH_USER }}
+  SSH_PORT: ${{ vars.SSH_PORT }}
+  DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=semver,pattern=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            USE_MIRROR=false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Install SSH Key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          if_key_exists: fail
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.SSH_HOST }}
+          username: ${{ env.SSH_USER }}
+          port: ${{ env.SSH_PORT }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          command_timeout: 3600s
+          script: |
+            cd ${{ env.DEPLOY_PATH }}
+            LOCK_FILE="/tmp/devmind-deploy.lock"
+            MAX_WAIT=300
+            WAIT_INTERVAL=5
+            ELAPSED=0
+
+            # Wait for any existing deployment to complete
+            while [ -f "$LOCK_FILE" ] && [ $ELAPSED -lt $MAX_WAIT ]; do
+              echo "Deployment in progress, waiting... (${ELAPSED}s/${MAX_WAIT}s)"
+              sleep $WAIT_INTERVAL
+              ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+            done
+
+            if [ -f "$LOCK_FILE" ]; then
+              echo "Timeout waiting for deployment lock. Proceeding anyway..."
+            fi
+
+            # Create lock file
+            echo "$$ $(date)" > "$LOCK_FILE"
+            trap "rm -f $LOCK_FILE" EXIT
+
+            echo "Starting devmind deployment..."
+            # Pull the specified image tag
+            docker-compose -f docker-compose.yml pull
+            # Start containers in detached mode - this returns immediately
+            # The containers will gracefully shutdown old tasks in the background
+            docker-compose -f docker-compose.yml up -d --force-recreate
+            docker system prune -f
+
+            echo "devmind deployment completed"
+            echo "Note: Celery workers are gracefully shutting down old tasks in the background (up to 30 minutes)"
+            rm -f "$LOCK_FILE"

@@ -1,0 +1,49 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include setup.py
+include tox.ini
+
+recursive-include devmind *.py
+recursive-include devmind *.html
+recursive-include devmind *.txt
+recursive-include devmind *.json
+recursive-include devmind *.mo
+recursive-include devmind *.po
+recursive-include devmind *.pot
+recursive-include devmind *.css
+recursive-include devmind *.js
+recursive-include devmind *.png
+recursive-include devmind *.jpg
+recursive-include devmind *.gif
+recursive-include devmind *.ico
+recursive-include devmind *.svg
+
+recursive-include devmind/templates *
+recursive-include devmind/static *
+recursive-include devmind/locale *
+recursive-include devmind/migrations *
+
+# Exclude unnecessary files
+recursive-exclude devmind *.pyc
+recursive-exclude devmind *.pyo
+recursive-exclude devmind *.pyd
+recursive-exclude devmind *.so
+recursive-exclude devmind __pycache__
+recursive-exclude devmind *.egg-info
+recursive-exclude devmind *.dist-info
+recursive-exclude devmind .DS_Store
+recursive-exclude devmind .git
+recursive-exclude devmind .gitignore
+recursive-exclude devmind .env
+recursive-exclude devmind .env.*
+recursive-exclude devmind .vscode
+recursive-exclude devmind .idea
+recursive-exclude devmind .pytest_cache
+recursive-exclude devmind .coverage
+recursive-exclude devmind htmlcov
+recursive-exclude devmind build
+recursive-exclude devmind dist
+recursive-exclude devmind node_modules
+recursive-exclude devmind .tox
+recursive-exclude devmind .eggs

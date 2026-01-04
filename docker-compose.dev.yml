@@ -1,0 +1,164 @@
+services:
+  devmind-api:
+    image: devmind:latest
+    container_name: devmind-api-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USE_MIRROR: ${USE_MIRROR:-true}
+    volumes:
+      - ./data.dev/django/staticfiles:/opt/devmind/core/staticfiles
+      - ./data.dev/logs/api:/var/log/gunicorn
+      - ./devmind:/opt/devmind
+      - ./cache.dev:/opt/cache
+      - ./docker/nginx/certs:/opt/devmind/docker/nginx/certs
+      - ./data.dev/media:/opt/media
+    networks:
+      - devmind_network
+    depends_on:
+      - mysql
+    command: development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  devmind-worker:
+    image: devmind:latest
+    container_name: devmind-worker-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    volumes:
+      - ./cache.dev:/opt/cache
+      - ./data.dev/logs/worker:/var/log/celery
+      - ./data.dev/media:/opt/media
+      - ./devmind:/opt/devmind
+    networks:
+      - devmind_network
+    depends_on:
+      - devmind-api
+      - mysql
+      - redis
+    command: celery
+
+  devmind-scheduler:
+    image: devmind:latest
+    container_name: devmind-scheduler-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    volumes:
+      - ./data.dev/logs/scheduler:/var/log/celery
+      - ./devmind:/opt/devmind
+    networks:
+      - devmind_network
+    depends_on:
+      devmind-api:
+        condition: service_started
+      mysql:
+        condition: service_started
+      redis:
+        condition: service_started
+    command: celery-beat
+
+  mysql:
+    image: mariadb:11.6
+    container_name: devmind-mariadb-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    volumes:
+      - ./docker/mysql/etc/my.cnf:/etc/mysql/my.cnf
+      - ./docker/mysql/initdb.d:/docker-entrypoint-initdb.d
+      - ./data.dev/mysql/data:/var/lib/mysql
+      - ./data.dev/logs/mysql:/var/log/mysql
+    networks:
+      - devmind_network
+
+  redis:
+    image: redis:alpine
+    container_name: devmind-redis-dev
+    restart: unless-stopped
+    command: redis-server
+    volumes:
+      - ./data.dev/redis:/data
+      - ./data.dev/logs/redis:/var/log/redis
+    networks:
+      - devmind_network
+
+  flower:
+    image: devmind:latest
+    container_name: devmind-flower-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    ports:
+      - "${FLOWER_HOST_PORT:-5555}:5555"
+    depends_on:
+      devmind-api:
+        condition: service_started
+      redis:
+        condition: service_started
+    command: flower
+    networks:
+      - devmind_network
+
+  devmind-ui:
+    image: devmind-ui:dev
+    build:
+      context: ../devmind-ui
+      dockerfile: Dockerfile.dev
+    container_name: devmind-ui-dev
+    restart: unless-stopped
+    volumes:
+      - ../devmind-ui/src:/app/src:ro
+      - ../devmind-ui/public:/app/public:ro
+      - ../devmind-ui/index.html:/app/index.html:ro
+      - ../devmind-ui/vite.config.js:/app/vite.config.js:ro
+      - ../devmind-ui/tailwind.config.js:/app/tailwind.config.js:ro
+      - ../devmind-ui/postcss.config.js:/app/postcss.config.js:ro
+      - ../devmind-ui/package.json:/app/package.json:ro
+      - ../devmind-ui/node_modules:/app/node_modules
+    networks:
+      - devmind_network
+    depends_on:
+      devmind-api:
+        condition: service_started
+
+  nginx:
+    image: nginx:latest
+    container_name: devmind-nginx-dev
+    restart: unless-stopped
+    env_file:
+      - ./.env.dev
+    volumes:
+      - ./docker/nginx/default.dev.conf:/etc/nginx/conf.d/default.conf
+      - ./data.dev/django/staticfiles:/staticfiles:ro
+      - ./data.dev/logs/nginx:/var/log/nginx
+      - ./data.dev/media:/opt/media:ro
+    ports:
+      - "${DJANGO_HOST_PORT:-8000}:80"
+    networks:
+      - devmind_network
+    depends_on:
+      devmind-api:
+        condition: service_healthy
+      devmind-ui:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  devmind_network:
+    driver: bridge
