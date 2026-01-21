@@ -20,7 +20,7 @@ services:
     networks:
       - devmind_network
     depends_on:
-      - mysql
+      - postgresql
     command: development
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
@@ -44,7 +44,7 @@ services:
       - devmind_network
     depends_on:
       - devmind-api
-      - mysql
+      - postgresql
       - redis
     command: celery
 
@@ -62,25 +62,43 @@ services:
     depends_on:
       devmind-api:
         condition: service_started
-      mysql:
+      postgresql:
         condition: service_started
       redis:
         condition: service_started
     command: celery-beat
 
-  mysql:
-    image: mariadb:11.6
-    container_name: devmind-mariadb-dev
+  postgresql:
+    image: postgres:17
+    container_name: devmind-postgresql-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-devmind}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Allow password authentication from any host (safe in Docker network)
+      POSTGRES_HOST_AUTH_METHOD: md5
     volumes:
-      - ./docker/mysql/etc/my.cnf:/etc/mysql/my.cnf
-      - ./docker/mysql/initdb.d:/docker-entrypoint-initdb.d
-      - ./data.dev/mysql/data:/var/lib/mysql
-      - ./data.dev/logs/mysql:/var/log/mysql
+      - ./docker/postgresql/initdb.d:/docker-entrypoint-initdb.d:ro
+      - ./docker/postgresql/etc/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./data.dev/postgresql/data:/var/lib/postgresql/data
+      - ./data.dev/logs/postgresql:/var/log/postgresql
+    entrypoint: ["bash", "-c", "mkdir -p /var/log/postgresql && chown -R postgres:postgres /var/log/postgresql && chmod -R 755 /var/log/postgresql && exec docker-entrypoint.sh \"$$@\""]
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
     networks:
       - devmind_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-devmind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   redis:
     image: redis:alpine
@@ -111,11 +129,12 @@ services:
       - devmind_network
 
   devmind-ui:
-    image: devmind-ui:dev
     build:
       context: ../devmind-ui
       dockerfile: Dockerfile.dev
+    image: devmind-ui:dev
     container_name: devmind-ui-dev
+    pull_policy: missing
     restart: unless-stopped
     volumes:
       - ../devmind-ui/src:/app/src:ro

@@ -47,9 +47,14 @@ wait_for_db() {
             log "MySQL is ready!"
             ;;
         postgresql|postgres)
-            HOST=${POSTGRES_HOST:-localhost}
+            # In Docker Compose, use service name 'postgresql' as default host
+            # For local development, use 'localhost'
+            HOST=${POSTGRES_HOST:-postgresql}
             PORT=${POSTGRES_PORT:-5432}
+            USER=${POSTGRES_USER:-postgres}
+            DB=${POSTGRES_DB:-postgres}
             log "Waiting for PostgreSQL at $HOST:$PORT..."
+            # pg_isready doesn't require authentication, just checks if server is accepting connections
             until pg_isready -h "$HOST" -p "$PORT" > /dev/null 2>&1; do
                 sleep 2
             done

@@ -56,7 +56,7 @@ Edit `.env` file and configure:
 - `DJANGO_DEBUG=false`: Disable debug mode
 - `ALLOWED_HOSTS`: Allowed domain names
 - `CSRF_TRUSTED_ORIGINS`: Trusted domain names
-- Database configuration (MySQL)
+- Database configuration (PostgreSQL - recommended, or MySQL/MariaDB for backward compatibility)
 - AI service configuration (OpenAI/Azure OpenAI)
 - Other necessary production configurations
 

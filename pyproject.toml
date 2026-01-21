@@ -20,7 +20,8 @@ dependencies = [
     "drf-spectacular",
     "python-dotenv",
     "dj_database_url==2.3.0",
-    "mysqlclient==2.1.1",
+    "mysqlclient==2.1.1",  # Kept for backward compatibility (MySQL/MariaDB support)
+    "psycopg2-binary>=2.9.9",  # PostgreSQL adapter (recommended)
     "celery==5.3.1",
     "django-celery-beat==2.7.0",
     "django_celery_results",

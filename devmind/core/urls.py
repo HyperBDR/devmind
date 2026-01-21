@@ -37,6 +37,10 @@ urlpatterns = [
     # Includes configuration management endpoints
     path('', include('app_config.urls')),
 
+    # Cloud billing routes
+    # Includes cloud billing management endpoints
+    path('api/v1/cloud-billing/', include('cloud_billing.urls')),
+
     # Custom OAuth callback redirect with JWT tokens
     # This must come BEFORE allauth.urls to intercept the redirect
     path(

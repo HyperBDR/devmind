@@ -62,6 +62,8 @@ RUN apt-get install -y --no-install-recommends \
     iputils-ping \
     dnsutils \
     mariadb-client \
+    # Note: MySQL/MariaDB packages are kept for backward compatibility
+    # PostgreSQL is the recommended database (postgresql-client, libpq-dev)
     && rm -rf /var/lib/apt/lists/* \
     && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 \
     && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1

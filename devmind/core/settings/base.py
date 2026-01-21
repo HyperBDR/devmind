@@ -165,6 +165,7 @@ INSTALLED_APPS = [
 INSTALLED_APPS += [
     'accounts',
     'app_config',
+    'cloud_billing',
 ]
 
 # The ID of the site that this Django project is associated with.

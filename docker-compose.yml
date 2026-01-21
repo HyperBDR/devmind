@@ -19,7 +19,7 @@ services:
     networks:
       - devmind_network
     depends_on:
-      - mysql
+      - postgresql
     command: gunicorn
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
@@ -44,7 +44,7 @@ services:
     depends_on:
       devmind-api:
         condition: service_started
-      mysql:
+      postgresql:
         condition: service_started
       redis:
         condition: service_started
@@ -64,19 +64,20 @@ services:
     depends_on:
       devmind-api:
         condition: service_started
-      mysql:
+      postgresql:
         condition: service_started
       redis:
         condition: service_started
     command: celery-beat
 
   devmind-ui:
-    image: devmind-ui:latest
     container_name: devmind-ui
     restart: unless-stopped
     build:
       context: ../devmind-ui
       dockerfile: Dockerfile
+    image: devmind-ui:latest
+    pull_policy: missing
     expose:
       - "80"
     networks:
@@ -116,19 +117,37 @@ services:
       retries: 3
       start_period: 30s
 
-  mysql:
-    image: mariadb:11.6
-    container_name: devmind-mariadb
+  postgresql:
+    image: postgres:17
+    container_name: devmind-postgresql
     restart: unless-stopped
     env_file:
       - ./.env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-devmind}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Allow password authentication from any host (safe in Docker network)
+      POSTGRES_HOST_AUTH_METHOD: md5
     volumes:
-      - ./docker/mysql/etc/my.cnf:/etc/mysql/my.cnf
-      - ./docker/mysql/initdb.d:/docker-entrypoint-initdb.d
-      - ./data/mysql/data:/var/lib/mysql
-      - ./data/logs/mysql:/var/log/mysql
+      - ./docker/postgresql/initdb.d:/docker-entrypoint-initdb.d:ro
+      - ./docker/postgresql/etc/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./data/postgresql/data:/var/lib/postgresql/data
+      - ./data/logs/postgresql:/var/log/postgresql
+    entrypoint: ["bash", "-c", "mkdir -p /var/log/postgresql && chown -R postgres:postgres /var/log/postgresql && chmod -R 755 /var/log/postgresql && exec docker-entrypoint.sh \"$$@\""]
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
     networks:
       - devmind_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-devmind}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   redis:
     image: redis:alpine
