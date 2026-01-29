@@ -86,13 +86,15 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = int(
 
 # Celery periodic task scheduling configuration, defining tasks that need to
 # run periodically
-# Note: All periodic tasks are now managed via Django Celery Beat's database scheduler
-# You can add tasks through the Django admin interface or programmatically
 CELERY_BEAT_SCHEDULE = {
-    # Add your periodic tasks here if needed
-    # Example:
-    # 'my_periodic_task': {
-    #     'task': 'myapp.tasks.my_task',
-    #     'schedule': crontab(hour=0, minute=0),  # Daily at midnight
-    # },
+    # Cloud billing collection task
+    # Collect billing data for all active cloud providers every hour at 10 minutes past
+    'cloud_billing_hourly_collection': {
+        'task': 'cloud_billing.tasks.collect_billing_data',
+        # Every hour at :10
+        'schedule': crontab(minute=10),
+        'args': (),
+        # System user for scheduled tasks
+        'kwargs': {'user_id': 0},
+    },
 }

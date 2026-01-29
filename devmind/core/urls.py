@@ -41,6 +41,10 @@ urlpatterns = [
     # Includes cloud billing management endpoints
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),
 
+    # Task management routes
+    # Includes unified task management endpoints
+    path('api/v1/tasks/', include('task_manager.urls')),
+
     # Custom OAuth callback redirect with JWT tokens
     # This must come BEFORE allauth.urls to intercept the redirect
     path(

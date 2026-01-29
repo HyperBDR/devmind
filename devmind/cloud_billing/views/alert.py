@@ -109,7 +109,9 @@ class AlertRecordViewSet(viewsets.ReadOnlyModelViewSet):
     """
     ViewSet for querying alert records.
     """
-    queryset = AlertRecord.objects.select_related('provider', 'alert_rule').all()
+    queryset = (
+        AlertRecord.objects.select_related('provider', 'alert_rule').all()
+    )
     permission_classes = [IsAuthenticated]
 
     def get_serializer_class(self):
@@ -124,7 +126,10 @@ class AlertRecordViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Filter alert records by provider, date range, and webhook status.
         """
-        queryset = AlertRecord.objects.select_related('provider', 'alert_rule').all()
+        queryset = (
+            AlertRecord.objects.select_related('provider', 'alert_rule')
+            .all()
+        )
 
         provider_id = self.request.query_params.get('provider_id', None)
         start_date = self.request.query_params.get('start_date', None)

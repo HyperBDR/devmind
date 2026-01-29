@@ -32,7 +32,8 @@ warnings.filterwarnings('ignore', message='.*invalid escape sequence.*')
 SILENCED_SYSTEM_CHECKS = [
     # MariaDB does not support unique constraints with conditions
     'models.W036',
-    'models.W043',  # MariaDB does not support indexes on expressions
+    # MariaDB does not support indexes on expressions
+    'models.W043',
 ]
 
 # ============================
@@ -166,6 +167,8 @@ INSTALLED_APPS += [
     'accounts',
     'app_config',
     'cloud_billing',
+    'notifier',
+    'task_manager',
 ]
 
 # The ID of the site that this Django project is associated with.
@@ -348,21 +351,32 @@ LANGUAGE_CODE_MAPPING = {
     # Chinese variants
     'zh-cn': 'zh-hans',
     'zh': 'zh-hans',
-    'zh-tw': 'zh-hans',  # Traditional Chinese -> Simplified (fallback)
-    'zh-hk': 'zh-hans',  # Hong Kong Chinese -> Simplified (fallback)
-    'zh-sg': 'zh-hans',  # Singapore Chinese -> Simplified
-    'zh-mo': 'zh-hans',  # Macau Chinese -> Simplified (fallback)
+    # Traditional Chinese -> Simplified (fallback)
+    'zh-tw': 'zh-hans',
+    # Hong Kong Chinese -> Simplified (fallback)
+    'zh-hk': 'zh-hans',
+    # Singapore Chinese -> Simplified
+    'zh-sg': 'zh-hans',
+    # Macau Chinese -> Simplified (fallback)
+    'zh-mo': 'zh-hans',
 
     # English variants (Django's LocaleMiddleware handles these
     # automatically via language prefix matching, but included here
     # for completeness and explicit control)
-    'en-us': 'en',  # US English
-    'en-gb': 'en',  # UK English
-    'en-au': 'en',  # Australia English
-    'en-ca': 'en',  # Canada English
-    'en-nz': 'en',  # New Zealand English
-    'en-ie': 'en',  # Ireland English
-    'en-za': 'en',  # South Africa English
+    # US English
+    'en-us': 'en',
+    # UK English
+    'en-gb': 'en',
+    # Australia English
+    'en-au': 'en',
+    # Canada English
+    'en-ca': 'en',
+    # New Zealand English
+    'en-nz': 'en',
+    # Ireland English
+    'en-ie': 'en',
+    # South Africa English
+    'en-za': 'en',
 }
 
 # ============================
@@ -513,5 +527,6 @@ SPECTACULAR_SETTINGS = {
     'TAGS': [
         {'name': 'auth', 'description': 'Authentication endpoints'},
         {'name': 'config', 'description': 'Global configuration endpoints'},
+        {'name': 'task-management', 'description': 'Unified task management endpoints'},
     ],
 }

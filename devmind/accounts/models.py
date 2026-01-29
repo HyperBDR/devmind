@@ -110,7 +110,7 @@ class Profile(models.Model):
 
     timezone = models.CharField(
         max_length=50,
-        default='UTC',
+        default='Asia/Shanghai',
         help_text=(
             "User's timezone for displaying dates and times. "
             "Common values: 'UTC', 'Asia/Shanghai', 'America/New_York', etc."

@@ -62,14 +62,19 @@ REST_FRAMEWORK = {
 
     # Additional pagination settings (optional):
     # ---------------------------------------
-    # 'PAGINATE_BY_PARAM': 'page_size',  # Allow client to override page size
-    # 'MAX_PAGE_SIZE': 100,              # Maximum limit for page size
-    # 'PAGE_QUERY_PARAM': 'p',           # Custom page parameter (default: page)
-    # 'PAGE_SIZE_QUERY_PARAM': 'size',   # Allow client to set page size
+    # Allow client to override page size
+    # 'PAGINATE_BY_PARAM': 'page_size',
+    # Maximum limit for page size
+    # 'MAX_PAGE_SIZE': 100,
+    # Custom page parameter (default: page)
+    # 'PAGE_QUERY_PARAM': 'p',
+    # Allow client to set page size
+    # 'PAGE_SIZE_QUERY_PARAM': 'size',
 
     # --- Sorting Configuration ---
     # DEFAULT_FILTER_BACKENDS: Enable ordering filter backend
-    # Using OrderingFilter allows clients to sort results via ?ordering=field_name
+    # Using OrderingFilter allows clients to sort results via
+    # ?ordering=field_name
     # Example: ?ordering=-created_date for descending sort
     'DEFAULT_FILTER_BACKENDS': (
         'rest_framework.filters.OrderingFilter',

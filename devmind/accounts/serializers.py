@@ -1,3 +1,4 @@
+import logging
 import re
 
 from django.conf import settings
@@ -10,10 +11,6 @@ from allauth.socialaccount import providers
 from allauth.socialaccount.models import SocialAccount
 
 from accounts.models import Profile
-
-# Note: EmailAlias is from threadline app
-# If you have similar functionality in devmind, import it here:
-# from threadline.models import EmailAlias
 
 
 def normalize_language_code(value):
@@ -66,14 +63,9 @@ def check_username_uniqueness(username):
     """
     Check if username is unique.
 
-    Note: This is a placeholder. If you have EmailAlias or similar
-    functionality, implement the uniqueness check here.
-    For now, we just check if User.username is unique.
+    Currently checks User.username uniqueness.
+    Can be extended to check EmailAlias if needed.
     """
-    # If you have EmailAlias, use:
-    # return EmailAlias.is_unique(username)
-    #
-    # For now, just check User.username:
     return not User.objects.filter(username=username).exists()
 
 
@@ -425,8 +417,9 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     display_name = serializers.SerializerMethodField(
         read_only=True,
         help_text=_(
-            "User-friendly display name, prioritizing first_name + last_name "
-            "from OAuth providers, falling back to username"
+            "User-friendly display name, prioritizing "
+            "first_name + last_name from OAuth providers, "
+            "falling back to username"
         )
     )
 
@@ -438,8 +431,23 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     )
 
     profile = serializers.SerializerMethodField(
-        read_only=True,
         help_text=_("User profile information")
+    )
+    profile_language = serializers.CharField(
+        write_only=True,
+        required=False,
+        help_text=_(
+            "User's preferred language for AI generation "
+            "and backend logic (not UI display)"
+        )
+    )
+    profile_timezone = serializers.CharField(
+        write_only=True,
+        required=False,
+        help_text=_(
+            "User's timezone for backend logic "
+            "and date/time display"
+        )
     )
 
     auth_info = serializers.SerializerMethodField(
@@ -458,6 +466,8 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             'display_name',
             'virtual_email',
             'profile',
+            'profile_language',
+            'profile_timezone',
             'auth_info',
             'is_staff'
         ]
@@ -494,25 +504,10 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     def get_virtual_email(self, obj):
         """
         Get the primary virtual email address for the user.
-        Returns the first active EmailAlias.
 
-        Note: If you have EmailAlias, uncomment and use:
-        try:
-            from threadline.models import EmailAlias
-            email_alias = EmailAlias.objects.filter(
-                user=obj,
-                is_active=True
-            ).first()
-
-            if email_alias:
-                return email_alias.full_email_address()
-
-            return None
-        except Exception:
-            return None
+        Returns None as EmailAlias is not implemented in this project.
+        Can be extended to return email alias if needed.
         """
-        # Placeholder: return username@domain if you have a domain
-        # For now, return None or username
         return None
 
     def get_profile(self, obj):
@@ -581,13 +576,62 @@ class UserDetailsSerializer(serializers.ModelSerializer):
                 auth_info['login_identifier'] = obj.email
 
         except Exception as e:
-            import logging
             logger = logging.getLogger(__name__)
             logger.error(
-                f"Error getting auth info for user {obj.id}: {e}"
+                "Error getting auth info for user %s: %s",
+                obj.id,
+                e,
+                exc_info=True
             )
 
         return auth_info
+
+    def update(self, instance, validated_data):
+        """
+        Update user instance and profile language/timezone if provided.
+        """
+        profile_language = validated_data.pop('profile_language', None)
+        profile_timezone = validated_data.pop('profile_timezone', None)
+
+        # Update user fields
+        instance = super().update(instance, validated_data)
+
+        # Update profile language and/or timezone if provided
+        if profile_language is not None or profile_timezone is not None:
+            try:
+                profile = instance.profile
+                update_fields = []
+                if profile_language is not None:
+                    normalized_lang = normalize_language_code(
+                        profile_language
+                    )
+                    profile.language = normalized_lang
+                    update_fields.append('language')
+                if profile_timezone is not None:
+                    tz_value = (
+                        profile_timezone.strip() or 'Asia/Shanghai'
+                    )
+                    profile.timezone = tz_value
+                    update_fields.append('timezone')
+                if update_fields:
+                    profile.save(update_fields=update_fields)
+            except Profile.DoesNotExist:
+                default_lang = (
+                    normalize_language_code(profile_language)
+                    if profile_language
+                    else 'zh-CN'
+                )
+                default_tz = (
+                    profile_timezone.strip()
+                    if profile_timezone
+                    else 'Asia/Shanghai'
+                )
+                Profile.objects.create(
+                    user=instance,
+                    language=default_lang,
+                    timezone=default_tz
+                )
+        return instance
 
 
 class CustomPasswordResetSerializer(serializers.Serializer):

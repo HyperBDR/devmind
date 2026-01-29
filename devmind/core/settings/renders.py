@@ -20,9 +20,12 @@ class CustomJSONRenderer(JSONRenderer):
 
     The standardized format is:
     {
-        "code": int,      # 0 for success, HTTP status code for errors
-        "message": str,   # "success" or "failed"
-        "data": dict      # Original response data
+        # 0 for success, HTTP status code for errors
+        "code": int,
+        # "success" or "failed"
+        "message": str,
+        # Original response data
+        "data": dict
     }
 
     The renderer handles three cases:

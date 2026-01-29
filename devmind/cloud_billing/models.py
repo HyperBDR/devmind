@@ -5,6 +5,12 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
 
+from .constants import (
+    WEBHOOK_STATUS_FAILED,
+    WEBHOOK_STATUS_PENDING,
+    WEBHOOK_STATUS_SUCCESS,
+)
+
 
 class CloudProvider(models.Model):
     """
@@ -12,7 +18,8 @@ class CloudProvider(models.Model):
     """
     PROVIDER_TYPES = [
         ('aws', 'AWS'),
-        ('huawei', 'Huawei Cloud'),
+        ('huawei', 'Huawei Cloud (China)'),
+        ('huawei-intl', 'Huawei Cloud (International)'),
         ('alibaba', 'Alibaba Cloud'),
         ('azure', 'Azure'),
     ]
@@ -31,6 +38,11 @@ class CloudProvider(models.Model):
     display_name = models.CharField(
         max_length=200,
         help_text="Display name for the provider, e.g., 'AWS China'"
+    )
+    notes = models.TextField(
+        blank=True,
+        null=True,
+        help_text="Optional notes or description for this provider"
     )
     config = models.JSONField(
         help_text="Authentication configuration stored as JSON"
@@ -93,7 +105,14 @@ class BillingData(models.Model):
     total_cost = models.DecimalField(
         max_digits=20,
         decimal_places=2,
-        help_text="Total cost"
+        help_text="Cumulative total cost for the period"
+    )
+    hourly_cost = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Incremental cost for this hour (current - previous hour)"
     )
     currency = models.CharField(
         max_length=10,
@@ -118,8 +137,9 @@ class BillingData(models.Model):
         db_table = 'cloud_billing_data'
         verbose_name = 'Billing Data'
         verbose_name_plural = 'Billing Data'
-        unique_together = [('provider', 'period', 'hour')]
+        unique_together = [('provider', 'account_id', 'period', 'hour')]
         indexes = [
+            models.Index(fields=['provider', 'account_id', 'period', 'hour']),
             models.Index(fields=['provider', 'period', 'hour']),
             models.Index(fields=['period', 'hour']),
             models.Index(fields=['collected_at']),
@@ -153,6 +173,16 @@ class AlertRule(models.Model):
         null=True,
         blank=True,
         help_text="Growth percentage threshold, e.g., 5.0 means 5%"
+    )
+    growth_amount_threshold = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Growth amount threshold, e.g., 1000.00 means alert when "
+            "cost increases by 1000.00"
+        )
     )
     is_active = models.BooleanField(
         default=True,
@@ -188,9 +218,11 @@ class AlertRule(models.Model):
         """
         Validate that at least one threshold is set.
         """
-        if not self.cost_threshold and not self.growth_threshold:
+        if (not self.cost_threshold and not self.growth_threshold and
+                not self.growth_amount_threshold):
             raise ValidationError(
-                "At least one of cost_threshold or growth_threshold must be set."
+                "At least one of cost_threshold, growth_threshold, "
+                "or growth_amount_threshold must be set."
             )
 
     def save(self, *args, **kwargs):
@@ -206,6 +238,8 @@ class AlertRule(models.Model):
             thresholds.append(f"Cost: {self.cost_threshold}")
         if self.growth_threshold:
             thresholds.append(f"Growth: {self.growth_threshold}%")
+        if self.growth_amount_threshold:
+            thresholds.append(f"Growth Amount: {self.growth_amount_threshold}")
         return f"{self.provider.display_name} - {', '.join(thresholds)}"
 
 
@@ -214,9 +248,9 @@ class AlertRecord(models.Model):
     Alert record model for tracking billing alerts.
     """
     WEBHOOK_STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('success', 'Success'),
-        ('failed', 'Failed'),
+        (WEBHOOK_STATUS_PENDING, 'Pending'),
+        (WEBHOOK_STATUS_SUCCESS, 'Success'),
+        (WEBHOOK_STATUS_FAILED, 'Failed'),
     ]
 
     provider = models.ForeignKey(
@@ -261,7 +295,7 @@ class AlertRecord(models.Model):
     webhook_status = models.CharField(
         max_length=20,
         choices=WEBHOOK_STATUS_CHOICES,
-        default='pending',
+        default=WEBHOOK_STATUS_PENDING,
         db_index=True
     )
     webhook_response = models.JSONField(

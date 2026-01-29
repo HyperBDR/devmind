@@ -131,8 +131,8 @@ def create_profile(user):
             user=user,
             defaults={
                 'registration_completed': False,
-                'language': 'en-US',
-                'timezone': 'UTC'
+                'language': 'zh-CN',
+                'timezone': 'Asia/Shanghai'
             }
         )
         if created:

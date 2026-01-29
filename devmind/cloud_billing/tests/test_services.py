@@ -5,8 +5,10 @@ import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
 
+from cloud_billing.services.notification_service import (
+    CloudBillingNotificationService
+)
 from cloud_billing.services.provider_service import ProviderService
-from cloud_billing.services.webhook_service import WebhookService
 from cloud_billing.models import CloudProvider, AlertRecord
 
 
@@ -170,206 +172,105 @@ class TestProviderService:
 
 
 @pytest.mark.django_db
-class TestWebhookService:
+class TestCloudBillingNotificationService:
     """
-    Tests for WebhookService.
+    Tests for CloudBillingNotificationService.
+
+    These tests focus on the business logic of converting
+    cloud billing data to notification format.
     """
 
-    @patch('cloud_billing.services.webhook_service.get_config')
-    def test_load_config_success(self, mock_get_config):
-        """
-        Test loading webhook config successfully.
-        """
-        mock_config = {
-            'is_active': True,
-            'url': 'https://open.feishu.cn/open-apis/bot/v2/hook/test',
-            'provider': 'feishu',
-            'language': 'zh-hans'
-        }
-        mock_get_config.return_value = mock_config
-
-        service = WebhookService()
-        assert service.webhook_config == mock_config
-
-    @patch('cloud_billing.services.webhook_service.get_config')
-    def test_load_config_not_active(self, mock_get_config):
-        """
-        Test loading inactive webhook config.
-        """
-        mock_config = {'is_active': False}
-        mock_get_config.return_value = mock_config
-
-        service = WebhookService()
-        assert service.webhook_config is None
-
-    @patch('cloud_billing.services.webhook_service.get_config')
-    def test_get_webhook_config(self, mock_get_config):
-        """
-        Test getting webhook config.
-        """
-        mock_config = {
-            'is_active': True,
-            'url': 'https://open.feishu.cn/open-apis/bot/v2/hook/test'
-        }
-        mock_get_config.return_value = mock_config
-
-        service = WebhookService()
-        result = service.get_webhook_config()
-        assert result == mock_config
-
-    @patch('cloud_billing.services.webhook_service.requests.post')
-    @patch('cloud_billing.services.webhook_service.WebhookService._load_config')
-    def test_send_feishu_alert_success(
-        self,
-        mock_load_config,
-        mock_post
-    ):
-        """
-        Test sending Feishu alert successfully.
-        """
-        mock_config = {
-            'is_active': True,
-            'url': 'https://open.feishu.cn/open-apis/bot/v2/hook/test',
-            'language': 'zh-hans',
-            'timeout': 10
-        }
-        mock_load_config.return_value = None
-
-        mock_response = Mock()
-        mock_response.json.return_value = {'code': 0}
-        mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
-
-        service = WebhookService()
-        service.webhook_config = mock_config
-
-        alert_data = {
-            'provider_name': 'Test AWS',
-            'current_cost': 100.50,
-            'previous_cost': 80.00,
-            'increase_cost': 20.50,
-            'increase_percent': 25.63,
-            'currency': 'USD',
-            'language': 'zh-hans'
-        }
-
-        result = service.send_feishu_alert(alert_data)
-        assert result['success'] is True
-        assert 'response' in result
-
-    @patch('cloud_billing.services.webhook_service.WebhookService._load_config')
-    def test_send_feishu_alert_no_config(self, mock_load_config):
-        """
-        Test sending Feishu alert without config.
-        """
-        service = WebhookService()
-        service.webhook_config = None
-
-        alert_data = {
-            'provider_name': 'Test AWS',
-            'current_cost': 100.50,
-            'previous_cost': 80.00,
-            'increase_cost': 20.50,
-            'increase_percent': 25.63,
-            'currency': 'USD'
-        }
-
-        result = service.send_feishu_alert(alert_data)
-        assert result['success'] is False
-        assert 'error' in result
-
-    @patch('cloud_billing.services.webhook_service.requests.post')
-    def test_send_wechat_alert_success(self, mock_post):
-        """
-        Test sending WeChat alert successfully.
-        """
-        mock_config = {
-            'is_active': True,
-            'url': 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test',
-            'language': 'zh-hans',
-            'timeout': 10
-        }
-
-        mock_response = Mock()
-        mock_response.json.return_value = {'errcode': 0}
-        mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
-
-        service = WebhookService()
-        service.webhook_config = mock_config
-
-        alert_data = {
-            'provider_name': 'Test AWS',
-            'current_cost': 100.50,
-            'previous_cost': 80.00,
-            'increase_cost': 20.50,
-            'increase_percent': 25.63,
-            'currency': 'USD',
-            'language': 'zh-hans'
-        }
-
-        result = service.send_wechat_alert(alert_data)
-        assert result['success'] is True
-
-    @patch('cloud_billing.services.webhook_service.WebhookService.send_feishu_alert')
+    @patch(
+        'cloud_billing.services.notification_service.WebhookService'
+    )
     def test_send_alert_feishu(
         self,
-        mock_send_feishu,
+        mock_webhook_service_class,
         alert_record
     ):
         """
         Test sending alert via Feishu.
         """
-        mock_config = {
+        mock_webhook_service = Mock()
+        mock_webhook_service_class.return_value = mock_webhook_service
+        mock_webhook_service.get_webhook_config.return_value = {
             'is_active': True,
             'provider': 'feishu',
             'language': 'zh-hans'
         }
-        mock_send_feishu.return_value = {'success': True}
+        mock_webhook_service.send.return_value = {
+            'success': True,
+            'response': {},
+            'error': None
+        }
 
-        service = WebhookService()
-        service.webhook_config = mock_config
-
+        service = CloudBillingNotificationService()
         result = service.send_alert(alert_record)
-        assert result['success'] is True
-        mock_send_feishu.assert_called_once()
 
-    @patch('cloud_billing.services.webhook_service.WebhookService.send_wechat_alert')
+        assert result['success'] is True
+        mock_webhook_service.send.assert_called_once()
+        call_args = mock_webhook_service.send.call_args
+        assert call_args[0][1] == 'feishu'
+        payload = call_args[0][0]
+        # Verify Feishu payload format
+        assert payload['msg_type'] == 'post'
+        assert 'content' in payload
+        assert 'post' in payload['content']
+
+    @patch(
+        'cloud_billing.services.notification_service.WebhookService'
+    )
     def test_send_alert_wechat(
         self,
-        mock_send_wechat,
+        mock_webhook_service_class,
         alert_record
     ):
         """
         Test sending alert via WeChat.
         """
-        mock_config = {
+        mock_webhook_service = Mock()
+        mock_webhook_service_class.return_value = mock_webhook_service
+        mock_webhook_service.get_webhook_config.return_value = {
             'is_active': True,
             'provider': 'wechat',
             'language': 'zh-hans'
         }
-        mock_send_wechat.return_value = {'success': True}
-
-        service = WebhookService()
-        service.webhook_config = mock_config
-
-        result = service.send_alert(alert_record)
-        assert result['success'] is True
-        mock_send_wechat.assert_called_once()
-
-    def test_send_alert_unsupported_provider(self, alert_record):
-        """
-        Test sending alert with unsupported provider type.
-        """
-        mock_config = {
-            'is_active': True,
-            'provider': 'unsupported',
-            'language': 'zh-hans'
+        mock_webhook_service.send.return_value = {
+            'success': True,
+            'response': {},
+            'error': None
         }
 
-        service = WebhookService()
-        service.webhook_config = mock_config
-
+        service = CloudBillingNotificationService()
         result = service.send_alert(alert_record)
+
+        assert result['success'] is True
+        mock_webhook_service.send.assert_called_once()
+        call_args = mock_webhook_service.send.call_args
+        assert call_args[0][1] == 'wechat'
+        payload = call_args[0][0]
+        # Verify WeChat payload format
+        assert payload['msgtype'] == 'markdown'
+        assert 'markdown' in payload
+        assert 'content' in payload['markdown']
+
+    @patch(
+        'cloud_billing.services.notification_service.WebhookService'
+    )
+    def test_send_alert_no_config(
+        self,
+        mock_webhook_service_class,
+        alert_record
+    ):
+        """
+        Test sending alert without webhook config.
+        """
+        mock_webhook_service = Mock()
+        mock_webhook_service_class.return_value = mock_webhook_service
+        mock_webhook_service.get_webhook_config.return_value = None
+
+        service = CloudBillingNotificationService()
+        result = service.send_alert(alert_record)
+
         assert result['success'] is False
-        assert 'Unsupported' in result['error']
+        assert 'not found' in result['error'].lower()
