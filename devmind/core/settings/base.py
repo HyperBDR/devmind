@@ -167,6 +167,7 @@ INSTALLED_APPS += [
     'accounts',
     'app_config',
     'cloud_billing',
+    'llm_tracker',
     'notifier',
     'task_manager',
 ]

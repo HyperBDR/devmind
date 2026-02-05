@@ -43,6 +43,8 @@ dependencies = [
     "django-allauth>=0.57.0",
     "django-cors-headers>=4.3.0",
     "django-extensions>=3.2.3",
+    # LLM tracker (llm_service depends on devtoolbox for OpenAI/Azure/Gemini)
+    "devtoolbox @ git+https://github.com/cloud2ai/devtoolbox.git",
 ]
 
 [project.optional-dependencies]

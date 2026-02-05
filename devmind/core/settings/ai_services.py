@@ -104,6 +104,20 @@ AZURE_OPENAI_CONFIG = {
 }
 
 # ============================
+# Google Gemini Configuration (Optional)
+# ============================
+
+# GEMINI_CONFIG: Google Gemini service configuration
+# Used when LLM_PROVIDER is set to 'gemini'
+# Documentation: https://ai.google.dev/gemini-api/docs
+GEMINI_CONFIG = {
+    'api_key': os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY'),
+    'model': os.getenv('GEMINI_MODEL', 'gemini-1.5-pro'),
+    'max_tokens': int(os.getenv('GEMINI_MAX_TOKENS', '60000')),
+    'temperature': float(os.getenv('GEMINI_TEMPERATURE', '0.7')),
+}
+
+# ============================
 # LLM Provider Selection
 # ============================
 
