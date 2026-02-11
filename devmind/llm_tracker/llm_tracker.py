@@ -1,5 +1,5 @@
 """
-LLM call tracker for DevMind.
+LLM call tracker for easy-divine.
 
 Provides unified interface for LLM API calls with automatic usage
 tracking and cost analysis.
@@ -92,8 +92,8 @@ class LLMTracker:
         effective_state = {**(state or {}), "node_name": node_name}
         total_chars = sum(len(msg.get("content", "")) for msg in messages)
         logger.info(
-            f"[{node_name}] LLM request: "
-            f"messages={len(messages)}, total_chars={total_chars}, "
+            f"LLM request; node_name={node_name}, "
+            f"message_count={len(messages)}, total_chars={total_chars}, "
             f"json_mode={json_mode}"
         )
 
@@ -101,6 +101,10 @@ class LLMTracker:
             response_obj = llm_service.chat(**chat_kwargs)
 
             if response_obj is None:
+                logger.error(
+                    f"LLM service returned None response; "
+                    f"node_name={node_name}"
+                )
                 raise ValueError(
                     f"[{node_name}] LLM service returned None response"
                 )
@@ -145,9 +149,19 @@ class LLMTracker:
                 )
 
             if not response_content or not str(response_content).strip():
+                model_val = actual_model or "unknown"
+                logger.warning(
+                    f"LLM returned empty response; node_name={node_name}, "
+                    f"model={model_val}"
+                )
                 raise ValueError("LLM returned empty response")
 
             if not usage:
+                model_val = actual_model or "unknown"
+                logger.debug(
+                    f"No usage_metadata on response; node_name={node_name}, "
+                    f"model={model_val}"
+                )
                 usage = {
                     "model": actual_model or "unknown",
                     "prompt_tokens": 0,
@@ -184,17 +198,20 @@ class LLMTracker:
                 error=None,
             )
 
+            node = effective_state.get("node_name", "unknown")
             logger.info(
-                f"[{effective_state.get('node_name', 'unknown')}] LLM call succeeded: "
-                f"{usage['total_tokens']} tokens"
+                f"LLM call succeeded; node_name={node}, "
+                f"model={usage['model']}, total_tokens={usage['total_tokens']}"
             )
 
             return str(response_content), usage
 
         except Exception as e:
+            node = effective_state.get("node_name", "unknown")
+            err_type = type(e).__name__
             logger.error(
-                f"[{effective_state.get('node_name', 'unknown')}] LLM call failed: "
-                f"{type(e).__name__}: {e}"
+                f"LLM call failed; node_name={node}, error_type={err_type}, "
+                f"error={e}"
             )
             logger.exception(e)
 
@@ -287,6 +304,7 @@ class LLMTracker:
 
         except Exception as e:
             logger.warning(
-                f"Failed to save LLM usage record for {node_name}: {e}",
+                f"Failed to save LLM usage record; node_name={node_name}, "
+                f"model={model}, user_id={user_id}, error={e}",
                 exc_info=True,
             )

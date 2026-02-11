@@ -1,5 +1,6 @@
 """LLM Tracker admin configuration."""
 from django.contrib import admin
+
 from .models import LLMUsage
 
 

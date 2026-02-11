@@ -48,7 +48,9 @@ class Migration(migrations.Migration):
                     "completion_tokens",
                     models.IntegerField(
                         default=0,
-                        help_text="Number of output/completion tokens generated",
+                        help_text=(
+                            "Number of output/completion tokens generated"
+                        ),
                     ),
                 ),
                 (
@@ -94,7 +96,10 @@ class Migration(migrations.Migration):
                     models.JSONField(
                         blank=True,
                         default=dict,
-                        help_text="Context information (e.g. node_name, workflow_type)",
+                        help_text=(
+                            "Context information (e.g. node_name, "
+                            "workflow_type)"
+                        ),
                     ),
                 ),
                 (
@@ -109,7 +114,9 @@ class Migration(migrations.Migration):
                     "task_execution",
                     models.ForeignKey(
                         blank=True,
-                        help_text="Task execution associated with this LLM call",
+                        help_text=(
+                            "Task execution associated with this LLM call"
+                        ),
                         null=True,
                         on_delete=django.db.models.deletion.SET_NULL,
                         related_name="llm_usages",

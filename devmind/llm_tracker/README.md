@@ -4,6 +4,18 @@
 
 ---
 
+## 模块说明
+
+| 模块 | 用途 |
+|------|------|
+| **llm_tracker.py** | 发起 LLM 调用并自动落库（`LLMTracker.call_and_track`） |
+| **llm_service.py** | 获取 LLM 客户端（`get_llm_service`），不写库 |
+| **llm_usage_stats.py** | 用量**统计**：汇总、按模型、时序，供图表与成本分析 |
+| **llm_usage.py** | 用量**明细**：分页列表与筛选，供管理端表格 |
+| **views.py / urls.py** | Admin 只读 REST 接口（token-stats、llm-usage） |
+
+---
+
 ## 配置（settings）
 
 - `LLM_PROVIDER`: `"openai"` | `"azure_openai"` | `"gemini"`
@@ -67,34 +79,113 @@ svc = get_llm_service()
 
 ## 用量统计（供管理端）
 
+推荐直接按 query 取完整统计（含图表时序）：
+
+```python
+from llm_tracker.llm_usage_stats import get_token_stats_from_query
+
+data = get_token_stats_from_query(request.query_params)
+# data: summary, by_model, series（仅当传入 granularity 时有值，否则为 None）
+# 不支持的 granularity 会 raise ValueError
+```
+
+或按需调用底层函数：
+
 ```python
 from llm_tracker.llm_usage_stats import (
     get_summary_stats,
     get_stats_by_model,
-    get_stats_by_day,
+    get_time_series_stats,
 )
 ```
 
-### get_summary_stats(start_date=None, end_date=None)
+### get_summary_stats(start_date=None, end_date=None, user_id=None)
 
-- **返回**:
-  `total_prompt_tokens`, `total_completion_tokens`, `total_tokens`,
-  `total_calls`, `successful_calls`, `failed_calls`
+- **返回**: `total_prompt_tokens`, `total_completion_tokens`, `total_tokens`,
+  `total_cached_tokens`, `total_reasoning_tokens`, `total_calls`,
+  `successful_calls`, `failed_calls`
 
-### get_stats_by_model(start_date=None, end_date=None)
+### get_stats_by_model(start_date=None, end_date=None, user_id=None)
 
-- **返回**: list[dict]，每项含 `model`, `total_calls`, `total_prompt_tokens`, `total_completion_tokens`, `total_tokens`，按 `total_tokens` 降序
+- **返回**: list[dict]，每项含 `model`, `total_calls`, `total_prompt_tokens`,
+  `total_completion_tokens`, `total_tokens`, `total_cached_tokens`,
+  `total_reasoning_tokens`，按 `total_tokens` 降序
 
-### get_stats_by_day(start_date=None, end_date=None)
+### get_time_series_stats(granularity, start_date=None, end_date=None, user_id=None)
 
-- **返回**: list[dict]，每项含 `date`（日期字符串）, `total_calls`, `total_tokens`，按日期升序
+- **granularity**: `"day"`（按小时）| `"month"`（按日）| `"year"`（按月）
+- **返回**: list[dict]，每项含 `bucket`, `total_calls`, `total_prompt_tokens`,
+  `total_completion_tokens`, `total_tokens`, `total_cached_tokens`,
+  `total_reasoning_tokens`
+- 不支持的 granularity 会 **raise ValueError**
 
 日期可为 `datetime` 或可被 `parse_datetime`/isoformat 解析的字符串。
 
 ---
 
+## 用量明细（分页列表，供管理端表格）
+
+需要逐条、分页的用量记录时，用 `llm_usage`：
+
+```python
+from llm_tracker.llm_usage import get_llm_usage_list, get_llm_usage_list_from_query
+
+# 从 query 解析并返回分页结果
+data = get_llm_usage_list_from_query(request.query_params)
+# data: results (list), total, page, page_size
+```
+
+或直接调用（`start_date`、`end_date` 可选，为 datetime 或可解析字符串）：
+
+```python
+data = get_llm_usage_list(
+    page=1,
+    page_size=20,
+    user_id=user_id,
+    model_filter="gpt",
+    success_filter="true",
+    start_date=start_date,   # 可选
+    end_date=end_date,       # 可选
+)
+```
+
+- **筛选**: `user_id`、`model`（icontains）、`success`（true/false）、`start_date`、`end_date`
+- **返回**: `results`（每条含 id、user_id、username、model、prompt_tokens/completion_tokens/total_tokens、success、error、created_at、metadata）、`total`、`page`、`page_size`
+- `llm_usage` 内部复用 `llm_usage_stats` 的 `_parse_date`、`_parse_end_date` 做日期解析
+
+---
+
+## Admin API（仅管理员）
+
+llm_tracker 提供只读的 REST 接口，需 **IsAdminUser**（staff 或 superuser）。
+
+### 挂载方式
+
+在项目根 URL 下 include 即可，例如：
+
+```python
+# core/urls.py 或项目主 urls.py
+from django.urls import path, include
+
+urlpatterns = [
+    path('api/v1/admin/', include('llm_tracker.urls')),
+]
+```
+
+则接口为：
+
+- `GET /api/v1/admin/token-stats/` — 用量统计（summary、by_model、series）
+  - query: `start_date`, `end_date`, `user_id`, `granularity`（day|month|year）
+- `GET /api/v1/admin/llm-usage/` — 分页用量列表
+  - query: `page`, `page_size`, `user_id`, `model`, `success`, `start_date`, `end_date`
+
+依赖：`rest_framework`，且认证用户需 `is_staff=True` 或为 superuser。
+
+---
+
 ## 数据表
 
-- **LLMUsage**（表名 `llm_tracker_usage`）
-  字段：id(UUID), user_id, model, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, success, error, metadata(JSON), created_at。
-  `metadata` 中会写入：`node_name`、`source_type`、`source_task_id`、`source_path` 及 state 里传入的 `metadata` 内容。
+- **LLMUsage**（表名 `llm_tracker_usage`）  
+  字段：id(UUID), user_id, model, prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, success, error, metadata(JSON), created_at。  
+  `metadata` 中会写入：`node_name`、`source_type`、`source_task_id`、`source_path` 及 state 里传入的 `metadata` 内容。  
+  在 Django Admin（`admin.py` 已注册）中可只读查看。

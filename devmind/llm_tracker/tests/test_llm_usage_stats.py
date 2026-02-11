@@ -1,18 +1,18 @@
 """
-Tests for llm_usage_stats: _parse_date, get_summary_stats, by_model, by_day.
+Tests for llm_usage_stats: _parse_date, get_summary_stats, by_model, series.
 
 Uses real DB and LLMUsage records for aggregation tests.
 """
-from datetime import datetime
-
 import pytest
 from django.utils import timezone as django_tz
 
 from llm_tracker.llm_usage_stats import (
     _parse_date,
-    get_stats_by_day,
+    _parse_end_date,
     get_stats_by_model,
     get_summary_stats,
+    get_time_series_stats,
+    get_token_stats_from_query,
 )
 from llm_tracker.models import LLMUsage
 
@@ -48,6 +48,35 @@ class TestParseDate:
 
     def test_returns_none_for_wrong_type(self):
         assert _parse_date(123) is None
+
+
+@pytest.mark.unit
+class TestParseEndDate:
+    """
+    _parse_end_date returns end of day for date-only strings so full day
+    is included.
+    """
+
+    def test_returns_none_for_none(self):
+        assert _parse_end_date(None) is None
+
+    def test_date_only_returns_end_of_day(self):
+        out = _parse_end_date("2025-02-01")
+        assert out is not None
+        assert out.year == 2025
+        assert out.month == 2
+        assert out.day == 1
+        assert out.hour == 23
+        assert out.minute == 59
+        assert out.second == 59
+        assert out.microsecond == 999999
+
+    def test_datetime_string_unchanged(self):
+        s = "2025-02-01T14:30:00+00:00"
+        out = _parse_end_date(s)
+        assert out is not None
+        assert out.hour == 14
+        assert out.minute == 30
 
 
 @pytest.mark.unit
@@ -146,39 +175,94 @@ class TestGetStatsByModel:
 
 @pytest.mark.unit
 @pytest.mark.django_db
-class TestGetStatsByDay:
+class TestGetTimeSeriesStats:
     """
-    get_stats_by_day returns list of {date, total_calls, total_tokens} per day.
+    get_time_series_stats buckets by hour/day/month and applies filters.
     """
 
-    def test_empty_list_when_no_records(self):
-        assert get_stats_by_day() == []
+    def test_raises_for_unsupported_granularity(self):
+        with pytest.raises(ValueError, match="Unsupported granularity"):
+            get_time_series_stats(granularity="invalid")
 
-    def test_one_row_per_day(self):
-        now = django_tz.now()
+    def test_day_granularity_returns_buckets(self):
         LLMUsage.objects.create(
             model="m1",
             total_tokens=10,
-            created_at=now,
+        )
+        items = get_time_series_stats(granularity="day")
+        assert isinstance(items, list)
+        if items:
+            row = items[0]
+            assert "bucket" in row
+            assert "total_calls" in row
+            assert "total_tokens" in row
+
+    def test_month_granularity_returns_buckets(self):
+        LLMUsage.objects.create(model="m1", total_tokens=5)
+        items = get_time_series_stats(granularity="month")
+        assert isinstance(items, list)
+
+    def test_year_granularity_returns_buckets(self):
+        LLMUsage.objects.create(model="m1", total_tokens=5)
+        items = get_time_series_stats(granularity="year")
+        assert isinstance(items, list)
+
+    def test_filters_by_user_and_dates(self, django_user_model):
+        user = django_user_model.objects.create_user(
+            username="u1", password="p", email="u1@example.com"
         )
         LLMUsage.objects.create(
-            model="m2",
-            total_tokens=20,
-            created_at=now,
+            user=user,
+            model="m1",
+            total_tokens=1,
         )
-        rows = get_stats_by_day()
-        assert len(rows) == 1
-        assert rows[0]["total_calls"] == 2
-        assert rows[0]["total_tokens"] == 30
-        assert rows[0]["date"] is not None
+        items = get_time_series_stats(
+            granularity="day",
+            user_id=user.id,
+        )
+        assert isinstance(items, list)
 
-    def test_filters_by_start_date(self):
-        now = django_tz.now()
-        LLMUsage.objects.create(model="m1", total_tokens=1, created_at=now)
-        start = (now - django_tz.timedelta(days=1)).date()
-        start_dt = django_tz.make_aware(
-            datetime.combine(start, datetime.min.time())
+
+@pytest.mark.unit
+@pytest.mark.django_db
+class TestGetTokenStatsFromQuery:
+    """
+    get_token_stats_from_query builds summary, by_model, series from params.
+    """
+
+    def test_returns_summary_and_by_model_without_granularity(self):
+        LLMUsage.objects.create(model="m1", total_tokens=10)
+        out = get_token_stats_from_query({})
+        assert "summary" in out
+        assert out["summary"]["total_tokens"] == 10
+        assert "by_model" in out
+        assert out["series"] is None
+
+    def test_parses_start_date_end_date_user_id(self, django_user_model):
+        user = django_user_model.objects.create_user(
+            username="u1", password="p", email="u1@example.com"
         )
-        rows = get_stats_by_day(start_date=start_dt)
-        assert len(rows) >= 1
-        assert any(r["total_tokens"] == 1 for r in rows)
+        LLMUsage.objects.create(
+            user=user,
+            model="m1",
+            total_tokens=1,
+        )
+        out = get_token_stats_from_query({
+            "start_date": "2025-01-01T00:00:00+00:00",
+            "end_date": "2025-12-31T23:59:59+00:00",
+            "user_id": str(user.id),
+        })
+        assert "summary" in out
+        assert "by_model" in out
+
+    def test_includes_series_when_granularity_given(self):
+        LLMUsage.objects.create(model="m1", total_tokens=1)
+        out = get_token_stats_from_query({"granularity": "day"})
+        assert out["series"] is not None
+        assert out["series"]["granularity"] == "day"
+        assert "items" in out["series"]
+
+    def test_raises_for_unsupported_granularity_in_params(self):
+        with pytest.raises(ValueError, match="Unsupported granularity"):
+            get_token_stats_from_query({"granularity": "bad"})
+

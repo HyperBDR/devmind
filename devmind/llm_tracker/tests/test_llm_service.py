@@ -42,7 +42,9 @@ class TestGetLlmServiceOpenAI:
         mock_settings.LLM_PROVIDER = "openai"
         mock_settings.OPENAI_CONFIG = {}
 
-        with pytest.raises(ValueError, match="OpenAI configuration is incomplete"):
+        with pytest.raises(
+            ValueError, match="OpenAI configuration is incomplete"
+        ):
             get_llm_service()
 
 
