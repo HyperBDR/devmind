@@ -1,14 +1,16 @@
 # DevMind
 
+English | [中文](README.zh-CN.md)
+
 AI-powered acceleration platform for internal enterprise use, enabling AI-driven R&D project management, financial data analysis, and other intelligent workflows.
 
 ## Agentcore submodules
 
 Common modules (e.g. LLM tracking, config, task manager, notifier) are maintained as separate repositories and included here as **git submodules** under `devmind/agentcore/`. The project uses them via editable installs and does not keep a local compatibility layer.
 
-### After cloning the repo
+### After cloning the repo: fetch submodules first
 
-Initialize and fetch submodules:
+**If you just cloned the repo, you must initialize and fetch submodules** so that agentcore packages are available; otherwise Python imports and Django apps will fail.
 
 ```bash
 git submodule update --init --recursive
@@ -51,6 +53,8 @@ Future submodules (e.g. agentcore-config, agentcore-task-tracker, agentcore-noti
 - Git
 
 ### Setup
+
+0. **If you cloned the repo:** run `git submodule update --init --recursive` (see [Agentcore submodules](#after-cloning-the-repo-fetch-submodules-first) above).
 
 1. Copy environment configuration file:
 
