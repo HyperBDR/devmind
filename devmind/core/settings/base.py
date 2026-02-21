@@ -167,7 +167,7 @@ INSTALLED_APPS += [
     'accounts',
     'app_config',
     'cloud_billing',
-    'llm_tracker',
+    'agentcore_tracking.adapters.django',
     'notifier',
     'task_manager',
 ]
@@ -529,5 +529,6 @@ SPECTACULAR_SETTINGS = {
         {'name': 'auth', 'description': 'Authentication endpoints'},
         {'name': 'config', 'description': 'Global configuration endpoints'},
         {'name': 'task-management', 'description': 'Unified task management endpoints'},
+        {'name': 'llm-tracking', 'description': 'LLM usage tracking and config (admin API)'},
     ],
 }

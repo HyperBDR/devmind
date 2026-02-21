@@ -45,6 +45,9 @@ urlpatterns = [
     # Includes unified task management endpoints
     path('api/v1/tasks/', include('task_manager.urls')),
 
+    # LLM tracking admin API (agentcore-tracking submodule)
+    path('api/v1/admin/', include('agentcore_tracking.adapters.django.urls')),
+
     # Custom OAuth callback redirect with JWT tokens
     # This must come BEFORE allauth.urls to intercept the redirect
     path(

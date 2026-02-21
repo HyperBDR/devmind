@@ -2,6 +2,47 @@
 
 AI-powered acceleration platform for internal enterprise use, enabling AI-driven R&D project management, financial data analysis, and other intelligent workflows.
 
+## Agentcore submodules
+
+Common modules (e.g. LLM tracking, config, task manager, notifier) are maintained as separate repositories and included here as **git submodules** under `devmind/agentcore/`. The project uses them via editable installs and does not keep a local compatibility layer.
+
+### After cloning the repo
+
+Initialize and fetch submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+### Installing agentcore packages (local and CI)
+
+Each submodule under `devmind/agentcore/` is a pip-installable package. Install them in editable mode so the project can import `agentcore_xxx`:
+
+```bash
+# From the repository root (devmind/)
+for d in devmind/agentcore/*/; do
+  [ -f "${d}pyproject.toml" ] && pip install -e "$d"
+done
+```
+
+If using `uv`:
+
+```bash
+for d in devmind/agentcore/*/; do
+  [ -f "${d}pyproject.toml" ] && uv pip install -e "$d"
+done
+```
+
+Docker builds run the same logic in the Dockerfile after installing main dependencies.
+
+### Submodule mapping and usage
+
+| Submodule               | Replaces (legacy) | Django app (INSTALLED_APPS)              | Import / URL mount |
+|-------------------------|-------------------|------------------------------------------|---------------------|
+| `agentcore-tracking`    | llm_tracker       | `agentcore_tracking.adapters.django`     | `agentcore_tracking.*`, `api/v1/admin/` |
+
+Future submodules (e.g. agentcore-config, agentcore-task-tracker, agentcore-notifier) follow the same pattern and are installed the same way.
+
 ## Development Environment
 
 ### Requirements

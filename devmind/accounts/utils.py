@@ -100,7 +100,7 @@ class SocialAccountHelper:
 
         Example:
             if SocialAccountHelper.has_provider(user, 'google'):
-                print("User has Google account")
+                print(f"User has Google account")
         """
         return SocialAccount.objects.filter(
             user=user,

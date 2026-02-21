@@ -103,6 +103,17 @@ RUN set -eux; \
         uv pip install --system -r requirements.txt; \
     fi
 
+# Install agentcore submodules (editable) so agentcore_xxx packages are available
+# After COPY devmind /opt/devmind, agentcore lives at /opt/devmind/agentcore/
+RUN set -eux; \
+    export PATH="/root/.local/bin:$PATH"; \
+    for d in agentcore/*/; do \
+        if [ -f "${d}pyproject.toml" ]; then \
+            echo "Installing agentcore submodule: $d"; \
+            uv pip install --system -e "$d" || true; \
+        fi; \
+    done
+
 # Create necessary directories
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/devmind
 

@@ -1,0 +1,3 @@
+[submodule "devmind/agentcore/agentcore-tracking"]
+	path = devmind/agentcore/agentcore-tracking
+	url = https://github.com/cloud2ai/agentcore-tracking.git
