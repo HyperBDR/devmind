@@ -14,9 +14,11 @@ from django.utils import translation
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from task_manager.constants import TaskStatus
-from task_manager.services.task_tracker import TaskTracker
-from task_manager.utils.log_collector import TaskLogCollector
+from agentcore_task.adapters.django import (
+    TaskLogCollector,
+    TaskStatus,
+    TaskTracker,
+)
 
 from app_config.utils import get_config
 
@@ -28,7 +30,7 @@ from .constants import (
 from .models import AlertRecord, AlertRule, BillingData, CloudProvider
 from .services.notification_service import CloudBillingNotificationService
 from .services.provider_service import ProviderService
-from task_manager import prevent_duplicate_task
+from agentcore_task.adapters.django import prevent_duplicate_task
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,7 @@ def collect_billing_data(
     # Set up simple log collector for this task
     log_collector = TaskLogCollector(max_records=1000)
 
-    # Register task in task_manager if not already registered
+    # Register task in agentcore_task if not already registered
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
@@ -384,7 +386,7 @@ def check_alert_for_provider(provider_id: int):
     """
     task_id = current_task.request.id if current_task else None
 
-    # Register task in task_manager if not already registered
+    # Register task in agentcore_task if not already registered
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
@@ -657,7 +659,7 @@ def check_alert_for_provider(provider_id: int):
                 'alerted': False,
             }
 
-        # Update task status to success in task_manager
+        # Update task status to success in task tracker
         if task_id:
             TaskTracker.update_task_status(
                 task_id=task_id,
@@ -675,7 +677,7 @@ def check_alert_for_provider(provider_id: int):
         )
         result = {'checked': False, 'reason': error_msg}
 
-        # Update task status to failure in task_manager
+        # Update task status to failure in task tracker
         if task_id:
             TaskTracker.update_task_status(
                 task_id=task_id,
@@ -695,7 +697,7 @@ def check_alert_for_provider(provider_id: int):
         )
         result = {'checked': False, 'reason': error_msg}
 
-        # Update task status to failure in task_manager
+        # Update task status to failure in task tracker
         if task_id:
             TaskTracker.update_task_status(
                 task_id=task_id,
@@ -721,7 +723,7 @@ def send_alert_notification(alert_record_id: int):
     """
     task_id = current_task.request.id if current_task else None
 
-    # Register task in task_manager if not already registered
+    # Register task in agentcore_task if not already registered
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
@@ -778,7 +780,7 @@ def send_alert_notification(alert_record_id: int):
             'error': result.get('error'),
         }
 
-        # Update task status in task_manager
+        # Update task status in task tracker
         if task_id:
             if result['success']:
                 TaskTracker.update_task_status(

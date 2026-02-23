@@ -103,16 +103,22 @@ RUN set -eux; \
         uv pip install --system -r requirements.txt; \
     fi
 
-# Install agentcore submodules (editable) so agentcore_xxx packages are available
-# After COPY devmind /opt/devmind, agentcore lives at /opt/devmind/agentcore/
+# Dev mode: after unified deps, overlay agentcore from image copy in editable mode.
+# Without DEV_MODE=1, agentcore-task/agentcore-metering come from GitHub only (see
+# pyproject.toml). Use DEV_MODE=1 when building to pick up local agentcore fixes
+# (e.g. django __getattr__ recursion fix) without publishing to GitHub first.
+# COPY devmind /opt/devmind puts agentcore at /opt/devmind/agentcore/, so loop uses agentcore/*/
+ARG DEV_MODE=0
 RUN set -eux; \
-    export PATH="/root/.local/bin:$PATH"; \
-    for d in agentcore/*/; do \
-        if [ -f "${d}pyproject.toml" ]; then \
-            echo "Installing agentcore submodule: $d"; \
-            uv pip install --system -e "$d" || true; \
-        fi; \
-    done
+    if [ "$DEV_MODE" = "1" ]; then \
+        export PATH="/root/.local/bin:$PATH"; \
+        for d in agentcore/*/; do \
+            if [ -f "${d}pyproject.toml" ]; then \
+                echo "Dev mode: pip install -e $d"; \
+                (cd "$d" && uv pip install --system -e .); \
+            fi; \
+        done; \
+    fi
 
 # Create necessary directories
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/devmind

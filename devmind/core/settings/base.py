@@ -167,9 +167,9 @@ INSTALLED_APPS += [
     'accounts',
     'app_config',
     'cloud_billing',
-    'agentcore_tracking.adapters.django',
+    'agentcore_metering.adapters.django',
+    'agentcore_task.adapters.django',
     'notifier',
-    'task_manager',
 ]
 
 # The ID of the site that this Django project is associated with.

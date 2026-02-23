@@ -6,7 +6,18 @@ AI-powered acceleration platform for internal enterprise use, enabling AI-driven
 
 ## Agentcore submodules
 
-Common modules (e.g. LLM tracking, config, task manager, notifier) are maintained as separate repositories and included here as **git submodules** under `devmind/agentcore/`. The project uses them via editable installs and does not keep a local compatibility layer.
+Common modules (e.g. LLM tracking, task execution tracking, notifier) are maintained as separate repositories and included here as **git submodules** under `devmind/agentcore/`.
+
+### How agentcore is installed
+
+- **Production (Docker)**  
+  Dependencies are declared in `pyproject.toml` and point to GitHub. When you build the image with `docker-compose up -d` (or `docker-compose build`), the Dockerfile installs all dependencies from `pyproject.toml`; agentcore packages are installed from GitHub and no local path is used.
+
+- **Development (Docker)**  
+  Use `docker-compose -f docker-compose.dev.yml` so the image is built with `DEV_MODE=1`. The Dockerfile then does one extra step after the main dependency install: for each directory under `devmind/agentcore/*/` that has a `pyproject.toml`, it runs `pip install -e .` there. That overlays the GitHub-installed agentcore with your **local** agentcore code in editable mode, so you can change code under `devmind/agentcore/` and debug without rebuilding the image (especially when combined with volume mounts in `docker-compose.dev.yml`).
+
+- **Local / non-Docker**  
+  After cloning, run `git submodule update --init --recursive`, then install the project. To develop agentcore locally, install each submodule in editable mode (see below).
 
 ### After cloning the repo: fetch submodules first
 
@@ -16,18 +27,17 @@ Common modules (e.g. LLM tracking, config, task manager, notifier) are maintaine
 git submodule update --init --recursive
 ```
 
-### Installing agentcore packages (local and CI)
+### Installing agentcore packages in editable mode (local / non-Docker dev)
 
-Each submodule under `devmind/agentcore/` is a pip-installable package. Install them in editable mode so the project can import `agentcore_xxx`:
+From the repository root (the `devmind/` directory that contains `pyproject.toml`):
 
 ```bash
-# From the repository root (devmind/)
 for d in devmind/agentcore/*/; do
   [ -f "${d}pyproject.toml" ] && pip install -e "$d"
 done
 ```
 
-If using `uv`:
+With `uv`:
 
 ```bash
 for d in devmind/agentcore/*/; do
@@ -35,15 +45,12 @@ for d in devmind/agentcore/*/; do
 done
 ```
 
-Docker builds run the same logic in the Dockerfile after installing main dependencies.
-
 ### Submodule mapping and usage
 
-| Submodule               | Replaces (legacy) | Django app (INSTALLED_APPS)              | Import / URL mount |
-|-------------------------|-------------------|------------------------------------------|---------------------|
-| `agentcore-tracking`    | llm_tracker       | `agentcore_tracking.adapters.django`     | `agentcore_tracking.*`, `api/v1/admin/` |
-
-Future submodules (e.g. agentcore-config, agentcore-task-tracker, agentcore-notifier) follow the same pattern and are installed the same way.
+| Submodule            | Replaces (legacy) | Django app (INSTALLED_APPS)          | Import / URL mount                    |
+|----------------------|-------------------|--------------------------------------|----------------------------------------|
+| `agentcore-metering` | llm_tracker       | `agentcore_metering.adapters.django` | `agentcore_metering.*`, `api/v1/admin/` |
+| `agentcore-task`     | —                 | `agentcore_task.adapters.django`     | `agentcore_task.*`, `api/v1/tasks/`    |
 
 ## Development Environment
 

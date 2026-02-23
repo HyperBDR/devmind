@@ -10,6 +10,7 @@ services:
       dockerfile: Dockerfile
       args:
         USE_MIRROR: ${USE_MIRROR:-true}
+        DEV_MODE: "1"
     volumes:
       - ./data.dev/django/staticfiles:/opt/devmind/core/staticfiles
       - ./data.dev/logs/api:/var/log/gunicorn

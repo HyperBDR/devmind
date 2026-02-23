@@ -6,7 +6,18 @@
 
 ## Agentcore 子模块
 
-通用模块（如 LLM 追踪、配置、任务管理、通知等）以独立仓库维护，通过 **Git 子模块** 引入到 `devmind/agentcore/` 下。项目以可编辑方式安装并使用这些包，不再在本地保留兼容层。
+通用模块（如 LLM 追踪、任务执行追踪、通知等）以独立仓库维护，通过 **Git 子模块** 引入到 `devmind/agentcore/` 下。
+
+### Agentcore 的安装方式
+
+- **生产环境（Docker）**  
+  依赖写在 `pyproject.toml` 中，并指向 GitHub。使用 `docker-compose up -d`（或先 `docker-compose build`）构建镜像时，Dockerfile 会按 pyproject.toml 安装全部依赖，agentcore 包从 GitHub 安装，不依赖本地路径。
+
+- **开发环境（Docker）**  
+  使用 `docker-compose -f docker-compose.dev.yml` 启动时，镜像会以 `DEV_MODE=1` 构建。Dockerfile 在安装完统一依赖后多做一步：对 `devmind/agentcore/*/` 下每个带 `pyproject.toml` 的目录执行 `pip install -e .`，用**本地** agentcore 代码以可编辑方式覆盖 GitHub 版本，便于在 `devmind/agentcore/` 下改代码、调试，而无需重新构建镜像（配合 docker-compose.dev.yml 的 volume 挂载效果更佳）。
+
+- **本地 / 非 Docker**  
+  克隆后执行 `git submodule update --init --recursive`，再安装项目。若要在本地开发 agentcore，可对每个子模块做可编辑安装（见下）。
 
 ### 克隆仓库后：请先拉取子模块
 
@@ -16,12 +27,11 @@
 git submodule update --init --recursive
 ```
 
-### 安装 agentcore 包（本地与 CI）
+### 以可编辑方式安装 agentcore 包（本地 / 非 Docker 开发）
 
-`devmind/agentcore/` 下每个子模块均为可 pip 安装的包。建议以可编辑模式安装，以便项目能导入 `agentcore_xxx`：
+在仓库根目录（即包含 `pyproject.toml` 的 `devmind/` 目录）下执行：
 
 ```bash
-# 在仓库根目录（devmind/）下执行
 for d in devmind/agentcore/*/; do
   [ -f "${d}pyproject.toml" ] && pip install -e "$d"
 done
@@ -35,15 +45,12 @@ for d in devmind/agentcore/*/; do
 done
 ```
 
-Docker 构建会在安装主依赖后，在 Dockerfile 中执行相同逻辑。
-
 ### 子模块与用法对照
 
-| 子模块               | 替代（已废弃） | Django 应用 (INSTALLED_APPS)       | 导入 / URL 挂载           |
-|----------------------|----------------|------------------------------------|----------------------------|
-| `agentcore-tracking` | llm_tracker    | `agentcore_tracking.adapters.django` | `agentcore_tracking.*`、`api/v1/admin/` |
-
-后续子模块（如 agentcore-config、agentcore-task-tracker、agentcore-notifier）将沿用相同方式安装与使用。
+| 子模块               | 替代（已废弃） | Django 应用 (INSTALLED_APPS)           | 导入 / URL 挂载                    |
+|----------------------|----------------|----------------------------------------|-------------------------------------|
+| `agentcore-metering` | llm_tracker    | `agentcore_metering.adapters.django`   | `agentcore_metering.*`、`api/v1/admin/` |
+| `agentcore-task`     | —              | `agentcore_task.adapters.django`       | `agentcore_task.*`、`api/v1/tasks/` |
 
 ## 开发环境
 

@@ -1,3 +1,6 @@
-[submodule "devmind/agentcore/agentcore-tracking"]
-	path = devmind/agentcore/agentcore-tracking
-	url = https://github.com/cloud2ai/agentcore-tracking.git
+[submodule "devmind/agentcore/agentcore-metering"]
+	path = devmind/agentcore/agentcore-metering
+	url = https://github.com/cloud2ai/agentcore-metering.git
+[submodule "devmind/agentcore/agentcore-task"]
+	path = devmind/agentcore/agentcore-task
+	url = https://github.com/cloud2ai/agentcore-task.git

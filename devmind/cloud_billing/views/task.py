@@ -7,9 +7,11 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from task_manager import is_task_locked
-from task_manager.services.task_tracker import TaskTracker
-from task_manager.utils import register_task_execution
+from agentcore_task.adapters.django import (
+    is_task_locked,
+    register_task_execution,
+    TaskTracker,
+)
 
 from ..tasks import collect_billing_data
 
@@ -100,14 +102,14 @@ class BillingTaskViewSet(viewsets.ViewSet):
         summary="Get task status",
         description=(
             "Get the status of billing collection tasks. "
-            "Uses task_manager for unified task tracking."
+            "Uses agentcore_task for unified task tracking."
         ),
         responses={200: {'type': 'object'}},
     )
     @action(detail=False, methods=['get'])
     def status(self, request):
         """
-        Get task status using task_manager.
+        Get task status using task tracker.
         """
         task_id = request.query_params.get('task_id', None)
         if not task_id:

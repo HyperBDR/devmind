@@ -45,6 +45,9 @@ dependencies = [
     "django-extensions>=3.2.3",
     # LLM tracker (llm_service depends on devtoolbox for OpenAI/Azure/Gemini)
     "devtoolbox @ git+https://github.com/cloud2ai/devtoolbox.git",
+    # Agentcore submodules (Django apps). Production installs from GitHub; dev overlays with pip install -e in agentcore path.
+    "agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git",
+    "agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git",
 ]
 
 [project.optional-dependencies]

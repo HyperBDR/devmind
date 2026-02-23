@@ -8,6 +8,7 @@ services:
       dockerfile: Dockerfile
       args:
         USE_MIRROR: ${USE_MIRROR:-false}
+        DEV_MODE: "0"
     env_file:
       - ./.env
     volumes:
