@@ -44,6 +44,8 @@ urlpatterns = [
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 
+    # Notifier admin API (agentcore-notifier: must be before admin/ to match)
+    path('api/v1/admin/notifications/', include('agentcore_notifier.adapters.django.urls')),
     # LLM metering admin API (agentcore-metering submodule)
     path('api/v1/admin/', include('agentcore_metering.adapters.django.urls')),
 

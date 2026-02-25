@@ -97,6 +97,9 @@ run_migrations() {
         log "Superuser \"$DJANGO_SUPERUSER_USERNAME\" already exists, skipping creation"
     fi
     set -e
+
+    log "Registering periodic tasks to django_celery_beat..."
+    python manage.py register_periodic_tasks || true
 }
 
 collect_static() {

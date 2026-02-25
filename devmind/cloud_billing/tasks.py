@@ -14,13 +14,14 @@ from django.utils import translation
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from agentcore_notifier.adapters.django.services.webhook_service import (
+    get_default_webhook_channel,
+)
 from agentcore_task.adapters.django import (
     TaskLogCollector,
     TaskStatus,
     TaskTracker,
 )
-
-from app_config.utils import get_config
 
 from .constants import (
     WEBHOOK_STATUS_FAILED,
@@ -561,10 +562,11 @@ def check_alert_for_provider(provider_id: int):
                 )
                 continue
 
-            language = 'zh-hans'
+            language = "zh-hans"
             try:
-                webhook_config = get_config('webhook_config', default={})
-                language = webhook_config.get('language', 'zh-hans')
+                channel, _ = get_default_webhook_channel()
+                if channel and isinstance(channel.config, dict):
+                    language = channel.config.get("language", "zh-hans")
             except Exception:
                 pass
 

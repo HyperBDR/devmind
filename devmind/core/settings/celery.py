@@ -1,7 +1,5 @@
 import os
 
-from celery.schedules import crontab
-
 # For production environments, use Redis or RabbitMQ as result backend.
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL",
                                "redis://localhost:6379")
@@ -84,17 +82,6 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = int(
 # you can set it higher (e.g., 2-4x CPU count)
 # Configure via CELERY_CONCURRENCY environment variable in .env file
 
-# Celery periodic task scheduling configuration, defining tasks that need to
-# run periodically
-CELERY_BEAT_SCHEDULE = {
-    # Cloud billing collection task
-    # Collect billing data for all active cloud providers every hour at 10 minutes past
-    'cloud_billing_hourly_collection': {
-        'task': 'cloud_billing.tasks.collect_billing_data',
-        # Every hour at :10
-        'schedule': crontab(minute=10),
-        'args': (),
-        # System user for scheduled tasks
-        'kwargs': {'user_id': 0},
-    },
-}
+# Periodic tasks are registered via: python manage.py register_periodic_tasks
+# (each app defines its tasks in periodic_tasks.py). No hardcode here.
+CELERY_BEAT_SCHEDULE = {}

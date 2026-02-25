@@ -2,7 +2,7 @@
 Notification service for cloud billing alerts.
 
 This service generates notification messages from cloud billing business data
-and sends them using the notifier service.
+and sends them via agentcore_notifier Celery task (send_webhook_notification).
 """
 import logging
 from typing import Any, Dict
@@ -10,8 +10,11 @@ from typing import Any, Dict
 from django.utils import translation
 from django.utils.translation import gettext_lazy as _
 
-from notifier.constants import FEISHU_PROVIDERS, Provider
-from notifier.services.webhook_service import WebhookService
+from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
+from agentcore_notifier.adapters.django.services.webhook_service import (
+    get_default_webhook_channel,
+)
+from agentcore_notifier.adapters.django.tasks.send import send_webhook_notification
 
 from ..constants import (
     DEFAULT_LANGUAGE,
@@ -39,10 +42,8 @@ class CloudBillingNotificationService:
     """
 
     def __init__(self):
-        """
-        Initialize notification service.
-        """
-        self.webhook_service = WebhookService()
+        """Initialize notification service (no local webhook client; uses task)."""
+        pass
 
     def _generate_feishu_payload(
         self, alert_record: AlertRecord, language: str
@@ -210,75 +211,40 @@ class CloudBillingNotificationService:
 
     def send_alert(self, alert_record: AlertRecord) -> Dict[str, Any]:
         """
-        Send alert notification for cloud billing alert record.
-
-        Args:
-            alert_record: AlertRecord instance
-
-        Returns:
-            Dictionary with result:
-            {success: bool, response: dict, error: str}
-        
-        Note: Alert record is always created even if webhook is not configured.
-        This method attempts to send notification, but failure does not prevent
-        alert record creation.
+        Send alert notification via Celery task (agentcore_notifier).
+        Reads active webhook channel from agentcore_notifier (NotificationChannel);
+        actual send runs async in worker.
         """
-        webhook_config = self.webhook_service.get_webhook_config()
-        if not webhook_config:
-            # Return failure but alert record is already created
-            # This allows alert records to be tracked even without
-            # webhook config
+        channel, config = get_default_webhook_channel()
+        if not channel or not config:
             return {
-                'success': False,
-                'response': None,
-                'error': 'Webhook config not found or not active'
+                "success": False,
+                "response": None,
+                "error": "Webhook config not found or not active",
             }
 
-        provider_type = webhook_config.get('provider', Provider.FEISHU)
-        language = webhook_config.get('language', DEFAULT_LANGUAGE)
+        provider_type = config.get("provider", Provider.FEISHU)
+        language = (channel.config or {}).get("language", DEFAULT_LANGUAGE)
+        user = alert_record.provider.created_by
+        user_id = user.id if user else None
 
-        provider_id = alert_record.provider.id
-        provider_name = alert_record.provider.name
-
-        logger.info(
-            f"CloudBillingNotificationService.send_alert: "
-            f"Generating and sending alert notification "
-            f"(alert_record_id={alert_record.id}, "
-            f"provider_id={provider_id}, "
-            f"provider_name={provider_name}, "
-            f"webhook_provider={provider_type}, "
-            f"language={language})"
-        )
-
-        # Generate payload based on provider type
         if provider_type in FEISHU_PROVIDERS:
-            payload = self._generate_feishu_payload(
-                alert_record, language
-            )
+            payload = self._generate_feishu_payload(alert_record, language)
         elif provider_type == Provider.WECHAT:
-            payload = self._generate_wechat_payload(
-                alert_record, language
-            )
+            payload = self._generate_wechat_payload(alert_record, language)
         else:
             return {
-                'success': False,
-                'response': None,
-                'error': (
-                    f'Unsupported webhook provider type: {provider_type}'
-                )
+                "success": False,
+                "response": None,
+                "error": f"Unsupported webhook provider type: {provider_type}",
             }
 
-        # Get user from provider (provider's creator should receive alerts)
-        user = alert_record.provider.created_by
-
-        # Send notification using notifier service
-        result = self.webhook_service.send(
-            payload,
-            provider_type,
+        send_webhook_notification.delay(
+            payload=payload,
+            provider_type=provider_type,
             source_app=SOURCE_APP_CLOUD_BILLING,
             source_type=SOURCE_TYPE_ALERT,
             source_id=str(alert_record.id),
-            user=user
+            user_id=user_id,
         )
-
-        return result
+        return {"success": True, "response": None, "error": None}

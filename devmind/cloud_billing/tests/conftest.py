@@ -1,6 +1,12 @@
 """
 Pytest configuration and fixtures for cloud billing tests.
 """
+import os
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cloud_billing.tests.settings")
+
+import django
+django.setup()
+
 import pytest
 from decimal import Decimal
 from datetime import datetime, timedelta

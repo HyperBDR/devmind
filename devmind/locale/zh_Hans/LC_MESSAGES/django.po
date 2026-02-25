@@ -422,6 +422,61 @@ msgstr ""
 "{provider_name}{account_display} 在过去一小时的消费增长了 "
 "{increase_cost:.2f} {currency}，增长率为 {increase_percent:.2f}%"
 
+#: agentcore_notifier/adapters/django/views/channels.py
+#, python-format
+msgid ""
+"Server cannot reach SMTP host (no route). Check deployment: "
+"firewall/security group outbound rules, or container network. "
+"Original: %(error)s"
+msgstr ""
+"服务器无法连接到 SMTP 主机（无路由）。请检查部署环境：防火墙/安全组是否"
+"放行出站访问该主机与端口；若在容器内，网络是否允许访问外网。原始错误: %(error)s"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+#, python-format
+msgid ""
+"SMTP connection timed out. Check server network and "
+"firewall/proxy. Original: %(error)s"
+msgstr ""
+"连接 SMTP 服务器超时。请检查：服务器网络是否能访问该主机与端口；防火墙或代理"
+"是否拦截。原始错误: %(error)s"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Webhook URL not configured"
+msgstr "未配置 Webhook URL"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Channel validation test"
+msgstr "[DevMind] 渠道校验测试"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Send failed"
+msgstr "发送失败"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "SMTP host not configured"
+msgstr "未配置 SMTP 主机"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "From address required to send test"
+msgstr "发送测试邮件需要填写发件人地址"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Email validation test"
+msgstr "[DevMind] 校验收件测试"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "(connection only)"
+msgstr "（仅连接）"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Email channel validation test"
+msgstr "[DevMind] 邮件渠道校验测试"
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Validation failed"
+msgstr "校验失败"
+
 #~ msgid "OSS storage is disabled, validation skipped"
 #~ msgstr "OSS存储已禁用，跳过验证"
 

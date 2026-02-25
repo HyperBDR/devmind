@@ -48,6 +48,7 @@ dependencies = [
     # Agentcore submodules (Django apps). Production installs from GitHub; dev overlays with pip install -e in agentcore path.
     "agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git",
     "agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git",
+    "agentcore-notifier @ git+https://github.com/cloud2ai/agentcore-notifier.git",
 ]
 
 [project.optional-dependencies]

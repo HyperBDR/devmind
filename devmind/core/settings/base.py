@@ -164,12 +164,13 @@ INSTALLED_APPS = [
 
 # Project-Specific Apps
 INSTALLED_APPS += [
+    'core',
     'accounts',
     'app_config',
     'cloud_billing',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
-    'notifier',
+    'agentcore_notifier.adapters.django',
 ]
 
 # The ID of the site that this Django project is associated with.

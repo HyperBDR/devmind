@@ -396,6 +396,57 @@ msgid ""
 "{currency} in the last hour, growth rate: {increase_percent:.2f}%"
 msgstr ""
 
+#: agentcore_notifier/adapters/django/views/channels.py
+#, python-format
+msgid ""
+"Server cannot reach SMTP host (no route). Check deployment: "
+"firewall/security group outbound rules, or container network. "
+"Original: %(error)s"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+#, python-format
+msgid ""
+"SMTP connection timed out. Check server network and "
+"firewall/proxy. Original: %(error)s"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Webhook URL not configured"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Channel validation test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Send failed"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "SMTP host not configured"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "From address required to send test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Email validation test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "(connection only)"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "[DevMind] Email channel validation test"
+msgstr ""
+
+#: agentcore_notifier/adapters/django/views/channels.py
+msgid "Validation failed"
+msgstr ""
+
 #~ msgid "OSS storage is disabled, validation skipped"
 #~ msgstr "OSS storage is disabled, validation skipped"
 

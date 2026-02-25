@@ -1,9 +1,10 @@
 """
 Signals for global configuration app.
 
-Automatically invalidates cache when configurations are saved or deleted.
+Invalidates cache when configurations are saved or deleted.
 """
 import logging
+
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
@@ -34,4 +35,6 @@ def invalidate_config_cache_on_delete(sender, instance, **kwargs):
         invalidate_config_cache(key=instance.key, category=instance.category)
         logger.debug(f"Invalidated cache for deleted config: {instance.key}")
     except Exception as e:
-        logger.warning(f"Failed to invalidate cache for deleted config {instance.key}: {e}")
+        logger.warning(
+            f"Failed to invalidate cache for deleted config {instance.key}: {e}"
+        )
