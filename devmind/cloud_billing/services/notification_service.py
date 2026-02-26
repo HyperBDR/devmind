@@ -14,7 +14,9 @@ from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
 from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
 )
-from agentcore_notifier.adapters.django.tasks.send import send_webhook_notification
+from agentcore_notifier.adapters.django.tasks.send import (
+    send_webhook_notification,
+)
 
 from ..constants import (
     DEFAULT_LANGUAGE,
@@ -42,7 +44,7 @@ class CloudBillingNotificationService:
     """
 
     def __init__(self):
-        """Initialize notification service (no local webhook client; uses task)."""
+        """Init notification service (no local webhook; uses task)."""
         pass
 
     def _generate_feishu_payload(
@@ -212,8 +214,8 @@ class CloudBillingNotificationService:
     def send_alert(self, alert_record: AlertRecord) -> Dict[str, Any]:
         """
         Send alert notification via Celery task (agentcore_notifier).
-        Reads active webhook channel from agentcore_notifier (NotificationChannel);
-        actual send runs async in worker.
+        Reads active webhook channel from agentcore_notifier
+        (NotificationChannel); actual send runs async in worker.
         """
         channel, config = get_default_webhook_channel()
         if not channel or not config:

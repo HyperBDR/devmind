@@ -349,7 +349,7 @@ class HuaweiCloud(BaseCloudProvider):
                 f"Request ID: {request_id}\n"
                 f"Region: {self.config.region}"
             )
-            logger.error(error_message)
+            logger.error(f"{error_message}")
             logger.exception(e)
             return {
                 "status": "error",

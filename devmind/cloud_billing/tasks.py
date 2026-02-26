@@ -108,7 +108,7 @@ def collect_billing_data(
                 f"(provider_id={provider_id})"
             )
             log_collector.warning(warning_msg)
-            logger.warning(warning_msg)
+            logger.warning(f"{warning_msg}")
             return results
 
         provider_service = ProviderService()
@@ -124,7 +124,7 @@ def collect_billing_data(
                     f"display_name={provider.display_name})"
                 )
                 log_collector.info(info_msg)
-                logger.info(info_msg)
+                logger.info(f"{info_msg}")
 
                 config_dict = provider.config
 
@@ -140,7 +140,7 @@ def collect_billing_data(
                         f"type={provider.provider_type})"
                     )
                     log_collector.warning(warning_msg)
-                    logger.warning(warning_msg)
+                    logger.warning(f"{warning_msg}")
                     results['failed'].append({
                         'provider': provider.name,
                         'error': (
@@ -166,7 +166,7 @@ def collect_billing_data(
                         f"period={current_period}, error={error_msg})"
                     )
                     log_collector.error(error_log)
-                    logger.error(error_log)
+                    logger.error(f"{error_log}")
                     results['failed'].append({
                         'provider': provider.name,
                         'error': error_msg
@@ -267,7 +267,7 @@ def collect_billing_data(
                             f"account_id={account_id})"
                         )
                         log_collector.info(info_msg)
-                        logger.info(info_msg)
+                        logger.info(f"{info_msg}")
                     else:
                         info_msg = (
                             f"Task collect_billing_data: Created new billing "
@@ -278,7 +278,7 @@ def collect_billing_data(
                             f"account_id={account_id})"
                         )
                         log_collector.info(info_msg)
-                        logger.info(info_msg)
+                        logger.info(f"{info_msg}")
 
                 results['success'].append({
                     'provider': provider.name,
@@ -296,7 +296,7 @@ def collect_billing_data(
                     f"type={provider.provider_type}, error={str(e)})"
                 )
                 log_collector.error(error_msg, exception=error_traceback)
-                logger.error(error_msg, exc_info=True)
+                logger.error(f"{error_msg}", exc_info=True)
                 results['failed'].append({
                     'provider': provider.name,
                     'error': str(e)
@@ -310,7 +310,7 @@ def collect_billing_data(
             f"failed={len(results['failed'])})"
         )
         log_collector.info(info_msg)
-        logger.info(info_msg)
+        logger.info(f"{info_msg}")
 
         # Save logs to task metadata
         if task_id:
@@ -337,7 +337,7 @@ def collect_billing_data(
             f"(provider_id={provider_id}, error={error_msg})"
         )
         log_collector.error(error_log, exception=error_traceback)
-        logger.error(error_log, exc_info=True)
+        logger.error(f"{error_log}", exc_info=True)
         results['error'] = error_msg
 
         # Save logs to task metadata
@@ -729,6 +729,15 @@ def check_alert_for_provider(provider_id: int):
         return result
 
 
+def _send_alert_notification_metadata(log_collector):
+    """Build metadata dict with logs for task detail panel."""
+    return {
+        'logs': log_collector.get_logs(),
+        'warnings_and_errors': log_collector.get_warnings_and_errors(),
+        'log_summary': log_collector.get_summary(),
+    }
+
+
 @shared_task(name='cloud_billing.tasks.send_alert_notification')
 def send_alert_notification(alert_record_id: int):
     """
@@ -741,8 +750,8 @@ def send_alert_notification(alert_record_id: int):
         Dictionary with notification result
     """
     task_id = current_task.request.id if current_task else None
+    log_collector = TaskLogCollector(max_records=500)
 
-    # Register task in agentcore_task if not already registered
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
@@ -753,9 +762,13 @@ def send_alert_notification(alert_record_id: int):
         )
         TaskTracker.update_task_status(
             task_id=task_id,
-            status=TaskStatus.STARTED
+            status=TaskStatus.STARTED,
+            metadata=_send_alert_notification_metadata(log_collector)
         )
 
+    log_collector.info(
+        f"Sending alert notification (alert_record_id={alert_record_id})"
+    )
     logger.info(
         f"Task send_alert_notification: Sending alert notification "
         f"(alert_record_id={alert_record_id}, task_id={task_id})"
@@ -772,11 +785,15 @@ def send_alert_notification(alert_record_id: int):
             if result['success'] else WEBHOOK_STATUS_FAILED
         )
         alert_record.webhook_response = result.get('response')
-        # DB column is NOT NULL; ensure we never save None
         alert_record.webhook_error = result.get('error') or ''
         alert_record.save()
 
         if result['success']:
+            log_collector.info(
+                f"Alert notification sent successfully "
+                f"(provider_id={alert_record.provider.id}, "
+                f"provider_name={alert_record.provider.name})"
+            )
             logger.info(
                 f"Task send_alert_notification: Alert notification sent "
                 f"successfully (alert_record_id={alert_record_id}, "
@@ -786,6 +803,10 @@ def send_alert_notification(alert_record_id: int):
             )
         else:
             error_msg = result.get('error')
+            log_collector.error(
+                f"Failed to send alert: {error_msg}",
+                exception=result.get('response')
+            )
             logger.error(
                 f"Task send_alert_notification: Failed to send alert "
                 f"notification (alert_record_id={alert_record_id}, "
@@ -800,45 +821,52 @@ def send_alert_notification(alert_record_id: int):
             'error': result.get('error'),
         }
 
-        # Update task status in task tracker
         if task_id:
+            meta = _send_alert_notification_metadata(log_collector)
             if result['success']:
                 TaskTracker.update_task_status(
                     task_id=task_id,
                     status=TaskStatus.SUCCESS,
-                    result=task_result
+                    result=task_result,
+                    metadata=meta
                 )
             else:
                 TaskTracker.update_task_status(
                     task_id=task_id,
                     status=TaskStatus.FAILURE,
                     result=task_result,
-                    error=result.get('error', '')
+                    error=result.get('error', ''),
+                    metadata=meta
                 )
 
         return task_result
 
     except AlertRecord.DoesNotExist:
         error_msg = 'AlertRecord not found'
+        log_collector.error(f"AlertRecord not found (id={alert_record_id})")
         logger.error(
             f"Task send_alert_notification: AlertRecord not found "
             f"(alert_record_id={alert_record_id})"
         )
         result = {'success': False, 'error': error_msg}
 
-        # Update task status to failure
         if task_id:
             TaskTracker.update_task_status(
                 task_id=task_id,
                 status=TaskStatus.FAILURE,
                 result=result,
-                error=error_msg
+                error=error_msg,
+                metadata=_send_alert_notification_metadata(log_collector)
             )
 
         return result
     except Exception as e:
         error_msg = str(e)
         error_traceback = traceback.format_exc()
+        log_collector.error(
+            f"Error sending alert notification: {error_msg}",
+            exception=error_traceback
+        )
         logger.error(
             f"Task send_alert_notification: Error sending alert notification "
             f"(alert_record_id={alert_record_id}, error={error_msg})",
@@ -855,14 +883,14 @@ def send_alert_notification(alert_record_id: int):
 
         result = {'success': False, 'error': error_msg}
 
-        # Update task status to failure
         if task_id:
             TaskTracker.update_task_status(
                 task_id=task_id,
                 status=TaskStatus.FAILURE,
                 result=result,
                 error=error_msg,
-                traceback=error_traceback
+                traceback=error_traceback,
+                metadata=_send_alert_notification_metadata(log_collector)
             )
 
         return result
