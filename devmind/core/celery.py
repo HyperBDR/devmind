@@ -2,6 +2,7 @@ import logging
 import os
 import signal
 import threading
+import time
 
 from celery import Celery
 from celery.signals import worker_process_init, worker_shutting_down
@@ -89,7 +90,6 @@ def setup_periodic_zombie_reaper():
 
         Check every 30 seconds.
         """
-        import time
         while True:
             time.sleep(30)
             reap_zombies()

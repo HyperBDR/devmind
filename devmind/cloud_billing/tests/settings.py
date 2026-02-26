@@ -10,6 +10,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "cloud_billing",
     "agentcore_notifier.adapters.django",
+    "agentcore_task.adapters.django",
 ]
 DATABASES = {
     "default": {
@@ -19,3 +20,14 @@ DATABASES = {
 }
 ROOT_URLCONF = "cloud_billing.tests.urls"
 CELERY_TASK_ALWAYS_EAGER = True
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": (
+        "rest_framework.pagination.PageNumberPagination"
+    ),
+    "PAGE_SIZE": 100,
+}
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+}

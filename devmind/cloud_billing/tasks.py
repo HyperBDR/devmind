@@ -18,6 +18,7 @@ from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
 )
 from agentcore_task.adapters.django import (
+    prevent_duplicate_task,
     TaskLogCollector,
     TaskStatus,
     TaskTracker,
@@ -31,7 +32,6 @@ from .constants import (
 from .models import AlertRecord, AlertRule, BillingData, CloudProvider
 from .services.notification_service import CloudBillingNotificationService
 from .services.provider_service import ProviderService
-from agentcore_task.adapters.django import prevent_duplicate_task
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +195,7 @@ def collect_billing_data(
                     # This month has data, try to get previous hour's record
                     previous_hour = current_hour - 1
                     previous_period = current_period
-                    
+
                     # Handle cross-month case
                     # (hour 0 -> previous month hour 23)
                     if previous_hour < 0:
@@ -375,6 +375,9 @@ def collect_billing_data(
 
 
 @shared_task(name='cloud_billing.tasks.check_alert_for_provider')
+@prevent_duplicate_task(
+    "check_alert_for_provider", lock_param="provider_id", timeout=600
+)
 def check_alert_for_provider(provider_id: int):
     """
     Check alert rules for a specific provider.
@@ -419,7 +422,14 @@ def check_alert_for_provider(provider_id: int):
                 f"(provider_id={provider.id}, name={provider.name}, "
                 f"type={provider.provider_type})"
             )
-            return {'checked': False, 'reason': 'No active alert rule'}
+            result = {'checked': False, 'reason': 'No active alert rule'}
+            if task_id:
+                TaskTracker.update_task_status(
+                    task_id=task_id,
+                    status=TaskStatus.SUCCESS,
+                    result=result
+                )
+            return result
 
         current_period = datetime.now().strftime("%Y-%m")
         current_hour = datetime.now().hour
@@ -438,7 +448,14 @@ def check_alert_for_provider(provider_id: int):
                 f"found (provider_id={provider.id}, name={provider.name}, "
                 f"period={current_period}, hour={current_hour})"
             )
-            return {'checked': False, 'reason': 'No current billing data'}
+            result = {'checked': False, 'reason': 'No current billing data'}
+            if task_id:
+                TaskTracker.update_task_status(
+                    task_id=task_id,
+                    status=TaskStatus.SUCCESS,
+                    result=result
+                )
+            return result
 
         previous_hour = current_hour - 1
         previous_period = current_period
@@ -452,7 +469,7 @@ def check_alert_for_provider(provider_id: int):
         alerts_created = []
         for current_billing in current_billings:
             account_id = current_billing.account_id or ''
-            
+
             try:
                 previous_billing = BillingData.objects.get(
                     provider=provider,
@@ -564,7 +581,7 @@ def check_alert_for_provider(provider_id: int):
 
             language = "zh-hans"
             try:
-                channel, _ = get_default_webhook_channel()
+                channel, _config = get_default_webhook_channel()
                 if channel and isinstance(channel.config, dict):
                     language = channel.config.get("language", "zh-hans")
             except Exception:
@@ -574,7 +591,7 @@ def check_alert_for_provider(provider_id: int):
             cost_threshold_triggered = any(
                 'Current cost' in reason for reason in alert_reason
             )
-            
+
             # Map language code to Django translation code
             lang_code = 'zh_Hans' if language == 'zh-hans' else 'en'
             with translation.override(lang_code):
@@ -586,7 +603,7 @@ def check_alert_for_provider(provider_id: int):
                     )
                 else:
                     account_display = ""
-                
+
                 if cost_threshold_triggered:
                     alert_message = str(_(
                         "{provider_name}{account_display} "
@@ -755,7 +772,8 @@ def send_alert_notification(alert_record_id: int):
             if result['success'] else WEBHOOK_STATUS_FAILED
         )
         alert_record.webhook_response = result.get('response')
-        alert_record.webhook_error = result.get('error', '')
+        # DB column is NOT NULL; ensure we never save None
+        alert_record.webhook_error = result.get('error') or ''
         alert_record.save()
 
         if result['success']:
@@ -830,7 +848,7 @@ def send_alert_notification(alert_record_id: int):
         try:
             alert_record = AlertRecord.objects.get(id=alert_record_id)
             alert_record.webhook_status = WEBHOOK_STATUS_FAILED
-            alert_record.webhook_error = error_msg
+            alert_record.webhook_error = error_msg or ''
             alert_record.save()
         except Exception:
             pass

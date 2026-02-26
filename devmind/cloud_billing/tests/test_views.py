@@ -392,7 +392,7 @@ class TestBillingTaskViewSet:
         mock_task = mocker.Mock()
         mock_task.id = 'test-task-id'
         mocker.patch(
-            'cloud_billing.views.task.collect_billing_data.delay',
+            'cloud_billing.tasks.collect_billing_data.delay',
             return_value=mock_task
         )
 
@@ -401,23 +401,24 @@ class TestBillingTaskViewSet:
         assert response.data['success'] is True
         assert 'task_id' in response.data
 
-    def test_get_task_status(self, api_client, mocker):
+    def test_get_task_status(self, api_client, user):
         """
-        Test getting task status.
+        Test getting task status via TaskTracker (no Celery sync).
         """
+        from agentcore_task.adapters.django.models import TaskExecution
+        from agentcore_task.constants import TaskStatus
+
         task_id = 'test-task-id'
-        url = f'/api/v1/cloud-billing/tasks/status/?task_id={task_id}'
-
-        mock_result = mocker.Mock()
-        mock_result.status = 'SUCCESS'
-        mock_result.ready.return_value = True
-        mock_result.result = {'success': True}
-
-        mocker.patch(
-            'cloud_billing.views.task.AsyncResult',
-            return_value=mock_result
+        TaskExecution.objects.create(
+            task_id=task_id,
+            task_name='cloud_billing.tasks.collect_billing_data',
+            module='cloud_billing',
+            status=TaskStatus.SUCCESS,
+            result={'success': True},
         )
-
+        url = (
+            f'/api/v1/cloud-billing/tasks/status/?task_id={task_id}&sync=false'
+        )
         response = api_client.get(url)
         assert response.status_code == 200
         assert response.data['task_id'] == task_id

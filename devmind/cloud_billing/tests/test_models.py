@@ -123,9 +123,12 @@ class TestBillingData:
         """
         Test BillingData __str__ method.
         """
-        assert str(billing_data) == (
+        expected = (
             f"{billing_data.provider.display_name} - "
             f"{billing_data.period} {billing_data.hour:02d}:00"
+        )
+        assert str(billing_data) == expected, (
+            f"__str__ output should use zero-padded hour; got {str(billing_data)!r}"
         )
 
 

@@ -147,7 +147,10 @@ class BillingData(models.Model):
         ordering = ['-period', '-hour']
 
     def __str__(self):
-        return f"{self.provider.display_name} - {self.period} {self.hour}:00"
+        return (
+            f"{self.provider.display_name} - {self.period} "
+            f"{self.hour:02d}:00"
+        )
 
 
 class AlertRule(models.Model):

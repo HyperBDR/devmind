@@ -2,8 +2,21 @@
 Pytest configuration and fixtures for cloud billing tests.
 """
 import os
+import sys
+from pathlib import Path
+
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "cloud_billing.tests.settings")
 
+agentcore_task_path = (
+    Path(__file__).resolve().parent.parent.parent
+    / "agentcore"
+    / "agentcore-task"
+)
+if agentcore_task_path.exists() and str(agentcore_task_path) not in sys.path:
+    sys.path.insert(0, str(agentcore_task_path))
+
+# NOTE(Ray): Django test bootstrap requires DJANGO_SETTINGS_MODULE set
+# before importing django; import order here is intentional.
 import django
 django.setup()
 

@@ -52,6 +52,24 @@ done
 | `agentcore-metering` | llm_tracker    | `agentcore_metering.adapters.django`   | `agentcore_metering.*`、`api/v1/admin/` |
 | `agentcore-task`     | —              | `agentcore_task.adapters.django`       | `agentcore_task.*`、`api/v1/tasks/` |
 
+## Celery：自动加载 app 任务与 entrypoint 生效逻辑
+
+### 任务代码如何被加载
+
+- 在 `core/celery.py` 中，Celery 应用会调用 `app.autodiscover_tasks()`（无参数）。Celery 会在 Django `INSTALLED_APPS` 里的每个应用中查找 `tasks.py` 并导入，因此各 app 中通过 `@app.task` / `@shared_task` 定义的任务都会被注册。
+- 只要某个 Django 应用（含 agentcore 包）在 `INSTALLED_APPS` 中且提供 `tasks.py`，就会被自动发现，无需额外配置。
+
+### 定时任务如何注册
+
+- 定时（类 cron）任务仅靠 Celery 不会自动发现，需要写入 **django_celery_beat** 后，beat 调度器才会执行。
+- 管理命令 `python manage.py register_periodic_tasks` 会遍历 `INSTALLED_APPS` 中的每个应用，查找其下的 `periodic_tasks` 模块；若该模块定义了 `register_periodic_tasks()`，则调用它。各应用通过项目中的 `core.periodic_registry` 声明 cron 项，该命令再将这些项写入 django_celery_beat 的数据库表（幂等）。
+
+### 在 `docker/entrypoint.sh` 中的生效方式
+
+- entrypoint 会设置 `PYTHONPATH=/opt/devmind` 和 `DJANGO_SETTINGS_MODULE=core.settings`，这样在通过 `-A core` 启动 Celery 时，会加载 `core.celery`，且能正确使用 Django 配置（含 `INSTALLED_APPS`）。
+- **`celery`（worker）** 与 **`celery-beat`**：容器执行 `celery -A core worker` 或 `celery -A core beat` 时，导入 `core.celery` 会执行 `autodiscover_tasks()`，所有 app 的 `tasks.py` 被加载，任务对 worker 和 beat 可见；beat 使用 `DatabaseScheduler`，从数据库读取调度表。
+- **`gunicorn`** 与 **`development`**：在 `wait_for_db` 和 `run_migrations` 之后，entrypoint 会执行 `python manage.py register_periodic_tasks`（或 true）。该命令会汇总各 app 的 `periodic_tasks.register_periodic_tasks()` 并写入 django_celery_beat。典型多容器部署下，由 Web 容器（gunicorn）在启动时执行一次迁移和 `register_periodic_tasks`；celery 与 celery-beat 容器共用同一数据库，因此无需再执行该命令即可看到已注册的任务与调度。
+
 ## 开发环境
 
 ### 环境要求

@@ -34,7 +34,7 @@ def discover_and_register():
                 module.register_periodic_tasks()
             except Exception as e:
                 logger.exception(
-                    "register_periodic_tasks failed for app %s: %s", app, e
+                    f"register_periodic_tasks failed for app {app}: {e}"
                 )
 
     apply_registry()

@@ -1,6 +1,7 @@
 """
-Registry for periodic tasks. Apps register entries via register_periodic_tasks();
-apply_registry() writes them to django_celery_beat (idempotent).
+Registry for periodic tasks. Apps register entries via
+register_periodic_tasks(); apply_registry() writes them to
+django_celery_beat (idempotent).
 
 No Django signals; intended to be called from a CLI so the flow is portable
 (e.g. future FastAPI migration).
@@ -55,8 +56,10 @@ class TaskRegistry:
     """
     In-memory registry of periodic task definitions.
 
-    Apps add entries via add(); apply() writes them to django_celery_beat
-    (CrontabSchedule/IntervalSchedule + PeriodicTask, update_or_create).
+    Apps add entries via add(); apply() writes them to django_celery_beat.
+    New tasks are created with full defaults. Existing tasks are updated only
+    on code-owned fields (task, args, kwargs); schedule (crontab/interval),
+    queue, and enabled are left as in the DB so user customisations are kept.
     """
 
     def __init__(self):
@@ -123,7 +126,7 @@ class TaskRegistry:
                 crontab_schedule = _get_or_create_crontab(schedule)
                 interval_schedule = None
 
-        defaults = {
+        create_defaults = {
             "task": task_name,
             "args": json.dumps(list(args)),
             "kwargs": json.dumps(kwargs),
@@ -131,13 +134,20 @@ class TaskRegistry:
             "enabled": enabled,
         }
         if crontab_schedule is not None:
-            defaults["crontab"] = crontab_schedule
-            defaults["interval"] = None
+            create_defaults["crontab"] = crontab_schedule
+            create_defaults["interval"] = None
         else:
-            defaults["interval"] = interval_schedule
-            defaults["crontab"] = None
+            create_defaults["interval"] = interval_schedule
+            create_defaults["crontab"] = None
 
-        PeriodicTask.objects.update_or_create(name=name, defaults=defaults)
+        obj, created = PeriodicTask.objects.get_or_create(
+            name=name, defaults=create_defaults
+        )
+        if not created:
+            obj.task = task_name
+            obj.args = json.dumps(list(args))
+            obj.kwargs = json.dumps(kwargs)
+            obj.save(update_fields=["task", "args", "kwargs"])
         PeriodicTasks.update_changed()
 
     def apply(self):
@@ -145,10 +155,10 @@ class TaskRegistry:
         for name, entry in self._entries.items():
             try:
                 self._apply_one(name, entry)
-                logger.debug("Registered periodic task: %s", name)
+                logger.debug(f"Registered periodic task: {name}")
             except Exception as e:
                 logger.exception(
-                    "Failed to register periodic task %s: %s", name, e
+                    f"Failed to register periodic task {name}: {e}"
                 )
 
 
