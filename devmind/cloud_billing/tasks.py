@@ -5,7 +5,7 @@ import logging
 import traceback
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from celery import shared_task
 from celery import current_task
@@ -741,10 +741,9 @@ def _send_alert_notification_metadata(log_collector):
 @shared_task(name='cloud_billing.tasks.send_alert_notification')
 def send_alert_notification(alert_record_id: int):
     """
-    Send alert notification via webhook.
-
-    Args:
-        alert_record_id: AlertRecord ID to send notification for
+    Send alert notification via webhook. Channel is taken from
+    provider.config['notification'] (type=webhook, channel_uuid=...) when set;
+    otherwise the notifier default is used (whether one exists is up to notifier).
 
     Returns:
         Dictionary with notification result
@@ -776,9 +775,24 @@ def send_alert_notification(alert_record_id: int):
 
     try:
         alert_record = AlertRecord.objects.get(id=alert_record_id)
+        provider = alert_record.provider
+        channel_uuid = None
+        channel_type = None
+        notification = (provider.config or {}).get("notification")
+        if isinstance(notification, dict):
+            ntype = notification.get("type")
+            cu = notification.get("channel_uuid")
+            if cu:
+                channel_uuid = str(cu)
+            if ntype in ("webhook", "email"):
+                channel_type = ntype
 
         notification_service = CloudBillingNotificationService()
-        result = notification_service.send_alert(alert_record)
+        result = notification_service.send_alert(
+            alert_record,
+            channel_uuid=channel_uuid,
+            channel_type=channel_type,
+        )
 
         alert_record.webhook_status = (
             WEBHOOK_STATUS_SUCCESS

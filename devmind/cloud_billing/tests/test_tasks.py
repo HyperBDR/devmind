@@ -1,8 +1,10 @@
 """
-Unit tests for cloud_billing Celery tasks (collect_billing_data, check_alert_for_provider).
+Unit tests for cloud_billing Celery tasks (collect_billing_data, check_alert_for_provider,
+send_alert_notification).
 """
 import pytest
 from decimal import Decimal
+from unittest.mock import patch, MagicMock
 
 from django.contrib.auth.models import User
 
@@ -10,8 +12,9 @@ from cloud_billing.models import (
     CloudProvider,
     BillingData,
     AlertRule,
+    AlertRecord,
 )
-from cloud_billing.tasks import check_alert_for_provider
+from cloud_billing.tasks import check_alert_for_provider, send_alert_notification
 from agentcore_task.adapters.django.models import TaskExecution
 from agentcore_task.constants import TaskStatus
 from agentcore_task.adapters.django.services.lock import acquire_task_lock, release_task_lock
@@ -128,3 +131,87 @@ class TestCheckAlertForProvider:
             )
         finally:
             release_task_lock(lock_name)
+
+
+@pytest.mark.django_db
+class TestSendAlertNotification:
+    """Tests for send_alert_notification task."""
+
+    @patch(
+        "cloud_billing.tasks.CloudBillingNotificationService"
+    )
+    def test_uses_provider_config_notification_when_set(
+        self,
+        mock_service_class,
+        alert_record,
+    ):
+        """
+        Task reads provider.config['notification'] (type=webhook, channel_uuid).
+        """
+        import uuid
+        channel_uuid = uuid.uuid4()
+        provider = alert_record.provider
+        provider.config = provider.config or {}
+        provider.config["notification"] = {
+            "type": "webhook",
+            "channel_uuid": str(channel_uuid),
+        }
+        provider.save()
+
+        mock_service = MagicMock()
+        mock_service.send_alert.return_value = {"success": True}
+        mock_service_class.return_value = mock_service
+
+        send_alert_notification(alert_record.id)
+
+        mock_service.send_alert.assert_called_once()
+        call_args = mock_service.send_alert.call_args
+        assert call_args[1]["channel_uuid"] == str(channel_uuid)
+
+    @patch(
+        "cloud_billing.tasks.CloudBillingNotificationService"
+    )
+    def test_no_channel_uuid_uses_default_and_succeeds_when_default_exists(
+        self,
+        mock_service_class,
+        alert_record,
+    ):
+        """
+        When provider has no config['notification'], task passes channel_uuid=None;
+        notifier default is used; if default exists, send succeeds.
+        """
+        mock_service = MagicMock()
+        mock_service.send_alert.return_value = {"success": True}
+        mock_service_class.return_value = mock_service
+
+        result = send_alert_notification(alert_record.id)
+
+        assert result["success"] is True
+        mock_service.send_alert.assert_called_once()
+        call_args = mock_service.send_alert.call_args
+        assert call_args[1]["channel_uuid"] is None
+
+    @patch(
+        "cloud_billing.tasks.CloudBillingNotificationService"
+    )
+    def test_no_channel_uuid_service_returns_failure_when_no_default(
+        self,
+        mock_service_class,
+        alert_record,
+    ):
+        """
+        When channel_uuid is None and notifier has no default,
+        send_alert returns failure; task records failed status.
+        """
+        mock_service = MagicMock()
+        mock_service.send_alert.return_value = {
+            "success": False,
+            "error": "Webhook config not found or not active",
+        }
+        mock_service_class.return_value = mock_service
+
+        result = send_alert_notification(alert_record.id)
+
+        assert result["success"] is False
+        alert_record.refresh_from_db()
+        assert alert_record.webhook_status == "failed"

@@ -166,7 +166,6 @@ INSTALLED_APPS = [
 INSTALLED_APPS += [
     'core',
     'accounts',
-    'app_config',
     'cloud_billing',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',

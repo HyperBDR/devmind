@@ -16,6 +16,7 @@ from accounts.views import (
     SendRegistrationEmailView,
     VerifyRegistrationTokenView,
 )
+from accounts.views.management import ManagementGroupListView, ManagementUserListView
 
 
 class CustomLoginView(LoginView):
@@ -101,5 +102,17 @@ urlpatterns = [
         'api/v1/auth/scenes',
         GetAvailableScenesView.as_view(),
         name='available_scenes'
+    ),
+
+    # Management portal (admin-only)
+    path(
+        'api/v1/management/users/',
+        ManagementUserListView.as_view(),
+        name='management_users'
+    ),
+    path(
+        'api/v1/management/groups/',
+        ManagementGroupListView.as_view(),
+        name='management_groups'
     ),
 ]

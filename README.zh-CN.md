@@ -4,6 +4,11 @@
 
 面向企业内部使用的 AI 加速平台，支持 AI 驱动的研发项目管理、财务数据分析等智能工作流。
 
+## 设计原则
+
+为解耦，**每个应用（app）应自行管理自身资源**，包括数据库、接口、配置等。详见 [docs/DESIGN_PRINCIPLES.zh-CN.md](docs/DESIGN_PRINCIPLES.zh-CN.md)。  
+Design principles (English): [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md).
+
 ## Agentcore 子模块
 
 通用模块（如 LLM 追踪、任务执行追踪、通知等）以独立仓库维护，通过 **Git 子模块** 引入到 `devmind/agentcore/` 下。

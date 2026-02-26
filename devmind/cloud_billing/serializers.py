@@ -65,6 +65,7 @@ class CloudProviderSerializer(serializers.ModelSerializer):
     def validate_config(self, value):
         """
         Validate config format based on provider_type.
+        Normalize config['notification']['email_to'] to an array when present.
         """
         # For partial updates, if config is not provided, keep existing config
         if value is None:
@@ -81,6 +82,23 @@ class CloudProviderSerializer(serializers.ModelSerializer):
                 "Configuration is required. Please provide authentication "
                 "credentials for the cloud provider."
             )
+        
+        notification = value.get("notification")
+        if isinstance(notification, dict) and notification.get("type") == "email":
+            email_to = notification.get("email_to")
+            if email_to is not None:
+                if isinstance(email_to, list):
+                    notification["email_to"] = [
+                        str(a).strip() for a in email_to if (a or "").strip()
+                    ]
+                elif isinstance(email_to, str) and email_to.strip():
+                    notification["email_to"] = [
+                        a.strip()
+                        for a in email_to.replace(",", " ").split()
+                        if a.strip()
+                    ]
+                else:
+                    notification["email_to"] = []
         
         return value
 

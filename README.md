@@ -4,6 +4,11 @@ English | [中文](README.zh-CN.md)
 
 AI-powered acceleration platform for internal enterprise use, enabling AI-driven R&D project management, financial data analysis, and other intelligent workflows.
 
+## Design principles
+
+For decoupling, **each application (app) must manage its own resources**—including database, APIs, and configuration. See [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md).  
+设计原则（中文）：[docs/DESIGN_PRINCIPLES.zh-CN.md](docs/DESIGN_PRINCIPLES.zh-CN.md).
+
 ## Agentcore submodules
 
 Common modules (e.g. LLM tracking, task execution tracking, notifier) are maintained as separate repositories and included here as **git submodules** under `devmind/agentcore/`.

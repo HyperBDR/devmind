@@ -33,10 +33,6 @@ urlpatterns = [
     # Includes authentication endpoints provided by custom accounts.urls
     path('', include('accounts.urls')),
 
-    # Global configuration routes
-    # Includes configuration management endpoints
-    path('', include('app_config.urls')),
-
     # Cloud billing routes
     # Includes cloud billing management endpoints
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),

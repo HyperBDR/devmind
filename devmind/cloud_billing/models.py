@@ -45,7 +45,12 @@ class CloudProvider(models.Model):
         help_text="Optional notes or description for this provider"
     )
     config = models.JSONField(
-        help_text="Authentication configuration stored as JSON"
+        help_text=(
+            "Authentication and optional metadata as JSON. For alert "
+            "notifications, set config['notification'] = {type: 'webhook'|'email', "
+            "channel_uuid: '<uuid>', email_to: ['a@b.com', ...]} (email_to is an "
+            "array of strings, used when type is 'email')."
+        )
     )
     is_active = models.BooleanField(
         default=True,

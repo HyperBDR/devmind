@@ -184,32 +184,40 @@ class TestCloudBillingNotificationService:
     """
 
     @patch(
-        'cloud_billing.services.notification_service.send_webhook_notification'
+        'cloud_billing.services.notification_service.send_notification'
     )
     @patch(
-        'cloud_billing.services.notification_service.get_default_webhook_channel'
+        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
     )
     def test_send_alert_feishu(
         self,
-        mock_get_channel,
+        mock_get_by_uuid,
         mock_send_task,
         alert_record
     ):
         """
-        Test sending alert via Feishu (enqueues Celery task).
+        Test sending alert via Feishu (enqueues unified send_notification with webhook params).
         """
-        mock_channel = type('Channel', (), {'config': {'language': 'zh-hans'}})()
+        from uuid import uuid4
+        ch_uuid = uuid4()
+        mock_channel = type('Channel', (), {
+            'uuid': ch_uuid,
+            'config': {'language': 'zh-hans'},
+        })()
         mock_config = {'is_active': True, 'provider': 'feishu'}
-        mock_get_channel.return_value = (mock_channel, mock_config)
+        mock_get_by_uuid.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
-        result = service.send_alert(alert_record)
+        result = service.send_alert(alert_record, channel_uuid=str(ch_uuid))
 
         assert result['success'] is True
         mock_send_task.delay.assert_called_once()
         call_kwargs = mock_send_task.delay.call_args[1]
-        assert call_kwargs['provider_type'] == 'feishu'
-        payload = call_kwargs['payload']
+        assert call_kwargs['notification_type'] == 'webhook'
+        assert call_kwargs['channel_uuid'] == str(ch_uuid)
+        params = call_kwargs['params']
+        assert params['provider_type'] == 'feishu'
+        payload = params['payload']
         assert payload['msg_type'] == 'post'
         assert 'content' in payload
         assert 'post' in payload['content']
@@ -218,51 +226,170 @@ class TestCloudBillingNotificationService:
         assert str(alert_record.id) == call_kwargs['source_id']
 
     @patch(
-        'cloud_billing.services.notification_service.send_webhook_notification'
+        'cloud_billing.services.notification_service.send_notification'
     )
     @patch(
-        'cloud_billing.services.notification_service.get_default_webhook_channel'
+        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
     )
     def test_send_alert_wechat(
         self,
-        mock_get_channel,
+        mock_get_by_uuid,
         mock_send_task,
         alert_record
     ):
         """
-        Test sending alert via WeChat (enqueues Celery task).
+        Test sending alert via WeChat (enqueues unified send_notification with webhook params).
         """
-        mock_channel = type('Channel', (), {'config': {'language': 'zh-hans'}})()
+        from uuid import uuid4
+        ch_uuid = uuid4()
+        mock_channel = type('Channel', (), {
+            'uuid': ch_uuid,
+            'config': {'language': 'zh-hans'},
+        })()
         mock_config = {'is_active': True, 'provider': 'wechat'}
-        mock_get_channel.return_value = (mock_channel, mock_config)
+        mock_get_by_uuid.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
-        result = service.send_alert(alert_record)
+        result = service.send_alert(alert_record, channel_uuid=str(ch_uuid))
 
         assert result['success'] is True
         mock_send_task.delay.assert_called_once()
         call_kwargs = mock_send_task.delay.call_args[1]
-        assert call_kwargs['provider_type'] == 'wechat'
-        payload = call_kwargs['payload']
+        assert call_kwargs['notification_type'] == 'webhook'
+        assert call_kwargs['channel_uuid'] == str(ch_uuid)
+        params = call_kwargs['params']
+        assert params['provider_type'] == 'wechat'
+        payload = params['payload']
         assert payload['msgtype'] == 'markdown'
         assert 'markdown' in payload
         assert 'content' in payload['markdown']
 
     @patch(
+        'cloud_billing.services.notification_service.send_notification'
+    )
+    @patch(
         'cloud_billing.services.notification_service.get_default_webhook_channel'
     )
-    def test_send_alert_no_config(
+    def test_send_alert_uses_default_when_channel_uuid_is_none(
         self,
-        mock_get_channel,
+        mock_get_default,
+        mock_send_task,
+        alert_record,
+    ):
+        """
+        When channel_uuid is None, use notifier default (get_default_webhook_channel).
+        Unified task is called with channel_uuid=None; notifier resolves default.
+        """
+        mock_channel = type('Channel', (), {
+            'uuid': __import__('uuid').uuid4(),
+            'config': {'language': 'zh-hans'},
+        })()
+        mock_config = {'is_active': True, 'provider': 'feishu'}
+        mock_get_default.return_value = (mock_channel, mock_config)
+
+        service = CloudBillingNotificationService()
+        result = service.send_alert(alert_record, channel_uuid=None)
+
+        assert result['success'] is True
+        mock_send_task.delay.assert_called_once()
+        call_kwargs = mock_send_task.delay.call_args[1]
+        assert call_kwargs['notification_type'] == 'webhook'
+        assert call_kwargs['channel_uuid'] == str(mock_channel.uuid)
+        assert call_kwargs['params']['provider_type'] == 'feishu'
+
+    @patch(
+        'cloud_billing.services.notification_service.send_notification'
+    )
+    def test_send_alert_email_without_channel_uuid_returns_error(
+        self,
+        mock_send_task,
+        alert_record,
+    ):
+        """
+        Email notification requires channel_uuid; do not silently fallback.
+        """
+        service = CloudBillingNotificationService()
+        result = service.send_alert(
+            alert_record,
+            channel_uuid=None,
+            channel_type='email',
+        )
+        assert result['success'] is False
+        assert 'channel_uuid is required' in result['error']
+        mock_send_task.delay.assert_not_called()
+
+    @patch(
+        'cloud_billing.services.notification_service.get_default_webhook_channel'
+    )
+    def test_send_alert_no_default_returns_error_when_channel_uuid_none(
+        self,
+        mock_get_default,
+        alert_record,
+    ):
+        """
+        When channel_uuid is None and notifier has no default, return error.
+        """
+        mock_get_default.return_value = (None, None)
+
+        service = CloudBillingNotificationService()
+        result = service.send_alert(alert_record, channel_uuid=None)
+
+        assert result['success'] is False
+        assert 'not found' in result['error'].lower() or 'not active' in result['error'].lower()
+
+    @patch(
+        'cloud_billing.services.notification_service.send_notification'
+    )
+    @patch(
+        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
+    )
+    def test_send_alert_with_channel_uuid(
+        self,
+        mock_get_by_uuid,
+        mock_send_task,
         alert_record
     ):
         """
-        Test sending alert without webhook config.
+        Test sending alert with channel_uuid; unified task receives channel_uuid and params.
         """
-        mock_get_channel.return_value = (None, None)
+        from uuid import uuid4
+        ch_uuid = uuid4()
+        mock_channel = type('Channel', (), {
+            'id': 1,
+            'uuid': ch_uuid,
+            'config': {'language': 'zh-hans'},
+        })()
+        mock_config = {'is_active': True, 'provider': 'feishu'}
+        mock_get_by_uuid.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
-        result = service.send_alert(alert_record)
+        result = service.send_alert(alert_record, channel_uuid=str(ch_uuid))
+
+        assert result['success'] is True
+        mock_send_task.delay.assert_called_once()
+        call_kwargs = mock_send_task.delay.call_args[1]
+        assert call_kwargs['notification_type'] == 'webhook'
+        assert call_kwargs['channel_uuid'] == str(ch_uuid)
+        assert call_kwargs['params']['provider_type'] == 'feishu'
+
+    @patch(
+        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
+    )
+    def test_send_alert_channel_uuid_not_found(
+        self,
+        mock_get_by_uuid,
+        alert_record
+    ):
+        """
+        Test sending alert with channel_uuid that does not exist or is inactive.
+        """
+        mock_get_by_uuid.return_value = (None, None)
+
+        service = CloudBillingNotificationService()
+        result = service.send_alert(
+            alert_record,
+            channel_uuid='00000000-0000-0000-0000-000000000000',
+        )
 
         assert result['success'] is False
-        assert 'not found' in result['error'].lower()
+        assert 'not found' in result['error'].lower() or 'inactive' in result['error'].lower()
