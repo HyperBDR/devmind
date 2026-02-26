@@ -11,11 +11,11 @@ concurrency:
 
 env:
   REGISTRY: ${{ vars.REGISTRY }}
-  IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+  IMAGE_NAME: ${{ vars.DEVMIND_IMAGE_NAME }}
   SSH_HOST: ${{ vars.SSH_HOST }}
   SSH_USER: ${{ vars.SSH_USER }}
   SSH_PORT: ${{ vars.SSH_PORT }}
-  DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+  DEPLOY_PATH: ${{ vars.DEVMIND_DEPLOY_PATH }}
 
 jobs:
   build-and-deploy:
