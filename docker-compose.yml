@@ -90,22 +90,6 @@ services:
       retries: 3
       start_period: 60s
 
-  devmind-e2e:
-    build:
-      context: ../devmind-ui
-      dockerfile: Dockerfile.e2e
-    image: devmind-ui-e2e:latest
-    pull_policy: missing
-    environment:
-      BASE_URL: http://devmind-ui:80
-      CI: "1"
-    networks:
-      - devmind_network
-    depends_on:
-      devmind-ui:
-        condition: service_started
-    command: npx playwright test --project=chromium
-
   # Recommend to use nginx proxy manager to manage the outside access
   nginx:
     image: nginx:latest
