@@ -4,3 +4,6 @@
 [submodule "devmind/agentcore/agentcore-task"]
 	path = devmind/agentcore/agentcore-task
 	url = https://github.com/cloud2ai/agentcore-task.git
+[submodule "devmind/agentcore/agentcore-notifier"]
+	path = devmind/agentcore/agentcore-notifier
+	url = https://github.com/cloud2ai/agentcore-notifier.git

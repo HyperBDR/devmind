@@ -1,6 +1,6 @@
 services:
   devmind-api:
-    image: devmind:latest
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind:latest
     container_name: devmind-api
     restart: unless-stopped
     build:
@@ -30,7 +30,7 @@ services:
       start_period: 120s
 
   devmind-worker:
-    image: devmind:latest
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind:latest
     container_name: devmind-worker
     restart: unless-stopped
     stop_grace_period: 120s
@@ -52,7 +52,7 @@ services:
     command: celery
 
   devmind-scheduler:
-    image: devmind:latest
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind:latest
     container_name: devmind-scheduler
     restart: unless-stopped
     stop_grace_period: 30s
@@ -77,7 +77,7 @@ services:
     build:
       context: ../devmind-ui
       dockerfile: Dockerfile
-    image: devmind-ui:latest
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-ui:latest
     pull_policy: missing
     expose:
       - "80"
