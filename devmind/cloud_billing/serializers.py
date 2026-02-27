@@ -261,6 +261,7 @@ class AlertRecordListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name',
             'current_cost', 'previous_cost', 'increase_cost',
-            'increase_percent', 'currency', 'webhook_status',
+            'increase_percent', 'currency', 'alert_message',
+            'webhook_status',
             'created_at',
         ]

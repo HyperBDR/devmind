@@ -51,7 +51,7 @@ REST_FRAMEWORK = {
     # - LimitOffsetPagination: Limit/skip style (?limit=10&offset=20)
     # - CursorPagination: Cursor-based for large datasets, prevents skipping
     'DEFAULT_PAGINATION_CLASS': (
-        'rest_framework.pagination.PageNumberPagination'
+        'core.paginations.APIPagination'
     ),
 
     # PAGE_SIZE: Number of items per page
