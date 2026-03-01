@@ -18,6 +18,7 @@ from huaweicloudsdkbssintl.v2 import BssintlClient
 from huaweicloudsdkbssintl.v2.region.bssintl_region import BssintlRegion
 from huaweicloudsdkcore.exceptions import exceptions
 import huaweicloudsdkbssintl.v2.model as model
+from django.utils import timezone
 
 from .provider import BaseCloudProvider, BaseCloudConfig
 
@@ -122,7 +123,7 @@ class HuaweiIntlCloud(BaseCloudProvider):
     def _validate_period(self, period: Optional[str]) -> str:
         """Validate and return the billing period."""
         if period is None:
-            period = datetime.now().strftime("%Y-%m")
+            period = timezone.now().strftime("%Y-%m")
 
         try:
             year, month = map(int, period.split("-"))

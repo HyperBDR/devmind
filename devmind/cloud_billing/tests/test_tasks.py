@@ -1,6 +1,6 @@
 """
-Unit tests for cloud_billing Celery tasks (collect_billing_data, check_alert_for_provider,
-send_alert_notification).
+Unit tests for cloud_billing Celery tasks: collect_billing_data,
+check_alert_for_provider, send_alert_notification.
 """
 import pytest
 from decimal import Decimal
@@ -14,10 +14,16 @@ from cloud_billing.models import (
     AlertRule,
     AlertRecord,
 )
-from cloud_billing.tasks import check_alert_for_provider, send_alert_notification
+from cloud_billing.tasks import (
+    check_alert_for_provider,
+    send_alert_notification,
+)
 from agentcore_task.adapters.django.models import TaskExecution
 from agentcore_task.constants import TaskStatus
-from agentcore_task.adapters.django.services.lock import acquire_task_lock, release_task_lock
+from agentcore_task.adapters.django.services.lock import (
+    acquire_task_lock,
+    release_task_lock,
+)
 
 
 @pytest.mark.django_db
@@ -146,7 +152,8 @@ class TestSendAlertNotification:
         alert_record,
     ):
         """
-        Task reads provider.config['notification'] (type=webhook, channel_uuid).
+        Task reads provider.config['notification'] (type=webhook,
+        channel_uuid).
         """
         import uuid
         channel_uuid = uuid.uuid4()
@@ -177,8 +184,8 @@ class TestSendAlertNotification:
         alert_record,
     ):
         """
-        When provider has no config['notification'], task passes channel_uuid=None;
-        notifier default is used; if default exists, send succeeds.
+        When provider has no config['notification'], task passes
+        channel_uuid=None; notifier default used if default exists.
         """
         mock_service = MagicMock()
         mock_service.send_alert.return_value = {"success": True}

@@ -295,18 +295,10 @@ LANGUAGES = (
     ('en', 'English'),
 )
 
-# TIME_ZONE: Sets the default time zone for displaying dates and times.
-# This primarily affects:
-# - Django admin portal (displays times in UTC+8)
-# - Template rendering
-# - Logging and console output
-#
-# Note: API responses (REST Framework) return UTC timezone by default
-# when USE_TZ=True, allowing frontend to handle timezone conversion.
-#
-# When USE_TZ=True, times are stored in UTC in the database and converted
-# to this time zone when displayed. 'Asia/Shanghai' is UTC+8.
-TIME_ZONE = 'Asia/Shanghai'
+# TIME_ZONE: Default time zone for dates/times. Set to UTC so that values
+# read from the DB (stored in UTC) are not converted when accessed in code.
+# API and admin then expose UTC; frontend handles user timezone conversion.
+TIME_ZONE = 'UTC'
 
 # USE_I18N: Enables internationalization support. When set to True, Django
 # loads translation files and handles language-specific functionalities. Set
@@ -528,7 +520,13 @@ SPECTACULAR_SETTINGS = {
     'TAGS': [
         {'name': 'auth', 'description': 'Authentication endpoints'},
         {'name': 'config', 'description': 'Global configuration endpoints'},
-        {'name': 'task-management', 'description': 'Unified task management endpoints'},
-        {'name': 'llm-tracking', 'description': 'LLM usage tracking and config (admin API)'},
+        {
+            'name': 'task-management',
+            'description': 'Unified task management endpoints',
+        },
+        {
+            'name': 'llm-tracking',
+            'description': 'LLM usage tracking and config (admin API)',
+        },
     ],
 }

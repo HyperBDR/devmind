@@ -128,7 +128,7 @@ class TestBillingData:
             f"{billing_data.period} {billing_data.hour:02d}:00"
         )
         assert str(billing_data) == expected, (
-            f"__str__ output should use zero-padded hour; got {str(billing_data)!r}"
+            f"Expected zero-padded hour; got {str(billing_data)!r}"
         )
 
 

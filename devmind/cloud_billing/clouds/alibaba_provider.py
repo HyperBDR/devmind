@@ -12,6 +12,7 @@ from typing import Dict, Optional, Any, Tuple
 from alibabacloud_bssopenapi20171214.client import Client
 from alibabacloud_tea_openapi.models import Config
 from alibabacloud_bssopenapi20171214 import models as bss_models
+from django.utils import timezone
 
 from .provider import BaseCloudConfig, BaseCloudProvider
 
@@ -107,7 +108,7 @@ class AlibabaCloud(BaseCloudProvider):
             ValueError: If period format is invalid
         """
         if period is None:
-            period = datetime.now().strftime("%Y-%m")
+            period = timezone.now().strftime("%Y-%m")
 
         try:
             datetime.strptime(period, "%Y-%m")

@@ -45,13 +45,10 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
 }
 
 # Task execution time limits
-# CELERY_TASK_TIME_LIMIT: Hard time limit (seconds) - worker will be killed if exceeded
-# CELERY_TASK_SOFT_TIME_LIMIT: Soft time limit (seconds) - raises SoftTimeLimitExceeded exception
-# These limits ensure tasks don't run indefinitely and allow graceful shutdown.
-# When worker receives SIGTERM, it will wait for running tasks to complete,
-# but will force-kill tasks exceeding CELERY_TASK_TIME_LIMIT.
-# Docker Compose stop_grace_period (600s) should be less than CELERY_TASK_TIME_LIMIT
-# to allow graceful shutdown before Docker forces termination.
+# CELERY_TASK_TIME_LIMIT: Hard limit (s); worker killed if exceeded.
+# CELERY_TASK_SOFT_TIME_LIMIT: Soft limit (s); raises SoftTimeLimitExceeded.
+# When worker receives SIGTERM, it waits for tasks; force-kill if over limit.
+# Docker stop_grace_period (600s) should be < CELERY_TASK_TIME_LIMIT.
 CELERY_TASK_TIME_LIMIT = 3600
 CELERY_TASK_SOFT_TIME_LIMIT = 3000
 

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from azure.identity import ClientSecretCredential
 from azure.mgmt.consumption import ConsumptionManagementClient
 from azure.mgmt.resource import ResourceManagementClient
+from django.utils import timezone
 
 from ..utils.logging import mask_sensitive_config_object
 from .provider import BaseCloudProvider, BaseCloudConfig
@@ -165,7 +166,7 @@ class AzureCloud(BaseCloudProvider):
             ValueError: If period format is invalid
         """
         if period is None:
-            period = datetime.now().strftime("%Y-%m")
+            period = timezone.now().strftime("%Y-%m")
 
         logger.info(f"Getting billing info for period: {period}")
 

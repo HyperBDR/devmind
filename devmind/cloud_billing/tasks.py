@@ -112,8 +112,9 @@ def collect_billing_data(
             return results
 
         provider_service = ProviderService()
-        current_period = datetime.now().strftime("%Y-%m")
-        current_hour = datetime.now().hour
+        now = timezone.now()
+        current_period = now.strftime("%Y-%m")
+        current_hour = now.hour
 
         for provider in providers:
             try:
@@ -200,7 +201,7 @@ def collect_billing_data(
                     # (hour 0 -> previous month hour 23)
                     if previous_hour < 0:
                         previous_hour = 23
-                        prev_date = datetime.now() - timedelta(days=1)
+                        prev_date = timezone.now() - timedelta(days=1)
                         previous_period = prev_date.strftime("%Y-%m")
 
                     try:
@@ -431,8 +432,9 @@ def check_alert_for_provider(provider_id: int):
                 )
             return result
 
-        current_period = datetime.now().strftime("%Y-%m")
-        current_hour = datetime.now().hour
+        now = timezone.now()
+        current_period = now.strftime("%Y-%m")
+        current_hour = now.hour
 
         # Get all current billing records for this provider
         # (may have multiple accounts)
@@ -462,7 +464,7 @@ def check_alert_for_provider(provider_id: int):
 
         if previous_hour < 0:
             previous_hour = 23
-            prev_date = datetime.now() - timedelta(days=1)
+            prev_date = timezone.now() - timedelta(days=1)
             previous_period = prev_date.strftime("%Y-%m")
 
         # Check alerts for each account_id separately
@@ -741,9 +743,9 @@ def _send_alert_notification_metadata(log_collector):
 @shared_task(name='cloud_billing.tasks.send_alert_notification')
 def send_alert_notification(alert_record_id: int):
     """
-    Send alert notification via webhook. Channel is taken from
+    Send alert notification via webhook. Channel from
     provider.config['notification'] (type=webhook, channel_uuid=...) when set;
-    otherwise the notifier default is used (whether one exists is up to notifier).
+    else notifier default is used.
 
     Returns:
         Dictionary with notification result

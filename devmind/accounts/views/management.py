@@ -1,7 +1,4 @@
-"""
-Management portal views (admin-only).
-
-Provides user list/create and group list/create for the management console.
+"""Management portal views (admin-only): user list/create, group list/create.
 """
 
 from django.contrib.auth import get_user_model
@@ -18,6 +15,7 @@ User = get_user_model()
 
 
 def _safe_int(value, default, min_value=1, max_value=100):
+    """Parse value to int and clamp to [min_value, max_value]; else default."""
     try:
         out = int(value)
     except (TypeError, ValueError):
@@ -30,6 +28,7 @@ def _safe_int(value, default, min_value=1, max_value=100):
 
 
 def _paginated_payload(items, total, page, page_size):
+    """Build paginated response dict (count, page, page_size, results)."""
     return {
         'count': total,
         'page': page,
@@ -39,6 +38,7 @@ def _paginated_payload(items, total, page, page_size):
 
 
 def _user_payload(u):
+    """Build serializable user dict with profile, display_name, and groups."""
     try:
         profile = u.profile
     except Profile.DoesNotExist:
@@ -85,7 +85,7 @@ def _user_payload(u):
 class ManagementUserListView(APIView):
     """
     GET: List all users for management console (with profile and groups).
-    POST: Create a new user (username, email, password, is_staff, group_ids, language, timezone).
+    POST: Create user (username, email, password, is_staff, group_ids, etc).
     Admin-only.
     """
 
@@ -134,12 +134,18 @@ class ManagementUserListView(APIView):
             )
         if User.objects.filter(username=username).exists():
             return Response(
-                {'detail': 'A user with that username already exists.', 'code': 'username_taken'},
+                {
+                    'detail': 'A user with that username already exists.',
+                    'code': 'username_taken',
+                },
                 status=HTTP_400_BAD_REQUEST
             )
         if email and User.objects.filter(email=email).exists():
             return Response(
-                {'detail': 'A user with that email already exists.', 'code': 'email_taken'},
+                {
+                    'detail': 'A user with that email already exists.',
+                    'code': 'email_taken',
+                },
                 status=HTTP_400_BAD_REQUEST
             )
 
@@ -152,7 +158,11 @@ class ManagementUserListView(APIView):
             user.is_staff = True
             user.save(update_fields=['is_staff'])
         if group_ids:
-            valid_ids = list(Group.objects.filter(pk__in=group_ids).values_list('pk', flat=True))
+            valid_ids = list(
+                Group.objects.filter(pk__in=group_ids).values_list(
+                    'pk', flat=True
+                )
+            )
             if valid_ids:
                 user.groups.set(valid_ids)
         try:
@@ -213,7 +223,10 @@ class ManagementGroupListView(APIView):
             )
         if Group.objects.filter(name=name).exists():
             return Response(
-                {'detail': 'A group with that name already exists.', 'code': 'name_taken'},
+                {
+                    'detail': 'A group with that name already exists.',
+                    'code': 'name_taken',
+                },
                 status=HTTP_400_BAD_REQUEST
             )
         group = Group.objects.create(name=name)

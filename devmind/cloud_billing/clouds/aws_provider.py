@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+from django.utils import timezone
 
 from ..utils.logging import mask_sensitive_config_object
 from .provider import BaseCloudProvider, BaseCloudConfig
@@ -161,7 +162,7 @@ class AWSCloud(BaseCloudProvider):
             ValueError: If period format is invalid
         """
         if period is None:
-            period = datetime.now().strftime("%Y-%m")
+            period = timezone.now().strftime("%Y-%m")
 
         logger.info(f"Getting billing info for period: {period}")
 

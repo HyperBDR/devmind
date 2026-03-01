@@ -84,7 +84,10 @@ class CloudProviderSerializer(serializers.ModelSerializer):
             )
         
         notification = value.get("notification")
-        if isinstance(notification, dict) and notification.get("type") == "email":
+        if (
+            isinstance(notification, dict)
+            and notification.get("type") == "email"
+        ):
             email_to = notification.get("email_to")
             if email_to is not None:
                 if isinstance(email_to, list):

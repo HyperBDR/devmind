@@ -130,7 +130,8 @@ class TestCloudProviderViewSet:
             'account_id': '123456789012'
         }
         mocker.patch(
-            'cloud_billing.services.provider_service.ProviderService.validate_credentials',
+            'cloud_billing.services.provider_service.ProviderService.'
+            'validate_credentials',
             return_value=mock_result
         )
 

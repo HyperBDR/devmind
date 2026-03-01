@@ -89,7 +89,9 @@ class TestProviderService:
         with pytest.raises(Exception):
             service.get_billing_info('aws', {}, period='2025-01')
 
-    @patch('cloud_billing.services.provider_service.ProviderService.create_provider')
+    @patch(
+        'cloud_billing.services.provider_service.ProviderService.create_provider'
+    )
     def test_validate_credentials_success(self, mock_create_provider):
         """
         Test validating credentials successfully.
@@ -110,7 +112,9 @@ class TestProviderService:
         assert result['account_id'] == '123456789012'
         assert result.get('error_code') is None
 
-    @patch('cloud_billing.services.provider_service.ProviderService.create_provider')
+    @patch(
+        'cloud_billing.services.provider_service.ProviderService.create_provider'
+    )
     def test_validate_credentials_invalid(self, mock_create_provider):
         """
         Test validating invalid credentials.
@@ -129,7 +133,9 @@ class TestProviderService:
         assert result['account_id'] == ''
         assert result.get('error_code') == 'validation_failed'
 
-    @patch('cloud_billing.services.provider_service.ProviderService.create_provider')
+    @patch(
+        'cloud_billing.services.provider_service.ProviderService.create_provider'
+    )
     def test_validate_credentials_exception(self, mock_create_provider):
         """
         Test handling exceptions during credential validation.
@@ -143,7 +149,9 @@ class TestProviderService:
         assert result['valid'] is False
         assert result.get('error_code') == 'network_error'
 
-    @patch('cloud_billing.services.provider_service.ProviderService.create_provider')
+    @patch(
+        'cloud_billing.services.provider_service.ProviderService.create_provider'
+    )
     def test_get_account_id_success(self, mock_create_provider):
         """
         Test getting account ID successfully.
@@ -160,7 +168,9 @@ class TestProviderService:
 
         assert result == '123456789012'
 
-    @patch('cloud_billing.services.provider_service.ProviderService.create_provider')
+    @patch(
+        'cloud_billing.services.provider_service.ProviderService.create_provider'
+    )
     def test_get_account_id_error(self, mock_create_provider):
         """
         Test handling errors when getting account ID.
@@ -196,7 +206,7 @@ class TestCloudBillingNotificationService:
         alert_record
     ):
         """
-        Test sending alert via Feishu (enqueues unified send_notification with webhook params).
+        Test sending alert via Feishu (unified send_notification webhook).
         """
         from uuid import uuid4
         ch_uuid = uuid4()
@@ -238,7 +248,7 @@ class TestCloudBillingNotificationService:
         alert_record
     ):
         """
-        Test sending alert via WeChat (enqueues unified send_notification with webhook params).
+        Test sending alert via WeChat (unified send_notification webhook).
         """
         from uuid import uuid4
         ch_uuid = uuid4()
@@ -277,8 +287,8 @@ class TestCloudBillingNotificationService:
         alert_record,
     ):
         """
-        When channel_uuid is None, use notifier default (get_default_webhook_channel).
-        Unified task is called with channel_uuid=None; notifier resolves default.
+        When channel_uuid is None, use notifier default.
+        Unified task called with channel_uuid=None; notifier resolves default.
         """
         mock_channel = type('Channel', (), {
             'uuid': __import__('uuid').uuid4(),
@@ -335,7 +345,8 @@ class TestCloudBillingNotificationService:
         result = service.send_alert(alert_record, channel_uuid=None)
 
         assert result['success'] is False
-        assert 'not found' in result['error'].lower() or 'not active' in result['error'].lower()
+        err = result['error'].lower()
+        assert 'not found' in err or 'not active' in err
 
     @patch(
         'cloud_billing.services.notification_service.send_notification'
@@ -350,7 +361,7 @@ class TestCloudBillingNotificationService:
         alert_record
     ):
         """
-        Test sending alert with channel_uuid; unified task receives channel_uuid and params.
+        Test sending alert with channel_uuid; unified task gets params.
         """
         from uuid import uuid4
         ch_uuid = uuid4()
@@ -381,7 +392,7 @@ class TestCloudBillingNotificationService:
         alert_record
     ):
         """
-        Test sending alert with channel_uuid that does not exist or is inactive.
+        Test alert with channel_uuid that does not exist or is inactive.
         """
         mock_get_by_uuid.return_value = (None, None)
 
@@ -392,4 +403,5 @@ class TestCloudBillingNotificationService:
         )
 
         assert result['success'] is False
-        assert 'not found' in result['error'].lower() or 'inactive' in result['error'].lower()
+        err = result['error'].lower()
+        assert 'not found' in err or 'inactive' in err

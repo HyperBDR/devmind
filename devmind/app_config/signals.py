@@ -22,8 +22,10 @@ def invalidate_config_cache_on_save(sender, instance, **kwargs):
     try:
         invalidate_config_cache(key=instance.key, category=instance.category)
         logger.debug(f"Invalidated cache for config: {instance.key}")
-    except Exception as e:
-        logger.warning(f"Failed to invalidate cache for config {instance.key}: {e}")
+    except (ValueError, TypeError, OSError, AttributeError) as e:
+        logger.warning(
+            f"Failed to invalidate cache for config {instance.key}: {e}"
+        )
 
 
 @receiver(post_delete, sender=GlobalConfig)
@@ -34,7 +36,7 @@ def invalidate_config_cache_on_delete(sender, instance, **kwargs):
     try:
         invalidate_config_cache(key=instance.key, category=instance.category)
         logger.debug(f"Invalidated cache for deleted config: {instance.key}")
-    except Exception as e:
+    except (ValueError, TypeError, OSError, AttributeError) as e:
         logger.warning(
             f"Failed to invalidate cache for deleted config {instance.key}: {e}"
         )

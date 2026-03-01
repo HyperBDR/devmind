@@ -1,5 +1,6 @@
 from django.urls import path
 from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.views import TokenRefreshView
 from dj_rest_auth.views import (
     LoginView, LogoutView,
     PasswordChangeView,
@@ -16,7 +17,10 @@ from accounts.views import (
     SendRegistrationEmailView,
     VerifyRegistrationTokenView,
 )
-from accounts.views.management import ManagementGroupListView, ManagementUserListView
+from accounts.views.management import (
+    ManagementGroupListView,
+    ManagementUserListView,
+)
 
 
 class CustomLoginView(LoginView):
@@ -35,6 +39,12 @@ urlpatterns = [
         'api/v1/auth/logout',
         LogoutView.as_view(),
         name='rest_logout'
+    ),
+    # JWT token refresh (no auth required; uses refresh token in body)
+    path(
+        'api/v1/auth/token/refresh',
+        TokenRefreshView.as_view(),
+        name='token_refresh'
     ),
     # Get or update user details
     path(
