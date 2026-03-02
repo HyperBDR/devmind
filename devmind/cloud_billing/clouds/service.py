@@ -15,16 +15,23 @@ from .huawei_intl_provider import HuaweiIntlConfig, HuaweiIntlCloud
 from .alibaba_provider import AlibabaConfig, AlibabaCloud
 from .azure_provider import AzureConfig, AzureCloud
 
-
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Tencent Cloud: optional dependency (tencentcloud-sdk-python-common, tencentcloud-sdk-python-billing)
+# If SDK is not installed, tencentcloud provider is unavailable; other providers still work.
+try:
+    from .tencent_provider import TencentConfig, TencentCloud
+    _TENCENT_AVAILABLE = True
+except ImportError as e:
+    TencentConfig = None  # type: ignore[misc, assignment]
+    TencentCloud = None  # type: ignore[misc, assignment]
+    _TENCENT_AVAILABLE = False
+    logger.debug("Tencent Cloud provider not available (missing SDK): %s", e)
 
-class ProviderFactory:
-    """Factory for creating cloud provider instances."""
 
-    # Mapping of provider names to their config and provider classes
-    PROVIDER_MAPPING = {
+def _build_provider_mapping():
+    mapping = {
         'aws': {
             'config_class': AWSConfig,
             'provider_class': AWSCloud
@@ -44,8 +51,21 @@ class ProviderFactory:
         'azure': {
             'config_class': AzureConfig,
             'provider_class': AzureCloud
-        }
+        },
     }
+    if _TENCENT_AVAILABLE and TencentConfig and TencentCloud:
+        mapping['tencentcloud'] = {
+            'config_class': TencentConfig,
+            'provider_class': TencentCloud
+        }
+    return mapping
+
+
+class ProviderFactory:
+    """Factory for creating cloud provider instances."""
+
+    # Mapping of provider names to their config and provider classes
+    PROVIDER_MAPPING = _build_provider_mapping()
 
     @classmethod
     def create_provider(

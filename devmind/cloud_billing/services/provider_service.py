@@ -122,6 +122,31 @@ class ProviderService:
                 normalized['api_secret'] = api_secret
             if region:
                 normalized['region'] = region
+        elif provider_type == 'tencentcloud':
+            access_key_id = (
+                config_dict.get('TENCENT_ACCESS_KEY_ID') or
+                config_dict.get('access_key_id')
+            )
+            access_key_secret = (
+                config_dict.get('TENCENT_ACCESS_KEY_SECRET') or
+                config_dict.get('access_key_secret')
+            )
+            app_id = (
+                config_dict.get('TENCENT_APP_ID') or
+                config_dict.get('app_id')
+            )
+            region = (
+                config_dict.get('TENCENT_REGION') or
+                config_dict.get('region')
+            )
+            if access_key_id:
+                normalized['access_key_id'] = access_key_id
+            if access_key_secret:
+                normalized['access_key_secret'] = access_key_secret
+            if app_id:
+                normalized['app_id'] = app_id
+            if region:
+                normalized['region'] = region
         else:
             # For unknown types, pass through as-is
             normalized = config_dict.copy()
@@ -323,6 +348,15 @@ class ProviderService:
                 return 'alibaba_invalid_credentials'
             elif 'region' in error_lower:
                 return 'alibaba_invalid_region'
+
+        # Tencent Cloud specific errors
+        elif provider_type == 'tencentcloud':
+            if 'auth' in error_lower or 'unauthorized' in error_lower:
+                return 'tencentcloud_invalid_credentials'
+            if 'secret' in error_lower or 'signature' in error_lower:
+                return 'tencentcloud_invalid_secret'
+            if 'cam' in error_lower or 'permission' in error_lower:
+                return 'tencentcloud_no_permission'
 
         # Generic errors
         if 'ssl' in error_lower or 'sslerror' in error_lower:
