@@ -14,7 +14,7 @@ services:
     volumes:
       - ./data/django/staticfiles:/opt/devmind/core/staticfiles
       - ./data/logs/api:/var/log/gunicorn
-      - ./data/media:/opt/media
+      - ./data/storage:/opt/storage
       - ./cache:/opt/cache
       - ./docker/nginx/certs:/opt/devmind/docker/nginx/certs
     networks:
@@ -38,7 +38,7 @@ services:
       - ./.env
     volumes:
       - ./data/logs/worker:/var/log/celery
-      - ./data/media:/opt/media
+      - ./data/storage:/opt/storage
       - ./cache:/opt/cache
     networks:
       - devmind_network
@@ -99,7 +99,7 @@ services:
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
       - ./docker/nginx/certs:/etc/nginx/certs:ro
       - ./data/django/staticfiles:/staticfiles:ro
-      - ./data/media:/opt/media:ro
+      - ./data/storage:/opt/storage:ro
       - ./data/logs/nginx:/var/log/nginx
     ports:
       - "${NGINX_HTTP_PORT:-10080}:80"

@@ -28,6 +28,7 @@ dependencies = [
     "redis",
     "gunicorn==20.1.0",
     "requests>=2.31.0",
+    "jira>=3.10.0",
     "python-dateutil>=2.8.2",
     "django-json-widget>=1.1.1",
     # Cloud billing providers
@@ -43,8 +44,6 @@ dependencies = [
     "django-allauth>=0.57.0",
     "django-cors-headers>=4.3.0",
     "django-extensions>=3.2.3",
-    # LLM tracker (llm_service depends on devtoolbox for OpenAI/Azure/Gemini)
-    "devtoolbox @ git+https://github.com/cloud2ai/devtoolbox.git",
     # Agentcore submodules (Django apps). Production installs from GitHub; dev overlays with pip install -e in agentcore path.
     "agentcore-metering @ git+https://github.com/cloud2ai/agentcore-metering.git",
     "agentcore-task @ git+https://github.com/cloud2ai/agentcore-task.git",
@@ -59,6 +58,11 @@ dev = [
     "flake8>=6.0.0",
     "isort>=5.12.0",
     "mypy>=1.0.0"
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "unit: App-level unit tests (domain logic, services, model methods).",
 ]
 
 [tool.setuptools]

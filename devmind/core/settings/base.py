@@ -167,6 +167,7 @@ INSTALLED_APPS += [
     'core',
     'accounts',
     'cloud_billing',
+    'data_collector',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -496,7 +497,13 @@ from .celery import *
 from .rest import *
 from .swagger import *
 from .cache import *
-from .storage import *
+
+# Unified storage root; data_collector uses DATA_COLLECTOR_ROOT for attachments
+STORAGE_ROOT = os.getenv("STORAGE_ROOT", "/opt/storage")
+DATA_COLLECTOR_ROOT = os.getenv(
+    "DATA_COLLECTOR_ROOT",
+    os.path.join(STORAGE_ROOT, "data_collector"),
+)
 
 # ============================
 # DRF Spectacular Configuration
@@ -527,6 +534,10 @@ SPECTACULAR_SETTINGS = {
         {
             'name': 'llm-tracking',
             'description': 'LLM usage tracking and config (admin API)',
+        },
+        {
+            'name': 'data-collector',
+            'description': 'Data collection config, raw records, attachments, stats',
         },
     ],
 }

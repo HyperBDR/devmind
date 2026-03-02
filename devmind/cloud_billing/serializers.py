@@ -12,12 +12,16 @@ class CloudProviderSerializer(serializers.ModelSerializer):
     """
     Serializer for CloudProvider model.
     """
-    created_by_username = serializers.CharField(
-        source='created_by.username', read_only=True
-    )
-    updated_by_username = serializers.CharField(
-        source='updated_by.username', read_only=True
-    )
+    created_by_username = serializers.SerializerMethodField()
+    updated_by_username = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_created_by_username(obj):
+        return obj.created_by.username if obj.created_by_id else ''
+
+    @staticmethod
+    def get_updated_by_username(obj):
+        return obj.updated_by.username if obj.updated_by_id else ''
     
     # Make name optional for create operations (will be auto-generated)
     name = serializers.CharField(
@@ -166,12 +170,16 @@ class AlertRuleSerializer(serializers.ModelSerializer):
     provider_name = serializers.CharField(
         source='provider.display_name', read_only=True
     )
-    created_by_username = serializers.CharField(
-        source='created_by.username', read_only=True
-    )
-    updated_by_username = serializers.CharField(
-        source='updated_by.username', read_only=True
-    )
+    created_by_username = serializers.SerializerMethodField()
+    updated_by_username = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_created_by_username(obj):
+        return obj.created_by.username if obj.created_by_id else ''
+
+    @staticmethod
+    def get_updated_by_username(obj):
+        return obj.updated_by.username if obj.updated_by_id else ''
 
     class Meta:
         model = AlertRule

@@ -17,7 +17,7 @@ services:
       - ./devmind:/opt/devmind
       - ./cache.dev:/opt/cache
       - ./docker/nginx/certs:/opt/devmind/docker/nginx/certs
-      - ./data.dev/media:/opt/media
+      - ./data.dev/storage:/opt/storage
     networks:
       - devmind_network
     depends_on:
@@ -39,7 +39,7 @@ services:
     volumes:
       - ./cache.dev:/opt/cache
       - ./data.dev/logs/worker:/var/log/celery
-      - ./data.dev/media:/opt/media
+      - ./data.dev/storage:/opt/storage
       - ./devmind:/opt/devmind
     networks:
       - devmind_network
@@ -162,7 +162,7 @@ services:
       - ./docker/nginx/default.dev.conf:/etc/nginx/conf.d/default.conf
       - ./data.dev/django/staticfiles:/staticfiles:ro
       - ./data.dev/logs/nginx:/var/log/nginx
-      - ./data.dev/media:/opt/media:ro
+      - ./data.dev/storage:/opt/storage:ro
     ports:
       - "${DJANGO_HOST_PORT:-8000}:80"
     networks:

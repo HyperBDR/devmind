@@ -447,6 +447,26 @@ msgstr ""
 msgid "Validation failed"
 msgstr ""
 
+#: data_collector/tasks.py
+msgid "Start collection"
+msgstr "Start collection"
+
+#: data_collector/tasks.py
+msgid "Fetching raw data"
+msgstr "Fetching raw data"
+
+#: data_collector/tasks.py
+msgid "Collection done"
+msgstr "Collection done"
+
+#: data_collector/tasks.py
+msgid "Start cleanup"
+msgstr "Start cleanup"
+
+#: data_collector/tasks.py
+msgid "Cleanup done"
+msgstr "Cleanup done"
+
 #~ msgid "OSS storage is disabled, validation skipped"
 #~ msgstr "OSS storage is disabled, validation skipped"
 

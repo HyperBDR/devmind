@@ -477,6 +477,26 @@ msgstr "[DevMind] 邮件渠道校验测试"
 msgid "Validation failed"
 msgstr "校验失败"
 
+#: data_collector/tasks.py
+msgid "Start collection"
+msgstr "开始采集"
+
+#: data_collector/tasks.py
+msgid "Fetching raw data"
+msgstr "拉取原始数据"
+
+#: data_collector/tasks.py
+msgid "Collection done"
+msgstr "采集完成"
+
+#: data_collector/tasks.py
+msgid "Start cleanup"
+msgstr "开始清理"
+
+#: data_collector/tasks.py
+msgid "Cleanup done"
+msgstr "清理完成"
+
 #~ msgid "OSS storage is disabled, validation skipped"
 #~ msgstr "OSS存储已禁用，跳过验证"
 

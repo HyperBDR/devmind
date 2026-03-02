@@ -37,6 +37,9 @@ urlpatterns = [
     # Includes cloud billing management endpoints
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),
 
+    # Data collector routes (raw data collection from JIRA, Feishu, etc.)
+    path('api/v1/data-collector/', include('data_collector.urls')),
+
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 
