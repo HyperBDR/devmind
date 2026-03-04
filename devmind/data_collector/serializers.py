@@ -99,8 +99,11 @@ class CollectorConfigSerializer(serializers.ModelSerializer):
 
 class CollectorConfigListSerializer(serializers.ModelSerializer):
     """
-    List view: uuid, platform, key, is_enabled, version, updated_at.
+    List view: uuid, platform, key, is_enabled, version, updated_at,
+    schedule_cron (from value, for list display).
     """
+
+    schedule_cron = serializers.SerializerMethodField()
 
     class Meta:
         model = CollectorConfig
@@ -111,7 +114,12 @@ class CollectorConfigListSerializer(serializers.ModelSerializer):
             "is_enabled",
             "version",
             "updated_at",
+            "schedule_cron",
         ]
+
+    def get_schedule_cron(self, obj):
+        value = getattr(obj, "value", None) or {}
+        return value.get("schedule_cron") or "0 */2 * * *"
 
 
 def _record_display_title(raw_data, source_unique_id, platform):
@@ -127,6 +135,21 @@ def _record_display_title(raw_data, source_unique_id, platform):
         summary = fields.get("summary")
         if summary:
             return summary
+    elif platform == "feishu":
+        # For Feishu we prefer approval (definition) name as title.
+        approval = raw_data.get("approval") or {}
+        title = approval.get("name")
+        if title:
+            return str(title)
+    elif platform == "license":
+        order = raw_data.get("order") or {}
+        code = order.get("code")
+        if code:
+            return str(code)
+        category = order.get("category") or {}
+        name = category.get("name") if isinstance(category, dict) else None
+        if name:
+            return str(name)
     return source_unique_id or ""
 
 

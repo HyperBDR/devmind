@@ -10,14 +10,14 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Prefetch
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils import translation
 from django.utils.translation import gettext as _
 
 from celery import current_task
 from celery import shared_task
-from django.db.models import Prefetch
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 
 from agentcore_task.adapters.django import (
     TaskStatus,
@@ -170,27 +170,45 @@ def _sync_attachments_for_record(provider, auth_config, raw_record):
     return synced, removed
 
 
-def _register_and_start(task_id, config_uuid, lang=None):
+def _register_and_start(
+    task_id,
+    config_uuid,
+    lang=None,
+    platform: str | None = None,
+    config_key: str | None = None,
+    created_by=None,
+):
     if task_id:
+        metadata = {"config_uuid": config_uuid}
+        if platform:
+            metadata["config_platform"] = platform
+        if config_key:
+            metadata["config_key"] = config_key
         TaskTracker.register_task(
             task_id=task_id,
             task_name=MODULE_NAME + ".tasks.run_collect",
             module=MODULE_NAME,
             task_kwargs={"config_uuid": config_uuid},
-            metadata={"config_uuid": config_uuid},
+            metadata=metadata,
             initial_status=TaskStatus.STARTED,
+            created_by=created_by,
         )
         with translation.override(lang or settings.LANGUAGE_CODE):
             msg = _("Start collection")
+        metadata = {
+            "progress_percent": 0,
+            "progress_message": msg,
+            "progress_step": "start",
+            "config_uuid": config_uuid,
+        }
+        if platform:
+            metadata["config_platform"] = platform
+        if config_key:
+            metadata["config_key"] = config_key
         TaskTracker.update_task_status(
             task_id,
             TaskStatus.STARTED,
-            metadata={
-                "progress_percent": 0,
-                "progress_message": msg,
-                "progress_step": "start",
-                "config_uuid": config_uuid,
-            },
+            metadata=metadata,
         )
 
 
@@ -211,7 +229,7 @@ def run_collect(
     task_id = current_task.request.id if current_task else None
     logger.info(
         f"[data_collector] run_collect started, config_uuid={config_uuid}, "
-        f"task_id={task_id}, start_time={start_time}, end_time={end_time}"
+        f"task_id={task_id}, start_time={start_time}, end_time={end_time}",
     )
     try:
         config = CollectorConfig.objects.get(uuid=config_uuid)
@@ -231,7 +249,14 @@ def run_collect(
 
     value = config.value or {}
     lang = value.get("language") or settings.LANGUAGE_CODE
-    _register_and_start(task_id, config_uuid, lang)
+    _register_and_start(
+        task_id,
+        config_uuid,
+        lang,
+        platform=config.platform,
+        config_key=config.key,
+        created_by=config.user,
+    )
 
     logger.info(
         f"[data_collector] run_collect config loaded: "
@@ -252,7 +277,11 @@ def run_collect(
                     task_id,
                     TaskStatus.FAILURE,
                     error=err,
-                    metadata={"config_uuid": config_uuid},
+                    metadata={
+                        "config_uuid": config_uuid,
+                        "config_platform": config.platform,
+                        "config_key": config.key,
+                    },
                 )
             return {
                 "success": False,
@@ -269,7 +298,11 @@ def run_collect(
                     task_id,
                     TaskStatus.FAILURE,
                     error=err,
-                    metadata={"config_uuid": config_uuid},
+                    metadata={
+                        "config_uuid": config_uuid,
+                        "config_platform": config.platform,
+                        "config_key": config.key,
+                    },
                 )
             return {
                 "success": False,
@@ -282,12 +315,15 @@ def run_collect(
         start_time = start_dt
         end_time = end_dt
     elif runtime.get("first_collect_at") is None:
-        if initial_range == "1m":
-            start_time = now - timedelta(days=30)
-        elif initial_range == "3m":
-            start_time = now - timedelta(days=90)
-        else:
-            start_time = now - timedelta(days=30)
+        # First run: lookback from initial_range; supports "m" and "d" styles.
+        lookback_days = 30
+        if initial_range in ("1m", "30d"):
+            lookback_days = 30
+        elif initial_range in ("3m", "90d"):
+            lookback_days = 90
+        elif initial_range == "10d":
+            lookback_days = 10
+        start_time = now - timedelta(days=lookback_days)
         end_time = now
         logger.info(
             f"[data_collector] run_collect first run, "
@@ -340,6 +376,9 @@ def run_collect(
     if provider_cls:
         provider = provider_cls()
         auth_config = value.get("auth") or {}
+        base_url = value.get("base_url") or auth_config.get("base_url")
+        if base_url:
+            auth_config = {**auth_config, "base_url": base_url}
         logger.info(
             f"[data_collector] run_collect calling provider.collect "
             f"platform={config.platform}, start={start_time}, end={end_time}"
@@ -363,7 +402,11 @@ def run_collect(
                     task_id,
                     TaskStatus.FAILURE,
                     error=str(e),
-                    metadata={"config_uuid": config_uuid},
+                    metadata={
+                        "config_uuid": config_uuid,
+                        "config_platform": config.platform,
+                        "config_key": config.key,
+                    },
                 )
             raise
 
@@ -524,6 +567,8 @@ def run_collect(
                 "progress_message": msg,
                 "progress_step": "done",
                 "config_uuid": config_uuid,
+                "config_platform": config.platform,
+                "config_key": config.key,
                 "records_created": records_created,
                 "records_updated": records_updated,
                 "records_collected": n_collected,
@@ -552,6 +597,11 @@ def run_cleanup(config_uuid: str):
     update runtime_state.last_cleanup_at. Uses TaskTracker and metadata.
     """
     task_id = current_task.request.id if current_task else None
+    try:
+        config = CollectorConfig.objects.get(uuid=config_uuid)
+    except CollectorConfig.DoesNotExist:
+        config = None
+
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
@@ -560,8 +610,13 @@ def run_cleanup(config_uuid: str):
             task_kwargs={"config_uuid": config_uuid},
             metadata={"config_uuid": config_uuid},
             initial_status=TaskStatus.STARTED,
+            created_by=config.user if config else None,
         )
-        with translation.override(settings.LANGUAGE_CODE):
+        lang_override = (
+            (config.value or {}).get("language") if config
+            else settings.LANGUAGE_CODE
+        )
+        with translation.override(lang_override):
             msg = _("Start cleanup")
         TaskTracker.update_task_status(
             task_id,
@@ -574,9 +629,7 @@ def run_cleanup(config_uuid: str):
             },
         )
 
-    try:
-        config = CollectorConfig.objects.get(uuid=config_uuid)
-    except CollectorConfig.DoesNotExist:
+    if not config:
         if task_id:
             TaskTracker.update_task_status(
                 task_id,
@@ -604,8 +657,11 @@ def run_cleanup(config_uuid: str):
                     try:
                         if os.path.isfile(att.file_path):
                             os.remove(att.file_path)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        logger.warning(
+                            f"[data_collector] run_cleanup remove file "
+                            f"failed path={att.file_path[:80]}: {e}"
+                        )
             rec.delete()
         runtime["last_cleanup_at"] = timezone.now().isoformat()
         value["runtime_state"] = runtime
@@ -624,6 +680,8 @@ def run_cleanup(config_uuid: str):
                 "progress_message": msg,
                 "records_deleted": count,
                 "config_uuid": config_uuid,
+                "config_platform": config.platform,
+                "config_key": config.key,
             },
         )
 
@@ -637,6 +695,11 @@ def run_validate(config_uuid: str, start_time: str, end_time: str):
     Uses TaskTracker and metadata.
     """
     task_id = current_task.request.id if current_task else None
+    try:
+        config = CollectorConfig.objects.get(uuid=config_uuid)
+    except CollectorConfig.DoesNotExist:
+        config = None
+
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
@@ -649,11 +712,10 @@ def run_validate(config_uuid: str, start_time: str, end_time: str):
             },
             metadata={"config_uuid": config_uuid},
             initial_status=TaskStatus.STARTED,
+            created_by=config.user if config else None,
         )
 
-    try:
-        config = CollectorConfig.objects.get(uuid=config_uuid)
-    except CollectorConfig.DoesNotExist:
+    if not config:
         if task_id:
             TaskTracker.update_task_status(
                 task_id,
@@ -672,6 +734,22 @@ def run_validate(config_uuid: str, start_time: str, end_time: str):
         if isinstance(end_time, str)
         else end_time
     )
+    if st is None or et is None:
+        err = "Invalid start_time or end_time format."
+        if task_id:
+            value = config.value or {}
+            TaskTracker.update_task_status(
+                task_id,
+                TaskStatus.FAILURE,
+                error=err,
+                metadata={
+                    "config_uuid": config_uuid,
+                    "config_platform": config.platform,
+                    "config_key": config.key,
+                },
+            )
+        return {"success": False, "error": err}
+
     records = list(
         RawDataRecord.objects.filter(
             user_id=config.user_id,
@@ -686,7 +764,11 @@ def run_validate(config_uuid: str, start_time: str, end_time: str):
     missing = []
     if provider_cls:
         provider = provider_cls()
-        auth_config = (config.value or {}).get("auth") or {}
+        value = config.value or {}
+        auth_config = value.get("auth") or {}
+        base_url = value.get("base_url") or auth_config.get("base_url")
+        if base_url:
+            auth_config = {**auth_config, "base_url": base_url}
         missing = provider.validate(
             auth_config,
             st,
@@ -716,6 +798,8 @@ def run_validate(config_uuid: str, start_time: str, end_time: str):
                 "records_validated": len(records),
                 "records_marked_deleted": len(missing),
                 "config_uuid": config_uuid,
+                "config_platform": config.platform,
+                "config_key": config.key,
             },
         )
 

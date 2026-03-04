@@ -10,12 +10,14 @@ from data_collector.models import RawDataRecord
 from data_collector.services.beat_sync import (
     CLEANUP_TASK_NAME_PREFIX,
     COLLECT_TASK_NAME_PREFIX,
+    _crontab_from_string,
     sync_config_to_beat,
     unsync_config_from_beat,
 )
 from data_collector.services.providers import get_provider
-from data_collector.services.providers.jira import JiraProvider
 from data_collector.services.providers.feishu import FeishuProvider
+from data_collector.services.providers.jira import JiraProvider
+from data_collector.services.providers.license import LicenseProvider
 from data_collector.services.storage import (
     attachment_file_path,
     attachment_file_url,
@@ -38,7 +40,9 @@ class TestStorage:
             filter_metadata={},
             data_hash="h",
         )
-        with patch("data_collector.services.storage.get_data_collector_root") as m:
+        with patch(
+            "data_collector.services.storage.get_data_collector_root"
+        ) as m:
             m.return_value = "/opt/storage/data_collector"
             path = get_raw_data_attachment_dir(record)
             root = "/opt/storage/data_collector"
@@ -56,7 +60,9 @@ class TestStorage:
             filter_metadata={},
             data_hash="h",
         )
-        with patch("data_collector.services.storage.get_data_collector_root") as m:
+        with patch(
+            "data_collector.services.storage.get_data_collector_root"
+        ) as m:
             m.return_value = "/opt/storage/data_collector"
             path = attachment_file_path(record, "att-123")
             root = "/opt/storage/data_collector"
@@ -86,7 +92,9 @@ class TestStorage:
             filter_metadata={},
             data_hash="h",
         )
-        with patch("data_collector.services.storage.get_data_collector_root") as m:
+        with patch(
+            "data_collector.services.storage.get_data_collector_root"
+        ) as m:
             m.return_value = str(tmp_path)
             out = ensure_attachment_dir(record)
             expected_dir = tmp_path / "raw_data" / str(record.uuid)
@@ -168,12 +176,30 @@ class TestBeatSync:
 
 
 @pytest.mark.unit
+@pytest.mark.django_db
+class TestCrontabFromString:
+    def test_crontab_from_string_valid_five_fields(self):
+        crontab = _crontab_from_string("5 */3 * * *")
+        assert crontab is not None
+        assert crontab.minute == "5"
+        assert crontab.hour == "*/3"
+
+    def test_crontab_from_string_invalid_returns_none(self):
+        assert _crontab_from_string("") is None
+        assert _crontab_from_string("1 2 3") is None
+        assert _crontab_from_string("invalid") is None
+
+
+@pytest.mark.unit
 class TestGetProvider:
     def test_get_provider_jira_returns_jira_provider_class(self):
         assert get_provider("jira") is JiraProvider
 
     def test_get_provider_feishu_returns_feishu_provider_class(self):
         assert get_provider("feishu") is FeishuProvider
+
+    def test_get_provider_license_returns_license_provider_class(self):
+        assert get_provider("license") is LicenseProvider
 
     def test_get_provider_unknown_returns_none(self):
         assert get_provider("unknown_platform") is None

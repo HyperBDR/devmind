@@ -405,6 +405,38 @@ FILE_UPLOAD_MAX_NUMBER_FILES = 100
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # ============================
+# Logging Configuration
+# ============================
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "INFO",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        # Data collector tasks (Celery workers)
+        "data_collector.tasks": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+        # Feishu provider (API + workers)
+        "data_collector.services.providers.feishu": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}
+
+# ============================
 # URL Configuration
 # ============================
 # APPEND_SLASH: Controls Django's URL trailing slash behavior.

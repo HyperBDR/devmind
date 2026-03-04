@@ -153,7 +153,12 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             if start_dt >= end_dt:
                 raise ValidationError("start_time must be before end_time.")
             delta = end_dt - start_dt
-            if delta.days > 90:
+            max_days = 30 if config.platform == "feishu" else 90
+            if delta.days > max_days:
+                if config.platform == "feishu":
+                    raise ValidationError(
+                        "Collect range for Feishu must not exceed 30 days."
+                    )
                 raise ValidationError(
                     "Collect range must not exceed 3 months (90 days)."
                 )
@@ -168,7 +173,11 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             module="data_collector",
             task_kwargs=task_kwargs,
             created_by=request.user,
-            metadata={"config_uuid": config_uuid_str},
+            metadata={
+                "config_uuid": config_uuid_str,
+                "config_platform": config.platform,
+                "config_key": config.key,
+            },
             initial_status=TaskStatus.PENDING,
         )
         return Response(
