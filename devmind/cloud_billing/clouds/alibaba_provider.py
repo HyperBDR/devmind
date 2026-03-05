@@ -16,9 +16,23 @@ from django.utils import timezone
 
 from .provider import BaseCloudConfig, BaseCloudProvider
 
+try:
+    from alibabacloud_sts20150401.client import Client as StsClient
+    _STS_AVAILABLE = True
+except ImportError:
+    StsClient = None  # type: ignore[misc, assignment]
+    _STS_AVAILABLE = False
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# BSS OpenAPI: China uses business.aliyuncs.com (bssopenapi.*.aliyuncs.com often fails to resolve).
+BSS_ENDPOINT_CHINA = "business.aliyuncs.com"
+DEFAULT_BSS_ENDPOINT = "bssopenapi.aliyuncs.com"
+BSS_OPENAPI_ENDPOINT = DEFAULT_BSS_ENDPOINT  # alias for backward compatibility
+# STS GetCallerIdentity endpoint (same as working script: sts.aliyuncs.com).
+STS_ENDPOINT_DEFAULT = "sts.aliyuncs.com"
 
 
 class AlibabaConfig(BaseCloudConfig):
@@ -57,15 +71,13 @@ class AlibabaConfig(BaseCloudConfig):
         if self.api_secret is None:
             self.api_secret = os.environ.get("ALIBABA_ACCESS_KEY_SECRET")
         if self.region is None:
-            self.region = os.environ.get("ALIBABA_REGION")
+            self.region = os.environ.get("ALIBABA_REGION", "cn-hangzhou")
 
-        # Validate required fields
+        # Validate required fields (region has default for BSS central endpoint)
         if not self.api_key:
             raise ValueError("access key ID is required")
         if not self.api_secret:
             raise ValueError("access key secret is required")
-        if not self.region:
-            raise ValueError("region is required")
 
 
 class AlibabaCloud(BaseCloudProvider):
@@ -79,18 +91,52 @@ class AlibabaCloud(BaseCloudProvider):
         """
         super().__init__(config)
         self._client = None
+        self._sts_client = None
         self.name = "alibaba"
+
+    def _get_sts_endpoint(self) -> str:
+        """STS endpoint (env override or default sts.aliyuncs.com, same as working script)."""
+        return os.environ.get("ALIBABA_STS_ENDPOINT", "").strip() or STS_ENDPOINT_DEFAULT
+
+    @property
+    def sts_client(self) -> Optional[Any]:
+        """Lazy STS client for GetCallerIdentity (account ID). Build same as working script."""
+        if not _STS_AVAILABLE or StsClient is None:
+            return None
+        if self._sts_client is None:
+            endpoint = self._get_sts_endpoint()
+            logger.debug("Using Alibaba STS endpoint: %s", endpoint)
+            # Same as working script: Config(access_key_id, access_key_secret) then set endpoint
+            cfg = Config(
+                access_key_id=self.config.api_key,
+                access_key_secret=self.config.api_secret,
+            )
+            cfg.endpoint = endpoint
+            self._sts_client = StsClient(cfg)
+        return self._sts_client
+
+    def _get_bss_endpoint(self) -> str:
+        """Resolve BSS endpoint: env override, then China region -> business.aliyuncs.com, else default."""
+        endpoint = os.environ.get("ALIBABA_BSS_ENDPOINT", "").strip()
+        if endpoint:
+            return endpoint
+        region = (self.config.region or "").strip().lower()
+        if region and region.startswith("cn-"):
+            return BSS_ENDPOINT_CHINA
+        if region:
+            return f"bssopenapi.{region}.aliyuncs.com"
+        return BSS_OPENAPI_ENDPOINT
 
     @property
     def client(self) -> Client:
         """Get Alibaba Cloud BSS client."""
         if self._client is None:
+            endpoint = self._get_bss_endpoint()
+            logger.debug("Using Alibaba BSS endpoint: %s", endpoint)
             config = Config(
                 access_key_id=self.config.api_key,
                 access_key_secret=self.config.api_secret,
-                endpoint=(
-                    f"bssopenapi.{self.config.region}.aliyuncs.com"
-                )
+                endpoint=endpoint,
             )
             self._client = Client(config)
         return self._client
@@ -215,31 +261,43 @@ class AlibabaCloud(BaseCloudProvider):
             }
 
     def get_account_id(self) -> str:
-        """Get the Alibaba Cloud account ID.
-
-        Returns:
-            str: Alibaba Cloud account ID
-
-        Raises:
-            Exception: If the account ID cannot be retrieved
-        """
+        """Get the Alibaba Cloud account ID via STS GetCallerIdentity (same as working script)."""
+        if self.sts_client is None:
+            logger.warning(
+                "Alibaba account_id requires alibabacloud-sts20150401. "
+                "Install in backend env: pip install alibabacloud-sts20150401"
+            )
+            return ""
         try:
-            request = bss_models.GetResourcePackageRequest()
-            response = self.client.get_resource_package(request)
-            return response.body.data.owner_id
+            response = self.sts_client.get_caller_identity()
+            body = response.body
+            if body is None:
+                return ""
+            account_id = getattr(body, "account_id", None)
+            return str(account_id) if account_id else ""
         except Exception as e:
-            logger.error(f"Failed to get account ID: {str(e)}")
-            raise
+            logger.warning("Alibaba STS GetCallerIdentity failed: %s", e)
+            return ""
 
     def validate_credentials(self) -> bool:
-        """Validate Alibaba Cloud credentials.
-
-        Returns:
-            bool: True if credentials are valid, False otherwise
-        """
+        """Validate via STS GetCallerIdentity when available, else BSS QueryAccountBalance."""
+        if self.sts_client is not None:
+            try:
+                response = self.sts_client.get_caller_identity()
+                body = response.body
+                if body and getattr(body, "account_id", None):
+                    return True
+            except Exception as e:
+                logger.warning("Alibaba STS GetCallerIdentity failed, trying BSS: %s", e)
+        # Fallback: BSS QueryAccountBalance (no account_id, but validates credentials)
         try:
-            self.get_account_id()
+            self.client.query_account_balance()
+            if self.sts_client is None:
+                logger.info(
+                    "Alibaba validated via BSS. Install alibabacloud-sts20150401 "
+                    "in backend to get account_id: pip install alibabacloud-sts20150401"
+                )
             return True
         except Exception as e:
-            logger.error(f"Failed to validate credentials: {str(e)}")
-            return False
+            logger.error("Alibaba credential validation failed: %s", e)
+            raise

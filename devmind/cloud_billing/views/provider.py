@@ -253,11 +253,14 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
                 config
             )
 
-            return Response({
+            response_data = {
                 'valid': result.get('valid', False),
                 'error_code': result.get('error_code'),
                 'account_id': result.get('account_id', ''),
-            })
+            }
+            if result.get('message'):
+                response_data['message'] = result['message']
+            return Response(response_data)
         except Exception as e:
             return Response({
                 'valid': False,

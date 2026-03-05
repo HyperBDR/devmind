@@ -247,13 +247,15 @@ class ProviderService:
 
             # Try to validate credentials and capture error details
             error_code = None
+            error_message = None
             try:
                 is_valid = provider.validate_credentials()
                 if not is_valid:
                     error_code = self._get_error_code(provider_type, None)
             except Exception as e:
                 is_valid = False
-                error_code = self._get_error_code(provider_type, str(e))
+                error_message = str(e)
+                error_code = self._get_error_code(provider_type, error_message)
 
             account_id = ""
 
@@ -273,23 +275,28 @@ class ProviderService:
                         f"error={str(e)})"
                     )
 
-            return {
+            result = {
                 'valid': is_valid,
                 'error_code': error_code if not is_valid else None,
                 'account_id': account_id,
             }
+            if error_message and not is_valid:
+                result['message'] = error_message
+            return result
         except Exception as e:
-            error_code = self._get_error_code(provider_type, str(e))
+            error_message = str(e)
+            error_code = self._get_error_code(provider_type, error_message)
             
             logger.warning(
                 f"ProviderService.validate_credentials: "
                 f"Failed to validate credentials "
-                f"(provider_type={provider_type}, error={str(e)})"
+                f"(provider_type={provider_type}, error={error_message})"
             )
             return {
                 'valid': False,
                 'error_code': error_code,
                 'account_id': '',
+                'message': error_message,
             }
 
     def _get_error_code(
@@ -344,6 +351,8 @@ class ProviderService:
 
         # Alibaba specific errors
         elif provider_type == 'alibaba':
+            if 'getcalleridentity' in error_lower or 'sts:getcalleridentity' in error_lower:
+                return 'alibaba_need_sts_get_caller_identity'
             if 'access key' in error_lower:
                 return 'alibaba_invalid_credentials'
             elif 'region' in error_lower:
