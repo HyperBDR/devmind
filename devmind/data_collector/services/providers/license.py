@@ -5,38 +5,21 @@ License platform provider.
 - Step 2 exposes order collection only; step 3 config shape follows Jira
   (project_keys, initial_range, etc.).
 - Collect: GET /v1/order/list with is_paginate=false,
-  filter_start_time/filter_end_time as UTC strings "YYYY-MM-DD HH:MM:SS";
+  filter_update_start_time/filter_update_end_time as UTC strings "YYYY-MM-DD HH:MM:SS";
   source_unique_id uses the response field "code".
 """
 
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 import requests
 
+from data_collector.utils import to_utc_datetime_str
 from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
-
-
-def _to_utc_datetime_str(dt: Any) -> str:
-    """
-    Convert datetime to UTC string for filter_start_time/filter_end_time.
-    Format: "YYYY-MM-DD HH:MM:SS" (UTC).
-    """
-    if dt is None:
-        return ""
-    if isinstance(dt, str):
-        return dt
-    if isinstance(dt, datetime):
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        utc_dt = dt.astimezone(timezone.utc)
-        return utc_dt.strftime("%Y-%m-%d %H:%M:%S")
-    return str(dt)
 
 
 def _get_base_url(auth_config: dict) -> str:
@@ -151,7 +134,7 @@ class LicenseProvider(BaseProvider):
     ) -> list[dict]:
         """
         Fetch order list: GET /v1/order/list with is_paginate=false,
-        filter_start_time and filter_end_time as strings.
+        filter_update_start_time and filter_update_end_time as strings.
         """
         if not auth_config:
             return []
@@ -165,18 +148,16 @@ class LicenseProvider(BaseProvider):
 
         base_url = _get_base_url(auth_config)
         url = f"{base_url}/v1/order/list"
-        filter_start_time = _to_utc_datetime_str(start_time)
-        filter_end_time = _to_utc_datetime_str(end_time)
+        filter_update_start_time = to_utc_datetime_str(start_time)
+        filter_update_end_time = to_utc_datetime_str(end_time)
         params = {
             "is_paginate": "false",
-            "filter_start_time": filter_start_time,
-            "filter_end_time": filter_end_time,
+            "filter_update_start_time": filter_update_start_time,
+            "filter_update_end_time": filter_update_end_time,
         }
         headers = self._auth_headers(auth_config)
         logger.info(
-            "LicenseProvider.collect: GET %s params=%s",
-            url,
-            params,
+            f"LicenseProvider.collect: GET {url} params={params}",
         )
         resp = requests.get(url, headers=headers, params=params, timeout=60)
         resp.raise_for_status()
@@ -216,8 +197,8 @@ class LicenseProvider(BaseProvider):
             url = f"{base_url}/v1/order/list"
             params = {
                 "is_paginate": "false",
-                "filter_start_time": _to_utc_datetime_str(start_time),
-                "filter_end_time": _to_utc_datetime_str(end_time),
+                "filter_update_start_time": to_utc_datetime_str(start_time),
+                "filter_update_end_time": to_utc_datetime_str(end_time),
             }
             headers = self._auth_headers(auth_config)
             resp = requests.get(

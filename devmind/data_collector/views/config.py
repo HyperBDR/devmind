@@ -88,7 +88,12 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             uniq_violation = const_uniq in str(e)
             if uniq_violation or "unique" in err_str:
                 raise ValidationError(
-                    {"platform": "该平台下已存在采集配置，每个平台仅可添加一条。"}
+                    {
+                        "platform": (
+                            "A collector config already exists for this "
+                            "platform; only one config per platform is allowed."
+                        )
+                    }
                 )
             raise
 

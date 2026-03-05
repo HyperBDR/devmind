@@ -1,5 +1,5 @@
 """
-Unit tests for License provider: _to_utc_datetime_str, _get_base_url,
+Unit tests for License provider: to_utc_datetime_str, _get_base_url,
 LicenseProvider.list_projects, _order_raw_to_item, authenticate, collect, validate, fetch_attachments.
 """
 from datetime import datetime, timezone
@@ -7,25 +7,22 @@ from unittest.mock import patch
 
 import pytest
 
-from data_collector.services.providers.license import (
-    LicenseProvider,
-    _get_base_url,
-    _to_utc_datetime_str,
-)
+from data_collector.services.providers.license import LicenseProvider, _get_base_url
+from data_collector.utils import to_utc_datetime_str
 
 
 @pytest.mark.unit
 class TestLicenseHelpers:
     def test_to_utc_datetime_str_from_datetime(self):
         dt = datetime(2025, 1, 15, 12, 30, 0, tzinfo=timezone.utc)
-        s = _to_utc_datetime_str(dt)
+        s = to_utc_datetime_str(dt)
         assert s == "2025-01-15 12:30:00"
 
     def test_to_utc_datetime_str_none_returns_empty(self):
-        assert _to_utc_datetime_str(None) == ""
+        assert to_utc_datetime_str(None) == ""
 
     def test_to_utc_datetime_str_string_passthrough(self):
-        assert _to_utc_datetime_str("2025-01-01 00:00:00") == "2025-01-01 00:00:00"
+        assert to_utc_datetime_str("2025-01-01 00:00:00") == "2025-01-01 00:00:00"
 
     def test_get_base_url_raises_when_empty(self):
         with pytest.raises(ValueError, match="base_url"):

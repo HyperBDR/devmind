@@ -6,40 +6,37 @@ from unittest.mock import patch
 
 import pytest
 
-from data_collector.services.providers.feishu import (
-    FeishuProvider,
-    _from_unix_ms,
-    _to_unix_ms,
-)
+from data_collector.services.providers.feishu import FeishuProvider
+from data_collector.utils import from_unix_ms, to_unix_ms
 
 
 @pytest.mark.unit
 class TestFeishuTimeHelpers:
     def test_to_unix_ms_from_datetime_utc(self):
         dt = datetime(2025, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
-        ms = _to_unix_ms(dt)
+        ms = to_unix_ms(dt)
         assert isinstance(ms, int)
         assert ms == 1736942400000
 
     def test_to_unix_ms_from_iso_string(self):
-        ms = _to_unix_ms("2025-01-15T12:00:00+00:00")
+        ms = to_unix_ms("2025-01-15T12:00:00+00:00")
         assert isinstance(ms, int)
         assert ms == 1736942400000
 
     def test_to_unix_ms_from_timestamp_seconds(self):
-        ms = _to_unix_ms(1736942400)
+        ms = to_unix_ms(1736942400)
         assert ms == 1736942400000
 
     def test_from_unix_ms_returns_datetime(self):
-        dt = _from_unix_ms(1736942400000)
+        dt = from_unix_ms(1736942400000)
         assert dt is not None
         assert dt.year == 2025
         assert dt.month == 1
         assert dt.day == 15
 
     def test_from_unix_ms_none_for_invalid(self):
-        assert _from_unix_ms(None) is None
-        assert _from_unix_ms("") is None
+        assert from_unix_ms(None) is None
+        assert from_unix_ms("") is None
 
 
 @pytest.mark.unit

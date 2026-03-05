@@ -120,6 +120,9 @@ RUN set -eux; \
         done; \
     fi
 
+# Compile Django message catalogs (.po -> .mo) so runtime gettext works
+RUN python manage.py compilemessages -l zh_Hans -l en
+
 # Create necessary directories
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/devmind
 
