@@ -16,11 +16,11 @@ import hashlib
 import json
 import logging
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 import requests
 
+from data_collector.utils import from_unix_ms, to_unix_ms
 from .base import BaseProvider
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,8 @@ TENANT_TOKEN_URL = f"{FEISHU_BASE_URL}/open-apis/auth/v3/tenant_access_token/int
 APPROVAL_LIST_URL = f"{FEISHU_BASE_URL}/open-apis/approval/v4/approvals"
 # Use the newer instances query API to fetch approval instances
 INSTANCE_LIST_URL = f"{FEISHU_BASE_URL}/open-apis/approval/v4/instances/query"
+# Max pages per instances query to avoid unbounded loop (page_size=200 each)
+INSTANCE_LIST_MAX_PAGES = 500
 # Base path for approval instance detail API; final URL:
 #   {INSTANCE_DETAIL_URL}/{instance_code}
 INSTANCE_DETAIL_URL = f"{FEISHU_BASE_URL}/open-apis/approval/v4/instances"
@@ -38,48 +40,6 @@ FILE_DOWNLOAD_URL_TEMPLATE = (
 )
 # Contact API: get user name for approval timeline display
 CONTACT_USER_URL = f"{FEISHU_BASE_URL}/open-apis/contact/v3/users"
-
-
-def _to_unix_ms(dt: Any) -> int:
-    """
-    Convert datetime / ISO8601 string / timestamp to Feishu unix ms timestamp.
-    """
-    if isinstance(dt, (int, float)):
-        return int(dt * 1000)
-    if isinstance(dt, str):
-        try:
-            # 允许直接传 ISO8601 字符串
-            parsed = datetime.fromisoformat(dt.replace("Z", "+00:00"))
-            dt = parsed
-        except Exception:
-            return 0
-    if isinstance(dt, datetime):
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return int(dt.timestamp() * 1000)
-    return 0
-
-
-def _from_unix_ms(value: Any) -> datetime | None:
-    """
-    Convert Feishu millisecond timestamp (str/int) to timezone-aware datetime.
-    Returns None if value is falsy or cannot be parsed.
-    """
-    if value is None:
-        return None
-    try:
-        if isinstance(value, str):
-            value = value.strip()
-            if not value:
-                return None
-        ms = int(value)
-    except (TypeError, ValueError):
-        return None
-    # Feishu uses epoch milliseconds
-    try:
-        return datetime.fromtimestamp(ms / 1000.0, tz=timezone.utc)
-    except (OverflowError, OSError, ValueError):
-        return None
 
 
 class FeishuProvider(BaseProvider):
@@ -147,8 +107,8 @@ class FeishuProvider(BaseProvider):
             return False
         try:
             logger.info(
-                "FeishuProvider.authenticate: validating app_id=%s",
-                (auth_config.get("app_id") or "").strip(),
+                f"FeishuProvider.authenticate: validating "
+                f"app_id={(auth_config.get('app_id') or '').strip()!r}",
             )
             self._get_tenant_access_token(auth_config)
             logger.info("FeishuProvider.authenticate: success")
@@ -183,8 +143,8 @@ class FeishuProvider(BaseProvider):
                     continue
                 out.append({"key": code, "id": str(code), "name": name})
             logger.info(
-                "FeishuProvider.list_projects: fetched %d approval definitions",
-                len(out),
+                f"FeishuProvider.list_projects: fetched {len(out)} approval "
+                "definitions",
             )
             return out
         except Exception as e:
@@ -202,14 +162,14 @@ class FeishuProvider(BaseProvider):
         Call Feishu approval instances query API and return raw instances.
         """
         headers = self._auth_headers(auth_config)
-        start_ms = _to_unix_ms(start_time)
-        end_ms = _to_unix_ms(end_time)
+        start_ms = to_unix_ms(start_time)
+        end_ms = to_unix_ms(end_time)
         if not start_ms or not end_ms:
             return []
 
         page_token = None
         instances: list[dict] = []
-        while True:
+        for _ in range(INSTANCE_LIST_MAX_PAGES):
             payload: dict[str, Any] = {
                 "approval_code": approval_code,
                 # Per Feishu docs, use instance_start_time_* fields for time range
@@ -234,17 +194,20 @@ class FeishuProvider(BaseProvider):
             d = data.get("data") or {}
             items = d.get("instance_list") or d.get("items") or []
             instances.extend(items)
+            page_preview = (d.get("page_token") or "")[:32]
             logger.info(
-                "FeishuProvider._list_instances_for_approval: approval_code=%s "
-                "fetched=%d, total_so_far=%d, page_token=%s",
-                approval_code,
-                len(items),
-                len(instances),
-                (d.get("page_token") or "")[:32],
+                f"FeishuProvider._list_instances_for_approval: "
+                f"approval_code={approval_code!r} fetched={len(items)}, "
+                f"total_so_far={len(instances)}, page_token={page_preview!r}",
             )
             page_token = d.get("page_token")
             if not page_token:
                 break
+        if page_token:
+            logger.warning(
+                "Feishu instances pagination reached INSTANCE_LIST_MAX_PAGES, "
+                "results may be truncated",
+            )
         return instances
 
     def _get_instance_detail(
@@ -263,9 +226,8 @@ class FeishuProvider(BaseProvider):
         if data.get("code", 0) != 0:
             msg = data.get("msg") or data.get("message") or "Feishu get instance failed"
             logger.warning(
-                "FeishuProvider._get_instance_detail: instance_code=%s error=%s",
-                instance_code,
-                msg,
+                f"FeishuProvider._get_instance_detail: instance_code="
+                f"{instance_code!r} error={msg!r}",
             )
             return None
         # Detail may be nested under data.instance or just data
@@ -334,9 +296,7 @@ class FeishuProvider(BaseProvider):
             data = resp.json() or {}
         except Exception as e:
             logger.warning(
-                "FeishuProvider._fetch_user_name failed user_id=%s: %s",
-                user_id,
-                e,
+                f"FeishuProvider._fetch_user_name failed user_id={user_id!r}: {e}",
             )
             return None
         if data.get("code", 0) != 0:
@@ -380,8 +340,8 @@ class FeishuProvider(BaseProvider):
             or instance.get("update_time")
             or instance.get("update_timestamp")
         )
-        start_time = _from_unix_ms(start_raw)
-        end_time = _from_unix_ms(end_raw)
+        start_time = from_unix_ms(start_raw)
+        end_time = from_unix_ms(end_raw)
 
         raw_data = {
             "approval": approval,
@@ -451,8 +411,8 @@ class FeishuProvider(BaseProvider):
                         ),
                         "file_type": str(file_type),
                         "file_size": int(file_size) if file_size else 0,
-                        "source_created_at": _from_unix_ms(created_raw),
-                        "source_updated_at": _from_unix_ms(updated_raw),
+                        "source_created_at": from_unix_ms(created_raw),
+                        "source_updated_at": from_unix_ms(updated_raw),
                     }
                 )
         return attachments
@@ -504,12 +464,8 @@ class FeishuProvider(BaseProvider):
                 return []
 
         logger.info(
-            "FeishuProvider.collect: start, approval_codes=%s, "
-            "start_time=%s, end_time=%s, user_id=%s",
-            approval_codes,
-            start_time,
-            end_time,
-            user_id,
+            f"FeishuProvider.collect: start, approval_codes={approval_codes!r}, "
+            f"start_time={start_time}, end_time={end_time}, user_id={user_id}",
         )
         items: list[dict] = []
         user_name_cache: dict[str, str | None] = {}
@@ -563,9 +519,8 @@ class FeishuProvider(BaseProvider):
                 if item:
                     items.append(item)
         logger.info(
-            "FeishuProvider.collect: done, approval_codes=%s, items=%d",
-            approval_codes,
-            len(items),
+            f"FeishuProvider.collect: done, approval_codes={approval_codes!r}, "
+            f"items={len(items)}",
         )
         return items
 

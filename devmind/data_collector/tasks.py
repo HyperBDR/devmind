@@ -373,6 +373,7 @@ def run_collect(
     records_updated = 0
     records_skipped_no_sid = 0
     records_skipped_unchanged = 0
+    n_items = 0
     if provider_cls:
         provider = provider_cls()
         auth_config = value.get("auth") or {}
@@ -551,7 +552,6 @@ def run_collect(
         )
 
     if task_id:
-        n_collected = records_created + records_updated
         with translation.override(lang):
             msg = _("Collection done")
         TaskTracker.update_task_status(
@@ -560,7 +560,7 @@ def run_collect(
             result={
                 "records_created": records_created,
                 "records_updated": records_updated,
-                "records_collected": n_collected,
+                "records_collected": n_items,
             },
             metadata={
                 "progress_percent": 100,
@@ -571,7 +571,7 @@ def run_collect(
                 "config_key": config.key,
                 "records_created": records_created,
                 "records_updated": records_updated,
-                "records_collected": n_collected,
+                "records_collected": n_items,
             },
         )
 
