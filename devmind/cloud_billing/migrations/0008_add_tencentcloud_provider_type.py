@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("cloud_billing", "0006_alter_billingdata_total_cost_and_more"),
+        ("cloud_billing", "0007_alter_cloudprovider_config"),
     ]
 
     operations = [

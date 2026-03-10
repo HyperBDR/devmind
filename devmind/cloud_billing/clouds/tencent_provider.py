@@ -185,6 +185,42 @@ class TencentCloud(BaseCloudProvider):
 
         return total_cost, service_costs, items
 
+    def _query_bill_summary(self, period: str) -> tuple:
+        """使用 DescribeBillSummary API 查询月度账单摘要
+        
+        该 API 有更高的速率限制和显式的 Ready 字段
+        """
+        req = billing_models.DescribeBillSummaryRequest()
+        req.Month = period
+        req.GroupType = "business"
+        resp = self.client.DescribeBillSummary(req)
+        
+        ready = getattr(resp, "Ready", 0)
+        if ready == 0:
+            logger.warning("腾讯云账单数据尚未准备就绪，周期: %s", period)
+            raise TencentCloudSDKException("SummaryDataNotReady", "数据未就绪，请 5-10 分钟后重试")
+        
+        total_cost = 0.0
+        service_costs: Dict[str, float] = {}
+        items: list = []
+        
+        summary_detail = getattr(resp, "SummaryDetail", None) or []
+        logger.info("腾讯云 DescribeBillSummary 返回 %d 条记录，周期: %s", len(summary_detail), period)
+        
+        for detail in summary_detail:
+            cost_str = getattr(detail, "RealTotalCost", None) or getattr(detail, "TotalCost", None) or getattr(detail, "CashPayAmount", None) or "0"
+            try:
+                cost = float(cost_str)
+            except (TypeError, ValueError):
+                cost = 0.0
+            total_cost += cost
+            
+            name = getattr(detail, "GroupValue", None) or getattr(detail, "BusinessCodeName", None) or getattr(detail, "ProductCodeName", None) or "Unknown"
+            service_costs[name] = service_costs.get(name, 0.0) + cost
+            items.append({"service_name": name, "amount": cost})
+        
+        return total_cost, service_costs, items
+
     def get_billing_info(self, period: Optional[str] = None) -> Dict[str, Any]:
         """Get billing information for a period.
 
@@ -211,7 +247,7 @@ class TencentCloud(BaseCloudProvider):
         currency = "CNY"
 
         try:
-            total_cost, service_costs, items = self._query_bill_resource_summary(period)
+            total_cost, service_costs, items = self._query_bill_summary(period)
             data = {
                 "total_cost": total_cost,
                 "currency": currency,
@@ -228,11 +264,16 @@ class TencentCloud(BaseCloudProvider):
             code = getattr(e, "code", "") or ""
             if "CamNoAuth" in code or "UnauthorizedOperation" in code or "NoAuth" in str(e):
                 logger.warning(
-                    "Tencent DescribeBillResourceSummary not authorized, returning balance only: %s",
+                    "腾讯云 DescribeBillSummary 未授权，仅返回余额: %s",
+                    e,
+                )
+            elif "SummaryDataNotReady" in code:
+                logger.warning(
+                    "腾讯云账单数据未就绪，仅返回余额: %s",
                     e,
                 )
             else:
-                logger.error("Tencent Billing API error: %s", e)
+                logger.error("腾讯云账单 API 错误: %s", e)
                 return {
                     "status": "error",
                     "data": None,
