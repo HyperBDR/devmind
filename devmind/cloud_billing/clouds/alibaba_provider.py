@@ -204,25 +204,62 @@ class AlibabaCloud(BaseCloudProvider):
         # Extract YYYY-MM from start_date
         billing_cycle = start_date[:7]
         request = bss_models.QueryBillRequest(
-            billing_cycle=billing_cycle,
-            granularity="DAILY"
+            billing_cycle=billing_cycle
         )
         return self.client.query_bill(request)
 
     def _calculate_total_cost(
         self, response: Dict[str, Any]
-    ) -> Tuple[float, str]:
-        """Calculate total cost from API response.
+    ) -> Tuple[float, str, Dict[str, float]]:
+        """Calculate total cost and service breakdown from API response.
 
         Args:
             response (Dict[str, Any]): API response
 
         Returns:
-            Tuple[float, str]: Total cost and currency
+            Tuple[float, str, Dict[str, float]]: Total cost, currency, and service costs
         """
-        total_cost = float(response.body.data.total_amount)
-        currency = response.body.data.currency
-        return total_cost, currency
+        data = response.body.data
+        total_cost = 0.0
+        currency = 'CNY'
+        service_costs: Dict[str, float] = {}
+
+        # Extract items from the response
+        items_obj = getattr(data, 'items', None)
+        if items_obj:
+            # Get item list (attribute is 'item' in lowercase)
+            items = getattr(items_obj, 'item', [])
+            
+            if not isinstance(items, list):
+                items = [items]
+
+            for item in items:
+                try:
+                    # Handle both dict and object items
+                    if isinstance(item, dict):
+                        pretax_amount = float(item.get('PretaxAmount', 0))
+                        product_name = item.get('ProductName', 'Unknown Service')
+                        product_code = item.get('ProductCode', '')
+                        item_currency = item.get('Currency', 'CNY')
+                    else:
+                        pretax_amount = float(getattr(item, 'pretax_amount', 0))
+                        product_name = getattr(item, 'product_name', 'Unknown Service')
+                        product_code = getattr(item, 'product_code', '')
+                        item_currency = getattr(item, 'currency', 'CNY')
+
+                    total_cost += pretax_amount
+                    currency = item_currency
+
+                    if product_code:
+                        service_key = f"{product_name} ({product_code})"
+                    else:
+                        service_key = product_name
+
+                    service_costs[service_key] = service_costs.get(service_key, 0) + pretax_amount
+                except (AttributeError, ValueError, TypeError, KeyError):
+                    continue
+
+        return total_cost, currency, service_costs
 
     def get_billing_info(
         self, period: Optional[str] = None
@@ -240,7 +277,7 @@ class AlibabaCloud(BaseCloudProvider):
             start_date, end_date = self._get_period_dates(period)
 
             response = self._query_billing_api(start_date, end_date)
-            total_cost, currency = self._calculate_total_cost(response)
+            total_cost, currency, service_costs = self._calculate_total_cost(response)
             account_id = self.get_account_id()
 
             return {
@@ -248,7 +285,8 @@ class AlibabaCloud(BaseCloudProvider):
                 "data": {
                     "total_cost": total_cost,
                     "currency": currency,
-                    "account_id": account_id
+                    "account_id": account_id,
+                    "service_costs": service_costs
                 },
                 "error": None
             }
