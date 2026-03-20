@@ -67,13 +67,13 @@ done
 ### How periodic tasks are registered
 
 - Periodic (cron-like) tasks are not discovered by Celery alone; they are registered into **django_celery_beat** so the beat scheduler can run them.
-- The management command `python manage.py register_periodic_tasks` discovers, for each app in `INSTALLED_APPS`, a `periodic_tasks` module and, if it defines a `register_periodic_tasks()` function, calls it. Each app uses the project’s `core.periodic_registry` to declare cron entries; the command then writes these entries into the django_celery_beat database tables (idempotent).
+- The management command `python manage.py register_periodic_tasks` discovers, for each app in `INSTALLED_APPS`, a `periodic_tasks` module and, if it defines a `register_periodic_tasks()` function, calls it. Each app uses the project’s `core.periodic_registry` to declare cron entries; the registry only creates missing rows and leaves existing django_celery_beat records untouched.
 
 ### How this runs in `docker/entrypoint.sh`
 
 - The entrypoint sets `PYTHONPATH=/opt/devmind` and `DJANGO_SETTINGS_MODULE=core.settings`, so that when Celery is started with `-A core`, it loads `core.celery` and Django settings (including `INSTALLED_APPS`) are available.
 - **`celery` (worker)** and **`celery-beat`**: When the container runs `celery -A core worker` or `celery -A core beat`, importing `core.celery` runs `autodiscover_tasks()`, so all app `tasks.py` modules are loaded and tasks are visible to the worker and to beat. Beat uses `DatabaseScheduler`, so it reads the schedule from the database.
-- **`gunicorn`** and **`development`**: After `wait_for_db` and `run_migrations`, the entrypoint runs `python manage.py register_periodic_tasks` (or true). That populates django_celery_beat with the periodic entries from every app’s `periodic_tasks.register_periodic_tasks()`. In a typical multi-container setup, the web container (gunicorn) runs migrations and `register_periodic_tasks` once; the celery and celery-beat containers then start and use the same database, so they see the registered tasks and schedule without running the command again.
+- **`gunicorn`** and **`development`**: After `wait_for_db` and `run_migrations`, the entrypoint runs `python manage.py register_periodic_tasks` (or true). That creates missing django_celery_beat rows from every app’s `periodic_tasks.register_periodic_tasks()` without overwriting existing records. In a typical multi-container setup, the web container (gunicorn) runs migrations and `register_periodic_tasks` once; the celery and celery-beat containers then start and use the same database, so they see the registered tasks and schedule without running the command again.
 
 ## Development Environment
 

@@ -43,7 +43,8 @@ def discover_and_register():
 class Command(BaseCommand):
     help = (
         "Discover all apps' periodic_tasks.register_periodic_tasks() and "
-        "register entries to django_celery_beat (idempotent)."
+        "register entries to django_celery_beat without updating existing "
+        "rows."
     )
 
     def handle(self, *args, **options):
