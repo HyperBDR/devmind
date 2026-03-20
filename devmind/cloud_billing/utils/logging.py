@@ -31,6 +31,8 @@ def mask_sensitive_config(config_dict):
         'huawei_access_key_id', 'huawei_secret_access_key',
         'azure_client_secret', 'azure_subscription_key',
         'alibaba_access_key_id', 'alibaba_access_key_secret',
+        'tencent_access_key_id', 'tencent_access_key_secret',
+        'access_key_id', 'access_key_secret', 'app_id',
     }
 
     sanitized = {}

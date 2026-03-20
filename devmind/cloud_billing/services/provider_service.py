@@ -122,6 +122,31 @@ class ProviderService:
                 normalized['api_secret'] = api_secret
             if region:
                 normalized['region'] = region
+        elif provider_type == 'tencentcloud':
+            access_key_id = (
+                config_dict.get('TENCENT_ACCESS_KEY_ID') or
+                config_dict.get('access_key_id')
+            )
+            access_key_secret = (
+                config_dict.get('TENCENT_ACCESS_KEY_SECRET') or
+                config_dict.get('access_key_secret')
+            )
+            app_id = (
+                config_dict.get('TENCENT_APP_ID') or
+                config_dict.get('app_id')
+            )
+            region = (
+                config_dict.get('TENCENT_REGION') or
+                config_dict.get('region')
+            )
+            if access_key_id:
+                normalized['access_key_id'] = access_key_id
+            if access_key_secret:
+                normalized['access_key_secret'] = access_key_secret
+            if app_id:
+                normalized['app_id'] = app_id
+            if region:
+                normalized['region'] = region
         else:
             # For unknown types, pass through as-is
             normalized = config_dict.copy()
@@ -222,13 +247,15 @@ class ProviderService:
 
             # Try to validate credentials and capture error details
             error_code = None
+            error_message = None
             try:
                 is_valid = provider.validate_credentials()
                 if not is_valid:
                     error_code = self._get_error_code(provider_type, None)
             except Exception as e:
                 is_valid = False
-                error_code = self._get_error_code(provider_type, str(e))
+                error_message = str(e)
+                error_code = self._get_error_code(provider_type, error_message)
 
             account_id = ""
 
@@ -248,23 +275,28 @@ class ProviderService:
                         f"error={str(e)})"
                     )
 
-            return {
+            result = {
                 'valid': is_valid,
                 'error_code': error_code if not is_valid else None,
                 'account_id': account_id,
             }
+            if error_message and not is_valid:
+                result['message'] = error_message
+            return result
         except Exception as e:
-            error_code = self._get_error_code(provider_type, str(e))
+            error_message = str(e)
+            error_code = self._get_error_code(provider_type, error_message)
             
             logger.warning(
                 f"ProviderService.validate_credentials: "
                 f"Failed to validate credentials "
-                f"(provider_type={provider_type}, error={str(e)})"
+                f"(provider_type={provider_type}, error={error_message})"
             )
             return {
                 'valid': False,
                 'error_code': error_code,
                 'account_id': '',
+                'message': error_message,
             }
 
     def _get_error_code(
@@ -319,10 +351,21 @@ class ProviderService:
 
         # Alibaba specific errors
         elif provider_type == 'alibaba':
+            if 'getcalleridentity' in error_lower or 'sts:getcalleridentity' in error_lower:
+                return 'alibaba_need_sts_get_caller_identity'
             if 'access key' in error_lower:
                 return 'alibaba_invalid_credentials'
             elif 'region' in error_lower:
                 return 'alibaba_invalid_region'
+
+        # Tencent Cloud specific errors
+        elif provider_type == 'tencentcloud':
+            if 'auth' in error_lower or 'unauthorized' in error_lower:
+                return 'tencentcloud_invalid_credentials'
+            if 'secret' in error_lower or 'signature' in error_lower:
+                return 'tencentcloud_invalid_secret'
+            if 'cam' in error_lower or 'permission' in error_lower:
+                return 'tencentcloud_no_permission'
 
         # Generic errors
         if 'ssl' in error_lower or 'sslerror' in error_lower:
