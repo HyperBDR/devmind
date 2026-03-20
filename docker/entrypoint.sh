@@ -69,8 +69,7 @@ wait_for_db() {
 # --- Django Management Tasks ---
 run_migrations() {
     log "Running Django migrations..."
-    # --fake-initial: if tables already exist (e.g. from llm_tracker or stale state), mark migration applied without creating
-    python manage.py migrate --noinput --fake-initial
+    python manage.py migrate --noinput
 
     log "Ensuring superuser exists..."
     DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
