@@ -22,6 +22,7 @@ class CloudProvider(models.Model):
         ('huawei-intl', 'Huawei Cloud (International)'),
         ('alibaba', 'Alibaba Cloud'),
         ('azure', 'Azure'),
+        ('tencentcloud', 'Tencent Cloud'),
     ]
 
     name = models.CharField(
