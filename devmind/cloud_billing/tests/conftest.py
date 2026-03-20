@@ -1,6 +1,7 @@
 """
 Pytest configuration and fixtures for cloud billing tests.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -18,6 +19,7 @@ if agentcore_task_path.exists() and str(agentcore_task_path) not in sys.path:
 # NOTE(Ray): Django test bootstrap requires DJANGO_SETTINGS_MODULE set
 # before importing django; import order here is intentional.
 import django
+
 django.setup()
 
 import pytest
@@ -41,9 +43,7 @@ def user():
     Create a test user.
     """
     return User.objects.create_user(
-        username='testuser',
-        email='test@example.com',
-        password='testpass123'
+        username="testuser", email="test@example.com", password="testpass123"
     )
 
 
@@ -63,17 +63,17 @@ def cloud_provider(user):
     Create a test cloud provider.
     """
     return CloudProvider.objects.create(
-        name='test_aws',
-        provider_type='aws',
-        display_name='Test AWS',
+        name="test_aws",
+        provider_type="aws",
+        display_name="Test AWS",
         config={
-            'access_key': 'test_access_key',
-            'secret_key': 'test_secret_key',
-            'region': 'us-east-1'
+            "access_key": "test_access_key",
+            "secret_key": "test_secret_key",
+            "region": "us-east-1",
         },
         is_active=True,
         created_by=user,
-        updated_by=user
+        updated_by=user,
     )
 
 
@@ -83,13 +83,13 @@ def cloud_provider_inactive(user):
     Create an inactive test cloud provider.
     """
     return CloudProvider.objects.create(
-        name='test_aws_inactive',
-        provider_type='aws',
-        display_name='Test AWS Inactive',
-        config={'access_key': 'test', 'secret_key': 'test'},
+        name="test_aws_inactive",
+        provider_type="aws",
+        display_name="Test AWS Inactive",
+        config={"access_key": "test", "secret_key": "test"},
         is_active=False,
         created_by=user,
-        updated_by=user
+        updated_by=user,
     )
 
 
@@ -99,17 +99,39 @@ def huawei_provider(user):
     Create a Huawei Cloud test provider.
     """
     return CloudProvider.objects.create(
-        name='test_huawei',
-        provider_type='huawei',
-        display_name='Test Huawei Cloud',
+        name="test_huawei",
+        provider_type="huawei",
+        display_name="Test Huawei Cloud",
         config={
-            'ak': 'test_ak',
-            'sk': 'test_sk',
-            'project_id': 'test_project_id'
+            "ak": "test_ak",
+            "sk": "test_sk",
+            "project_id": "test_project_id",
         },
         is_active=True,
         created_by=user,
-        updated_by=user
+        updated_by=user,
+    )
+
+
+@pytest.fixture
+def volcengine_provider(user):
+    """
+    Create a Volcengine test provider.
+    """
+    return CloudProvider.objects.create(
+        name="test_volcengine",
+        provider_type="volcengine",
+        display_name="Test Volcengine",
+        config={
+            "api_key": "test_access_key",
+            "api_secret": "test_secret_key",
+            "region": "cn-north-1",
+            "endpoint": "https://billing.volcengineapi.com",
+            "payer_id": "2100052604",
+        },
+        is_active=True,
+        created_by=user,
+        updated_by=user,
     )
 
 
@@ -124,14 +146,10 @@ def billing_data(cloud_provider):
         provider=cloud_provider,
         period=current_period,
         hour=current_hour,
-        total_cost=Decimal('100.50'),
-        currency='USD',
-        service_costs={
-            'ec2': '50.00',
-            's3': '30.00',
-            'rds': '20.50'
-        },
-        account_id='123456789012'
+        total_cost=Decimal("100.50"),
+        currency="USD",
+        service_costs={"ec2": "50.00", "s3": "30.00", "rds": "20.50"},
+        account_id="123456789012",
     )
 
 
@@ -144,21 +162,15 @@ def previous_billing_data(cloud_provider):
     previous_hour = (datetime.now() - timedelta(hours=1)).hour
     if previous_hour < 0:
         previous_hour = 23
-        current_period = (
-            datetime.now() - timedelta(days=1)
-        ).strftime("%Y-%m")
+        current_period = (datetime.now() - timedelta(days=1)).strftime("%Y-%m")
     return BillingData.objects.create(
         provider=cloud_provider,
         period=current_period,
         hour=previous_hour,
-        total_cost=Decimal('80.00'),
-        currency='USD',
-        service_costs={
-            'ec2': '40.00',
-            's3': '25.00',
-            'rds': '15.00'
-        },
-        account_id='123456789012'
+        total_cost=Decimal("80.00"),
+        currency="USD",
+        service_costs={"ec2": "40.00", "s3": "25.00", "rds": "15.00"},
+        account_id="123456789012",
     )
 
 
@@ -169,11 +181,11 @@ def alert_rule(cloud_provider, user):
     """
     return AlertRule.objects.create(
         provider=cloud_provider,
-        cost_threshold=Decimal('20.00'),
-        growth_threshold=Decimal('10.00'),
+        cost_threshold=Decimal("20.00"),
+        growth_threshold=Decimal("10.00"),
         is_active=True,
         created_by=user,
-        updated_by=user
+        updated_by=user,
     )
 
 
@@ -185,11 +197,11 @@ def alert_record(cloud_provider, alert_rule):
     return AlertRecord.objects.create(
         provider=cloud_provider,
         alert_rule=alert_rule,
-        current_cost=Decimal('100.50'),
-        previous_cost=Decimal('80.00'),
-        increase_cost=Decimal('20.50'),
-        increase_percent=Decimal('25.63'),
-        currency='USD',
-        alert_message='Test alert message',
-        webhook_status='pending'
+        current_cost=Decimal("100.50"),
+        previous_cost=Decimal("80.00"),
+        increase_cost=Decimal("20.50"),
+        increase_percent=Decimal("25.63"),
+        currency="USD",
+        alert_message="Test alert message",
+        webhook_status="pending",
     )

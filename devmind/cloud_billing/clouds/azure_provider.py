@@ -38,12 +38,13 @@ class AzureConfig(BaseCloudConfig):
         AZURE_TIMEOUT: Request timeout in seconds
         AZURE_MAX_RETRIES: Maximum number of retries for failed requests
     """
+
     tenant_id: Optional[str] = None
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     subscription_id: Optional[str] = None
-    timeout: int = 30
-    max_retries: int = 3
+    timeout: Optional[int] = None
+    max_retries: Optional[int] = None
 
     def __post_init__(self):
         """Initialize configuration from environment variables if not set."""
@@ -55,9 +56,9 @@ class AzureConfig(BaseCloudConfig):
             self.client_secret = os.getenv("AZURE_CLIENT_SECRET")
         if self.subscription_id is None:
             self.subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID")
-        if self.timeout == 30:
+        if self.timeout is None:
             self.timeout = int(os.getenv("AZURE_TIMEOUT", "30"))
-        if self.max_retries == 3:
+        if self.max_retries is None:
             self.max_retries = int(os.getenv("AZURE_MAX_RETRIES", "3"))
 
         self._validate_config()
@@ -129,7 +130,7 @@ class AzureCloud(BaseCloudProvider):
             self._credential = ClientSecretCredential(
                 tenant_id=self.config.tenant_id,
                 client_id=self.config.client_id,
-                client_secret=self.config.client_secret
+                client_secret=self.config.client_secret,
             )
         return self._credential
 
@@ -139,7 +140,7 @@ class AzureCloud(BaseCloudProvider):
         if self._consumption_client is None:
             self._consumption_client = ConsumptionManagementClient(
                 credential=self.credential,
-                subscription_id=self.config.subscription_id
+                subscription_id=self.config.subscription_id,
             )
         return self._consumption_client
 
@@ -149,7 +150,7 @@ class AzureCloud(BaseCloudProvider):
         if self._resource_client is None:
             self._resource_client = ResourceManagementClient(
                 credential=self.credential,
-                subscription_id=self.config.subscription_id
+                subscription_id=self.config.subscription_id,
             )
         return self._resource_client
 
@@ -196,9 +197,7 @@ class AzureCloud(BaseCloudProvider):
             next_month = month + 1
             next_year = year
 
-        last_day = (
-            datetime(next_year, next_month, 1) - timedelta(days=1)
-        ).day
+        last_day = (datetime(next_year, next_month, 1) - timedelta(days=1)).day
 
         return f"{period}-01", f"{period}-{last_day:02d}"
 
@@ -224,14 +223,12 @@ class AzureCloud(BaseCloudProvider):
             filter=(
                 f"usageStart ge '{start_date}' and "
                 f"usageEnd le '{end_date}'"
-            )
+            ),
         )
 
         return list(usage_details)
 
-    def _calculate_total_cost(
-        self, usage_details: list
-    ) -> Tuple[float, str]:
+    def _calculate_total_cost(self, usage_details: list) -> Tuple[float, str]:
         """Calculate total cost from billing API response.
 
         Args:
@@ -240,21 +237,28 @@ class AzureCloud(BaseCloudProvider):
         Returns:
             Tuple[float, str]: Total cost and currency
         """
-        total_cost = sum(float(detail.cost) for detail in usage_details)
+        total_cost = sum(
+            float(
+                getattr(
+                    detail,
+                    "cost_in_billing_currency",
+                    getattr(detail, "cost", 0.0),
+                )
+                or 0.0
+            )
+            for detail in usage_details
+        )
         currency = (
-            usage_details[0].billing_currency
-            if usage_details else "USD"
+            getattr(usage_details[0], "billing_currency_code", None)
+            or getattr(usage_details[0], "billing_currency", None)
+            or "USD"
         )
 
-        logger.debug(
-            f"Calculated total cost: {total_cost} {currency}"
-        )
+        logger.debug(f"Calculated total cost: {total_cost} {currency}")
 
         return total_cost, currency
 
-    def get_billing_info(
-        self, period: Optional[str] = None
-    ) -> Dict[str, Any]:
+    def get_billing_info(self, period: Optional[str] = None) -> Dict[str, Any]:
         """Get Azure billing information for a specific period.
 
         Args:
@@ -290,18 +294,14 @@ class AzureCloud(BaseCloudProvider):
                 "data": {
                     "total_cost": total_cost,
                     "currency": currency,
-                    "account_id": account_id
+                    "account_id": account_id,
                 },
-                "error": None
+                "error": None,
             }
 
         except Exception as e:
             logger.error(f"Failed to get billing info: {str(e)}")
-            return {
-                "status": "error",
-                "data": None,
-                "error": str(e)
-            }
+            return {"status": "error", "data": None, "error": str(e)}
 
     def get_account_id(self) -> str:
         """Get the Azure subscription ID.
@@ -329,9 +329,7 @@ class AzureCloud(BaseCloudProvider):
         """
         try:
             # Try to get subscription details to validate credentials
-            self.resource_client.subscriptions.get(
-                self.config.subscription_id
-            )
+            self.resource_client.subscriptions.get(self.config.subscription_id)
             return True
         except Exception as e:
             logger.error(f"Failed to validate credentials: {str(e)}")

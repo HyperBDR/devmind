@@ -1,12 +1,13 @@
 """
 Tests for cloud billing services.
 """
+
 import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
 
 from cloud_billing.services.notification_service import (
-    CloudBillingNotificationService
+    CloudBillingNotificationService,
 )
 from cloud_billing.services.provider_service import ProviderService
 from cloud_billing.models import CloudProvider, AlertRecord
@@ -18,7 +19,7 @@ class TestProviderService:
     Tests for ProviderService.
     """
 
-    @patch('cloud_billing.services.provider_service.ProviderFactory')
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
     def test_create_provider_success(self, mock_factory):
         """
         Test creating a provider successfully.
@@ -29,68 +30,137 @@ class TestProviderService:
 
         service = ProviderService()
         result = service.create_provider(
-            'aws',
-            {'api_key': 'test', 'api_secret': 'test'}
+            "aws", {"api_key": "test", "api_secret": "test"}
         )
 
         assert result == mock_provider_instance
         mock_factory.create_provider.assert_called_once_with(
-            'aws',
-            {'api_key': 'test', 'api_secret': 'test'}
+            "aws", {"api_key": "test", "api_secret": "test"}
         )
 
-    @patch('cloud_billing.services.provider_service.ProviderFactory')
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
     def test_create_provider_import_error(self, mock_factory):
         """
         Test that ImportError from factory is propagated.
         """
         mock_factory.create_provider.side_effect = ImportError(
-            'No module named cloud_billings'
+            "No module named cloud_billings"
         )
 
         service = ProviderService()
-        with pytest.raises(ImportError, match='cloud_billings'):
-            service.create_provider('aws', {})
+        with pytest.raises(ImportError, match="cloud_billings"):
+            service.create_provider("aws", {})
 
-    @patch('cloud_billing.services.provider_service.BillingService')
+    @patch("cloud_billing.services.provider_service.BillingService")
     def test_get_billing_info_success(self, mock_billing_service):
         """
         Test getting billing info successfully.
         """
         mock_instance = Mock()
         mock_instance.get_billing_info.return_value = {
-            'status': 'success',
-            'data': {
-                'total_cost': 100.50,
-                'currency': 'USD',
-                'service_costs': {'ec2': 50.00}
-            }
+            "status": "success",
+            "data": {
+                "total_cost": 100.50,
+                "currency": "USD",
+                "service_costs": {"ec2": 50.00},
+            },
         }
         mock_billing_service.return_value = mock_instance
 
         service = ProviderService()
         result = service.get_billing_info(
-            'aws',
-            {'access_key': 'test', 'secret_key': 'test'},
-            period='2025-01'
+            "aws",
+            {"access_key": "test", "secret_key": "test"},
+            period="2025-01",
         )
 
-        assert result['status'] == 'success'
-        assert 'data' in result
+        assert result["status"] == "success"
+        assert "data" in result
 
-    @patch('cloud_billing.services.provider_service.BillingService')
+    @patch("cloud_billing.services.provider_service.BillingService")
     def test_get_billing_info_error(self, mock_billing_service):
         """
         Test handling errors when getting billing info.
         """
-        mock_billing_service.side_effect = Exception('API Error')
+        mock_billing_service.side_effect = Exception("API Error")
 
         service = ProviderService()
         with pytest.raises(Exception):
-            service.get_billing_info('aws', {}, period='2025-01')
+            service.get_billing_info("aws", {}, period="2025-01")
+
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_volcengine_normalizes_config(self, mock_factory):
+        """
+        Test Volcengine config normalization before provider creation.
+        """
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        service = ProviderService()
+        result = service.create_provider(
+            "volcengine",
+            {
+                "VOLCENGINE_ACCESS_KEY_ID": "test_key",
+                "VOLCENGINE_SECRET_ACCESS_KEY": "test_secret",
+                "VOLCENGINE_REGION": "cn-north-1",
+                "VOLCENGINE_ENDPOINT": "https://billing.volcengineapi.com",
+                "VOLCENGINE_PAYER_ID": "2100052604",
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "volcengine",
+            {
+                "api_key": "test_key",
+                "api_secret": "test_secret",
+                "region": "cn-north-1",
+                "endpoint": "https://billing.volcengineapi.com",
+                "payer_id": "2100052604",
+            },
+        )
+
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_tencentcloud_normalizes_config(
+        self, mock_factory
+    ):
+        """
+        Test Tencent Cloud config normalization before provider creation.
+        """
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        service = ProviderService()
+        result = service.create_provider(
+            "tencentcloud",
+            {
+                "TENCENT_ACCESS_KEY_ID": "test_key",
+                "TENCENT_ACCESS_KEY_SECRET": "test_secret",
+                "TENCENT_APP_ID": "10001",
+                "TENCENT_REGION": "ap-guangzhou",
+                "TENCENT_ENDPOINT": "billing.tencentcloudapi.com",
+                "TENCENT_TIMEOUT": 45,
+                "TENCENT_MAX_RETRIES": 5,
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "tencentcloud",
+            {
+                "access_key_id": "test_key",
+                "access_key_secret": "test_secret",
+                "app_id": "10001",
+                "region": "ap-guangzhou",
+                "endpoint": "billing.tencentcloudapi.com",
+                "timeout": 45,
+                "max_retries": 5,
+            },
+        )
 
     @patch(
-        'cloud_billing.services.provider_service.ProviderService.create_provider'
+        "cloud_billing.services.provider_service."
+        "ProviderService.create_provider"
     )
     def test_validate_credentials_success(self, mock_create_provider):
         """
@@ -99,21 +169,21 @@ class TestProviderService:
         """
         mock_provider = Mock()
         mock_provider.validate_credentials.return_value = True
-        mock_provider.get_account_id.return_value = '123456789012'
+        mock_provider.get_account_id.return_value = "123456789012"
         mock_create_provider.return_value = mock_provider
 
         service = ProviderService()
         result = service.validate_credentials(
-            'aws',
-            {'api_key': 'test', 'api_secret': 'test'}
+            "aws", {"api_key": "test", "api_secret": "test"}
         )
 
-        assert result['valid'] is True
-        assert result['account_id'] == '123456789012'
-        assert result.get('error_code') is None
+        assert result["valid"] is True
+        assert result["account_id"] == "123456789012"
+        assert result.get("error_code") is None
 
     @patch(
-        'cloud_billing.services.provider_service.ProviderService.create_provider'
+        "cloud_billing.services.provider_service."
+        "ProviderService.create_provider"
     )
     def test_validate_credentials_invalid(self, mock_create_provider):
         """
@@ -125,63 +195,64 @@ class TestProviderService:
 
         service = ProviderService()
         result = service.validate_credentials(
-            'aws',
-            {'api_key': 'invalid', 'api_secret': 'invalid'}
+            "aws", {"api_key": "invalid", "api_secret": "invalid"}
         )
 
-        assert result['valid'] is False
-        assert result['account_id'] == ''
-        assert result.get('error_code') == 'validation_failed'
+        assert result["valid"] is False
+        assert result["account_id"] == ""
+        assert result.get("error_code") == "validation_failed"
 
     @patch(
-        'cloud_billing.services.provider_service.ProviderService.create_provider'
+        "cloud_billing.services.provider_service."
+        "ProviderService.create_provider"
     )
     def test_validate_credentials_exception(self, mock_create_provider):
         """
         Test handling exceptions during credential validation.
         Exception path returns error_code (e.g. network_error).
         """
-        mock_create_provider.side_effect = Exception('Connection error')
+        mock_create_provider.side_effect = Exception("Connection error")
 
         service = ProviderService()
-        result = service.validate_credentials('aws', {})
+        result = service.validate_credentials("aws", {})
 
-        assert result['valid'] is False
-        assert result.get('error_code') == 'network_error'
+        assert result["valid"] is False
+        assert result.get("error_code") == "network_error"
 
     @patch(
-        'cloud_billing.services.provider_service.ProviderService.create_provider'
+        "cloud_billing.services.provider_service."
+        "ProviderService.create_provider"
     )
     def test_get_account_id_success(self, mock_create_provider):
         """
         Test getting account ID successfully.
         """
         mock_provider = Mock()
-        mock_provider.get_account_id.return_value = '123456789012'
+        mock_provider.get_account_id.return_value = "123456789012"
         mock_create_provider.return_value = mock_provider
 
         service = ProviderService()
         result = service.get_account_id(
-            'aws',
-            {'access_key': 'test', 'secret_key': 'test'}
+            "aws", {"access_key": "test", "secret_key": "test"}
         )
 
-        assert result == '123456789012'
+        assert result == "123456789012"
 
     @patch(
-        'cloud_billing.services.provider_service.ProviderService.create_provider'
+        "cloud_billing.services.provider_service."
+        "ProviderService.create_provider"
     )
     def test_get_account_id_error(self, mock_create_provider):
         """
         Test handling errors when getting account ID.
         """
         mock_provider = Mock()
-        mock_provider.get_account_id.side_effect = Exception('API Error')
+        mock_provider.get_account_id.side_effect = Exception("API Error")
         mock_create_provider.return_value = mock_provider
 
         service = ProviderService()
         with pytest.raises(Exception):
-            service.get_account_id('aws', {})
+            service.get_account_id("aws", {})
 
 
 @pytest.mark.django_db
@@ -193,92 +264,93 @@ class TestCloudBillingNotificationService:
     cloud billing data to notification format.
     """
 
+    @patch("cloud_billing.services.notification_service.send_notification")
     @patch(
-        'cloud_billing.services.notification_service.send_notification'
-    )
-    @patch(
-        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
+        "cloud_billing.services.notification_service."
+        "get_webhook_channel_by_uuid"
     )
     def test_send_alert_feishu(
-        self,
-        mock_get_by_uuid,
-        mock_send_task,
-        alert_record
+        self, mock_get_by_uuid, mock_send_task, alert_record
     ):
         """
         Test sending alert via Feishu (unified send_notification webhook).
         """
         from uuid import uuid4
+
         ch_uuid = uuid4()
-        mock_channel = type('Channel', (), {
-            'uuid': ch_uuid,
-            'config': {'language': 'zh-hans'},
-        })()
-        mock_config = {'is_active': True, 'provider': 'feishu'}
+        mock_channel = type(
+            "Channel",
+            (),
+            {
+                "uuid": ch_uuid,
+                "config": {"language": "zh-hans"},
+            },
+        )()
+        mock_config = {"is_active": True, "provider": "feishu"}
         mock_get_by_uuid.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
         result = service.send_alert(alert_record, channel_uuid=str(ch_uuid))
 
-        assert result['success'] is True
+        assert result["success"] is True
         mock_send_task.delay.assert_called_once()
         call_kwargs = mock_send_task.delay.call_args[1]
-        assert call_kwargs['notification_type'] == 'webhook'
-        assert call_kwargs['channel_uuid'] == str(ch_uuid)
-        params = call_kwargs['params']
-        assert params['provider_type'] == 'feishu'
-        payload = params['payload']
-        assert payload['msg_type'] == 'post'
-        assert 'content' in payload
-        assert 'post' in payload['content']
-        assert call_kwargs['source_app'] == 'cloud_billing'
-        assert call_kwargs['source_type'] == 'alert'
-        assert str(alert_record.id) == call_kwargs['source_id']
+        assert call_kwargs["notification_type"] == "webhook"
+        assert call_kwargs["channel_uuid"] == str(ch_uuid)
+        params = call_kwargs["params"]
+        assert params["provider_type"] == "feishu"
+        payload = params["payload"]
+        assert payload["msg_type"] == "post"
+        assert "content" in payload
+        assert "post" in payload["content"]
+        assert call_kwargs["source_app"] == "cloud_billing"
+        assert call_kwargs["source_type"] == "alert"
+        assert str(alert_record.id) == call_kwargs["source_id"]
 
+    @patch("cloud_billing.services.notification_service.send_notification")
     @patch(
-        'cloud_billing.services.notification_service.send_notification'
-    )
-    @patch(
-        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
+        "cloud_billing.services.notification_service."
+        "get_webhook_channel_by_uuid"
     )
     def test_send_alert_wechat(
-        self,
-        mock_get_by_uuid,
-        mock_send_task,
-        alert_record
+        self, mock_get_by_uuid, mock_send_task, alert_record
     ):
         """
         Test sending alert via WeChat (unified send_notification webhook).
         """
         from uuid import uuid4
+
         ch_uuid = uuid4()
-        mock_channel = type('Channel', (), {
-            'uuid': ch_uuid,
-            'config': {'language': 'zh-hans'},
-        })()
-        mock_config = {'is_active': True, 'provider': 'wechat'}
+        mock_channel = type(
+            "Channel",
+            (),
+            {
+                "uuid": ch_uuid,
+                "config": {"language": "zh-hans"},
+            },
+        )()
+        mock_config = {"is_active": True, "provider": "wechat"}
         mock_get_by_uuid.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
         result = service.send_alert(alert_record, channel_uuid=str(ch_uuid))
 
-        assert result['success'] is True
+        assert result["success"] is True
         mock_send_task.delay.assert_called_once()
         call_kwargs = mock_send_task.delay.call_args[1]
-        assert call_kwargs['notification_type'] == 'webhook'
-        assert call_kwargs['channel_uuid'] == str(ch_uuid)
-        params = call_kwargs['params']
-        assert params['provider_type'] == 'wechat'
-        payload = params['payload']
-        assert payload['msgtype'] == 'markdown'
-        assert 'markdown' in payload
-        assert 'content' in payload['markdown']
+        assert call_kwargs["notification_type"] == "webhook"
+        assert call_kwargs["channel_uuid"] == str(ch_uuid)
+        params = call_kwargs["params"]
+        assert params["provider_type"] == "wechat"
+        payload = params["payload"]
+        assert payload["msgtype"] == "markdown"
+        assert "markdown" in payload
+        assert "content" in payload["markdown"]
 
+    @patch("cloud_billing.services.notification_service.send_notification")
     @patch(
-        'cloud_billing.services.notification_service.send_notification'
-    )
-    @patch(
-        'cloud_billing.services.notification_service.get_default_webhook_channel'
+        "cloud_billing.services.notification_service."
+        "get_default_webhook_channel"
     )
     def test_send_alert_uses_default_when_channel_uuid_is_none(
         self,
@@ -290,26 +362,28 @@ class TestCloudBillingNotificationService:
         When channel_uuid is None, use notifier default.
         Unified task called with channel_uuid=None; notifier resolves default.
         """
-        mock_channel = type('Channel', (), {
-            'uuid': __import__('uuid').uuid4(),
-            'config': {'language': 'zh-hans'},
-        })()
-        mock_config = {'is_active': True, 'provider': 'feishu'}
+        mock_channel = type(
+            "Channel",
+            (),
+            {
+                "uuid": __import__("uuid").uuid4(),
+                "config": {"language": "zh-hans"},
+            },
+        )()
+        mock_config = {"is_active": True, "provider": "feishu"}
         mock_get_default.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
         result = service.send_alert(alert_record, channel_uuid=None)
 
-        assert result['success'] is True
+        assert result["success"] is True
         mock_send_task.delay.assert_called_once()
         call_kwargs = mock_send_task.delay.call_args[1]
-        assert call_kwargs['notification_type'] == 'webhook'
-        assert call_kwargs['channel_uuid'] == str(mock_channel.uuid)
-        assert call_kwargs['params']['provider_type'] == 'feishu'
+        assert call_kwargs["notification_type"] == "webhook"
+        assert call_kwargs["channel_uuid"] == str(mock_channel.uuid)
+        assert call_kwargs["params"]["provider_type"] == "feishu"
 
-    @patch(
-        'cloud_billing.services.notification_service.send_notification'
-    )
+    @patch("cloud_billing.services.notification_service.send_notification")
     def test_send_alert_email_without_channel_uuid_returns_error(
         self,
         mock_send_task,
@@ -322,14 +396,15 @@ class TestCloudBillingNotificationService:
         result = service.send_alert(
             alert_record,
             channel_uuid=None,
-            channel_type='email',
+            channel_type="email",
         )
-        assert result['success'] is False
-        assert 'channel_uuid is required' in result['error']
+        assert result["success"] is False
+        assert "channel_uuid is required" in result["error"]
         mock_send_task.delay.assert_not_called()
 
     @patch(
-        'cloud_billing.services.notification_service.get_default_webhook_channel'
+        "cloud_billing.services.notification_service."
+        "get_default_webhook_channel"
     )
     def test_send_alert_no_default_returns_error_when_channel_uuid_none(
         self,
@@ -344,52 +419,52 @@ class TestCloudBillingNotificationService:
         service = CloudBillingNotificationService()
         result = service.send_alert(alert_record, channel_uuid=None)
 
-        assert result['success'] is False
-        err = result['error'].lower()
-        assert 'not found' in err or 'not active' in err
+        assert result["success"] is False
+        err = result["error"].lower()
+        assert "not found" in err or "not active" in err
 
+    @patch("cloud_billing.services.notification_service.send_notification")
     @patch(
-        'cloud_billing.services.notification_service.send_notification'
-    )
-    @patch(
-        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
+        "cloud_billing.services.notification_service."
+        "get_webhook_channel_by_uuid"
     )
     def test_send_alert_with_channel_uuid(
-        self,
-        mock_get_by_uuid,
-        mock_send_task,
-        alert_record
+        self, mock_get_by_uuid, mock_send_task, alert_record
     ):
         """
         Test sending alert with channel_uuid; unified task gets params.
         """
         from uuid import uuid4
+
         ch_uuid = uuid4()
-        mock_channel = type('Channel', (), {
-            'id': 1,
-            'uuid': ch_uuid,
-            'config': {'language': 'zh-hans'},
-        })()
-        mock_config = {'is_active': True, 'provider': 'feishu'}
+        mock_channel = type(
+            "Channel",
+            (),
+            {
+                "id": 1,
+                "uuid": ch_uuid,
+                "config": {"language": "zh-hans"},
+            },
+        )()
+        mock_config = {"is_active": True, "provider": "feishu"}
         mock_get_by_uuid.return_value = (mock_channel, mock_config)
 
         service = CloudBillingNotificationService()
         result = service.send_alert(alert_record, channel_uuid=str(ch_uuid))
 
-        assert result['success'] is True
+        assert result["success"] is True
         mock_send_task.delay.assert_called_once()
         call_kwargs = mock_send_task.delay.call_args[1]
-        assert call_kwargs['notification_type'] == 'webhook'
-        assert call_kwargs['channel_uuid'] == str(ch_uuid)
-        assert call_kwargs['params']['provider_type'] == 'feishu'
+        assert call_kwargs["notification_type"] == "webhook"
+        assert call_kwargs["channel_uuid"] == str(ch_uuid)
+        assert call_kwargs["params"]["provider_type"] == "feishu"
 
     @patch(
-        'cloud_billing.services.notification_service.get_webhook_channel_by_uuid'
+        "cloud_billing.services.notification_service."
+        "get_webhook_channel_by_uuid"
     )
     def test_send_alert_channel_uuid_not_found(
-        self,
-        mock_get_by_uuid,
-        alert_record
+        self, mock_get_by_uuid, alert_record
     ):
         """
         Test alert with channel_uuid that does not exist or is inactive.
@@ -399,9 +474,9 @@ class TestCloudBillingNotificationService:
         service = CloudBillingNotificationService()
         result = service.send_alert(
             alert_record,
-            channel_uuid='00000000-0000-0000-0000-000000000000',
+            channel_uuid="00000000-0000-0000-0000-000000000000",
         )
 
-        assert result['success'] is False
-        err = result['error'].lower()
-        assert 'not found' in err or 'inactive' in err
+        assert result["success"] is False
+        err = result["error"].lower()
+        assert "not found" in err or "inactive" in err

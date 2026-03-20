@@ -1,52 +1,50 @@
 """Tencent Cloud provider implementation.
 
-This module provides an implementation for Tencent Cloud using
-tencentcloud-sdk-python-billing. Authentication is validated via
-DescribeAccountBalance API.
-
-API Documentation:
-https://cloud.tencent.com/document/product/555/50284
-
-Config fields (DB / API): access_key_id, access_key_secret, app_id.
-Tencent SDK uses SecretId (= access_key_id) and SecretKey (= access_key_secret).
+This module provides Tencent Cloud billing collection using the
+tencentcloud-sdk-python-billing package. Authentication is validated through
+the DescribeAccountBalance API.
 """
 
 import logging
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional, Any
+from datetime import datetime
+from decimal import Decimal, InvalidOperation
+from typing import Any, Dict, List, Optional, Tuple
 
-from tencentcloud.common.credential import Credential
 from tencentcloud.billing.v20180709 import billing_client
 from tencentcloud.billing.v20180709 import models as billing_models
+from tencentcloud.common.credential import Credential
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import (
     TencentCloudSDKException,
 )
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
 
 from ..utils.logging import mask_sensitive_config_object
-from .provider import BaseCloudProvider, BaseCloudConfig
+from .provider import BaseCloudConfig, BaseCloudProvider
 
 
 logger = logging.getLogger(__name__)
 
-# Default region for billing API (billing.tencentcloudapi.com is region-agnostic)
+DEFAULT_ENDPOINT = "billing.tencentcloudapi.com"
 DEFAULT_REGION = "ap-guangzhou"
+DEFAULT_HTTP_TIMEOUT = 60
+DEFAULT_SUMMARY_GROUP_TYPE = "business"
+DEFAULT_CURRENCY = "CNY"
 
 
 @dataclass
 class TencentConfig(BaseCloudConfig):
-    """Tencent Cloud provider configuration.
-
-    Config keys: access_key_id (SecretId), access_key_secret (SecretKey), app_id.
-    Inherits region, timeout, max_retries from BaseCloudConfig.
-    """
+    """Tencent Cloud provider configuration."""
 
     access_key_id: Optional[str] = None
     access_key_secret: Optional[str] = None
     app_id: Optional[str] = None
+    endpoint: Optional[str] = None
 
     def __post_init__(self):
-        """Initialize from environment if not set."""
+        """Load unset values from environment variables."""
         if self.access_key_id is None:
             self.access_key_id = os.getenv("TENCENT_ACCESS_KEY_ID")
         if self.access_key_secret is None:
@@ -55,6 +53,8 @@ class TencentConfig(BaseCloudConfig):
             self.app_id = os.getenv("TENCENT_APP_ID")
         if self.region is None:
             self.region = os.getenv("TENCENT_REGION", DEFAULT_REGION)
+        if self.endpoint is None:
+            self.endpoint = os.getenv("TENCENT_ENDPOINT", DEFAULT_ENDPOINT)
         if self.timeout == 30:
             self.timeout = int(os.getenv("TENCENT_TIMEOUT", "30"))
         if self.max_retries == 3:
@@ -70,8 +70,9 @@ class TencentConfig(BaseCloudConfig):
             )
         if not self.access_key_secret:
             raise ValueError(
-                "Tencent access_key_secret is required. Set it via constructor or "
-                "TENCENT_ACCESS_KEY_SECRET environment variable."
+                "Tencent access_key_secret is required. Set it via "
+                "constructor or TENCENT_ACCESS_KEY_SECRET environment "
+                "variable."
             )
         if not self.app_id:
             raise ValueError(
@@ -91,218 +92,161 @@ class TencentCloud(BaseCloudProvider):
         """Initialize Tencent Cloud provider.
 
         Args:
-            config: Tencent configuration (access_key_id, access_key_secret, app_id)
+            config: Tencent configuration.
         """
         super().__init__(config)
         self._client = None
         self.name = "tencentcloud"
         sanitized = mask_sensitive_config_object(config)
-        logger.info("Initialized Tencent Cloud provider with config: %s", sanitized)
+        logger.info(
+            f"Initialized Tencent Cloud provider with config: {sanitized}"
+        )
 
-    @property
-    def client(self):
-        """Get Tencent Billing client."""
-        if self._client is None:
-            cred = Credential(
-                self.config.access_key_id,
-                self.config.access_key_secret,
-            )
-            self._client = billing_client.BillingClient(cred, self.config.region or DEFAULT_REGION)
-        return self._client
-
-    def _describe_account_balance(self) -> Any:
-        """Call DescribeAccountBalance to validate credentials and get account info."""
-        req = billing_models.DescribeAccountBalanceRequest()
-        return self.client.DescribeAccountBalance(req)
-
-    def validate_credentials(self) -> bool:
-        """Validate Tencent credentials by calling billing API.
-
-        Returns:
-            True if credentials are valid, False otherwise.
-        """
-        try:
-            self._describe_account_balance()
-            logger.info(
-                "Tencent credentials validated successfully (region=%s)",
-                self.config.region or DEFAULT_REGION,
-            )
-            return True
-        except TencentCloudSDKException as e:
-            logger.warning(
-                "Tencent credentials validation failed: %s",
-                str(e),
-            )
-            return False
-        except Exception as e:
-            logger.error("Failed to validate Tencent credentials: %s", str(e))
-            logger.exception(e)
-            return False
-
-    def get_account_id(self) -> str:
-        """Get account identifier: Uin from API or app_id from config."""
-        try:
-            resp = self._describe_account_balance()
-            uin = getattr(resp, "Uin", None)
-            if uin is not None:
-                return str(uin)
-        except Exception as e:
-            logger.debug("Could not get Uin from DescribeAccountBalance: %s", e)
-        return self.config.app_id or ""
-
-    def _query_bill_resource_summary(self, period: str) -> tuple:
-        """Query DescribeBillResourceSummary for month, return (total_cost_yuan, service_costs, items)."""
-        total_cost = 0.0
-        service_costs: Dict[str, float] = {}
-        items: list = []
-        offset = 0
-        limit = 1000
-        need_record_num = 1
-
-        while True:
-            req = billing_models.DescribeBillResourceSummaryRequest()
-            req.Month = period
-            req.Offset = offset
-            req.Limit = limit
-            req.NeedRecordNum = need_record_num
-            resp = self.client.DescribeBillResourceSummary(req)
-            summary_set = getattr(resp, "ResourceSummarySet", None) or []
-            for item in summary_set:
-                cost_str = getattr(item, "RealTotalCost", None) or getattr(item, "TotalCost", None) or "0"
-                try:
-                    cost = float(cost_str)
-                except (TypeError, ValueError):
-                    cost = 0.0
-                total_cost += cost
-                name = getattr(item, "BusinessCodeName", None) or getattr(item, "ProductCodeName", None) or "Unknown"
-                service_costs[name] = service_costs.get(name, 0.0) + cost
-                items.append({"service_name": name, "amount": cost})
-            total_count = getattr(resp, "Total", 0) or 0
-            if not summary_set or offset + len(summary_set) >= total_count:
-                break
-            offset += limit
-            need_record_num = 0  # only first page needs total count
-
-        return total_cost, service_costs, items
-
-    def _query_bill_summary(self, period: str) -> tuple:
-        """使用 DescribeBillSummary API 查询月度账单摘要
-        
-        该 API 有更高的速率限制和显式的 Ready 字段
-        """
-        req = billing_models.DescribeBillSummaryRequest()
-        req.Month = period
-        req.GroupType = "business"
-        resp = self.client.DescribeBillSummary(req)
-        
-        ready = getattr(resp, "Ready", 0)
-        if ready == 0:
-            logger.warning("腾讯云账单数据尚未准备就绪，周期: %s", period)
-            raise TencentCloudSDKException("SummaryDataNotReady", "数据未就绪，请 5-10 分钟后重试")
-        
-        total_cost = 0.0
-        service_costs: Dict[str, float] = {}
-        items: list = []
-        
-        summary_detail = getattr(resp, "SummaryDetail", None) or []
-        logger.info("腾讯云 DescribeBillSummary 返回 %d 条记录，周期: %s", len(summary_detail), period)
-        
-        for detail in summary_detail:
-            cost_str = getattr(detail, "RealTotalCost", None) or getattr(detail, "TotalCost", None) or getattr(detail, "CashPayAmount", None) or "0"
-            try:
-                cost = float(cost_str)
-            except (TypeError, ValueError):
-                cost = 0.0
-            total_cost += cost
-            
-            name = getattr(detail, "GroupValue", None) or getattr(detail, "BusinessCodeName", None) or getattr(detail, "ProductCodeName", None) or "Unknown"
-            service_costs[name] = service_costs.get(name, 0.0) + cost
-            items.append({"service_name": name, "amount": cost})
-        
-        return total_cost, service_costs, items
-
-    def get_billing_info(self, period: Optional[str] = None) -> Dict[str, Any]:
-        """Get billing information for a period.
-
-        Uses DescribeBillResourceSummary for monthly cost; falls back to
-        DescribeAccountBalance (balance only, total_cost=0) if bill API fails.
-
-        Args:
-            period: Optional YYYY-MM; defaults to current month.
-
-        Returns:
-            Dict with status, data (total_cost, currency, account_id, service_costs, items), error.
-        """
-        from datetime import datetime
+    @staticmethod
+    def _normalize_period(period: Optional[str]) -> str:
+        """Normalize a billing period to YYYY-MM."""
         if not period:
             period = datetime.now().strftime("%Y-%m")
         try:
-            year, month = period.split("-")
-            if not (1 <= int(month) <= 12):
-                raise ValueError("Invalid period month")
-        except (ValueError, AttributeError):
-            period = datetime.now().strftime("%Y-%m")
+            datetime.strptime(period, "%Y-%m")
+        except ValueError as exc:
+            raise ValueError("Invalid period format. Use YYYY-MM") from exc
+        return period
 
-        account_id = self.get_account_id()
-        currency = "CNY"
-
+    @staticmethod
+    def _to_decimal(value: Any) -> Decimal:
+        """Convert a raw value to Decimal, defaulting to zero."""
         try:
+            if value is None or value == "":
+                return Decimal("0")
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return Decimal("0")
+
+    def _build_client(self):
+        """Create a Tencent billing client."""
+        credential = Credential(
+            self.config.access_key_id,
+            self.config.access_key_secret,
+        )
+        http_profile = HttpProfile(
+            endpoint=self.config.endpoint or DEFAULT_ENDPOINT,
+            reqTimeout=self.config.timeout or DEFAULT_HTTP_TIMEOUT,
+        )
+        client_profile = ClientProfile(httpProfile=http_profile)
+        return billing_client.BillingClient(
+            credential,
+            self.config.region or DEFAULT_REGION,
+            client_profile,
+        )
+
+    @property
+    def client(self):
+        """Lazily create and cache the Tencent billing client."""
+        if self._client is None:
+            self._client = self._build_client()
+        return self._client
+
+    def _describe_account_balance(self) -> Any:
+        """Call DescribeAccountBalance to validate credentials."""
+        request = billing_models.DescribeAccountBalanceRequest()
+        return self.client.DescribeAccountBalance(request)
+
+    def validate_credentials(self) -> bool:
+        """Validate Tencent credentials by calling the billing API."""
+        try:
+            self._describe_account_balance()
+            logger.info(
+                "Tencent credentials validated successfully "
+                f"(region={self.config.region or DEFAULT_REGION})"
+            )
+            return True
+        except TencentCloudSDKException as exc:
+            logger.warning(
+                f"Tencent credentials validation failed: {exc}"
+            )
+            return False
+        except Exception as exc:
+            logger.exception(
+                f"Failed to validate Tencent credentials: {exc}"
+            )
+            return False
+
+    def get_account_id(self) -> str:
+        """Return the Tencent Uin when available."""
+        try:
+            response = self._describe_account_balance()
+        except Exception as exc:
+            logger.debug(
+                f"Could not get Uin from DescribeAccountBalance: {exc}"
+            )
+            return ""
+
+        uin = getattr(response, "Uin", None)
+        if uin is None:
+            return ""
+        return str(uin)
+
+    def _query_bill_summary(
+        self,
+        period: str,
+    ) -> Tuple[Decimal, Dict[str, float], List[Dict[str, Any]]]:
+        """Query DescribeBillSummary for the given month."""
+        request = billing_models.DescribeBillSummaryRequest()
+        request.Month = period
+        request.GroupType = DEFAULT_SUMMARY_GROUP_TYPE
+        response = self.client.DescribeBillSummary(request)
+
+        ready = getattr(response, "Ready", 0)
+        if not ready:
+            raise TencentCloudSDKException(
+                "SummaryDataNotReady",
+                "Tencent bill summary data is not ready yet.",
+            )
+
+        total_cost = Decimal("0")
+        service_costs: Dict[str, float] = {}
+        items: List[Dict[str, Any]] = []
+        summary_detail = getattr(response, "SummaryDetail", None) or []
+
+        for detail in summary_detail:
+            cost = self._to_decimal(
+                getattr(detail, "RealTotalCost", None)
+                or getattr(detail, "TotalCost", None)
+                or getattr(detail, "CashPayAmount", None)
+                or "0"
+            )
+            total_cost += cost
+            name = (
+                getattr(detail, "GroupValue", None)
+                or getattr(detail, "BusinessCodeName", None)
+                or getattr(detail, "ProductCodeName", None)
+                or "Unknown"
+            )
+            service_costs[name] = service_costs.get(name, 0.0) + float(cost)
+            items.append({"service_name": name, "amount": float(cost)})
+
+        return total_cost, service_costs, items
+
+    def get_billing_info(self, period: Optional[str] = None) -> Dict[str, Any]:
+        """Get billing information for a specific month."""
+        try:
+            period = self._normalize_period(period)
             total_cost, service_costs, items = self._query_bill_summary(period)
+            account_id = self.get_account_id()
+            currency = DEFAULT_CURRENCY
             data = {
-                "total_cost": total_cost,
+                "total_cost": float(total_cost),
                 "currency": currency,
                 "account_id": account_id,
                 "service_costs": service_costs,
                 "items": items,
+                "bill_period": period,
             }
-            return {
-                "status": "success",
-                "data": data,
-                "error": None,
-            }
-        except TencentCloudSDKException as e:
-            code = getattr(e, "code", "") or ""
-            if "CamNoAuth" in code or "UnauthorizedOperation" in code or "NoAuth" in str(e):
-                logger.warning(
-                    "腾讯云 DescribeBillSummary 未授权，仅返回余额: %s",
-                    e,
-                )
-            elif "SummaryDataNotReady" in code:
-                logger.warning(
-                    "腾讯云账单数据未就绪，仅返回余额: %s",
-                    e,
-                )
-            else:
-                logger.error("腾讯云账单 API 错误: %s", e)
-                return {
-                    "status": "error",
-                    "data": None,
-                    "error": str(e),
-                }
-            try:
-                resp = self._describe_account_balance()
-                balance_cents = getattr(resp, "RealBalance", 0) or getattr(resp, "Balance", 0)
-                try:
-                    balance_yuan = float(balance_cents) / 100.0
-                except (TypeError, ValueError):
-                    balance_yuan = 0.0
-                data = {
-                    "total_cost": 0.0,
-                    "currency": currency,
-                    "account_id": account_id,
-                    "service_costs": {},
-                    "items": [],
-                    "balance_yuan": balance_yuan,
-                }
-                return {"status": "success", "data": data, "error": None}
-            except Exception as fallback_e:
-                logger.error("Tencent fallback balance error: %s", fallback_e)
-                return {"status": "error", "data": None, "error": str(e)}
-        except Exception as e:
-            logger.error("Unexpected error in Tencent billing: %s", str(e))
-            logger.exception(e)
-            return {
-                "status": "error",
-                "data": None,
-                "error": str(e),
-            }
+            return {"status": "success", "data": data, "error": None}
+        except TencentCloudSDKException as exc:
+            logger.warning(f"Tencent bill summary query failed: {exc}")
+            return {"status": "error", "data": None, "error": str(exc)}
+        except Exception as exc:
+            logger.exception(f"Unexpected error in Tencent billing: {exc}")
+            return {"status": "error", "data": None, "error": str(exc)}

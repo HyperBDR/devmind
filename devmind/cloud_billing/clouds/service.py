@@ -14,50 +14,38 @@ from .huawei_provider import HuaweiConfig, HuaweiCloud
 from .huawei_intl_provider import HuaweiIntlConfig, HuaweiIntlCloud
 from .alibaba_provider import AlibabaConfig, AlibabaCloud
 from .azure_provider import AzureConfig, AzureCloud
+from .tencent_provider import TencentConfig, TencentCloud
+from .volcengine_provider import VolcengineConfig, VolcengineCloud
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Tencent Cloud: optional dependency (tencentcloud-sdk-python-common, tencentcloud-sdk-python-billing)
-# If SDK is not installed, tencentcloud provider is unavailable; other providers still work.
-try:
-    from .tencent_provider import TencentConfig, TencentCloud
-    _TENCENT_AVAILABLE = True
-except ImportError as e:
-    TencentConfig = None  # type: ignore[misc, assignment]
-    TencentCloud = None  # type: ignore[misc, assignment]
-    _TENCENT_AVAILABLE = False
-    logger.debug("Tencent Cloud provider not available (missing SDK): %s", e)
-
 
 def _build_provider_mapping():
     mapping = {
-        'aws': {
-            'config_class': AWSConfig,
-            'provider_class': AWSCloud
+        "aws": {"config_class": AWSConfig, "provider_class": AWSCloud},
+        "huawei": {
+            "config_class": HuaweiConfig,
+            "provider_class": HuaweiCloud,
         },
-        'huawei': {
-            'config_class': HuaweiConfig,
-            'provider_class': HuaweiCloud
+        "huawei-intl": {
+            "config_class": HuaweiIntlConfig,
+            "provider_class": HuaweiIntlCloud,
         },
-        'huawei-intl': {
-            'config_class': HuaweiIntlConfig,
-            'provider_class': HuaweiIntlCloud
+        "alibaba": {
+            "config_class": AlibabaConfig,
+            "provider_class": AlibabaCloud,
         },
-        'alibaba': {
-            'config_class': AlibabaConfig,
-            'provider_class': AlibabaCloud
-        },
-        'azure': {
-            'config_class': AzureConfig,
-            'provider_class': AzureCloud
+        "azure": {"config_class": AzureConfig, "provider_class": AzureCloud},
+        "volcengine": {
+            "config_class": VolcengineConfig,
+            "provider_class": VolcengineCloud,
         },
     }
-    if _TENCENT_AVAILABLE and TencentConfig and TencentCloud:
-        mapping['tencentcloud'] = {
-            'config_class': TencentConfig,
-            'provider_class': TencentCloud
-        }
+    mapping["tencentcloud"] = {
+        "config_class": TencentConfig,
+        "provider_class": TencentCloud,
+    }
     return mapping
 
 
@@ -87,8 +75,8 @@ class ProviderFactory:
             raise ValueError(f"Unsupported provider: {provider_name}")
 
         provider_info = cls.PROVIDER_MAPPING[provider_name]
-        config_class = provider_info['config_class']
-        provider_class = provider_info['provider_class']
+        config_class = provider_info["config_class"]
+        provider_class = provider_info["provider_class"]
 
         # Create provider instance with validated config
         # Add fallback to empty dict if config is None
@@ -113,9 +101,7 @@ class BillingService:
             provider_name (str): Name of the cloud provider
             config (Dict[str, Any]): Provider configuration
         """
-        self.provider = ProviderFactory.create_provider(
-            provider_name, config
-        )
+        self.provider = ProviderFactory.create_provider(provider_name, config)
 
     def get_billing_info(self, period: Optional[str] = None) -> Dict[str, Any]:
         """Get billing information.

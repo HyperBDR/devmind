@@ -1,6 +1,7 @@
 """
 Celery tasks for cloud billing collection and alert checking.
 """
+
 import logging
 import traceback
 from datetime import datetime, timedelta
@@ -36,13 +37,12 @@ from .services.provider_service import ProviderService
 logger = logging.getLogger(__name__)
 
 
-@shared_task(name='cloud_billing.tasks.collect_billing_data')
+@shared_task(name="cloud_billing.tasks.collect_billing_data")
 @prevent_duplicate_task(
     "collect_billing_data", lock_param="user_id", timeout=3600
 )
 def collect_billing_data(
-    provider_id: Optional[int] = None,
-    user_id: Optional[int] = None
+    provider_id: Optional[int] = None, user_id: Optional[int] = None
 ):
     """
     Collect billing data for cloud providers.
@@ -69,14 +69,13 @@ def collect_billing_data(
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
-            task_name='cloud_billing.tasks.collect_billing_data',
-            module='cloud_billing',
-            task_kwargs={'provider_id': provider_id, 'user_id': user_id},
-            metadata={'provider_id': provider_id, 'user_id': user_id}
+            task_name="cloud_billing.tasks.collect_billing_data",
+            module="cloud_billing",
+            task_kwargs={"provider_id": provider_id, "user_id": user_id},
+            metadata={"provider_id": provider_id, "user_id": user_id},
         )
         TaskTracker.update_task_status(
-            task_id=task_id,
-            status=TaskStatus.STARTED
+            task_id=task_id, status=TaskStatus.STARTED
         )
 
     log_collector.info(
@@ -89,9 +88,9 @@ def collect_billing_data(
     )
 
     results = {
-        'success': [],
-        'failed': [],
-        'total': 0,
+        "success": [],
+        "failed": [],
+        "total": 0,
     }
 
     try:
@@ -109,6 +108,20 @@ def collect_billing_data(
             )
             log_collector.warning(warning_msg)
             logger.warning(f"{warning_msg}")
+            if task_id:
+                all_logs = log_collector.get_logs()
+                warnings_and_errors = log_collector.get_warnings_and_errors()
+                log_summary = log_collector.get_summary()
+                TaskTracker.update_task_status(
+                    task_id=task_id,
+                    status=TaskStatus.SUCCESS,
+                    result=results,
+                    metadata={
+                        "logs": all_logs,
+                        "warnings_and_errors": warnings_and_errors,
+                        "log_summary": log_summary,
+                    },
+                )
             return results
 
         provider_service = ProviderService()
@@ -142,24 +155,24 @@ def collect_billing_data(
                     )
                     log_collector.warning(warning_msg)
                     logger.warning(f"{warning_msg}")
-                    results['failed'].append({
-                        'provider': provider.name,
-                        'error': (
-                            'No configuration found. '
-                            'Please configure the provider first.'
-                        )
-                    })
+                    results["failed"].append(
+                        {
+                            "provider": provider.name,
+                            "error": (
+                                "No configuration found. "
+                                "Please configure the provider first."
+                            ),
+                        }
+                    )
                     continue
 
                 # get_billing_info will normalize the config internally
                 billing_info = provider_service.get_billing_info(
-                    provider.provider_type,
-                    config_dict,
-                    period=current_period
+                    provider.provider_type, config_dict, period=current_period
                 )
 
-                if billing_info.get('status') != 'success':
-                    error_msg = billing_info.get('error', 'Unknown error')
+                if billing_info.get("status") != "success":
+                    error_msg = billing_info.get("error", "Unknown error")
                     error_log = (
                         f"Task collect_billing_data: Failed to get billing "
                         f"(provider_id={provider.id}, name={provider.name}, "
@@ -168,24 +181,22 @@ def collect_billing_data(
                     )
                     log_collector.error(error_log)
                     logger.error(f"{error_log}")
-                    results['failed'].append({
-                        'provider': provider.name,
-                        'error': error_msg
-                    })
+                    results["failed"].append(
+                        {"provider": provider.name, "error": error_msg}
+                    )
                     continue
 
-                billing_data = billing_info.get('data', {})
-                total_cost = Decimal(str(billing_data.get('total_cost', 0)))
-                currency = billing_data.get('currency', 'USD')
-                service_costs = billing_data.get('service_costs', {})
-                account_id = billing_data.get('account_id', '')
+                billing_data = billing_info.get("data", {})
+                total_cost = Decimal(str(billing_data.get("total_cost", 0)))
+                currency = billing_data.get("currency", "USD")
+                service_costs = billing_data.get("service_costs", {})
+                account_id = billing_data.get("account_id", "")
 
                 # Calculate hourly incremental cost
                 # Rule: If this month has no data yet, hourly_cost = total_cost
                 # Otherwise, calculate increment from previous hour
                 has_data_this_period = BillingData.objects.filter(
-                    provider=provider,
-                    period=current_period
+                    provider=provider, period=current_period
                 ).exists()
 
                 if not has_data_this_period:
@@ -209,13 +220,13 @@ def collect_billing_data(
                             provider=provider,
                             account_id=account_id,
                             period=previous_period,
-                            hour=previous_hour
+                            hour=previous_hour,
                         )
                         # Calculate incremental cost: current - previous
                         hourly_cost = total_cost - previous_billing.total_cost
                         # Ensure hourly_cost is not negative (safety check)
                         if hourly_cost < 0:
-                            hourly_cost = Decimal('0')
+                            hourly_cost = Decimal("0")
                     except BillingData.DoesNotExist:
                         # Previous hour not found, use total_cost as fallback
                         # This should rarely happen if data collection
@@ -230,11 +241,11 @@ def collect_billing_data(
                             period=current_period,
                             hour=current_hour,
                             defaults={
-                                'total_cost': total_cost,
-                                'hourly_cost': hourly_cost,
-                                'currency': currency,
-                                'service_costs': service_costs,
-                            }
+                                "total_cost": total_cost,
+                                "hourly_cost": hourly_cost,
+                                "currency": currency,
+                                "service_costs": service_costs,
+                            },
                         )
                     )
 
@@ -254,9 +265,12 @@ def collect_billing_data(
                         # collected_at is updated
                         billing_record.save(
                             update_fields=[
-                                'total_cost', 'hourly_cost', 'currency',
-                                'service_costs', 'account_id',
-                                'collected_at'
+                                "total_cost",
+                                "hourly_cost",
+                                "currency",
+                                "service_costs",
+                                "account_id",
+                                "collected_at",
                             ]
                         )
                         info_msg = (
@@ -281,13 +295,18 @@ def collect_billing_data(
                         log_collector.info(info_msg)
                         logger.info(f"{info_msg}")
 
-                results['success'].append({
-                    'provider': provider.name,
-                    'total_cost': float(total_cost),
-                    'currency': currency,
-                })
+                results["success"].append(
+                    {
+                        "provider": provider.name,
+                        "total_cost": float(total_cost),
+                        "currency": currency,
+                    }
+                )
 
-                check_alert_for_provider.delay(provider.id)
+                check_alert_for_provider.delay(
+                    provider.id,
+                    provider.provider_type,
+                )
 
             except Exception as e:
                 error_traceback = traceback.format_exc()
@@ -298,12 +317,27 @@ def collect_billing_data(
                 )
                 log_collector.error(error_msg, exception=error_traceback)
                 logger.error(f"{error_msg}", exc_info=True)
-                results['failed'].append({
-                    'provider': provider.name,
-                    'error': str(e)
-                })
+                results["failed"].append(
+                    {"provider": provider.name, "error": str(e)}
+                )
 
-        results['total'] = len(results['success']) + len(results['failed'])
+        results["total"] = len(results["success"]) + len(results["failed"])
+        task_status = TaskStatus.SUCCESS
+        task_error = None
+        if results["success"]:
+            if results["failed"]:
+                results["warning"] = (
+                    f"{len(results['failed'])} provider(s) failed "
+                    f"during this collection run"
+                )
+        elif results["failed"]:
+            task_status = TaskStatus.FAILURE
+            task_error = (
+                "Billing collection failed for all providers "
+                f"(failed={len(results['failed'])})"
+            )
+            results["error"] = task_error
+
         info_msg = (
             f"Task collect_billing_data: Billing collection completed "
             f"(provider_id={provider_id}, total={results['total']}, "
@@ -321,13 +355,14 @@ def collect_billing_data(
 
             TaskTracker.update_task_status(
                 task_id=task_id,
-                status=TaskStatus.SUCCESS,
+                status=task_status,
                 result=results,
+                error=task_error,
                 metadata={
-                    'logs': all_logs,
-                    'warnings_and_errors': warnings_and_errors,
-                    'log_summary': log_summary
-                }
+                    "logs": all_logs,
+                    "warnings_and_errors": warnings_and_errors,
+                    "log_summary": log_summary,
+                },
             )
 
     except Exception as e:
@@ -339,7 +374,7 @@ def collect_billing_data(
         )
         log_collector.error(error_log, exception=error_traceback)
         logger.error(f"{error_log}", exc_info=True)
-        results['error'] = error_msg
+        results["error"] = error_msg
 
         # Save logs to task metadata
         if task_id:
@@ -355,10 +390,10 @@ def collect_billing_data(
                     error=error_msg,
                     traceback=error_traceback,
                     metadata={
-                        'logs': all_logs,
-                        'warnings_and_errors': warnings_and_errors,
-                        'log_summary': log_summary
-                    }
+                        "logs": all_logs,
+                        "warnings_and_errors": warnings_and_errors,
+                        "log_summary": log_summary,
+                    },
                 )
             except Exception as log_error:
                 logger.error(
@@ -369,22 +404,25 @@ def collect_billing_data(
                     status=TaskStatus.FAILURE,
                     result=results,
                     error=error_msg,
-                    traceback=error_traceback
+                    traceback=error_traceback,
                 )
 
     return results
 
 
-@shared_task(name='cloud_billing.tasks.check_alert_for_provider')
+@shared_task(name="cloud_billing.tasks.check_alert_for_provider")
 @prevent_duplicate_task(
     "check_alert_for_provider", lock_param="provider_id", timeout=600
 )
-def check_alert_for_provider(provider_id: int):
+def check_alert_for_provider(
+    provider_id: int, provider_name: Optional[str] = None
+):
     """
     Check alert rules for a specific provider.
 
     Args:
         provider_id: Provider ID to check alerts for
+        provider_name: Optional provider type for task naming
 
     Returns:
         Dictionary with alert check results
@@ -393,16 +431,30 @@ def check_alert_for_provider(provider_id: int):
 
     # Register task in agentcore_task if not already registered
     if task_id:
+        task_display_name = (
+            "cloud_billing.tasks.check_alert_for_provider"
+            f" ({provider_name})"
+            if provider_name
+            else (
+                "cloud_billing.tasks.check_alert_for_provider "
+                f"(provider_id={provider_id})"
+            )
+        )
         TaskTracker.register_task(
             task_id=task_id,
-            task_name='cloud_billing.tasks.check_alert_for_provider',
-            module='cloud_billing',
-            task_kwargs={'provider_id': provider_id},
-            metadata={'provider_id': provider_id}
+            task_name=task_display_name,
+            module="cloud_billing",
+            task_kwargs={
+                "provider_id": provider_id,
+                "provider_name": provider_name,
+            },
+            metadata={
+                "provider_id": provider_id,
+                "provider_name": provider_name,
+            },
         )
         TaskTracker.update_task_status(
-            task_id=task_id,
-            status=TaskStatus.STARTED
+            task_id=task_id, status=TaskStatus.STARTED
         )
 
     logger.info(
@@ -423,12 +475,10 @@ def check_alert_for_provider(provider_id: int):
                 f"(provider_id={provider.id}, name={provider.name}, "
                 f"type={provider.provider_type})"
             )
-            result = {'checked': False, 'reason': 'No active alert rule'}
+            result = {"checked": False, "reason": "No active alert rule"}
             if task_id:
                 TaskTracker.update_task_status(
-                    task_id=task_id,
-                    status=TaskStatus.SUCCESS,
-                    result=result
+                    task_id=task_id, status=TaskStatus.SUCCESS, result=result
                 )
             return result
 
@@ -439,9 +489,7 @@ def check_alert_for_provider(provider_id: int):
         # Get all current billing records for this provider
         # (may have multiple accounts)
         current_billings = BillingData.objects.filter(
-            provider=provider,
-            period=current_period,
-            hour=current_hour
+            provider=provider, period=current_period, hour=current_hour
         )
 
         if not current_billings.exists():
@@ -450,12 +498,10 @@ def check_alert_for_provider(provider_id: int):
                 f"found (provider_id={provider.id}, name={provider.name}, "
                 f"period={current_period}, hour={current_hour})"
             )
-            result = {'checked': False, 'reason': 'No current billing data'}
+            result = {"checked": False, "reason": "No current billing data"}
             if task_id:
                 TaskTracker.update_task_status(
-                    task_id=task_id,
-                    status=TaskStatus.SUCCESS,
-                    result=result
+                    task_id=task_id, status=TaskStatus.SUCCESS, result=result
                 )
             return result
 
@@ -470,14 +516,14 @@ def check_alert_for_provider(provider_id: int):
         # Check alerts for each account_id separately
         alerts_created = []
         for current_billing in current_billings:
-            account_id = current_billing.account_id or ''
+            account_id = current_billing.account_id or ""
 
             try:
                 previous_billing = BillingData.objects.get(
                     provider=provider,
                     account_id=account_id,
                     period=previous_period,
-                    hour=previous_hour
+                    hour=previous_hour,
                 )
             except BillingData.DoesNotExist:
                 logger.info(
@@ -591,11 +637,11 @@ def check_alert_for_provider(provider_id: int):
 
             # Generate alert message based on trigger reason
             cost_threshold_triggered = any(
-                'Current cost' in reason for reason in alert_reason
+                "Current cost" in reason for reason in alert_reason
             )
 
             # Map language code to Django translation code
-            lang_code = 'zh_Hans' if language == 'zh-hans' else 'en'
+            lang_code = "zh_Hans" if language == "zh-hans" else "en"
             with translation.override(lang_code):
                 if account_id:
                     account_display = str(
@@ -607,31 +653,35 @@ def check_alert_for_provider(provider_id: int):
                     account_display = ""
 
                 if cost_threshold_triggered:
-                    alert_message = str(_(
-                        "{provider_name}{account_display} "
-                        "current total cost {current_cost:.2f} "
-                        "{currency} exceeds threshold "
-                        "{threshold:.2f} {currency}"
-                    ).format(
-                        provider_name=provider.display_name,
-                        account_display=account_display,
-                        current_cost=current_cost,
-                        currency=current_billing.currency,
-                        threshold=alert_rule.cost_threshold,
-                    ))
+                    alert_message = str(
+                        _(
+                            "{provider_name}{account_display} "
+                            "current total cost {current_cost:.2f} "
+                            "{currency} exceeds threshold "
+                            "{threshold:.2f} {currency}"
+                        ).format(
+                            provider_name=provider.display_name,
+                            account_display=account_display,
+                            current_cost=current_cost,
+                            currency=current_billing.currency,
+                            threshold=alert_rule.cost_threshold,
+                        )
+                    )
                 else:
-                    alert_message = str(_(
-                        "{provider_name}{account_display} "
-                        "billing increased by {increase_cost:.2f} "
-                        "{currency} in the last hour, "
-                        "growth rate: {increase_percent:.2f}%"
-                    ).format(
-                        provider_name=provider.display_name,
-                        account_display=account_display,
-                        increase_cost=increase_cost,
-                        currency=current_billing.currency,
-                        increase_percent=increase_percent,
-                    ))
+                    alert_message = str(
+                        _(
+                            "{provider_name}{account_display} "
+                            "billing increased by {increase_cost:.2f} "
+                            "{currency} in the last hour, "
+                            "growth rate: {increase_percent:.2f}%"
+                        ).format(
+                            provider_name=provider.display_name,
+                            account_display=account_display,
+                            increase_cost=increase_cost,
+                            currency=current_billing.currency,
+                            increase_percent=increase_percent,
+                        )
+                    )
 
             # Always create alert record, even if webhook is not configured
             alert_record = AlertRecord.objects.create(
@@ -661,42 +711,42 @@ def check_alert_for_provider(provider_id: int):
                 f"reasons={', '.join(alert_reason)})"
             )
 
-            alerts_created.append({
-                'alert_record_id': alert_record.id,
-                'account_id': account_id,
-                'reasons': alert_reason,
-            })
+            alerts_created.append(
+                {
+                    "alert_record_id": alert_record.id,
+                    "account_id": account_id,
+                    "reasons": alert_reason,
+                }
+            )
 
         # Return result
         if alerts_created:
             result = {
-                'checked': True,
-                'alerted': True,
-                'alerts_created': alerts_created,
+                "checked": True,
+                "alerted": True,
+                "alerts_created": alerts_created,
             }
         else:
             result = {
-                'checked': True,
-                'alerted': False,
+                "checked": True,
+                "alerted": False,
             }
 
         # Update task status to success in task tracker
         if task_id:
             TaskTracker.update_task_status(
-                task_id=task_id,
-                status=TaskStatus.SUCCESS,
-                result=result
+                task_id=task_id, status=TaskStatus.SUCCESS, result=result
             )
 
         return result
 
     except CloudProvider.DoesNotExist:
-        error_msg = 'Provider not found'
+        error_msg = "Provider not found"
         logger.error(
             f"Task check_alert_for_provider: Provider not found "
             f"(provider_id={provider_id})"
         )
-        result = {'checked': False, 'reason': error_msg}
+        result = {"checked": False, "reason": error_msg}
 
         # Update task status to failure in task tracker
         if task_id:
@@ -704,7 +754,7 @@ def check_alert_for_provider(provider_id: int):
                 task_id=task_id,
                 status=TaskStatus.FAILURE,
                 result=result,
-                error=error_msg
+                error=error_msg,
             )
 
         return result
@@ -714,9 +764,9 @@ def check_alert_for_provider(provider_id: int):
         logger.error(
             f"Task check_alert_for_provider: Error checking alerts "
             f"(provider_id={provider_id}, error={error_msg})",
-            exc_info=True
+            exc_info=True,
         )
-        result = {'checked': False, 'reason': error_msg}
+        result = {"checked": False, "reason": error_msg}
 
         # Update task status to failure in task tracker
         if task_id:
@@ -725,7 +775,7 @@ def check_alert_for_provider(provider_id: int):
                 status=TaskStatus.FAILURE,
                 result=result,
                 error=error_msg,
-                traceback=error_traceback
+                traceback=error_traceback,
             )
 
         return result
@@ -734,13 +784,13 @@ def check_alert_for_provider(provider_id: int):
 def _send_alert_notification_metadata(log_collector):
     """Build metadata dict with logs for task detail panel."""
     return {
-        'logs': log_collector.get_logs(),
-        'warnings_and_errors': log_collector.get_warnings_and_errors(),
-        'log_summary': log_collector.get_summary(),
+        "logs": log_collector.get_logs(),
+        "warnings_and_errors": log_collector.get_warnings_and_errors(),
+        "log_summary": log_collector.get_summary(),
     }
 
 
-@shared_task(name='cloud_billing.tasks.send_alert_notification')
+@shared_task(name="cloud_billing.tasks.send_alert_notification")
 def send_alert_notification(alert_record_id: int):
     """
     Send alert notification via webhook. Channel from
@@ -756,15 +806,15 @@ def send_alert_notification(alert_record_id: int):
     if task_id:
         TaskTracker.register_task(
             task_id=task_id,
-            task_name='cloud_billing.tasks.send_alert_notification',
-            module='cloud_billing',
-            task_kwargs={'alert_record_id': alert_record_id},
-            metadata={'alert_record_id': alert_record_id}
+            task_name="cloud_billing.tasks.send_alert_notification",
+            module="cloud_billing",
+            task_kwargs={"alert_record_id": alert_record_id},
+            metadata={"alert_record_id": alert_record_id},
         )
         TaskTracker.update_task_status(
             task_id=task_id,
             status=TaskStatus.STARTED,
-            metadata=_send_alert_notification_metadata(log_collector)
+            metadata=_send_alert_notification_metadata(log_collector),
         )
 
     log_collector.info(
@@ -798,13 +848,14 @@ def send_alert_notification(alert_record_id: int):
 
         alert_record.webhook_status = (
             WEBHOOK_STATUS_SUCCESS
-            if result['success'] else WEBHOOK_STATUS_FAILED
+            if result["success"]
+            else WEBHOOK_STATUS_FAILED
         )
-        alert_record.webhook_response = result.get('response')
-        alert_record.webhook_error = result.get('error') or ''
+        alert_record.webhook_response = result.get("response")
+        alert_record.webhook_error = result.get("error") or ""
         alert_record.save()
 
-        if result['success']:
+        if result["success"]:
             log_collector.info(
                 f"Alert notification sent successfully "
                 f"(provider_id={alert_record.provider.id}, "
@@ -818,10 +869,10 @@ def send_alert_notification(alert_record_id: int):
                 f"webhook_status=success)"
             )
         else:
-            error_msg = result.get('error')
+            error_msg = result.get("error")
             log_collector.error(
                 f"Failed to send alert: {error_msg}",
-                exception=result.get('response')
+                exception=result.get("response"),
             )
             logger.error(
                 f"Task send_alert_notification: Failed to send alert "
@@ -832,39 +883,39 @@ def send_alert_notification(alert_record_id: int):
             )
 
         task_result = {
-            'success': result['success'],
-            'alert_record_id': alert_record_id,
-            'error': result.get('error'),
+            "success": result["success"],
+            "alert_record_id": alert_record_id,
+            "error": result.get("error"),
         }
 
         if task_id:
             meta = _send_alert_notification_metadata(log_collector)
-            if result['success']:
+            if result["success"]:
                 TaskTracker.update_task_status(
                     task_id=task_id,
                     status=TaskStatus.SUCCESS,
                     result=task_result,
-                    metadata=meta
+                    metadata=meta,
                 )
             else:
                 TaskTracker.update_task_status(
                     task_id=task_id,
                     status=TaskStatus.FAILURE,
                     result=task_result,
-                    error=result.get('error', ''),
-                    metadata=meta
+                    error=result.get("error", ""),
+                    metadata=meta,
                 )
 
         return task_result
 
     except AlertRecord.DoesNotExist:
-        error_msg = 'AlertRecord not found'
+        error_msg = "AlertRecord not found"
         log_collector.error(f"AlertRecord not found (id={alert_record_id})")
         logger.error(
             f"Task send_alert_notification: AlertRecord not found "
             f"(alert_record_id={alert_record_id})"
         )
-        result = {'success': False, 'error': error_msg}
+        result = {"success": False, "error": error_msg}
 
         if task_id:
             TaskTracker.update_task_status(
@@ -872,7 +923,7 @@ def send_alert_notification(alert_record_id: int):
                 status=TaskStatus.FAILURE,
                 result=result,
                 error=error_msg,
-                metadata=_send_alert_notification_metadata(log_collector)
+                metadata=_send_alert_notification_metadata(log_collector),
             )
 
         return result
@@ -881,23 +932,23 @@ def send_alert_notification(alert_record_id: int):
         error_traceback = traceback.format_exc()
         log_collector.error(
             f"Error sending alert notification: {error_msg}",
-            exception=error_traceback
+            exception=error_traceback,
         )
         logger.error(
             f"Task send_alert_notification: Error sending alert notification "
             f"(alert_record_id={alert_record_id}, error={error_msg})",
-            exc_info=True
+            exc_info=True,
         )
 
         try:
             alert_record = AlertRecord.objects.get(id=alert_record_id)
             alert_record.webhook_status = WEBHOOK_STATUS_FAILED
-            alert_record.webhook_error = error_msg or ''
+            alert_record.webhook_error = error_msg or ""
             alert_record.save()
         except Exception:
             pass
 
-        result = {'success': False, 'error': error_msg}
+        result = {"success": False, "error": error_msg}
 
         if task_id:
             TaskTracker.update_task_status(
@@ -906,7 +957,7 @@ def send_alert_notification(alert_record_id: int):
                 result=result,
                 error=error_msg,
                 traceback=error_traceback,
-                metadata=_send_alert_notification_metadata(log_collector)
+                metadata=_send_alert_notification_metadata(log_collector),
             )
 
         return result

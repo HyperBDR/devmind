@@ -1,6 +1,7 @@
 """
 Provider service for cloud billing.
 """
+
 import logging
 from typing import Any, Dict, Optional
 
@@ -34,127 +35,210 @@ class ProviderService:
             f"Normalizing config for {provider_type}: {sanitized_config}"
         )
         normalized = {}
-        
-        if provider_type == 'aws':
-            api_key = (config_dict.get('AWS_ACCESS_KEY_ID') or 
-                      config_dict.get('aws_access_key_id') or 
-                      config_dict.get('api_key'))
-            api_secret = (config_dict.get('AWS_SECRET_ACCESS_KEY') or 
-                         config_dict.get('aws_secret_access_key') or 
-                         config_dict.get('api_secret'))
-            region = (config_dict.get('AWS_REGION') or 
-                     config_dict.get('aws_region') or 
-                     config_dict.get('region'))
-            
-            if api_key:
-                normalized['api_key'] = api_key
-            if api_secret:
-                normalized['api_secret'] = api_secret
-            if region:
-                normalized['region'] = region
-        elif provider_type in ('huawei', 'huawei-intl'):
-            api_key = (config_dict.get('HUAWEI_ACCESS_KEY_ID') or 
-                      config_dict.get('huawei_access_key_id') or 
-                      config_dict.get('api_key'))
-            api_secret = (config_dict.get('HUAWEI_SECRET_ACCESS_KEY') or 
-                         config_dict.get('huawei_secret_access_key') or 
-                         config_dict.get('api_secret'))
-            region = (config_dict.get('HUAWEI_REGION') or 
-                     config_dict.get('huawei_region') or 
-                     config_dict.get('region'))
-            
-            if api_key:
-                normalized['api_key'] = api_key
-            if api_secret:
-                normalized['api_secret'] = api_secret
-            if region:
-                normalized['region'] = region
-            
-            project_id = (
-                config_dict.get('HUAWEI_PROJECT_ID') or
-                config_dict.get('project_id')
+
+        if provider_type == "aws":
+            api_key = (
+                config_dict.get("AWS_ACCESS_KEY_ID")
+                or config_dict.get("aws_access_key_id")
+                or config_dict.get("api_key")
             )
-            if project_id:
-                normalized['project_id'] = project_id
-            
-            is_intl = (
-                provider_type == 'huawei-intl' and
-                config_dict.get('HUAWEI_IS_INTERNATIONAL')
-            )
-            if is_intl:
-                normalized['is_international'] = True
-        elif provider_type == 'azure':
-            tenant_id = (config_dict.get('AZURE_TENANT_ID') or 
-                        config_dict.get('azure_tenant_id') or 
-                        config_dict.get('tenant_id'))
-            client_id = (config_dict.get('AZURE_CLIENT_ID') or 
-                        config_dict.get('azure_client_id') or 
-                        config_dict.get('client_id'))
-            client_secret = (config_dict.get('AZURE_CLIENT_SECRET') or 
-                           config_dict.get('azure_client_secret') or 
-                           config_dict.get('client_secret'))
-            subscription_id = (config_dict.get('AZURE_SUBSCRIPTION_ID') or 
-                              config_dict.get('azure_subscription_id') or 
-                              config_dict.get('subscription_id'))
-            
-            if tenant_id:
-                normalized['tenant_id'] = tenant_id
-            if client_id:
-                normalized['client_id'] = client_id
-            if client_secret:
-                normalized['client_secret'] = client_secret
-            if subscription_id:
-                normalized['subscription_id'] = subscription_id
-        elif provider_type == 'alibaba':
-            api_key = (config_dict.get('ALIBABA_ACCESS_KEY_ID') or 
-                      config_dict.get('alibaba_access_key_id') or 
-                      config_dict.get('api_key'))
-            api_secret = (config_dict.get('ALIBABA_SECRET_ACCESS_KEY') or 
-                         config_dict.get('alibaba_secret_access_key') or 
-                         config_dict.get('api_secret'))
-            region = (config_dict.get('ALIBABA_REGION') or 
-                     config_dict.get('alibaba_region') or 
-                     config_dict.get('region'))
-            
-            if api_key:
-                normalized['api_key'] = api_key
-            if api_secret:
-                normalized['api_secret'] = api_secret
-            if region:
-                normalized['region'] = region
-        elif provider_type == 'tencentcloud':
-            access_key_id = (
-                config_dict.get('TENCENT_ACCESS_KEY_ID') or
-                config_dict.get('access_key_id')
-            )
-            access_key_secret = (
-                config_dict.get('TENCENT_ACCESS_KEY_SECRET') or
-                config_dict.get('access_key_secret')
-            )
-            app_id = (
-                config_dict.get('TENCENT_APP_ID') or
-                config_dict.get('app_id')
+            api_secret = (
+                config_dict.get("AWS_SECRET_ACCESS_KEY")
+                or config_dict.get("aws_secret_access_key")
+                or config_dict.get("api_secret")
             )
             region = (
-                config_dict.get('TENCENT_REGION') or
-                config_dict.get('region')
+                config_dict.get("AWS_REGION")
+                or config_dict.get("aws_region")
+                or config_dict.get("region")
+            )
+
+            if api_key:
+                normalized["api_key"] = api_key
+            if api_secret:
+                normalized["api_secret"] = api_secret
+            if region:
+                normalized["region"] = region
+        elif provider_type in ("huawei", "huawei-intl"):
+            api_key = (
+                config_dict.get("HUAWEI_ACCESS_KEY_ID")
+                or config_dict.get("huawei_access_key_id")
+                or config_dict.get("api_key")
+            )
+            api_secret = (
+                config_dict.get("HUAWEI_SECRET_ACCESS_KEY")
+                or config_dict.get("huawei_secret_access_key")
+                or config_dict.get("api_secret")
+            )
+            region = (
+                config_dict.get("HUAWEI_REGION")
+                or config_dict.get("huawei_region")
+                or config_dict.get("region")
+            )
+
+            if api_key:
+                normalized["api_key"] = api_key
+            if api_secret:
+                normalized["api_secret"] = api_secret
+            if region:
+                normalized["region"] = region
+
+            project_id = config_dict.get(
+                "HUAWEI_PROJECT_ID"
+            ) or config_dict.get("project_id")
+            if project_id:
+                normalized["project_id"] = project_id
+
+            is_intl = provider_type == "huawei-intl" and config_dict.get(
+                "HUAWEI_IS_INTERNATIONAL"
+            )
+            if is_intl:
+                normalized["is_international"] = True
+        elif provider_type == "azure":
+            tenant_id = (
+                config_dict.get("AZURE_TENANT_ID")
+                or config_dict.get("azure_tenant_id")
+                or config_dict.get("tenant_id")
+            )
+            client_id = (
+                config_dict.get("AZURE_CLIENT_ID")
+                or config_dict.get("azure_client_id")
+                or config_dict.get("client_id")
+            )
+            client_secret = (
+                config_dict.get("AZURE_CLIENT_SECRET")
+                or config_dict.get("azure_client_secret")
+                or config_dict.get("client_secret")
+            )
+            subscription_id = (
+                config_dict.get("AZURE_SUBSCRIPTION_ID")
+                or config_dict.get("azure_subscription_id")
+                or config_dict.get("subscription_id")
+            )
+
+            if tenant_id:
+                normalized["tenant_id"] = tenant_id
+            if client_id:
+                normalized["client_id"] = client_id
+            if client_secret:
+                normalized["client_secret"] = client_secret
+            if subscription_id:
+                normalized["subscription_id"] = subscription_id
+        elif provider_type == "alibaba":
+            api_key = (
+                config_dict.get("ALIBABA_ACCESS_KEY_ID")
+                or config_dict.get("alibaba_access_key_id")
+                or config_dict.get("api_key")
+            )
+            api_secret = (
+                config_dict.get("ALIBABA_SECRET_ACCESS_KEY")
+                or config_dict.get("alibaba_secret_access_key")
+                or config_dict.get("api_secret")
+            )
+            region = (
+                config_dict.get("ALIBABA_REGION")
+                or config_dict.get("alibaba_region")
+                or config_dict.get("region")
+            )
+
+            if api_key:
+                normalized["api_key"] = api_key
+            if api_secret:
+                normalized["api_secret"] = api_secret
+            if region:
+                normalized["region"] = region
+        elif provider_type == "tencentcloud":
+            access_key_id = config_dict.get(
+                "TENCENT_ACCESS_KEY_ID"
+            ) or config_dict.get("access_key_id")
+            access_key_secret = config_dict.get(
+                "TENCENT_ACCESS_KEY_SECRET"
+            ) or config_dict.get("access_key_secret")
+            app_id = config_dict.get("TENCENT_APP_ID") or config_dict.get(
+                "app_id"
+            )
+            region = config_dict.get("TENCENT_REGION") or config_dict.get(
+                "region"
+            )
+            endpoint = config_dict.get("TENCENT_ENDPOINT") or config_dict.get(
+                "endpoint"
+            )
+            timeout = config_dict.get("TENCENT_TIMEOUT") or config_dict.get(
+                "timeout"
+            )
+            max_retries = (
+                config_dict.get("TENCENT_MAX_RETRIES")
+                or config_dict.get("max_retries")
             )
             if access_key_id:
-                normalized['access_key_id'] = access_key_id
+                normalized["access_key_id"] = access_key_id
             if access_key_secret:
-                normalized['access_key_secret'] = access_key_secret
+                normalized["access_key_secret"] = access_key_secret
             if app_id:
-                normalized['app_id'] = app_id
+                normalized["app_id"] = app_id
             if region:
-                normalized['region'] = region
+                normalized["region"] = region
+            if endpoint:
+                normalized["endpoint"] = endpoint
+            if timeout is not None and timeout != "":
+                normalized["timeout"] = int(timeout)
+            if max_retries is not None and max_retries != "":
+                normalized["max_retries"] = int(max_retries)
+        elif provider_type == "volcengine":
+            access_key_id = (
+                config_dict.get("VOLCENGINE_ACCESS_KEY_ID")
+                or config_dict.get("volcengine_access_key_id")
+                or config_dict.get("access_key_id")
+                or config_dict.get("api_key")
+            )
+            access_key_secret = (
+                config_dict.get("VOLCENGINE_SECRET_ACCESS_KEY")
+                or config_dict.get("VOLCENGINE_ACCESS_KEY_SECRET")
+                or config_dict.get("volcengine_secret_access_key")
+                or config_dict.get("volcengine_access_key_secret")
+                or config_dict.get("access_key_secret")
+                or config_dict.get("api_secret")
+            )
+            region = (
+                config_dict.get("VOLCENGINE_REGION")
+                or config_dict.get("volcengine_region")
+                or config_dict.get("region")
+            )
+            endpoint = config_dict.get(
+                "VOLCENGINE_ENDPOINT"
+            ) or config_dict.get("volcengine_endpoint")
+            payer_id = (
+                config_dict.get("VOLCENGINE_PAYER_ID")
+                or config_dict.get("volcengine_payer_id")
+                or config_dict.get("payer_id")
+            )
+            service = config_dict.get("VOLCENGINE_SERVICE") or config_dict.get(
+                "volcengine_service"
+            )
+            version = config_dict.get("VOLCENGINE_VERSION") or config_dict.get(
+                "volcengine_version"
+            )
+            if access_key_id:
+                normalized["api_key"] = access_key_id
+            if access_key_secret:
+                normalized["api_secret"] = access_key_secret
+            if region:
+                normalized["region"] = region
+            if endpoint:
+                normalized["endpoint"] = endpoint
+            if payer_id:
+                normalized["payer_id"] = payer_id
+            if service:
+                normalized["service"] = service
+            if version:
+                normalized["version"] = version
         else:
             # For unknown types, pass through as-is
             normalized = config_dict.copy()
-        
+
         # Remove None and empty string values
         result = {
-            k: v for k, v in normalized.items()
-            if v is not None and v != ''
+            k: v for k, v in normalized.items() if v is not None and v != ""
         }
         sanitized_result = mask_sensitive_config(result)
         logger.debug(
@@ -177,10 +261,8 @@ class ProviderService:
             # Always normalize config field names to ensure consistency
             # This handles both frontend field names (AWS_ACCESS_KEY_ID)
             # and backend field names (api_key)
-            config_dict = self._normalize_config(
-                provider_type, config_dict
-            )
-            
+            config_dict = self._normalize_config(provider_type, config_dict)
+
             provider = ProviderFactory.create_provider(
                 provider_type, config_dict
             )
@@ -196,7 +278,7 @@ class ProviderService:
         self,
         provider_type: str,
         config_dict: Dict[str, Any],
-        period: Optional[str] = None
+        period: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Get billing information for a provider.
@@ -226,9 +308,7 @@ class ProviderService:
             raise
 
     def validate_credentials(
-        self,
-        provider_type: str,
-        config_dict: Dict[str, Any]
+        self, provider_type: str, config_dict: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Validate provider credentials.
@@ -276,33 +356,31 @@ class ProviderService:
                     )
 
             result = {
-                'valid': is_valid,
-                'error_code': error_code if not is_valid else None,
-                'account_id': account_id,
+                "valid": is_valid,
+                "error_code": error_code if not is_valid else None,
+                "account_id": account_id,
             }
             if error_message and not is_valid:
-                result['message'] = error_message
+                result["message"] = error_message
             return result
         except Exception as e:
             error_message = str(e)
             error_code = self._get_error_code(provider_type, error_message)
-            
+
             logger.warning(
                 f"ProviderService.validate_credentials: "
                 f"Failed to validate credentials "
                 f"(provider_type={provider_type}, error={error_message})"
             )
             return {
-                'valid': False,
-                'error_code': error_code,
-                'account_id': '',
-                'message': error_message,
+                "valid": False,
+                "error_code": error_code,
+                "account_id": "",
+                "message": error_message,
             }
 
     def _get_error_code(
-        self,
-        provider_type: str,
-        error_msg: Optional[str]
+        self, provider_type: str, error_msg: Optional[str]
     ) -> str:
         """
         Extract error code from technical error messages.
@@ -315,68 +393,90 @@ class ProviderService:
             Error code that can be used for i18n translation
         """
         if not error_msg:
-            return 'validation_failed'
+            return "validation_failed"
 
         error_lower = error_msg.lower()
 
         # AWS specific errors
-        if provider_type == 'aws':
-            if 'invalidclienttokenid' in error_lower:
-                return 'aws_invalid_access_key_id'
-            elif 'signaturedoesnotmatch' in error_lower:
-                return 'aws_invalid_secret_key'
-            elif 'ssl' in error_lower or 'sslerror' in error_lower:
-                return 'aws_ssl_error'
-            elif 'access key' in error_lower:
-                return 'aws_invalid_credentials'
-            elif 'region' in error_lower:
-                return 'aws_invalid_region'
+        if provider_type == "aws":
+            if "invalidclienttokenid" in error_lower:
+                return "aws_invalid_access_key_id"
+            elif "signaturedoesnotmatch" in error_lower:
+                return "aws_invalid_secret_key"
+            elif "ssl" in error_lower or "sslerror" in error_lower:
+                return "aws_ssl_error"
+            elif "access key" in error_lower:
+                return "aws_invalid_credentials"
+            elif "region" in error_lower:
+                return "aws_invalid_region"
 
         # Huawei specific errors
-        elif provider_type == 'huawei':
-            if 'ssl' in error_lower or 'sslerror' in error_lower:
-                return 'huawei_ssl_error'
-            elif 'access key' in error_lower or 'api_key' in error_lower:
-                return 'huawei_invalid_credentials'
-            elif 'region' in error_lower:
-                return 'huawei_invalid_region'
+        elif provider_type == "huawei":
+            if "ssl" in error_lower or "sslerror" in error_lower:
+                return "huawei_ssl_error"
+            elif "access key" in error_lower or "api_key" in error_lower:
+                return "huawei_invalid_credentials"
+            elif "region" in error_lower:
+                return "huawei_invalid_region"
 
         # Azure specific errors
-        elif provider_type == 'azure':
-            if ('authentication' in error_lower or
-                    'unauthorized' in error_lower):
-                return 'azure_invalid_authentication'
-            elif 'subscription' in error_lower:
-                return 'azure_invalid_subscription'
+        elif provider_type == "azure":
+            if (
+                "authentication" in error_lower
+                or "unauthorized" in error_lower
+            ):
+                return "azure_invalid_authentication"
+            elif "subscription" in error_lower:
+                return "azure_invalid_subscription"
 
         # Alibaba specific errors
-        elif provider_type == 'alibaba':
-            if 'getcalleridentity' in error_lower or 'sts:getcalleridentity' in error_lower:
-                return 'alibaba_need_sts_get_caller_identity'
-            if 'access key' in error_lower:
-                return 'alibaba_invalid_credentials'
-            elif 'region' in error_lower:
-                return 'alibaba_invalid_region'
+        elif provider_type == "alibaba":
+            if (
+                "getcalleridentity" in error_lower
+                or "sts:getcalleridentity" in error_lower
+            ):
+                return "alibaba_need_sts_get_caller_identity"
+            if "access key" in error_lower:
+                return "alibaba_invalid_credentials"
+            elif "region" in error_lower:
+                return "alibaba_invalid_region"
 
         # Tencent Cloud specific errors
-        elif provider_type == 'tencentcloud':
-            if 'auth' in error_lower or 'unauthorized' in error_lower:
-                return 'tencentcloud_invalid_credentials'
-            if 'secret' in error_lower or 'signature' in error_lower:
-                return 'tencentcloud_invalid_secret'
-            if 'cam' in error_lower or 'permission' in error_lower:
-                return 'tencentcloud_no_permission'
+        elif provider_type == "tencentcloud":
+            if "auth" in error_lower or "unauthorized" in error_lower:
+                return "tencentcloud_invalid_credentials"
+            if "secret" in error_lower or "signature" in error_lower:
+                return "tencentcloud_invalid_secret"
+            if "cam" in error_lower or "permission" in error_lower:
+                return "tencentcloud_no_permission"
+
+        # Volcengine specific errors
+        elif provider_type == "volcengine":
+            if "unauthorized" in error_lower or "access denied" in error_lower:
+                return "volcengine_invalid_credentials"
+            if "signature" in error_lower or "authorization" in error_lower:
+                return "volcengine_invalid_secret"
+            if (
+                "rate limit" in error_lower
+                or "throttl" in error_lower
+                or "429" in error_lower
+            ):
+                return "volcengine_rate_limit"
+            if "timeout" in error_lower:
+                return "volcengine_timeout"
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return "volcengine_no_permission"
 
         # Generic errors
-        if 'ssl' in error_lower or 'sslerror' in error_lower:
-            return 'ssl_error'
-        elif 'timeout' in error_lower:
-            return 'timeout_error'
-        elif 'connection' in error_lower or 'network' in error_lower:
-            return 'network_error'
+        if "ssl" in error_lower or "sslerror" in error_lower:
+            return "ssl_error"
+        elif "timeout" in error_lower:
+            return "timeout_error"
+        elif "connection" in error_lower or "network" in error_lower:
+            return "network_error"
 
         # Default error code
-        return 'validation_failed'
+        return "validation_failed"
 
     def get_account_id(
         self, provider_type: str, config_dict: Dict[str, Any]
