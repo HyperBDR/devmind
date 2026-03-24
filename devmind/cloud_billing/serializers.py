@@ -246,11 +246,16 @@ class AlertRecordSerializer(serializers.ModelSerializer):
     provider_name = serializers.CharField(
         source='provider.display_name', read_only=True
     )
+    provider_label = serializers.SerializerMethodField()
+
+    def get_provider_label(self, obj):
+        return obj.provider.get_alert_label()
 
     class Meta:
         model = AlertRecord
         fields = [
-            'id', 'provider', 'provider_name', 'alert_rule',
+            'id', 'provider', 'provider_name', 'provider_label',
+            'alert_rule',
             'current_cost', 'previous_cost', 'increase_cost',
             'increase_percent', 'currency', 'alert_message',
             'webhook_status', 'webhook_response', 'webhook_error',
@@ -266,11 +271,15 @@ class AlertRecordListSerializer(serializers.ModelSerializer):
     provider_name = serializers.CharField(
         source='provider.display_name', read_only=True
     )
+    provider_label = serializers.SerializerMethodField()
+
+    def get_provider_label(self, obj):
+        return obj.provider.get_alert_label()
 
     class Meta:
         model = AlertRecord
         fields = [
-            'id', 'provider', 'provider_name',
+            'id', 'provider', 'provider_name', 'provider_label',
             'current_cost', 'previous_cost', 'increase_cost',
             'increase_percent', 'currency', 'alert_message',
             'webhook_status',

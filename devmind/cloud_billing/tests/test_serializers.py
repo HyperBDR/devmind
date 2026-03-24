@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 
 from rest_framework.exceptions import ValidationError
 
-from cloud_billing.models import CloudProvider, AlertRule
+from cloud_billing.models import CloudProvider, AlertRule, AlertRecord
 from cloud_billing.serializers import (
     CloudProviderSerializer,
     AlertRuleSerializer,
@@ -170,3 +170,38 @@ class TestBillingDataSerializer:
         assert 'provider_type' in data
         assert 'total_cost' in data
         assert 'currency' in data
+
+
+@pytest.mark.django_db
+class TestAlertRecordSerializer:
+    """
+    Tests for AlertRecordSerializer.
+    """
+
+    def test_serialize_alert_record_includes_provider_label(
+        self, cloud_provider, alert_rule
+    ):
+        """
+        Test serializing an alert record exposes the notes-aware label.
+        """
+        cloud_provider.notes = "默认备注"
+        cloud_provider.save(update_fields=["notes"])
+        record = AlertRecord.objects.create(
+            provider=cloud_provider,
+            alert_rule=alert_rule,
+            current_cost=Decimal("100.50"),
+            previous_cost=Decimal("80.00"),
+            increase_cost=Decimal("20.50"),
+            increase_percent=Decimal("25.63"),
+            currency="USD",
+            alert_message="Test alert",
+            webhook_status="pending",
+        )
+
+        from cloud_billing.serializers import AlertRecordSerializer
+
+        serializer = AlertRecordSerializer(record)
+        data = serializer.data
+        assert data["provider_name"] == "Test AWS"
+        assert data["provider_label"] == "Test AWS（默认备注）"
+        assert data["alert_message"] == "Test alert"

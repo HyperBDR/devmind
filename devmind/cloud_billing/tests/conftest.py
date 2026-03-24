@@ -24,9 +24,10 @@ django.setup()
 
 import pytest
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from cloud_billing.models import (
@@ -140,8 +141,9 @@ def billing_data(cloud_provider):
     """
     Create test billing data.
     """
-    current_period = datetime.now().strftime("%Y-%m")
-    current_hour = datetime.now().hour
+    now = timezone.now()
+    current_period = now.strftime("%Y-%m")
+    current_hour = now.hour
     return BillingData.objects.create(
         provider=cloud_provider,
         period=current_period,
@@ -158,11 +160,12 @@ def previous_billing_data(cloud_provider):
     """
     Create previous hour billing data.
     """
-    current_period = datetime.now().strftime("%Y-%m")
-    previous_hour = (datetime.now() - timedelta(hours=1)).hour
+    now = timezone.now()
+    current_period = now.strftime("%Y-%m")
+    previous_hour = (now - timedelta(hours=1)).hour
     if previous_hour < 0:
         previous_hour = 23
-        current_period = (datetime.now() - timedelta(days=1)).strftime("%Y-%m")
+        current_period = (now - timedelta(days=1)).strftime("%Y-%m")
     return BillingData.objects.create(
         provider=cloud_provider,
         period=current_period,

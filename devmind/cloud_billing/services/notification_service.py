@@ -9,7 +9,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from django.utils import translation
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from agentcore_notifier.adapters.django.services.email_service import (
     get_default_email_channel,
@@ -32,8 +32,6 @@ from cloud_billing.constants import (
     FEISHU_TAG_AT,
     FEISHU_TAG_TEXT,
     FEISHU_USER_ID_ALL,
-    LANGUAGE_EN,
-    LANGUAGE_ZH_HANS,
     SOURCE_APP_CLOUD_BILLING,
     SOURCE_TYPE_ALERT,
     WECHAT_MSGTYPE_MARKDOWN,
@@ -68,57 +66,64 @@ class CloudBillingNotificationService:
         Returns:
             Feishu webhook payload dictionary
         """
-        provider_name = alert_record.provider.display_name
-        current_cost = float(alert_record.current_cost)
-        previous_cost = float(alert_record.previous_cost)
-        increase_cost = float(alert_record.increase_cost)
-        increase_percent = float(alert_record.increase_percent)
-        currency = alert_record.currency
-
-        # Map language code to Django translation code
+        provider_label = alert_record.provider.get_alert_label()
         lang_code = 'zh_Hans' if language == 'zh-hans' else 'en'
         with translation.override(lang_code):
-            title = str(_("[Important] Cloud Billing Alert"))
-            
-            # Check if this is a cost threshold alert
-            # (current_cost exceeds threshold) or growth alert
-            alert_rule = alert_record.alert_rule
-            is_cost_threshold = (
-                alert_rule and
-                alert_rule.cost_threshold is not None and
-                current_cost > float(alert_rule.cost_threshold)
-            )
-            
-            if is_cost_threshold:
-                message_template = _(
-                    "%(provider_name)s current total cost "
-                    "%(current_cost).2f %(currency)s exceeds threshold "
-                    "%(threshold).2f %(currency)s\n"
-                    "Previous hour cost: %(previous_cost).2f %(currency)s"
+            title = _("[Important] Cloud Billing Alert")
+            message = (alert_record.alert_message or "").strip()
+            if not message:
+                current_cost = float(alert_record.current_cost)
+                previous_cost = float(alert_record.previous_cost)
+                increase_cost = float(alert_record.increase_cost)
+                increase_percent = float(alert_record.increase_percent)
+                currency = alert_record.currency
+                alert_rule = alert_record.alert_rule
+                is_cost_threshold = (
+                    alert_rule
+                    and alert_rule.cost_threshold is not None
+                    and current_cost > float(alert_rule.cost_threshold)
                 )
-                message = str(message_template % {
-                    'provider_name': provider_name,
-                    'current_cost': current_cost,
-                    'currency': currency,
-                    'threshold': alert_rule.cost_threshold,
-                    'previous_cost': previous_cost,
-                })
-            else:
-                message_template = _(
-                    "%(provider_name)s account billing increased by "
-                    "%(increase_cost).2f %(currency)s in the last hour, "
-                    "growth rate: %(increase_percent).2f%%\n"
-                    "Current cost: %(current_cost).2f %(currency)s\n"
-                    "Previous hour cost: %(previous_cost).2f %(currency)s"
-                )
-                message = str(message_template % {
-                    'provider_name': provider_name,
-                    'increase_cost': increase_cost,
-                    'currency': currency,
-                    'increase_percent': increase_percent,
-                    'current_cost': current_cost,
-                    'previous_cost': previous_cost,
-                })
+
+                if is_cost_threshold:
+                    if previous_cost > 0:
+                        message = _(
+                            "{provider_name} current total cost "
+                            "{current_cost:.2f} {currency} exceeds threshold "
+                            "{threshold:.2f} {currency}\n"
+                            "Previous hour cost: {previous_cost:.2f} {currency}"
+                        ).format(
+                            provider_name=provider_label,
+                            current_cost=current_cost,
+                            currency=currency,
+                            threshold=alert_rule.cost_threshold,
+                            previous_cost=previous_cost,
+                        )
+                    else:
+                        message = _(
+                            "{provider_name} current total cost "
+                            "{current_cost:.2f} {currency} exceeds threshold "
+                            "{threshold:.2f} {currency}"
+                        ).format(
+                            provider_name=provider_label,
+                            current_cost=current_cost,
+                            currency=currency,
+                            threshold=alert_rule.cost_threshold,
+                        )
+                else:
+                    message = _(
+                        "{provider_name} account billing increased by "
+                        "{increase_cost:.2f} {currency} in the last hour, "
+                        "growth rate: {increase_percent:.2f}%\n"
+                        "Current cost: {current_cost:.2f} {currency}\n"
+                        "Previous hour cost: {previous_cost:.2f} {currency}"
+                    ).format(
+                        provider_name=provider_label,
+                        increase_cost=increase_cost,
+                        currency=currency,
+                        increase_percent=increase_percent,
+                        current_cost=current_cost,
+                        previous_cost=previous_cost,
+                    )
 
         payload = {
             "msg_type": FEISHU_MSG_TYPE_POST,
@@ -155,60 +160,68 @@ class CloudBillingNotificationService:
         Returns:
             WeChat webhook payload dictionary
         """
-        provider_name = alert_record.provider.display_name
-        current_cost = float(alert_record.current_cost)
-        previous_cost = float(alert_record.previous_cost)
-        increase_cost = float(alert_record.increase_cost)
-        increase_percent = float(alert_record.increase_percent)
-        currency = alert_record.currency
-
-        # Map language code to Django translation code
+        provider_label = alert_record.provider.get_alert_label()
         lang_code = 'zh_Hans' if language == 'zh-hans' else 'en'
         with translation.override(lang_code):
-            title = str(_("## Cloud Billing Alert\n\n"))
-            
-            # Check if this is a cost threshold alert
-            # (current_cost exceeds threshold) or growth alert
-            alert_rule = alert_record.alert_rule
-            is_cost_threshold = (
-                alert_rule and
-                alert_rule.cost_threshold is not None and
-                current_cost > float(alert_rule.cost_threshold)
+            title = _(
+                "## Cloud Billing Alert\n\n"
             )
-            
-            if is_cost_threshold:
-                content = str(_(
-                    "{title}**{provider_name}** current total cost "
-                    "**{current_cost:.2f} {currency}** exceeds threshold "
-                    "**{threshold:.2f} {currency}**\n\n"
-                    "- Previous hour cost: {previous_cost:.2f} {currency}\n\n"
-                    "<@all>"
-                ).format(
-                    title=title,
-                    provider_name=provider_name,
-                    current_cost=current_cost,
-                    currency=currency,
-                    threshold=alert_rule.cost_threshold,
-                    previous_cost=previous_cost,
-                ))
-            else:
-                content = str(_(
-                    "{title}**{provider_name}** account billing "
-                    "increased by **{increase_cost:.2f} {currency}** "
-                    "in the last hour, growth rate: "
-                    "**{increase_percent:.2f}%**\n\n"
-                    "- Current cost: {current_cost:.2f} {currency}\n"
-                    "- Previous hour cost: {previous_cost:.2f} {currency}\n\n"
-                    "<@all>"
-                ).format(
-                    title=title,
-                    provider_name=provider_name,
-                    increase_cost=increase_cost,
-                    currency=currency,
-                    increase_percent=increase_percent,
-                    current_cost=current_cost,
-                    previous_cost=previous_cost,
-                ))
+            message = (alert_record.alert_message or "").strip()
+            if not message:
+                current_cost = float(alert_record.current_cost)
+                previous_cost = float(alert_record.previous_cost)
+                increase_cost = float(alert_record.increase_cost)
+                increase_percent = float(alert_record.increase_percent)
+                currency = alert_record.currency
+                alert_rule = alert_record.alert_rule
+                is_cost_threshold = (
+                    alert_rule
+                    and alert_rule.cost_threshold is not None
+                    and current_cost > float(alert_rule.cost_threshold)
+                )
+
+                if is_cost_threshold:
+                    if previous_cost > 0:
+                        message = _(
+                            "{provider_name} current total cost "
+                            "**{current_cost:.2f} {currency}** exceeds threshold "
+                            "**{threshold:.2f} {currency}**\n\n"
+                            "- Previous hour cost: {previous_cost:.2f} {currency}"
+                        ).format(
+                            provider_name=provider_label,
+                            current_cost=current_cost,
+                            currency=currency,
+                            threshold=alert_rule.cost_threshold,
+                            previous_cost=previous_cost,
+                        )
+                    else:
+                        message = _(
+                            "{provider_name} current total cost "
+                            "**{current_cost:.2f} {currency}** exceeds threshold "
+                            "**{threshold:.2f} {currency}**"
+                        ).format(
+                            provider_name=provider_label,
+                            current_cost=current_cost,
+                            currency=currency,
+                            threshold=alert_rule.cost_threshold,
+                        )
+                else:
+                    message = _(
+                        "{provider_name} account billing "
+                        "increased by **{increase_cost:.2f} {currency}** "
+                        "in the last hour, growth rate: "
+                        "**{increase_percent:.2f}%**\n\n"
+                        "- Current cost: {current_cost:.2f} {currency}\n"
+                        "- Previous hour cost: {previous_cost:.2f} {currency}"
+                    ).format(
+                        provider_name=provider_label,
+                        increase_cost=increase_cost,
+                        currency=currency,
+                        increase_percent=increase_percent,
+                        current_cost=current_cost,
+                        previous_cost=previous_cost,
+                    )
+            content = f"{title}{message}\n\n<@all>"
 
         payload = {
             "msgtype": WECHAT_MSGTYPE_MARKDOWN,
@@ -226,57 +239,64 @@ class CloudBillingNotificationService:
         Generate plain text subject and body for email from alert record.
         Returns (subject, body).
         """
-        provider_name = alert_record.provider.display_name
-        current_cost = float(alert_record.current_cost)
-        previous_cost = float(alert_record.previous_cost)
-        increase_cost = float(alert_record.increase_cost)
-        increase_percent = float(alert_record.increase_percent)
-        currency = alert_record.currency
+        provider_label = alert_record.provider.get_alert_label()
         lang_code = "zh_Hans" if language == "zh-hans" else "en"
         with translation.override(lang_code):
-            subject = str(_("[Important] Cloud Billing Alert"))
-            alert_rule = alert_record.alert_rule
-            is_cost_threshold = (
-                alert_rule
-                and alert_rule.cost_threshold is not None
-                and current_cost > float(alert_rule.cost_threshold)
-            )
-            if is_cost_threshold:
-                body_template = _(
-                    "%(provider_name)s current total cost "
-                    "%(current_cost).2f %(currency)s exceeds threshold "
-                    "%(threshold).2f %(currency)s\n"
-                    "Previous hour cost: %(previous_cost).2f %(currency)s"
+            subject = _("[Important] Cloud Billing Alert")
+            body = (alert_record.alert_message or "").strip()
+            if not body:
+                current_cost = float(alert_record.current_cost)
+                previous_cost = float(alert_record.previous_cost)
+                increase_cost = float(alert_record.increase_cost)
+                increase_percent = float(alert_record.increase_percent)
+                currency = alert_record.currency
+                alert_rule = alert_record.alert_rule
+                is_cost_threshold = (
+                    alert_rule
+                    and alert_rule.cost_threshold is not None
+                    and current_cost > float(alert_rule.cost_threshold)
                 )
-                body = str(
-                    body_template
-                    % {
-                        "provider_name": provider_name,
-                        "current_cost": current_cost,
-                        "currency": currency,
-                        "threshold": alert_rule.cost_threshold,
-                        "previous_cost": previous_cost,
-                    }
-                )
-            else:
-                body_template = _(
-                    "%(provider_name)s account billing increased by "
-                    "%(increase_cost).2f %(currency)s in the last hour, "
-                    "growth rate: %(increase_percent).2f%%\n"
-                    "Current cost: %(current_cost).2f %(currency)s\n"
-                    "Previous hour cost: %(previous_cost).2f %(currency)s"
-                )
-                body = str(
-                    body_template
-                    % {
-                        "provider_name": provider_name,
-                        "increase_cost": increase_cost,
-                        "currency": currency,
-                        "increase_percent": increase_percent,
-                        "current_cost": current_cost,
-                        "previous_cost": previous_cost,
-                    }
-                )
+
+                if is_cost_threshold:
+                    if previous_cost > 0:
+                        body = _(
+                            "{provider_name} current total cost "
+                            "{current_cost:.2f} {currency} exceeds threshold "
+                            "{threshold:.2f} {currency}\n"
+                            "Previous hour cost: {previous_cost:.2f} {currency}"
+                        ).format(
+                            provider_name=provider_label,
+                            current_cost=current_cost,
+                            currency=currency,
+                            threshold=alert_rule.cost_threshold,
+                            previous_cost=previous_cost,
+                        )
+                    else:
+                        body = _(
+                            "{provider_name} current total cost "
+                            "{current_cost:.2f} {currency} exceeds threshold "
+                            "{threshold:.2f} {currency}"
+                        ).format(
+                            provider_name=provider_label,
+                            current_cost=current_cost,
+                            currency=currency,
+                            threshold=alert_rule.cost_threshold,
+                        )
+                else:
+                    body = _(
+                        "{provider_name} account billing increased by "
+                        "{increase_cost:.2f} {currency} in the last hour, "
+                        "growth rate: {increase_percent:.2f}%\n"
+                        "Current cost: {current_cost:.2f} {currency}\n"
+                        "Previous hour cost: {previous_cost:.2f} {currency}"
+                    ).format(
+                        provider_name=provider_label,
+                        increase_cost=increase_cost,
+                        currency=currency,
+                        increase_percent=increase_percent,
+                        current_cost=current_cost,
+                        previous_cost=previous_cost,
+                    )
         return subject, body
 
     def send_alert(

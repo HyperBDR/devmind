@@ -13,7 +13,7 @@ from celery import current_task
 from django.db import transaction
 from django.utils import translation
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
+from django.utils.translation import gettext as _
 
 from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
@@ -517,51 +517,24 @@ def check_alert_for_provider(
         alerts_created = []
         for current_billing in current_billings:
             account_id = current_billing.account_id or ""
-
-            try:
-                previous_billing = BillingData.objects.get(
-                    provider=provider,
-                    account_id=account_id,
-                    period=previous_period,
-                    hour=previous_hour,
-                )
-            except BillingData.DoesNotExist:
-                logger.info(
-                    f"Task check_alert_for_provider: "
-                    f"No previous billing data found "
-                    f"(provider_id={provider.id}, name={provider.name}, "
-                    f"account_id={account_id}, period={previous_period}, "
-                    f"hour={previous_hour})"
-                )
-                continue
-
             current_cost = Decimal(str(current_billing.total_cost))
-            previous_cost = Decimal(str(previous_billing.total_cost))
-
-            if previous_cost <= 0:
-                logger.info(
-                    f"Task check_alert_for_provider: "
-                    f"Previous cost is zero or negative "
-                    f"(provider_id={provider.id}, name={provider.name}, "
-                    f"account_id={account_id}, "
-                    f"previous_cost={previous_cost}, "
-                    f"period={previous_period}, hour={previous_hour})"
-                )
-                continue
-
-            increase_cost = current_cost - previous_cost
-            increase_percent = (increase_cost / previous_cost) * 100
-
+            previous_billing = None
+            previous_cost = Decimal("0")
+            increase_cost = Decimal("0")
+            increase_percent = Decimal("0")
             should_alert = False
             alert_reason = []
+            cost_threshold_triggered = False
 
-            # Check cost threshold (absolute current cost)
+            # Cost threshold is absolute and should not depend on a previous
+            # billing record. Growth-based rules still need the previous hour.
             if alert_rule.cost_threshold is not None:
                 cost_threshold_decimal = Decimal(
                     str(alert_rule.cost_threshold)
                 )
                 if current_cost > cost_threshold_decimal:
                     should_alert = True
+                    cost_threshold_triggered = True
                     alert_reason.append(
                         f"Current cost {current_cost} exceeds threshold "
                         f"{alert_rule.cost_threshold}"
@@ -575,8 +548,49 @@ def check_alert_for_provider(
                         f"cost_threshold={alert_rule.cost_threshold})"
                     )
 
+            needs_previous_billing = (
+                alert_rule.growth_threshold is not None
+                or alert_rule.growth_amount_threshold is not None
+            )
+            if needs_previous_billing:
+                try:
+                    previous_billing = BillingData.objects.get(
+                        provider=provider,
+                        account_id=account_id,
+                        period=previous_period,
+                        hour=previous_hour,
+                    )
+                except BillingData.DoesNotExist:
+                    logger.info(
+                        f"Task check_alert_for_provider: "
+                        f"No previous billing data found "
+                        f"(provider_id={provider.id}, name={provider.name}, "
+                        f"account_id={account_id}, period={previous_period}, "
+                        f"hour={previous_hour})"
+                    )
+                    if not should_alert:
+                        continue
+
+                if previous_billing is not None:
+                    previous_cost = Decimal(str(previous_billing.total_cost))
+                    if previous_cost <= 0:
+                        logger.info(
+                            f"Task check_alert_for_provider: "
+                            f"Previous cost is zero or negative "
+                            f"(provider_id={provider.id}, name={provider.name}, "
+                            f"account_id={account_id}, "
+                            f"previous_cost={previous_cost}, "
+                            f"period={previous_period}, hour={previous_hour})"
+                        )
+                        if not cost_threshold_triggered:
+                            continue
+
+            if previous_billing is not None and previous_cost > 0:
+                increase_cost = current_cost - previous_cost
+                increase_percent = (increase_cost / previous_cost) * 100
+
             # Check growth threshold
-            if alert_rule.growth_threshold is not None:
+            if alert_rule.growth_threshold is not None and previous_billing:
                 growth_threshold_decimal = Decimal(
                     str(alert_rule.growth_threshold)
                 )
@@ -596,7 +610,7 @@ def check_alert_for_provider(
                     )
 
             # Check growth amount threshold
-            if alert_rule.growth_amount_threshold is not None:
+            if alert_rule.growth_amount_threshold is not None and previous_billing:
                 growth_amount_threshold_decimal = Decimal(
                     str(alert_rule.growth_amount_threshold)
                 )
@@ -643,44 +657,50 @@ def check_alert_for_provider(
             # Map language code to Django translation code
             lang_code = "zh_Hans" if language == "zh-hans" else "en"
             with translation.override(lang_code):
+                provider_label = provider.get_alert_label()
                 if account_id:
-                    account_display = str(
-                        _(" (Account: {account_id})").format(
-                            account_id=account_id
-                        )
-                    )
+                    account_display = _(
+                        " (Account: {account_id})"
+                    ).format(account_id=account_id)
                 else:
                     account_display = ""
 
                 if cost_threshold_triggered:
-                    alert_message = str(
-                        _(
-                            "{provider_name}{account_display} "
-                            "current total cost {current_cost:.2f} "
-                            "{currency} exceeds threshold "
-                            "{threshold:.2f} {currency}"
+                    if previous_cost > 0:
+                        alert_message = _(
+                            "{provider_name}{account_display} current total "
+                            "cost {current_cost:.2f} {currency} exceeds "
+                            "threshold {threshold:.2f} {currency}"
                         ).format(
-                            provider_name=provider.display_name,
+                            provider_name=provider_label,
                             account_display=account_display,
                             current_cost=current_cost,
                             currency=current_billing.currency,
                             threshold=alert_rule.cost_threshold,
                         )
-                    )
-                else:
-                    alert_message = str(
-                        _(
-                            "{provider_name}{account_display} "
-                            "billing increased by {increase_cost:.2f} "
-                            "{currency} in the last hour, "
-                            "growth rate: {increase_percent:.2f}%"
+                    else:
+                        alert_message = _(
+                            "{provider_name}{account_display} current total "
+                            "cost {current_cost:.2f} {currency} exceeds "
+                            "threshold {threshold:.2f} {currency}"
                         ).format(
-                            provider_name=provider.display_name,
+                            provider_name=provider_label,
                             account_display=account_display,
-                            increase_cost=increase_cost,
+                            current_cost=current_cost,
                             currency=current_billing.currency,
-                            increase_percent=increase_percent,
+                            threshold=alert_rule.cost_threshold,
                         )
+                else:
+                    alert_message = _(
+                        "{provider_name}{account_display} billing "
+                        "increased by {increase_cost:.2f} {currency} in the "
+                        "last hour, growth rate: {increase_percent:.2f}%"
+                    ).format(
+                        provider_name=provider_label,
+                        account_display=account_display,
+                        increase_cost=increase_cost,
+                        currency=current_billing.currency,
+                        increase_percent=increase_percent,
                     )
 
             # Always create alert record, even if webhook is not configured
