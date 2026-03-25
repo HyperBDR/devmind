@@ -97,6 +97,7 @@ class TestAlertRuleSerializer:
         assert 'provider_name' in data
         assert 'cost_threshold' in data
         assert 'growth_threshold' in data
+        assert 'balance_threshold' in data
 
     def test_deserialize_create_alert_rule(
         self,
@@ -110,6 +111,7 @@ class TestAlertRuleSerializer:
             'provider': cloud_provider.id,
             'cost_threshold': '20.00',
             'growth_threshold': '10.00',
+            'balance_threshold': '100.00',
             'is_active': True
         }
         serializer = AlertRuleSerializer(data=data)
@@ -117,6 +119,7 @@ class TestAlertRuleSerializer:
         rule = serializer.save(created_by=user, updated_by=user)
         assert rule.provider == cloud_provider
         assert rule.cost_threshold == Decimal('20.00')
+        assert rule.balance_threshold == Decimal('100.00')
 
     def test_validate_at_least_one_threshold(self, cloud_provider):
         """
@@ -139,7 +142,8 @@ class TestAlertRuleSerializer:
         """
         data = {
             'cost_threshold': None,
-            'growth_threshold': '15.00'
+            'growth_threshold': '15.00',
+            'balance_threshold': None,
         }
         serializer = AlertRuleSerializer(
             alert_rule,
@@ -169,4 +173,5 @@ class TestBillingDataSerializer:
         assert 'provider_name' in data
         assert 'provider_type' in data
         assert 'total_cost' in data
+        assert 'balance' in data
         assert 'currency' in data

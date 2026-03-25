@@ -11,9 +11,7 @@ from typing import Any, Dict, Optional
 from celery import shared_task
 from celery import current_task
 from django.db import transaction
-from django.utils import translation
 from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
 
 from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
@@ -188,9 +186,33 @@ def collect_billing_data(
 
                 billing_data = billing_info.get("data", {})
                 total_cost = Decimal(str(billing_data.get("total_cost", 0)))
+                balance_raw = billing_data.get("balance")
+                balance = (
+                    Decimal(str(balance_raw))
+                    if balance_raw is not None
+                    else None
+                )
+                balance_debug = billing_data.get("balance_debug") or {}
                 currency = billing_data.get("currency", "USD")
                 service_costs = billing_data.get("service_costs", {})
                 account_id = billing_data.get("account_id", "")
+
+                if provider.provider_type in (
+                    "alibaba",
+                    "aws",
+                    "azure",
+                    "huawei",
+                    "huawei-intl",
+                    "tencentcloud",
+                    "volcengine",
+                    "baidu",
+                    "zhipu",
+                ):
+                    log_collector.warning(
+                        f"{provider.provider_type.upper()} balance debug "
+                        f"(provider_id={provider.id}, account_id={account_id}, "
+                        f"balance={balance}, balance_debug={balance_debug})"
+                    )
 
                 # Calculate hourly incremental cost
                 # Rule: If this month has no data yet, hourly_cost = total_cost
@@ -242,6 +264,7 @@ def collect_billing_data(
                             hour=current_hour,
                             defaults={
                                 "total_cost": total_cost,
+                                "balance": balance,
                                 "hourly_cost": hourly_cost,
                                 "currency": currency,
                                 "service_costs": service_costs,
@@ -252,6 +275,7 @@ def collect_billing_data(
                     if not created:
                         # Update existing billing record with latest data
                         billing_record.total_cost = total_cost
+                        billing_record.balance = balance
                         billing_record.hourly_cost = hourly_cost
                         billing_record.currency = currency
                         billing_record.service_costs = service_costs
@@ -266,6 +290,7 @@ def collect_billing_data(
                         billing_record.save(
                             update_fields=[
                                 "total_cost",
+                                "balance",
                                 "hourly_cost",
                                 "currency",
                                 "service_costs",
@@ -278,6 +303,7 @@ def collect_billing_data(
                             f"billing data (provider_id={provider.id}, "
                             f"name={provider.name}, period={current_period}, "
                             f"hour={current_hour}, total_cost={total_cost}, "
+                            f"balance={balance}, "
                             f"hourly_cost={hourly_cost}, currency={currency}, "
                             f"account_id={account_id})"
                         )
@@ -289,6 +315,7 @@ def collect_billing_data(
                             f"data (provider_id={provider.id}, "
                             f"name={provider.name}, period={current_period}, "
                             f"hour={current_hour}, total_cost={total_cost}, "
+                            f"balance={balance}, "
                             f"hourly_cost={hourly_cost}, currency={currency}, "
                             f"account_id={account_id})"
                         )
@@ -299,6 +326,7 @@ def collect_billing_data(
                     {
                         "provider": provider.name,
                         "total_cost": float(total_cost),
+                        "balance": float(balance) if balance is not None else None,
                         "currency": currency,
                     }
                 )
@@ -518,6 +546,14 @@ def check_alert_for_provider(
         for current_billing in current_billings:
             account_id = current_billing.account_id or ""
 
+            current_cost = Decimal(str(current_billing.total_cost))
+            current_balance = (
+                Decimal(str(current_billing.balance))
+                if current_billing.balance is not None
+                else None
+            )
+            previous_billing = None
+            previous_cost = Decimal("0")
             try:
                 previous_billing = BillingData.objects.get(
                     provider=provider,
@@ -525,6 +561,7 @@ def check_alert_for_provider(
                     period=previous_period,
                     hour=previous_hour,
                 )
+                previous_cost = Decimal(str(previous_billing.total_cost))
             except BillingData.DoesNotExist:
                 logger.info(
                     f"Task check_alert_for_provider: "
@@ -533,12 +570,8 @@ def check_alert_for_provider(
                     f"account_id={account_id}, period={previous_period}, "
                     f"hour={previous_hour})"
                 )
-                continue
 
-            current_cost = Decimal(str(current_billing.total_cost))
-            previous_cost = Decimal(str(previous_billing.total_cost))
-
-            if previous_cost <= 0:
+            if previous_cost <= 0 and current_balance is None:
                 logger.info(
                     f"Task check_alert_for_provider: "
                     f"Previous cost is zero or negative "
@@ -550,7 +583,9 @@ def check_alert_for_provider(
                 continue
 
             increase_cost = current_cost - previous_cost
-            increase_percent = (increase_cost / previous_cost) * 100
+            increase_percent = Decimal("0")
+            if previous_cost > 0:
+                increase_percent = (increase_cost / previous_cost) * 100
 
             should_alert = False
             alert_reason = []
@@ -616,6 +651,28 @@ def check_alert_for_provider(
                         f"{alert_rule.growth_amount_threshold})"
                     )
 
+            if (
+                alert_rule.balance_threshold is not None
+                and current_balance is not None
+            ):
+                balance_threshold_decimal = Decimal(
+                    str(alert_rule.balance_threshold)
+                )
+                if current_balance < balance_threshold_decimal:
+                    should_alert = True
+                    alert_reason.append(
+                        f"Current balance {current_balance:.2f} is below "
+                        f"threshold {alert_rule.balance_threshold}"
+                    )
+                    logger.info(
+                        f"Task check_alert_for_provider: "
+                        f"Balance threshold triggered "
+                        f"(provider_id={provider.id}, name={provider.name}, "
+                        f"account_id={account_id}, "
+                        f"current_balance={current_balance:.2f}, "
+                        f"balance_threshold={alert_rule.balance_threshold})"
+                    )
+
             if not should_alert:
                 logger.info(
                     f"Task check_alert_for_provider: No alert triggered "
@@ -627,61 +684,70 @@ def check_alert_for_provider(
                 )
                 continue
 
-            language = "zh-hans"
-            try:
-                channel, _config = get_default_webhook_channel()
-                if channel and isinstance(channel.config, dict):
-                    language = channel.config.get("language", "zh-hans")
-            except Exception:
-                pass
-
             # Generate alert message based on trigger reason
             cost_threshold_triggered = any(
                 "Current cost" in reason for reason in alert_reason
             )
+            balance_threshold_triggered = any(
+                "Current balance" in reason for reason in alert_reason
+            )
+            alert_lines = [f"云平台：{provider.display_name}"]
+            if account_id:
+                alert_lines.append(f"账号：{account_id}")
 
-            # Map language code to Django translation code
-            lang_code = "zh_Hans" if language == "zh-hans" else "en"
-            with translation.override(lang_code):
-                if account_id:
-                    account_display = str(
-                        _(" (Account: {account_id})").format(
-                            account_id=account_id
-                        )
+            if balance_threshold_triggered:
+                alert_lines.insert(0, "告警类型：余额阈值告警")
+                alert_lines.append(
+                    f"当前余额：{current_balance:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append(
+                    f"告警阈值：{alert_rule.balance_threshold:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append("告警说明：账户剩余余额低于设定阈值")
+            elif cost_threshold_triggered:
+                alert_lines.insert(0, "告警类型：费用阈值告警")
+                alert_lines.append(
+                    f"当前总费用：{current_cost:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append(
+                    f"告警阈值：{alert_rule.cost_threshold:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append(
+                    f"上一小时费用：{previous_cost:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append("告警说明：当前总费用已超过设定阈值")
+            else:
+                alert_lines.insert(0, "告警类型：费用增长告警")
+                alert_lines.append(
+                    f"当前总费用：{current_cost:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append(
+                    f"上一小时费用：{previous_cost:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append(
+                    f"增长金额：{increase_cost:.2f} "
+                    f"{current_billing.currency}"
+                )
+                alert_lines.append(f"增长比例：{increase_percent:.2f}%")
+                if alert_rule.growth_threshold is not None:
+                    alert_lines.append(
+                        f"百分比阈值：{alert_rule.growth_threshold:.2f}%"
                     )
-                else:
-                    account_display = ""
+                if alert_rule.growth_amount_threshold is not None:
+                    alert_lines.append(
+                        f"金额阈值：{alert_rule.growth_amount_threshold:.2f} "
+                        f"{current_billing.currency}"
+                    )
+                alert_lines.append("告警说明：费用增长超过设定阈值")
 
-                if cost_threshold_triggered:
-                    alert_message = str(
-                        _(
-                            "{provider_name}{account_display} "
-                            "current total cost {current_cost:.2f} "
-                            "{currency} exceeds threshold "
-                            "{threshold:.2f} {currency}"
-                        ).format(
-                            provider_name=provider.display_name,
-                            account_display=account_display,
-                            current_cost=current_cost,
-                            currency=current_billing.currency,
-                            threshold=alert_rule.cost_threshold,
-                        )
-                    )
-                else:
-                    alert_message = str(
-                        _(
-                            "{provider_name}{account_display} "
-                            "billing increased by {increase_cost:.2f} "
-                            "{currency} in the last hour, "
-                            "growth rate: {increase_percent:.2f}%"
-                        ).format(
-                            provider_name=provider.display_name,
-                            account_display=account_display,
-                            increase_cost=increase_cost,
-                            currency=current_billing.currency,
-                            increase_percent=increase_percent,
-                        )
-                    )
+            alert_message = "\n".join(alert_lines)
 
             # Always create alert record, even if webhook is not configured
             alert_record = AlertRecord.objects.create(
@@ -692,6 +758,8 @@ def check_alert_for_provider(
                 increase_cost=increase_cost,
                 increase_percent=increase_percent,
                 currency=current_billing.currency,
+                current_balance=current_balance,
+                balance_threshold=alert_rule.balance_threshold,
                 alert_message=alert_message,
                 webhook_status=WEBHOOK_STATUS_PENDING,
             )
@@ -707,6 +775,7 @@ def check_alert_for_provider(
                 f"current_cost={current_cost}, previous_cost={previous_cost}, "
                 f"increase_cost={increase_cost}, "
                 f"increase_percent={increase_percent:.2f}, "
+                f"current_balance={current_balance}, "
                 f"currency={current_billing.currency}, "
                 f"reasons={', '.join(alert_reason)})"
             )

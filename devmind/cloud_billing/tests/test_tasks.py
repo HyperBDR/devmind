@@ -128,6 +128,37 @@ class TestCheckAlertForProvider:
             "alerts_created", True
         )
 
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    def test_balance_threshold_triggers_alert(
+        self,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+        previous_billing_data,
+    ):
+        """
+        Balance threshold alerts should trigger when current balance drops
+        below the configured threshold.
+        """
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            balance_threshold=Decimal("550.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        record = AlertRecord.objects.latest("id")
+        assert record.current_balance == Decimal("520.00")
+        assert record.balance_threshold == Decimal("550.00")
+        assert "remaining balance" in record.alert_message.lower()
+        mock_send_alert.assert_called_once_with(record.id)
+
     def test_skipped_when_lock_held(self, cloud_provider):
         """
         When prevent_duplicate_task lock is held for same provider_id,

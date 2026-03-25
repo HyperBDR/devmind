@@ -94,6 +94,7 @@ class HuaweiIntlCloud(BaseCloudProvider):
         """Initialize Huawei Cloud International provider."""
         super().__init__(config)
         self._client = None
+        self._last_balance_debug = {}
         self.name = "huawei-intl"
         logger.info(
             f"Initialized Huawei Cloud International provider: "
@@ -134,6 +135,18 @@ class HuaweiIntlCloud(BaseCloudProvider):
 
         return period
 
+    def _resolve_sdk_member(self, names: List[str]) -> Tuple[Any, str]:
+        """Resolve the first available SDK attribute from candidate names."""
+        for name in names:
+            member = getattr(model, name, None)
+            if member is not None:
+                return member, name
+        raise ImportError(
+            "None of the SDK members were found in "
+            "huaweicloudsdkbssintl.v2.model: "
+            + ", ".join(names)
+        )
+
     def _query_billing_api(self, period: str) -> Any:
         """Query the Huawei International billing API."""
         logger.debug(
@@ -141,18 +154,31 @@ class HuaweiIntlCloud(BaseCloudProvider):
             f"region={self.config.region}, period={period}"
         )
 
-        # Import request class dynamically to handle different SDK versions
-        request_class = getattr(model, 'ListMonthlyExpendituresRequest')
-        if request_class is None:
-            raise ImportError(
-                "ListMonthlyExpendituresRequest not found in "
-                "huaweicloudsdkbssintl.v2.model"
-            )
-
         try:
+            request_class, request_class_name = self._resolve_sdk_member([
+                "ShowCustomerMonthlySumRequest",
+                "ListMonthlyExpendituresRequest",
+            ])
             request = request_class()
-            request.cycle = period
-            response = self.client.list_monthly_expenditures(request)
+            if hasattr(request, "bill_cycle"):
+                request.bill_cycle = period
+            elif hasattr(request, "cycle"):
+                request.cycle = period
+            else:
+                raise AttributeError(
+                    f"Request class {request_class_name} has no supported "
+                    "billing cycle field"
+                )
+
+            if hasattr(self.client, "show_customer_monthly_sum"):
+                response = self.client.show_customer_monthly_sum(request)
+            elif hasattr(self.client, "list_monthly_expenditures"):
+                response = self.client.list_monthly_expenditures(request)
+            else:
+                raise AttributeError(
+                    "Huawei International client has no supported billing "
+                    "summary method"
+                )
 
             if not hasattr(response, 'bill_sums'):
                 raise ValueError(
@@ -173,6 +199,14 @@ class HuaweiIntlCloud(BaseCloudProvider):
                 f"[{error_code}]: {error_msg}"
             )
             raise
+
+    def _query_balance_api(self) -> Any:
+        """Query the Huawei International balance API."""
+        request_class, _ = self._resolve_sdk_member([
+            "ShowCustomerAccountBalancesRequest",
+        ])
+        request = request_class()
+        return self.client.show_customer_account_balances(request)
 
     def _calculate_total_cost(
         self, response: Any
@@ -222,6 +256,63 @@ class HuaweiIntlCloud(BaseCloudProvider):
         )
         return total_cost, currency, service_costs, item_details
 
+    def _calculate_balance(
+        self, response: Any
+    ) -> Tuple[Optional[float], Dict[str, Any]]:
+        """Calculate credit balance from Huawei International response."""
+        account_balances = getattr(response, "account_balances", None) or []
+        selected_balance = None
+        currency = getattr(response, "currency", "USD")
+        measure_id = getattr(response, "measure_id", 1)
+        debt_amount = getattr(response, "debt_amount", None)
+        debug_items: List[Dict[str, Any]] = []
+
+        for account in account_balances:
+            account_type = getattr(account, "account_type", None)
+            amount = getattr(account, "amount", None)
+            account_currency = getattr(account, "currency", None) or currency
+            account_measure_id = getattr(account, "measure_id", measure_id)
+            converted_amount = None
+            if amount is not None:
+                converted_amount = self._convert_amount(
+                    float(amount), account_measure_id
+                )
+            debug_items.append({
+                "account_id": getattr(account, "account_id", ""),
+                "account_type": account_type,
+                "amount": amount,
+                "converted_amount": converted_amount,
+                "currency": account_currency,
+                "designated_amount": getattr(
+                    account, "designated_amount", None
+                ),
+                "credit_amount": getattr(account, "credit_amount", None),
+                "measure_id": account_measure_id,
+            })
+            if account_type == 2:
+                credit_amount = getattr(account, "credit_amount", None)
+                if credit_amount is not None:
+                    selected_balance = self._convert_amount(
+                        float(credit_amount), account_measure_id
+                    )
+                elif amount is not None:
+                    selected_balance = converted_amount
+                currency = account_currency
+                break
+
+        return selected_balance, {
+            "status": "success",
+            "currency": currency,
+            "measure_id": measure_id,
+            "debt_amount": (
+                self._convert_amount(float(debt_amount), measure_id)
+                if debt_amount is not None else None
+            ),
+            "selected_account_type": 2 if selected_balance is not None else None,
+            "balance_type": "credit_amount",
+            "account_balances": debug_items,
+        }
+
     def get_billing_info(
         self, period: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -232,10 +323,38 @@ class HuaweiIntlCloud(BaseCloudProvider):
             total_cost, currency, service_costs, item_details = (
                 self._calculate_total_cost(response)
             )
+            balance = None
+            try:
+                balance_response = self._query_balance_api()
+                balance, balance_debug = self._calculate_balance(
+                    balance_response
+                )
+                self._last_balance_debug = balance_debug
+            except exceptions.ClientRequestException as e:
+                self._last_balance_debug = {
+                    "status": "client_error",
+                    "error_code": getattr(e, "error_code", "Unknown"),
+                    "error_msg": getattr(e, "error_msg", str(e)),
+                }
+                logger.warning(
+                    "Huawei International balance lookup failed [%s]: %s",
+                    getattr(e, "error_code", "Unknown"),
+                    getattr(e, "error_msg", str(e)),
+                )
+            except Exception as e:
+                self._last_balance_debug = {
+                    "status": "unexpected_error",
+                    "error_msg": str(e),
+                }
+                logger.warning(
+                    "Huawei International balance lookup failed: %s", e
+                )
             account_id = self.get_account_id()
 
             data = {
                 "total_cost": total_cost,
+                "balance": balance,
+                "balance_debug": self._last_balance_debug,
                 "currency": currency,
                 "account_id": account_id,
                 "service_costs": service_costs,

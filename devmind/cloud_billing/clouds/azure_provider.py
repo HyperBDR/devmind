@@ -6,9 +6,11 @@ This module provides an implementation of the Cloud interface for Azure.
 import logging
 import os
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
 
+import requests
 from azure.identity import ClientSecretCredential
 from azure.mgmt.consumption import ConsumptionManagementClient
 from azure.mgmt.resource import ResourceManagementClient
@@ -43,6 +45,7 @@ class AzureConfig(BaseCloudConfig):
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     subscription_id: Optional[str] = None
+    billing_account_id: Optional[str] = None
     timeout: Optional[int] = None
     max_retries: Optional[int] = None
 
@@ -56,6 +59,8 @@ class AzureConfig(BaseCloudConfig):
             self.client_secret = os.getenv("AZURE_CLIENT_SECRET")
         if self.subscription_id is None:
             self.subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID")
+        if self.billing_account_id is None:
+            self.billing_account_id = os.getenv("AZURE_BILLING_ACCOUNT_ID")
         if self.timeout is None:
             self.timeout = int(os.getenv("AZURE_TIMEOUT", "30"))
         if self.max_retries is None:
@@ -116,6 +121,7 @@ class AzureCloud(BaseCloudProvider):
         self._credential = None
         self._consumption_client = None
         self._resource_client = None
+        self._last_balance_debug = {}
         self.name = "azure"
         sanitized_config = mask_sensitive_config_object(config)
         logger.info(
@@ -153,6 +159,209 @@ class AzureCloud(BaseCloudProvider):
                 subscription_id=self.config.subscription_id,
             )
         return self._resource_client
+
+    def _get_management_headers(self) -> Dict[str, str]:
+        """Build ARM headers using the current credential."""
+        token = self.credential.get_token(
+            "https://management.azure.com/.default"
+        )
+        return {
+            "Authorization": f"Bearer {token.token}",
+            "Content-Type": "application/json",
+        }
+
+    def _management_get(
+        self, path: str, api_version: str
+    ) -> Dict[str, Any]:
+        """Call an Azure ARM GET endpoint."""
+        url = f"https://management.azure.com{path}"
+        response = requests.get(
+            url,
+            headers=self._get_management_headers(),
+            params={"api-version": api_version},
+            timeout=self.config.timeout or 30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _parse_amount_value(self, raw_value: Any) -> Optional[float]:
+        """Parse Azure amount values safely."""
+        if raw_value is None:
+            return None
+
+        value = raw_value
+        if isinstance(raw_value, dict):
+            value = raw_value.get("value")
+
+        if isinstance(value, str):
+            value = value.replace(",", "").strip()
+
+        try:
+            return float(Decimal(str(value)))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    def _extract_available_balance(
+        self, payload: Dict[str, Any]
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """Extract available balance from Azure Billing API payload."""
+        properties = payload.get("properties") or {}
+        amount = properties.get("amount") or {}
+        balance = self._parse_amount_value(amount)
+        currency = amount.get("currency") if isinstance(amount, dict) else None
+        return balance, currency
+
+    def _extract_consumption_balance(
+        self, payload: Dict[str, Any]
+    ) -> Tuple[Optional[float], Optional[str], Dict[str, Any]]:
+        """Extract balance from Azure Consumption API payload."""
+        properties = payload.get("properties") or {}
+        amount = (
+            properties.get("amount")
+            or properties.get("endingBalance")
+            or properties.get("currentBalance")
+        )
+        balance = self._parse_amount_value(amount)
+        currency = None
+        if isinstance(amount, dict):
+            currency = amount.get("currency")
+        currency = currency or properties.get("currency")
+        details = {
+            "ending_balance": properties.get("endingBalance"),
+            "current_balance": properties.get("currentBalance"),
+            "beginning_balance": properties.get("beginningBalance"),
+            "total_usage": properties.get("totalUsage"),
+        }
+        return balance, currency, details
+
+    def _resolve_billing_account_id(self) -> Optional[str]:
+        """Resolve the Azure billing account id.
+
+        Uses explicit config when provided, otherwise picks the first
+        billing account visible to the current principal.
+        """
+        if self.config.billing_account_id:
+            return self.config.billing_account_id
+
+        payload = self._management_get(
+            "/providers/Microsoft.Billing/billingAccounts",
+            "2024-04-01",
+        )
+        accounts = payload.get("value") or []
+        if not accounts:
+            return None
+
+        first = accounts[0]
+        return first.get("name") or first.get("id", "").split("/")[-1]
+
+    def get_balance(self) -> Optional[float]:
+        """Get Azure balance when the billing account supports it."""
+        attempts = []
+        try:
+            billing_account_id = self._resolve_billing_account_id()
+            if not billing_account_id:
+                self._last_balance_debug = {
+                    "status": "billing_account_not_found",
+                }
+                return None
+
+            try:
+                available_payload = self._management_get(
+                    "/providers/Microsoft.Billing/billingAccounts/"
+                    f"{billing_account_id}/availableBalance/default",
+                    "2024-04-01",
+                )
+                available_balance, currency = self._extract_available_balance(
+                    available_payload
+                )
+                attempts.append(
+                    {
+                        "source": "billing.available_balance",
+                        "status": "success",
+                        "payload_keys": list(available_payload.keys()),
+                        "amount": (
+                            (available_payload.get("properties") or {}).get(
+                                "amount"
+                            )
+                        ),
+                    }
+                )
+                if available_balance is not None:
+                    self._last_balance_debug = {
+                        "status": "success",
+                        "source": "billing.available_balance",
+                        "billing_account_id": billing_account_id,
+                        "currency": currency or "USD",
+                        "balance": available_balance,
+                        "attempts": attempts,
+                    }
+                    return available_balance
+            except requests.HTTPError as exc:
+                attempts.append(
+                    {
+                        "source": "billing.available_balance",
+                        "status": "http_error",
+                        "status_code": (
+                            exc.response.status_code
+                            if exc.response is not None
+                            else None
+                        ),
+                        "error": (
+                            exc.response.text
+                            if exc.response is not None
+                            else str(exc)
+                        ),
+                    }
+                )
+
+            consumption_payload = self._management_get(
+                "/providers/Microsoft.Billing/billingAccounts/"
+                f"{billing_account_id}/providers/Microsoft.Consumption/"
+                "balances",
+                "2024-08-01",
+            )
+            balance, currency, details = self._extract_consumption_balance(
+                consumption_payload
+            )
+            attempts.append(
+                {
+                    "source": "consumption.balances",
+                    "status": "success",
+                    "payload_keys": list(consumption_payload.keys()),
+                    **details,
+                }
+            )
+            self._last_balance_debug = {
+                "status": (
+                    "success" if balance is not None else "empty_balance"
+                ),
+                "source": "consumption.balances",
+                "billing_account_id": billing_account_id,
+                "currency": str(currency or "USD").strip(),
+                "balance": balance,
+                "attempts": attempts,
+                **details,
+            }
+            return balance
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response else None
+            body = exc.response.text if exc.response is not None else str(exc)
+            self._last_balance_debug = {
+                "status": "http_error",
+                "status_code": status_code,
+                "error": body,
+                "attempts": attempts,
+            }
+            logger.warning("Azure balance lookup failed: %s", body)
+            return None
+        except Exception as exc:
+            self._last_balance_debug = {
+                "status": "unexpected_error",
+                "error": str(exc),
+                "attempts": attempts,
+            }
+            logger.warning("Azure balance lookup failed: %s", exc)
+            return None
 
     def _validate_period(self, period: Optional[str]) -> str:
         """Validate and return the billing period.
@@ -237,6 +446,13 @@ class AzureCloud(BaseCloudProvider):
         Returns:
             Tuple[float, str]: Total cost and currency
         """
+        if not usage_details:
+            logger.info(
+                "Azure usage details are empty for subscription %s",
+                self.config.subscription_id,
+            )
+            return 0.0, "USD"
+
         total_cost = sum(
             float(
                 getattr(
@@ -287,12 +503,15 @@ class AzureCloud(BaseCloudProvider):
 
             usage_details = self._query_billing_api(start_date, end_date)
             total_cost, currency = self._calculate_total_cost(usage_details)
+            balance = self.get_balance()
             account_id = self.get_account_id()
 
             return {
                 "status": "success",
                 "data": {
                     "total_cost": total_cost,
+                    "balance": balance,
+                    "balance_debug": self._last_balance_debug,
                     "currency": currency,
                     "account_id": account_id,
                 },
@@ -328,8 +547,13 @@ class AzureCloud(BaseCloudProvider):
             Exception: If the validation fails due to network or other issues
         """
         try:
-            # Try to get subscription details to validate credentials
-            self.resource_client.subscriptions.get(self.config.subscription_id)
+            # Validate credentials by querying the subscription directly
+            # via ARM. This avoids relying on SDK-specific helper surfaces
+            # that vary across azure-mgmt-resource versions.
+            self._management_get(
+                f"/subscriptions/{self.config.subscription_id}",
+                "2020-01-01",
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to validate credentials: {str(e)}")

@@ -8,6 +8,22 @@ from rest_framework import serializers
 from .models import AlertRecord, AlertRule, BillingData, CloudProvider
 
 
+def get_balance_support_info(provider):
+    """Return whether balance collection is supported for the provider."""
+    provider_type = getattr(provider, "provider_type", "")
+    config = getattr(provider, "config", {}) or {}
+    region = str(config.get("region") or config.get("AWS_REGION") or "").strip()
+    if provider_type == "aws" and region in {"cn-north-1", "cn-northwest-1"}:
+        return {
+            "supported": False,
+            "note": "暂不支持",
+        }
+    return {
+        "supported": True,
+        "note": "",
+    }
+
+
 class CloudProviderSerializer(serializers.ModelSerializer):
     """
     Serializer for CloudProvider model.
@@ -132,13 +148,24 @@ class BillingDataSerializer(serializers.ModelSerializer):
     provider_type = serializers.CharField(
         source='provider.provider_type', read_only=True
     )
+    balance_supported = serializers.SerializerMethodField()
+    balance_note = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_balance_supported(obj):
+        return get_balance_support_info(obj.provider)["supported"]
+
+    @staticmethod
+    def get_balance_note(obj):
+        return get_balance_support_info(obj.provider)["note"]
 
     class Meta:
         model = BillingData
         fields = [
             'id', 'provider', 'provider_name', 'provider_type',
-            'period', 'hour', 'total_cost', 'hourly_cost', 'currency',
+            'period', 'hour', 'total_cost', 'balance', 'hourly_cost', 'currency',
             'service_costs', 'account_id', 'collected_at',
+            'balance_supported', 'balance_note',
         ]
         read_only_fields = ['id', 'collected_at']
 
@@ -153,13 +180,23 @@ class BillingDataListSerializer(serializers.ModelSerializer):
     provider_type = serializers.CharField(
         source='provider.provider_type', read_only=True
     )
+    balance_supported = serializers.SerializerMethodField()
+    balance_note = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_balance_supported(obj):
+        return get_balance_support_info(obj.provider)["supported"]
+
+    @staticmethod
+    def get_balance_note(obj):
+        return get_balance_support_info(obj.provider)["note"]
 
     class Meta:
         model = BillingData
         fields = [
             'id', 'provider', 'provider_name', 'provider_type',
-            'period', 'hour', 'total_cost', 'hourly_cost', 'currency',
-            'collected_at', 'account_id',
+            'period', 'hour', 'total_cost', 'balance', 'hourly_cost', 'currency',
+            'collected_at', 'account_id', 'balance_supported', 'balance_note',
         ]
 
 
@@ -186,7 +223,7 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name',
             'cost_threshold', 'growth_threshold',
-            'growth_amount_threshold', 'is_active',
+            'growth_amount_threshold', 'balance_threshold', 'is_active',
             'created_at', 'updated_at',
             'created_by', 'created_by_username',
             'updated_by', 'updated_by_username',
@@ -201,22 +238,30 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         Validate that at least one threshold is set.
         """
         cost_threshold = attrs.get('cost_threshold')
-        if not cost_threshold and self.instance:
+        if cost_threshold is None and self.instance:
             cost_threshold = self.instance.cost_threshold
 
         growth_threshold = attrs.get('growth_threshold')
-        if not growth_threshold and self.instance:
+        if growth_threshold is None and self.instance:
             growth_threshold = self.instance.growth_threshold
 
         growth_amount_threshold = attrs.get('growth_amount_threshold')
-        if not growth_amount_threshold and self.instance:
+        if growth_amount_threshold is None and self.instance:
             growth_amount_threshold = self.instance.growth_amount_threshold
 
-        if (not cost_threshold and not growth_threshold and
-                not growth_amount_threshold):
+        balance_threshold = attrs.get('balance_threshold')
+        if balance_threshold is None and self.instance:
+            balance_threshold = self.instance.balance_threshold
+
+        if (
+            cost_threshold is None
+            and growth_threshold is None
+            and growth_amount_threshold is None
+            and balance_threshold is None
+        ):
             raise serializers.ValidationError(
                 "At least one of cost_threshold, growth_threshold, "
-                "or growth_amount_threshold must be set."
+                "growth_amount_threshold, or balance_threshold must be set."
             )
         return attrs
 
@@ -234,7 +279,7 @@ class AlertRuleListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name',
             'cost_threshold', 'growth_threshold',
-            'growth_amount_threshold', 'is_active',
+            'growth_amount_threshold', 'balance_threshold', 'is_active',
             'created_at', 'updated_at',
         ]
 
@@ -252,7 +297,8 @@ class AlertRecordSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name', 'alert_rule',
             'current_cost', 'previous_cost', 'increase_cost',
-            'increase_percent', 'currency', 'alert_message',
+            'increase_percent', 'currency', 'current_balance',
+            'balance_threshold', 'alert_message',
             'webhook_status', 'webhook_response', 'webhook_error',
             'created_at',
         ]
@@ -272,7 +318,8 @@ class AlertRecordListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name',
             'current_cost', 'previous_cost', 'increase_cost',
-            'increase_percent', 'currency', 'alert_message',
+            'increase_percent', 'currency', 'current_balance',
+            'balance_threshold', 'alert_message',
             'webhook_status',
             'created_at',
         ]

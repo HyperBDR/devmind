@@ -120,6 +120,7 @@ class HuaweiCloud(BaseCloudProvider):
             f"Initialized Huawei Cloud provider with config: "
             f"{sanitized_config}"
         )
+        self._last_balance_debug = {}
 
     @property
     def client(self):
@@ -216,6 +217,15 @@ class HuaweiCloud(BaseCloudProvider):
             logger.error(f"Huawei BSS API error [{error_code}]: {error_msg}")
             raise
 
+    def _query_balance_api(self) -> Any:
+        """Query Huawei domestic balance API."""
+        from huaweicloudsdkbss.v2.model import (
+            ShowCustomerAccountBalancesRequest,
+        )
+
+        request = ShowCustomerAccountBalancesRequest()
+        return self.client.show_customer_account_balances(request)
+
     def _calculate_total_cost(
         self, response: Any
     ) -> Tuple[float, str, Dict[str, float], List[Dict]]:
@@ -283,6 +293,36 @@ class HuaweiCloud(BaseCloudProvider):
 
         return total_cost, currency, service_costs, item_details
 
+    def _calculate_balance(
+        self, response: Any
+    ) -> Tuple[Optional[float], Dict[str, Any]]:
+        """Calculate Huawei balance from account balances response."""
+        account_balances = getattr(response, "account_balances", None) or []
+        selected_balance = None
+        currency = getattr(response, "currency", "CNY")
+        debug_items = []
+
+        for account in account_balances:
+            account_type = getattr(account, "account_type", None)
+            amount = getattr(account, "amount", None)
+            account_currency = getattr(account, "currency", None) or currency
+            debug_items.append({
+                "account_id": getattr(account, "account_id", ""),
+                "account_type": account_type,
+                "amount": amount,
+                "currency": account_currency,
+            })
+            if account_type == 1 and amount is not None:
+                selected_balance = float(amount)
+                currency = account_currency
+                break
+
+        return selected_balance, {
+            "status": "success",
+            "currency": currency,
+            "account_balances": debug_items,
+        }
+
     def get_billing_info(
         self, period: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -317,6 +357,30 @@ class HuaweiCloud(BaseCloudProvider):
             total_cost, currency, service_costs, item_details = (
                 self._calculate_total_cost(response)
             )
+            balance = None
+            try:
+                balance_response = self._query_balance_api()
+                balance, balance_debug = self._calculate_balance(
+                    balance_response
+                )
+                self._last_balance_debug = balance_debug
+            except exceptions.ClientRequestException as e:
+                self._last_balance_debug = {
+                    "status": "client_error",
+                    "error_code": getattr(e, "error_code", "Unknown"),
+                    "error_msg": getattr(e, "error_msg", str(e)),
+                }
+                logger.warning(
+                    "Huawei balance lookup failed [%s]: %s",
+                    getattr(e, "error_code", "Unknown"),
+                    getattr(e, "error_msg", str(e)),
+                )
+            except Exception as e:
+                self._last_balance_debug = {
+                    "status": "unexpected_error",
+                    "error_msg": str(e),
+                }
+                logger.warning("Huawei balance lookup failed: %s", e)
 
             # Get account ID
             account_id = self.get_account_id()
@@ -324,6 +388,8 @@ class HuaweiCloud(BaseCloudProvider):
             # Build response data
             data = {
                 "total_cost": total_cost,
+                "balance": balance,
+                "balance_debug": self._last_balance_debug,
                 "currency": currency,
                 "account_id": account_id,
                 "service_costs": service_costs,
