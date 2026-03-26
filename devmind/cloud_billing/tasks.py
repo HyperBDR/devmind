@@ -39,6 +39,19 @@ def _is_chinese_language(language: str) -> bool:
     return str(language or "").lower().startswith("zh")
 
 
+def _extract_provider_notes(provider: CloudProvider) -> str:
+    direct_notes = (getattr(provider, "notes", "") or "").strip()
+    if direct_notes:
+        return direct_notes
+
+    config = getattr(provider, "config", {}) or {}
+    for key in ("notes", "note", "remark", "remarks", "description"):
+        value = (config.get(key) or "").strip() if isinstance(config, dict) else ""
+        if value:
+            return value
+    return ""
+
+
 def _build_alert_message(
     *,
     provider_name: str,
@@ -817,7 +830,7 @@ def check_alert_for_provider(
             )
             alert_message = _build_alert_message(
                 provider_name=provider.display_name,
-                provider_notes=(provider.notes or "").strip(),
+                provider_notes=_extract_provider_notes(provider),
                 account_id=account_id,
                 current_cost=current_cost,
                 previous_cost=previous_cost,

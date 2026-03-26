@@ -413,6 +413,8 @@ def _build_financial_health(accounts):
         {
             'name': item['name'],
             'category': item['category'],
+            'account_id': item['account_id'],
+            'notes': item['notes'],
             'days_remaining': item['days_remaining'],
         }
         for item in accounts[:8]

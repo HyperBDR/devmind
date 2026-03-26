@@ -164,6 +164,44 @@ class TestCheckAlertForProvider:
         assert "remaining balance" in record.alert_message.lower()
         mock_send_alert.assert_called_once_with(record.id)
 
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_default_webhook_channel")
+    def test_balance_threshold_alert_includes_notes_for_chinese_channel(
+        self,
+        mock_get_default_webhook_channel,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+        previous_billing_data,
+    ):
+        mock_channel = SimpleNamespace(config={"language": "zh-hans"})
+        mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        cloud_provider.provider_type = "baidu"
+        cloud_provider.display_name = "百度智能云"
+        cloud_provider.config = {
+            **(cloud_provider.config or {}),
+            "notes": "余额告警测试备注",
+        }
+        cloud_provider.save(update_fields=["provider_type", "display_name", "config"])
+
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            balance_threshold=Decimal("550.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        record = AlertRecord.objects.latest("id")
+        assert "备注：余额告警测试备注" in record.alert_message
+        assert "账号：" in record.alert_message
+        mock_send_alert.assert_called_once_with(record.id)
+
     def test_skipped_when_lock_held(self, cloud_provider):
         """
         When prevent_duplicate_task lock is held for same provider_id,
