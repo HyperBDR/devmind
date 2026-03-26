@@ -7,7 +7,6 @@ Channel selection (webhook/email by UUID or default) is handled by notifier.
 """
 import logging
 from typing import Any, Dict, Optional
-
 from agentcore_notifier.adapters.django.services.email_service import (
     get_default_email_channel,
     get_email_channel_by_uuid,
@@ -29,8 +28,6 @@ from cloud_billing.constants import (
     FEISHU_TAG_AT,
     FEISHU_TAG_TEXT,
     FEISHU_USER_ID_ALL,
-    LANGUAGE_EN,
-    LANGUAGE_ZH_HANS,
     SOURCE_APP_CLOUD_BILLING,
     SOURCE_TYPE_ALERT,
     WECHAT_MSGTYPE_MARKDOWN,

@@ -92,6 +92,18 @@ class CloudProvider(models.Model):
     def __str__(self):
         return f"{self.display_name} ({self.name})"
 
+    def get_alert_label(self):
+        """
+        Return a human-readable label for alerts.
+
+        Include notes when present so notifications can carry the user's
+        remark/annotation alongside the provider name.
+        """
+        notes = " ".join((self.notes or "").split())
+        if not notes:
+            return self.display_name
+        return f"{self.display_name}（{notes}）"
+
 
 class BillingData(models.Model):
     """

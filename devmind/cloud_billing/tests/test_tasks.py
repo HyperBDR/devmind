@@ -130,6 +130,63 @@ class TestCheckAlertForProvider:
         )
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    def test_cost_threshold_triggers_without_previous_billing(
+        self,
+        mock_send_alert_delay,
+        cloud_provider,
+        user,
+        billing_data,
+    ):
+        """
+        Cost threshold should alert even when there is no previous billing
+        record for the current hour.
+        """
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            cost_threshold=Decimal("1.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        assert len(result.get("alerts_created", [])) == 1
+        mock_send_alert_delay.assert_called_once()
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    def test_alert_message_includes_provider_notes(
+        self,
+        mock_send_alert_delay,
+        cloud_provider,
+        user,
+        billing_data,
+    ):
+        """
+        Alert messages should include the provider notes snapshot when present.
+        """
+        cloud_provider.notes = "默认备注"
+        cloud_provider.save(update_fields=["notes"])
+
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            cost_threshold=Decimal("1.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["alerted"] is True
+        record = AlertRecord.objects.order_by("-created_at").first()
+        assert record is not None
+        assert "默认备注" in record.alert_message
+        mock_send_alert_delay.assert_called_once()
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
     def test_balance_threshold_triggers_alert(
         self,

@@ -715,17 +715,19 @@ def check_alert_for_provider(
             increase_percent = Decimal("0")
             if previous_cost > 0:
                 increase_percent = (increase_cost / previous_cost) * 100
-
             should_alert = False
             alert_reason = []
+            cost_threshold_triggered = False
 
-            # Check cost threshold (absolute current cost)
+            # Cost threshold is absolute and should not depend on a previous
+            # billing record. Growth-based rules still need the previous hour.
             if alert_rule.cost_threshold is not None:
                 cost_threshold_decimal = Decimal(
                     str(alert_rule.cost_threshold)
                 )
                 if current_cost > cost_threshold_decimal:
                     should_alert = True
+                    cost_threshold_triggered = True
                     alert_reason.append(
                         f"Current cost {current_cost} exceeds threshold "
                         f"{alert_rule.cost_threshold}"
@@ -739,8 +741,49 @@ def check_alert_for_provider(
                         f"cost_threshold={alert_rule.cost_threshold})"
                     )
 
+            needs_previous_billing = (
+                alert_rule.growth_threshold is not None
+                or alert_rule.growth_amount_threshold is not None
+            )
+            if needs_previous_billing:
+                try:
+                    previous_billing = BillingData.objects.get(
+                        provider=provider,
+                        account_id=account_id,
+                        period=previous_period,
+                        hour=previous_hour,
+                    )
+                except BillingData.DoesNotExist:
+                    logger.info(
+                        f"Task check_alert_for_provider: "
+                        f"No previous billing data found "
+                        f"(provider_id={provider.id}, name={provider.name}, "
+                        f"account_id={account_id}, period={previous_period}, "
+                        f"hour={previous_hour})"
+                    )
+                    if not should_alert:
+                        continue
+
+                if previous_billing is not None:
+                    previous_cost = Decimal(str(previous_billing.total_cost))
+                    if previous_cost <= 0:
+                        logger.info(
+                            f"Task check_alert_for_provider: "
+                            f"Previous cost is zero or negative "
+                            f"(provider_id={provider.id}, name={provider.name}, "
+                            f"account_id={account_id}, "
+                            f"previous_cost={previous_cost}, "
+                            f"period={previous_period}, hour={previous_hour})"
+                        )
+                        if not cost_threshold_triggered:
+                            continue
+
+            if previous_billing is not None and previous_cost > 0:
+                increase_cost = current_cost - previous_cost
+                increase_percent = (increase_cost / previous_cost) * 100
+
             # Check growth threshold
-            if alert_rule.growth_threshold is not None:
+            if alert_rule.growth_threshold is not None and previous_billing:
                 growth_threshold_decimal = Decimal(
                     str(alert_rule.growth_threshold)
                 )
@@ -760,7 +803,7 @@ def check_alert_for_provider(
                     )
 
             # Check growth amount threshold
-            if alert_rule.growth_amount_threshold is not None:
+            if alert_rule.growth_amount_threshold is not None and previous_billing:
                 growth_amount_threshold_decimal = Decimal(
                     str(alert_rule.growth_amount_threshold)
                 )
