@@ -487,8 +487,8 @@ msgid "Amount threshold"
 msgstr "金额阈值"
 
 #: cloud_billing/tasks.py
-msgid "Remaining balance is below the configured threshold"
-msgstr "账户剩余余额低于设定阈值"
+msgid "Remaining balance is below the configured threshold. Please recharge promptly."
+msgstr "账户剩余余额低于设定阈值，请及时充值"
 
 #: cloud_billing/tasks.py
 msgid "Current total cost exceeds the configured threshold"
