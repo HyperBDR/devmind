@@ -52,7 +52,12 @@ class PaymentTypeTests(SimpleTestCase):
         )
 
     @patch('cloud_billing.dashboard.requests.get')
-    def test_fetches_exchange_rate_from_remote_api(self, mock_get):
+    @patch('cloud_billing.dashboard._cache_get_safely', return_value=None)
+    def test_fetches_exchange_rate_from_remote_api(
+        self,
+        _mock_cache_get,
+        mock_get,
+    ):
         response = Mock()
         response.raise_for_status.return_value = None
         response.json.return_value = {
@@ -77,7 +82,12 @@ class PaymentTypeTests(SimpleTestCase):
         )
 
     @patch('cloud_billing.dashboard.requests.get')
-    def test_falls_back_when_remote_api_fails(self, mock_get):
+    @patch('cloud_billing.dashboard._cache_get_safely', return_value=None)
+    def test_falls_back_when_remote_api_fails(
+        self,
+        _mock_cache_get,
+        mock_get,
+    ):
         mock_get.side_effect = RuntimeError('network failure')
 
         with patch.dict(
@@ -89,6 +99,47 @@ class PaymentTypeTests(SimpleTestCase):
 
         self.assertEqual(result['rate_source_label'], 'Internal baseline rate')
         self.assertEqual(result['exchange_rate'], 7.15)
+
+    @patch('cloud_billing.dashboard.requests.get')
+    @patch('cloud_billing.dashboard._cache_set_safely')
+    @patch('cloud_billing.dashboard._cache_get_safely')
+    def test_uses_cached_exchange_rate_within_24_hours(
+        self,
+        mock_cache_get,
+        mock_cache_set,
+        mock_get,
+    ):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            'conversion_rates': {'CNY': 7.31},
+            'time_last_update_unix': 1711411200,
+        }
+        mock_get.return_value = response
+        mock_cache_get.side_effect = [
+            None,
+            {
+                'exchange_rate': 7.31,
+                'rate_source_label': 'ExchangeRate API',
+                'rate_source_url': 'https://www.exchangerate-api.com/',
+                'rate_collected_at': '2024-03-26T00:00:00+00:00',
+            },
+        ]
+
+        with patch.dict(
+            'os.environ',
+            {'EXCHANGE_RATE_API_KEY': 'cached-api-key', 'EXCHANGE_RATE_API_TIMEOUT': '9'},
+            clear=True,
+        ):
+            first_result = _build_exchange_rate_info()
+            second_result = _build_exchange_rate_info()
+
+        self.assertEqual(first_result, second_result)
+        mock_cache_set.assert_called_once()
+        mock_get.assert_called_once_with(
+            'https://v6.exchangerate-api.com/v6/cached-api-key/latest/USD',
+            timeout=9,
+        )
 
 
 class AccountFundsTests(SimpleTestCase):

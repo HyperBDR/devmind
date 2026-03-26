@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+import hashlib
 import logging
 import os
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import requests
+from django.core.cache import cache
 from django.db.models import Prefetch
 from django.utils import timezone
 
@@ -20,6 +22,8 @@ LLM_PROVIDER_TYPES = {'zhipu'}
 CNY_RATE = Decimal('7.15')
 EXCHANGE_RATE_API_URL = 'https://v6.exchangerate-api.com/v6/{api_key}/latest/USD'
 EXCHANGE_RATE_SOURCE_URL = 'https://www.exchangerate-api.com/'
+EXCHANGE_RATE_CACHE_PREFIX = 'cloud_billing:exchange_rate'
+EXCHANGE_RATE_CACHE_TTL = 60 * 60 * 24
 PROVIDER_PAYMENT_TYPES = {
     'aws': 'postpaid',
     'azure': 'postpaid',
@@ -45,6 +49,21 @@ def _resolve_dashboard_timezone(timezone_name: str | None):
                 timezone_name,
             )
     return timezone.get_current_timezone()
+
+
+def _cache_get_safely(cache_key: str):
+    try:
+        return cache.get(cache_key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Failed to read exchange rate cache: %s', exc)
+        return None
+
+
+def _cache_set_safely(cache_key: str, value: dict[str, object], timeout: int) -> None:
+    try:
+        cache.set(cache_key, value, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('Failed to write exchange rate cache: %s', exc)
 
 
 def _payment_type_for_provider(provider, balance_supported: bool) -> str:
@@ -441,6 +460,12 @@ def _build_exchange_rate_info() -> dict[str, object]:
     if not api_key:
         return _build_fallback_exchange_rate_info()
 
+    key_hash = hashlib.sha256(api_key.encode('utf-8')).hexdigest()[:12]
+    cache_key = f'{EXCHANGE_RATE_CACHE_PREFIX}:{key_hash}'
+    cached_value = _cache_get_safely(cache_key)
+    if cached_value:
+        return cached_value
+
     request_url = EXCHANGE_RATE_API_URL.format(api_key=api_key)
     timeout = int(os.getenv('EXCHANGE_RATE_API_TIMEOUT', '10'))
 
@@ -461,12 +486,18 @@ def _build_exchange_rate_info() -> dict[str, object]:
                 tz=dt_timezone.utc,
             )
 
-        return {
+        exchange_rate_info = {
             'exchange_rate': float(cny_rate),
             'rate_source_label': 'ExchangeRate API',
             'rate_source_url': EXCHANGE_RATE_SOURCE_URL,
             'rate_collected_at': collected_at.isoformat(),
         }
+        _cache_set_safely(
+            cache_key,
+            exchange_rate_info,
+            timeout=EXCHANGE_RATE_CACHE_TTL,
+        )
+        return exchange_rate_info
     except Exception as exc:  # noqa: BLE001
         logger.warning('Failed to fetch exchange rate from ExchangeRate API: %s', exc)
         return _build_fallback_exchange_rate_info()
