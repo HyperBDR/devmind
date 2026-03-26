@@ -24,12 +24,20 @@ from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
 
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
+    EMAIL_BODY_TITLE_EN,
+    EMAIL_BODY_TITLE_ZH_HANS,
+    EMAIL_SUBJECT_EN,
+    EMAIL_SUBJECT_ZH_HANS,
     FEISHU_MSG_TYPE_POST,
     FEISHU_TAG_AT,
     FEISHU_TAG_TEXT,
+    FEISHU_TITLE_EN,
+    FEISHU_TITLE_ZH_HANS,
     FEISHU_USER_ID_ALL,
     SOURCE_APP_CLOUD_BILLING,
     SOURCE_TYPE_ALERT,
+    WECHAT_TITLE_EN,
+    WECHAT_TITLE_ZH_HANS,
     WECHAT_MSGTYPE_MARKDOWN,
 )
 from cloud_billing.models import AlertRecord
@@ -62,10 +70,31 @@ class CloudBillingNotificationService:
     def _is_chinese_language(self, language: str) -> bool:
         return str(language or DEFAULT_LANGUAGE).lower().startswith("zh")
 
-    def _get_alert_title(self, language: str) -> str:
-        if self._is_chinese_language(language):
-            return "云账单告警"
-        return "Cloud Billing Alert"
+    def _get_alert_title(self, language: str, channel: str) -> str:
+        title_map = {
+            "feishu": {
+                True: FEISHU_TITLE_ZH_HANS,
+                False: FEISHU_TITLE_EN,
+            },
+            "wechat": {
+                True: WECHAT_TITLE_ZH_HANS,
+                False: WECHAT_TITLE_EN,
+            },
+            "email_subject": {
+                True: EMAIL_SUBJECT_ZH_HANS,
+                False: EMAIL_SUBJECT_EN,
+            },
+            "email_body": {
+                True: EMAIL_BODY_TITLE_ZH_HANS,
+                False: EMAIL_BODY_TITLE_EN,
+            },
+        }
+        normalized_channel = str(channel or "").lower()
+        if normalized_channel not in title_map:
+            raise ValueError(f"Unsupported alert title channel: {channel}")
+        return title_map[normalized_channel][
+            self._is_chinese_language(language)
+        ]
 
     def _get_alert_body(
         self, alert_record: AlertRecord, language: str
@@ -87,7 +116,7 @@ class CloudBillingNotificationService:
         Returns:
             Feishu webhook payload dictionary
         """
-        title = self._get_alert_title(language)
+        title = self._get_alert_title(language, "feishu")
         message = self._get_alert_body(alert_record, language)
         content = []
         for line in message.splitlines():
@@ -142,7 +171,11 @@ class CloudBillingNotificationService:
                 rows.append(f"**{label}**{separator}{value}")
             else:
                 rows.append(f"**{label}**")
-        content = f"## {self._get_alert_title(language)}\n\n" + "\n".join(rows) + "\n\n<@all>"
+        content = (
+            self._get_alert_title(language, "wechat")
+            + "\n".join(rows)
+            + "\n\n<@all>"
+        )
 
         payload = {
             "msgtype": WECHAT_MSGTYPE_MARKDOWN,
@@ -160,7 +193,7 @@ class CloudBillingNotificationService:
         Generate plain text subject and body for email from alert record.
         Returns (subject, body).
         """
-        subject = self._get_alert_title(language)
+        subject = self._get_alert_title(language, "email_subject")
         rows = []
         for line in self._get_alert_body(alert_record, language).splitlines():
             label, value = self._split_label_value(line)
@@ -169,7 +202,7 @@ class CloudBillingNotificationService:
                 rows.append(f"**{label}**{separator}{value}")
             else:
                 rows.append(f"**{label}**")
-        body = f"## {self._get_alert_title(language)}\n\n" + "\n".join(rows)
+        body = self._get_alert_title(language, "email_body") + "\n".join(rows)
         return subject, body
 
     def send_alert(

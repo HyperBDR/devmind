@@ -6,12 +6,13 @@ import logging
 import traceback
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from celery import shared_task
 from celery import current_task
 from django.db import transaction
-from django.utils import timezone
+from django.utils import timezone, translation
+from django.utils.translation import gettext as _
 
 from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
@@ -24,6 +25,7 @@ from agentcore_task.adapters.django import (
 )
 
 from .constants import (
+    DEFAULT_LANGUAGE,
     WEBHOOK_STATUS_FAILED,
     WEBHOOK_STATUS_PENDING,
     WEBHOOK_STATUS_SUCCESS,
@@ -37,6 +39,15 @@ logger = logging.getLogger(__name__)
 
 def _is_chinese_language(language: str) -> bool:
     return str(language or "").lower().startswith("zh")
+
+
+def _format_alert_line(
+    label: str,
+    value: str,
+    is_chinese_language: bool,
+) -> str:
+    separator = "：" if is_chinese_language else ": "
+    return f"{label}{separator}{value}"
 
 
 def _extract_provider_notes(provider: CloudProvider) -> str:
@@ -68,71 +79,156 @@ def _build_alert_message(
     balance_threshold_triggered: bool,
     language: str,
 ) -> str:
-    if _is_chinese_language(language):
-        lines = [f"云平台：{provider_name}"]
+    normalized_language = str(language or DEFAULT_LANGUAGE).lower()
+    is_chinese_language = _is_chinese_language(normalized_language)
+
+    with translation.override(normalized_language):
+        lines = [
+            _format_alert_line(_("Cloud provider"), provider_name, is_chinese_language),
+        ]
         if account_id:
-            lines.append(f"账号：{account_id}")
+            lines.append(
+                _format_alert_line(_("Account"), account_id, is_chinese_language)
+            )
         if provider_notes:
-            lines.append(f"备注：{provider_notes}")
+            lines.append(
+                _format_alert_line(_("Notes"), provider_notes, is_chinese_language)
+            )
 
         if balance_threshold_triggered:
-            lines.insert(0, "告警类型：余额阈值告警")
-            lines.append(f"当前余额：{current_balance:.2f} {currency}")
-            lines.append(
-                f"告警阈值：{alert_rule.balance_threshold:.2f} {currency}"
+            lines.insert(
+                0,
+                _format_alert_line(
+                    _("Alert type"),
+                    _("Balance threshold alert"),
+                    is_chinese_language,
+                ),
             )
-            lines.append("告警说明：账户剩余余额低于设定阈值")
+            lines.append(
+                _format_alert_line(
+                    _("Current balance"),
+                    f"{current_balance:.2f} {currency}",
+                    is_chinese_language,
+                )
+            )
+            lines.append(
+                _format_alert_line(
+                    _("Alert threshold"),
+                    f"{alert_rule.balance_threshold:.2f} {currency}",
+                    is_chinese_language,
+                )
+            )
+            lines.append(
+                _format_alert_line(
+                    _("Alert description"),
+                    _(
+                        "Remaining balance is below the configured threshold. "
+                        "Please recharge promptly."
+                    ),
+                    is_chinese_language,
+                )
+            )
             return "\n".join(lines)
 
         if cost_threshold_triggered:
-            lines.insert(0, "告警类型：费用阈值告警")
-            lines.append(f"当前总费用：{current_cost:.2f} {currency}")
-            lines.append(
-                f"告警阈值：{alert_rule.cost_threshold:.2f} {currency}"
+            lines.insert(
+                0,
+                _format_alert_line(
+                    _("Alert type"),
+                    _("Cost threshold alert"),
+                    is_chinese_language,
+                ),
             )
-            lines.append(f"上一小时费用：{previous_cost:.2f} {currency}")
-            lines.append("告警说明：当前总费用已超过设定阈值")
+            lines.append(
+                _format_alert_line(
+                    _("Current total cost"),
+                    f"{current_cost:.2f} {currency}",
+                    is_chinese_language,
+                )
+            )
+            lines.append(
+                _format_alert_line(
+                    _("Alert threshold"),
+                    f"{alert_rule.cost_threshold:.2f} {currency}",
+                    is_chinese_language,
+                )
+            )
+            lines.append(
+                _format_alert_line(
+                    _("Previous hour cost"),
+                    f"{previous_cost:.2f} {currency}",
+                    is_chinese_language,
+                )
+            )
+            lines.append(
+                _format_alert_line(
+                    _("Alert description"),
+                    _("Current total cost exceeds the configured threshold"),
+                    is_chinese_language,
+                )
+            )
             return "\n".join(lines)
 
-        lines.insert(0, "告警类型：费用增长告警")
-        lines.append(f"当前总费用：{current_cost:.2f} {currency}")
-        lines.append(f"上一小时费用：{previous_cost:.2f} {currency}")
-        lines.append(f"增长金额：{increase_cost:.2f} {currency}")
-        lines.append(f"增长比例：{increase_percent:.2f}%")
+        lines.insert(
+            0,
+            _format_alert_line(
+                _("Alert type"),
+                _("Cost growth alert"),
+                is_chinese_language,
+            ),
+        )
+        lines.append(
+            _format_alert_line(
+                _("Current total cost"),
+                f"{current_cost:.2f} {currency}",
+                is_chinese_language,
+            )
+        )
+        lines.append(
+            _format_alert_line(
+                _("Previous hour cost"),
+                f"{previous_cost:.2f} {currency}",
+                is_chinese_language,
+            )
+        )
+        lines.append(
+            _format_alert_line(
+                _("Increase amount"),
+                f"{increase_cost:.2f} {currency}",
+                is_chinese_language,
+            )
+        )
+        lines.append(
+            _format_alert_line(
+                _("Growth rate"),
+                f"{increase_percent:.2f}%",
+                is_chinese_language,
+            )
+        )
         if alert_rule.growth_threshold is not None:
-            lines.append(f"百分比阈值：{alert_rule.growth_threshold:.2f}%")
+            lines.append(
+                _format_alert_line(
+                    _("Percentage threshold"),
+                    f"{alert_rule.growth_threshold:.2f}%",
+                    is_chinese_language,
+                )
+            )
         if alert_rule.growth_amount_threshold is not None:
             lines.append(
-                f"金额阈值：{alert_rule.growth_amount_threshold:.2f} {currency}"
+                _format_alert_line(
+                    _("Amount threshold"),
+                    f"{alert_rule.growth_amount_threshold:.2f} {currency}",
+                    is_chinese_language,
+                )
             )
-        lines.append("告警说明：费用增长超过设定阈值")
+        lines.append(
+            _format_alert_line(
+                _("Alert description"),
+                _("Billing growth exceeds the configured threshold"),
+                is_chinese_language,
+            )
+        )
         return "\n".join(lines)
-
-    account_suffix = f" (Account: {account_id})" if account_id else ""
-    notes_suffix = f"\nNotes: {provider_notes}" if provider_notes else ""
-    if balance_threshold_triggered:
-        return (
-            f"{provider_name}{account_suffix} remaining balance "
-            f"{current_balance:.2f} {currency} is below threshold "
-            f"{alert_rule.balance_threshold:.2f} {currency}"
-            f"{notes_suffix}"
-        )
-    if cost_threshold_triggered:
-        return (
-            f"{provider_name}{account_suffix} current total cost "
-            f"{current_cost:.2f} {currency} exceeds threshold "
-            f"{alert_rule.cost_threshold:.2f} {currency}\n"
-            f"Previous hour cost: {previous_cost:.2f} {currency}"
-            f"{notes_suffix}"
-        )
-    return (
-        f"{provider_name}{account_suffix} account billing increased by "
-        f"{increase_cost:.2f} {currency} in the last hour, growth rate: "
-        f"{increase_percent:.2f}%\n"
-        f"Current cost: {current_cost:.2f} {currency}\n"
-        f"Previous hour cost: {previous_cost:.2f} {currency}"
-        f"{notes_suffix}"
-    )
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")
@@ -177,7 +273,7 @@ def collect_billing_data(
         )
 
     log_collector.info(
-        f"Task collect_billing_data: Starting billing data collection "
+        f"Starting billing data collection "
         f"(provider_id={provider_id}, user_id={user_id}, task_id={task_id})"
     )
     logger.info(
@@ -429,7 +525,8 @@ def collect_billing_data(
                         )
                         info_msg = (
                             f"Task collect_billing_data: Updated existing "
-                            f"billing data (provider_id={provider.id}, "
+                            f"billing data "
+                            f"(provider_id={provider.id}, "
                             f"name={provider.name}, period={current_period}, "
                             f"hour={current_hour}, total_cost={total_cost}, "
                             f"balance={balance}, "
@@ -441,7 +538,8 @@ def collect_billing_data(
                     else:
                         info_msg = (
                             f"Task collect_billing_data: Created new billing "
-                            f"data (provider_id={provider.id}, "
+                            f"data "
+                            f"(provider_id={provider.id}, "
                             f"name={provider.name}, period={current_period}, "
                             f"hour={current_hour}, total_cost={total_cost}, "
                             f"balance={balance}, "
@@ -632,7 +730,10 @@ def check_alert_for_provider(
                 f"(provider_id={provider.id}, name={provider.name}, "
                 f"type={provider.provider_type})"
             )
-            result = {"checked": False, "reason": "No active alert rule"}
+            result = {
+                "checked": False,
+                "reason": "No active alert rule",
+            }
             if task_id:
                 TaskTracker.update_task_status(
                     task_id=task_id, status=TaskStatus.SUCCESS, result=result
@@ -655,7 +756,10 @@ def check_alert_for_provider(
                 f"found (provider_id={provider.id}, name={provider.name}, "
                 f"period={current_period}, hour={current_hour})"
             )
-            result = {"checked": False, "reason": "No current billing data"}
+            result = {
+                "checked": False,
+                "reason": "No current billing data",
+            }
             if task_id:
                 TaskTracker.update_task_status(
                     task_id=task_id, status=TaskStatus.SUCCESS, result=result
@@ -718,6 +822,7 @@ def check_alert_for_provider(
             should_alert = False
             alert_reason = []
             cost_threshold_triggered = False
+            balance_threshold_triggered = False
 
             # Cost threshold is absolute and should not depend on a previous
             # billing record. Growth-based rules still need the previous hour.
@@ -832,6 +937,7 @@ def check_alert_for_provider(
                 )
                 if current_balance < balance_threshold_decimal:
                     should_alert = True
+                    balance_threshold_triggered = True
                     alert_reason.append(
                         f"Current balance {current_balance:.2f} is below "
                         f"threshold {alert_rule.balance_threshold}"
@@ -864,13 +970,6 @@ def check_alert_for_provider(
             except Exception:
                 pass
 
-            # Generate alert message based on trigger reason
-            cost_threshold_triggered = any(
-                "Current cost" in reason for reason in alert_reason
-            )
-            balance_threshold_triggered = any(
-                "Current balance" in reason for reason in alert_reason
-            )
             alert_message = _build_alert_message(
                 provider_name=provider.display_name,
                 provider_notes=_extract_provider_notes(provider),
@@ -1070,7 +1169,8 @@ def send_alert_notification(alert_record_id: int):
             )
             logger.info(
                 f"Task send_alert_notification: Alert notification sent "
-                f"successfully (alert_record_id={alert_record_id}, "
+                f"successfully "
+                f"(alert_record_id={alert_record_id}, "
                 f"provider_id={alert_record.provider.id}, "
                 f"provider_name={alert_record.provider.name}, "
                 f"webhook_status=success)"

@@ -396,6 +396,82 @@ msgid ""
 "{currency} in the last hour, growth rate: {increase_percent:.2f}%"
 msgstr ""
 
+#: cloud_billing/tasks.py
+msgid "Alert type"
+msgstr "Alert type"
+
+#: cloud_billing/tasks.py
+msgid "Cloud provider"
+msgstr "Cloud provider"
+
+#: cloud_billing/tasks.py
+msgid "Account"
+msgstr "Account"
+
+#: cloud_billing/tasks.py
+msgid "Notes"
+msgstr "Notes"
+
+#: cloud_billing/tasks.py
+msgid "Current balance"
+msgstr "Current balance"
+
+#: cloud_billing/tasks.py
+msgid "Alert threshold"
+msgstr "Alert threshold"
+
+#: cloud_billing/tasks.py
+msgid "Alert description"
+msgstr "Alert description"
+
+#: cloud_billing/tasks.py
+msgid "Balance threshold alert"
+msgstr "Balance threshold alert"
+
+#: cloud_billing/tasks.py
+msgid "Cost threshold alert"
+msgstr "Cost threshold alert"
+
+#: cloud_billing/tasks.py
+msgid "Cost growth alert"
+msgstr "Cost growth alert"
+
+#: cloud_billing/tasks.py
+msgid "Current total cost"
+msgstr "Current total cost"
+
+#: cloud_billing/tasks.py
+msgid "Previous hour cost"
+msgstr "Previous hour cost"
+
+#: cloud_billing/tasks.py
+msgid "Increase amount"
+msgstr "Increase amount"
+
+#: cloud_billing/tasks.py
+msgid "Growth rate"
+msgstr "Growth rate"
+
+#: cloud_billing/tasks.py
+msgid "Percentage threshold"
+msgstr "Percentage threshold"
+
+#: cloud_billing/tasks.py
+msgid "Amount threshold"
+msgstr "Amount threshold"
+
+#: cloud_billing/tasks.py
+msgid "Remaining balance is below the configured threshold. Please recharge promptly."
+msgstr "Remaining balance is below the configured threshold. Please recharge promptly."
+
+#: cloud_billing/tasks.py
+msgid "Current total cost exceeds the configured threshold"
+msgstr "Current total cost exceeds the configured threshold"
+
+#: cloud_billing/tasks.py
+msgid "Billing growth exceeds the configured threshold"
+msgstr "Billing growth exceeds the configured threshold"
+
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""

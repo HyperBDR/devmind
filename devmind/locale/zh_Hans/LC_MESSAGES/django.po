@@ -422,6 +422,82 @@ msgstr ""
 "{provider_name}{account_display} 在过去一小时的消费增长了 "
 "{increase_cost:.2f} {currency}，增长率为 {increase_percent:.2f}%"
 
+#: cloud_billing/tasks.py
+msgid "Alert type"
+msgstr "告警类型"
+
+#: cloud_billing/tasks.py
+msgid "Cloud provider"
+msgstr "云平台"
+
+#: cloud_billing/tasks.py
+msgid "Account"
+msgstr "账号"
+
+#: cloud_billing/tasks.py
+msgid "Notes"
+msgstr "备注"
+
+#: cloud_billing/tasks.py
+msgid "Current balance"
+msgstr "当前余额"
+
+#: cloud_billing/tasks.py
+msgid "Alert threshold"
+msgstr "告警阈值"
+
+#: cloud_billing/tasks.py
+msgid "Alert description"
+msgstr "告警说明"
+
+#: cloud_billing/tasks.py
+msgid "Balance threshold alert"
+msgstr "余额阈值告警"
+
+#: cloud_billing/tasks.py
+msgid "Cost threshold alert"
+msgstr "费用阈值告警"
+
+#: cloud_billing/tasks.py
+msgid "Cost growth alert"
+msgstr "费用增长告警"
+
+#: cloud_billing/tasks.py
+msgid "Current total cost"
+msgstr "当前总费用"
+
+#: cloud_billing/tasks.py
+msgid "Previous hour cost"
+msgstr "上一小时费用"
+
+#: cloud_billing/tasks.py
+msgid "Increase amount"
+msgstr "增长金额"
+
+#: cloud_billing/tasks.py
+msgid "Growth rate"
+msgstr "增长比例"
+
+#: cloud_billing/tasks.py
+msgid "Percentage threshold"
+msgstr "百分比阈值"
+
+#: cloud_billing/tasks.py
+msgid "Amount threshold"
+msgstr "金额阈值"
+
+#: cloud_billing/tasks.py
+msgid "Remaining balance is below the configured threshold"
+msgstr "账户剩余余额低于设定阈值"
+
+#: cloud_billing/tasks.py
+msgid "Current total cost exceeds the configured threshold"
+msgstr "当前总费用已超过设定阈值"
+
+#: cloud_billing/tasks.py
+msgid "Billing growth exceeds the configured threshold"
+msgstr "费用增长超过设定阈值"
+
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""

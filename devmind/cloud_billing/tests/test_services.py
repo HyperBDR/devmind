@@ -6,6 +6,7 @@ import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
 
+from cloud_billing.constants import FEISHU_TITLE_ZH_HANS, WECHAT_TITLE_EN
 from cloud_billing.services.notification_service import (
     CloudBillingNotificationService,
 )
@@ -540,6 +541,26 @@ class TestCloudBillingNotificationService:
         assert call_kwargs["notification_type"] == "webhook"
         assert call_kwargs["channel_uuid"] == str(ch_uuid)
         assert call_kwargs["params"]["provider_type"] == "feishu"
+
+    def test_generate_feishu_payload_uses_constant_title(
+        self, alert_record
+    ):
+        service = CloudBillingNotificationService()
+
+        payload = service._generate_feishu_payload(alert_record, "zh-hans")
+
+        assert payload["content"]["post"]["zh-hans"]["title"] == (
+            FEISHU_TITLE_ZH_HANS
+        )
+
+    def test_generate_wechat_payload_uses_constant_title_prefix(
+        self, alert_record
+    ):
+        service = CloudBillingNotificationService()
+
+        payload = service._generate_wechat_payload(alert_record, "en")
+
+        assert payload["markdown"]["content"].startswith(WECHAT_TITLE_EN)
 
     @patch(
         "cloud_billing.services.notification_service."
