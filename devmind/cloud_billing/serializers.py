@@ -2,6 +2,7 @@
 Serializers for cloud billing API.
 """
 from django.contrib.auth.models import User
+from django.utils.translation import get_language
 
 from rest_framework import serializers
 
@@ -13,10 +14,12 @@ def get_balance_support_info(provider):
     provider_type = getattr(provider, "provider_type", "")
     config = getattr(provider, "config", {}) or {}
     region = str(config.get("region") or config.get("AWS_REGION") or "").strip()
+    language = (get_language() or "").lower()
+    unsupported_note = "暂不支持" if language.startswith("zh") else "Not supported yet"
     if provider_type == "aws" and region in {"cn-north-1", "cn-northwest-1"}:
         return {
             "supported": False,
-            "note": "暂不支持",
+            "note": unsupported_note,
         }
     return {
         "supported": True,

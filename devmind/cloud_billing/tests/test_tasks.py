@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from cloud_billing.models import (
     CloudProvider,
@@ -129,8 +130,10 @@ class TestCheckAlertForProvider:
         )
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_default_webhook_channel")
     def test_balance_threshold_triggers_alert(
         self,
+        mock_get_default_webhook_channel,
         mock_send_alert,
         cloud_provider,
         user,
@@ -141,6 +144,8 @@ class TestCheckAlertForProvider:
         Balance threshold alerts should trigger when current balance drops
         below the configured threshold.
         """
+        mock_channel = SimpleNamespace(config={"language": "en"})
+        mock_get_default_webhook_channel.return_value = (mock_channel, {})
         AlertRule.objects.create(
             provider=cloud_provider,
             balance_threshold=Decimal("550.00"),
@@ -225,6 +230,60 @@ class TestCollectBillingData:
         )
         assert mock_update_task_status.call_args.kwargs["error"].startswith(
             "Billing collection failed for all providers"
+        )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    def test_partial_success_uses_previous_total_cost_and_updates_balance(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        current_period = timezone.now().strftime("%Y-%m")
+        previous_hour = max(timezone.now().hour - 1, 0)
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=current_period,
+            hour=previous_hour,
+            total_cost=Decimal("88.88"),
+            balance=Decimal("500.00"),
+            hourly_cost=Decimal("10.00"),
+            currency="USD",
+            service_costs={},
+            account_id="123456789012",
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "partial_success",
+            "data": {
+                "total_cost": 0.0,
+                "balance": 321.45,
+                "balance_debug": {"status": "success"},
+                "currency": "USD",
+                "account_id": "123456789012",
+                "cost_status": "error",
+                "cost_error": "usageDetails/read denied",
+            },
+            "error": "usageDetails/read denied",
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="123456789012",
+            period=current_period,
+            hour=timezone.now().hour,
+        )
+        assert record.total_cost == Decimal("88.88")
+        assert record.balance == Decimal("321.45")
+        mock_check_alert_delay.assert_called_once_with(
+            cloud_provider.id,
+            cloud_provider.provider_type,
         )
 
 

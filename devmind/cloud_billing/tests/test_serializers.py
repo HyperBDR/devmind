@@ -4,10 +4,11 @@ Tests for cloud billing serializers.
 import pytest
 from decimal import Decimal
 from django.contrib.auth.models import User
+from django.utils import translation
 
 from rest_framework.exceptions import ValidationError
 
-from cloud_billing.models import CloudProvider, AlertRule
+from cloud_billing.models import CloudProvider, AlertRule, BillingData
 from cloud_billing.serializers import (
     CloudProviderSerializer,
     AlertRuleSerializer,
@@ -175,3 +176,23 @@ class TestBillingDataSerializer:
         assert 'total_cost' in data
         assert 'balance' in data
         assert 'currency' in data
+
+    def test_balance_note_is_localized_for_english(self, cloud_provider):
+        cloud_provider.config = {"region": "cn-north-1"}
+        cloud_provider.save(update_fields=["config"])
+        billing = BillingData.objects.create(
+            provider=cloud_provider,
+            period="2025-01",
+            hour=1,
+            total_cost=Decimal("10.00"),
+            balance=Decimal("5.00"),
+            currency="USD",
+            service_costs={},
+            account_id="acct-1",
+        )
+
+        with translation.override("en"):
+            data = BillingDataSerializer(billing).data
+
+        assert data["balance_supported"] is False
+        assert data["balance_note"] == "Not supported yet"

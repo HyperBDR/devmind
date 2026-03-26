@@ -63,8 +63,6 @@ class ZhipuConfig(BaseCloudConfig):
 
     username: Optional[str] = None
     password: Optional[str] = None
-    organization_id: Optional[str] = None
-    project_id: Optional[str] = None
     user_type: str = DEFAULT_USER_TYPE
     timeout: int = DEFAULT_TIMEOUT
     max_retries: int = DEFAULT_MAX_RETRIES
@@ -74,10 +72,6 @@ class ZhipuConfig(BaseCloudConfig):
             self.username = os.getenv("ZHIPU_USERNAME")
         if self.password is None:
             self.password = os.getenv("ZHIPU_PASSWORD")
-        if self.organization_id is None:
-            self.organization_id = os.getenv("ZHIPU_ORGANIZATION")
-        if self.project_id is None:
-            self.project_id = os.getenv("ZHIPU_PROJECT")
         if self.user_type == DEFAULT_USER_TYPE:
             self.user_type = os.getenv("ZHIPU_USER_TYPE", DEFAULT_USER_TYPE)
         if self.timeout == DEFAULT_TIMEOUT:

@@ -26,6 +26,59 @@ Other methods to extend the User model:
 from django.contrib.auth.models import User
 from django.db import models
 
+from accounts.access import normalize_feature_keys, normalize_platform_key
+
+
+class Role(models.Model):
+    """Role-based visibility definition for consoles and route groups."""
+
+    name = models.CharField(
+        max_length=120,
+        unique=True,
+        help_text="Human-readable role name.",
+    )
+    visible_features = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Feature keys visible to users who hold this role.",
+    )
+    preferred_platform = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        help_text="Default platform to open after login.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this role participates in access calculation.",
+    )
+    users = models.ManyToManyField(
+        User,
+        blank=True,
+        related_name='platform_roles',
+        help_text="Users directly bound to this role.",
+    )
+    groups = models.ManyToManyField(
+        'auth.Group',
+        blank=True,
+        related_name='platform_roles',
+        help_text="Groups whose members inherit this role.",
+    )
+
+    class Meta:
+        ordering = ['name', 'id']
+
+    def save(self, *args, **kwargs):
+        """Normalize stored feature and platform values."""
+        self.visible_features = normalize_feature_keys(self.visible_features)
+        self.preferred_platform = normalize_platform_key(
+            self.preferred_platform
+        )
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.name
+
 
 class Profile(models.Model):
     """
@@ -114,6 +167,16 @@ class Profile(models.Model):
         help_text=(
             "User's timezone for displaying dates and times. "
             "Common values: 'UTC', 'Asia/Shanghai', 'America/New_York', etc."
+        )
+    )
+
+    preferred_platform = models.CharField(
+        max_length=50,
+        blank=True,
+        default='',
+        help_text=(
+            "Optional user-level preferred platform. "
+            "If empty, the effective role preference is used."
         )
     )
 

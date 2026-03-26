@@ -217,6 +217,8 @@ class TestProviderService:
             {
                 "ZHIPU_USERNAME": "tester",
                 "ZHIPU_PASSWORD": "secret",
+                "ZHIPU_ORGANIZATION": "org-123",
+                "ZHIPU_PROJECT": "proj-456",
             },
         )
 

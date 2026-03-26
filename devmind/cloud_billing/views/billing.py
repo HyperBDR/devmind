@@ -11,6 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from ..dashboard import build_dashboard_overview
 from ..models import BillingData
 from ..serializers import (
     BillingDataListSerializer,
@@ -270,6 +271,21 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
             'cost_by_service': cost_by_service,
             'by_provider': by_provider,
         })
+
+    @extend_schema(
+        tags=['cloud-billing'],
+        summary="Get operations overview dashboard data",
+        description=(
+            "Return a consolidated payload for the cloud billing "
+            "operations dashboard."
+        ),
+        responses={200: {'type': 'object'}},
+    )
+    @action(detail=False, methods=['get'], url_path='overview')
+    def overview(self, request):
+        """Return dashboard data for the operations overview page."""
+        timezone_name = request.query_params.get('timezone')
+        return Response(build_dashboard_overview(timezone_name=timezone_name))
 
     @extend_schema(
         tags=['cloud-billing'],

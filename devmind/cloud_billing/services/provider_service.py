@@ -278,18 +278,6 @@ class ProviderService:
                 or config_dict.get("zhipu_password")
                 or config_dict.get("password")
             )
-            organization_id = (
-                config_dict.get("ZHIPU_ORGANIZATION")
-                or config_dict.get("ZHIPU_ORGANIZATION_ID")
-                or config_dict.get("zhipu_organization")
-                or config_dict.get("organization_id")
-            )
-            project_id = (
-                config_dict.get("ZHIPU_PROJECT")
-                or config_dict.get("ZHIPU_PROJECT_ID")
-                or config_dict.get("zhipu_project")
-                or config_dict.get("project_id")
-            )
             user_type = (
                 config_dict.get("ZHIPU_USER_TYPE")
                 or config_dict.get("zhipu_user_type")
@@ -307,10 +295,6 @@ class ProviderService:
                 normalized["username"] = username
             if password:
                 normalized["password"] = password
-            if organization_id:
-                normalized["organization_id"] = organization_id
-            if project_id:
-                normalized["project_id"] = project_id
             if user_type:
                 normalized["user_type"] = user_type
             if timeout is not None and timeout != "":
