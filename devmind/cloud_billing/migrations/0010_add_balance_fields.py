@@ -71,4 +71,43 @@ class Migration(migrations.Migration):
                 null=True,
             ),
         ),
+        migrations.AddField(
+            model_name="cloudprovider",
+            name="balance",
+            field=models.DecimalField(
+                blank=True,
+                decimal_places=2,
+                help_text="Latest synced account balance for this provider",
+                max_digits=20,
+                null=True,
+            ),
+        ),
+        migrations.AddField(
+            model_name="cloudprovider",
+            name="balance_currency",
+            field=models.CharField(
+                blank=True,
+                default="",
+                help_text="Currency code for the latest synced balance",
+                max_length=10,
+            ),
+        ),
+        migrations.AddField(
+            model_name="cloudprovider",
+            name="balance_updated_at",
+            field=models.DateTimeField(
+                blank=True,
+                help_text="When the latest provider balance was synced",
+                null=True,
+            ),
+        ),
+        migrations.AddField(
+            model_name="cloudprovider",
+            name="tags",
+            field=models.JSONField(
+                blank=True,
+                default=list,
+                help_text="Custom tags for this provider/account",
+            ),
+        ),
     ]

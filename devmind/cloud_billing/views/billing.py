@@ -143,9 +143,13 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         total_cost = sum(
             float(b.total_cost) for b in latest_billings.values()
         )
+        unique_providers = {
+            billing.provider_id: billing.provider for billing in latest_billings.values()
+        }
         total_balance = sum(
-            float(b.balance) for b in latest_billings.values()
-            if b.balance is not None
+            float(provider.balance)
+            for provider in unique_providers.values()
+            if provider.balance is not None
         )
 
         # Average cost: total_cost / number of unique
@@ -243,8 +247,8 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                     'count': 0,
                     'currency': billing.currency,
                     'balance': (
-                        float(billing.balance)
-                        if billing.balance is not None else 0
+                        float(billing.provider.balance)
+                        if billing.provider.balance is not None else 0
                     ),
                     'balance_supported': balance_info['supported'],
                     'balance_note': balance_info['note'],
@@ -258,8 +262,10 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
             by_provider[provider_key]['currency'] = (
                 billing.currency or by_provider[provider_key]['currency']
             )
-            if billing.balance is not None:
-                by_provider[provider_key]['balance'] = float(billing.balance)
+            if billing.provider.balance is not None:
+                by_provider[provider_key]['balance'] = float(
+                    billing.provider.balance
+                )
             by_provider[provider_key]['count'] += 1
 
         return Response({

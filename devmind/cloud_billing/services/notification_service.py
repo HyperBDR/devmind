@@ -21,23 +21,18 @@ from agentcore_notifier.adapters.django.tasks.send import (
     send_notification,
 )
 from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
+from django.utils import translation
+from django.utils.translation import gettext as _
 
+from cloud_billing.alert_messages import build_alert_message_from_record
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
-    EMAIL_BODY_TITLE_EN,
-    EMAIL_BODY_TITLE_ZH_HANS,
-    EMAIL_SUBJECT_EN,
-    EMAIL_SUBJECT_ZH_HANS,
     FEISHU_MSG_TYPE_POST,
     FEISHU_TAG_AT,
     FEISHU_TAG_TEXT,
-    FEISHU_TITLE_EN,
-    FEISHU_TITLE_ZH_HANS,
     FEISHU_USER_ID_ALL,
     SOURCE_APP_CLOUD_BILLING,
     SOURCE_TYPE_ALERT,
-    WECHAT_TITLE_EN,
-    WECHAT_TITLE_ZH_HANS,
     WECHAT_MSGTYPE_MARKDOWN,
 )
 from cloud_billing.models import AlertRecord
@@ -71,37 +66,23 @@ class CloudBillingNotificationService:
         return str(language or DEFAULT_LANGUAGE).lower().startswith("zh")
 
     def _get_alert_title(self, language: str, channel: str) -> str:
-        title_map = {
-            "feishu": {
-                True: FEISHU_TITLE_ZH_HANS,
-                False: FEISHU_TITLE_EN,
-            },
-            "wechat": {
-                True: WECHAT_TITLE_ZH_HANS,
-                False: WECHAT_TITLE_EN,
-            },
-            "email_subject": {
-                True: EMAIL_SUBJECT_ZH_HANS,
-                False: EMAIL_SUBJECT_EN,
-            },
-            "email_body": {
-                True: EMAIL_BODY_TITLE_ZH_HANS,
-                False: EMAIL_BODY_TITLE_EN,
-            },
-        }
+        normalized_language = str(language or DEFAULT_LANGUAGE).lower()
+        with translation.override(normalized_language):
+            title_map = {
+                "feishu": _("[Important] Cloud Billing Alert"),
+                "wechat": _("## Cloud Billing Alert\n\n"),
+                "email_subject": _("Cloud Billing Alert"),
+                "email_body": _("## Cloud Billing Alert\n\n"),
+            }
         normalized_channel = str(channel or "").lower()
         if normalized_channel not in title_map:
             raise ValueError(f"Unsupported alert title channel: {channel}")
-        return title_map[normalized_channel][
-            self._is_chinese_language(language)
-        ]
+        return title_map[normalized_channel]
 
     def _get_alert_body(
         self, alert_record: AlertRecord, language: str
     ) -> str:
-        if alert_record.alert_message:
-            return str(alert_record.alert_message)
-        return ""
+        return build_alert_message_from_record(alert_record, language)
 
     def _generate_feishu_payload(
         self, alert_record: AlertRecord, language: str

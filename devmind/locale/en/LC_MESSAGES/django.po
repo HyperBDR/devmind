@@ -472,6 +472,18 @@ msgstr "Current total cost exceeds the configured threshold"
 msgid "Billing growth exceeds the configured threshold"
 msgstr "Billing growth exceeds the configured threshold"
 
+#: cloud_billing/dashboard.py
+msgid "US Dollar"
+msgstr "US Dollar"
+
+#: cloud_billing/dashboard.py
+msgid "Chinese Yuan"
+msgstr "Chinese Yuan"
+
+#: cloud_billing/services/notification_service.py
+msgid "Cloud Billing Alert"
+msgstr "Cloud Billing Alert"
+
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""

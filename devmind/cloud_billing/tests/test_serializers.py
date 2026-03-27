@@ -38,6 +38,7 @@ class TestCloudProviderSerializer:
             "name": "new_provider",
             "provider_type": "aws",
             "display_name": "New Provider",
+            "tags": ["生产", "重点", "生产"],
             "config": {"access_key": "test", "secret_key": "test"},
             "is_active": True,
         }
@@ -46,6 +47,7 @@ class TestCloudProviderSerializer:
         provider = serializer.save(created_by=user, updated_by=user)
         assert provider.name == "new_provider"
         assert provider.provider_type == "aws"
+        assert provider.tags == ["生产", "重点"]
 
     def test_validate_unique_name(self, cloud_provider):
         data = {
@@ -130,6 +132,9 @@ class TestBillingDataSerializer:
     """
 
     def test_serialize_billing_data(self, billing_data):
+        billing_data.provider.balance = Decimal("77.00")
+        billing_data.provider.balance_currency = "USD"
+        billing_data.provider.save(update_fields=["balance", "balance_currency"])
         serializer = BillingDataSerializer(billing_data)
         data = serializer.data
         assert data["id"] == billing_data.id
@@ -138,6 +143,7 @@ class TestBillingDataSerializer:
         assert "provider_type" in data
         assert "total_cost" in data
         assert "balance" in data
+        assert data["balance"] == "77.00"
         assert "currency" in data
 
     def test_balance_note_is_localized_for_english(self, cloud_provider):

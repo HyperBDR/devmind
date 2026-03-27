@@ -26,16 +26,3 @@ FEISHU_USER_ID_ALL = 'all'
 
 # WeChat payload keys
 WECHAT_MSGTYPE_MARKDOWN = 'markdown'
-
-# Message titles
-FEISHU_TITLE_ZH_HANS = "[重点关注]云平台账单消费提醒"
-FEISHU_TITLE_EN = "[Important] Cloud Billing Alert"
-
-WECHAT_TITLE_ZH_HANS = "## 云平台账单消费提醒\n\n"
-WECHAT_TITLE_EN = "## Cloud Billing Alert\n\n"
-
-EMAIL_SUBJECT_ZH_HANS = "云平台账单消费提醒"
-EMAIL_SUBJECT_EN = "Cloud Billing Alert"
-
-EMAIL_BODY_TITLE_ZH_HANS = "## 云平台账单消费提醒\n\n"
-EMAIL_BODY_TITLE_EN = "## Cloud Billing Alert\n\n"

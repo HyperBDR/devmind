@@ -248,6 +248,9 @@ class TestBillingDataViewSet:
         """
         Test billing statistics endpoint.
         """
+        cloud_provider.balance = Decimal("88.00")
+        cloud_provider.balance_currency = "USD"
+        cloud_provider.save(update_fields=["balance", "balance_currency"])
         url = (
             f"/api/v1/cloud-billing/billing-data/stats/"
             f"?provider_id={cloud_provider.id}"
@@ -294,6 +297,9 @@ class TestBillingDataViewSet:
         """
         Billing statistics should not include disabled providers.
         """
+        billing_data.provider.balance = Decimal("66.00")
+        billing_data.provider.balance_currency = "USD"
+        billing_data.provider.save(update_fields=["balance", "balance_currency"])
         BillingData.objects.create(
             provider=cloud_provider_inactive,
             period=billing_data.period,
@@ -310,7 +316,9 @@ class TestBillingDataViewSet:
 
         assert response.status_code == 200
         assert response.data["total_cost"] == float(billing_data.total_cost)
-        assert response.data["total_balance"] == float(billing_data.balance)
+        assert response.data["total_balance"] == float(
+            billing_data.provider.balance
+        )
         assert all(
             entry["provider_id"] != cloud_provider_inactive.id
             for entry in response.data["by_provider"].values()

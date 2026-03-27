@@ -2,7 +2,7 @@
 Serializers for cloud billing API.
 """
 from django.contrib.auth.models import User
-from django.utils.translation import get_language
+from django.utils.translation import gettext as _
 
 from rest_framework import serializers
 
@@ -14,8 +14,7 @@ def get_balance_support_info(provider):
     provider_type = getattr(provider, "provider_type", "")
     config = getattr(provider, "config", {}) or {}
     region = str(config.get("region") or config.get("AWS_REGION") or "").strip()
-    language = (get_language() or "").lower()
-    unsupported_note = "暂不支持" if language.startswith("zh") else "Not supported yet"
+    unsupported_note = _("Not supported yet")
     if provider_type == "aws" and region in {"cn-north-1", "cn-northwest-1"}:
         return {
             "supported": False,
@@ -53,7 +52,8 @@ class CloudProviderSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProvider
         fields = [
-            'id', 'name', 'provider_type', 'display_name', 'notes', 'config',
+            'id', 'name', 'provider_type', 'display_name', 'notes', 'tags',
+            'balance', 'balance_currency', 'balance_updated_at', 'config',
             'is_active', 'created_at', 'updated_at',
             'created_by', 'created_by_username',
             'updated_by', 'updated_by_username',
@@ -84,6 +84,25 @@ class CloudProviderSerializer(serializers.ModelSerializer):
                     "A provider with this name already exists."
                 )
         return value
+
+    def validate_tags(self, value):
+        """
+        Normalize provider tags to a unique string list.
+        """
+        if value in (None, ""):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Tags must be a list.")
+
+        normalized = []
+        seen = set()
+        for item in value:
+            tag = str(item or "").strip()
+            if not tag or tag in seen:
+                continue
+            normalized.append(tag)
+            seen.add(tag)
+        return normalized
 
     def validate_config(self, value):
         """
@@ -136,7 +155,8 @@ class CloudProviderListSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProvider
         fields = [
-            'id', 'name', 'provider_type', 'display_name', 'notes',
+            'id', 'name', 'provider_type', 'display_name', 'notes', 'tags',
+            'balance', 'balance_currency', 'balance_updated_at',
             'is_active', 'created_at'
         ]
 
@@ -151,8 +171,13 @@ class BillingDataSerializer(serializers.ModelSerializer):
     provider_type = serializers.CharField(
         source='provider.provider_type', read_only=True
     )
+    balance = serializers.SerializerMethodField()
     balance_supported = serializers.SerializerMethodField()
     balance_note = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_balance(obj):
+        return obj.provider.balance
 
     @staticmethod
     def get_balance_supported(obj):
@@ -183,8 +208,13 @@ class BillingDataListSerializer(serializers.ModelSerializer):
     provider_type = serializers.CharField(
         source='provider.provider_type', read_only=True
     )
+    balance = serializers.SerializerMethodField()
     balance_supported = serializers.SerializerMethodField()
     balance_note = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_balance(obj):
+        return obj.provider.balance
 
     @staticmethod
     def get_balance_supported(obj):

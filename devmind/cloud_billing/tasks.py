@@ -11,11 +11,14 @@ from typing import Dict, Optional
 from celery import shared_task
 from celery import current_task
 from django.db import transaction
-from django.utils import timezone, translation
-from django.utils.translation import gettext as _
+from django.utils import timezone
 
+from agentcore_notifier.adapters.django.services.email_service import (
+    get_email_channel_by_uuid,
+)
 from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
+    get_webhook_channel_by_uuid,
 )
 from agentcore_task.adapters.django import (
     prevent_duplicate_task,
@@ -23,6 +26,7 @@ from agentcore_task.adapters.django import (
     TaskStatus,
     TaskTracker,
 )
+from .alert_messages import build_alert_message, extract_provider_notes
 
 from .constants import (
     DEFAULT_LANGUAGE,
@@ -37,198 +41,44 @@ from .services.provider_service import ProviderService
 logger = logging.getLogger(__name__)
 
 
-def _is_chinese_language(language: str) -> bool:
-    return str(language or "").lower().startswith("zh")
+def _resolve_notification_language(provider: CloudProvider) -> str:
+    notification = (provider.config or {}).get("notification") or {}
+    channel_type = str(notification.get("type") or "").strip().lower()
+    channel_uuid = str(notification.get("channel_uuid") or "").strip()
+
+    try:
+        if channel_type == "email" and channel_uuid:
+            channel, _config = get_email_channel_by_uuid(channel_uuid)
+            if channel and isinstance(channel.config, dict):
+                return channel.config.get("language", DEFAULT_LANGUAGE)
+        if channel_uuid:
+            channel, _config = get_webhook_channel_by_uuid(channel_uuid)
+            if channel and isinstance(channel.config, dict):
+                return channel.config.get("language", DEFAULT_LANGUAGE)
+        channel, _config = get_default_webhook_channel()
+        if channel and isinstance(channel.config, dict):
+            return channel.config.get("language", DEFAULT_LANGUAGE)
+    except Exception:
+        pass
+    return DEFAULT_LANGUAGE
 
 
-def _format_alert_line(
-    label: str,
-    value: str,
-    is_chinese_language: bool,
-) -> str:
-    separator = "：" if is_chinese_language else ": "
-    return f"{label}{separator}{value}"
-
-
-def _extract_provider_notes(provider: CloudProvider) -> str:
-    direct_notes = (getattr(provider, "notes", "") or "").strip()
-    if direct_notes:
-        return direct_notes
-
-    config = getattr(provider, "config", {}) or {}
-    for key in ("notes", "note", "remark", "remarks", "description"):
-        value = (config.get(key) or "").strip() if isinstance(config, dict) else ""
-        if value:
-            return value
-    return ""
-
-
-def _build_alert_message(
-    *,
-    provider_name: str,
-    provider_notes: str,
+def _get_latest_known_balance(
+    provider: CloudProvider,
     account_id: str,
-    current_cost: Decimal,
-    previous_cost: Decimal,
-    increase_cost: Decimal,
-    increase_percent: Decimal,
-    current_balance: Decimal | None,
-    currency: str,
-    alert_rule: AlertRule,
-    cost_threshold_triggered: bool,
-    balance_threshold_triggered: bool,
-    language: str,
-) -> str:
-    normalized_language = str(language or DEFAULT_LANGUAGE).lower()
-    is_chinese_language = _is_chinese_language(normalized_language)
-
-    with translation.override(normalized_language):
-        lines = [
-            _format_alert_line(_("Cloud provider"), provider_name, is_chinese_language),
-        ]
-        if account_id:
-            lines.append(
-                _format_alert_line(_("Account"), account_id, is_chinese_language)
-            )
-        if provider_notes:
-            lines.append(
-                _format_alert_line(_("Notes"), provider_notes, is_chinese_language)
-            )
-
-        if balance_threshold_triggered:
-            lines.insert(
-                0,
-                _format_alert_line(
-                    _("Alert type"),
-                    _("Balance threshold alert"),
-                    is_chinese_language,
-                ),
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Current balance"),
-                    f"{current_balance:.2f} {currency}",
-                    is_chinese_language,
-                )
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Alert threshold"),
-                    f"{alert_rule.balance_threshold:.2f} {currency}",
-                    is_chinese_language,
-                )
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Alert description"),
-                    _(
-                        "Remaining balance is below the configured threshold. "
-                        "Please recharge promptly."
-                    ),
-                    is_chinese_language,
-                )
-            )
-            return "\n".join(lines)
-
-        if cost_threshold_triggered:
-            lines.insert(
-                0,
-                _format_alert_line(
-                    _("Alert type"),
-                    _("Cost threshold alert"),
-                    is_chinese_language,
-                ),
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Current total cost"),
-                    f"{current_cost:.2f} {currency}",
-                    is_chinese_language,
-                )
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Alert threshold"),
-                    f"{alert_rule.cost_threshold:.2f} {currency}",
-                    is_chinese_language,
-                )
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Previous hour cost"),
-                    f"{previous_cost:.2f} {currency}",
-                    is_chinese_language,
-                )
-            )
-            lines.append(
-                _format_alert_line(
-                    _("Alert description"),
-                    _("Current total cost exceeds the configured threshold"),
-                    is_chinese_language,
-                )
-            )
-            return "\n".join(lines)
-
-        lines.insert(
-            0,
-            _format_alert_line(
-                _("Alert type"),
-                _("Cost growth alert"),
-                is_chinese_language,
-            ),
-        )
-        lines.append(
-            _format_alert_line(
-                _("Current total cost"),
-                f"{current_cost:.2f} {currency}",
-                is_chinese_language,
-            )
-        )
-        lines.append(
-            _format_alert_line(
-                _("Previous hour cost"),
-                f"{previous_cost:.2f} {currency}",
-                is_chinese_language,
-            )
-        )
-        lines.append(
-            _format_alert_line(
-                _("Increase amount"),
-                f"{increase_cost:.2f} {currency}",
-                is_chinese_language,
-            )
-        )
-        lines.append(
-            _format_alert_line(
-                _("Growth rate"),
-                f"{increase_percent:.2f}%",
-                is_chinese_language,
-            )
-        )
-        if alert_rule.growth_threshold is not None:
-            lines.append(
-                _format_alert_line(
-                    _("Percentage threshold"),
-                    f"{alert_rule.growth_threshold:.2f}%",
-                    is_chinese_language,
-                )
-            )
-        if alert_rule.growth_amount_threshold is not None:
-            lines.append(
-                _format_alert_line(
-                    _("Amount threshold"),
-                    f"{alert_rule.growth_amount_threshold:.2f} {currency}",
-                    is_chinese_language,
-                )
-            )
-        lines.append(
-            _format_alert_line(
-                _("Alert description"),
-                _("Billing growth exceeds the configured threshold"),
-                is_chinese_language,
-            )
-        )
-        return "\n".join(lines)
+    current_period: str,
+    current_hour: int,
+):
+    """Return the most recent non-null balance before the current collection."""
+    queryset = BillingData.objects.filter(
+        provider=provider,
+        account_id=account_id,
+        balance__isnull=False,
+    ).exclude(
+        period=current_period,
+        hour=current_hour,
+    ).order_by('-collected_at', '-period', '-hour')
+    return queryset.values_list('balance', flat=True).first()
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")
@@ -397,6 +247,16 @@ def collect_billing_data(
                 currency = billing_data.get("currency", "USD")
                 service_costs = billing_data.get("service_costs", {})
                 account_id = billing_data.get("account_id", "")
+                fallback_balance = None
+                if balance is None:
+                    fallback_balance = _get_latest_known_balance(
+                        provider=provider,
+                        account_id=account_id,
+                        current_period=current_period,
+                        current_hour=current_hour,
+                    )
+                    if fallback_balance is not None:
+                        balance = fallback_balance
 
                 if billing_status == "partial_success" or cost_status != "success":
                     previous_total_cost = (
@@ -500,7 +360,8 @@ def collect_billing_data(
                     if not created:
                         # Update existing billing record with latest data
                         billing_record.total_cost = total_cost
-                        billing_record.balance = balance
+                        if balance is not None:
+                            billing_record.balance = balance
                         billing_record.hourly_cost = hourly_cost
                         billing_record.currency = currency
                         billing_record.service_costs = service_costs
@@ -529,7 +390,7 @@ def collect_billing_data(
                             f"(provider_id={provider.id}, "
                             f"name={provider.name}, period={current_period}, "
                             f"hour={current_hour}, total_cost={total_cost}, "
-                            f"balance={balance}, "
+                            f"balance={billing_record.balance}, "
                             f"hourly_cost={hourly_cost}, currency={currency}, "
                             f"account_id={account_id})"
                         )
@@ -548,6 +409,25 @@ def collect_billing_data(
                         )
                         log_collector.info(info_msg)
                         logger.info(f"{info_msg}")
+
+                    if balance is not None:
+                        provider.balance = balance
+                        provider.balance_currency = str(currency or "").upper()
+                        provider.balance_updated_at = timezone.now()
+                        provider.save(
+                            update_fields=[
+                                "balance",
+                                "balance_currency",
+                                "balance_updated_at",
+                            ]
+                        )
+
+                if fallback_balance is not None:
+                    log_collector.info(
+                        f"Task collect_billing_data: Reused previous balance "
+                        f"(provider_id={provider.id}, account_id={account_id}, "
+                        f"balance={fallback_balance})"
+                    )
 
                 results["success"].append(
                     {
@@ -962,17 +842,11 @@ def check_alert_for_provider(
                 )
                 continue
 
-            language = "en"
-            try:
-                channel, _config = get_default_webhook_channel()
-                if channel and isinstance(channel.config, dict):
-                    language = channel.config.get("language", "en")
-            except Exception:
-                pass
+            language = _resolve_notification_language(provider)
 
-            alert_message = _build_alert_message(
+            alert_message = build_alert_message(
                 provider_name=provider.display_name,
-                provider_notes=_extract_provider_notes(provider),
+                provider_notes=extract_provider_notes(provider),
                 account_id=account_id,
                 current_cost=current_cost,
                 previous_cost=previous_cost,

@@ -498,6 +498,18 @@ msgstr "当前总费用已超过设定阈值"
 msgid "Billing growth exceeds the configured threshold"
 msgstr "费用增长超过设定阈值"
 
+#: cloud_billing/dashboard.py
+msgid "US Dollar"
+msgstr "美元"
+
+#: cloud_billing/dashboard.py
+msgid "Chinese Yuan"
+msgstr "人民币"
+
+#: cloud_billing/services/notification_service.py
+msgid "Cloud Billing Alert"
+msgstr "云平台账单消费提醒"
+
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""

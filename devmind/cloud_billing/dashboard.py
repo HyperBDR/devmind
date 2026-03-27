@@ -14,6 +14,7 @@ import requests
 from django.core.cache import cache
 from django.db.models import Prefetch
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from .models import BillingData, CloudProvider
 from .serializers import get_balance_support_info
@@ -93,8 +94,12 @@ def _credit_limit_for_provider(provider) -> float | None:
 
 def _normalize_account_funds(provider, billing, payment_type: str) -> dict[str, object]:
     provider_type = str(getattr(provider, 'provider_type', '') or '').strip().lower()
-    account_currency = str(getattr(billing, 'currency', '') or 'USD').upper()
-    raw_balance = _to_float(getattr(billing, 'balance', None))
+    account_currency = str(
+        getattr(provider, 'balance_currency', '')
+        or getattr(billing, 'currency', '')
+        or 'USD'
+    ).upper()
+    raw_balance = _to_float(getattr(provider, 'balance', None))
     configured_credit_limit = _credit_limit_for_provider(provider)
 
     balance = raw_balance
@@ -152,6 +157,21 @@ def _billing_rows_for_current_year(local_tz):
         collected_at__gte=year_start.astimezone(dt_timezone.utc),
     ).order_by('provider_id', 'account_id', 'period', 'hour', 'collected_at')
     return now, year_start, list(rows)
+
+
+def _billing_rows_for_recent_days(local_tz, days: int = 30):
+    now = timezone.now().astimezone(local_tz)
+    window_start = (now - timedelta(days=max(days - 1, 0))).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    rows = BillingData.objects.select_related('provider').filter(
+        provider__is_active=True,
+        collected_at__gte=window_start.astimezone(dt_timezone.utc),
+    ).order_by('provider_id', 'account_id', 'period', 'hour', 'collected_at')
+    return now, window_start, list(rows)
 
 
 def _latest_billings():
@@ -306,21 +326,24 @@ def _build_trend_ranges(month_rows, year_rows, local_tz, now):
     }
 
 
-def _build_currency_breakdown(latest_billings):
+def _build_currency_breakdown(accounts, exchange_rate: float | None = None):
+    usd_to_cny_rate = float(exchange_rate or CNY_RATE)
     totals = defaultdict(float)
     original_totals = defaultdict(float)
-    for billing in latest_billings:
-        currency = str(billing.currency or 'USD').upper()
-        amount = _to_float(billing.total_cost)
+    for account in accounts:
+        currency = str(account.get('balance_currency') or '').upper()
+        amount = _to_float(account.get('balance'))
+        if not currency or amount <= 0:
+            continue
         original_totals[currency] += amount
         if currency == 'USD':
-            totals[currency] += amount * float(CNY_RATE)
+            totals[currency] += amount * usd_to_cny_rate
         else:
             totals[currency] += amount
 
     total_value = sum(totals.values()) or 1.0
     colors = {'USD': '#6366f1', 'CNY': '#10b981'}
-    labels = {'USD': '美元', 'CNY': '人民币'}
+    labels = {'USD': _('US Dollar'), 'CNY': _('Chinese Yuan')}
     items = []
     for currency in sorted(totals.keys()):
         items.append(
@@ -344,11 +367,199 @@ def _risk_for_days(days_remaining: int) -> str:
     return 'low'
 
 
-def _build_accounts(latest_billings, daily_rows, local_tz=None, now=None):
+def _build_account_detail(
+    billing: BillingData,
+    monthly_rows,
+    recent_rows,
+    display_funds: float,
+    daily_burn: float,
+    days_remaining: int,
+    payment_type: str,
+    selected_currency: str,
+):
+    provider_id = getattr(billing, 'provider_id', None) or getattr(
+        getattr(billing, 'provider', None),
+        'id',
+        None,
+    )
+    account_key = (provider_id, billing.account_id or '')
+    daily_totals = defaultdict(float)
+    daily_service_totals = defaultdict(lambda: defaultdict(float))
+    total_service_totals = defaultdict(float)
+    for index, row in enumerate(recent_rows):
+        if (row.provider_id, row.account_id or '') != account_key:
+            continue
+        collected_at = getattr(row, 'collected_at', None)
+        label = (
+            collected_at.strftime('%m-%d')
+            if collected_at is not None
+            else f'{index + 1:02d}'
+        )
+        row_total = _hourly_cost_value(row)
+        daily_totals[label] += row_total
+        row_service_costs = getattr(row, 'service_costs', {}) or {}
+        for service_name, service_value in row_service_costs.items():
+            numeric_value = _to_float(service_value)
+            if numeric_value <= 0:
+                continue
+            normalized_name = str(service_name)
+            daily_service_totals[label][normalized_name] += numeric_value
+            total_service_totals[normalized_name] += numeric_value
+
+    ordered_dates = []
+    if recent_rows:
+        if all(getattr(row, 'collected_at', None) is not None for row in recent_rows):
+            first_day = recent_rows[0].collected_at.date()
+            last_day = recent_rows[-1].collected_at.date()
+            cursor = first_day
+            while cursor <= last_day:
+                ordered_dates.append(cursor.strftime('%m-%d'))
+                cursor += timedelta(days=1)
+        else:
+            ordered_dates = sorted(daily_totals.keys())
+    recent_trend = [
+        {'date': label, 'value': round(daily_totals.get(label, 0.0), 2)}
+        for label in ordered_dates[-30:]
+    ]
+
+    fallback_service_costs = getattr(billing, 'service_costs', {}) or {}
+    if not total_service_totals and fallback_service_costs:
+        for service_name, service_value in fallback_service_costs.items():
+            numeric_value = _to_float(service_value)
+            if numeric_value > 0:
+                total_service_totals[str(service_name)] = numeric_value
+
+    sorted_services = sorted(
+        (
+            {
+                'name': str(name),
+                'value': round(_to_float(value), 2),
+            }
+            for name, value in total_service_totals.items()
+            if _to_float(value) > 0
+        ),
+        key=lambda item: item['value'],
+        reverse=True,
+    )
+    total_service_cost = sum(item['value'] for item in sorted_services) or 0.0
+    primary_service = (
+        sorted_services[0]
+        if sorted_services
+        else {'name': _('Core services'), 'value': 0.0}
+    )
+    primary_share = (
+        round(primary_service['value'] / total_service_cost * 100, 1)
+        if total_service_cost
+        else 0.0
+    )
+    detailed_services = [
+        {
+            'name': item['name'],
+            'value': item['value'],
+            'percentage': (
+                round(item['value'] / total_service_cost * 100, 1)
+                if total_service_cost
+                else 0.0
+            ),
+        }
+        for item in sorted_services
+    ]
+
+    major_services = []
+    other_service_total = 0.0
+    for item in detailed_services:
+        if item['percentage'] < 5:
+            other_service_total += item['value']
+        else:
+            major_services.append(item)
+    other_share = (
+        round(other_service_total / total_service_cost * 100, 1)
+        if total_service_cost and other_service_total > 0
+        else 0.0
+    )
+    if other_service_total > 0:
+        major_services.append(
+            {
+                'name': '__other__',
+                'value': round(other_service_total, 2),
+                'percentage': other_share,
+            }
+        )
+
+    detail_trend = []
+    trend_series = []
+    recent_labels = [item['date'] for item in recent_trend]
+    for service in major_services:
+        service_name = service['name']
+        values = []
+        for label in recent_labels:
+            if service_name == '__other__':
+                major_names = {item['name'] for item in major_services if item['name'] != '__other__'}
+                other_value = sum(
+                    value
+                    for name, value in daily_service_totals.get(label, {}).items()
+                    if name not in major_names
+                )
+                values.append(round(other_value, 2))
+            else:
+                values.append(round(daily_service_totals.get(label, {}).get(service_name, 0.0), 2))
+        trend_series.append(
+            {
+                'name': service_name,
+                'percentage': service['percentage'],
+                'values': values,
+            }
+        )
+
+    for index, item in enumerate(recent_trend):
+        services_map = {
+            series['name']: series['values'][index]
+            for series in trend_series
+        }
+        detail_trend.append(
+            {
+                'date': item['date'],
+                'total': round(item['value'], 2),
+                'services': services_map,
+            }
+        )
+
+    peak_daily_cost = max((item['value'] for item in recent_trend), default=0.0)
+    recommended_recharge = round(max(daily_burn * 30 - display_funds, 0), 2)
+    if payment_type == 'postpaid':
+        recommendation_status = 'healthy' if days_remaining > 14 else 'attention'
+    else:
+        recommendation_status = 'healthy' if days_remaining > 21 else 'attention'
+
+    return {
+        'recommendation_status': recommendation_status,
+        'daily_average': round(daily_burn, 2),
+        'daily_peak': round(peak_daily_cost, 2),
+        'recommended_recharge': recommended_recharge,
+        'recommended_window_days': 30,
+        'service_count': len(sorted_services),
+        'primary_service_name': primary_service['name'],
+        'primary_service_share': primary_share,
+        'other_service_share': other_share,
+        'service_breakdown': detailed_services,
+        'trend_series': trend_series,
+        'trend_30d': detail_trend,
+    }
+
+
+def _build_accounts(
+    latest_billings,
+    daily_rows,
+    recent_rows=None,
+    local_tz=None,
+    now=None,
+):
     if local_tz is None:
         local_tz = timezone.get_current_timezone()
     if now is None:
         now = timezone.now().astimezone(local_tz)
+    if recent_rows is None:
+        recent_rows = daily_rows
     monthly_burn = defaultdict(float)
     for row in daily_rows:
         account_key = (row.provider_id, row.account_id or '')
@@ -394,6 +605,7 @@ def _build_accounts(latest_billings, daily_rows, local_tz=None, now=None):
                 'provider': provider.display_name,
                 'provider_type': provider.provider_type,
                 'notes': (getattr(provider, 'notes', '') or '').strip(),
+                'tags': list(getattr(provider, 'tags', []) or []),
                 'category': (
                     'LLM'
                     if provider.provider_type in LLM_PROVIDER_TYPES
@@ -414,6 +626,20 @@ def _build_accounts(latest_billings, daily_rows, local_tz=None, now=None):
                 'usage_rate': None,
                 'account_id': billing.account_id or '',
                 'trend': account_trend,
+                'detail': _build_account_detail(
+                    billing,
+                    daily_rows,
+                    recent_rows,
+                    display_funds=display_funds,
+                    daily_burn=daily_burn,
+                    days_remaining=days_remaining,
+                    payment_type=payment_type,
+                    selected_currency=str(
+                        funds['display_funds_currency']
+                        or billing.currency
+                        or 'CNY'
+                    ).upper(),
+                ),
             }
         )
 
@@ -434,9 +660,10 @@ def _build_financial_health(accounts):
             'category': item['category'],
             'account_id': item['account_id'],
             'notes': item['notes'],
+            'tags': item.get('tags', []),
             'days_remaining': item['days_remaining'],
         }
-        for item in accounts[:8]
+        for item in accounts
     ]
     return {
         'total_funds': total_funds,
@@ -451,7 +678,7 @@ def _build_fallback_exchange_rate_info() -> dict[str, object]:
         'exchange_rate': float(CNY_RATE),
         'rate_source_label': 'Internal baseline rate',
         'rate_source_url': '',
-        'rate_collected_at': timezone.now().isoformat(),
+        'rate_collected_at': '',
     }
 
 
@@ -506,18 +733,29 @@ def _build_exchange_rate_info() -> dict[str, object]:
 def build_dashboard_overview(timezone_name: str | None = None) -> dict[str, object]:
     """Build a dashboard payload for the operations overview page."""
     local_tz = _resolve_dashboard_timezone(timezone_name)
+    exchange_rate_info = _build_exchange_rate_info()
     latest_billings = _latest_billings()
     now, _, daily_rows = _daily_rows_for_current_month(local_tz)
+    _, _, recent_rows = _billing_rows_for_recent_days(local_tz, days=30)
     _, _, year_rows = _billing_rows_for_current_year(local_tz)
-    accounts = _build_accounts(latest_billings, daily_rows, local_tz=local_tz, now=now)
+    accounts = _build_accounts(
+        latest_billings,
+        daily_rows,
+        recent_rows=recent_rows,
+        local_tz=local_tz,
+        now=now,
+    )
     summary = _build_summary(latest_billings, daily_rows, local_tz, now)
     summary['trend_ranges'] = _build_trend_ranges(daily_rows, year_rows, local_tz, now)
     overview = {
         'summary': summary,
-        'currency_breakdown': _build_currency_breakdown(latest_billings),
+        'currency_breakdown': _build_currency_breakdown(
+            accounts,
+            exchange_rate=exchange_rate_info.get('exchange_rate'),
+        ),
         'financial_health': _build_financial_health(accounts),
         'accounts': accounts,
         'timezone': str(local_tz),
     }
-    overview.update(_build_exchange_rate_info())
+    overview.update(exchange_rate_info)
     return overview

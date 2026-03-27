@@ -5,8 +5,6 @@ Tests for cloud billing services.
 import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
-
-from cloud_billing.constants import FEISHU_TITLE_ZH_HANS, WECHAT_TITLE_EN
 from cloud_billing.services.notification_service import (
     CloudBillingNotificationService,
 )
@@ -542,7 +540,7 @@ class TestCloudBillingNotificationService:
         assert call_kwargs["channel_uuid"] == str(ch_uuid)
         assert call_kwargs["params"]["provider_type"] == "feishu"
 
-    def test_generate_feishu_payload_uses_constant_title(
+    def test_generate_feishu_payload_uses_localized_title(
         self, alert_record
     ):
         service = CloudBillingNotificationService()
@@ -550,17 +548,36 @@ class TestCloudBillingNotificationService:
         payload = service._generate_feishu_payload(alert_record, "zh-hans")
 
         assert payload["content"]["post"]["zh-hans"]["title"] == (
-            FEISHU_TITLE_ZH_HANS
+            "[重点关注]云平台账单消费提醒"
         )
 
-    def test_generate_wechat_payload_uses_constant_title_prefix(
+    def test_generate_wechat_payload_uses_localized_title_prefix(
         self, alert_record
     ):
         service = CloudBillingNotificationService()
 
         payload = service._generate_wechat_payload(alert_record, "en")
 
-        assert payload["markdown"]["content"].startswith(WECHAT_TITLE_EN)
+        assert payload["markdown"]["content"].startswith(
+            "## Cloud Billing Alert\n\n"
+        )
+
+    def test_generate_wechat_payload_rebuilds_body_for_requested_language(
+        self, alert_record
+    ):
+        alert_record.alert_message = "告警类型：余额阈值告警"
+        alert_record.current_balance = Decimal("480.00")
+        alert_record.balance_threshold = Decimal("500.00")
+        alert_record.provider.display_name = "Baidu AI Cloud"
+        alert_record.provider.notes = "Top-up soon"
+
+        service = CloudBillingNotificationService()
+        payload = service._generate_wechat_payload(alert_record, "en")
+
+        content = payload["markdown"]["content"]
+        assert "**Alert type**: Balance threshold alert" in content
+        assert "**Cloud provider**: Baidu AI Cloud" in content
+        assert "**Notes**: Top-up soon" in content
 
     @patch(
         "cloud_billing.services.notification_service."

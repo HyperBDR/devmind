@@ -9,7 +9,9 @@ from zoneinfo import ZoneInfo
 
 from cloud_billing.dashboard import (
     _build_accounts,
+    _build_currency_breakdown,
     _build_exchange_rate_info,
+    _build_financial_health,
     _payment_type_for_provider,
     _build_trend_ranges,
 )
@@ -141,6 +143,25 @@ class PaymentTypeTests(SimpleTestCase):
             timeout=9,
         )
 
+    def test_currency_breakdown_uses_account_balance(self):
+        accounts = [
+            {
+                'balance_currency': 'USD',
+                'balance': Decimal('10.00'),
+                'display_funds_currency': 'USD',
+                'display_funds': Decimal('999.00'),
+            },
+            {'balance_currency': 'CNY', 'balance': Decimal('100.00')},
+            {'display_funds_currency': 'USD', 'display_funds': Decimal('500.00')},
+        ]
+
+        items = _build_currency_breakdown(accounts, exchange_rate=8.0)
+        breakdown = {item['code']: item for item in items}
+
+        self.assertEqual(breakdown['USD']['value'], 80.0)
+        self.assertEqual(breakdown['USD']['original_value'], 10.0)
+        self.assertEqual(breakdown['CNY']['value'], 100.0)
+
 
 class AccountFundsTests(SimpleTestCase):
     @patch('cloud_billing.dashboard.get_balance_support_info')
@@ -152,6 +173,8 @@ class AccountFundsTests(SimpleTestCase):
             provider_type='huawei-intl',
             display_name='华为云（国际）',
             config={},
+            balance=Decimal('200.00'),
+            balance_currency='USD',
         )
         latest_billings = [
             SimpleNamespace(
@@ -180,6 +203,152 @@ class AccountFundsTests(SimpleTestCase):
         self.assertEqual(account['credit_limit'], 200.0)
         self.assertEqual(account['credit_limit_currency'], 'USD')
         self.assertEqual(account['days_remaining'], 45)
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_account_tags_are_exposed_to_dashboard(self, mock_balance_support):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=22,
+            provider_type='baidu',
+            display_name='百度智能云',
+            tags=['生产', '核心'],
+            notes='VIP',
+            config={},
+            balance=Decimal('500.00'),
+            balance_currency='CNY',
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='acct-2',
+                total_cost=Decimal('88.00'),
+                currency='CNY',
+            )
+        ]
+        daily_rows = [
+            SimpleNamespace(
+                provider_id=22,
+                account_id='acct-2',
+                hourly_cost=Decimal('10.00'),
+            )
+        ]
+
+        accounts = _build_accounts(latest_billings, daily_rows)
+        financial_health = _build_financial_health(accounts)
+
+        self.assertEqual(accounts[0]['tags'], ['生产', '核心'])
+        self.assertEqual(
+            financial_health['recharge_alerts'][0]['tags'],
+            ['生产', '核心'],
+        )
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_account_detail_contains_service_breakdown_and_trend(self, mock_balance_support):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=23,
+            provider_type='alibaba',
+            display_name='阿里云',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('900.00'),
+            balance_currency='CNY',
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='acct-3',
+                total_cost=Decimal('300.00'),
+                currency='CNY',
+                service_costs={'ECS': Decimal('210.00'), 'OSS': Decimal('90.00')},
+            )
+        ]
+        daily_rows = [
+            SimpleNamespace(
+                provider_id=23,
+                account_id='acct-3',
+                hourly_cost=Decimal('30.00'),
+                collected_at=datetime(2026, 3, 25, 0, 0, tzinfo=dt_timezone.utc),
+            ),
+            SimpleNamespace(
+                provider_id=23,
+                account_id='acct-3',
+                hourly_cost=Decimal('45.00'),
+                collected_at=datetime(2026, 3, 26, 0, 0, tzinfo=dt_timezone.utc),
+            ),
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            daily_rows,
+            recent_rows=daily_rows,
+        )
+
+        detail = accounts[0]['detail']
+        self.assertEqual(detail['service_count'], 2)
+        self.assertEqual(detail['primary_service_name'], 'ECS')
+        self.assertGreater(detail['primary_service_share'], 60)
+        self.assertEqual(len(detail['trend_30d']), 2)
+        self.assertIn('recommended_recharge', detail)
+        self.assertEqual(detail['recommended_window_days'], 30)
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_small_services_are_grouped_into_other_series(self, mock_balance_support):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=24,
+            provider_type='alibaba',
+            display_name='阿里云',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('1200.00'),
+            balance_currency='CNY',
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='acct-4',
+                total_cost=Decimal('300.00'),
+                currency='CNY',
+                service_costs={
+                    'ECS': Decimal('240.00'),
+                    'OSS': Decimal('45.00'),
+                    'CDN': Decimal('9.00'),
+                    'DNS': Decimal('6.00'),
+                },
+            )
+        ]
+        daily_rows = [
+            SimpleNamespace(
+                provider_id=24,
+                account_id='acct-4',
+                hourly_cost=Decimal('30.00'),
+                collected_at=datetime(2026, 3, 25, 0, 0, tzinfo=dt_timezone.utc),
+                service_costs={
+                    'ECS': Decimal('24.00'),
+                    'OSS': Decimal('4.50'),
+                    'CDN': Decimal('0.90'),
+                    'DNS': Decimal('0.60'),
+                },
+            ),
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            daily_rows,
+            recent_rows=daily_rows,
+        )
+
+        detail = accounts[0]['detail']
+        series_names = [item['name'] for item in detail['trend_series']]
+        self.assertIn('__other__', series_names)
+        self.assertNotIn('CDN', series_names)
+        self.assertNotIn('DNS', series_names)
 
 
 class DashboardTimezoneTests(SimpleTestCase):

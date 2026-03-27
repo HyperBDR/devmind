@@ -48,6 +48,29 @@ class CloudProvider(models.Model):
         null=True,
         help_text="Optional notes or description for this provider",
     )
+    tags = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Custom tags for this provider/account",
+    )
+    balance = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Latest synced account balance for this provider",
+    )
+    balance_currency = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="Currency code for the latest synced balance",
+    )
+    balance_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the latest provider balance was synced",
+    )
     config = models.JSONField(
         help_text=(
             "Authentication and optional metadata as JSON. For alert "
