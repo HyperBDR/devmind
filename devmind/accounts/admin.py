@@ -2,7 +2,24 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import User
 
-from .models import Profile
+from .models import Profile, Role
+
+
+@admin.register(Role)
+class RoleAdmin(admin.ModelAdmin):
+    """Admin interface for role-based visibility configuration."""
+
+    list_display = [
+        'name',
+        'preferred_platform',
+        'is_active',
+    ]
+    list_filter = [
+        'is_active',
+        'preferred_platform',
+    ]
+    search_fields = ['name']
+    filter_horizontal = ['users', 'groups']
 
 
 @admin.register(Profile)
@@ -48,7 +65,8 @@ class ProfileAdmin(admin.ModelAdmin):
                 'avatar_url',
                 'bio',
                 'language',
-                'timezone'
+                'timezone',
+                'preferred_platform',
             )
         }),
     )

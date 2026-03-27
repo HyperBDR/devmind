@@ -39,9 +39,9 @@ class TestVolcengineCloud:
     @patch("cloud_billing.clouds.volcengine_provider.requests.Session.get")
     def test_get_billing_info_parses_response(self, mock_get):
         provider = self._make_provider()
-        response = Mock()
-        response.raise_for_status.return_value = None
-        response.json.return_value = {
+        bill_response = Mock()
+        bill_response.raise_for_status.return_value = None
+        bill_response.json.return_value = {
             "ResponseMetadata": {
                 "RequestId": "req-1",
                 "Action": "ListBill",
@@ -79,19 +79,38 @@ class TestVolcengineCloud:
                 "Offset": 0,
             },
         }
-        mock_get.return_value = response
+        balance_response = Mock()
+        balance_response.raise_for_status.return_value = None
+        balance_response.json.return_value = {
+            "ResponseMetadata": {
+                "RequestId": "req-balance",
+                "Action": "QueryBalanceAcct",
+                "Version": "20220101",
+                "Service": "billing",
+                "Region": "cn-north-1",
+            },
+            "Result": {
+                "AvailableBalance": "1200.50",
+                "CashBalance": "1200.50",
+                "ArrearsBalance": "0.00",
+            },
+        }
+        mock_get.side_effect = [bill_response, balance_response]
 
         result = provider.get_billing_info("2025-01")
 
         assert result["status"] == "success"
         data = result["data"]
         assert data["total_cost"] == 20.0
+        assert data["balance"] == 1200.5
         assert data["currency"] == "CNY"
         assert data["account_id"] == "2100052604"
         assert data["service_costs"]["云服务器"] == 12.34
         assert data["service_costs"]["对象存储"] == 7.66
         assert len(data["items"]) == 2
         assert data["items"][0]["bill_id"] == "Bill-001"
+        assert data["balance_debug"]["status"] == "success"
+        assert data["balance_debug"]["available_balance"] == "1200.50"
 
     def test_sign_headers_uses_raw_secret(self):
         provider = self._make_provider()
@@ -152,16 +171,59 @@ class TestVolcengineCloud:
                 "Offset": 0,
             },
         }
+        balance_response = Mock()
+        balance_response.raise_for_status.return_value = None
+        balance_response.json.return_value = {
+            "ResponseMetadata": {
+                "RequestId": "req-balance",
+                "Action": "QueryBalanceAcct",
+                "Version": "20220101",
+                "Service": "billing",
+                "Region": "cn-north-1",
+            },
+            "Result": {
+                "AvailableBalance": "0.00",
+                "CashBalance": "0.00",
+                "ArrearsBalance": "0.00",
+            },
+        }
         mock_get.side_effect = [
             RequestException("temporary error"),
             response,
+            balance_response,
         ]
 
         result = provider.get_billing_info("2025-01")
 
         assert result["status"] == "success"
-        assert mock_get.call_count == 2
+        assert mock_get.call_count == 3
 
     def test_get_account_id_uses_payer_id(self):
         provider = self._make_provider()
         assert provider.get_account_id() == "2100052604"
+
+    @patch("cloud_billing.clouds.volcengine_provider.requests.Session.get")
+    def test_get_balance_returns_none_on_api_error(self, mock_get):
+        provider = self._make_provider()
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "ResponseMetadata": {
+                "RequestId": "req-balance",
+                "Action": "QueryBalanceAcct",
+                "Version": "20220101",
+                "Service": "billing",
+                "Region": "cn-north-1",
+                "Error": {
+                    "Code": "AccessDenied",
+                    "Message": "no permission",
+                },
+            }
+        }
+        mock_get.return_value = response
+
+        balance = provider.get_balance()
+
+        assert balance is None
+        assert provider._last_balance_debug["status"] == "error"
+        assert "AccessDenied" in provider._last_balance_debug["error_message"]

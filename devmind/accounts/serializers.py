@@ -10,6 +10,14 @@ from rest_framework import serializers
 from allauth.socialaccount import providers
 from allauth.socialaccount.models import SocialAccount
 
+from accounts.access import (
+    get_access_profile,
+    get_effective_roles,
+    normalize_feature_keys,
+    normalize_platform_key,
+    serialize_feature_options,
+    serialize_platform_options,
+)
 from accounts.models import Profile
 
 
@@ -454,6 +462,14 @@ class UserDetailsSerializer(serializers.ModelSerializer):
         read_only=True,
         help_text=_("Authentication method and related information")
     )
+    access_profile = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_("Resolved platform visibility and landing route"),
+    )
+    roles = serializers.SerializerMethodField(
+        read_only=True,
+        help_text=_("Effective roles resolved from direct and group bindings."),
+    )
 
     class Meta:
         model = User
@@ -469,7 +485,9 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             'profile_language',
             'profile_timezone',
             'auth_info',
-            'is_staff'
+            'is_staff',
+            'roles',
+            'access_profile',
         ]
         read_only_fields = [
             'id',
@@ -479,7 +497,9 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             'profile',
             'auth_info',
             'display_name',
-            'is_staff'
+            'is_staff',
+            'roles',
+            'access_profile',
         ]
 
     def get_display_name(self, obj):
@@ -585,6 +605,28 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             )
 
         return auth_info
+
+    def get_roles(self, obj):
+        """Serialize effective roles for the current user."""
+        effective_roles = get_effective_roles(obj)
+        return [
+            {
+                'id': role.pk,
+                'name': role.name,
+                'visible_features': normalize_feature_keys(
+                    role.visible_features
+                ),
+                'preferred_platform': normalize_platform_key(
+                    role.preferred_platform
+                ),
+                'is_active': role.is_active,
+            }
+            for role in effective_roles
+        ]
+
+    def get_access_profile(self, obj):
+        """Serialize resolved access information for the current user."""
+        return get_access_profile(obj)
 
     def update(self, instance, validated_data):
         """

@@ -261,6 +261,138 @@ class AlibabaCloud(BaseCloudProvider):
 
         return total_cost, currency, service_costs
 
+    def _query_account_balance(self) -> Any:
+        """Query Alibaba Cloud account balance."""
+        return self.client.query_account_balance()
+
+    def _to_plain_dict(self, value: Any) -> Any:
+        """Convert SDK models to plain dictionaries/lists when possible."""
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return {
+                k: self._to_plain_dict(v)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [self._to_plain_dict(item) for item in value]
+
+        to_map = getattr(value, "to_map", None)
+        if callable(to_map):
+            try:
+                return self._to_plain_dict(to_map())
+            except Exception:
+                pass
+
+        raw_dict = getattr(value, "__dict__", None)
+        if isinstance(raw_dict, dict) and raw_dict:
+            return {
+                k: self._to_plain_dict(v)
+                for k, v in raw_dict.items()
+                if not k.startswith("_")
+            }
+
+        return value
+
+    def _get_nested_value(self, data: Any, key: str) -> Any:
+        """Read a value from dict/object using common Tea/OpenAPI styles."""
+        if data is None:
+            return None
+
+        if isinstance(data, dict):
+            if key in data:
+                return data[key]
+            lowered = key.lower()
+            for candidate_key, candidate_value in data.items():
+                if str(candidate_key).lower() == lowered:
+                    return candidate_value
+            return None
+
+        direct = getattr(data, key, None)
+        if direct is not None:
+            return direct
+
+        lowered = key.lower()
+        for attr in dir(data):
+            if attr.startswith("_"):
+                continue
+            if attr.lower() == lowered:
+                return getattr(data, attr, None)
+        return None
+
+    def _parse_amount(self, value: Any) -> Optional[float]:
+        """Parse amount strings like '2,895.93' into floats."""
+        if value in (None, ""):
+            return None
+        try:
+            return float(str(value).strip().replace(",", ""))
+        except (TypeError, ValueError):
+            return None
+
+    def _extract_cash_balance(self, response: Any) -> Optional[float]:
+        """Extract cash balance from Alibaba Cloud balance response."""
+        body = self._get_nested_value(response, "body")
+        plain_body = self._to_plain_dict(body)
+        data = self._get_nested_value(body, "data")
+        if data is None:
+            data = self._get_nested_value(plain_body, "data")
+
+        logger.warning(
+            "Alibaba QueryAccountBalance raw response body: %s",
+            plain_body,
+        )
+
+        candidate_sources = [data, self._to_plain_dict(data), body, plain_body]
+        candidate_fields = [
+            "available_cash_amount",
+            "AvailableCashAmount",
+            "available_amount",
+            "AvailableAmount",
+            "cash_amount",
+            "CashAmount",
+            "balance_amount",
+            "BalanceAmount",
+        ]
+
+        for source in candidate_sources:
+            if source is None:
+                continue
+            for field in candidate_fields:
+                value = self._get_nested_value(source, field)
+                if value in (None, ""):
+                    continue
+                parsed_value = self._parse_amount(value)
+                if parsed_value is None:
+                    continue
+                logger.warning(
+                    "Alibaba QueryAccountBalance matched field %s=%s",
+                    field,
+                    parsed_value,
+                )
+                return parsed_value
+
+        logger.warning(
+            "Alibaba QueryAccountBalance returned no recognizable cash "
+            "balance field. body=%s",
+            plain_body,
+        )
+        return None
+
+    def _build_balance_debug_info(self, response: Any) -> Dict[str, Any]:
+        """Build a compact debug payload for balance parsing diagnostics."""
+        body = self._get_nested_value(response, "body")
+        plain_body = self._to_plain_dict(body)
+        data = self._get_nested_value(body, "data")
+        if data is None:
+            data = self._get_nested_value(plain_body, "data")
+        plain_data = self._to_plain_dict(data)
+        return {
+            "body_keys": sorted(plain_body.keys())
+            if isinstance(plain_body, dict)
+            else [],
+            "data": plain_data,
+        }
+
     def get_billing_info(
         self, period: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -278,12 +410,27 @@ class AlibabaCloud(BaseCloudProvider):
 
             response = self._query_billing_api(start_date, end_date)
             total_cost, currency, service_costs = self._calculate_total_cost(response)
+            balance_response = self._query_account_balance()
+            balance = self._extract_cash_balance(balance_response)
+            balance_debug = self._build_balance_debug_info(balance_response)
             account_id = self.get_account_id()
+
+            logger.warning(
+                "Alibaba billing collection result: period=%s total_cost=%s "
+                "currency=%s balance=%s account_id=%s",
+                period,
+                total_cost,
+                currency,
+                balance,
+                account_id,
+            )
 
             return {
                 "status": "success",
                 "data": {
                     "total_cost": total_cost,
+                    "balance": balance,
+                    "balance_debug": balance_debug,
                     "currency": currency,
                     "account_id": account_id,
                     "service_costs": service_costs

@@ -32,6 +32,7 @@ DEFAULT_REGION = "ap-guangzhou"
 DEFAULT_HTTP_TIMEOUT = 60
 DEFAULT_SUMMARY_GROUP_TYPE = "business"
 DEFAULT_CURRENCY = "CNY"
+BALANCE_CENT_DIVISOR = Decimal("100")
 
 
 @dataclass
@@ -96,6 +97,7 @@ class TencentCloud(BaseCloudProvider):
         """
         super().__init__(config)
         self._client = None
+        self._last_balance_debug = {}
         self.name = "tencentcloud"
         sanitized = mask_sensitive_config_object(config)
         logger.info(
@@ -122,6 +124,15 @@ class TencentCloud(BaseCloudProvider):
             return Decimal(str(value))
         except (InvalidOperation, TypeError, ValueError):
             return Decimal("0")
+
+    def _parse_balance_amount(self, value: Any) -> Decimal:
+        """Convert Tencent balance fields from cents to yuan."""
+        amount = self._to_decimal(value)
+        if amount == Decimal("0"):
+            return amount
+        return (amount / BALANCE_CENT_DIVISOR).quantize(
+            Decimal("0.01")
+        )
 
     def _build_client(self):
         """Create a Tencent billing client."""
@@ -151,6 +162,46 @@ class TencentCloud(BaseCloudProvider):
         """Call DescribeAccountBalance to validate credentials."""
         request = billing_models.DescribeAccountBalanceRequest()
         return self.client.DescribeAccountBalance(request)
+
+    def get_balance(self) -> Optional[float]:
+        """Get Tencent Cloud balance from DescribeAccountBalance."""
+        try:
+            response = self._describe_account_balance()
+            available_balance = getattr(response, "AvailableBalance", None)
+            if available_balance is None:
+                available_balance = getattr(response, "Balance", None)
+            balance_decimal = self._parse_balance_amount(available_balance)
+            balance = float(balance_decimal)
+            self._last_balance_debug = {
+                "status": "success",
+                "uin": getattr(response, "Uin", None),
+                "available_balance_raw": available_balance,
+                "available_balance": str(balance_decimal),
+                "balance_raw": getattr(response, "Balance", None),
+                "credit_balance_raw": getattr(
+                    response, "CreditBalance", None
+                ),
+                "unit": "yuan_from_cent",
+            }
+            return balance
+        except TencentCloudSDKException as exc:
+            self._last_balance_debug = {
+                "status": "client_error",
+                "error_code": getattr(exc, "code", ""),
+                "error_message": str(exc),
+            }
+            logger.warning(
+                "Tencent balance lookup failed: %s",
+                exc,
+            )
+            return None
+        except Exception as exc:
+            self._last_balance_debug = {
+                "status": "unexpected_error",
+                "error_message": str(exc),
+            }
+            logger.warning("Tencent balance lookup failed: %s", exc)
+            return None
 
     def validate_credentials(self) -> bool:
         """Validate Tencent credentials by calling the billing API."""
@@ -233,10 +284,13 @@ class TencentCloud(BaseCloudProvider):
         try:
             period = self._normalize_period(period)
             total_cost, service_costs, items = self._query_bill_summary(period)
+            balance = self.get_balance()
             account_id = self.get_account_id()
             currency = DEFAULT_CURRENCY
             data = {
                 "total_cost": float(total_cost),
+                "balance": balance,
+                "balance_debug": self._last_balance_debug,
                 "currency": currency,
                 "account_id": account_id,
                 "service_costs": service_costs,

@@ -7,10 +7,6 @@ Channel selection (webhook/email by UUID or default) is handled by notifier.
 """
 import logging
 from typing import Any, Dict, Optional
-
-from django.utils import translation
-from django.utils.translation import gettext as _
-
 from agentcore_notifier.adapters.django.services.email_service import (
     get_default_email_channel,
     get_email_channel_by_uuid,
@@ -25,7 +21,10 @@ from agentcore_notifier.adapters.django.tasks.send import (
     send_notification,
 )
 from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
+from django.utils import translation
+from django.utils.translation import gettext as _
 
+from cloud_billing.alert_messages import build_alert_message_from_record
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
     FEISHU_MSG_TYPE_POST,
@@ -53,6 +52,38 @@ class CloudBillingNotificationService:
         """Init notification service (no local webhook; uses task)."""
         pass
 
+    def _split_label_value(self, line: str) -> tuple[str, str]:
+        """Split a `label:value` line into parts for channel-specific styling."""
+        if "：" in line:
+            label, value = line.split("：", 1)
+            return label.strip(), value.strip()
+        if ":" in line:
+            label, value = line.split(":", 1)
+            return label.strip(), value.strip()
+        return line.strip(), ""
+
+    def _is_chinese_language(self, language: str) -> bool:
+        return str(language or DEFAULT_LANGUAGE).lower().startswith("zh")
+
+    def _get_alert_title(self, language: str, channel: str) -> str:
+        normalized_language = str(language or DEFAULT_LANGUAGE).lower()
+        with translation.override(normalized_language):
+            title_map = {
+                "feishu": _("[Important] Cloud Billing Alert"),
+                "wechat": _("## Cloud Billing Alert\n\n"),
+                "email_subject": _("Cloud Billing Alert"),
+                "email_body": _("## Cloud Billing Alert\n\n"),
+            }
+        normalized_channel = str(channel or "").lower()
+        if normalized_channel not in title_map:
+            raise ValueError(f"Unsupported alert title channel: {channel}")
+        return title_map[normalized_channel]
+
+    def _get_alert_body(
+        self, alert_record: AlertRecord, language: str
+    ) -> str:
+        return build_alert_message_from_record(alert_record, language)
+
     def _generate_feishu_payload(
         self, alert_record: AlertRecord, language: str
     ) -> Dict[str, Any]:
@@ -66,64 +97,25 @@ class CloudBillingNotificationService:
         Returns:
             Feishu webhook payload dictionary
         """
-        provider_label = alert_record.provider.get_alert_label()
-        lang_code = 'zh_Hans' if language == 'zh-hans' else 'en'
-        with translation.override(lang_code):
-            title = _("[Important] Cloud Billing Alert")
-            message = (alert_record.alert_message or "").strip()
-            if not message:
-                current_cost = float(alert_record.current_cost)
-                previous_cost = float(alert_record.previous_cost)
-                increase_cost = float(alert_record.increase_cost)
-                increase_percent = float(alert_record.increase_percent)
-                currency = alert_record.currency
-                alert_rule = alert_record.alert_rule
-                is_cost_threshold = (
-                    alert_rule
-                    and alert_rule.cost_threshold is not None
-                    and current_cost > float(alert_rule.cost_threshold)
-                )
-
-                if is_cost_threshold:
-                    if previous_cost > 0:
-                        message = _(
-                            "{provider_name} current total cost "
-                            "{current_cost:.2f} {currency} exceeds threshold "
-                            "{threshold:.2f} {currency}\n"
-                            "Previous hour cost: {previous_cost:.2f} {currency}"
-                        ).format(
-                            provider_name=provider_label,
-                            current_cost=current_cost,
-                            currency=currency,
-                            threshold=alert_rule.cost_threshold,
-                            previous_cost=previous_cost,
-                        )
-                    else:
-                        message = _(
-                            "{provider_name} current total cost "
-                            "{current_cost:.2f} {currency} exceeds threshold "
-                            "{threshold:.2f} {currency}"
-                        ).format(
-                            provider_name=provider_label,
-                            current_cost=current_cost,
-                            currency=currency,
-                            threshold=alert_rule.cost_threshold,
-                        )
-                else:
-                    message = _(
-                        "{provider_name} account billing increased by "
-                        "{increase_cost:.2f} {currency} in the last hour, "
-                        "growth rate: {increase_percent:.2f}%\n"
-                        "Current cost: {current_cost:.2f} {currency}\n"
-                        "Previous hour cost: {previous_cost:.2f} {currency}"
-                    ).format(
-                        provider_name=provider_label,
-                        increase_cost=increase_cost,
-                        currency=currency,
-                        increase_percent=increase_percent,
-                        current_cost=current_cost,
-                        previous_cost=previous_cost,
-                    )
+        title = self._get_alert_title(language, "feishu")
+        message = self._get_alert_body(alert_record, language)
+        content = []
+        for line in message.splitlines():
+            label, value = self._split_label_value(line)
+            row = [{
+                "tag": FEISHU_TAG_TEXT,
+                "text": f"{label}：",
+            }]
+            if value:
+                row.append({
+                    "tag": FEISHU_TAG_TEXT,
+                    "text": value,
+                })
+            content.append(row)
+        content.append([{
+            "tag": FEISHU_TAG_AT,
+            "user_id": FEISHU_USER_ID_ALL
+        }])
 
         payload = {
             "msg_type": FEISHU_MSG_TYPE_POST,
@@ -131,15 +123,7 @@ class CloudBillingNotificationService:
                 "post": {
                     language: {
                         "title": title,
-                        "content": [
-                            [{
-                                "tag": FEISHU_TAG_TEXT,
-                                "text": message
-                            }, {
-                                "tag": FEISHU_TAG_AT,
-                                "user_id": FEISHU_USER_ID_ALL
-                            }]
-                        ]
+                        "content": content
                     }
                 }
             }
@@ -160,68 +144,19 @@ class CloudBillingNotificationService:
         Returns:
             WeChat webhook payload dictionary
         """
-        provider_label = alert_record.provider.get_alert_label()
-        lang_code = 'zh_Hans' if language == 'zh-hans' else 'en'
-        with translation.override(lang_code):
-            title = _(
-                "## Cloud Billing Alert\n\n"
-            )
-            message = (alert_record.alert_message or "").strip()
-            if not message:
-                current_cost = float(alert_record.current_cost)
-                previous_cost = float(alert_record.previous_cost)
-                increase_cost = float(alert_record.increase_cost)
-                increase_percent = float(alert_record.increase_percent)
-                currency = alert_record.currency
-                alert_rule = alert_record.alert_rule
-                is_cost_threshold = (
-                    alert_rule
-                    and alert_rule.cost_threshold is not None
-                    and current_cost > float(alert_rule.cost_threshold)
-                )
-
-                if is_cost_threshold:
-                    if previous_cost > 0:
-                        message = _(
-                            "{provider_name} current total cost "
-                            "**{current_cost:.2f} {currency}** exceeds threshold "
-                            "**{threshold:.2f} {currency}**\n\n"
-                            "- Previous hour cost: {previous_cost:.2f} {currency}"
-                        ).format(
-                            provider_name=provider_label,
-                            current_cost=current_cost,
-                            currency=currency,
-                            threshold=alert_rule.cost_threshold,
-                            previous_cost=previous_cost,
-                        )
-                    else:
-                        message = _(
-                            "{provider_name} current total cost "
-                            "**{current_cost:.2f} {currency}** exceeds threshold "
-                            "**{threshold:.2f} {currency}**"
-                        ).format(
-                            provider_name=provider_label,
-                            current_cost=current_cost,
-                            currency=currency,
-                            threshold=alert_rule.cost_threshold,
-                        )
-                else:
-                    message = _(
-                        "{provider_name} account billing "
-                        "increased by **{increase_cost:.2f} {currency}** "
-                        "in the last hour, growth rate: "
-                        "**{increase_percent:.2f}%**\n\n"
-                        "- Current cost: {current_cost:.2f} {currency}\n"
-                        "- Previous hour cost: {previous_cost:.2f} {currency}"
-                    ).format(
-                        provider_name=provider_label,
-                        increase_cost=increase_cost,
-                        currency=currency,
-                        increase_percent=increase_percent,
-                        current_cost=current_cost,
-                        previous_cost=previous_cost,
-                    )
-            content = f"{title}{message}\n\n<@all>"
+        rows = []
+        for line in self._get_alert_body(alert_record, language).splitlines():
+            label, value = self._split_label_value(line)
+            if value:
+                separator = "：" if self._is_chinese_language(language) else ": "
+                rows.append(f"**{label}**{separator}{value}")
+            else:
+                rows.append(f"**{label}**")
+        content = (
+            self._get_alert_title(language, "wechat")
+            + "\n".join(rows)
+            + "\n\n<@all>"
+        )
 
         payload = {
             "msgtype": WECHAT_MSGTYPE_MARKDOWN,
@@ -239,64 +174,16 @@ class CloudBillingNotificationService:
         Generate plain text subject and body for email from alert record.
         Returns (subject, body).
         """
-        provider_label = alert_record.provider.get_alert_label()
-        lang_code = "zh_Hans" if language == "zh-hans" else "en"
-        with translation.override(lang_code):
-            subject = _("[Important] Cloud Billing Alert")
-            body = (alert_record.alert_message or "").strip()
-            if not body:
-                current_cost = float(alert_record.current_cost)
-                previous_cost = float(alert_record.previous_cost)
-                increase_cost = float(alert_record.increase_cost)
-                increase_percent = float(alert_record.increase_percent)
-                currency = alert_record.currency
-                alert_rule = alert_record.alert_rule
-                is_cost_threshold = (
-                    alert_rule
-                    and alert_rule.cost_threshold is not None
-                    and current_cost > float(alert_rule.cost_threshold)
-                )
-
-                if is_cost_threshold:
-                    if previous_cost > 0:
-                        body = _(
-                            "{provider_name} current total cost "
-                            "{current_cost:.2f} {currency} exceeds threshold "
-                            "{threshold:.2f} {currency}\n"
-                            "Previous hour cost: {previous_cost:.2f} {currency}"
-                        ).format(
-                            provider_name=provider_label,
-                            current_cost=current_cost,
-                            currency=currency,
-                            threshold=alert_rule.cost_threshold,
-                            previous_cost=previous_cost,
-                        )
-                    else:
-                        body = _(
-                            "{provider_name} current total cost "
-                            "{current_cost:.2f} {currency} exceeds threshold "
-                            "{threshold:.2f} {currency}"
-                        ).format(
-                            provider_name=provider_label,
-                            current_cost=current_cost,
-                            currency=currency,
-                            threshold=alert_rule.cost_threshold,
-                        )
-                else:
-                    body = _(
-                        "{provider_name} account billing increased by "
-                        "{increase_cost:.2f} {currency} in the last hour, "
-                        "growth rate: {increase_percent:.2f}%\n"
-                        "Current cost: {current_cost:.2f} {currency}\n"
-                        "Previous hour cost: {previous_cost:.2f} {currency}"
-                    ).format(
-                        provider_name=provider_label,
-                        increase_cost=increase_cost,
-                        currency=currency,
-                        increase_percent=increase_percent,
-                        current_cost=current_cost,
-                        previous_cost=previous_cost,
-                    )
+        subject = self._get_alert_title(language, "email_subject")
+        rows = []
+        for line in self._get_alert_body(alert_record, language).splitlines():
+            label, value = self._split_label_value(line)
+            if value:
+                separator = "：" if self._is_chinese_language(language) else ": "
+                rows.append(f"**{label}**{separator}{value}")
+            else:
+                rows.append(f"**{label}**")
+        body = self._get_alert_title(language, "email_body") + "\n".join(rows)
         return subject, body
 
     def send_alert(

@@ -36,6 +36,7 @@ DEFAULT_SERVICE = "billing"
 DEFAULT_VERSION = "2022-01-01"
 DEFAULT_LIMIT = 100
 DEFAULT_ACTION = "ListBill"
+DEFAULT_BALANCE_ACTION = "QueryBalanceAcct"
 DEFAULT_TIMEOUT = 30
 DEFAULT_MAX_RETRIES = 3
 
@@ -113,6 +114,7 @@ class VolcengineCloud(BaseCloudProvider):
         super().__init__(config)
         self.name = "volcengine"
         self._session = requests.Session()
+        self._last_balance_debug = {}
         sanitized_config = mask_sensitive_config_object(config)
         logger.info(
             f"Initialized Volcengine Cloud provider with config: "
@@ -243,6 +245,23 @@ class VolcengineCloud(BaseCloudProvider):
             offset=offset,
         )
 
+    def _request_query_balance(self) -> Dict[str, Any]:
+        """Call QueryBalanceAcct to fetch account balance."""
+        url, host = self._resolve_request_target()
+        query_params = {
+            "Action": DEFAULT_BALANCE_ACTION,
+            "Version": self.config.version or DEFAULT_VERSION,
+        }
+        x_date = self._format_x_date()
+        headers = self._sign_headers("GET", host, query_params, x_date)
+        return self._request_json_with_retry(
+            url=url,
+            params=query_params,
+            headers=headers,
+            period="balance",
+            offset=0,
+        )
+
     def _resolve_request_target(self) -> Tuple[str, str]:
         parsed = urlsplit(self.config.endpoint or DEFAULT_ENDPOINT)
         return (
@@ -352,6 +371,12 @@ class VolcengineCloud(BaseCloudProvider):
                     return default
         return default
 
+    @staticmethod
+    def _extract_result_object(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the Volcengine Result object when present."""
+        result = payload.get("Result") or {}
+        return result if isinstance(result, dict) else {}
+
     def _parse_bill_items(
         self,
         items: List[Dict[str, Any]],
@@ -446,9 +471,57 @@ class VolcengineCloud(BaseCloudProvider):
             "amount": float(amount),
         }
 
+    def get_balance(self) -> Optional[float]:
+        """Get Volcengine available balance from QueryBalanceAcct."""
+        try:
+            payload = self._request_query_balance()
+            metadata = payload.get("ResponseMetadata") or {}
+            if metadata.get("Error") or payload.get("Error"):
+                raise RuntimeError(self._extract_error(payload))
+
+            result = self._extract_result_object(payload)
+            container = result or payload
+            available_balance = container.get("AvailableBalance")
+            cash_balance = container.get("CashBalance")
+            arrears_balance = container.get("ArrearsBalance")
+            available_decimal = self._to_decimal(available_balance)
+
+            self._last_balance_debug = {
+                "status": "success",
+                "available_balance": str(available_balance),
+                "cash_balance": str(cash_balance),
+                "arrears_balance": str(arrears_balance),
+                "response_keys": list(container.keys()),
+            }
+            return float(available_decimal)
+        except requests.HTTPError as exc:
+            self._last_balance_debug = {
+                "status": "http_error",
+                "error_message": str(exc),
+            }
+            logger.warning("Volcengine balance HTTP error: %s", exc)
+            return None
+        except (requests.RequestException, ValueError, RuntimeError) as exc:
+            self._last_balance_debug = {
+                "status": "error",
+                "error_message": str(exc),
+            }
+            logger.warning("Volcengine balance error: %s", exc)
+            return None
+        except Exception as exc:
+            self._last_balance_debug = {
+                "status": "unexpected_error",
+                "error_message": str(exc),
+            }
+            logger.warning("Unexpected Volcengine balance error: %s", exc)
+            return None
+
     def get_billing_info(self, period: Optional[str] = None) -> Dict[str, Any]:
         try:
             data = self._collect_billing_data(self._normalize_period(period))
+            balance = self.get_balance()
+            data["balance"] = balance
+            data["balance_debug"] = self._last_balance_debug
             return {"status": "success", "data": data, "error": None}
         except requests.HTTPError as exc:
             logger.error(f"Volcengine billing HTTP error: {exc}")

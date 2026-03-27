@@ -16,6 +16,8 @@ from .alibaba_provider import AlibabaConfig, AlibabaCloud
 from .azure_provider import AzureConfig, AzureCloud
 from .tencent_provider import TencentConfig, TencentCloud
 from .volcengine_provider import VolcengineConfig, VolcengineCloud
+from .baidu_provider import BaiduConfig, BaiduCloud
+from .zhipu_provider import ZhipuConfig, ZhipuCloud
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -40,6 +42,14 @@ def _build_provider_mapping():
         "volcengine": {
             "config_class": VolcengineConfig,
             "provider_class": VolcengineCloud,
+        },
+        "baidu": {
+            "config_class": BaiduConfig,
+            "provider_class": BaiduCloud,
+        },
+        "zhipu": {
+            "config_class": ZhipuConfig,
+            "provider_class": ZhipuCloud,
         },
     }
     mapping["tencentcloud"] = {

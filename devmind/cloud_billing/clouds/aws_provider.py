@@ -93,6 +93,8 @@ class AWSConfig(BaseCloudConfig):
 class AWSCloud(BaseCloudProvider):
     """AWS cloud provider implementation."""
 
+    CHINA_REGIONS = {"cn-north-1", "cn-northwest-1"}
+
     def __init__(self, config: AWSConfig):
         """Initialize AWS cloud provider.
 
@@ -105,6 +107,7 @@ class AWSCloud(BaseCloudProvider):
         super().__init__(config)
         self._client = None
         self._sts_client = None
+        self._mturk_client = None
         self.name = "aws"
         sanitized_config = mask_sensitive_config_object(config)
         logger.info(
@@ -148,6 +151,18 @@ class AWSCloud(BaseCloudProvider):
                 config=retry_config
             )
         return self._sts_client
+
+    @property
+    def mturk_client(self):
+        """Get AWS MTurk client for account balance lookup."""
+        if self._mturk_client is None:
+            self._mturk_client = boto3.client(
+                "mturk",
+                aws_access_key_id=self.config.api_key,
+                aws_secret_access_key=self.config.api_secret,
+                region_name="us-east-1",
+            )
+        return self._mturk_client
 
     def _validate_period(self, period: Optional[str]) -> str:
         """Validate and return the billing period.
@@ -248,6 +263,74 @@ class AWSCloud(BaseCloudProvider):
 
         return total_cost, currency
 
+    def get_balance(self) -> Optional[float]:
+        """Get AWS billing balance when available.
+
+        AWS does not expose a generic cash balance API like Alibaba Cloud.
+        We use the official MTurk GetAccountBalance API as a best-effort
+        fallback because AWS documents it as returning the remaining
+        available AWS Billing usage when enabled.
+        """
+        if (self.config.region or "").strip() in self.CHINA_REGIONS:
+            self._last_balance_debug = {
+                "source": "mturk.get_account_balance",
+                "status": "unsupported_partition",
+                "reason": (
+                    "AWS China regions do not support this global MTurk "
+                    "balance lookup"
+                ),
+                "region": self.config.region,
+            }
+            logger.info(
+                "Skip AWS balance lookup for China region: %s",
+                self.config.region,
+            )
+            return None
+
+        self._last_balance_debug = {
+            "source": "mturk.get_account_balance",
+            "status": "unknown",
+        }
+        try:
+            response = self.mturk_client.get_account_balance()
+            raw_balance = response.get("AvailableBalance")
+            self._last_balance_debug = {
+                "source": "mturk.get_account_balance",
+                "status": "success",
+                "response": response,
+            }
+            if raw_balance in (None, ""):
+                self._last_balance_debug["status"] = "empty_balance"
+                return None
+            balance = float(str(raw_balance).replace(",", "").strip())
+            logger.info("AWS balance collected via MTurk API: %s", balance)
+            self._last_balance_debug["parsed_balance"] = balance
+            return balance
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code", "")
+            self._last_balance_debug = {
+                "source": "mturk.get_account_balance",
+                "status": "client_error",
+                "error_code": error_code,
+                "error_message": exc.response.get("Error", {}).get(
+                    "Message", str(exc)
+                ),
+            }
+            logger.warning(
+                "AWS balance lookup unavailable via MTurk API: %s - %s",
+                error_code,
+                exc.response.get("Error", {}).get("Message", str(exc)),
+            )
+            return None
+        except Exception as exc:
+            self._last_balance_debug = {
+                "source": "mturk.get_account_balance",
+                "status": "unexpected_error",
+                "error_message": str(exc),
+            }
+            logger.warning("AWS balance lookup failed: %s", exc)
+            return None
+
     def get_billing_info(
         self, period: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -282,6 +365,7 @@ class AWSCloud(BaseCloudProvider):
 
             # Calculate total cost
             total_cost, currency = self._calculate_total_cost(response)
+            balance = self.get_balance()
 
             # Get account ID
             account_id = self.get_account_id()
@@ -289,6 +373,8 @@ class AWSCloud(BaseCloudProvider):
             # Build response data
             data = {
                 "total_cost": total_cost,
+                "balance": balance,
+                "balance_debug": getattr(self, "_last_balance_debug", {}),
                 "currency": currency,
                 "account_id": account_id
             }
