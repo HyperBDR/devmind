@@ -41,7 +41,8 @@ class AlertRuleAdmin(admin.ModelAdmin):
     Admin interface for AlertRule model.
     """
     list_display = [
-        'provider', 'cost_threshold', 'growth_threshold', 'is_active',
+        'provider', 'cost_threshold', 'growth_threshold',
+        'balance_threshold', 'days_remaining_threshold', 'is_active',
         'created_at'
     ]
     list_filter = ['is_active', 'created_at']
@@ -56,7 +57,8 @@ class AlertRecordAdmin(admin.ModelAdmin):
     """
     list_display = [
         'provider', 'current_cost', 'previous_cost', 'increase_percent',
-        'currency', 'webhook_status', 'created_at'
+        'currency', 'current_balance', 'current_days_remaining',
+        'webhook_status', 'created_at'
     ]
     list_filter = ['provider', 'webhook_status', 'currency', 'created_at']
     search_fields = [
