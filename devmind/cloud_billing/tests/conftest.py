@@ -189,6 +189,7 @@ def alert_rule(cloud_provider, user):
         cost_threshold=Decimal("20.00"),
         growth_threshold=Decimal("10.00"),
         balance_threshold=Decimal("500.00"),
+        days_remaining_threshold=7,
         is_active=True,
         created_by=user,
         updated_by=user,
@@ -210,6 +211,8 @@ def alert_record(cloud_provider, alert_rule):
         currency="USD",
         current_balance=Decimal("480.00"),
         balance_threshold=Decimal("500.00"),
+        current_days_remaining=6,
+        days_remaining_threshold=7,
         alert_message="Test alert message",
         webhook_status="pending",
     )

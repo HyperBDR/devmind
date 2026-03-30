@@ -533,7 +533,7 @@ class AccountFundsTests(SimpleTestCase):
         self.assertEqual(detail['service_breakdown_coverage'], 100.0)
 
     @patch('cloud_billing.dashboard.get_balance_support_info')
-    def test_daily_average_uses_active_billing_days_for_account(
+    def test_daily_average_uses_recent_30_day_total_divided_by_30_for_account(
         self,
         mock_balance_support,
     ):
@@ -563,6 +563,7 @@ class AccountFundsTests(SimpleTestCase):
                 provider_id=27,
                 account_id='acct-7',
                 hourly_cost=Decimal('30.00'),
+                total_cost=Decimal('30.00'),
                 collected_at=datetime(2026, 3, 2, 8, 0, tzinfo=dt_timezone.utc),
                 period='2026-03',
                 hour=8,
@@ -572,6 +573,7 @@ class AccountFundsTests(SimpleTestCase):
                 provider_id=27,
                 account_id='acct-7',
                 hourly_cost=Decimal('60.00'),
+                total_cost=Decimal('90.00'),
                 collected_at=datetime(2026, 3, 5, 8, 0, tzinfo=dt_timezone.utc),
                 period='2026-03',
                 hour=8,
@@ -587,8 +589,8 @@ class AccountFundsTests(SimpleTestCase):
             now=datetime(2026, 3, 20, 0, 0, tzinfo=dt_timezone.utc),
         )
 
-        self.assertEqual(accounts[0]['detail']['daily_average'], 45.0)
-        self.assertEqual(accounts[0]['change'], 45.0)
+        self.assertEqual(accounts[0]['detail']['daily_average'], 3.0)
+        self.assertEqual(accounts[0]['change'], 3.0)
 
 
 class DashboardTimezoneTests(SimpleTestCase):

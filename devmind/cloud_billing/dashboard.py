@@ -25,6 +25,7 @@ EXCHANGE_RATE_API_URL = 'https://v6.exchangerate-api.com/v6/{api_key}/latest/USD
 EXCHANGE_RATE_SOURCE_URL = 'https://www.exchangerate-api.com/'
 EXCHANGE_RATE_CACHE_PREFIX = 'cloud_billing:exchange_rate'
 EXCHANGE_RATE_CACHE_TTL = 60 * 60 * 24
+RECENT_BURN_WINDOW_DAYS = 30
 PROVIDER_PAYMENT_TYPES = {
     'aws': 'postpaid',
     'azure': 'postpaid',
@@ -130,6 +131,49 @@ def _hourly_cost_value(billing: BillingData) -> float:
     if billing.hourly_cost is not None:
         return _to_float(billing.hourly_cost)
     return 0.0
+
+
+def _total_cost_value(billing: BillingData) -> float:
+    if getattr(billing, 'total_cost', None) is not None:
+        return _to_float(billing.total_cost)
+    return 0.0
+
+
+def _recent_spend_from_snapshots(account_rows, now) -> float:
+    if not account_rows:
+        return 0.0
+
+    current_period = now.strftime('%Y-%m')
+    recent_window_start = (now - timedelta(days=RECENT_BURN_WINDOW_DAYS - 1)).date()
+    row_periods = {getattr(row, 'period', None) for row in account_rows if getattr(row, 'period', None)}
+
+    # When the 30-day window starts on the first day of the current month,
+    # the latest monthly cumulative snapshot is the best approximation of
+    # the recent 30-day spend even if early-hour rows are missing.
+    if (
+        recent_window_start.day == 1
+        and row_periods == {current_period}
+    ):
+        return max(_total_cost_value(row) for row in account_rows)
+
+    spend = 0.0
+    rows_by_period = defaultdict(list)
+    for row in account_rows:
+        row_period = getattr(row, 'period', None)
+        if not row_period:
+            continue
+        rows_by_period[row_period].append(row)
+
+    for period_rows in rows_by_period.values():
+        first_row = period_rows[0]
+        last_row = period_rows[-1]
+        first_total = _total_cost_value(first_row)
+        first_increment = _hourly_cost_value(first_row)
+        baseline_total = max(first_total - first_increment, 0.0)
+        latest_total = _total_cost_value(last_row)
+        spend += max(latest_total - baseline_total, 0.0)
+
+    return spend
 
 
 def _daily_rows_for_current_month(local_tz):
@@ -671,15 +715,13 @@ def _build_accounts(
     if recent_rows is None:
         recent_rows = daily_rows
     monthly_burn = defaultdict(float)
-    monthly_active_days = defaultdict(set)
+    recent_rows_by_account = defaultdict(list)
     for row in daily_rows:
         account_key = (row.provider_id, row.account_id or '')
         monthly_burn[account_key] += _hourly_cost_value(row)
-        collected_at = getattr(row, 'collected_at', None)
-        if collected_at is not None:
-            monthly_active_days[account_key].add(
-                collected_at.astimezone(local_tz).date()
-            )
+    for row in recent_rows:
+        account_key = (row.provider_id, row.account_id or '')
+        recent_rows_by_account[account_key].append(row)
 
     total_cost = sum(_to_float(item.total_cost) for item in latest_billings) or 1.0
     accounts = []
@@ -687,8 +729,15 @@ def _build_accounts(
         provider = billing.provider
         account_key = (provider.id, billing.account_id or '')
         burn = monthly_burn[account_key]
-        active_days = len(monthly_active_days[account_key]) or max(now.day, 1)
-        daily_burn = burn / active_days if burn else 0.0
+        recent_spend = _recent_spend_from_snapshots(
+            recent_rows_by_account[account_key],
+            now,
+        )
+        daily_burn = (
+            recent_spend / RECENT_BURN_WINDOW_DAYS
+            if recent_spend
+            else 0.0
+        )
         balance_info = get_balance_support_info(provider)
         payment_type = _payment_type_for_provider(
             provider,

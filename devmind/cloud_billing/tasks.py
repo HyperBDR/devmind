@@ -34,11 +34,14 @@ from .constants import (
     WEBHOOK_STATUS_PENDING,
     WEBHOOK_STATUS_SUCCESS,
 )
+from .dashboard import _normalize_account_funds, _payment_type_for_provider
 from .models import AlertRecord, AlertRule, BillingData, CloudProvider
+from .serializers import get_balance_support_info
 from .services.notification_service import CloudBillingNotificationService
 from .services.provider_service import ProviderService
 
 logger = logging.getLogger(__name__)
+RECENT_BURN_WINDOW_DAYS = 30
 
 
 def _resolve_notification_language(provider: CloudProvider) -> str:
@@ -79,6 +82,82 @@ def _get_latest_known_balance(
         hour=current_hour,
     ).order_by('-collected_at', '-period', '-hour')
     return queryset.values_list('balance', flat=True).first()
+
+
+def _recent_spend_from_snapshots(rows, now) -> Decimal:
+    if not rows:
+        return Decimal("0")
+
+    current_period = now.strftime("%Y-%m")
+    recent_window_start = (now - timedelta(days=RECENT_BURN_WINDOW_DAYS - 1)).date()
+    row_periods = {row.period for row in rows if getattr(row, "period", None)}
+
+    if recent_window_start.day == 1 and row_periods == {current_period}:
+        return max((Decimal(str(row.total_cost)) for row in rows), default=Decimal("0"))
+
+    spend = Decimal("0")
+    rows_by_period = {}
+    for row in rows:
+        rows_by_period.setdefault(row.period, []).append(row)
+
+    for period_rows in rows_by_period.values():
+        first_row = period_rows[0]
+        last_row = period_rows[-1]
+        first_total = Decimal(str(first_row.total_cost))
+        first_increment = Decimal(str(first_row.hourly_cost or 0))
+        baseline_total = max(first_total - first_increment, Decimal("0"))
+        latest_total = Decimal(str(last_row.total_cost))
+        spend += max(latest_total - baseline_total, Decimal("0"))
+
+    return spend
+
+
+def _estimate_days_remaining(provider, current_billing, now) -> tuple[Decimal, int | None]:
+    account_id = current_billing.account_id or ""
+    window_start = (now - timedelta(days=RECENT_BURN_WINDOW_DAYS - 1)).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    recent_rows = list(
+        BillingData.objects.filter(
+            provider=provider,
+            account_id=account_id,
+            collected_at__gte=window_start,
+        ).order_by("period", "hour", "collected_at")
+    )
+    recent_spend = _recent_spend_from_snapshots(recent_rows, now)
+    if recent_spend <= 0:
+        return Decimal("0"), None
+
+    daily_burn = recent_spend / Decimal(str(RECENT_BURN_WINDOW_DAYS))
+    if daily_burn <= 0:
+        daily_burn = Decimal("0")
+
+    balance_info = get_balance_support_info(provider)
+    payment_type = _payment_type_for_provider(
+        provider,
+        balance_info["supported"],
+    )
+    funds = _normalize_account_funds(provider, current_billing, payment_type)
+    display_funds = Decimal(str(funds["display_funds"] or 0))
+    normalized_balance = Decimal(str(funds["balance"] or 0))
+
+    if (
+        funds["uses_credit_limit_days"]
+        and display_funds > 0
+        and daily_burn > 0
+    ):
+        days_remaining = max(int(display_funds / daily_burn), 1)
+    elif normalized_balance > 0 and daily_burn > 0:
+        days_remaining = max(int(normalized_balance / daily_burn), 1)
+    elif payment_type == "postpaid":
+        days_remaining = 45
+    else:
+        days_remaining = 120
+
+    return daily_burn, days_remaining
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")
@@ -703,6 +782,12 @@ def check_alert_for_provider(
             alert_reason = []
             cost_threshold_triggered = False
             balance_threshold_triggered = False
+            days_remaining_threshold_triggered = False
+            _daily_burn, current_days_remaining = _estimate_days_remaining(
+                provider,
+                current_billing,
+                now,
+            )
 
             # Cost threshold is absolute and should not depend on a previous
             # billing record. Growth-based rules still need the previous hour.
@@ -831,6 +916,26 @@ def check_alert_for_provider(
                         f"balance_threshold={alert_rule.balance_threshold})"
                     )
 
+            if (
+                alert_rule.days_remaining_threshold is not None
+                and current_days_remaining is not None
+                and current_days_remaining < int(alert_rule.days_remaining_threshold)
+            ):
+                should_alert = True
+                days_remaining_threshold_triggered = True
+                alert_reason.append(
+                    f"Estimated days remaining {current_days_remaining} is below "
+                    f"threshold {alert_rule.days_remaining_threshold}"
+                )
+                logger.info(
+                    f"Task check_alert_for_provider: "
+                    f"Estimated days remaining threshold triggered "
+                    f"(provider_id={provider.id}, name={provider.name}, "
+                    f"account_id={account_id}, "
+                    f"current_days_remaining={current_days_remaining}, "
+                    f"days_remaining_threshold={alert_rule.days_remaining_threshold})"
+                )
+
             if not should_alert:
                 logger.info(
                     f"Task check_alert_for_provider: No alert triggered "
@@ -841,6 +946,15 @@ def check_alert_for_provider(
                     f"increase_percent={increase_percent:.2f})"
                 )
                 continue
+
+            if balance_threshold_triggered:
+                alert_type = AlertRecord.ALERT_TYPE_BALANCE
+            elif days_remaining_threshold_triggered:
+                alert_type = AlertRecord.ALERT_TYPE_DAYS_REMAINING
+            elif cost_threshold_triggered:
+                alert_type = AlertRecord.ALERT_TYPE_COST
+            else:
+                alert_type = AlertRecord.ALERT_TYPE_GROWTH
 
             language = _resolve_notification_language(provider)
 
@@ -853,10 +967,13 @@ def check_alert_for_provider(
                 increase_cost=increase_cost,
                 increase_percent=increase_percent,
                 current_balance=current_balance,
+                current_days_remaining=current_days_remaining,
                 currency=current_billing.currency,
                 alert_rule=alert_rule,
+                alert_type=alert_type,
                 cost_threshold_triggered=cost_threshold_triggered,
                 balance_threshold_triggered=balance_threshold_triggered,
+                days_remaining_threshold_triggered=days_remaining_threshold_triggered,
                 language=language,
             )
 
@@ -864,13 +981,28 @@ def check_alert_for_provider(
             alert_record = AlertRecord.objects.create(
                 provider=provider,
                 alert_rule=alert_rule,
+                alert_type=alert_type,
                 current_cost=current_cost,
                 previous_cost=previous_cost,
                 increase_cost=increase_cost,
                 increase_percent=increase_percent,
                 currency=current_billing.currency,
                 current_balance=current_balance,
-                balance_threshold=alert_rule.balance_threshold,
+                balance_threshold=(
+                    alert_rule.balance_threshold
+                    if balance_threshold_triggered
+                    else None
+                ),
+                current_days_remaining=(
+                    current_days_remaining
+                    if days_remaining_threshold_triggered
+                    else None
+                ),
+                days_remaining_threshold=(
+                    alert_rule.days_remaining_threshold
+                    if days_remaining_threshold_triggered
+                    else None
+                ),
                 alert_message=alert_message,
                 webhook_status=WEBHOOK_STATUS_PENDING,
             )

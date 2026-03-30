@@ -455,6 +455,10 @@ msgid "Balance threshold alert"
 msgstr "余额阈值告警"
 
 #: cloud_billing/tasks.py
+msgid "Estimated days remaining alert"
+msgstr "预计使用天数告警"
+
+#: cloud_billing/tasks.py
 msgid "Cost threshold alert"
 msgstr "费用阈值告警"
 
@@ -465,6 +469,10 @@ msgstr "费用增长告警"
 #: cloud_billing/tasks.py
 msgid "Current total cost"
 msgstr "当前总费用"
+
+#: cloud_billing/tasks.py
+msgid "Estimated days remaining"
+msgstr "预计使用天数"
 
 #: cloud_billing/tasks.py
 msgid "Previous hour cost"
@@ -489,6 +497,10 @@ msgstr "金额阈值"
 #: cloud_billing/tasks.py
 msgid "Remaining balance is below the configured threshold. Please recharge promptly."
 msgstr "账户剩余余额低于设定阈值，请及时充值"
+
+#: cloud_billing/tasks.py
+msgid "Projected remaining days are below the configured threshold. Please recharge promptly."
+msgstr "预计使用天数低于设定阈值，请及时充值"
 
 #: cloud_billing/tasks.py
 msgid "Current total cost exceeds the configured threshold"
