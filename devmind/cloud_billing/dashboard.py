@@ -330,7 +330,14 @@ def _build_currency_breakdown(accounts, exchange_rate: float | None = None):
     usd_to_cny_rate = float(exchange_rate or CNY_RATE)
     totals = defaultdict(float)
     original_totals = defaultdict(float)
+    seen_providers = set()
     for account in accounts:
+        provider_key = account.get('provider_id')
+        if provider_key not in (None, ''):
+            provider_key = str(provider_key)
+            if provider_key in seen_providers:
+                continue
+            seen_providers.add(provider_key)
         currency = str(account.get('balance_currency') or '').upper()
         amount = _to_float(account.get('balance'))
         if not currency or amount <= 0:
@@ -383,12 +390,60 @@ def _build_account_detail(
         None,
     )
     account_key = (provider_id, billing.account_id or '')
+    relevant_recent_rows = []
+    for row in recent_rows:
+        row_provider_id = getattr(row, 'provider_id', None) or getattr(
+            getattr(row, 'provider', None),
+            'id',
+            None,
+        )
+        if (row_provider_id, row.account_id or '') == account_key:
+            relevant_recent_rows.append(row)
+
+    baseline_service_costs_by_period = {}
+    first_recent_row_by_period = {}
+    for row in relevant_recent_rows:
+        row_period = getattr(row, 'period', None)
+        if row_period and row_period not in first_recent_row_by_period:
+            first_recent_row_by_period[row_period] = row
+
+    for row in monthly_rows:
+        row_provider_id = getattr(row, 'provider_id', None) or getattr(
+            getattr(row, 'provider', None),
+            'id',
+            None,
+        )
+        row_period = getattr(row, 'period', None)
+        if (row_provider_id, row.account_id or '') != account_key or not row_period:
+            continue
+
+        first_recent_row = first_recent_row_by_period.get(row_period)
+        if first_recent_row is None:
+            continue
+
+        if (
+            getattr(row, 'hour', -1),
+            getattr(row, 'collected_at', None),
+        ) >= (
+            getattr(first_recent_row, 'hour', -1),
+            getattr(first_recent_row, 'collected_at', None),
+        ):
+            continue
+
+        baseline_service_costs_by_period[row_period] = {
+            str(service_name): _to_float(service_value)
+            for service_name, service_value in (
+                (getattr(row, 'service_costs', {}) or {}).items()
+            )
+        }
+
     daily_totals = defaultdict(float)
     daily_service_totals = defaultdict(lambda: defaultdict(float))
     total_service_totals = defaultdict(float)
-    for index, row in enumerate(recent_rows):
-        if (row.provider_id, row.account_id or '') != account_key:
-            continue
+    previous_service_costs = None
+    previous_period = None
+    has_recent_service_rows = False
+    for index, row in enumerate(relevant_recent_rows):
         collected_at = getattr(row, 'collected_at', None)
         label = (
             collected_at.strftime('%m-%d')
@@ -397,14 +452,39 @@ def _build_account_detail(
         )
         row_total = _hourly_cost_value(row)
         daily_totals[label] += row_total
+
         row_service_costs = getattr(row, 'service_costs', {}) or {}
-        for service_name, service_value in row_service_costs.items():
-            numeric_value = _to_float(service_value)
-            if numeric_value <= 0:
-                continue
-            normalized_name = str(service_name)
-            daily_service_totals[label][normalized_name] += numeric_value
-            total_service_totals[normalized_name] += numeric_value
+        current_period = getattr(row, 'period', None)
+        service_delta_map = {}
+        if row_service_costs:
+            has_recent_service_rows = True
+            if previous_period != current_period:
+                previous_service_costs = baseline_service_costs_by_period.get(
+                    current_period
+                )
+            if previous_service_costs is None:
+                for service_name, service_value in row_service_costs.items():
+                    numeric_value = _to_float(service_value)
+                    if numeric_value > 0:
+                        service_delta_map[str(service_name)] = numeric_value
+            else:
+                all_service_names = set(previous_service_costs) | set(row_service_costs)
+                for service_name in all_service_names:
+                    current_value = _to_float(row_service_costs.get(service_name))
+                    previous_value = _to_float(previous_service_costs.get(service_name))
+                    delta_value = current_value - previous_value
+                    if delta_value > 0:
+                        service_delta_map[str(service_name)] = delta_value
+
+            for service_name, service_value in service_delta_map.items():
+                daily_service_totals[label][service_name] += round(service_value, 2)
+                total_service_totals[service_name] += round(service_value, 2)
+
+            previous_service_costs = {
+                str(service_name): _to_float(service_value)
+                for service_name, service_value in row_service_costs.items()
+            }
+            previous_period = current_period
 
     ordered_dates = []
     if recent_rows:
@@ -423,7 +503,9 @@ def _build_account_detail(
     ]
 
     fallback_service_costs = getattr(billing, 'service_costs', {}) or {}
-    if not total_service_totals and fallback_service_costs:
+    service_breakdown_source = 'recent_rows'
+    if not total_service_totals:
+        service_breakdown_source = 'latest_billing'
         for service_name, service_value in fallback_service_costs.items():
             numeric_value = _to_float(service_value)
             if numeric_value > 0:
@@ -442,6 +524,16 @@ def _build_account_detail(
         reverse=True,
     )
     total_service_cost = sum(item['value'] for item in sorted_services) or 0.0
+    comparison_total = (
+        sum(item['value'] for item in recent_trend)
+        if service_breakdown_source == 'recent_rows'
+        else _to_float(getattr(billing, 'total_cost', 0))
+    )
+    service_coverage = (
+        round(total_service_cost / comparison_total * 100, 1)
+        if comparison_total > 0 and total_service_cost > 0
+        else 0.0
+    )
     primary_service = (
         sorted_services[0]
         if sorted_services
@@ -494,7 +586,11 @@ def _build_account_detail(
         values = []
         for label in recent_labels:
             if service_name == '__other__':
-                major_names = {item['name'] for item in major_services if item['name'] != '__other__'}
+                major_names = {
+                    item['name']
+                    for item in major_services
+                    if item['name'] != '__other__'
+                }
                 other_value = sum(
                     value
                     for name, value in daily_service_totals.get(label, {}).items()
@@ -502,7 +598,14 @@ def _build_account_detail(
                 )
                 values.append(round(other_value, 2))
             else:
-                values.append(round(daily_service_totals.get(label, {}).get(service_name, 0.0), 2))
+                values.append(
+                    round(
+                        daily_service_totals.get(label, {}).get(
+                            service_name, 0.0
+                        ),
+                        2,
+                    )
+                )
         trend_series.append(
             {
                 'name': service_name,
@@ -541,6 +644,13 @@ def _build_account_detail(
         'primary_service_name': primary_service['name'],
         'primary_service_share': primary_share,
         'other_service_share': other_share,
+        'service_breakdown_currency': str(
+            getattr(billing, 'currency', '') or selected_currency or 'CNY'
+        ).upper(),
+        'service_breakdown_source': service_breakdown_source,
+        'service_breakdown_has_recent_rows': has_recent_service_rows,
+        'service_breakdown_coverage': service_coverage,
+        'service_breakdown_complete': abs(service_coverage - 100.0) < 0.1,
         'service_breakdown': detailed_services,
         'trend_series': trend_series,
         'trend_30d': detail_trend,
@@ -561,9 +671,15 @@ def _build_accounts(
     if recent_rows is None:
         recent_rows = daily_rows
     monthly_burn = defaultdict(float)
+    monthly_active_days = defaultdict(set)
     for row in daily_rows:
         account_key = (row.provider_id, row.account_id or '')
         monthly_burn[account_key] += _hourly_cost_value(row)
+        collected_at = getattr(row, 'collected_at', None)
+        if collected_at is not None:
+            monthly_active_days[account_key].add(
+                collected_at.astimezone(local_tz).date()
+            )
 
     total_cost = sum(_to_float(item.total_cost) for item in latest_billings) or 1.0
     accounts = []
@@ -571,7 +687,8 @@ def _build_accounts(
         provider = billing.provider
         account_key = (provider.id, billing.account_id or '')
         burn = monthly_burn[account_key]
-        daily_burn = burn / max(now.day, 1) if burn else 0.0
+        active_days = len(monthly_active_days[account_key]) or max(now.day, 1)
+        daily_burn = burn / active_days if burn else 0.0
         balance_info = get_balance_support_info(provider)
         payment_type = _payment_type_for_provider(
             provider,
@@ -601,6 +718,7 @@ def _build_accounts(
         accounts.append(
             {
                 'id': f'{provider.id}-{billing.account_id or "default"}',
+                'provider_id': provider.id,
                 'name': provider.display_name,
                 'provider': provider.display_name,
                 'provider_type': provider.provider_type,
@@ -648,7 +766,16 @@ def _build_accounts(
 
 
 def _build_financial_health(accounts):
-    total_funds = round(sum(item['balance'] for item in accounts), 2)
+    provider_balances = {}
+    for item in accounts:
+        provider_key = item.get('provider_id')
+        if provider_key in (None, ''):
+            provider_key = item.get('id')
+        if provider_key in (None, '') or provider_key in provider_balances:
+            continue
+        provider_balances[provider_key] = _to_float(item.get('balance'))
+
+    total_funds = round(sum(provider_balances.values()), 2)
     total_days = min((item['days_remaining'] for item in accounts), default=0)
     bottleneck = next(
         (item['name'] for item in accounts if item['days_remaining'] == total_days),
