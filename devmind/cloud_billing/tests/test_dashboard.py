@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from cloud_billing.dashboard import (
+    _build_account_detail,
     _build_accounts,
     _build_currency_breakdown,
     _build_exchange_rate_info,
@@ -138,6 +139,7 @@ class PaymentTypeTests(SimpleTestCase):
 
         self.assertEqual(first_result, second_result)
         mock_cache_set.assert_called_once()
+        self.assertEqual(mock_cache_set.call_args.kwargs['timeout'], 60 * 60 * 24)
         mock_get.assert_called_once_with(
             'https://v6.exchangerate-api.com/v6/cached-api-key/latest/USD',
             timeout=9,
@@ -146,12 +148,18 @@ class PaymentTypeTests(SimpleTestCase):
     def test_currency_breakdown_uses_account_balance(self):
         accounts = [
             {
+                'provider_id': 1,
                 'balance_currency': 'USD',
                 'balance': Decimal('10.00'),
                 'display_funds_currency': 'USD',
                 'display_funds': Decimal('999.00'),
             },
-            {'balance_currency': 'CNY', 'balance': Decimal('100.00')},
+            {
+                'provider_id': 1,
+                'balance_currency': 'USD',
+                'balance': Decimal('10.00'),
+            },
+            {'provider_id': 2, 'balance_currency': 'CNY', 'balance': Decimal('100.00')},
             {'display_funds_currency': 'USD', 'display_funds': Decimal('500.00')},
         ]
 
@@ -161,6 +169,47 @@ class PaymentTypeTests(SimpleTestCase):
         self.assertEqual(breakdown['USD']['value'], 80.0)
         self.assertEqual(breakdown['USD']['original_value'], 10.0)
         self.assertEqual(breakdown['CNY']['value'], 100.0)
+
+    def test_financial_health_total_funds_deduplicates_provider_balance(self):
+        accounts = [
+            {
+                'provider_id': 1,
+                'id': '1-acct-a',
+                'balance': Decimal('200.00'),
+                'days_remaining': 8,
+                'name': 'AWS Main',
+                'category': 'Cloud',
+                'account_id': 'acct-a',
+                'notes': '',
+                'tags': [],
+            },
+            {
+                'provider_id': 1,
+                'id': '1-acct-b',
+                'balance': Decimal('200.00'),
+                'days_remaining': 12,
+                'name': 'AWS Main',
+                'category': 'Cloud',
+                'account_id': 'acct-b',
+                'notes': '',
+                'tags': [],
+            },
+            {
+                'provider_id': 2,
+                'id': '2-default',
+                'balance': Decimal('50.00'),
+                'days_remaining': 5,
+                'name': 'Baidu',
+                'category': 'Cloud',
+                'account_id': '',
+                'notes': '',
+                'tags': [],
+            },
+        ]
+
+        financial_health = _build_financial_health(accounts)
+
+        self.assertEqual(financial_health['total_funds'], 250.0)
 
 
 class AccountFundsTests(SimpleTestCase):
@@ -272,12 +321,16 @@ class AccountFundsTests(SimpleTestCase):
                 account_id='acct-3',
                 hourly_cost=Decimal('30.00'),
                 collected_at=datetime(2026, 3, 25, 0, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                service_costs={'ECS': Decimal('21.00'), 'OSS': Decimal('9.00')},
             ),
             SimpleNamespace(
                 provider_id=23,
                 account_id='acct-3',
                 hourly_cost=Decimal('45.00'),
                 collected_at=datetime(2026, 3, 26, 0, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                service_costs={'ECS': Decimal('52.50'), 'OSS': Decimal('22.50')},
             ),
         ]
 
@@ -292,6 +345,11 @@ class AccountFundsTests(SimpleTestCase):
         self.assertEqual(detail['primary_service_name'], 'ECS')
         self.assertGreater(detail['primary_service_share'], 60)
         self.assertEqual(len(detail['trend_30d']), 2)
+        self.assertEqual(detail['service_breakdown_currency'], 'CNY')
+        self.assertEqual(detail['service_breakdown_source'], 'recent_rows')
+        self.assertTrue(detail['service_breakdown_complete'])
+        self.assertEqual(detail['service_breakdown_coverage'], 100.0)
+        self.assertEqual(len(detail['trend_series']), 2)
         self.assertIn('recommended_recharge', detail)
         self.assertEqual(detail['recommended_window_days'], 30)
 
@@ -329,6 +387,7 @@ class AccountFundsTests(SimpleTestCase):
                 account_id='acct-4',
                 hourly_cost=Decimal('30.00'),
                 collected_at=datetime(2026, 3, 25, 0, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
                 service_costs={
                     'ECS': Decimal('24.00'),
                     'OSS': Decimal('4.50'),
@@ -349,6 +408,187 @@ class AccountFundsTests(SimpleTestCase):
         self.assertIn('__other__', series_names)
         self.assertNotIn('CDN', series_names)
         self.assertNotIn('DNS', series_names)
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_account_detail_marks_latest_billing_fallback_service_breakdown(
+        self,
+        mock_balance_support,
+    ):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=25,
+            provider_type='aws',
+            display_name='AWS',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('0'),
+            balance_currency='USD',
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='acct-5',
+                total_cost=Decimal('200.00'),
+                currency='USD',
+                service_costs={
+                    'EC2': Decimal('120.00'),
+                    'S3': Decimal('40.00'),
+                },
+            )
+        ]
+        daily_rows = [
+            SimpleNamespace(
+                provider_id=25,
+                account_id='acct-5',
+                hourly_cost=Decimal('20.00'),
+                collected_at=datetime(2026, 3, 25, 0, 0, tzinfo=dt_timezone.utc),
+                service_costs={},
+            ),
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            daily_rows,
+            recent_rows=daily_rows,
+        )
+
+        detail = accounts[0]['detail']
+        self.assertEqual(detail['service_breakdown_currency'], 'USD')
+        self.assertEqual(detail['service_breakdown_source'], 'latest_billing')
+        self.assertFalse(detail['service_breakdown_complete'])
+        self.assertFalse(detail['service_breakdown_has_recent_rows'])
+        self.assertEqual(detail['service_breakdown_coverage'], 80.0)
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_account_detail_uses_previous_monthly_snapshot_as_service_baseline(
+        self,
+        mock_balance_support,
+    ):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=26,
+            provider_type='alibaba',
+            display_name='阿里云',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('1000.00'),
+            balance_currency='CNY',
+        )
+        latest_billing = SimpleNamespace(
+            provider=provider,
+            account_id='acct-6',
+            total_cost=Decimal('500.00'),
+            currency='CNY',
+            service_costs={'SLB': Decimal('220.00'), 'ECS': Decimal('280.00')},
+        )
+        monthly_rows = [
+            SimpleNamespace(
+                provider_id=26,
+                account_id='acct-6',
+                period='2026-03',
+                hour=7,
+                collected_at=datetime(2026, 3, 20, 7, 0, tzinfo=dt_timezone.utc),
+                service_costs={'SLB': Decimal('100.00'), 'ECS': Decimal('140.00')},
+            ),
+            SimpleNamespace(
+                provider_id=26,
+                account_id='acct-6',
+                period='2026-03',
+                hour=8,
+                collected_at=datetime(2026, 3, 20, 8, 0, tzinfo=dt_timezone.utc),
+                hourly_cost=Decimal('30.00'),
+                service_costs={'SLB': Decimal('120.00'), 'ECS': Decimal('150.00')},
+            ),
+            SimpleNamespace(
+                provider_id=26,
+                account_id='acct-6',
+                period='2026-03',
+                hour=9,
+                collected_at=datetime(2026, 3, 21, 9, 0, tzinfo=dt_timezone.utc),
+                hourly_cost=Decimal('40.00'),
+                service_costs={'SLB': Decimal('150.00'), 'ECS': Decimal('160.00')},
+            ),
+        ]
+
+        detail = _build_account_detail(
+            latest_billing,
+            monthly_rows,
+            recent_rows=monthly_rows[1:],
+            display_funds=1000.0,
+            daily_burn=35.0,
+            days_remaining=20,
+            payment_type='prepaid',
+            selected_currency='CNY',
+        )
+
+        breakdown = {
+            item['name']: item['value'] for item in detail['service_breakdown']
+        }
+        self.assertEqual(breakdown['SLB'], 50.0)
+        self.assertEqual(breakdown['ECS'], 20.0)
+        self.assertEqual(detail['service_breakdown_coverage'], 100.0)
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_daily_average_uses_active_billing_days_for_account(
+        self,
+        mock_balance_support,
+    ):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=27,
+            provider_type='alibaba',
+            display_name='阿里云',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('300.00'),
+            balance_currency='CNY',
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='acct-7',
+                total_cost=Decimal('90.00'),
+                currency='CNY',
+                service_costs={'ECS': Decimal('90.00')},
+            )
+        ]
+        daily_rows = [
+            SimpleNamespace(
+                provider_id=27,
+                account_id='acct-7',
+                hourly_cost=Decimal('30.00'),
+                collected_at=datetime(2026, 3, 2, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+                service_costs={'ECS': Decimal('30.00')},
+            ),
+            SimpleNamespace(
+                provider_id=27,
+                account_id='acct-7',
+                hourly_cost=Decimal('60.00'),
+                collected_at=datetime(2026, 3, 5, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+                service_costs={'ECS': Decimal('90.00')},
+            ),
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            daily_rows,
+            recent_rows=daily_rows,
+            local_tz=dt_timezone.utc,
+            now=datetime(2026, 3, 20, 0, 0, tzinfo=dt_timezone.utc),
+        )
+
+        self.assertEqual(accounts[0]['detail']['daily_average'], 45.0)
+        self.assertEqual(accounts[0]['change'], 45.0)
 
 
 class DashboardTimezoneTests(SimpleTestCase):
