@@ -56,11 +56,14 @@ def build_alert_message(
     increase_cost,
     increase_percent,
     current_balance,
+    current_days_remaining,
     currency: str,
     alert_rule,
     cost_threshold_triggered: bool,
     balance_threshold_triggered: bool,
+    days_remaining_threshold_triggered: bool,
     language: str,
+    alert_type: str | None = None,
 ) -> str:
     normalized_language = str(language or DEFAULT_LANGUAGE).lower()
 
@@ -89,7 +92,12 @@ def build_alert_message(
                 )
             )
 
-        if balance_threshold_triggered:
+        effective_alert_type = str(alert_type or "").strip().lower()
+
+        if (
+            effective_alert_type == "balance"
+            or balance_threshold_triggered
+        ):
             lines.insert(
                 0,
                 format_alert_line(
@@ -124,7 +132,55 @@ def build_alert_message(
             )
             return "\n".join(lines)
 
-        if cost_threshold_triggered:
+        if (
+            effective_alert_type == "days_remaining"
+            or days_remaining_threshold_triggered
+        ):
+            lines.insert(
+                0,
+                format_alert_line(
+                    _("Alert type"),
+                    _("Estimated days remaining alert"),
+                    language=normalized_language,
+                ),
+            )
+            lines.append(
+                format_alert_line(
+                    _("Current balance"),
+                    f"{current_balance:.2f} {currency}",
+                    language=normalized_language,
+                )
+            )
+            lines.append(
+                format_alert_line(
+                    _("Estimated days remaining"),
+                    str(current_days_remaining),
+                    language=normalized_language,
+                )
+            )
+            lines.append(
+                format_alert_line(
+                    _("Alert threshold"),
+                    str(alert_rule.days_remaining_threshold),
+                    language=normalized_language,
+                )
+            )
+            lines.append(
+                format_alert_line(
+                    _("Alert description"),
+                    _(
+                        "Projected remaining days are below the configured "
+                        "threshold. Please recharge promptly."
+                    ),
+                    language=normalized_language,
+                )
+            )
+            return "\n".join(lines)
+
+        if (
+            effective_alert_type == "cost"
+            or cost_threshold_triggered
+        ):
             lines.insert(
                 0,
                 format_alert_line(
@@ -231,21 +287,45 @@ def build_alert_message_from_record(alert_record, language: str) -> str:
         growth_threshold=None,
         growth_amount_threshold=None,
         balance_threshold=alert_record.balance_threshold,
+        days_remaining_threshold=alert_record.days_remaining_threshold,
     )
     current_balance = getattr(alert_record, "current_balance", None)
+    alert_type = getattr(alert_record, "alert_type", None)
     balance_threshold = getattr(alert_record, "balance_threshold", None)
+    current_days_remaining = getattr(alert_record, "current_days_remaining", None)
+    days_remaining_threshold = getattr(
+        alert_record,
+        "days_remaining_threshold",
+        None,
+    )
     current_cost = getattr(alert_record, "current_cost", 0)
 
     balance_threshold_triggered = (
+        alert_type == "balance"
+        or (
         current_balance is not None
         and balance_threshold is not None
         and current_balance < balance_threshold
+        )
     )
     cost_threshold = getattr(alert_rule, "cost_threshold", None)
     cost_threshold_triggered = (
+        alert_type == "cost"
+        or (
         not balance_threshold_triggered
+        and current_days_remaining is None
         and cost_threshold is not None
         and current_cost > cost_threshold
+        )
+    )
+    days_remaining_threshold_triggered = (
+        alert_type == "days_remaining"
+        or (
+        not balance_threshold_triggered
+        and current_days_remaining is not None
+        and days_remaining_threshold is not None
+        and current_days_remaining < days_remaining_threshold
+        )
     )
 
     return build_alert_message(
@@ -257,9 +337,12 @@ def build_alert_message_from_record(alert_record, language: str) -> str:
         increase_cost=alert_record.increase_cost,
         increase_percent=alert_record.increase_percent,
         current_balance=current_balance,
+        current_days_remaining=current_days_remaining,
         currency=alert_record.currency,
         alert_rule=alert_rule,
+        alert_type=alert_type,
         cost_threshold_triggered=cost_threshold_triggered,
         balance_threshold_triggered=balance_threshold_triggered,
+        days_remaining_threshold_triggered=days_remaining_threshold_triggered,
         language=language,
     )

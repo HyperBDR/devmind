@@ -256,7 +256,8 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name',
             'cost_threshold', 'growth_threshold',
-            'growth_amount_threshold', 'balance_threshold', 'is_active',
+            'growth_amount_threshold', 'balance_threshold',
+            'days_remaining_threshold', 'is_active',
             'created_at', 'updated_at',
             'created_by', 'created_by_username',
             'updated_by', 'updated_by_username',
@@ -286,15 +287,21 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         if balance_threshold is None and self.instance:
             balance_threshold = self.instance.balance_threshold
 
+        days_remaining_threshold = attrs.get('days_remaining_threshold')
+        if days_remaining_threshold is None and self.instance:
+            days_remaining_threshold = self.instance.days_remaining_threshold
+
         if (
             cost_threshold is None
             and growth_threshold is None
             and growth_amount_threshold is None
             and balance_threshold is None
+            and days_remaining_threshold is None
         ):
             raise serializers.ValidationError(
                 "At least one of cost_threshold, growth_threshold, "
-                "growth_amount_threshold, or balance_threshold must be set."
+                "growth_amount_threshold, balance_threshold, or "
+                "days_remaining_threshold must be set."
             )
         return attrs
 
@@ -312,7 +319,8 @@ class AlertRuleListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'provider', 'provider_name',
             'cost_threshold', 'growth_threshold',
-            'growth_amount_threshold', 'balance_threshold', 'is_active',
+            'growth_amount_threshold', 'balance_threshold',
+            'days_remaining_threshold', 'is_active',
             'created_at', 'updated_at',
         ]
 
@@ -333,10 +341,11 @@ class AlertRecordSerializer(serializers.ModelSerializer):
         model = AlertRecord
         fields = [
             'id', 'provider', 'provider_name', 'provider_label',
-            'alert_rule',
+            'alert_rule', 'alert_type',
             'current_cost', 'previous_cost', 'increase_cost',
             'increase_percent', 'currency', 'current_balance',
-            'balance_threshold', 'alert_message',
+            'balance_threshold', 'current_days_remaining',
+            'days_remaining_threshold', 'alert_message',
             'webhook_status', 'webhook_response', 'webhook_error',
             'created_at',
         ]
@@ -359,9 +368,11 @@ class AlertRecordListSerializer(serializers.ModelSerializer):
         model = AlertRecord
         fields = [
             'id', 'provider', 'provider_name', 'provider_label',
+            'alert_type',
             'current_cost', 'previous_cost', 'increase_cost',
             'increase_percent', 'currency', 'current_balance',
-            'balance_threshold', 'alert_message',
+            'balance_threshold', 'current_days_remaining',
+            'days_remaining_threshold', 'alert_message',
             'webhook_status',
             'created_at',
         ]

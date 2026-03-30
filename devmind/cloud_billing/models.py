@@ -245,6 +245,14 @@ class AlertRule(models.Model):
             "balance drops below 100.00"
         ),
     )
+    days_remaining_threshold = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Estimated days remaining threshold, e.g., 7 means alert when "
+            "projected remaining days drop below 7"
+        ),
+    )
     is_active = models.BooleanField(
         default=True,
         db_index=True,
@@ -284,10 +292,12 @@ class AlertRule(models.Model):
             and self.growth_threshold is None
             and self.growth_amount_threshold is None
             and self.balance_threshold is None
+            and self.days_remaining_threshold is None
         ):
             raise ValidationError(
                 "At least one of cost_threshold, growth_threshold, "
-                "growth_amount_threshold, or balance_threshold must be set."
+                "growth_amount_threshold, balance_threshold, or "
+                "days_remaining_threshold must be set."
             )
 
     def save(self, *args, **kwargs):
@@ -307,6 +317,8 @@ class AlertRule(models.Model):
             thresholds.append(f"Growth Amount: {self.growth_amount_threshold}")
         if self.balance_threshold is not None:
             thresholds.append(f"Balance: {self.balance_threshold}")
+        if self.days_remaining_threshold is not None:
+            thresholds.append(f"Days Remaining: {self.days_remaining_threshold}")
         return f"{self.provider.display_name} - {', '.join(thresholds)}"
 
 
@@ -315,6 +327,16 @@ class AlertRecord(models.Model):
     Alert record model for tracking billing alerts.
     """
 
+    ALERT_TYPE_COST = "cost"
+    ALERT_TYPE_GROWTH = "growth"
+    ALERT_TYPE_BALANCE = "balance"
+    ALERT_TYPE_DAYS_REMAINING = "days_remaining"
+    ALERT_TYPE_CHOICES = [
+        (ALERT_TYPE_COST, "Cost Threshold"),
+        (ALERT_TYPE_GROWTH, "Cost Growth"),
+        (ALERT_TYPE_BALANCE, "Balance Threshold"),
+        (ALERT_TYPE_DAYS_REMAINING, "Estimated Days Remaining"),
+    ]
     WEBHOOK_STATUS_CHOICES = [
         (WEBHOOK_STATUS_PENDING, "Pending"),
         (WEBHOOK_STATUS_SUCCESS, "Success"),
@@ -330,6 +352,12 @@ class AlertRecord(models.Model):
         null=True,
         blank=True,
         related_name="alert_records",
+    )
+    alert_type = models.CharField(
+        max_length=32,
+        choices=ALERT_TYPE_CHOICES,
+        default=ALERT_TYPE_GROWTH,
+        help_text="Primary alert type that triggered this record",
     )
     current_cost = models.DecimalField(
         max_digits=20, decimal_places=2, help_text="Current hour cost"
@@ -357,6 +385,16 @@ class AlertRecord(models.Model):
         null=True,
         blank=True,
         help_text="Balance threshold that triggered the alert",
+    )
+    current_days_remaining = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Projected remaining days when the alert was triggered",
+    )
+    days_remaining_threshold = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Projected remaining days threshold that triggered the alert",
     )
     alert_message = models.TextField(help_text="Alert message content")
     webhook_status = models.CharField(

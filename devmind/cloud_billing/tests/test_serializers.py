@@ -87,6 +87,7 @@ class TestAlertRuleSerializer:
         assert "cost_threshold" in data
         assert "growth_threshold" in data
         assert "balance_threshold" in data
+        assert "days_remaining_threshold" in data
 
     def test_deserialize_create_alert_rule(self, cloud_provider, user):
         data = {
@@ -94,6 +95,7 @@ class TestAlertRuleSerializer:
             "cost_threshold": "20.00",
             "growth_threshold": "10.00",
             "balance_threshold": "100.00",
+            "days_remaining_threshold": 7,
             "is_active": True,
         }
         serializer = AlertRuleSerializer(data=data)
@@ -102,12 +104,16 @@ class TestAlertRuleSerializer:
         assert rule.provider == cloud_provider
         assert rule.cost_threshold == Decimal("20.00")
         assert rule.balance_threshold == Decimal("100.00")
+        assert rule.days_remaining_threshold == 7
 
     def test_validate_at_least_one_threshold(self, cloud_provider):
         data = {
             "provider": cloud_provider.id,
             "cost_threshold": None,
             "growth_threshold": None,
+            "growth_amount_threshold": None,
+            "balance_threshold": None,
+            "days_remaining_threshold": None,
         }
         serializer = AlertRuleSerializer(data=data)
         assert not serializer.is_valid()
@@ -117,6 +123,7 @@ class TestAlertRuleSerializer:
             "cost_threshold": None,
             "growth_threshold": "15.00",
             "balance_threshold": None,
+            "days_remaining_threshold": None,
         }
         serializer = AlertRuleSerializer(alert_rule, data=data, partial=True)
         assert serializer.is_valid()
@@ -186,6 +193,8 @@ class TestAlertRecordSerializer:
             increase_cost=Decimal("20.50"),
             increase_percent=Decimal("25.63"),
             currency="USD",
+            current_days_remaining=6,
+            days_remaining_threshold=7,
             alert_message="Test alert",
             webhook_status="pending",
         )
@@ -196,4 +205,6 @@ class TestAlertRecordSerializer:
         data = serializer.data
         assert data["provider_name"] == "Test AWS"
         assert data["provider_label"] == "Test AWS（默认备注）"
+        assert data["current_days_remaining"] == 6
+        assert data["days_remaining_threshold"] == 7
         assert data["alert_message"] == "Test alert"
