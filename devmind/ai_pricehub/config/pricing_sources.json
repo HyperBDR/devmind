@@ -1,0 +1,49 @@
+{
+  "primary_vendor": {
+    "slug": "agione",
+    "name": "AGIOne",
+    "pricing_url": "https://zh.agione.co/hyperone/xapi/models/list",
+    "currency": "CNY",
+    "models_source": {
+      "type": "agione_model_list",
+      "url": "https://zh.agione.co/hyperone/xapi/models/list"
+    }
+  },
+  "comparison_vendors": [
+    {
+      "slug": "zhipu",
+      "name": "Zhipu AI",
+      "aliases": ["Zhipu", "Zhipu AI", "Z.AI"],
+      "pricing_url": "https://bigmodel.cn/pricing",
+      "currency": "CNY"
+    },
+    {
+      "slug": "deepseek",
+      "name": "DeepSeek",
+      "aliases": ["DeepSeek"],
+      "pricing_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "currency": "CNY"
+    },
+    {
+      "slug": "aliyun",
+      "name": "Aliyun",
+      "aliases": ["Aliyun", "Alibaba Cloud"],
+      "pricing_url": "https://bailian.console.aliyun.com/cn-beijing/?tab=doc#/doc/?type=model&url=2987148",
+      "currency": "CNY"
+    },
+    {
+      "slug": "volcengine",
+      "name": "VolcEngine",
+      "aliases": ["VolcEngine", "Volc Engine", "火山引擎"],
+      "pricing_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh",
+      "currency": "CNY"
+    },
+    {
+      "slug": "baidu",
+      "name": "Baidu Qianfan",
+      "aliases": ["Baidu", "Baidu Qianfan", "Qianfan", "百度千帆"],
+      "pricing_url": "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+      "currency": "CNY"
+    }
+  ]
+}

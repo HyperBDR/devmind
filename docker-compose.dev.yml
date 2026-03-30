@@ -92,6 +92,8 @@ services:
       - "postgres"
       - "-c"
       - "config_file=/etc/postgresql/postgresql.conf"
+    ports:
+      - "5432:5432"
     networks:
       - devmind_network
     healthcheck:

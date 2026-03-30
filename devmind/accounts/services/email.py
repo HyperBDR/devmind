@@ -6,8 +6,10 @@ supporting multiple languages with proper internationalization.
 """
 
 import logging
+from email.utils import formataddr
 
 from django.conf import settings
+from django.core.mail import get_connection
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import translation
@@ -26,6 +28,53 @@ def get_translation_language_code(language):
     normalized = language.lower().replace('_', '-')
     mapping = getattr(settings, 'LANGUAGE_CODE_MAPPING', {})
     return mapping.get(normalized, normalized)
+
+
+def get_email_delivery_options():
+    """
+    Resolve outbound email settings from runtime SMTP config when available.
+
+    Falls back to Django settings so password reset still works in environments
+    that only use environment variables.
+    """
+    get_config = None
+    try:
+        from app_config.utils import get_config as runtime_get_config
+        get_config = runtime_get_config
+    except Exception:
+        get_config = None
+
+    smtp_config = {}
+    if get_config is not None:
+        smtp_config = get_config('smtp_config', default={}) or {}
+
+    use_runtime_smtp = bool(
+        smtp_config.get('enable') and smtp_config.get('host')
+    )
+
+    if use_runtime_smtp:
+        from_email = smtp_config.get('from_email') or settings.DEFAULT_FROM_EMAIL
+        from_name = (smtp_config.get('from_name') or '').strip()
+        if from_name:
+            from_email = formataddr((from_name, from_email))
+
+        connection = get_connection(
+            backend='django.core.mail.backends.smtp.EmailBackend',
+            host=smtp_config.get('host', ''),
+            port=int(smtp_config.get('port') or 587),
+            username=smtp_config.get('username', ''),
+            password=smtp_config.get('password', ''),
+            use_tls=bool(smtp_config.get('use_tls', True)),
+            use_ssl=bool(smtp_config.get('use_ssl', False)),
+        )
+        return from_email, connection
+
+    from_email = (
+        settings.EMAIL_HOST_USER
+        if settings.EMAIL_HOST_USER
+        else settings.DEFAULT_FROM_EMAIL
+    )
+    return from_email, None
 
 
 class RegistrationEmailService:
@@ -79,17 +128,14 @@ class RegistrationEmailService:
                     'Please complete your registration by visiting: %(url)s'
                 ) % {'url': registration_url})
 
-            from_email = (
-                settings.EMAIL_HOST_USER
-                if settings.EMAIL_HOST_USER
-                else settings.DEFAULT_FROM_EMAIL
-            )
+            from_email, connection = get_email_delivery_options()
 
             email_message = EmailMultiAlternatives(
                 subject=subject,
                 body=text_content,
                 from_email=from_email,
-                to=[email]
+                to=[email],
+                connection=connection,
             )
             email_message.attach_alternative(html_content, "text/html")
 
@@ -207,17 +253,14 @@ class PasswordResetEmailService:
                     'Please reset your password by visiting: %(url)s'
                 ) % {'url': reset_url})
 
-            from_email = (
-                settings.EMAIL_HOST_USER
-                if settings.EMAIL_HOST_USER
-                else settings.DEFAULT_FROM_EMAIL
-            )
+            from_email, connection = get_email_delivery_options()
 
             email_message = EmailMultiAlternatives(
                 subject=subject,
                 body=text_content,
                 from_email=from_email,
-                to=[email]
+                to=[email],
+                connection=connection,
             )
             email_message.attach_alternative(html_content, "text/html")
 

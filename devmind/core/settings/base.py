@@ -168,6 +168,7 @@ INSTALLED_APPS = [
 INSTALLED_APPS += [
     'core',
     'accounts',
+    'ai_pricehub',
     'cloud_billing',
     'data_collector',
     'agentcore_metering.adapters.django',
