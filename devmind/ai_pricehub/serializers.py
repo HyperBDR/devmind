@@ -8,6 +8,7 @@ class PriceSourceConfigSerializer(serializers.Serializer):
     vendor_name = serializers.CharField()
     region = serializers.CharField(allow_blank=True, required=False)
     endpoint_url = serializers.URLField()
+    parser_llm_config_uuid = serializers.UUIDField(allow_null=True, required=False)
     currency = serializers.CharField()
     points_per_currency_unit = serializers.FloatField()
     is_enabled = serializers.BooleanField(required=False)

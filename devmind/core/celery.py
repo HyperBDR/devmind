@@ -34,7 +34,10 @@ app.config_from_object("django.conf:settings", namespace="CELERY")
 # Explicitly set the beat scheduler to use database
 app.conf.update(
     result_backend='django-db',
-    beat_scheduler='django_celery_beat.schedulers:DatabaseScheduler'
+    beat_scheduler='django_celery_beat.schedulers:DatabaseScheduler',
+    imports=tuple(app.conf.get("imports", ())) + (
+        "ai_pricehub.tasks",
+    ),
 )
 
 # Automatically discover all task modules registered in the Django project.

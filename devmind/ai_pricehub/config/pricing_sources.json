@@ -29,7 +29,12 @@
       "name": "Aliyun",
       "aliases": ["Aliyun", "Alibaba Cloud"],
       "pricing_url": "https://bailian.console.aliyun.com/cn-beijing/?tab=doc#/doc/?type=model&url=2987148",
-      "currency": "CNY"
+      "currency": "CNY",
+      "acquisition": {
+        "method": "api",
+        "api_url": "https://bailian-cs.console.aliyun.com/data/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=zeldaHttp.dashscopeModel./zelda/api/v1/modelCenter/listFoundationModels&_v=undefined",
+        "region": "cn-beijing"
+      }
     },
     {
       "slug": "volcengine",

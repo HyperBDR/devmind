@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import mimetypes
@@ -5,44 +7,17 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import requests
-from deepagents import create_deep_agent
-from deepagents.backends.filesystem import FilesystemBackend
-from langchain.tools import tool
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import BaseMessage
-from langchain_openai import ChatOpenAI
-
-from django.conf import settings
 
 from .extraction import ExtractedPricingCatalog
-from .skill_runner import run_vendor_skill
+from .tracked_llm import build_tracking_state, invoke_tracked_structured_llm
 
+logger = logging.getLogger(__name__)
 
-class DeepAgentLLMLogHandler(BaseCallbackHandler):
-    def __init__(self) -> None:
-        self.logger = logging.getLogger("devmind.ai_pricehub.deepagent")
-
-    def on_chat_model_start(
-        self,
-        serialized: dict[str, Any],
-        messages: list[list[BaseMessage]],
-        **kwargs: Any,
-    ) -> Any:
-        for batch in messages:
-            payload = [
-                {
-                    "type": getattr(message, "type", None),
-                    "content": message.content,
-                }
-                for message in batch
-            ]
-            self.logger.info(
-                "deepagent_llm_start model=%s messages=%s",
-                serialized.get("name") or serialized.get("id"),
-                json.dumps(payload, ensure_ascii=False),
-            )
+RESOURCE_TEXT_CHAR_LIMIT = 18000
+RESOURCE_URL_LIMIT = 5
 
 
 class ParserAgentService:
@@ -50,22 +25,38 @@ class ParserAgentService:
         self.root_dir = Path(__file__).resolve().parent
         self.runtime_dir = self.root_dir / "runtime" / "parse_jobs"
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        self.callback_handler = DeepAgentLLMLogHandler()
 
-    def discover_vendor_catalog(self, *, vendor: dict[str, Any]) -> dict[str, Any]:
-        self._validate_llm_config()
+    def discover_vendor_catalog(
+        self,
+        *,
+        vendor: dict[str, Any],
+        parser_llm_config_uuid: str | None = None,
+    ) -> dict[str, Any]:
         job_dir = self.runtime_dir / uuid.uuid4().hex
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        prompt = self._build_vendor_discovery_prompt(vendor=vendor)
-        tools = self._build_vendor_tools(job_dir=job_dir, vendor=vendor)
-        result = self._invoke_agent(
-            prompt=prompt,
-            tools=tools,
-            response_format=ExtractedPricingCatalog,
-            skill_name="pricing-vendor-agent",
+        evidence = self._collect_vendor_evidence(vendor=vendor, job_dir=job_dir)
+        state = build_tracking_state(
+            vendor=vendor,
+            node_name="ai_pricehub_vendor_parser_agent",
+            source_path="ai_pricehub.parser_agent",
+            metadata={
+                "job_dir": str(job_dir),
+                "pricing_url": vendor.get("pricing_url") or "",
+            },
         )
-        payload = result.model_dump() if isinstance(result, ExtractedPricingCatalog) else ExtractedPricingCatalog.model_validate(result).model_dump()
+        result, usage, llm_settings = invoke_tracked_structured_llm(
+            schema=ExtractedPricingCatalog,
+            messages=self._build_vendor_discovery_messages(
+                evidence=evidence,
+            ),
+            preferred_config_uuid=parser_llm_config_uuid,
+            node_name="ai_pricehub_vendor_parser_agent",
+            state=state,
+            max_tokens=5000,
+            temperature=0,
+        )
+        payload = result.model_dump()
         return {
             "models": payload.get("models", []),
             "notes": payload.get("notes"),
@@ -73,111 +64,137 @@ class ParserAgentService:
                 "vendor": vendor.get("name"),
                 "job_dir": str(job_dir),
                 "pricing_url": vendor.get("pricing_url"),
-                "notes": payload.get("notes"),
+                "evidence": evidence,
+                "usage": usage,
+                "parser_llm": {
+                    "config_uuid": llm_settings.get("config_uuid"),
+                    "label": llm_settings.get("label"),
+                    "source": llm_settings.get("source"),
+                },
             },
-            "source_type": "vendor_agent_skill",
+            "source_type": "vendor_tracked_parser",
         }
 
-    def _invoke_agent(
+    def _collect_vendor_evidence(
         self,
         *,
-        prompt: str,
-        tools: list[Any],
-        response_format: type,
-        skill_name: str,
-    ) -> Any:
-        llm = ChatOpenAI(
-            model=settings.AI_PRICEHUB_PARSER_LLM_MODEL,
-            api_key=settings.AI_PRICEHUB_PARSER_LLM_API_KEY,
-            base_url=settings.AI_PRICEHUB_PARSER_LLM_BASE_URL,
-            temperature=0,
-            callbacks=[self.callback_handler],
-        )
-        backend = FilesystemBackend(root_dir=str(self.root_dir))
-        agent = create_deep_agent(
-            model=llm,
-            backend=backend,
-            tools=tools,
-            skills=[f"/skills/{skill_name}"],
-            response_format=response_format,
-            system_prompt=(
-                "You extract AI model token pricing from vendor-owned pricing pages. "
-                "Always fetch the vendor page, inspect the contents, and return structured JSON only."
-            ),
-        )
-        result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
-        structured = result.get("structured_response")
-        if structured is None:
-            raise ValueError("Deep agent did not return structured pricing output.")
-        return structured
+        vendor: dict[str, Any],
+        job_dir: Path,
+    ) -> dict[str, Any]:
+        pricing_url = str(vendor.get("pricing_url") or "").strip()
+        evidence: dict[str, Any] = {
+            "pricing_url": pricing_url,
+            "vendor_context": {
+                "slug": vendor.get("slug"),
+                "name": vendor.get("name"),
+                "currency": vendor.get("currency"),
+                "acquisition": vendor.get("acquisition") or {},
+            },
+            "resources": [],
+        }
 
-    def _build_vendor_tools(self, *, job_dir: Path, vendor: dict[str, Any]) -> list[Any]:
-        @tool
-        def get_vendor_context() -> str:
-            """Return the configured vendor context, including vendor name, slug, pricing URL, currency, and aliases."""
-            return json.dumps(vendor, ensure_ascii=False, indent=2)
+        deterministic_result = None
+        deterministic_raw = (vendor.get("_deterministic_catalog") or {}).get("raw_payload")
+        if deterministic_raw:
+            deterministic_result = deterministic_raw
+        if deterministic_result:
+            evidence["deterministic_attempt"] = deterministic_result
 
-        @tool
-        def run_vendor_skill_python() -> str:
-            """Run the vendor-specific deterministic pricing Python script and return its standard JSON result."""
+        if not pricing_url:
+            return evidence
+
+        primary_resource = self._fetch_resource(pricing_url, job_dir=job_dir)
+        evidence["resources"].append(primary_resource)
+
+        candidate_urls = self._extract_candidate_urls(
+            pricing_url=pricing_url,
+            text=primary_resource.get("content") or "",
+        )
+        for candidate_url in candidate_urls[:RESOURCE_URL_LIMIT]:
             try:
-                result = run_vendor_skill(vendor.get("slug", ""))
+                evidence["resources"].append(
+                    self._fetch_resource(candidate_url, job_dir=job_dir),
+                )
             except Exception as exc:
-                return json.dumps({"error": str(exc)}, ensure_ascii=False, indent=2)
-            return json.dumps(result, ensure_ascii=False, indent=2)
+                logger.info(
+                    "ai_pricehub parser skipped candidate resource url=%s error=%s",
+                    candidate_url,
+                    exc,
+                )
+        return evidence
 
-        @tool
-        def fetch_url_to_file(url: str) -> str:
-            """Fetch a URL and save the response to the current job directory."""
-            response = requests.get(url, timeout=30)
-            response.raise_for_status()
-            content_type = response.headers.get("content-type", "").lower()
-            suffix = self._guess_suffix(url=url, content_type=content_type)
-            target = job_dir / f"resource-{uuid.uuid4().hex}{suffix}"
-            target.write_text(response.text, encoding="utf-8")
-            return json.dumps(
-                {
-                    "url": url,
-                    "status_code": response.status_code,
-                    "content_type": content_type,
-                    "file_path": f"/{target.relative_to(self.root_dir).as_posix()}",
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+    def _fetch_resource(self, url: str, *, job_dir: Path) -> dict[str, Any]:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "").lower()
+        text = response.text
+        suffix = self._guess_suffix(url=url, content_type=content_type)
+        target = job_dir / f"resource-{uuid.uuid4().hex}{suffix}"
+        target.write_text(text, encoding="utf-8")
+        return {
+            "url": url,
+            "content_type": content_type,
+            "file_path": f"/{target.relative_to(self.root_dir).as_posix()}",
+            "content": text[:RESOURCE_TEXT_CHAR_LIMIT],
+        }
 
-        @tool
-        def extract_urls_from_file(file_path: str, pattern: str = "") -> str:
-            """Extract URLs or asset paths from a saved HTML or JS file."""
-            resolved = self.root_dir / file_path.lstrip("/")
-            text = resolved.read_text(encoding="utf-8")
-            matches = re.findall(r'https?://[^"\'\\s)]+|/[^"\'\\s)]+', text)
-            if pattern:
-                regex = re.compile(pattern)
-                matches = [item for item in matches if regex.search(item)]
-            unique: list[str] = []
-            for item in matches:
-                if item not in unique:
-                    unique.append(item)
-            return json.dumps(unique[:200], ensure_ascii=False, indent=2)
+    @staticmethod
+    def _extract_candidate_urls(*, pricing_url: str, text: str) -> list[str]:
+        parsed = urlparse(pricing_url)
+        base_host = parsed.netloc
+        seen: set[str] = set()
+        scored: list[tuple[int, str]] = []
+        for raw in re.findall(r'https?://[^"\'\s)]+|/[^"\'\s)]+', text):
+            candidate = urljoin(pricing_url, raw)
+            normalized = candidate.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            candidate_parsed = urlparse(normalized)
+            if candidate_parsed.netloc and candidate_parsed.netloc != base_host:
+                continue
+            score = 0
+            lowered = normalized.lower()
+            if any(token in lowered for token in ("pricing", "price", "billing", "token", "model")):
+                score += 3
+            if lowered.endswith(".json"):
+                score += 4
+            if lowered.endswith(".js"):
+                score += 2
+            if score <= 0:
+                continue
+            scored.append((score, normalized))
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        return [url for _, url in scored]
 
-        @tool
-        def read_file_chunk(file_path: str, start: int = 0, length: int = 8000) -> str:
-            """Read a chunk from a saved file so large HTML or JS resources can be inspected incrementally."""
-            resolved = self.root_dir / file_path.lstrip("/")
-            text = resolved.read_text(encoding="utf-8")
-            return json.dumps(
-                {
-                    "file_path": file_path,
-                    "start": start,
-                    "length": length,
-                    "content": text[start:start + length],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-
-        return [get_vendor_context, run_vendor_skill_python, fetch_url_to_file, extract_urls_from_file, read_file_chunk]
+    def _build_vendor_discovery_messages(
+        self,
+        *,
+        evidence: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        prompt = (
+            "Analyze the vendor pricing evidence below and extract a complete AI model pricing catalog.\n"
+            f"Vendor metadata:\n{json.dumps(evidence.get('vendor_context') or {}, ensure_ascii=False, indent=2)}\n\n"
+            f"Evidence bundle:\n{json.dumps(evidence, ensure_ascii=False, indent=2)}\n\n"
+            "Requirements:\n"
+            "- Return only standard model pricing, one item per model per market scope when applicable.\n"
+            "- Normalize prices to the vendor currency per 1M tokens.\n"
+            "- Preserve region distinctions using market_scope values domestic, international, global, or null.\n"
+            "- When the evidence shows tiered or range pricing, keep the highest standard range price.\n"
+            "- Ignore cache, batch, promotional, training, discount, or free-tier pricing.\n"
+            "- Keep model names concise and canonical.\n"
+            "- Omit models you cannot substantiate from the evidence.\n"
+        )
+        return [
+            {
+                "role": "system",
+                "content": (
+                    "Extract vendor AI model token pricing into structured JSON. "
+                    "Return a valid JSON object only."
+                ),
+            },
+            {"role": "user", "content": prompt},
+        ]
 
     @staticmethod
     def _guess_suffix(*, url: str, content_type: str) -> str:
@@ -189,31 +206,6 @@ class ParserAgentService:
             return ".js"
         guessed = mimetypes.guess_extension(content_type.split(";")[0].strip()) if content_type else None
         return guessed or ".txt"
-
-    @staticmethod
-    def _build_vendor_discovery_prompt(*, vendor: dict[str, Any]) -> str:
-        return (
-            "Use the vendor metadata below as your starting context, then discover the vendor pricing resources and extract the full priced model catalog.\n"
-            f"Vendor metadata:\n{json.dumps(vendor, ensure_ascii=False, indent=2)}\n"
-            "Requirements:\n"
-            "- Start from the vendor-owned pricing URL when available.\n"
-            "- You may inspect HTML pages, JS bundles, JSON endpoints, or vendor assets as needed.\n"
-            "- Return one item per supported priced model when you can substantiate it from fetched resources.\n"
-            "- Normalize prices to the vendor currency per 1M tokens.\n"
-            "- Distinguish market scope when the source provides different prices for China mainland versus international regions.\n"
-            "- Set market_scope to domestic, international, or leave it null if the page does not distinguish regions.\n"
-            "- Ignore batch, cache, training, discount, or promotional prices unless clearly marked as standard pricing.\n"
-            "- Keep model names canonical and concise.\n"
-        )
-
-    @staticmethod
-    def _validate_llm_config() -> None:
-        if not getattr(settings, "AI_PRICEHUB_PARSER_LLM_API_KEY", ""):
-            raise ValueError("AIPRICEHUB_PARSER_LLM_API_KEY is required for deepagent parsing.")
-        if not getattr(settings, "AI_PRICEHUB_PARSER_LLM_MODEL", ""):
-            raise ValueError("AIPRICEHUB_PARSER_LLM_MODEL is required for deepagent parsing.")
-        if not getattr(settings, "AI_PRICEHUB_PARSER_LLM_BASE_URL", ""):
-            raise ValueError("AIPRICEHUB_PARSER_LLM_BASE_URL is required for deepagent parsing.")
 
 
 parser_agent_service = ParserAgentService()

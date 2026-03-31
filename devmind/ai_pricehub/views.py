@@ -5,6 +5,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
 
+from .llm_config import get_llm_config_reference
 from .serializers import (
     ComparisonItemSerializer,
     ModelItemSerializer,
@@ -17,9 +18,13 @@ from .services import (
     get_primary_source_config,
     list_primary_source_configs,
 )
+from .tasks import enqueue_pricing_sync
 
 
 def serialize_primary_source_config(config):
+    parser_llm = get_llm_config_reference(
+        str(config.parser_llm_config_uuid) if config.parser_llm_config_uuid else ""
+    )
     return {
         "id": config.id,
         "vendor_slug": config.vendor_slug,
@@ -27,6 +32,8 @@ def serialize_primary_source_config(config):
         "vendor_name": config.vendor_name,
         "region": config.region,
         "endpoint_url": config.endpoint_url,
+        "parser_llm_config_uuid": parser_llm["uuid"],
+        "parser_llm_config_label": parser_llm["label"],
         "currency": config.currency,
         "points_per_currency_unit": config.points_per_currency_unit,
         "is_enabled": config.is_enabled,
@@ -90,7 +97,19 @@ class SyncAPIView(APIView):
     )
     def post(self, request):
         platform_slug = request.data.get("platform_slug") or request.query_params.get("platform_slug")
-        return Response(ai_pricehub_service.sync_configured_sources(platform_slug=platform_slug))
+        task_id = enqueue_pricing_sync(
+            platform_slug=platform_slug,
+            created_by=request.user if getattr(request.user, "is_authenticated", False) else None,
+        )
+        return Response(
+            {
+                "accepted": True,
+                "task_id": task_id,
+                "platform_slug": platform_slug or "",
+                "message": "Pricing sync task queued.",
+            },
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
 class PrimarySourceConfigAPIView(APIView):

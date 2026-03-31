@@ -1,3 +1,4 @@
+import logging
 import re
 from typing import Any
 
@@ -7,20 +8,11 @@ from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
 
 from .config_loader import config_loader
+from .harness import pricing_harness_agent
+from .llm_config import get_llm_config_reference
 from .models import PriceSourceConfig, PricingRecord
-from .skill_runner import run_vendor_skill
-from .vendors.baidu import sync_vendor_catalog as sync_baidu_catalog
-from .vendors.deepseek import sync_vendor_catalog as sync_deepseek_catalog
-from .vendors.volcengine import sync_vendor_catalog as sync_volcengine_catalog
-from .vendors.zhipu import sync_vendor_catalog as sync_zhipu_catalog
 
-VENDOR_SYNC_FALLBACK_HANDLERS = {
-    "aliyun": lambda: run_vendor_skill("aliyun"),
-    "baidu": sync_baidu_catalog,
-    "deepseek": sync_deepseek_catalog,
-    "volcengine": sync_volcengine_catalog,
-    "zhipu": sync_zhipu_catalog,
-}
+logger = logging.getLogger(__name__)
 
 
 class AIPriceHubService:
@@ -130,7 +122,11 @@ class AIPriceHubService:
         }
 
     @transaction.atomic
-    def sync_configured_sources(self, platform_slug: str | None = None) -> dict[str, Any]:
+    def sync_configured_sources(
+        self,
+        platform_slug: str | None = None,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
         primary_vendors = [
             vendor
             for vendor in config_loader.get_primary_vendor_configs()
@@ -141,6 +137,10 @@ class AIPriceHubService:
                 vendor for vendor in primary_vendors if vendor.get("platform_slug") == platform_slug
             ]
         comparison_vendors = config_loader.get_comparison_vendors()
+        parser_llm_config_uuid = self._resolve_parser_llm_config_uuid(
+            primary_vendors,
+            platform_slug=platform_slug,
+        )
         collected_hour = timezone.now().replace(
             minute=0,
             second=0,
@@ -151,6 +151,7 @@ class AIPriceHubService:
         failure_count = 0
         errors: list[str] = []
         synced_vendor_slugs: set[str] = set()
+        primary_models: list[dict[str, Any]] = []
 
         if not primary_vendors:
             return {
@@ -166,6 +167,12 @@ class AIPriceHubService:
         for primary_vendor in primary_vendors:
             try:
                 primary_catalog = self._fetch_primary_vendor_models(primary_vendor)
+                logger.info(
+                    "[ai_pricehub] fetched primary catalog platform=%s models=%s source=%s",
+                    primary_vendor.get("platform_slug") or primary_vendor.get("slug"),
+                    len(primary_catalog.get("models", [])),
+                    primary_catalog.get("source_type"),
+                )
             except Exception as exc:
                 primary_catalog = {
                     "models": [],
@@ -174,6 +181,7 @@ class AIPriceHubService:
                 }
                 failure_count += 1
                 errors.append(f"{primary_vendor['name']}: {exc}")
+            primary_models.extend(primary_catalog.get("models", []))
 
             synced_count, synced_failures = self._sync_vendor_models(
                 vendor_data=primary_vendor,
@@ -184,13 +192,31 @@ class AIPriceHubService:
             snapshot_count += synced_count
             failure_count += synced_failures
             synced_vendor_slugs.add(primary_vendor["slug"])
+            logger.info(
+                "[ai_pricehub] synced primary catalog platform=%s snapshots=%s failures=%s",
+                primary_vendor.get("platform_slug") or primary_vendor.get("slug"),
+                synced_count,
+                synced_failures,
+            )
 
         for vendor_data in comparison_vendors:
             if vendor_data["slug"] in synced_vendor_slugs:
                 continue
             synced_vendor_slugs.add(vendor_data["slug"])
             try:
-                catalog = self._fetch_comparison_vendor_catalog(vendor_data)
+                catalog = self._fetch_comparison_vendor_catalog(
+                    vendor_data,
+                    parser_llm_config_uuid=parser_llm_config_uuid,
+                    task_id=task_id,
+                    primary_models=primary_models,
+                )
+                logger.info(
+                    "[ai_pricehub] fetched comparison catalog vendor=%s models=%s source=%s stage=%s",
+                    vendor_data["slug"],
+                    len(catalog.get("models", [])),
+                    catalog.get("source_type"),
+                    (catalog.get("raw_payload") or {}).get("source_stage"),
+                )
             except Exception as exc:
                 catalog = {
                     "models": [],
@@ -199,6 +225,8 @@ class AIPriceHubService:
                 }
                 failure_count += 1
                 errors.append(f"{vendor_data['name']}: {exc}")
+                if self._is_strict_vendor_sync(vendor_data):
+                    raise
             synced_count, synced_failures = self._sync_vendor_models(
                 vendor_data=vendor_data,
                 catalog=catalog,
@@ -207,10 +235,25 @@ class AIPriceHubService:
             )
             snapshot_count += synced_count
             failure_count += synced_failures
+            logger.info(
+                "[ai_pricehub] synced comparison catalog vendor=%s snapshots=%s failures=%s",
+                vendor_data["slug"],
+                synced_count,
+                synced_failures,
+            )
 
         all_records = list(PricingRecord.objects.all())
         vendor_total = len({record.vendor_slug for record in all_records})
         model_total = len(all_records)
+        logger.info(
+            "[ai_pricehub] sync completed platform=%s vendors=%s models=%s snapshots=%s failures=%s errors=%s",
+            platform_slug or "",
+            vendor_total,
+            model_total,
+            snapshot_count,
+            failure_count,
+            errors,
+        )
         return {
             "vendors": vendor_total,
             "models": model_total,
@@ -227,6 +270,12 @@ class AIPriceHubService:
         response.raise_for_status()
         payload = response.json()
         records = payload.get("result", {}).get("records", [])
+        logger.info(
+            "[ai_pricehub] primary source response platform=%s url=%s records=%s",
+            vendor.get("platform_slug") or vendor.get("slug"),
+            url,
+            len(records),
+        )
         models = []
         for record in records:
             model_name = self._derive_agione_model_name(record)
@@ -257,34 +306,87 @@ class AIPriceHubService:
             "source_type": "agione_model_list",
         }
 
-    def _fetch_comparison_vendor_catalog(self, vendor_data: dict[str, Any]) -> dict[str, Any]:
-        try:
-            from .parser_agent import parser_agent_service
-        except ImportError as exc:
-            fallback_handler = VENDOR_SYNC_FALLBACK_HANDLERS.get(vendor_data["slug"])
-            if fallback_handler is None:
-                raise ValueError(
-                    f"Deepagent dependencies are unavailable and no fallback sync handler exists for {vendor_data['slug']}."
-                ) from exc
-            catalog = fallback_handler()
-            catalog.setdefault("raw_payload", {})
-            catalog["raw_payload"]["fallback_reason"] = (
-                "deepagent_dependencies_unavailable"
-            )
-            catalog["raw_payload"]["fallback_detail"] = str(exc)
-            return catalog
+    def _fetch_comparison_vendor_catalog(
+        self,
+        vendor_data: dict[str, Any],
+        *,
+        parser_llm_config_uuid: str | None = None,
+        task_id: str | None = None,
+        primary_models: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        parser_llm_reference = get_llm_config_reference(parser_llm_config_uuid)
+        model_queries = self._build_vendor_model_queries(
+            vendor_data,
+            primary_models or [],
+        )
+        enriched_vendor = {
+            **vendor_data,
+            "parser_llm_config_uuid": parser_llm_reference["uuid"],
+            "parser_llm_config_label": parser_llm_reference["label"],
+            "_primary_model_queries": model_queries,
+            "_tracking_context": {
+                "source_type": "ai_pricehub",
+                "source_task_id": task_id or "",
+            },
+        }
+        return pricing_harness_agent.fetch_vendor_catalog(
+            enriched_vendor,
+            parser_llm_config_uuid=parser_llm_config_uuid,
+        )
 
-        try:
-            return parser_agent_service.discover_vendor_catalog(vendor=vendor_data)
-        except Exception as exc:
-            fallback_handler = VENDOR_SYNC_FALLBACK_HANDLERS.get(vendor_data["slug"])
-            if fallback_handler is None:
-                raise
-            catalog = fallback_handler()
-            catalog.setdefault("raw_payload", {})
-            catalog["raw_payload"]["fallback_reason"] = "deepagent_sync_failed"
-            catalog["raw_payload"]["fallback_detail"] = str(exc)
-            return catalog
+    @staticmethod
+    def _resolve_parser_llm_config_uuid(
+        primary_vendors: list[dict[str, Any]],
+        *,
+        platform_slug: str | None = None,
+    ) -> str | None:
+        if platform_slug:
+            for vendor in primary_vendors:
+                if vendor.get("platform_slug") == platform_slug:
+                    return vendor.get("parser_llm_config_uuid") or None
+        for vendor in primary_vendors:
+            if vendor.get("parser_llm_config_uuid"):
+                return vendor["parser_llm_config_uuid"]
+        return None
+
+    def _build_vendor_model_queries(
+        self,
+        vendor_data: dict[str, Any],
+        primary_models: list[dict[str, Any]],
+    ) -> list[str]:
+        if not primary_models:
+            return []
+
+        vendor_keys = {
+            self._canonical_vendor_key(vendor_data.get("slug"), vendor_data.get("name"))
+        }
+        for alias in vendor_data.get("aliases") or []:
+            vendor_keys.add(self._canonical_vendor_key(alias, alias))
+
+        queries: list[str] = []
+        for item in primary_models:
+            source_vendors = item.get("source_vendors") or []
+            if not any(
+                self._canonical_vendor_key(name, name) in vendor_keys
+                for name in source_vendors
+            ):
+                continue
+            candidates = [
+                str(item.get("model_name") or "").strip(),
+                *[
+                    str(alias or "").strip()
+                    for alias in (item.get("aliases") or [])
+                ],
+            ]
+            for candidate in candidates:
+                if candidate and candidate not in queries:
+                    queries.append(candidate)
+        return queries
+
+    @staticmethod
+    def _is_strict_vendor_sync(vendor_data: dict[str, Any]) -> bool:
+        acquisition = vendor_data.get("acquisition") or {}
+        return str(acquisition.get("method") or "").strip().lower() == "api"
 
     def _sync_vendor_models(
         self,
@@ -329,6 +431,15 @@ class AIPriceHubService:
                 and record_data.get("output_price_per_million") is None
             ):
                 failure_count += 1
+
+        logger.info(
+            "[ai_pricehub] prepared records vendor=%s role=%s prepared=%s snapshots=%s failures=%s",
+            vendor_data.get("slug"),
+            role,
+            len(prepared_records),
+            snapshot_count,
+            failure_count,
+        )
 
         return snapshot_count, failure_count
 
@@ -845,6 +956,7 @@ def list_primary_source_configs() -> list[PriceSourceConfig]:
             default.get("models_source", {}).get("url")
             or default.get("pricing_url")
         ),
+        "parser_llm_config_uuid": None,
         "currency": default.get("currency", "CNY"),
         "points_per_currency_unit": default.get(
             "points_per_currency_unit",

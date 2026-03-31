@@ -20,7 +20,12 @@ class PricingHarnessAgent:
         self._deterministic_fetcher = deterministic_fetcher or self._run_vendor_skill
         self._agent_fetcher = agent_fetcher or self._run_parser_agent
 
-    def fetch_vendor_catalog(self, vendor: dict[str, Any]) -> dict[str, Any]:
+    def fetch_vendor_catalog(
+        self,
+        vendor: dict[str, Any],
+        *,
+        parser_llm_config_uuid: str | None = None,
+    ) -> dict[str, Any]:
         acquisition = vendor.get("acquisition") or {}
         strategy = str(acquisition.get("method") or "page").strip().lower()
 
@@ -30,11 +35,19 @@ class PricingHarnessAgent:
         )
         if self._catalog_has_models(deterministic_catalog):
             return deterministic_catalog
+        if self._is_api_only_strategy(strategy):
+            raise ValueError(
+                self._build_api_only_error_message(
+                    vendor=vendor,
+                    catalog=deterministic_catalog,
+                )
+            )
 
         agent_catalog = self._attempt_agent_fetch(
             vendor=vendor,
             strategy=strategy,
             deterministic_catalog=deterministic_catalog,
+            parser_llm_config_uuid=parser_llm_config_uuid,
         )
         if self._catalog_has_models(agent_catalog):
             return agent_catalog
@@ -75,9 +88,16 @@ class PricingHarnessAgent:
         vendor: dict[str, Any],
         strategy: str,
         deterministic_catalog: dict[str, Any] | None,
+        parser_llm_config_uuid: str | None,
     ) -> dict[str, Any] | None:
         try:
-            catalog = self._agent_fetcher(vendor)
+            catalog = self._agent_fetcher(
+                {
+                    **vendor,
+                    "_deterministic_catalog": deterministic_catalog,
+                },
+                parser_llm_config_uuid=parser_llm_config_uuid,
+            )
         except Exception as exc:
             catalog = self._build_error_catalog(
                 vendor=vendor,
@@ -89,7 +109,7 @@ class PricingHarnessAgent:
             vendor=vendor,
             catalog=catalog,
             strategy=strategy,
-            source_stage="deepagent",
+            source_stage="tracked_parser",
         )
         if deterministic_catalog is not None:
             catalog.setdefault("raw_payload", {})
@@ -101,6 +121,27 @@ class PricingHarnessAgent:
     @staticmethod
     def _catalog_has_models(catalog: dict[str, Any] | None) -> bool:
         return bool(catalog and catalog.get("models"))
+
+    @staticmethod
+    def _is_api_only_strategy(strategy: str) -> bool:
+        return strategy == "api"
+
+    @staticmethod
+    def _build_api_only_error_message(
+        *,
+        vendor: dict[str, Any],
+        catalog: dict[str, Any] | None,
+    ) -> str:
+        payload = (catalog or {}).get("raw_payload") or {}
+        detail = (
+            payload.get("api_error")
+            or payload.get("error")
+            or "API-only sync returned no models."
+        )
+        return (
+            f"API-only sync failed for vendor '{vendor.get('slug') or vendor.get('name')}'. "
+            f"{detail}"
+        )
 
     @staticmethod
     def _annotate_catalog(
@@ -148,10 +189,17 @@ class PricingHarnessAgent:
         return run_vendor_skill(vendor.get("slug", ""), vendor)
 
     @staticmethod
-    def _run_parser_agent(vendor: dict[str, Any]) -> dict[str, Any]:
+    def _run_parser_agent(
+        vendor: dict[str, Any],
+        *,
+        parser_llm_config_uuid: str | None = None,
+    ) -> dict[str, Any]:
         from .parser_agent import parser_agent_service
 
-        return parser_agent_service.discover_vendor_catalog(vendor=vendor)
+        return parser_agent_service.discover_vendor_catalog(
+            vendor=vendor,
+            parser_llm_config_uuid=parser_llm_config_uuid,
+        )
 
 
 pricing_harness_agent = PricingHarnessAgent()

@@ -1,14 +1,19 @@
 import importlib.util
+import inspect
 from pathlib import Path
 from types import ModuleType
 
 
-def run_vendor_skill(vendor_slug: str) -> dict:
+def run_vendor_skill(vendor_slug: str, vendor: dict | None = None) -> dict:
     module = _load_vendor_skill_module(vendor_slug)
     sync_vendor_catalog = getattr(module, "sync_vendor_catalog", None)
     if sync_vendor_catalog is None:
         raise ValueError(f"Vendor skill script for '{vendor_slug}' does not expose sync_vendor_catalog().")
-    result = sync_vendor_catalog()
+    signature = inspect.signature(sync_vendor_catalog)
+    if signature.parameters:
+        result = sync_vendor_catalog(vendor)
+    else:
+        result = sync_vendor_catalog()
     if not isinstance(result, dict):
         raise ValueError(f"Vendor skill script for '{vendor_slug}' returned invalid catalog data.")
     return result

@@ -9,6 +9,7 @@ class PriceSourceConfig(models.Model):
     vendor_name = models.CharField(max_length=255)
     region = models.CharField(max_length=100, blank=True, default="")
     endpoint_url = models.URLField(max_length=1000)
+    parser_llm_config_uuid = models.UUIDField(blank=True, null=True, db_index=True)
     currency = models.CharField(max_length=10, default="CNY")
     points_per_currency_unit = models.FloatField(default=10.0)
     is_enabled = models.BooleanField(default=True)

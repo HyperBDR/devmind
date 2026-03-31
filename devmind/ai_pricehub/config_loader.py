@@ -23,6 +23,11 @@ class ConfigLoader:
             "platform_slug": config.platform_slug,
             "name": config.vendor_name,
             "region": config.region,
+            "parser_llm_config_uuid": (
+                str(config.parser_llm_config_uuid)
+                if config.parser_llm_config_uuid
+                else ""
+            ),
             "currency": config.currency,
             "points_per_currency_unit": config.points_per_currency_unit,
             "is_enabled": config.is_enabled,
@@ -54,6 +59,7 @@ class ConfigLoader:
                 "platform_slug": default["slug"],
                 "name": default["name"],
                 "region": default.get("region", ""),
+                "parser_llm_config_uuid": "",
                 "currency": default.get("currency", "CNY"),
                 "points_per_currency_unit": default.get(
                     "points_per_currency_unit",
