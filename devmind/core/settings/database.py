@@ -13,8 +13,9 @@ Rationale:
         4. Supports switching DB engines (mysql, postgresql, sqlite) elegantly.
 """
 import os
-import dj_database_url
 from pathlib import Path
+
+import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -65,15 +66,15 @@ if not DATABASE_URL:
         DATABASE_URL = f"sqlite:///{BASE_DIR / sqlite_path}"
         # SQLite doesn't need special timeout options
 
+def _build_default_db_config(url):
+    config = dj_database_url.config(default=url)
+    config['CONN_MAX_AGE'] = 0
+    if DB_OPTIONS:
+        config['OPTIONS'] = DB_OPTIONS
+    return config
+
+
 # Use DATABASE_URL for unified database configuration
 DATABASES = {
-    'default': dj_database_url.config(default=DATABASE_URL)
+    'default': _build_default_db_config(DATABASE_URL),
 }
-
-# Database connection optimization for Celery long-running tasks
-# Disable persistent connections to avoid using stale connections
-DATABASES['default']['CONN_MAX_AGE'] = 0
-
-# Apply database-specific options if defined
-if DB_OPTIONS:
-    DATABASES['default']['OPTIONS'] = DB_OPTIONS

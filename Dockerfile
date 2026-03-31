@@ -55,6 +55,7 @@ RUN apt-get install -y --no-install-recommends \
     libpng-dev \
     libmagic1 \
     libmagic-dev \
+    tesseract-ocr \
     gettext \
     procps \
     htop \

@@ -40,6 +40,9 @@ urlpatterns = [
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),
 
+    # OnePro monitor routes
+    path('api/v1/onepro-monitor/', include('onepro_monitor.urls')),
+
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 

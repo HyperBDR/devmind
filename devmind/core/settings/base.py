@@ -170,6 +170,7 @@ INSTALLED_APPS += [
     'accounts',
     'cloud_billing',
     'data_collector',
+    'onepro_monitor',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
