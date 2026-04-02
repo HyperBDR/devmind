@@ -570,6 +570,7 @@ class TestCloudBillingNotificationService:
         alert_record.balance_threshold = Decimal("500.00")
         alert_record.provider.display_name = "Baidu AI Cloud"
         alert_record.provider.notes = "Top-up soon"
+        alert_record.provider.tags = ["production", "core"]
 
         service = CloudBillingNotificationService()
         payload = service._generate_wechat_payload(alert_record, "en")
@@ -578,6 +579,7 @@ class TestCloudBillingNotificationService:
         assert "**Alert type**: Balance threshold alert" in content
         assert "**Cloud provider**: Baidu AI Cloud" in content
         assert "**Notes**: Top-up soon" in content
+        assert "**Tags**: production, core" in content
 
     @patch(
         "cloud_billing.services.notification_service."

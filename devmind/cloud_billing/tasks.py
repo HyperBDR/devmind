@@ -26,7 +26,11 @@ from agentcore_task.adapters.django import (
     TaskStatus,
     TaskTracker,
 )
-from .alert_messages import build_alert_message, extract_provider_notes
+from .alert_messages import (
+    build_alert_message,
+    extract_provider_notes,
+    extract_provider_tags,
+)
 
 from .constants import (
     DEFAULT_LANGUAGE,
@@ -961,6 +965,7 @@ def check_alert_for_provider(
             alert_message = build_alert_message(
                 provider_name=provider.display_name,
                 provider_notes=extract_provider_notes(provider),
+                provider_tags=extract_provider_tags(provider),
                 account_id=account_id,
                 current_cost=current_cost,
                 previous_cost=previous_cost,

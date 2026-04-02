@@ -187,6 +187,36 @@ class TestCheckAlertForProvider:
         mock_send_alert_delay.assert_called_once()
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    def test_alert_message_includes_provider_tags(
+        self,
+        mock_send_alert_delay,
+        cloud_provider,
+        user,
+        billing_data,
+    ):
+        """
+        Alert messages should include provider tags when present.
+        """
+        cloud_provider.tags = ["生产", "核心"]
+        cloud_provider.save(update_fields=["tags"])
+
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            cost_threshold=Decimal("1.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["alerted"] is True
+        record = AlertRecord.objects.order_by("-created_at").first()
+        assert record is not None
+        assert "标签：生产、核心" in record.alert_message
+        mock_send_alert_delay.assert_called_once()
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
     def test_balance_threshold_triggers_alert(
         self,
@@ -236,11 +266,14 @@ class TestCheckAlertForProvider:
         mock_get_default_webhook_channel.return_value = (mock_channel, {})
         cloud_provider.provider_type = "baidu"
         cloud_provider.display_name = "百度智能云"
+        cloud_provider.tags = ["预付费", "重点"]
         cloud_provider.config = {
             **(cloud_provider.config or {}),
             "notes": "余额告警测试备注",
         }
-        cloud_provider.save(update_fields=["provider_type", "display_name", "config"])
+        cloud_provider.save(
+            update_fields=["provider_type", "display_name", "tags", "config"]
+        )
 
         AlertRule.objects.create(
             provider=cloud_provider,
@@ -256,6 +289,7 @@ class TestCheckAlertForProvider:
         assert result["alerted"] is True
         record = AlertRecord.objects.latest("id")
         assert "备注：余额告警测试备注" in record.alert_message
+        assert "标签：预付费、重点" in record.alert_message
         assert "账号：" in record.alert_message
         mock_send_alert.assert_called_once_with(record.id)
 
