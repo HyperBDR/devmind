@@ -1,6 +1,8 @@
 """
 CollectorConfig ViewSet: CRUD with atomic Beat sync. User-scoped; uuid in URLs.
 """
+from typing import Optional
+
 from django.db import transaction
 from django.db.utils import IntegrityError
 from django.shortcuts import get_object_or_404
@@ -24,6 +26,100 @@ from agentcore_task.adapters.django import TaskStatus, register_task_execution
 from ..services.beat_sync import sync_config_to_beat, unsync_config_from_beat
 from ..services.providers import get_provider
 from ..tasks import run_collect, run_validate
+
+
+HYPERBDR_PLATFORM = "hyperbdr"
+HYPERBDR_DEFAULT_TIMEOUT = 30
+HYPERBDR_DEFAULT_RETRY_COUNT = 3
+HYPERBDR_DEFAULT_RETRY_DELAY = 2
+HYPERBDR_DEFAULT_COLLECT_INTERVAL = 7200
+
+
+def _is_hyperbdr_config(config: CollectorConfig) -> bool:
+    return getattr(config, "platform", "") == HYPERBDR_PLATFORM
+
+
+def _get_hyperbdr_data_source_model():
+    from hyperbdr_monitor.models import DataSource
+
+    return DataSource
+
+
+def _get_hyperbdr_collection_task_model():
+    from hyperbdr_monitor.models import CollectionTask
+
+    return CollectionTask
+
+
+def _get_hyperbdr_collection_runner():
+    from hyperbdr_monitor.tasks import run_collection_for_data_source
+
+    return run_collection_for_data_source
+
+
+def _get_hyperbdr_auth(config: CollectorConfig) -> dict:
+    value = getattr(config, "value", None) or {}
+    auth = value.get("auth") or {}
+    return {
+        "base_url": (value.get("base_url") or auth.get("base_url") or "").strip(),
+        "username": (auth.get("username") or "").strip(),
+        "password": auth.get("password") or "",
+    }
+
+
+def _unsync_hyperbdr_data_source(config: CollectorConfig) -> None:
+    if not _is_hyperbdr_config(config):
+        return
+    data_source_model = _get_hyperbdr_data_source_model()
+    data_source_model.objects.filter(name=config.key).delete()
+
+
+def _sync_hyperbdr_data_source(
+    config: CollectorConfig,
+    previous_config: Optional[CollectorConfig] = None,
+) -> None:
+    if previous_config and _is_hyperbdr_config(previous_config):
+        key_changed = previous_config.key != config.key
+        platform_changed = previous_config.platform != config.platform
+        if key_changed or platform_changed:
+            _unsync_hyperbdr_data_source(previous_config)
+
+    if not _is_hyperbdr_config(config):
+        return
+
+    auth = _get_hyperbdr_auth(config)
+    data_source_model = _get_hyperbdr_data_source_model()
+    data_source_model.objects.update_or_create(
+        name=config.key,
+        defaults={
+            "api_url": auth["base_url"].rstrip("/"),
+            "username": auth["username"],
+            "password": auth["password"],
+            "is_active": config.is_enabled,
+            "api_timeout": HYPERBDR_DEFAULT_TIMEOUT,
+            "api_retry_count": HYPERBDR_DEFAULT_RETRY_COUNT,
+            "api_retry_delay": HYPERBDR_DEFAULT_RETRY_DELAY,
+            "collect_interval": HYPERBDR_DEFAULT_COLLECT_INTERVAL,
+        },
+    )
+
+
+def _queue_hyperbdr_collect(config: CollectorConfig):
+    data_source_model = _get_hyperbdr_data_source_model()
+    collection_task_model = _get_hyperbdr_collection_task_model()
+    runner = _get_hyperbdr_collection_runner()
+
+    data_source = data_source_model.objects.get(name=config.key)
+    task = collection_task_model.objects.create(
+        data_source=data_source,
+        status=collection_task_model.STATUS_PENDING,
+        start_time=timezone.now(),
+        trigger_mode="manual",
+    )
+    celery_task = runner.delay(data_source.id, task.id, "manual")
+    task.celery_task_id = celery_task.id
+    task.save(update_fields=["celery_task_id", "updated_at"])
+    return task, celery_task
 
 
 @extend_schema_view(
@@ -82,6 +178,7 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
                 serializer.save(user=self.request.user)
                 config = serializer.instance
                 sync_config_to_beat(config)
+                _sync_hyperbdr_data_source(config)
         except IntegrityError as e:
             err_str = str(e).lower()
             const_uniq = "data_collector_config_user_platform_uniq"
@@ -99,12 +196,16 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         with transaction.atomic():
+            previous_config = CollectorConfig.objects.get(pk=serializer.instance.pk)
             serializer.save()
-            sync_config_to_beat(serializer.instance)
+            config = serializer.instance
+            sync_config_to_beat(config)
+            _sync_hyperbdr_data_source(config, previous_config=previous_config)
 
     def perform_destroy(self, instance):
         with transaction.atomic():
             unsync_config_from_beat(instance)
+            _unsync_hyperbdr_data_source(instance)
             instance.delete()
 
     @extend_schema(
@@ -138,6 +239,31 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             CollectorConfig, uuid=uuid, user=request.user
         )
         config_uuid_str = str(config.uuid)
+        if _is_hyperbdr_config(config):
+            _sync_hyperbdr_data_source(config)
+            hyperbdr_task, celery_task = _queue_hyperbdr_collect(config)
+            register_task_execution(
+                task_id=celery_task.id,
+                task_name="hyperbdr_monitor.tasks.run_collection_for_data_source",
+                module="data_collector",
+                task_kwargs={
+                    "data_source_id": hyperbdr_task.data_source_id,
+                    "hyperbdr_collection_task_id": hyperbdr_task.id,
+                    "trigger_mode": "manual",
+                },
+                created_by=request.user,
+                metadata={
+                    "config_uuid": config_uuid_str,
+                    "config_platform": config.platform,
+                    "config_key": config.key,
+                    "hyperbdr_collection_task_id": hyperbdr_task.id,
+                },
+                initial_status=TaskStatus.PENDING,
+            )
+            return Response(
+                {"task_id": celery_task.id, "message": "Collect task queued."},
+                status=status.HTTP_202_ACCEPTED,
+            )
         start_time = request.data.get("start_time")
         end_time = request.data.get("end_time")
         if start_time is not None or end_time is not None:

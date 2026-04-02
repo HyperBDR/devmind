@@ -6,9 +6,11 @@ This module provides an implementation of the Cloud interface for Azure.
 import logging
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, Tuple
+from decimal import Decimal, InvalidOperation
+from typing import Dict, Optional, Any, Tuple, List
 from datetime import datetime, timedelta
 
+import requests
 from azure.identity import ClientSecretCredential
 from azure.mgmt.consumption import ConsumptionManagementClient
 from azure.mgmt.resource import ResourceManagementClient
@@ -43,6 +45,7 @@ class AzureConfig(BaseCloudConfig):
     client_id: Optional[str] = None
     client_secret: Optional[str] = None
     subscription_id: Optional[str] = None
+    billing_account_id: Optional[str] = None
     timeout: Optional[int] = None
     max_retries: Optional[int] = None
 
@@ -56,6 +59,8 @@ class AzureConfig(BaseCloudConfig):
             self.client_secret = os.getenv("AZURE_CLIENT_SECRET")
         if self.subscription_id is None:
             self.subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID")
+        if self.billing_account_id is None:
+            self.billing_account_id = os.getenv("AZURE_BILLING_ACCOUNT_ID")
         if self.timeout is None:
             self.timeout = int(os.getenv("AZURE_TIMEOUT", "30"))
         if self.max_retries is None:
@@ -116,6 +121,7 @@ class AzureCloud(BaseCloudProvider):
         self._credential = None
         self._consumption_client = None
         self._resource_client = None
+        self._last_balance_debug = {}
         self.name = "azure"
         sanitized_config = mask_sensitive_config_object(config)
         logger.info(
@@ -153,6 +159,389 @@ class AzureCloud(BaseCloudProvider):
                 subscription_id=self.config.subscription_id,
             )
         return self._resource_client
+
+    def _get_management_headers(self) -> Dict[str, str]:
+        """Build ARM headers using the current credential."""
+        token = self.credential.get_token(
+            "https://management.azure.com/.default"
+        )
+        return {
+            "Authorization": f"Bearer {token.token}",
+            "Content-Type": "application/json",
+        }
+
+    def _management_get(
+        self, path: str, api_version: str
+    ) -> Dict[str, Any]:
+        """Call an Azure ARM GET endpoint."""
+        url = f"https://management.azure.com{path}"
+        response = requests.get(
+            url,
+            headers=self._get_management_headers(),
+            params={"api-version": api_version},
+            timeout=self.config.timeout or 30,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def _parse_amount_value(self, raw_value: Any) -> Optional[float]:
+        """Parse Azure amount values safely."""
+        if raw_value is None:
+            return None
+
+        value = raw_value
+        if isinstance(raw_value, dict):
+            value = raw_value.get("value")
+
+        if isinstance(value, str):
+            value = value.replace(",", "").strip()
+
+        try:
+            return float(Decimal(str(value)))
+        except (InvalidOperation, TypeError, ValueError):
+            return None
+
+    def _extract_available_balance(
+        self, payload: Dict[str, Any]
+    ) -> Tuple[Optional[float], Optional[str]]:
+        """Extract available balance from Azure Billing API payload."""
+        properties = payload.get("properties") or {}
+        amount = properties.get("amount") or {}
+        balance = self._parse_amount_value(amount)
+        currency = amount.get("currency") if isinstance(amount, dict) else None
+        return balance, currency
+
+    def _extract_consumption_balance(
+        self, payload: Dict[str, Any]
+    ) -> Tuple[Optional[float], Optional[str], Dict[str, Any]]:
+        """Extract balance from Azure Consumption API payload."""
+        properties = payload.get("properties") or {}
+        amount = (
+            properties.get("amount")
+            or properties.get("endingBalance")
+            or properties.get("currentBalance")
+        )
+        balance = self._parse_amount_value(amount)
+        currency = None
+        if isinstance(amount, dict):
+            currency = amount.get("currency")
+        currency = currency or properties.get("currency")
+        details = {
+            "ending_balance": properties.get("endingBalance"),
+            "current_balance": properties.get("currentBalance"),
+            "beginning_balance": properties.get("beginningBalance"),
+            "total_usage": properties.get("totalUsage"),
+        }
+        return balance, currency, details
+
+    def _extract_resource_name(
+        self, resource_id: Optional[str], resource_type: str
+    ) -> Optional[str]:
+        """Extract a resource name from a Billing ARM resource id."""
+        if not resource_id:
+            return None
+
+        marker = f"/{resource_type}/"
+        if marker not in resource_id:
+            return None
+
+        suffix = resource_id.split(marker, 1)[1]
+        return suffix.split("/", 1)[0] or None
+
+    def _build_billing_scope(
+        self,
+        billing_account_id: str,
+        billing_profile_id: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Build a normalized billing scope descriptor."""
+        scope = {
+            "billing_account_id": billing_account_id,
+            "billing_profile_id": billing_profile_id,
+            "source": source or "resolved",
+        }
+        return scope
+
+    def _resolve_configured_billing_scope(self) -> Optional[Dict[str, Any]]:
+        """Resolve a configured billing scope from raw config."""
+        configured_id = self.config.billing_account_id
+        if not configured_id:
+            return None
+
+        billing_account_id = self._extract_resource_name(
+            configured_id,
+            "billingAccounts",
+        )
+        billing_profile_id = self._extract_resource_name(
+            configured_id,
+            "billingProfiles",
+        )
+
+        if billing_account_id:
+            return self._build_billing_scope(
+                billing_account_id=billing_account_id,
+                billing_profile_id=billing_profile_id,
+                source="config.resource_id",
+            )
+
+        return self._build_billing_scope(
+            billing_account_id=configured_id,
+            source="config.billing_account_id",
+        )
+
+    def _list_billing_profiles(
+        self, billing_account_id: str
+    ) -> List[Dict[str, Any]]:
+        """List billing profiles for an Azure billing account."""
+        payload = self._management_get(
+            "/providers/Microsoft.Billing/billingAccounts/"
+            f"{billing_account_id}/billingProfiles",
+            "2024-04-01",
+        )
+        return payload.get("value") or []
+
+    def _resolve_billing_scopes(self) -> List[Dict[str, Any]]:
+        """Resolve candidate Azure billing scopes.
+
+        Uses explicit config when provided. Otherwise lists visible billing
+        accounts and, when available, their billing profiles so we can try
+        whichever scope actually exposes the balance endpoint.
+        """
+        configured_scope = self._resolve_configured_billing_scope()
+        if configured_scope:
+            return [configured_scope]
+
+        payload = self._management_get(
+            "/providers/Microsoft.Billing/billingAccounts",
+            "2024-04-01",
+        )
+        accounts = payload.get("value") or []
+        if len(accounts) > 1:
+            self._last_balance_debug = {
+                "status": "billing_account_ambiguous",
+                "error": (
+                    "Multiple Azure billing accounts are visible. "
+                    "Configure AZURE_BILLING_ACCOUNT_ID explicitly."
+                ),
+                "billing_account_ids": [
+                    account.get("name")
+                    or self._extract_resource_name(
+                        account.get("id"), "billingAccounts"
+                    )
+                    for account in accounts
+                ],
+            }
+            return []
+
+        scopes: List[Dict[str, Any]] = []
+        for account in accounts:
+            billing_account_id = (
+                account.get("name")
+                or self._extract_resource_name(
+                    account.get("id"), "billingAccounts"
+                )
+            )
+            if not billing_account_id:
+                continue
+
+            scopes.append(
+                self._build_billing_scope(
+                    billing_account_id=billing_account_id,
+                    source="billing_accounts.list",
+                )
+            )
+
+            try:
+                profiles = self._list_billing_profiles(billing_account_id)
+            except requests.HTTPError:
+                continue
+
+            for profile in profiles:
+                billing_profile_id = (
+                    profile.get("name")
+                    or self._extract_resource_name(
+                        profile.get("id"), "billingProfiles"
+                    )
+                )
+                if not billing_profile_id:
+                    continue
+                scopes.append(
+                    self._build_billing_scope(
+                        billing_account_id=billing_account_id,
+                        billing_profile_id=billing_profile_id,
+                        source="billing_profiles.list",
+                    )
+                )
+        return scopes
+
+    def _build_available_balance_path(self, scope: Dict[str, Any]) -> str:
+        """Build the available balance path for a billing scope."""
+        billing_account_id = scope["billing_account_id"]
+        billing_profile_id = scope.get("billing_profile_id")
+        base_path = (
+            "/providers/Microsoft.Billing/billingAccounts/"
+            f"{billing_account_id}"
+        )
+        if billing_profile_id:
+            base_path += f"/billingProfiles/{billing_profile_id}"
+        return f"{base_path}/availableBalance/default"
+
+    def get_balance(self) -> Optional[float]:
+        """Get Azure balance when the billing account supports it."""
+        attempts = []
+        try:
+            scopes = self._resolve_billing_scopes()
+            if not scopes:
+                if not self._last_balance_debug:
+                    self._last_balance_debug = {
+                        "status": "billing_account_not_found",
+                    }
+                return None
+
+            for scope in scopes:
+                billing_account_id = scope["billing_account_id"]
+                billing_profile_id = scope.get("billing_profile_id")
+                try:
+                    available_payload = self._management_get(
+                        self._build_available_balance_path(scope),
+                        "2024-04-01",
+                    )
+                    available_balance, currency = (
+                        self._extract_available_balance(available_payload)
+                    )
+                    attempts.append(
+                        {
+                            "source": "billing.available_balance",
+                            "status": "success",
+                            "scope_source": scope.get("source"),
+                            "billing_account_id": billing_account_id,
+                            "billing_profile_id": billing_profile_id,
+                            "payload_keys": list(available_payload.keys()),
+                            "amount": (
+                                (
+                                    available_payload.get("properties") or {}
+                                ).get("amount")
+                            ),
+                        }
+                    )
+                    if available_balance is not None:
+                        self._last_balance_debug = {
+                            "status": "success",
+                            "source": "billing.available_balance",
+                            "scope_source": scope.get("source"),
+                            "billing_account_id": billing_account_id,
+                            "billing_profile_id": billing_profile_id,
+                            "currency": currency or "USD",
+                            "balance": available_balance,
+                            "attempts": attempts,
+                        }
+                        return available_balance
+                except requests.HTTPError as exc:
+                    attempts.append(
+                        {
+                            "source": "billing.available_balance",
+                            "status": "http_error",
+                            "scope_source": scope.get("source"),
+                            "billing_account_id": billing_account_id,
+                            "billing_profile_id": billing_profile_id,
+                            "status_code": (
+                                exc.response.status_code
+                                if exc.response is not None
+                                else None
+                            ),
+                            "error": (
+                                exc.response.text
+                                if exc.response is not None
+                                else str(exc)
+                            ),
+                        }
+                    )
+
+            for scope in scopes:
+                billing_account_id = scope["billing_account_id"]
+                billing_profile_id = scope.get("billing_profile_id")
+                if billing_profile_id:
+                    continue
+
+                try:
+                    consumption_payload = self._management_get(
+                        "/providers/Microsoft.Billing/billingAccounts/"
+                        f"{billing_account_id}/providers/Microsoft.Consumption/"
+                        "balances",
+                        "2024-08-01",
+                    )
+                    balance, currency, details = (
+                        self._extract_consumption_balance(
+                            consumption_payload
+                        )
+                    )
+                    attempts.append(
+                        {
+                            "source": "consumption.balances",
+                            "status": "success",
+                            "scope_source": scope.get("source"),
+                            "billing_account_id": billing_account_id,
+                            "payload_keys": list(consumption_payload.keys()),
+                            **details,
+                        }
+                    )
+                    self._last_balance_debug = {
+                        "status": (
+                            "success" if balance is not None else "empty_balance"
+                        ),
+                        "source": "consumption.balances",
+                        "scope_source": scope.get("source"),
+                        "billing_account_id": billing_account_id,
+                        "currency": str(currency or "USD").strip(),
+                        "balance": balance,
+                        "attempts": attempts,
+                        **details,
+                    }
+                    return balance
+                except requests.HTTPError as exc:
+                    attempts.append(
+                        {
+                            "source": "consumption.balances",
+                            "status": "http_error",
+                            "scope_source": scope.get("source"),
+                            "billing_account_id": billing_account_id,
+                            "status_code": (
+                                exc.response.status_code
+                                if exc.response is not None
+                                else None
+                            ),
+                            "error": (
+                                exc.response.text
+                                if exc.response is not None
+                                else str(exc)
+                            ),
+                        }
+                    )
+
+            self._last_balance_debug = {
+                "status": "balance_not_available",
+                "attempts": attempts,
+            }
+            return None
+        except requests.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response else None
+            body = exc.response.text if exc.response is not None else str(exc)
+            self._last_balance_debug = {
+                "status": "http_error",
+                "status_code": status_code,
+                "error": body,
+                "attempts": attempts,
+            }
+            logger.warning("Azure balance lookup failed: %s", body)
+            return None
+        except Exception as exc:
+            self._last_balance_debug = {
+                "status": "unexpected_error",
+                "error": str(exc),
+                "attempts": attempts,
+            }
+            logger.warning("Azure balance lookup failed: %s", exc)
+            return None
 
     def _validate_period(self, period: Optional[str]) -> str:
         """Validate and return the billing period.
@@ -237,6 +626,13 @@ class AzureCloud(BaseCloudProvider):
         Returns:
             Tuple[float, str]: Total cost and currency
         """
+        if not usage_details:
+            logger.info(
+                "Azure usage details are empty for subscription %s",
+                self.config.subscription_id,
+            )
+            return 0.0, "USD"
+
         total_cost = sum(
             float(
                 getattr(
@@ -284,19 +680,62 @@ class AzureCloud(BaseCloudProvider):
         try:
             period = self._validate_period(period)
             start_date, end_date = self._get_period_dates(period)
-
-            usage_details = self._query_billing_api(start_date, end_date)
-            total_cost, currency = self._calculate_total_cost(usage_details)
             account_id = self.get_account_id()
 
+            total_cost = 0.0
+            currency = "USD"
+            usage_error = None
+
+            try:
+                usage_details = self._query_billing_api(start_date, end_date)
+                total_cost, currency = self._calculate_total_cost(
+                    usage_details
+                )
+            except Exception as exc:
+                usage_error = str(exc)
+                logger.warning(
+                    "Azure usage query failed for subscription %s: %s",
+                    self.config.subscription_id,
+                    usage_error,
+                )
+
+            balance = self.get_balance()
+            balance_debug = self._last_balance_debug
+
+            if usage_error and balance is None:
+                logger.error(
+                    "Failed to get Azure billing info: usage_error=%s, "
+                    "balance_debug=%s",
+                    usage_error,
+                    balance_debug,
+                )
+                return {
+                    "status": "error",
+                    "data": {
+                        "total_cost": total_cost,
+                        "balance": balance,
+                        "balance_debug": balance_debug,
+                        "currency": currency,
+                        "account_id": account_id,
+                        "cost_status": "error",
+                        "cost_error": usage_error,
+                    },
+                    "error": usage_error,
+                }
+
+            status = "success" if usage_error is None else "partial_success"
             return {
-                "status": "success",
+                "status": status,
                 "data": {
                     "total_cost": total_cost,
+                    "balance": balance,
+                    "balance_debug": balance_debug,
                     "currency": currency,
                     "account_id": account_id,
+                    "cost_status": "success" if usage_error is None else "error",
+                    "cost_error": usage_error,
                 },
-                "error": None,
+                "error": usage_error,
             }
 
         except Exception as e:
@@ -328,8 +767,13 @@ class AzureCloud(BaseCloudProvider):
             Exception: If the validation fails due to network or other issues
         """
         try:
-            # Try to get subscription details to validate credentials
-            self.resource_client.subscriptions.get(self.config.subscription_id)
+            # Validate credentials by querying the subscription directly
+            # via ARM. This avoids relying on SDK-specific helper surfaces
+            # that vary across azure-mgmt-resource versions.
+            self._management_get(
+                f"/subscriptions/{self.config.subscription_id}",
+                "2020-01-01",
+            )
             return True
         except Exception as e:
             logger.error(f"Failed to validate credentials: {str(e)}")

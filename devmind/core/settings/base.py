@@ -80,8 +80,6 @@ configure_logging(LOG_LEVEL)
 
 # Django & thrid party apps
 INSTALLED_APPS = [
-    'daphne',
-    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -170,7 +168,8 @@ INSTALLED_APPS += [
     'accounts',
     'cloud_billing',
     'data_collector',
-    'onepro_monitor',
+    'hyperbdr_monitor',
+    'hyperbdr_dashboard',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -237,16 +236,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'core.wsgi.application'
-ASGI_APPLICATION = 'core.asgi.application'
-
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [(os.getenv("REDIS_HOST", "localhost"), int(os.getenv("REDIS_PORT", 6379)))],
-        },
-    },
-}
 
 # ============================
 # Database Configuration

@@ -11,10 +11,12 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from ..dashboard import build_dashboard_overview
 from ..models import BillingData
 from ..serializers import (
     BillingDataListSerializer,
     BillingDataSerializer,
+    get_balance_support_info,
 )
 
 
@@ -51,10 +53,13 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Filter billing data by provider, period, and date range.
         """
-        queryset = BillingData.objects.select_related('provider').all()
+        queryset = BillingData.objects.select_related('provider').filter(
+            provider__is_active=True
+        )
 
         provider_id = self.request.query_params.get('provider_id', None)
         period = self.request.query_params.get('period', None)
+        account_id = self.request.query_params.get('account_id', None)
         start_date = self.request.query_params.get('start_date', None)
         end_date = self.request.query_params.get('end_date', None)
 
@@ -62,6 +67,8 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(provider_id=provider_id)
         if period:
             queryset = queryset.filter(period=period)
+        if account_id is not None and account_id != '':
+            queryset = queryset.filter(account_id=account_id)
         if start_date:
             # Start date: include from 00:00:00 of that day
             queryset = queryset.filter(
@@ -135,6 +142,14 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         # (provider, account_id, period)
         total_cost = sum(
             float(b.total_cost) for b in latest_billings.values()
+        )
+        unique_providers = {
+            billing.provider_id: billing.provider for billing in latest_billings.values()
+        }
+        total_balance = sum(
+            float(provider.balance)
+            for provider in unique_providers.values()
+            if provider.balance is not None
         )
 
         # Average cost: total_cost / number of unique
@@ -223,12 +238,20 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                 f"{billing.provider_id}_{billing.account_id or ''}"
             )
             if provider_key not in by_provider:
+                balance_info = get_balance_support_info(billing.provider)
                 by_provider[provider_key] = {
                     'provider_id': billing.provider_id,
                     'provider_name': billing.provider.display_name,
                     'account_id': billing.account_id or '',
                     'total_cost': 0,
-                    'count': 0
+                    'count': 0,
+                    'currency': billing.currency,
+                    'balance': (
+                        float(billing.provider.balance)
+                        if billing.provider.balance is not None else 0
+                    ),
+                    'balance_supported': balance_info['supported'],
+                    'balance_note': balance_info['note'],
                 }
             # Use the maximum total_cost across all periods for this
             # provider+account
@@ -236,16 +259,39 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                 by_provider[provider_key]['total_cost'],
                 float(billing.total_cost)
             )
+            by_provider[provider_key]['currency'] = (
+                billing.currency or by_provider[provider_key]['currency']
+            )
+            if billing.provider.balance is not None:
+                by_provider[provider_key]['balance'] = float(
+                    billing.provider.balance
+                )
             by_provider[provider_key]['count'] += 1
 
         return Response({
             'total_cost': float(total_cost),
+            'total_balance': float(total_balance),
             'average_cost': float(average_cost),
             'count': count,
             'cost_by_period': cost_by_period,
             'cost_by_service': cost_by_service,
             'by_provider': by_provider,
         })
+
+    @extend_schema(
+        tags=['cloud-billing'],
+        summary="Get operations overview dashboard data",
+        description=(
+            "Return a consolidated payload for the cloud billing "
+            "operations dashboard."
+        ),
+        responses={200: {'type': 'object'}},
+    )
+    @action(detail=False, methods=['get'], url_path='overview')
+    def overview(self, request):
+        """Return dashboard data for the operations overview page."""
+        timezone_name = request.query_params.get('timezone')
+        return Response(build_dashboard_overview(timezone_name=timezone_name))
 
     @extend_schema(
         tags=['cloud-billing'],
@@ -268,7 +314,9 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         Returns the most recent billing record for each unique
         provider + account_id combination within the specified date range.
         """
-        queryset = BillingData.objects.select_related('provider').all()
+        queryset = BillingData.objects.select_related('provider').filter(
+            provider__is_active=True
+        )
 
         provider_id = request.query_params.get('provider_id', None)
         start_date = request.query_params.get('start_date', None)

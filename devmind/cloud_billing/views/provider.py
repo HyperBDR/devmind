@@ -299,6 +299,89 @@ PROVIDER_CONFIG_SCHEMAS = {
             },
         ],
     },
+    "baidu": {
+        "provider_type": "baidu",
+        "display_name": "Baidu AI Cloud",
+        "description": (
+            "Use Baidu Cloud Finance OpenAPI to collect monthly billing "
+            "data and account balance."
+        ),
+        "required_fields": [
+            {
+                "name": "BAIDU_ACCESS_KEY_ID",
+                "backend_name": "api_key",
+                "label": "Access Key ID",
+                "type": "string",
+            },
+            {
+                "name": "BAIDU_SECRET_ACCESS_KEY",
+                "backend_name": "api_secret",
+                "label": "Secret Access Key",
+                "type": "password",
+            },
+        ],
+        "optional_fields": [
+            {
+                "name": "BAIDU_TIMEOUT",
+                "backend_name": "timeout",
+                "label": "Timeout",
+                "type": "integer",
+                "default": 30,
+            },
+            {
+                "name": "BAIDU_MAX_RETRIES",
+                "backend_name": "max_retries",
+                "label": "Max Retries",
+                "type": "integer",
+                "default": 3,
+            },
+        ],
+    },
+    "zhipu": {
+        "provider_type": "zhipu",
+        "display_name": "Zhipu AI",
+        "description": (
+            "Use Zhipu BigModel web finance endpoints to collect monthly "
+            "billing data and account balance."
+        ),
+        "required_fields": [
+            {
+                "name": "ZHIPU_USERNAME",
+                "backend_name": "username",
+                "label": "Username",
+                "type": "string",
+            },
+            {
+                "name": "ZHIPU_PASSWORD",
+                "backend_name": "password",
+                "label": "Password",
+                "type": "password",
+            },
+        ],
+        "optional_fields": [
+            {
+                "name": "ZHIPU_USER_TYPE",
+                "backend_name": "user_type",
+                "label": "User Type",
+                "type": "string",
+                "default": "PERSONAL",
+            },
+            {
+                "name": "ZHIPU_TIMEOUT",
+                "backend_name": "timeout",
+                "label": "Timeout",
+                "type": "integer",
+                "default": 30,
+            },
+            {
+                "name": "ZHIPU_MAX_RETRIES",
+                "backend_name": "max_retries",
+                "label": "Max Retries",
+                "type": "integer",
+                "default": 3,
+            },
+        ],
+    },
 }
 
 

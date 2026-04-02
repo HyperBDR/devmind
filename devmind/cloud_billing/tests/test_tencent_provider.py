@@ -98,7 +98,8 @@ class TestTencentCloud:
     def test_get_billing_info_parses_response(self):
         provider = self._make_provider()
         provider._client.DescribeAccountBalance.return_value = SimpleNamespace(
-            Uin=123456789012
+            Uin=123456789012,
+            AvailableBalance="25688",
         )
         provider._client.DescribeBillSummary.return_value = SimpleNamespace(
             Ready=1,
@@ -113,11 +114,16 @@ class TestTencentCloud:
         assert result["status"] == "success"
         data = result["data"]
         assert data["total_cost"] == 20.0
+        assert data["balance"] == 256.88
         assert data["currency"] == "CNY"
         assert data["account_id"] == "123456789012"
         assert data["service_costs"]["ECS"] == 12.34
         assert data["service_costs"]["OBS"] == 7.66
         assert len(data["items"]) == 2
+        assert data["balance_debug"]["status"] == "success"
+        assert data["balance_debug"]["available_balance_raw"] == "25688"
+        assert data["balance_debug"]["available_balance"] == "256.88"
+        assert data["balance_debug"]["unit"] == "yuan_from_cent"
         request = provider._client.DescribeBillSummary.call_args.args[0]
         assert request.Month == "2025-01"
         assert request.GroupType == "business"

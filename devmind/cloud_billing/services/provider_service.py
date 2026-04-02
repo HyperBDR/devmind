@@ -115,6 +115,11 @@ class ProviderService:
                 or config_dict.get("azure_subscription_id")
                 or config_dict.get("subscription_id")
             )
+            billing_account_id = (
+                config_dict.get("AZURE_BILLING_ACCOUNT_ID")
+                or config_dict.get("azure_billing_account_id")
+                or config_dict.get("billing_account_id")
+            )
 
             if tenant_id:
                 normalized["tenant_id"] = tenant_id
@@ -124,6 +129,8 @@ class ProviderService:
                 normalized["client_secret"] = client_secret
             if subscription_id:
                 normalized["subscription_id"] = subscription_id
+            if billing_account_id:
+                normalized["billing_account_id"] = billing_account_id
         elif provider_type == "alibaba":
             api_key = (
                 config_dict.get("ALIBABA_ACCESS_KEY_ID")
@@ -232,6 +239,68 @@ class ProviderService:
                 normalized["service"] = service
             if version:
                 normalized["version"] = version
+        elif provider_type == "baidu":
+            api_key = (
+                config_dict.get("BAIDU_ACCESS_KEY_ID")
+                or config_dict.get("baidu_access_key_id")
+                or config_dict.get("api_key")
+            )
+            api_secret = (
+                config_dict.get("BAIDU_SECRET_ACCESS_KEY")
+                or config_dict.get("baidu_secret_access_key")
+                or config_dict.get("api_secret")
+            )
+            timeout = (
+                config_dict.get("BAIDU_TIMEOUT")
+                or config_dict.get("timeout")
+            )
+            max_retries = (
+                config_dict.get("BAIDU_MAX_RETRIES")
+                or config_dict.get("max_retries")
+            )
+
+            if api_key:
+                normalized["api_key"] = api_key
+            if api_secret:
+                normalized["api_secret"] = api_secret
+            if timeout is not None and timeout != "":
+                normalized["timeout"] = int(timeout)
+            if max_retries is not None and max_retries != "":
+                normalized["max_retries"] = int(max_retries)
+        elif provider_type == "zhipu":
+            username = (
+                config_dict.get("ZHIPU_USERNAME")
+                or config_dict.get("zhipu_username")
+                or config_dict.get("username")
+            )
+            password = (
+                config_dict.get("ZHIPU_PASSWORD")
+                or config_dict.get("zhipu_password")
+                or config_dict.get("password")
+            )
+            user_type = (
+                config_dict.get("ZHIPU_USER_TYPE")
+                or config_dict.get("zhipu_user_type")
+                or config_dict.get("user_type")
+            )
+            timeout = (
+                config_dict.get("ZHIPU_TIMEOUT")
+                or config_dict.get("timeout")
+            )
+            max_retries = (
+                config_dict.get("ZHIPU_MAX_RETRIES")
+                or config_dict.get("max_retries")
+            )
+            if username:
+                normalized["username"] = username
+            if password:
+                normalized["password"] = password
+            if user_type:
+                normalized["user_type"] = user_type
+            if timeout is not None and timeout != "":
+                normalized["timeout"] = int(timeout)
+            if max_retries is not None and max_retries != "":
+                normalized["max_retries"] = int(max_retries)
         else:
             # For unknown types, pass through as-is
             normalized = config_dict.copy()
@@ -466,6 +535,22 @@ class ProviderService:
                 return "volcengine_timeout"
             if "permission" in error_lower or "forbidden" in error_lower:
                 return "volcengine_no_permission"
+
+        # Baidu specific errors
+        elif provider_type == "baidu":
+            if "signature" in error_lower or "authorization" in error_lower:
+                return "baidu_invalid_secret"
+            if "access key" in error_lower or "ak" in error_lower:
+                return "baidu_invalid_credentials"
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return "baidu_no_permission"
+        elif provider_type == "zhipu":
+            if "password" in error_lower or "username" in error_lower:
+                return "zhipu_invalid_credentials"
+            if "token" in error_lower or "authorization" in error_lower:
+                return "zhipu_invalid_token"
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return "zhipu_no_permission"
 
         # Generic errors
         if "ssl" in error_lower or "sslerror" in error_lower:

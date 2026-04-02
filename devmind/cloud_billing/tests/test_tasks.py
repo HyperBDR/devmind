@@ -9,6 +9,7 @@ from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from cloud_billing.models import (
     CloudProvider,
@@ -185,6 +186,149 @@ class TestCheckAlertForProvider:
         assert "默认备注" in record.alert_message
         mock_send_alert_delay.assert_called_once()
 
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_default_webhook_channel")
+    def test_balance_threshold_triggers_alert(
+        self,
+        mock_get_default_webhook_channel,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+        previous_billing_data,
+    ):
+        """
+        Balance threshold alerts should trigger when current balance drops
+        below the configured threshold.
+        """
+        mock_channel = SimpleNamespace(config={"language": "en"})
+        mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            balance_threshold=Decimal("550.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        record = AlertRecord.objects.latest("id")
+        assert record.current_balance == Decimal("520.00")
+        assert record.balance_threshold == Decimal("550.00")
+        assert "remaining balance" in record.alert_message.lower()
+        mock_send_alert.assert_called_once_with(record.id)
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_default_webhook_channel")
+    def test_balance_threshold_alert_includes_notes_for_chinese_channel(
+        self,
+        mock_get_default_webhook_channel,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+        previous_billing_data,
+    ):
+        mock_channel = SimpleNamespace(config={"language": "zh-hans"})
+        mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        cloud_provider.provider_type = "baidu"
+        cloud_provider.display_name = "百度智能云"
+        cloud_provider.config = {
+            **(cloud_provider.config or {}),
+            "notes": "余额告警测试备注",
+        }
+        cloud_provider.save(update_fields=["provider_type", "display_name", "config"])
+
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            balance_threshold=Decimal("550.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        record = AlertRecord.objects.latest("id")
+        assert "备注：余额告警测试备注" in record.alert_message
+        assert "账号：" in record.alert_message
+        mock_send_alert.assert_called_once_with(record.id)
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_email_channel_by_uuid")
+    def test_alert_message_uses_configured_email_channel_language(
+        self,
+        mock_get_email_channel_by_uuid,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+        previous_billing_data,
+    ):
+        mock_channel = SimpleNamespace(config={"language": "zh-hans"})
+        mock_get_email_channel_by_uuid.return_value = (mock_channel, {})
+        cloud_provider.config = {
+            **(cloud_provider.config or {}),
+            "notification": {
+                "type": "email",
+                "channel_uuid": "email-channel-1",
+            },
+        }
+        cloud_provider.save(update_fields=["config"])
+
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            balance_threshold=Decimal("550.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        record = AlertRecord.objects.latest("id")
+        assert "告警类型：余额阈值告警" in record.alert_message
+        mock_send_alert.assert_called_once_with(record.id)
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_default_webhook_channel")
+    def test_days_remaining_threshold_triggers_alert(
+        self,
+        mock_get_default_webhook_channel,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+        previous_billing_data,
+    ):
+        mock_channel = SimpleNamespace(config={"language": "en"})
+        mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            days_remaining_threshold=200,
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        record = AlertRecord.objects.latest("id")
+        assert record.current_days_remaining is not None
+        assert record.current_days_remaining < 200
+        assert record.days_remaining_threshold == 200
+        assert "estimated days remaining" in record.alert_message.lower()
+        mock_send_alert.assert_called_once_with(record.id)
+
     def test_skipped_when_lock_held(self, cloud_provider):
         """
         When prevent_duplicate_task lock is held for same provider_id,
@@ -251,6 +395,165 @@ class TestCollectBillingData:
         )
         assert mock_update_task_status.call_args.kwargs["error"].startswith(
             "Billing collection failed for all providers"
+        )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    def test_partial_success_uses_previous_total_cost_and_updates_balance(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        current_period = timezone.now().strftime("%Y-%m")
+        previous_hour = max(timezone.now().hour - 1, 0)
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=current_period,
+            hour=previous_hour,
+            total_cost=Decimal("88.88"),
+            balance=Decimal("500.00"),
+            hourly_cost=Decimal("10.00"),
+            currency="USD",
+            service_costs={},
+            account_id="123456789012",
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "partial_success",
+            "data": {
+                "total_cost": 0.0,
+                "balance": 321.45,
+                "balance_debug": {"status": "success"},
+                "currency": "USD",
+                "account_id": "123456789012",
+                "cost_status": "error",
+                "cost_error": "usageDetails/read denied",
+            },
+            "error": "usageDetails/read denied",
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="123456789012",
+            period=current_period,
+            hour=timezone.now().hour,
+        )
+        assert record.total_cost == Decimal("88.88")
+        assert record.balance == Decimal("321.45")
+        cloud_provider.refresh_from_db()
+        assert cloud_provider.balance == Decimal("321.45")
+        assert cloud_provider.balance_currency == "USD"
+        mock_check_alert_delay.assert_called_once_with(
+            cloud_provider.id,
+            cloud_provider.provider_type,
+        )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    def test_sync_preserves_previous_balance_when_current_balance_missing(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        current_period = timezone.now().strftime("%Y-%m")
+        previous_hour = max(timezone.now().hour - 1, 0)
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=current_period,
+            hour=previous_hour,
+            total_cost=Decimal("88.88"),
+            balance=Decimal("500.00"),
+            hourly_cost=Decimal("10.00"),
+            currency="USD",
+            service_costs={},
+            account_id="123456789012",
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "success",
+            "data": {
+                "total_cost": 120.5,
+                "balance": None,
+                "currency": "USD",
+                "account_id": "123456789012",
+                "service_costs": {},
+            },
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="123456789012",
+            period=current_period,
+            hour=timezone.now().hour,
+        )
+        assert record.balance == Decimal("500.00")
+        mock_check_alert_delay.assert_called_once_with(
+            cloud_provider.id,
+            cloud_provider.provider_type,
+        )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    def test_sync_updates_existing_current_hour_record_with_balance(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        current_period = timezone.now().strftime("%Y-%m")
+        current_hour = timezone.now().hour
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=current_period,
+            hour=current_hour,
+            total_cost=Decimal("88.88"),
+            balance=None,
+            hourly_cost=Decimal("10.00"),
+            currency="USD",
+            service_costs={},
+            account_id="123456789012",
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "success",
+            "data": {
+                "total_cost": 120.5,
+                "balance": 321.45,
+                "currency": "USD",
+                "account_id": "123456789012",
+                "service_costs": {},
+            },
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="123456789012",
+            period=current_period,
+            hour=current_hour,
+        )
+        assert record.balance == Decimal("321.45")
+        cloud_provider.refresh_from_db()
+        assert cloud_provider.balance == Decimal("321.45")
+        mock_check_alert_delay.assert_called_once_with(
+            cloud_provider.id,
+            cloud_provider.provider_type,
         )
 
 

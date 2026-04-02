@@ -1,17 +1,19 @@
 """
 Tests for cloud billing serializers.
 """
-import pytest
-from decimal import Decimal
-from django.contrib.auth.models import User
 
+from decimal import Decimal
+
+import pytest
+from django.contrib.auth.models import User
+from django.utils import translation
 from rest_framework.exceptions import ValidationError
 
-from cloud_billing.models import CloudProvider, AlertRule, AlertRecord
+from cloud_billing.models import AlertRecord, AlertRule, BillingData, CloudProvider
 from cloud_billing.serializers import (
-    CloudProviderSerializer,
     AlertRuleSerializer,
     BillingDataSerializer,
+    CloudProviderSerializer,
 )
 
 
@@ -22,62 +24,52 @@ class TestCloudProviderSerializer:
     """
 
     def test_serialize_provider(self, cloud_provider):
-        """
-        Test serializing a cloud provider.
-        """
         serializer = CloudProviderSerializer(cloud_provider)
         data = serializer.data
-        assert data['id'] == cloud_provider.id
-        assert data['name'] == 'test_aws'
-        assert data['provider_type'] == 'aws'
-        assert data['display_name'] == 'Test AWS'
-        assert 'config' in data
-        assert 'created_by_username' in data
+        assert data["id"] == cloud_provider.id
+        assert data["name"] == "test_aws"
+        assert data["provider_type"] == "aws"
+        assert data["display_name"] == "Test AWS"
+        assert "config" in data
+        assert "created_by_username" in data
 
     def test_deserialize_create_provider(self, user):
-        """
-        Test deserializing and creating a provider.
-        """
         data = {
-            'name': 'new_provider',
-            'provider_type': 'aws',
-            'display_name': 'New Provider',
-            'config': {'access_key': 'test', 'secret_key': 'test'},
-            'is_active': True
+            "name": "new_provider",
+            "provider_type": "aws",
+            "display_name": "New Provider",
+            "tags": ["生产", "重点", "生产"],
+            "config": {"access_key": "test", "secret_key": "test"},
+            "is_active": True,
         }
         serializer = CloudProviderSerializer(data=data)
         assert serializer.is_valid()
         provider = serializer.save(created_by=user, updated_by=user)
-        assert provider.name == 'new_provider'
-        assert provider.provider_type == 'aws'
+        assert provider.name == "new_provider"
+        assert provider.provider_type == "aws"
+        assert provider.tags == ["生产", "重点"]
 
     def test_validate_unique_name(self, cloud_provider):
-        """
-        Test that serializer validates unique name.
-        """
         data = {
-            'name': 'test_aws',
-            'provider_type': 'aws',
-            'display_name': 'Duplicate',
-            'config': {}
+            "name": "test_aws",
+            "provider_type": "aws",
+            "display_name": "Duplicate",
+            "config": {},
         }
         serializer = CloudProviderSerializer(data=data)
         assert not serializer.is_valid()
-        assert 'name' in serializer.errors
+        assert "name" in serializer.errors
 
     def test_validate_config_dict(self, user):
-        """
-        Test that config must be a dictionary.
-        """
         data = {
-            'name': 'test_provider',
-            'provider_type': 'aws',
-            'display_name': 'Test',
-            'config': 'not a dict'
+            "name": "test_provider",
+            "provider_type": "aws",
+            "display_name": "Test",
+            "config": "not a dict",
         }
         serializer = CloudProviderSerializer(data=data)
         assert not serializer.is_valid()
-        assert 'config' in serializer.errors
+        assert "config" in serializer.errors
 
 
 @pytest.mark.django_db
@@ -87,69 +79,57 @@ class TestAlertRuleSerializer:
     """
 
     def test_serialize_alert_rule(self, alert_rule):
-        """
-        Test serializing an alert rule.
-        """
         serializer = AlertRuleSerializer(alert_rule)
         data = serializer.data
-        assert data['id'] == alert_rule.id
-        assert data['provider'] == alert_rule.provider.id
-        assert 'provider_name' in data
-        assert 'cost_threshold' in data
-        assert 'growth_threshold' in data
+        assert data["id"] == alert_rule.id
+        assert data["provider"] == alert_rule.provider.id
+        assert "provider_name" in data
+        assert "cost_threshold" in data
+        assert "growth_threshold" in data
+        assert "balance_threshold" in data
+        assert "days_remaining_threshold" in data
 
-    def test_deserialize_create_alert_rule(
-        self,
-        cloud_provider,
-        user
-    ):
-        """
-        Test deserializing and creating an alert rule.
-        """
+    def test_deserialize_create_alert_rule(self, cloud_provider, user):
         data = {
-            'provider': cloud_provider.id,
-            'cost_threshold': '20.00',
-            'growth_threshold': '10.00',
-            'is_active': True
+            "provider": cloud_provider.id,
+            "cost_threshold": "20.00",
+            "growth_threshold": "10.00",
+            "balance_threshold": "100.00",
+            "days_remaining_threshold": 7,
+            "is_active": True,
         }
         serializer = AlertRuleSerializer(data=data)
         assert serializer.is_valid()
         rule = serializer.save(created_by=user, updated_by=user)
         assert rule.provider == cloud_provider
-        assert rule.cost_threshold == Decimal('20.00')
+        assert rule.cost_threshold == Decimal("20.00")
+        assert rule.balance_threshold == Decimal("100.00")
+        assert rule.days_remaining_threshold == 7
 
     def test_validate_at_least_one_threshold(self, cloud_provider):
-        """
-        Test that at least one threshold must be set.
-        """
         data = {
-            'provider': cloud_provider.id,
-            'cost_threshold': None,
-            'growth_threshold': None
+            "provider": cloud_provider.id,
+            "cost_threshold": None,
+            "growth_threshold": None,
+            "growth_amount_threshold": None,
+            "balance_threshold": None,
+            "days_remaining_threshold": None,
         }
         serializer = AlertRuleSerializer(data=data)
         assert not serializer.is_valid()
 
-    def test_validate_update_keeps_existing_threshold(
-        self,
-        alert_rule
-    ):
-        """
-        Test that update keeps existing threshold if not provided.
-        """
+    def test_validate_update_keeps_existing_threshold(self, alert_rule):
         data = {
-            'cost_threshold': None,
-            'growth_threshold': '15.00'
+            "cost_threshold": None,
+            "growth_threshold": "15.00",
+            "balance_threshold": None,
+            "days_remaining_threshold": None,
         }
-        serializer = AlertRuleSerializer(
-            alert_rule,
-            data=data,
-            partial=True
-        )
+        serializer = AlertRuleSerializer(alert_rule, data=data, partial=True)
         assert serializer.is_valid()
         rule = serializer.save()
         assert rule.cost_threshold == alert_rule.cost_threshold
-        assert rule.growth_threshold == Decimal('15.00')
+        assert rule.growth_threshold == Decimal("15.00")
 
 
 @pytest.mark.django_db
@@ -159,17 +139,39 @@ class TestBillingDataSerializer:
     """
 
     def test_serialize_billing_data(self, billing_data):
-        """
-        Test serializing billing data.
-        """
+        billing_data.provider.balance = Decimal("77.00")
+        billing_data.provider.balance_currency = "USD"
+        billing_data.provider.save(update_fields=["balance", "balance_currency"])
         serializer = BillingDataSerializer(billing_data)
         data = serializer.data
-        assert data['id'] == billing_data.id
-        assert data['provider'] == billing_data.provider.id
-        assert 'provider_name' in data
-        assert 'provider_type' in data
-        assert 'total_cost' in data
-        assert 'currency' in data
+        assert data["id"] == billing_data.id
+        assert data["provider"] == billing_data.provider.id
+        assert "provider_name" in data
+        assert "provider_type" in data
+        assert "total_cost" in data
+        assert "balance" in data
+        assert data["balance"] == "77.00"
+        assert "currency" in data
+
+    def test_balance_note_is_localized_for_english(self, cloud_provider):
+        cloud_provider.config = {"region": "cn-north-1"}
+        cloud_provider.save(update_fields=["config"])
+        billing = BillingData.objects.create(
+            provider=cloud_provider,
+            period="2025-01",
+            hour=1,
+            total_cost=Decimal("10.00"),
+            balance=Decimal("5.00"),
+            currency="USD",
+            service_costs={},
+            account_id="acct-1",
+        )
+
+        with translation.override("en"):
+            data = BillingDataSerializer(billing).data
+
+        assert data["balance_supported"] is False
+        assert data["balance_note"] == "Not supported yet"
 
 
 @pytest.mark.django_db
@@ -181,9 +183,6 @@ class TestAlertRecordSerializer:
     def test_serialize_alert_record_includes_provider_label(
         self, cloud_provider, alert_rule
     ):
-        """
-        Test serializing an alert record exposes the notes-aware label.
-        """
         cloud_provider.notes = "默认备注"
         cloud_provider.save(update_fields=["notes"])
         record = AlertRecord.objects.create(
@@ -194,6 +193,8 @@ class TestAlertRecordSerializer:
             increase_cost=Decimal("20.50"),
             increase_percent=Decimal("25.63"),
             currency="USD",
+            current_days_remaining=6,
+            days_remaining_threshold=7,
             alert_message="Test alert",
             webhook_status="pending",
         )
@@ -204,4 +205,6 @@ class TestAlertRecordSerializer:
         data = serializer.data
         assert data["provider_name"] == "Test AWS"
         assert data["provider_label"] == "Test AWS（默认备注）"
+        assert data["current_days_remaining"] == 6
+        assert data["days_remaining_threshold"] == 7
         assert data["alert_message"] == "Test alert"

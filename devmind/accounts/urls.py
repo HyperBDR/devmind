@@ -19,6 +19,10 @@ from accounts.views import (
 )
 from accounts.views.management import (
     ManagementGroupListView,
+    ManagementGroupDetailView,
+    ManagementRoleDetailView,
+    ManagementRoleListView,
+    ManagementUserDetailView,
     ManagementUserListView,
 )
 
@@ -121,8 +125,28 @@ urlpatterns = [
         name='management_users'
     ),
     path(
+        'api/v1/management/users/<int:user_id>/',
+        ManagementUserDetailView.as_view(),
+        name='management_user_detail'
+    ),
+    path(
         'api/v1/management/groups/',
         ManagementGroupListView.as_view(),
         name='management_groups'
+    ),
+    path(
+        'api/v1/management/groups/<int:group_id>/',
+        ManagementGroupDetailView.as_view(),
+        name='management_group_detail'
+    ),
+    path(
+        'api/v1/management/roles/',
+        ManagementRoleListView.as_view(),
+        name='management_roles'
+    ),
+    path(
+        'api/v1/management/roles/<int:role_id>/',
+        ManagementRoleDetailView.as_view(),
+        name='management_role_detail'
     ),
 ]

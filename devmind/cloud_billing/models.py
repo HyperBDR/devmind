@@ -26,6 +26,8 @@ class CloudProvider(models.Model):
         ("azure", "Azure"),
         ("tencentcloud", "Tencent Cloud"),
         ("volcengine", "Volcengine"),
+        ("baidu", "Baidu AI Cloud"),
+        ("zhipu", "Zhipu AI"),
     ]
 
     name = models.CharField(
@@ -45,6 +47,29 @@ class CloudProvider(models.Model):
         blank=True,
         null=True,
         help_text="Optional notes or description for this provider",
+    )
+    tags = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Custom tags for this provider/account",
+    )
+    balance = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Latest synced account balance for this provider",
+    )
+    balance_currency = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="Currency code for the latest synced balance",
+    )
+    balance_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the latest provider balance was synced",
     )
     config = models.JSONField(
         help_text=(
@@ -125,6 +150,13 @@ class BillingData(models.Model):
         decimal_places=2,
         help_text="Cumulative total cost for the period",
     )
+    balance = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Account cash balance at collection time",
+    )
     hourly_cost = models.DecimalField(
         max_digits=20,
         decimal_places=2,
@@ -203,6 +235,24 @@ class AlertRule(models.Model):
             "cost increases by 1000.00"
         ),
     )
+    balance_threshold = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Balance threshold, e.g., 100.00 means alert when account "
+            "balance drops below 100.00"
+        ),
+    )
+    days_remaining_threshold = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Estimated days remaining threshold, e.g., 7 means alert when "
+            "projected remaining days drop below 7"
+        ),
+    )
     is_active = models.BooleanField(
         default=True,
         db_index=True,
@@ -238,13 +288,16 @@ class AlertRule(models.Model):
         Validate that at least one threshold is set.
         """
         if (
-            not self.cost_threshold
-            and not self.growth_threshold
-            and not self.growth_amount_threshold
+            self.cost_threshold is None
+            and self.growth_threshold is None
+            and self.growth_amount_threshold is None
+            and self.balance_threshold is None
+            and self.days_remaining_threshold is None
         ):
             raise ValidationError(
                 "At least one of cost_threshold, growth_threshold, "
-                "or growth_amount_threshold must be set."
+                "growth_amount_threshold, balance_threshold, or "
+                "days_remaining_threshold must be set."
             )
 
     def save(self, *args, **kwargs):
@@ -256,12 +309,16 @@ class AlertRule(models.Model):
 
     def __str__(self):
         thresholds = []
-        if self.cost_threshold:
+        if self.cost_threshold is not None:
             thresholds.append(f"Cost: {self.cost_threshold}")
-        if self.growth_threshold:
+        if self.growth_threshold is not None:
             thresholds.append(f"Growth: {self.growth_threshold}%")
-        if self.growth_amount_threshold:
+        if self.growth_amount_threshold is not None:
             thresholds.append(f"Growth Amount: {self.growth_amount_threshold}")
+        if self.balance_threshold is not None:
+            thresholds.append(f"Balance: {self.balance_threshold}")
+        if self.days_remaining_threshold is not None:
+            thresholds.append(f"Days Remaining: {self.days_remaining_threshold}")
         return f"{self.provider.display_name} - {', '.join(thresholds)}"
 
 
@@ -270,6 +327,16 @@ class AlertRecord(models.Model):
     Alert record model for tracking billing alerts.
     """
 
+    ALERT_TYPE_COST = "cost"
+    ALERT_TYPE_GROWTH = "growth"
+    ALERT_TYPE_BALANCE = "balance"
+    ALERT_TYPE_DAYS_REMAINING = "days_remaining"
+    ALERT_TYPE_CHOICES = [
+        (ALERT_TYPE_COST, "Cost Threshold"),
+        (ALERT_TYPE_GROWTH, "Cost Growth"),
+        (ALERT_TYPE_BALANCE, "Balance Threshold"),
+        (ALERT_TYPE_DAYS_REMAINING, "Estimated Days Remaining"),
+    ]
     WEBHOOK_STATUS_CHOICES = [
         (WEBHOOK_STATUS_PENDING, "Pending"),
         (WEBHOOK_STATUS_SUCCESS, "Success"),
@@ -286,6 +353,12 @@ class AlertRecord(models.Model):
         blank=True,
         related_name="alert_records",
     )
+    alert_type = models.CharField(
+        max_length=32,
+        choices=ALERT_TYPE_CHOICES,
+        default=ALERT_TYPE_GROWTH,
+        help_text="Primary alert type that triggered this record",
+    )
     current_cost = models.DecimalField(
         max_digits=20, decimal_places=2, help_text="Current hour cost"
     )
@@ -299,6 +372,30 @@ class AlertRecord(models.Model):
         max_digits=5, decimal_places=2, help_text="Cost increase percentage"
     )
     currency = models.CharField(max_length=10, help_text="Currency code")
+    current_balance = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Current account balance when alert triggered",
+    )
+    balance_threshold = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Balance threshold that triggered the alert",
+    )
+    current_days_remaining = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Projected remaining days when the alert was triggered",
+    )
+    days_remaining_threshold = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Projected remaining days threshold that triggered the alert",
+    )
     alert_message = models.TextField(help_text="Alert message content")
     webhook_status = models.CharField(
         max_length=20,

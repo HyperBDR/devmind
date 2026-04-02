@@ -190,6 +190,9 @@ class TestAlertRule:
             provider=cloud_provider,
             cost_threshold=None,
             growth_threshold=None,
+            growth_amount_threshold=None,
+            balance_threshold=None,
+            days_remaining_threshold=None,
             created_by=user
         )
         with pytest.raises(ValidationError):
@@ -234,8 +237,26 @@ class TestAlertRule:
         assert str(alert_rule) == (
             f"{alert_rule.provider.display_name} - "
             f"Cost: {alert_rule.cost_threshold}, "
-            f"Growth: {alert_rule.growth_threshold}%"
+            f"Growth: {alert_rule.growth_threshold}%, "
+            f"Balance: {alert_rule.balance_threshold}, "
+            f"Days Remaining: {alert_rule.days_remaining_threshold}"
         )
+
+    def test_alert_rule_clean_success_with_days_remaining_threshold(
+        self,
+        cloud_provider,
+        user
+    ):
+        rule = AlertRule.objects.create(
+            provider=cloud_provider,
+            cost_threshold=None,
+            growth_threshold=None,
+            growth_amount_threshold=None,
+            balance_threshold=None,
+            days_remaining_threshold=7,
+            created_by=user
+        )
+        assert rule.days_remaining_threshold == 7
 
 
 @pytest.mark.django_db
@@ -260,6 +281,8 @@ class TestAlertRecord:
             increase_cost=Decimal('20.50'),
             increase_percent=Decimal('25.63'),
             currency='USD',
+            current_days_remaining=6,
+            days_remaining_threshold=7,
             alert_message='Test alert',
             webhook_status='pending'
         )
@@ -267,6 +290,8 @@ class TestAlertRecord:
         assert record.current_cost == Decimal('100.50')
         assert record.previous_cost == Decimal('80.00')
         assert record.increase_cost == Decimal('20.50')
+        assert record.current_days_remaining == 6
+        assert record.days_remaining_threshold == 7
         assert record.webhook_status == 'pending'
 
     def test_alert_record_str(self, alert_record):

@@ -1,11 +1,13 @@
 """
 Tests for data_collector API views.
 """
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 from django.contrib.auth.models import User
 
+from agentcore_task.adapters.django.models import TaskExecution
 from data_collector.models import CollectorConfig, RawDataAttachment, RawDataRecord
 
 
@@ -161,6 +163,161 @@ class TestCollectorConfigViewSet:
         )
         assert response.status_code == 202
         assert response.data.get("task_id") == "validate-1"
+
+    @patch("data_collector.views.config.sync_config_to_beat")
+    @patch("data_collector.views.config._sync_hyperbdr_data_source")
+    def test_create_hyperbdr_config_calls_bridge(
+        self,
+        mock_sync_hyperbdr,
+        mock_sync_to_beat,
+        api_client,
+        user,
+    ):
+        payload = {
+            "platform": "hyperbdr",
+            "key": "hyperbdr_primary",
+            "is_enabled": True,
+            "value": {
+                "auth": {
+                    "base_url": "https://admin-preprod.hyperbdr.com/",
+                    "username": "collector",
+                    "password": "secret",
+                },
+                "schedule_cron": "0 */2 * * *",
+            },
+        }
+
+        response = api_client.post(
+            "/api/v1/data-collector/configs/",
+            payload,
+            format="json",
+        )
+
+        assert response.status_code == 201
+        config = CollectorConfig.objects.get(user=user, platform="hyperbdr")
+        mock_sync_to_beat.assert_called_once_with(config)
+        mock_sync_hyperbdr.assert_called_once_with(config)
+
+    @patch("data_collector.views.config.sync_config_to_beat")
+    @patch("data_collector.views.config._sync_hyperbdr_data_source")
+    def test_update_hyperbdr_config_calls_bridge_for_enable_disable(
+        self,
+        mock_sync_hyperbdr,
+        mock_sync_to_beat,
+        api_client,
+        user,
+    ):
+        config = CollectorConfig.objects.create(
+            user=user,
+            platform="hyperbdr",
+            key="hyperbdr_primary",
+            value={
+                "auth": {
+                    "base_url": "https://admin-preprod.hyperbdr.com",
+                    "username": "collector",
+                    "password": "secret",
+                },
+                "schedule_cron": "0 */2 * * *",
+            },
+            is_enabled=True,
+        )
+
+        response = api_client.patch(
+            f"/api/v1/data-collector/configs/{config.uuid}/",
+            {"is_enabled": False, "version": config.version},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        config.refresh_from_db()
+        assert config.is_enabled is False
+        mock_sync_to_beat.assert_called_once_with(config)
+        mock_sync_hyperbdr.assert_called_once()
+        synced_config = mock_sync_hyperbdr.call_args.args[0]
+        assert synced_config.uuid == config.uuid
+        assert synced_config.is_enabled is False
+
+    def test_sync_hyperbdr_data_source_uses_hyperbdr_monitor_shape(self, user):
+        config = CollectorConfig.objects.create(
+            user=user,
+            platform="hyperbdr",
+            key="hyperbdr_primary",
+            value={
+                "auth": {
+                    "base_url": "https://admin-preprod.hyperbdr.com/",
+                    "username": "collector",
+                    "password": "secret",
+                },
+                "schedule_cron": "0 */2 * * *",
+            },
+            is_enabled=True,
+        )
+        update_or_create = Mock()
+        fake_model = SimpleNamespace(
+            objects=SimpleNamespace(update_or_create=update_or_create)
+        )
+
+        with patch(
+            "data_collector.views.config._get_hyperbdr_data_source_model",
+            return_value=fake_model,
+        ):
+            from data_collector.views.config import _sync_hyperbdr_data_source
+
+            _sync_hyperbdr_data_source(config)
+
+        fake_model.objects.update_or_create.assert_called_once_with(
+            name="hyperbdr_primary",
+            defaults={
+                "api_url": "https://admin-preprod.hyperbdr.com",
+                "username": "collector",
+                "password": "secret",
+                "is_active": True,
+                "api_timeout": 30,
+                "api_retry_count": 3,
+                "api_retry_delay": 2,
+                "collect_interval": 7200,
+            },
+        )
+
+    @patch("data_collector.views.config._queue_hyperbdr_collect")
+    def test_collect_hyperbdr_config_registers_task_execution(
+        self,
+        mock_queue_hyperbdr_collect,
+        api_client,
+        user,
+    ):
+        config = CollectorConfig.objects.create(
+            user=user,
+            platform="hyperbdr",
+            key="hyperbdr_primary",
+            value={
+                "auth": {
+                    "base_url": "https://admin-preprod.hyperbdr.com",
+                    "username": "collector",
+                    "password": "secret",
+                }
+            },
+            is_enabled=True,
+        )
+        mock_queue_hyperbdr_collect.return_value = (
+            SimpleNamespace(id=11, data_source_id=7),
+            SimpleNamespace(id="celery-hyperbdr-1"),
+        )
+
+        response = api_client.post(
+            f"/api/v1/data-collector/configs/{config.uuid}/collect/",
+            {},
+            format="json",
+        )
+
+        assert response.status_code == 202
+        assert response.data["task_id"] == "celery-hyperbdr-1"
+        task_execution = TaskExecution.objects.get(task_id="celery-hyperbdr-1")
+        assert task_execution.module == "data_collector"
+        assert task_execution.task_name == "hyperbdr_monitor.tasks.run_collection_for_data_source"
+        assert task_execution.metadata["config_platform"] == "hyperbdr"
+        assert task_execution.metadata["config_key"] == "hyperbdr_primary"
+        assert task_execution.metadata["hyperbdr_collection_task_id"] == 11
 
 
 @pytest.mark.django_db

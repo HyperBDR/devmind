@@ -5,7 +5,6 @@ Tests for cloud billing services.
 import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
-
 from cloud_billing.services.notification_service import (
     CloudBillingNotificationService,
 )
@@ -155,6 +154,88 @@ class TestProviderService:
                 "endpoint": "billing.tencentcloudapi.com",
                 "timeout": 45,
                 "max_retries": 5,
+            },
+        )
+
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_azure_normalizes_billing_account_id(
+        self, mock_factory
+    ):
+        """Test Azure config normalization includes billing account id."""
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        service = ProviderService()
+        result = service.create_provider(
+            "azure",
+            {
+                "AZURE_CLIENT_ID": "client",
+                "AZURE_CLIENT_SECRET": "secret",
+                "AZURE_TENANT_ID": "tenant",
+                "AZURE_SUBSCRIPTION_ID": "sub",
+                "AZURE_BILLING_ACCOUNT_ID": "billing-001",
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "azure",
+            {
+                "client_id": "client",
+                "client_secret": "secret",
+                "tenant_id": "tenant",
+                "subscription_id": "sub",
+                "billing_account_id": "billing-001",
+            },
+        )
+
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_baidu_normalizes_config(self, mock_factory):
+        """Test Baidu config normalization before provider creation."""
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        service = ProviderService()
+        result = service.create_provider(
+            "baidu",
+            {
+                "BAIDU_ACCESS_KEY_ID": "test_key",
+                "BAIDU_SECRET_ACCESS_KEY": "test_secret",
+            },
+        )
+
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_zhipu_normalizes_config(self, mock_factory):
+        """Test Zhipu config normalization before provider creation."""
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        service = ProviderService()
+        result = service.create_provider(
+            "zhipu",
+            {
+                "ZHIPU_USERNAME": "tester",
+                "ZHIPU_PASSWORD": "secret",
+                "ZHIPU_ORGANIZATION": "org-123",
+                "ZHIPU_PROJECT": "proj-456",
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "zhipu",
+            {
+                "username": "tester",
+                "password": "secret",
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "baidu",
+            {
+                "api_key": "test_key",
+                "api_secret": "test_secret",
             },
         )
 
@@ -458,6 +539,45 @@ class TestCloudBillingNotificationService:
         assert call_kwargs["notification_type"] == "webhook"
         assert call_kwargs["channel_uuid"] == str(ch_uuid)
         assert call_kwargs["params"]["provider_type"] == "feishu"
+
+    def test_generate_feishu_payload_uses_localized_title(
+        self, alert_record
+    ):
+        service = CloudBillingNotificationService()
+
+        payload = service._generate_feishu_payload(alert_record, "zh-hans")
+
+        assert payload["content"]["post"]["zh-hans"]["title"] == (
+            "[重点关注]云平台账单消费提醒"
+        )
+
+    def test_generate_wechat_payload_uses_localized_title_prefix(
+        self, alert_record
+    ):
+        service = CloudBillingNotificationService()
+
+        payload = service._generate_wechat_payload(alert_record, "en")
+
+        assert payload["markdown"]["content"].startswith(
+            "## Cloud Billing Alert\n\n"
+        )
+
+    def test_generate_wechat_payload_rebuilds_body_for_requested_language(
+        self, alert_record
+    ):
+        alert_record.alert_message = "告警类型：余额阈值告警"
+        alert_record.current_balance = Decimal("480.00")
+        alert_record.balance_threshold = Decimal("500.00")
+        alert_record.provider.display_name = "Baidu AI Cloud"
+        alert_record.provider.notes = "Top-up soon"
+
+        service = CloudBillingNotificationService()
+        payload = service._generate_wechat_payload(alert_record, "en")
+
+        content = payload["markdown"]["content"]
+        assert "**Alert type**: Balance threshold alert" in content
+        assert "**Cloud provider**: Baidu AI Cloud" in content
+        assert "**Notes**: Top-up soon" in content
 
     @patch(
         "cloud_billing.services.notification_service."

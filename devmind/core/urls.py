@@ -40,8 +40,11 @@ urlpatterns = [
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),
 
-    # OnePro monitor routes
-    path('api/v1/onepro-monitor/', include('onepro_monitor.urls')),
+    # HyperBDR monitor routes
+    path('api/v1/hyperbdr-monitor/', include('hyperbdr_monitor.urls')),
+
+    # HyperBDR Data Operations Dashboard
+    path('api/v1/hyperbdr-dashboard/', include('hyperbdr_dashboard.urls')),
 
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),

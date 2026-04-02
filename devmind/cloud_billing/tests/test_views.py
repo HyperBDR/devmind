@@ -142,6 +142,8 @@ class TestCloudProviderViewSet:
             for provider in response.data["providers"]
         }
         assert "volcengine" in provider_types
+        assert "baidu" in provider_types
+        assert "zhipu" in provider_types
 
         volcengine = api_client.get(url + "?provider_type=volcengine")
         assert volcengine.status_code == 200
@@ -162,6 +164,29 @@ class TestCloudProviderViewSet:
         assert "TENCENT_ENDPOINT" in tencent_optional
         assert "TENCENT_TIMEOUT" in tencent_optional
         assert "TENCENT_MAX_RETRIES" in tencent_optional
+
+        baidu = api_client.get(url + "?provider_type=baidu")
+        assert baidu.status_code == 200
+        baidu_required = {
+            field["name"]
+            for field in baidu.data["provider"]["required_fields"]
+        }
+        assert "BAIDU_ACCESS_KEY_ID" in baidu_required
+        assert "BAIDU_SECRET_ACCESS_KEY" in baidu_required
+
+        zhipu = api_client.get(url + "?provider_type=zhipu")
+        assert zhipu.status_code == 200
+        zhipu_required = {
+            field["name"]
+            for field in zhipu.data["provider"]["required_fields"]
+        }
+        assert "ZHIPU_USERNAME" in zhipu_required
+        assert "ZHIPU_PASSWORD" in zhipu_required
+        zhipu_optional = {
+            field["name"]
+            for field in zhipu.data["provider"]["optional_fields"]
+        }
+        assert "ZHIPU_USER_TYPE" in zhipu_optional
 
 
 @pytest.mark.django_db
@@ -217,11 +242,15 @@ class TestBillingDataViewSet:
         assert response.status_code == 200
         assert response.data["id"] == billing_data.id
         assert "provider_name" in response.data
+        assert "balance" in response.data
 
     def test_stats_endpoint(self, api_client, billing_data, cloud_provider):
         """
         Test billing statistics endpoint.
         """
+        cloud_provider.balance = Decimal("88.00")
+        cloud_provider.balance_currency = "USD"
+        cloud_provider.save(update_fields=["balance", "balance_currency"])
         url = (
             f"/api/v1/cloud-billing/billing-data/stats/"
             f"?provider_id={cloud_provider.id}"
@@ -229,9 +258,71 @@ class TestBillingDataViewSet:
         response = api_client.get(url)
         assert response.status_code == 200
         assert "total_cost" in response.data
+        assert "total_balance" in response.data
         assert "average_cost" in response.data
         assert "count" in response.data
         assert "cost_by_period" in response.data
+
+    def test_list_excludes_inactive_provider_data(
+        self, api_client, cloud_provider_inactive
+    ):
+        """
+        Billing data list should ignore disabled providers by default.
+        """
+        current_period = datetime.now().strftime("%Y-%m")
+        current_hour = datetime.now().hour
+        BillingData.objects.create(
+            provider=cloud_provider_inactive,
+            period=current_period,
+            hour=current_hour,
+            total_cost=Decimal("88.00"),
+            balance=Decimal("66.00"),
+            currency="USD",
+            service_costs={"ec2": "88.00"},
+            account_id="inactive-account",
+        )
+
+        url = "/api/v1/cloud-billing/billing-data/"
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        assert not any(
+            item["provider"] == cloud_provider_inactive.id
+            for item in response.data["results"]
+        )
+
+    def test_stats_excludes_inactive_provider_data(
+        self, api_client, billing_data, cloud_provider_inactive
+    ):
+        """
+        Billing statistics should not include disabled providers.
+        """
+        billing_data.provider.balance = Decimal("66.00")
+        billing_data.provider.balance_currency = "USD"
+        billing_data.provider.save(update_fields=["balance", "balance_currency"])
+        BillingData.objects.create(
+            provider=cloud_provider_inactive,
+            period=billing_data.period,
+            hour=billing_data.hour,
+            total_cost=Decimal("88.00"),
+            balance=Decimal("66.00"),
+            currency="USD",
+            service_costs={"ec2": "88.00"},
+            account_id="inactive-account",
+        )
+
+        url = "/api/v1/cloud-billing/billing-data/stats/"
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        assert response.data["total_cost"] == float(billing_data.total_cost)
+        assert response.data["total_balance"] == float(
+            billing_data.provider.balance
+        )
+        assert all(
+            entry["provider_id"] != cloud_provider_inactive.id
+            for entry in response.data["by_provider"].values()
+        )
 
 
 @pytest.mark.django_db
@@ -258,11 +349,13 @@ class TestAlertRuleViewSet:
             "provider": cloud_provider.id,
             "cost_threshold": "20.00",
             "growth_threshold": "10.00",
+            "balance_threshold": "200.00",
             "is_active": True,
         }
         response = api_client.post(url, data, format="json")
         assert response.status_code == 201
         assert response.data["provider"] == cloud_provider.id
+        assert response.data["balance_threshold"] == "200.00"
         assert response.data["created_by"] == user.id
 
     def test_update_alert_rule(self, api_client, alert_rule, user):
@@ -274,11 +367,13 @@ class TestAlertRuleViewSet:
             "provider": alert_rule.provider.id,
             "cost_threshold": "30.00",
             "growth_threshold": "15.00",
+            "balance_threshold": "150.00",
             "is_active": True,
         }
         response = api_client.put(url, data, format="json")
         assert response.status_code == 200
         assert response.data["cost_threshold"] == "30.00"
+        assert response.data["balance_threshold"] == "150.00"
         assert response.data["updated_by"] == user.id
 
 
