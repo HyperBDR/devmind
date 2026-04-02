@@ -605,6 +605,26 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         tags=["cloud-billing"],
+        summary="List provider tags",
+        description=(
+            "Return a de-duplicated list of all cloud provider tags for tag "
+            "selection UIs."
+        ),
+        responses={200: {"type": "object"}},
+    )
+    @action(detail=False, methods=["get"], url_path="tags")
+    def tags(self, request):
+        tag_set = set()
+        for provider in CloudProvider.objects.only("tags"):
+            for tag in provider.tags or []:
+                normalized = str(tag or "").strip()
+                if normalized:
+                    tag_set.add(normalized)
+
+        return Response({"tags": sorted(tag_set, key=lambda value: (value.lower(), value))})
+
+    @extend_schema(
+        tags=["cloud-billing"],
         summary="Validate provider configuration",
         description=(
             "Validate provider configuration without saving to database."

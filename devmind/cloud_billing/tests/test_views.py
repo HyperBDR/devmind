@@ -55,6 +55,42 @@ class TestCloudProviderViewSet:
         assert len(response.data["results"]) == 1
         assert response.data["results"][0]["provider_type"] == "aws"
 
+    def test_list_providers_includes_auth_identifier(
+        self, api_client, cloud_provider, user
+    ):
+        """
+        Test list view exposes a display-safe auth identifier.
+        """
+        cloud_provider.config = {
+            "AWS_ACCESS_KEY_ID": "AKIA_TEST_123456",
+            "AWS_SECRET_ACCESS_KEY": "secret",
+            "AWS_REGION": "us-east-1",
+        }
+        cloud_provider.save(update_fields=["config"])
+
+        zhipu_provider = CloudProvider.objects.create(
+            name="test_zhipu",
+            provider_type="zhipu",
+            display_name="Test Zhipu",
+            config={
+                "ZHIPU_USERNAME": "billing-user@example.com",
+                "ZHIPU_PASSWORD": "secret-password",
+            },
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        url = "/api/v1/cloud-billing/providers/"
+        response = api_client.get(url)
+        assert response.status_code == 200
+
+        rows = {item["id"]: item for item in response.data["results"]}
+        assert rows[cloud_provider.id]["auth_identifier_kind"] == "access_key_id"
+        assert rows[cloud_provider.id]["auth_identifier"] == "AKIA_TEST_123456"
+        assert rows[zhipu_provider.id]["auth_identifier_kind"] == "username"
+        assert rows[zhipu_provider.id]["auth_identifier"] == "billing-user@example.com"
+
     def test_create_provider(self, api_client, user):
         """
         Test creating a cloud provider.
@@ -187,6 +223,39 @@ class TestCloudProviderViewSet:
             for field in zhipu.data["provider"]["optional_fields"]
         }
         assert "ZHIPU_USER_TYPE" in zhipu_optional
+
+    def test_provider_tags_returns_unique_sorted_tags(
+        self, api_client, cloud_provider, cloud_provider_inactive, user
+    ):
+        """
+        Test provider tags endpoint returns a unique sorted list.
+        """
+        cloud_provider.tags = ["finance", "prod", "  "]
+        cloud_provider.save(update_fields=["tags"])
+        cloud_provider_inactive.tags = ["prod", "shared", "ops"]
+        cloud_provider_inactive.save(update_fields=["tags"])
+        CloudProvider.objects.create(
+            name="extra_tags_provider",
+            provider_type="aws",
+            display_name="Extra Tags Provider",
+            config={"access_key": "test", "secret_key": "test"},
+            tags=["Finance", "team-a"],
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        url = "/api/v1/cloud-billing/providers/tags/"
+        response = api_client.get(url)
+        assert response.status_code == 200
+        assert response.data["tags"] == [
+            "Finance",
+            "finance",
+            "ops",
+            "prod",
+            "shared",
+            "team-a",
+        ]
 
 
 @pytest.mark.django_db
