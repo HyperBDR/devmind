@@ -4,13 +4,19 @@ from typing import Any
 
 import requests
 from django.db import transaction
-from django.db.utils import OperationalError, ProgrammingError
 from django.utils import timezone
 
 from .config_loader import config_loader
 from .harness import pricing_harness_agent
 from .llm_config import get_llm_config_reference
-from .models import PriceSourceConfig, PricingRecord
+from .models import PricingRecord
+from .source_config_store import (
+    create_primary_source_config as create_primary_source_config_in_collector,
+    get_primary_source_config as get_primary_source_config_from_collector,
+    list_primary_source_configs as list_primary_source_configs_from_collector,
+    sync_primary_sources_to_collector as sync_primary_sources_to_collector_store,
+    update_primary_source_config as update_primary_source_config_in_collector,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +132,7 @@ class AIPriceHubService:
         self,
         platform_slug: str | None = None,
         task_id: str | None = None,
+        strict_api_failure_raises: bool = True,
     ) -> dict[str, Any]:
         primary_vendors = [
             vendor
@@ -209,6 +216,7 @@ class AIPriceHubService:
                     parser_llm_config_uuid=parser_llm_config_uuid,
                     task_id=task_id,
                     primary_models=primary_models,
+                    strict_api_only=strict_api_failure_raises,
                 )
                 logger.info(
                     "[ai_pricehub] fetched comparison catalog vendor=%s models=%s source=%s stage=%s",
@@ -225,7 +233,10 @@ class AIPriceHubService:
                 }
                 failure_count += 1
                 errors.append(f"{vendor_data['name']}: {exc}")
-                if self._is_strict_vendor_sync(vendor_data):
+                if (
+                    strict_api_failure_raises
+                    and self._is_strict_vendor_sync(vendor_data)
+                ):
                     raise
             synced_count, synced_failures = self._sync_vendor_models(
                 vendor_data=vendor_data,
@@ -313,6 +324,7 @@ class AIPriceHubService:
         parser_llm_config_uuid: str | None = None,
         task_id: str | None = None,
         primary_models: list[dict[str, Any]] | None = None,
+        strict_api_only: bool = True,
     ) -> dict[str, Any]:
         parser_llm_reference = get_llm_config_reference(parser_llm_config_uuid)
         model_queries = self._build_vendor_model_queries(
@@ -332,6 +344,7 @@ class AIPriceHubService:
         return pricing_harness_agent.fetch_vendor_catalog(
             enriched_vendor,
             parser_llm_config_uuid=parser_llm_config_uuid,
+            strict_api_only=strict_api_only,
         )
 
     @staticmethod
@@ -933,55 +946,30 @@ class AIPriceHubService:
 ai_pricehub_service = AIPriceHubService()
 
 
-def list_primary_source_configs() -> list[PriceSourceConfig]:
-    try:
-        configs = list(
-            PriceSourceConfig.objects.filter(vendor_slug="agione").order_by(
-                "region",
-                "vendor_name",
-                "id",
-            )
-        )
-    except (OperationalError, ProgrammingError):
-        configs = []
-    if configs:
-        return configs
-
-    default = config_loader.load()["primary_vendor"]
-    defaults = {
-        "platform_slug": default["slug"],
-        "vendor_name": default["name"],
-        "region": default.get("region", ""),
-        "endpoint_url": (
-            default.get("models_source", {}).get("url")
-            or default.get("pricing_url")
-        ),
-        "parser_llm_config_uuid": None,
-        "currency": default.get("currency", "CNY"),
-        "points_per_currency_unit": default.get(
-            "points_per_currency_unit",
-            10.0,
-        ),
-        "is_enabled": True,
-        "notes": "",
-    }
-    return [PriceSourceConfig(vendor_slug="agione", **defaults)]
+def list_primary_source_configs() -> list[dict[str, Any]]:
+    return list_primary_source_configs_from_collector()
 
 
-def get_primary_source_config(config_id: int) -> PriceSourceConfig | None:
-    try:
-        return PriceSourceConfig.objects.filter(
-            vendor_slug="agione",
-            id=config_id,
-        ).first()
-    except (OperationalError, ProgrammingError):
-        for item in list_primary_source_configs():
-            if item.id == config_id:
-                return item
-        return None
+def sync_primary_source_configs_to_collector(*, owner_user) -> list[dict[str, Any]]:
+    return sync_primary_sources_to_collector_store(owner_user=owner_user)
 
 
-def create_primary_source_config(data: dict[str, Any]) -> PriceSourceConfig:
-    payload = dict(data)
-    payload["vendor_slug"] = "agione"
-    return PriceSourceConfig.objects.create(**payload)
+def get_primary_source_config(config_id: int) -> dict[str, Any] | None:
+    return get_primary_source_config_from_collector(config_id)
+
+
+def create_primary_source_config(data: dict[str, Any], *, owner_user) -> dict[str, Any]:
+    return create_primary_source_config_in_collector(data, owner_user=owner_user)
+
+
+def update_primary_source_config(
+    config_id: int,
+    data: dict[str, Any],
+    *,
+    owner_user,
+) -> dict[str, Any] | None:
+    return update_primary_source_config_in_collector(
+        config_id,
+        data,
+        owner_user=owner_user,
+    )

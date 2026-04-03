@@ -26,6 +26,37 @@ from ..services.providers import get_provider
 from ..tasks import run_collect, run_validate
 
 
+def _sync_ai_pricehub_collect_config(config: CollectorConfig) -> None:
+    if config.platform != "ai_pricehub":
+        return
+    try:
+        from ai_pricehub.source_config_store import (
+            list_primary_source_configs,
+            set_primary_source_configs,
+        )
+    except Exception:
+        return
+
+    value = config.value or {}
+    value["project_keys"] = value.get("project_keys") or ["sync"]
+    incoming_sources = value.get("primary_sources")
+    if isinstance(incoming_sources, list) and incoming_sources:
+        try:
+            value["primary_sources"] = set_primary_source_configs(
+                incoming_sources,
+                owner_user=config.user,
+            )
+        except Exception:
+            return
+    else:
+        try:
+            value["primary_sources"] = list_primary_source_configs()
+        except Exception:
+            return
+    config.value = value
+    config.save(update_fields=["value", "updated_at"])
+
+
 @extend_schema_view(
     list=extend_schema(
         tags=["data-collector"],
@@ -81,6 +112,7 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 serializer.save(user=self.request.user)
                 config = serializer.instance
+                _sync_ai_pricehub_collect_config(config)
                 sync_config_to_beat(config)
         except IntegrityError as e:
             err_str = str(e).lower()
@@ -100,6 +132,7 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
     def perform_update(self, serializer):
         with transaction.atomic():
             serializer.save()
+            _sync_ai_pricehub_collect_config(serializer.instance)
             sync_config_to_beat(serializer.instance)
 
     def perform_destroy(self, instance):
@@ -306,6 +339,45 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
                 {"detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+    @extend_schema(
+        tags=["data-collector"],
+        summary="List active global LLM options for AI Price Hub",
+        description=(
+            "Return active global LLM configs as safe select options "
+            "(uuid/label/provider/model), used by AI Price Hub collector setup."
+        ),
+    )
+    @action(detail=False, methods=["get"], url_path="llm-options")
+    def llm_options(self, request):
+        try:
+            from agentcore_metering.adapters.django.models import LLMConfig
+        except Exception:
+            return Response({"options": []}, status=status.HTTP_200_OK)
+
+        rows = (
+            LLMConfig.objects.filter(
+                scope=LLMConfig.Scope.GLOBAL,
+                model_type=LLMConfig.MODEL_TYPE_LLM,
+                is_active=True,
+            )
+            .order_by("created_at", "id")
+        )
+        options = []
+        for row in rows:
+            cfg = row.config if isinstance(row.config, dict) else {}
+            model = (cfg.get("model") or row.provider or str(row.uuid)).strip()
+            provider = (row.provider or "").strip()
+            label = f"{model} ({provider})" if provider else model
+            options.append(
+                {
+                    "uuid": str(row.uuid),
+                    "label": label,
+                    "provider": provider,
+                    "model": model,
+                }
+            )
+        return Response({"options": options}, status=status.HTTP_200_OK)
 
     @extend_schema(
         tags=["data-collector"],

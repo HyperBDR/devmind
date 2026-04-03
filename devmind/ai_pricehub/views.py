@@ -17,28 +17,30 @@ from .services import (
     create_primary_source_config,
     get_primary_source_config,
     list_primary_source_configs,
+    sync_primary_source_configs_to_collector,
+    update_primary_source_config,
 )
 from .tasks import enqueue_pricing_sync
 
 
 def serialize_primary_source_config(config):
     parser_llm = get_llm_config_reference(
-        str(config.parser_llm_config_uuid) if config.parser_llm_config_uuid else ""
+        str(config.get("parser_llm_config_uuid") or "")
     )
     return {
-        "id": config.id,
-        "vendor_slug": config.vendor_slug,
-        "platform_slug": config.platform_slug,
-        "vendor_name": config.vendor_name,
-        "region": config.region,
-        "endpoint_url": config.endpoint_url,
+        "id": config["id"],
+        "vendor_slug": config["vendor_slug"],
+        "platform_slug": config["platform_slug"],
+        "vendor_name": config["vendor_name"],
+        "region": config["region"],
+        "endpoint_url": config["endpoint_url"],
         "parser_llm_config_uuid": parser_llm["uuid"],
         "parser_llm_config_label": parser_llm["label"],
-        "currency": config.currency,
-        "points_per_currency_unit": config.points_per_currency_unit,
-        "is_enabled": config.is_enabled,
-        "notes": config.notes,
-        "updated_at": config.updated_at,
+        "currency": config["currency"],
+        "points_per_currency_unit": config["points_per_currency_unit"],
+        "is_enabled": config["is_enabled"],
+        "notes": config["notes"],
+        "updated_at": config.get("updated_at"),
     }
 
 
@@ -123,7 +125,13 @@ class PrimarySourceConfigAPIView(APIView):
         responses={200: {"type": "object"}},
     )
     def get(self, request):
-        payload = [serialize_primary_source_config(config) for config in list_primary_source_configs()]
+        try:
+            source_configs = sync_primary_source_configs_to_collector(
+                owner_user=request.user,
+            )
+        except (OperationalError, ProgrammingError):
+            source_configs = list_primary_source_configs()
+        payload = [serialize_primary_source_config(config) for config in source_configs]
         PriceSourceConfigSerializer(payload, many=True).data
         return Response(payload)
 
@@ -137,7 +145,10 @@ class PrimarySourceConfigAPIView(APIView):
         serializer = PriceSourceConfigSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
-            config = create_primary_source_config(serializer.validated_data)
+            config = create_primary_source_config(
+                serializer.validated_data,
+                owner_user=request.user,
+            )
         except (OperationalError, ProgrammingError):
             return Response(
                 {
@@ -163,7 +174,7 @@ class PrimarySourceConfigDetailAPIView(APIView):
     )
     def patch(self, request, config_id: int):
         config = get_primary_source_config(config_id)
-        if config is None or config.pk is None:
+        if config is None:
             return Response(
                 {
                     "detail": (
@@ -176,9 +187,11 @@ class PrimarySourceConfigDetailAPIView(APIView):
         serializer = PriceSourceConfigSerializer(data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         try:
-            for field, value in serializer.validated_data.items():
-                setattr(config, field, value)
-            config.save()
+            updated = update_primary_source_config(
+                config_id,
+                serializer.validated_data,
+                owner_user=request.user,
+            )
         except (OperationalError, ProgrammingError):
             return Response(
                 {
@@ -189,4 +202,14 @@ class PrimarySourceConfigDetailAPIView(APIView):
                 },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        return Response(serialize_primary_source_config(config))
+        if updated is None:
+            return Response(
+                {
+                    "detail": (
+                        "Primary pricing source config is not available yet. "
+                        "Please run database migrations first."
+                    )
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(serialize_primary_source_config(updated))

@@ -25,6 +25,7 @@ class PricingHarnessAgent:
         vendor: dict[str, Any],
         *,
         parser_llm_config_uuid: str | None = None,
+        strict_api_only: bool = True,
     ) -> dict[str, Any]:
         acquisition = vendor.get("acquisition") or {}
         strategy = str(acquisition.get("method") or "page").strip().lower()
@@ -35,7 +36,7 @@ class PricingHarnessAgent:
         )
         if self._catalog_has_models(deterministic_catalog):
             return deterministic_catalog
-        if self._is_api_only_strategy(strategy):
+        if self._is_api_only_strategy(strategy) and strict_api_only:
             raise ValueError(
                 self._build_api_only_error_message(
                     vendor=vendor,

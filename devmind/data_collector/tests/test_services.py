@@ -15,6 +15,7 @@ from data_collector.services.beat_sync import (
     unsync_config_from_beat,
 )
 from data_collector.services.providers import get_provider
+from data_collector.services.providers.ai_pricehub import AIPriceHubProvider
 from data_collector.services.providers.feishu import FeishuProvider
 from data_collector.services.providers.jira import JiraProvider
 from data_collector.services.providers.license import LicenseProvider
@@ -200,6 +201,9 @@ class TestGetProvider:
 
     def test_get_provider_license_returns_license_provider_class(self):
         assert get_provider("license") is LicenseProvider
+
+    def test_get_provider_ai_pricehub_returns_provider_class(self):
+        assert get_provider("ai_pricehub") is AIPriceHubProvider
 
     def test_get_provider_unknown_returns_none(self):
         assert get_provider("unknown_platform") is None
