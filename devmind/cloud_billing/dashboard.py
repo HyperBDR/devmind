@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from calendar import monthrange
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
@@ -176,6 +177,25 @@ def _recent_spend_from_snapshots(account_rows, now) -> float:
     return spend
 
 
+def _recent_collected_days_from_snapshots(account_rows, now, local_tz) -> int:
+    if not account_rows:
+        return 0
+
+    recent_window_start = (now - timedelta(days=RECENT_BURN_WINDOW_DAYS - 1)).date()
+    today = now.date()
+    collected_days = set()
+
+    for row in account_rows:
+        collected_at = getattr(row, 'collected_at', None)
+        if collected_at is None:
+            continue
+        row_day = collected_at.astimezone(local_tz).date()
+        if recent_window_start <= row_day <= today:
+            collected_days.add(row_day)
+
+    return len(collected_days)
+
+
 def _daily_rows_for_current_month(local_tz):
     now = timezone.now().astimezone(local_tz)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -246,29 +266,32 @@ def _latest_billings():
     return latest
 
 
-def _build_summary(latest_billings, daily_rows, local_tz, now):
-    days_in_month = max(now.day, 1)
-    days_total = 30
-    current_consumed = sum(_to_float(item.total_cost) for item in latest_billings)
-    daily_average = current_consumed / days_in_month if days_in_month else 0.0
-    estimated_total = daily_average * days_total
+def _build_summary(latest_billings, daily_rows, local_tz, now, usd_to_cny_rate: float):
+    collected_dates = set()
 
     trend_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
     peak_cost = 0.0
     peak_date = now.date().isoformat()
     for row in daily_rows:
         local_collected_at = row.collected_at.astimezone(local_tz)
+        if local_collected_at.date() <= now.date():
+            collected_dates.add(local_collected_at.date())
         date_key = local_collected_at.strftime('%m-%d')
         currency_key = 'cny' if str(row.currency).upper() == 'CNY' else 'usd'
         trend_map[date_key][currency_key] += _hourly_cost_value(row)
 
+    days_total = monthrange(now.year, now.month)[1]
+    consumed_total = 0.0
     trend = []
-    for index in range(1, 32):
+    for index in range(1, days_total + 1):
         date_key = f'{now.month:02d}-{index:02d}'
         cny_value = round(trend_map[date_key]['cny'], 2)
         usd_value = round(trend_map[date_key]['usd'], 2)
-        total = round(cny_value + usd_value, 2)
-        if total > peak_cost:
+        total = round(cny_value + usd_value * usd_to_cny_rate, 2)
+        row_date = now.date().replace(day=index)
+        if row_date <= now.date():
+            consumed_total += total
+        if row_date <= now.date() and total > peak_cost:
             peak_cost = total
             peak_date = f'{now.year}-{date_key}'
         trend.append(
@@ -280,28 +303,44 @@ def _build_summary(latest_billings, daily_rows, local_tz, now):
             }
         )
 
+    collected_days = len(collected_dates)
+    daily_average = consumed_total / collected_days if collected_days else 0.0
+    remaining_days = max(days_total - now.day, 0)
+    estimated_total = consumed_total + daily_average * remaining_days
+
     return {
         'estimated_total': round(estimated_total, 2),
-        'current_consumed': round(current_consumed, 2),
+        'current_consumed': round(consumed_total, 2),
         'daily_average': round(daily_average, 2),
+        'collected_days': collected_days,
         'peak_cost': round(peak_cost, 2),
         'peak_date': peak_date,
         'trend': trend,
     }
 
 
-def _trend_point(label: str, cny_value: float, usd_value: float) -> dict[str, object]:
+def _trend_point(
+    label: str, cny_value: float, usd_value: float, usd_to_cny_rate: float
+) -> dict[str, object]:
     cny = round(cny_value, 2)
     usd = round(usd_value, 2)
     return {
         'date': label,
         'cny': cny,
         'usd': usd,
-        'total': round(cny + usd, 2),
+        'total': round(cny + usd * usd_to_cny_rate, 2),
     }
 
 
-def _build_trend_ranges(month_rows, year_rows, local_tz, now):
+def _build_trend_ranges(
+    month_rows,
+    recent_rows,
+    year_rows,
+    local_tz,
+    now,
+    usd_to_cny_rate: float | None = None,
+):
+    usd_to_cny_rate = float(usd_to_cny_rate or CNY_RATE)
 
     today_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
     for row in month_rows:
@@ -316,7 +355,12 @@ def _build_trend_ranges(month_rows, year_rows, local_tz, now):
     for hour in range(24):
         label = f'{hour:02d}:00'
         today.append(
-            _trend_point(label, today_map[label]['cny'], today_map[label]['usd'])
+            _trend_point(
+                label,
+                today_map[label]['cny'],
+                today_map[label]['usd'],
+                usd_to_cny_rate,
+            )
         )
 
     week_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
@@ -334,7 +378,38 @@ def _build_trend_ranges(month_rows, year_rows, local_tz, now):
     for offset in range(7):
         day = week_start + timedelta(days=offset)
         label = day.strftime('%m-%d')
-        week.append(_trend_point(label, week_map[label]['cny'], week_map[label]['usd']))
+        week.append(
+            _trend_point(
+                label,
+                week_map[label]['cny'],
+                week_map[label]['usd'],
+                usd_to_cny_rate,
+            )
+        )
+
+    recent_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
+    recent_start = now.date() - timedelta(days=29)
+    for row in recent_rows:
+        local_collected_at = row.collected_at.astimezone(local_tz)
+        row_date = local_collected_at.date()
+        if row_date < recent_start or row_date > now.date():
+            continue
+        label = local_collected_at.strftime('%m-%d')
+        currency_key = 'cny' if str(row.currency).upper() == 'CNY' else 'usd'
+        recent_map[label][currency_key] += _hourly_cost_value(row)
+
+    thirty_days = []
+    for offset in range(30):
+        day = recent_start + timedelta(days=offset)
+        label = day.strftime('%m-%d')
+        thirty_days.append(
+            _trend_point(
+                label,
+                recent_map[label]['cny'],
+                recent_map[label]['usd'],
+                usd_to_cny_rate,
+            )
+        )
 
     month_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
     for row in month_rows:
@@ -343,10 +418,16 @@ def _build_trend_ranges(month_rows, year_rows, local_tz, now):
         month_map[label][currency_key] += _hourly_cost_value(row)
 
     month = []
-    for index in range(1, 32):
+    month_days = monthrange(now.year, now.month)[1]
+    for index in range(1, month_days + 1):
         label = f'{now.month:02d}-{index:02d}'
         month.append(
-            _trend_point(label, month_map[label]['cny'], month_map[label]['usd'])
+            _trend_point(
+                label,
+                month_map[label]['cny'],
+                month_map[label]['usd'],
+                usd_to_cny_rate,
+            )
         )
 
     year_map = defaultdict(lambda: {'cny': 0.0, 'usd': 0.0})
@@ -359,12 +440,18 @@ def _build_trend_ranges(month_rows, year_rows, local_tz, now):
     for month_index in range(1, 13):
         label = f'{now.year}-{month_index:02d}'
         year.append(
-            _trend_point(label, year_map[label]['cny'], year_map[label]['usd'])
+            _trend_point(
+                label,
+                year_map[label]['cny'],
+                year_map[label]['usd'],
+                usd_to_cny_rate,
+            )
         )
 
     return {
         'today': today,
         'week': week,
+        'thirtyDays': thirty_days,
         'month': month,
         'year': year,
     }
@@ -733,9 +820,14 @@ def _build_accounts(
             recent_rows_by_account[account_key],
             now,
         )
+        recent_collected_days = _recent_collected_days_from_snapshots(
+            recent_rows_by_account[account_key],
+            now,
+            local_tz,
+        )
         daily_burn = (
-            recent_spend / RECENT_BURN_WINDOW_DAYS
-            if recent_spend
+            recent_spend / recent_collected_days
+            if recent_spend and recent_collected_days > 0
             else 0.0
         )
         balance_info = get_balance_support_info(provider)
@@ -760,7 +852,9 @@ def _build_accounts(
             account_trend.append(
                 {
                     'date': date_key,
-                    'value': round(max(display_funds - daily_burn * (9 - index), 0), 2),
+                    # Back-cast from today's available funds:
+                    # older points should be higher when daily burn is positive.
+                    'value': round(max(display_funds + daily_burn * (9 - index), 0), 2),
                 }
             )
 
@@ -779,6 +873,7 @@ def _build_accounts(
                     else 'Cloud'
                 ),
                 'cost': round(_to_float(billing.total_cost), 2),
+                'cost_currency': str(getattr(billing, 'currency', '') or 'CNY').upper(),
                 'percentage': round(_to_float(billing.total_cost) / total_cost * 100, 1),
                 'change': round(daily_burn, 1),
                 'risk': _risk_for_days(days_remaining),
@@ -921,8 +1016,21 @@ def build_dashboard_overview(timezone_name: str | None = None) -> dict[str, obje
         local_tz=local_tz,
         now=now,
     )
-    summary = _build_summary(latest_billings, daily_rows, local_tz, now)
-    summary['trend_ranges'] = _build_trend_ranges(daily_rows, year_rows, local_tz, now)
+    summary = _build_summary(
+        latest_billings,
+        daily_rows,
+        local_tz,
+        now,
+        float(exchange_rate_info.get('exchange_rate') or CNY_RATE),
+    )
+    summary['trend_ranges'] = _build_trend_ranges(
+        daily_rows,
+        recent_rows,
+        year_rows,
+        local_tz,
+        now,
+        float(exchange_rate_info.get('exchange_rate') or CNY_RATE),
+    )
     overview = {
         'summary': summary,
         'currency_breakdown': _build_currency_breakdown(
