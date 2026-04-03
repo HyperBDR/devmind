@@ -439,6 +439,10 @@ msgid "Notes"
 msgstr "备注"
 
 #: cloud_billing/tasks.py
+msgid "Tags"
+msgstr "标签"
+
+#: cloud_billing/tasks.py
 msgid "Current balance"
 msgstr "当前余额"
 

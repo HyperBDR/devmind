@@ -11,7 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from ..dashboard import build_dashboard_overview
+from ..dashboard import CNY_RATE, _build_exchange_rate_info, build_dashboard_overview
 from ..models import BillingData
 from ..serializers import (
     BillingDataListSerializer,
@@ -167,6 +167,8 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         count = queryset.count()
+        exchange_rate_info = _build_exchange_rate_info()
+        exchange_rate = float(exchange_rate_info.get('exchange_rate') or CNY_RATE)
 
         # Determine if grouping by year or month
         # If start_period and end_period span a full year
@@ -276,6 +278,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
             'cost_by_period': cost_by_period,
             'cost_by_service': cost_by_service,
             'by_provider': by_provider,
+            'exchange_rate': exchange_rate,
         })
 
     @extend_schema(

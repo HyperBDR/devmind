@@ -124,7 +124,7 @@ class AlibabaCloud(BaseCloudProvider):
         if region and region.startswith("cn-"):
             return BSS_ENDPOINT_CHINA
         if region:
-            return f"bssopenapi.{region}.aliyuncs.com"
+            return f"business.{region}.aliyuncs.com"
         return BSS_OPENAPI_ENDPOINT
 
     @property
