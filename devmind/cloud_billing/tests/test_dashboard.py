@@ -617,14 +617,18 @@ class DashboardTimezoneTests(SimpleTestCase):
         ranges = _build_trend_ranges(
             month_rows,
             month_rows,
+            month_rows,
             los_angeles,
             mock_now.return_value.astimezone(los_angeles),
         )
 
         today_points = {item['date']: item for item in ranges['today']}
         week_points = {item['date']: item for item in ranges['week']}
+        recent_points = {item['date']: item for item in ranges['thirtyDays']}
 
         self.assertEqual(today_points['17:00']['usd'], 12.5)
         self.assertEqual(today_points['17:00']['cny'], 0.0)
         self.assertEqual(week_points['03-24']['cny'], 88.0)
         self.assertEqual(week_points['03-25']['usd'], 12.5)
+        self.assertEqual(recent_points['03-24']['cny'], 88.0)
+        self.assertEqual(recent_points['03-25']['usd'], 12.5)
