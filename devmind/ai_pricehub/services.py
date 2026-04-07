@@ -1,9 +1,9 @@
 import logging
 import re
 from typing import Any
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import requests
-from django.db import transaction
 from django.utils import timezone
 
 from .config_loader import config_loader
@@ -127,7 +127,6 @@ class AIPriceHubService:
             "comparisons": comparisons,
         }
 
-    @transaction.atomic
     def sync_configured_sources(
         self,
         platform_slug: str | None = None,
@@ -280,7 +279,7 @@ class AIPriceHubService:
         response = requests.get(url, timeout=30)
         response.raise_for_status()
         payload = response.json()
-        records = payload.get("result", {}).get("records", [])
+        records = self._extract_agione_records(payload)
         logger.info(
             "[ai_pricehub] primary source response platform=%s url=%s records=%s",
             vendor.get("platform_slug") or vendor.get("slug"),
@@ -292,22 +291,30 @@ class AIPriceHubService:
             model_name = self._derive_agione_model_name(record)
             if not model_name:
                 continue
+            source_vendors = self._resolve_agione_source_vendors(
+                record,
+                source_url=url,
+            )
             models.append(
                 {
                     "model_name": model_name,
                     "aliases": self._build_agione_aliases(record, model_name),
                     "family": self._derive_agione_family(record),
-                    "input_price_per_million": self._convert_agione_points(
-                        record.get("promptPoints"),
-                        vendor,
+                    "input_price_per_million": self._extract_agione_price(
+                        record,
+                        direct_key="minInputPrice",
+                        points_key="promptPoints",
+                        vendor=vendor,
                     ),
-                    "output_price_per_million": self._convert_agione_points(
-                        record.get("completionPoints"),
-                        vendor,
+                    "output_price_per_million": self._extract_agione_price(
+                        record,
+                        direct_key="minOutputPrice",
+                        points_key="completionPoints",
+                        vendor=vendor,
                     ),
                     "currency": vendor.get("currency", "CNY"),
                     "notes": self._build_agione_notes(record, vendor),
-                    "source_vendors": self._extract_source_vendors(record),
+                    "source_vendors": source_vendors,
                     "is_aggregate": bool(record.get("isAggregate")),
                 }
             )
@@ -316,6 +323,70 @@ class AIPriceHubService:
             "raw_payload": {"url": url, "record_count": len(records)},
             "source_type": "agione_model_list",
         }
+
+    def _resolve_agione_source_vendors(
+        self,
+        record: dict[str, Any],
+        *,
+        source_url: str,
+    ) -> list[str]:
+        detail_records = self._fetch_agione_model_detail_records(
+            source_url=source_url,
+            meta_model_id=record.get("id"),
+        )
+        if detail_records:
+            detail_vendors = self._extract_source_vendors_from_detail_records(detail_records)
+            if detail_vendors:
+                return detail_vendors
+        return self._extract_source_vendors(record)
+
+    def _fetch_agione_model_detail_records(
+        self,
+        *,
+        source_url: str,
+        meta_model_id: Any,
+    ) -> list[dict[str, Any]]:
+        if not meta_model_id:
+            return []
+        detail_url = self._build_agione_model_detail_url(
+            source_url=source_url,
+            meta_model_id=meta_model_id,
+        )
+        try:
+            response = requests.get(detail_url, timeout=15)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logger.warning(
+                "[ai_pricehub] failed to fetch agione model detail meta_model_id=%s url=%s error=%s",
+                meta_model_id,
+                detail_url,
+                exc,
+            )
+            return []
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return []
+        records = result.get("records")
+        if not isinstance(records, list):
+            return []
+        return [item for item in records if isinstance(item, dict)]
+
+    @staticmethod
+    def _build_agione_model_detail_url(*, source_url: str, meta_model_id: Any) -> str:
+        parsed = urlsplit(source_url)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or "agione.cc"
+        query = urlencode({"metaModelId": str(meta_model_id)})
+        return urlunsplit(
+            (
+                scheme,
+                netloc,
+                "/hyperone/xapi/models/square/model-list",
+                query,
+                "",
+            )
+        )
 
     def _fetch_comparison_vendor_catalog(
         self,
@@ -698,6 +769,8 @@ class AIPriceHubService:
         canonical_name = AIPriceHubService._clean_agione_model_name(canonical_name)
         lowered = canonical_name.lower()
         aliases = {
+            "glm 4.7": "GLM-4.7",
+            "glm-4.7": "GLM-4.7",
             "moonshot-kimi-k2-instruct": "Kimi-K2-Instruct",
             "kimi-k2-instruct": "Kimi-K2-Instruct",
             "deepseek r1": "DeepSeek-R1",
@@ -709,8 +782,11 @@ class AIPriceHubService:
 
     @staticmethod
     def _build_description(item: dict[str, Any]) -> str | None:
-        notes = [item.get("notes"), item.get("description")]
-        parts = [part.strip() for part in notes if isinstance(part, str) and part.strip()]
+        notes = [
+            AIPriceHubService._extract_agione_text(item.get("notes")),
+            AIPriceHubService._extract_agione_text(item.get("description")),
+        ]
+        parts = [part.strip() for part in notes if part and part.strip()]
         return " ".join(parts) if parts else None
 
     @staticmethod
@@ -718,21 +794,63 @@ class AIPriceHubService:
         for candidate in AIPriceHubService._agione_text_candidates(record):
             extracted = AIPriceHubService._extract_model_name_from_text(candidate)
             if extracted:
-                return extracted
+                return AIPriceHubService._normalize_model_name(extracted)
 
-        name = AIPriceHubService._clean_agione_model_name((record.get("name") or "").strip())
+        name = AIPriceHubService._clean_agione_model_name(
+            AIPriceHubService._extract_agione_text(record.get("name"))
+        )
         if AIPriceHubService._looks_like_clean_model_name(name):
-            return name
+            return AIPriceHubService._normalize_model_name(name)
         return ""
 
     @staticmethod
     def _agione_text_candidates(record: dict[str, Any]) -> list[str]:
         candidates = []
-        for key in ["info", "information", "description", "remark", "summary"]:
-            value = record.get(key)
-            if isinstance(value, str) and value.strip():
-                candidates.append(value.strip())
+        for key in [
+            "displayName",
+            "name",
+            "metaModelUid",
+            "info",
+            "information",
+            "description",
+            "remark",
+            "summary",
+        ]:
+            value = AIPriceHubService._extract_agione_text(record.get(key))
+            if value and value not in candidates:
+                candidates.append(value)
         return candidates
+
+    @staticmethod
+    def _extract_agione_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in (
+                "en-US",
+                "en_US",
+                "en",
+                "zh-CN",
+                "zh_CN",
+                "zh",
+                "name",
+                "value",
+                "text",
+                "label",
+            ):
+                extracted = AIPriceHubService._extract_agione_text(value.get(key))
+                if extracted:
+                    return extracted
+            for nested in value.values():
+                extracted = AIPriceHubService._extract_agione_text(nested)
+                if extracted:
+                    return extracted
+        if isinstance(value, list):
+            for item in value:
+                extracted = AIPriceHubService._extract_agione_text(item)
+                if extracted:
+                    return extracted
+        return ""
 
     @staticmethod
     def _extract_model_name_from_text(text: str) -> str:
@@ -823,9 +941,12 @@ class AIPriceHubService:
     @staticmethod
     def _build_agione_aliases(record: dict[str, Any], model_name: str) -> list[str]:
         aliases = [model_name]
-        raw_name = (record.get("name") or "").strip()
-        description = record.get("description") or ""
-        for value in [raw_name, description]:
+        raw_name = AIPriceHubService._extract_agione_text(record.get("name"))
+        display_name = AIPriceHubService._extract_agione_text(record.get("displayName"))
+        meta_model_uid = AIPriceHubService._extract_agione_text(record.get("metaModelUid"))
+        meta_model_name = meta_model_uid.rsplit("/", 1)[-1] if meta_model_uid else ""
+        description = AIPriceHubService._extract_agione_text(record.get("description"))
+        for value in [display_name, raw_name, meta_model_name, meta_model_uid, description]:
             if value and value not in aliases:
                 aliases.append(value)
         return aliases
@@ -847,12 +968,75 @@ class AIPriceHubService:
                 flags=re.IGNORECASE,
             )
             if not fallback_match:
-                return []
-            vendor_text = fallback_match.group(1)
+                vendor_text = ""
+            else:
+                vendor_text = fallback_match.group(1)
         vendors = []
-        for item in re.split(r"/|,|&", vendor_text):
-            cleaned = item.strip()
-            if cleaned and cleaned not in vendors:
+        if vendor_text:
+            for item in re.split(r"/|,|&", vendor_text):
+                cleaned = item.strip()
+                if cleaned and cleaned not in vendors:
+                    vendors.append(cleaned)
+        if vendors:
+            return vendors
+        return AIPriceHubService._expand_agione_vendor_candidates(
+            [
+                AIPriceHubService._extract_agione_text(record.get("authorDisplayName")),
+                AIPriceHubService._extract_agione_text(record.get("authorUid")),
+                AIPriceHubService._extract_agione_text(record.get("metaModelUid")).split("/", 1)[0],
+            ]
+        )
+
+    @staticmethod
+    def _extract_source_vendors_from_detail_records(records: list[dict[str, Any]]) -> list[str]:
+        candidates: list[str] = []
+        for record in records:
+            if record.get("isAggregate"):
+                continue
+            provider_name = AIPriceHubService._extract_agione_text(record.get("providerDisplayName"))
+            bracket_match = re.match(r"^\[([^\]]+)\]", AIPriceHubService._extract_agione_text(record.get("name")))
+            bracket_name = bracket_match.group(1).strip() if bracket_match else ""
+            for value in [bracket_name, provider_name]:
+                if value and value not in candidates:
+                    candidates.append(value)
+        return AIPriceHubService._expand_agione_vendor_candidates(candidates)
+
+    @staticmethod
+    def _expand_agione_vendor_candidates(values: list[str]) -> list[str]:
+        vendor_aliases = {
+            "zhipu": ["Zhipu AI", "Zhipu", "Z.AI", "zhipu"],
+            "deepseek": ["DeepSeek", "deepseek"],
+            "aliyun": ["Aliyun", "Alibaba Cloud", "aliyun"],
+            "volcengine": ["VolcEngine", "Volc Engine", "火山引擎", "volcengine"],
+            "baidu": ["Baidu Qianfan", "Baidu", "Qianfan", "百度千帆", "baidu"],
+        }
+        provider_map = {
+            "zai": "zhipu",
+            "zaiquicker": "zhipu",
+            "zhipu": "zhipu",
+            "deepseek": "deepseek",
+            "aliyun": "aliyun",
+            "alibabacloud": "aliyun",
+            "alibabachina": "aliyun",
+            "qwen": "aliyun",
+            "volcengine": "volcengine",
+            "doubao": "volcengine",
+            "huosanyinqing": "volcengine",
+            "baidu": "baidu",
+            "baiduqianfan": "baidu",
+            "qianfan": "baidu",
+        }
+        vendors: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if not cleaned:
+                continue
+            provider_slug = provider_map.get(AIPriceHubService._canonical_vendor_key(cleaned, cleaned))
+            if provider_slug:
+                for alias in vendor_aliases[provider_slug]:
+                    if alias not in vendors:
+                        vendors.append(alias)
+            if cleaned not in vendors:
                 vendors.append(cleaned)
         return vendors
 
@@ -863,6 +1047,11 @@ class AIPriceHubService:
             name = tag_list[0].get("translations", {}).get("en-US", {}).get("name")
             if name:
                 return name.lower().replace(" ", "-")
+        series = AIPriceHubService._extract_agione_text(record.get("series"))
+        if series:
+            normalized = re.sub(r"[\s\u2010-\u2015\u2212]+", "-", series).strip("-")
+            if normalized:
+                return normalized.lower()
         return None
 
     @staticmethod
@@ -879,17 +1068,33 @@ class AIPriceHubService:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _extract_agione_price(
+        record: dict[str, Any],
+        direct_key: str,
+        points_key: str,
+        vendor: dict[str, Any],
+    ) -> float | None:
+        direct_value = record.get(direct_key)
+        if direct_value is not None:
+            return AIPriceHubService._convert_agione_points(direct_value, vendor)
+        return AIPriceHubService._convert_agione_points(record.get(points_key), vendor)
+
     def _build_agione_notes(self, record: dict[str, Any], vendor: dict[str, Any]) -> str | None:
-        description = (record.get("description") or "").strip()
+        description = self._extract_agione_text(record.get("description"))
         prompt_points = record.get("promptPoints")
         completion_points = record.get("completionPoints")
-        points_per_currency_unit = float(
-            vendor.get("points_per_currency_unit") or 10.0
-        )
+        if prompt_points is None:
+            prompt_points = record.get("minInputPrice")
+        if completion_points is None:
+            completion_points = record.get("minOutputPrice")
         notes = []
         if description:
             notes.append(description)
         if prompt_points is not None or completion_points is not None:
+            points_per_currency_unit = float(
+                vendor.get("points_per_currency_unit") or 10.0
+            )
             notes.append(
                 "AGIOne pricing converted from points using "
                 f"{points_per_currency_unit:g} points = 1 "
@@ -897,6 +1102,17 @@ class AIPriceHubService:
                 f" (input_points={prompt_points}, output_points={completion_points})."
             )
         return " ".join(notes) if notes else None
+
+    @staticmethod
+    def _extract_agione_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        result = payload.get("result")
+        if isinstance(result, list):
+            return [item for item in result if isinstance(item, dict)]
+        if isinstance(result, dict):
+            records = result.get("records")
+            if isinstance(records, list):
+                return [item for item in records if isinstance(item, dict)]
+        return []
 
     @staticmethod
     def _resolve_primary_platform_slug(

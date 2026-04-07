@@ -6,6 +6,7 @@ from data_collector.models import CollectorConfig
 from ai_pricehub.source_config_store import (
     AI_PRICEHUB_CONFIG_KEY,
     AI_PRICEHUB_PLATFORM,
+    AGIONE_MODELS_ENDPOINT_URL,
     create_primary_source_config,
     get_primary_source_config,
     get_primary_vendor_configs,
@@ -120,3 +121,109 @@ def test_sync_primary_sources_to_collector_writes_collector_config():
     )
     assert isinstance((row.value or {}).get("primary_sources"), list)
     assert len((row.value or {}).get("primary_sources") or []) >= 1
+
+
+@pytest.mark.django_db
+def test_list_primary_source_configs_normalizes_agione_homepage_endpoint():
+    User = get_user_model()
+    user = User.objects.create_user(username="admin-pricehub-homepage-endpoint")
+    CollectorConfig.objects.filter(platform=AI_PRICEHUB_PLATFORM).delete()
+
+    create_primary_source_config(
+        {
+            "vendor_slug": "agione",
+            "platform_slug": "agione",
+            "vendor_name": "AGIOne",
+            "endpoint_url": "https://agione.cc/",
+            "currency": "CNY",
+            "points_per_currency_unit": 10.0,
+            "is_enabled": True,
+            "notes": "",
+        },
+        owner_user=user,
+    )
+
+    sources = list_primary_source_configs()
+
+    assert sources[0]["endpoint_url"] == AGIONE_MODELS_ENDPOINT_URL
+
+
+@pytest.mark.django_db
+def test_list_primary_source_configs_normalizes_legacy_agione_models_endpoint():
+    User = get_user_model()
+    user = User.objects.create_user(username="admin-pricehub-legacy-endpoint")
+    CollectorConfig.objects.filter(platform=AI_PRICEHUB_PLATFORM).delete()
+
+    create_primary_source_config(
+        {
+            "vendor_slug": "agione",
+            "platform_slug": "agione",
+            "vendor_name": "AGIOne",
+            "endpoint_url": "https://zh.agione.co/hyperone/xapi/models/list",
+            "currency": "CNY",
+            "points_per_currency_unit": 10.0,
+            "is_enabled": True,
+            "notes": "",
+        },
+        owner_user=user,
+    )
+
+    vendors = get_primary_vendor_configs()
+
+    assert vendors[0]["models_source"]["url"] == AGIONE_MODELS_ENDPOINT_URL
+
+
+@pytest.mark.django_db
+def test_create_primary_source_config_does_not_overwrite_another_users_config():
+    User = get_user_model()
+    owner_a = User.objects.create_user(username="admin-pricehub-owner-a")
+    owner_b = User.objects.create_user(username="admin-pricehub-owner-b")
+    CollectorConfig.objects.filter(platform=AI_PRICEHUB_PLATFORM).delete()
+
+    CollectorConfig.objects.create(
+        user=owner_a,
+        platform=AI_PRICEHUB_PLATFORM,
+        key="owner-a-config",
+        value={
+            "primary_sources": [
+                {
+                    "id": 1,
+                    "vendor_slug": "agione",
+                    "platform_slug": "agione",
+                    "vendor_name": "Owner A",
+                    "region": "",
+                    "endpoint_url": "https://example.com/a",
+                    "parser_llm_config_uuid": "",
+                    "currency": "CNY",
+                    "points_per_currency_unit": 10.0,
+                    "is_enabled": True,
+                    "notes": "",
+                }
+            ]
+        },
+        is_enabled=True,
+    )
+
+    created = create_primary_source_config(
+        {
+            "vendor_slug": "agione",
+            "platform_slug": "agione-cn",
+            "vendor_name": "Owner B",
+            "endpoint_url": "https://example.com/b",
+            "currency": "CNY",
+            "points_per_currency_unit": 10.0,
+            "is_enabled": True,
+            "notes": "",
+        },
+        owner_user=owner_b,
+    )
+
+    row_a = CollectorConfig.objects.get(user=owner_a, platform=AI_PRICEHUB_PLATFORM)
+    row_b = CollectorConfig.objects.get(user=owner_b, platform=AI_PRICEHUB_PLATFORM)
+
+    assert (row_a.value.get("primary_sources") or [])[0]["vendor_name"] == "Owner A"
+    assert row_b.key == AI_PRICEHUB_CONFIG_KEY
+    assert any(
+        item.get("vendor_name") == created["vendor_name"]
+        for item in (row_b.value.get("primary_sources") or [])
+    )

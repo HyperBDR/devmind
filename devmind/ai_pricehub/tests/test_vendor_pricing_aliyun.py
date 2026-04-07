@@ -76,6 +76,26 @@ def test_resolve_target_models_uses_primary_model_queries():
 
 
 @pytest.mark.unit
+def test_resolve_target_models_filters_out_description_like_queries():
+    vendor = {
+        "_primary_model_queries": [
+            "GLM-4.7",
+            "z-ai/glm-4.7",
+            "A professional model focused on programming and agent capabilities.",
+            "qwen/qwen-plus",
+        ]
+    }
+
+    resolved = aliyun_pricing._resolve_target_models(vendor)  # noqa: SLF001
+
+    assert resolved == [
+        "glm-4.7",
+        "z-ai/glm-4.7",
+        "qwen/qwen-plus",
+    ]
+
+
+@pytest.mark.unit
 def test_sync_vendor_catalog_reports_api_only_attempt_state(monkeypatch):
     monkeypatch.setattr(
         aliyun_pricing,
@@ -98,6 +118,143 @@ def test_sync_vendor_catalog_reports_api_only_attempt_state(monkeypatch):
     assert result["raw_payload"]["api_attempted"] is True
     assert result["raw_payload"]["api_used"] is False
     assert result["raw_payload"]["page_fallback_used"] is False
+
+
+@pytest.mark.unit
+def test_sync_vendor_catalog_falls_back_to_public_pricing_page_without_cookie(monkeypatch):
+    monkeypatch.setattr(
+        aliyun_pricing,
+        "_fetch_text",
+        lambda url: "<html>public pricing page</html>",
+    )
+    monkeypatch.setattr(
+        aliyun_pricing,
+        "_extract_models_deterministic",
+        lambda html: [
+            {
+                "model_name": "qwen-plus",
+                "aliases": ["qwen-plus"],
+                "family": "text",
+                "currency": "CNY",
+                "input_price_per_million": 0.8,
+                "output_price_per_million": 2.0,
+                "market_scope": "domestic",
+                "notes": "Aliyun China mainland pricing row for mode default.",
+            }
+        ],
+    )
+
+    result = aliyun_pricing.sync_vendor_catalog(
+        {
+            "_primary_model_queries": ["qwen-plus"],
+            "acquisition": {"method": "api"},
+        }
+    )
+
+    assert result["models"] == [
+        {
+            "model_name": "qwen-plus",
+            "aliases": ["qwen-plus"],
+            "family": "text",
+            "currency": "CNY",
+            "input_price_per_million": 0.8,
+            "output_price_per_million": 2.0,
+            "market_scope": "domestic",
+            "notes": "Aliyun China mainland pricing row for mode default.",
+        }
+    ]
+    assert result["raw_payload"]["api_attempted"] is True
+    assert result["raw_payload"]["api_used"] is False
+    assert result["raw_payload"]["page_fallback_used"] is True
+    assert "Aliyun API cookie is required" in (result["raw_payload"]["api_error"] or "")
+
+
+@pytest.mark.unit
+def test_sync_vendor_catalog_merges_public_page_models_when_api_is_partial(monkeypatch):
+    monkeypatch.setattr(
+        aliyun_pricing,
+        "_query_models_via_api",
+        lambda **kwargs: [{"model_query": "qwen-plus", "payload": {"ok": True}}],
+    )
+    monkeypatch.setattr(
+        aliyun_pricing,
+        "_extract_models_from_api_payloads",
+        lambda **kwargs: [
+            {
+                "model_name": "qwen-plus",
+                "aliases": ["qwen-plus"],
+                "family": "text",
+                "currency": "CNY",
+                "input_price_per_million": 0.8,
+                "output_price_per_million": 2.0,
+                "market_scope": "domestic",
+                "notes": "API domestic price.",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        aliyun_pricing,
+        "_fetch_text",
+        lambda url: "<html>public pricing page</html>",
+    )
+    monkeypatch.setattr(
+        aliyun_pricing,
+        "_extract_models_deterministic",
+        lambda html: [
+            {
+                "model_name": "qwen-plus",
+                "aliases": ["qwen-plus"],
+                "family": "text",
+                "currency": "CNY",
+                "input_price_per_million": 0.8,
+                "output_price_per_million": 2.0,
+                "market_scope": "domestic",
+                "notes": "Page domestic price.",
+            },
+            {
+                "model_name": "qwen2.5-7b-instruct",
+                "aliases": ["qwen2.5-7b-instruct"],
+                "family": "text",
+                "currency": "CNY",
+                "input_price_per_million": 0.5,
+                "output_price_per_million": 1.0,
+                "market_scope": "domestic",
+                "notes": "Page-only domestic price.",
+            },
+        ],
+    )
+
+    result = aliyun_pricing.sync_vendor_catalog(
+        {
+            "_primary_model_queries": ["qwen-plus", "qwen2.5-7b-instruct"],
+            "acquisition": {"method": "api", "cookie": "test-cookie"},
+        }
+    )
+
+    assert result["models"] == [
+        {
+            "model_name": "qwen-plus",
+            "aliases": ["qwen-plus"],
+            "family": "text",
+            "currency": "CNY",
+            "input_price_per_million": 0.8,
+            "output_price_per_million": 2.0,
+            "market_scope": "domestic",
+            "notes": "API domestic price.",
+        },
+        {
+            "model_name": "qwen2.5-7b-instruct",
+            "aliases": ["qwen2.5-7b-instruct"],
+            "family": "text",
+            "currency": "CNY",
+            "input_price_per_million": 0.5,
+            "output_price_per_million": 1.0,
+            "market_scope": "domestic",
+            "notes": "Page-only domestic price.",
+        },
+    ]
+    assert result["raw_payload"]["api_used"] is True
+    assert result["raw_payload"]["page_fallback_used"] is True
 
 
 @pytest.mark.unit

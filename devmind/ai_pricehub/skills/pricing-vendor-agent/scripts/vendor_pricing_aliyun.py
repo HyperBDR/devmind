@@ -65,6 +65,9 @@ def sync_vendor_catalog(vendor: dict[str, Any] | None = None) -> dict[str, Any]:
     api_models: list[dict[str, Any]] = []
     api_error = None
     api_payload_count = 0
+    page_models: list[dict[str, Any]] = []
+    page_error = None
+    page_fallback_used = False
     model_queries = _resolve_target_models(vendor)
     session_config = _resolve_api_session_config(vendor)
     if model_queries:
@@ -84,12 +87,29 @@ def sync_vendor_catalog(vendor: dict[str, Any] | None = None) -> dict[str, Any]:
         api_error = "No Aliyun target models were derived from AGIOne source vendors."
 
     models = api_models
+    pricing_url = _resolve_aliyun_pricing_url(vendor)
+    try:
+        html = _fetch_text(pricing_url)
+        page_models = _filter_models_by_queries(
+            _extract_models_deterministic(html),
+            model_queries,
+        )
+        if page_models:
+            models = _merge_models(
+                primary_items=api_models,
+                supplemental_items=page_models,
+            )
+            page_fallback_used = True
+    except Exception as exc:
+        page_error = str(exc)
     notes_parts = [
-        f"Extracted {len(models)} Aliyun priced models from the Aliyun model center API."
+        f"Extracted {len(models)} Aliyun priced models."
     ]
-    notes_parts.append("Primary extraction path: Aliyun model center API only.")
+    notes_parts.append("Primary extraction path: Aliyun model center API, with public pricing-page fallback.")
     if api_error:
         notes_parts.append(f"api_error={api_error}")
+    if page_error:
+        notes_parts.append(f"page_error={page_error}")
 
     return {
         "vendor": build_vendor_metadata(
@@ -98,13 +118,14 @@ def sync_vendor_catalog(vendor: dict[str, Any] | None = None) -> dict[str, Any]:
             name="Aliyun",
             pricing_url=DEFAULT_VENDOR_URL,
             default_method="api",
-            resolved_pricing_url=session_config["api_url"],
+            resolved_pricing_url=pricing_url if page_fallback_used else session_config["api_url"],
         ),
         "models": models,
         "notes": " ".join(notes_parts),
         "source_type": "vendor_python_skill",
         "raw_payload": {
             "resolved_api_url": session_config["api_url"],
+            "resolved_pricing_url": pricing_url,
             "resolved_region": session_config["region"],
             "api_only": True,
             "api_attempted": bool(model_queries),
@@ -113,7 +134,9 @@ def sync_vendor_catalog(vendor: dict[str, Any] | None = None) -> dict[str, Any]:
             "api_query_models": model_queries,
             "api_payload_count": api_payload_count,
             "api_error": api_error,
-            "page_fallback_used": False,
+            "page_error": page_error,
+            "page_fallback_used": page_fallback_used,
+            "page_model_count": len(page_models),
         },
     }
 
@@ -154,9 +177,43 @@ def _resolve_target_models(vendor: dict[str, Any] | None) -> list[str]:
     queries: list[str] = []
     for value in (vendor or {}).get("_primary_model_queries") or []:
         model_name = str(value or "").strip().lower()
-        if model_name and model_name not in queries:
+        if model_name and _looks_like_target_model_query(model_name) and model_name not in queries:
             queries.append(model_name)
     return queries
+
+
+def _looks_like_target_model_query(value: str) -> bool:
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return False
+    basename = candidate.split("/", 1)[-1]
+    return bool(
+        _derive_family_from_name(candidate) == "text"
+        or _derive_family_from_name(basename) == "text"
+    )
+
+
+def _filter_models_by_queries(
+    models: list[dict[str, Any]],
+    model_queries: list[str],
+) -> list[dict[str, Any]]:
+    if not model_queries:
+        return models
+    normalized_queries = {
+        query.strip().lower().split("/", 1)[-1]
+        for query in model_queries
+        if query.strip()
+    }
+    filtered: list[dict[str, Any]] = []
+    for item in models:
+        model_name = str(item.get("model_name") or "").strip().lower()
+        aliases = [str(alias or "").strip().lower() for alias in item.get("aliases") or []]
+        candidates = {model_name, model_name.split("/", 1)[-1]}
+        candidates.update(alias for alias in aliases if alias)
+        candidates.update(alias.split("/", 1)[-1] for alias in aliases if alias)
+        if normalized_queries.intersection(candidates):
+            filtered.append(item)
+    return filtered
 
 
 def _query_models_via_api(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from django.db import transaction
 from django.db.utils import OperationalError, ProgrammingError
@@ -13,6 +14,10 @@ from .models import PriceSourceConfig
 
 AI_PRICEHUB_PLATFORM = "ai_pricehub"
 AI_PRICEHUB_CONFIG_KEY = "ai_pricehub_global"
+AGIONE_MODELS_ENDPOINT_URL = (
+    "https://agione.cc/hyperone/xapi/models/square/list"
+    "?isPublic=1&sortField=publishTime&sortOrder=desc&needConfig=true"
+)
 
 
 def _default_runtime_state() -> dict[str, Any]:
@@ -54,15 +59,39 @@ def _fallback_default_source() -> dict[str, Any]:
     }
 
 
+def _normalize_agione_endpoint_url(endpoint_url: str, vendor_slug: str) -> str:
+    normalized_vendor_slug = str(vendor_slug or "").strip().lower()
+    normalized_url = str(endpoint_url or "").strip()
+    if normalized_vendor_slug != "agione":
+        return normalized_url
+    if not normalized_url:
+        return AGIONE_MODELS_ENDPOINT_URL
+
+    parsed = urlsplit(normalized_url)
+    hostname = (parsed.hostname or "").lower()
+    path = (parsed.path or "").rstrip("/")
+    if hostname not in {"agione.cc", "zh.agione.co"}:
+        return normalized_url
+    if path in {"", "/"}:
+        return AGIONE_MODELS_ENDPOINT_URL
+    if path == "/hyperone/xapi/models/list":
+        return AGIONE_MODELS_ENDPOINT_URL
+    return normalized_url
+
+
 def _normalize_source(data: dict[str, Any], *, default_id: int) -> dict[str, Any]:
     parser_uuid = data.get("parser_llm_config_uuid")
+    vendor_slug = str(data.get("vendor_slug") or "agione")
     return {
         "id": int(data.get("id") or default_id),
-        "vendor_slug": str(data.get("vendor_slug") or "agione"),
+        "vendor_slug": vendor_slug,
         "platform_slug": str(data.get("platform_slug") or ""),
         "vendor_name": str(data.get("vendor_name") or ""),
         "region": str(data.get("region") or ""),
-        "endpoint_url": str(data.get("endpoint_url") or ""),
+        "endpoint_url": _normalize_agione_endpoint_url(
+            str(data.get("endpoint_url") or ""),
+            vendor_slug,
+        ),
         "parser_llm_config_uuid": str(parser_uuid) if parser_uuid else "",
         "currency": str(data.get("currency") or "CNY"),
         "points_per_currency_unit": float(
@@ -80,7 +109,10 @@ def _serialize_legacy_row(config: PriceSourceConfig, *, default_id: int) -> dict
         "platform_slug": config.platform_slug,
         "vendor_name": config.vendor_name,
         "region": config.region,
-        "endpoint_url": config.endpoint_url,
+        "endpoint_url": _normalize_agione_endpoint_url(
+            config.endpoint_url,
+            config.vendor_slug,
+        ),
         "parser_llm_config_uuid": (
             str(config.parser_llm_config_uuid) if config.parser_llm_config_uuid else ""
         ),
@@ -103,10 +135,43 @@ def _sort_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _get_global_config_row() -> CollectorConfig | None:
-    return (
+    exact = (
         CollectorConfig.objects.filter(
             platform=AI_PRICEHUB_PLATFORM,
             key=AI_PRICEHUB_CONFIG_KEY,
+        )
+        .order_by("id")
+        .first()
+    )
+    if exact:
+        return exact
+    return (
+        CollectorConfig.objects.filter(
+            platform=AI_PRICEHUB_PLATFORM,
+        )
+        .order_by("id")
+        .first()
+    )
+
+
+def _get_owner_config_row(owner_user) -> CollectorConfig | None:
+    if owner_user is None:
+        return None
+    exact = (
+        CollectorConfig.objects.filter(
+            user=owner_user,
+            platform=AI_PRICEHUB_PLATFORM,
+            key=AI_PRICEHUB_CONFIG_KEY,
+        )
+        .order_by("id")
+        .first()
+    )
+    if exact:
+        return exact
+    return (
+        CollectorConfig.objects.filter(
+            user=owner_user,
+            platform=AI_PRICEHUB_PLATFORM,
         )
         .order_by("id")
         .first()
@@ -125,8 +190,12 @@ def _build_collector_value(primary_sources: list[dict[str, Any]]) -> dict[str, A
 
 
 def list_primary_source_configs() -> list[dict[str, Any]]:
+    return _list_primary_source_configs()
+
+
+def _list_primary_source_configs(*, owner_user=None) -> list[dict[str, Any]]:
     try:
-        row = _get_global_config_row()
+        row = _get_owner_config_row(owner_user) if owner_user is not None else _get_global_config_row()
     except (OperationalError, ProgrammingError):
         row = None
     if row:
@@ -165,7 +234,7 @@ def _upsert_global_config_row(
     primary_sources: list[dict[str, Any]],
 ) -> CollectorConfig:
     with transaction.atomic():
-        row = _get_global_config_row()
+        row = _get_owner_config_row(owner_user)
         if row:
             current_value = row.value or {}
             merged = {
@@ -185,11 +254,10 @@ def _upsert_global_config_row(
         ).first()
         value = _build_collector_value(primary_sources)
         if owner_row:
-            owner_row.key = AI_PRICEHUB_CONFIG_KEY
             owner_row.value = value
             owner_row.is_enabled = True
             owner_row.save(
-                update_fields=["key", "value", "is_enabled", "updated_at"]
+                update_fields=["value", "is_enabled", "updated_at"]
             )
             return owner_row
 
@@ -203,7 +271,7 @@ def _upsert_global_config_row(
 
 
 def create_primary_source_config(data: dict[str, Any], *, owner_user) -> dict[str, Any]:
-    sources = list_primary_source_configs()
+    sources = _list_primary_source_configs(owner_user=owner_user)
     next_id = max((int(item.get("id") or 0) for item in sources), default=0) + 1
     source = _normalize_source(data, default_id=next_id)
     source["id"] = next_id
@@ -252,7 +320,7 @@ def update_primary_source_config(
     *,
     owner_user,
 ) -> dict[str, Any] | None:
-    sources = list_primary_source_configs()
+    sources = _list_primary_source_configs(owner_user=owner_user)
     updated: list[dict[str, Any]] = []
     target: dict[str, Any] | None = None
     for source in sources:

@@ -1,5 +1,6 @@
 import re
 from html import unescape
+import json
 
 import requests
 
@@ -245,3 +246,7 @@ def _should_replace_price(*, current_price: float | None, current_score: int, ca
     if candidate_price != current_price:
         return candidate_price > current_price
     return candidate_score > current_score
+
+
+if __name__ == "__main__":
+    print(json.dumps(sync_vendor_catalog(), ensure_ascii=False, indent=2))
