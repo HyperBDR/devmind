@@ -1,0 +1,54 @@
+{
+  "primary_vendor": {
+    "slug": "agione",
+    "name": "AGIOne",
+    "pricing_url": "https://agione.cc/hyperone/xapi/models/square/list?isPublic=1&sortField=publishTime&sortOrder=desc&needConfig=true",
+    "currency": "CNY",
+    "models_source": {
+      "type": "agione_model_list",
+      "url": "https://agione.cc/hyperone/xapi/models/square/list?isPublic=1&sortField=publishTime&sortOrder=desc&needConfig=true"
+    }
+  },
+  "comparison_vendors": [
+    {
+      "slug": "zhipu",
+      "name": "Zhipu AI",
+      "aliases": ["Zhipu", "Zhipu AI", "Z.AI"],
+      "pricing_url": "https://bigmodel.cn/pricing",
+      "currency": "CNY"
+    },
+    {
+      "slug": "deepseek",
+      "name": "DeepSeek",
+      "aliases": ["DeepSeek"],
+      "pricing_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+      "currency": "CNY"
+    },
+    {
+      "slug": "aliyun",
+      "name": "Aliyun",
+      "aliases": ["Aliyun", "Alibaba Cloud"],
+      "pricing_url": "https://bailian.console.aliyun.com/cn-beijing/?tab=doc#/doc/?type=model&url=2987148",
+      "currency": "CNY",
+      "acquisition": {
+        "method": "api",
+        "api_url": "https://bailian-cs.console.aliyun.com/data/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=zeldaHttp.dashscopeModel./zelda/api/v1/modelCenter/listFoundationModels&_v=undefined",
+        "region": "cn-beijing"
+      }
+    },
+    {
+      "slug": "volcengine",
+      "name": "VolcEngine",
+      "aliases": ["VolcEngine", "Volc Engine", "火山引擎"],
+      "pricing_url": "https://www.volcengine.com/docs/82379/1544106?lang=zh",
+      "currency": "CNY"
+    },
+    {
+      "slug": "baidu",
+      "name": "Baidu Qianfan",
+      "aliases": ["Baidu", "Baidu Qianfan", "Qianfan", "百度千帆"],
+      "pricing_url": "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+      "currency": "CNY"
+    }
+  ]
+}

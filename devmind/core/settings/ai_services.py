@@ -118,6 +118,24 @@ GEMINI_CONFIG = {
 }
 
 # ============================
+# AI Price Hub Parser LLM Configuration
+# ============================
+
+# Dedicated parser LLM settings for AI Price Hub vendor-page extraction.
+AI_PRICEHUB_PARSER_LLM_BASE_URL = os.getenv(
+    'AIPRICEHUB_PARSER_LLM_BASE_URL',
+    os.getenv('OPENAI_API_BASE', 'https://api.openai.com/v1/'),
+)
+AI_PRICEHUB_PARSER_LLM_API_KEY = os.getenv(
+    'AIPRICEHUB_PARSER_LLM_API_KEY',
+    os.getenv('OPENAI_API_KEY'),
+)
+AI_PRICEHUB_PARSER_LLM_MODEL = os.getenv(
+    'AIPRICEHUB_PARSER_LLM_MODEL',
+    os.getenv('OPENAI_MODEL', 'gpt-5-nano'),
+)
+
+# ============================
 # LLM Provider Selection
 # ============================
 

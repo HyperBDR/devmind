@@ -393,6 +393,7 @@ def run_collect(
                 config.user_id,
                 config.platform,
                 project_keys=proj_keys,
+                task_id=task_id,
             )
         except Exception as e:
             logger.exception(

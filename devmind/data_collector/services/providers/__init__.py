@@ -2,11 +2,13 @@
 Platform providers for data collection. Use get_provider(platform) to resolve.
 """
 from .base import BaseProvider
+from .ai_pricehub import AIPriceHubProvider
 from .feishu import FeishuProvider
 from .jira import JiraProvider
 from .license import LicenseProvider
 
 PROVIDER_MAPPING = {
+    "ai_pricehub": AIPriceHubProvider,
     "feishu": FeishuProvider,
     "jira": JiraProvider,
     "license": LicenseProvider,

@@ -4,6 +4,7 @@ Cover run_collect (time range, persist create/update/skip, config not found),
 run_cleanup (retention, config not found), run_validate (mark deleted).
 """
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -65,6 +66,26 @@ class TestRunCollect:
         runtime = (collector_config.value or {}).get("runtime_state") or {}
         assert "last_success_collect_at" in runtime
         assert "first_collect_at" in runtime
+
+    @patch("data_collector.tasks.get_provider")
+    def test_run_collect_passes_task_id_to_provider(
+        self,
+        mock_get_provider,
+        collector_config,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            "data_collector.tasks.current_task",
+            SimpleNamespace(request=SimpleNamespace(id="task-xyz")),
+        )
+        mock_provider = MagicMock()
+        mock_provider.collect.return_value = []
+        mock_get_provider.return_value = MagicMock(return_value=mock_provider)
+
+        run_collect(str(collector_config.uuid))
+
+        call_kwargs = mock_provider.collect.call_args.kwargs
+        assert call_kwargs.get("task_id") == "task-xyz"
 
     @patch("data_collector.tasks.get_provider")
     def test_run_collect_first_run_uses_initial_range(
