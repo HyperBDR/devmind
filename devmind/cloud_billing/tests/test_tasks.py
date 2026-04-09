@@ -345,6 +345,23 @@ class TestCheckAlertForProvider:
     ):
         mock_channel = SimpleNamespace(config={"language": "en"})
         mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        now = timezone.now()
+
+        for offset in range(1, 7):
+            collected_at = now - datetime.timedelta(days=offset)
+            row = BillingData.objects.create(
+                provider=cloud_provider,
+                period=collected_at.strftime("%Y-%m"),
+                day=collected_at.date(),
+                hour=collected_at.hour,
+                total_cost=Decimal("10.00") * Decimal(7 - offset),
+                hourly_cost=Decimal("10.00"),
+                balance=Decimal("520.00"),
+                currency="USD",
+                account_id="123456789012",
+            )
+            BillingData.objects.filter(pk=row.pk).update(collected_at=collected_at)
+
         AlertRule.objects.create(
             provider=cloud_provider,
             days_remaining_threshold=200,
@@ -363,6 +380,33 @@ class TestCheckAlertForProvider:
         assert record.days_remaining_threshold == 200
         assert "estimated days remaining" in record.alert_message.lower()
         mock_send_alert.assert_called_once_with(record.id)
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.get_default_webhook_channel")
+    def test_days_remaining_threshold_does_not_trigger_without_7_days_history(
+        self,
+        mock_get_default_webhook_channel,
+        mock_send_alert,
+        cloud_provider,
+        user,
+        billing_data,
+    ):
+        mock_channel = SimpleNamespace(config={"language": "en"})
+        mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            days_remaining_threshold=200,
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is False
+        assert AlertRecord.objects.count() == 0
+        mock_send_alert.assert_not_called()
 
     def test_skipped_when_lock_held(self, cloud_provider):
         """

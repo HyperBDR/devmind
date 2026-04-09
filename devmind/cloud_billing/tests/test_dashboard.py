@@ -252,7 +252,8 @@ class AccountFundsTests(SimpleTestCase):
         self.assertEqual(account['balance_currency'], '')
         self.assertEqual(account['credit_limit'], 200.0)
         self.assertEqual(account['credit_limit_currency'], 'USD')
-        self.assertEqual(account['days_remaining'], 45)
+        self.assertIsNone(account['days_remaining'])
+        self.assertFalse(account['has_days_remaining_reference'])
 
     @patch('cloud_billing.dashboard.get_balance_support_info')
     def test_account_tags_are_exposed_to_dashboard(self, mock_balance_support):
@@ -350,6 +351,7 @@ class AccountFundsTests(SimpleTestCase):
 
         self.assertEqual(accounts[0]['recent_collected_days'], 2)
         self.assertFalse(accounts[0]['has_days_remaining_reference'])
+        self.assertIsNone(accounts[0]['days_remaining'])
         self.assertIsNone(financial_health['total_days'])
 
     @patch('cloud_billing.dashboard.get_balance_support_info')
@@ -825,9 +827,10 @@ class AccountFundsTests(SimpleTestCase):
             now=datetime(2026, 3, 20, 0, 0, tzinfo=dt_timezone.utc),
         )
 
-        self.assertEqual(accounts[0]['detail']['daily_average'], 45.0)
-        self.assertEqual(accounts[0]['change'], 45.0)
-        self.assertEqual(accounts[0]['days_remaining'], 6)
+        self.assertEqual(accounts[0]['detail']['daily_average'], 0)
+        self.assertEqual(accounts[0]['change'], 0)
+        self.assertIsNone(accounts[0]['days_remaining'])
+        self.assertFalse(accounts[0]['has_days_remaining_reference'])
 
 
 class DashboardTimezoneTests(SimpleTestCase):
