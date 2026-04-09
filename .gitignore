@@ -218,6 +218,9 @@ releasenotes/build
 # Build output directory
 output
 
+# AI Price Hub runtime artifacts
+devmind/ai_pricehub/runtime/
+
 # Patch files
 .patch
 

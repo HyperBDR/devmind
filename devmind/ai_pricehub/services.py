@@ -1,0 +1,1191 @@
+import logging
+import re
+from typing import Any
+from urllib.parse import urlencode, urlsplit, urlunsplit
+
+import requests
+from django.utils import timezone
+
+from .config_loader import config_loader
+from .harness import pricing_harness_agent
+from .llm_config import get_llm_config_reference
+from .models import PricingRecord
+from .source_config_store import (
+    create_primary_source_config as create_primary_source_config_in_collector,
+    get_primary_source_config as get_primary_source_config_from_collector,
+    list_primary_source_configs as list_primary_source_configs_from_collector,
+    sync_primary_sources_to_collector as sync_primary_sources_to_collector_store,
+    update_primary_source_config as update_primary_source_config_in_collector,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class AIPriceHubService:
+    """Pricing sync and comparison service."""
+
+    def get_overview(self, platform_slug: str | None = None) -> dict[str, Any]:
+        primary_sources = self._primary_sources()
+        selected_platform_slug = self._resolve_primary_platform_slug(
+            primary_sources,
+            platform_slug,
+        )
+        records = self._latest_records()
+        vendor_index = self._build_vendor_index(records)
+        serialized_models = [
+            self._serialize_model(record, vendor_index=vendor_index)
+            for record in records
+        ]
+        return {
+            "primary_sources": [
+                self._serialize_primary_source(source, serialized_models)
+                for source in primary_sources
+            ],
+            "selected_platform_slug": selected_platform_slug,
+            "vendors": [
+                {"id": vendor_id, "slug": slug, "name": name}
+                for slug, (vendor_id, name) in sorted(
+                    vendor_index.items(),
+                    key=lambda item: item[1][1].lower(),
+                )
+            ],
+            "primary_models": [
+                item
+                for item in serialized_models
+                if item["role"] == "primary" and item["vendor_slug"] == selected_platform_slug
+            ],
+            "models": serialized_models,
+        }
+
+    def compare_models(
+        self,
+        primary_model_id: int | None = None,
+        platform_slug: str | None = None,
+    ) -> dict[str, Any] | None:
+        primary_sources = self._primary_sources()
+        primary_vendor_slug = self._resolve_primary_platform_slug(
+            primary_sources,
+            platform_slug,
+        )
+        records = self._latest_records()
+        if not records:
+            return None
+
+        vendor_index = self._build_vendor_index(records)
+        primary_candidates = [
+            record
+            for record in records
+            if record.role == "primary" and record.vendor_slug == primary_vendor_slug
+        ]
+        primary = self._resolve_primary_model(primary_candidates, primary_model_id)
+        if primary is None:
+            return None
+
+        primary_key = self._canonical_key(primary.model_name)
+        allowed_vendor_keys = self._source_vendor_keys(primary)
+        comparisons_by_vendor: dict[str, PricingRecord] = {}
+        preferred_market_scope = self._preferred_market_scope_for_primary(primary)
+        for record in records:
+            if record.id == primary.id or record.vendor_slug == primary.vendor_slug:
+                continue
+            if self._canonical_key(record.model_name) != primary_key:
+                continue
+            if record.currency != primary.currency:
+                continue
+            if allowed_vendor_keys:
+                vendor_key = self._canonical_vendor_key(record.vendor_slug, record.vendor_name)
+                if vendor_key not in allowed_vendor_keys:
+                    continue
+            if (
+                record.input_price_per_million is None
+                and record.output_price_per_million is None
+            ):
+                continue
+            vendor_key = self._canonical_vendor_key(record.vendor_slug, record.vendor_name)
+            existing = comparisons_by_vendor.get(vendor_key)
+            comparisons_by_vendor[vendor_key] = self._select_comparison_record(
+                existing=existing,
+                candidate=record,
+                preferred_market_scope=preferred_market_scope,
+            )
+
+        comparisons = [
+            self._serialize_comparison(record, primary, vendor_index=vendor_index)
+            for record in comparisons_by_vendor.values()
+        ]
+        comparisons.sort(
+            key=lambda item: (
+                item["input_price_per_million"] is None,
+                item["input_price_per_million"] or 0,
+                item["output_price_per_million"] is None,
+                item["output_price_per_million"] or 0,
+            )
+        )
+        return {
+            "selected_platform_slug": primary_vendor_slug,
+            "primary_model": self._serialize_model(primary, vendor_index=vendor_index),
+            "comparisons": comparisons,
+        }
+
+    def sync_configured_sources(
+        self,
+        platform_slug: str | None = None,
+        task_id: str | None = None,
+        strict_api_failure_raises: bool = True,
+    ) -> dict[str, Any]:
+        primary_vendors = [
+            vendor
+            for vendor in config_loader.get_primary_vendor_configs()
+            if vendor.get("is_enabled", True)
+        ]
+        if platform_slug:
+            primary_vendors = [
+                vendor for vendor in primary_vendors if vendor.get("platform_slug") == platform_slug
+            ]
+        comparison_vendors = config_loader.get_comparison_vendors()
+        parser_llm_config_uuid = self._resolve_parser_llm_config_uuid(
+            primary_vendors,
+            platform_slug=platform_slug,
+        )
+        collected_hour = timezone.now().replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        snapshot_count = 0
+        failure_count = 0
+        errors: list[str] = []
+        synced_vendor_slugs: set[str] = set()
+        primary_models: list[dict[str, Any]] = []
+
+        if not primary_vendors:
+            return {
+                "vendors": 0,
+                "models": 0,
+                "snapshots": 0,
+                "failures": 0,
+                "errors": [],
+                "accepted": True,
+                "message": "No enabled primary source is configured.",
+            }
+
+        for primary_vendor in primary_vendors:
+            try:
+                primary_catalog = self._fetch_primary_vendor_models(primary_vendor)
+                logger.info(
+                    "[ai_pricehub] fetched primary catalog platform=%s models=%s source=%s",
+                    primary_vendor.get("platform_slug") or primary_vendor.get("slug"),
+                    len(primary_catalog.get("models", [])),
+                    primary_catalog.get("source_type"),
+                )
+            except Exception as exc:
+                primary_catalog = {
+                    "models": [],
+                    "source_type": "agione_model_list",
+                    "raw_payload": {"error": str(exc)},
+                }
+                failure_count += 1
+                errors.append(f"{primary_vendor['name']}: {exc}")
+            primary_models.extend(primary_catalog.get("models", []))
+
+            synced_count, synced_failures = self._sync_vendor_models(
+                vendor_data=primary_vendor,
+                catalog=primary_catalog,
+                role="primary",
+                collected_hour=collected_hour,
+            )
+            snapshot_count += synced_count
+            failure_count += synced_failures
+            synced_vendor_slugs.add(primary_vendor["slug"])
+            logger.info(
+                "[ai_pricehub] synced primary catalog platform=%s snapshots=%s failures=%s",
+                primary_vendor.get("platform_slug") or primary_vendor.get("slug"),
+                synced_count,
+                synced_failures,
+            )
+
+        for vendor_data in comparison_vendors:
+            if vendor_data["slug"] in synced_vendor_slugs:
+                continue
+            synced_vendor_slugs.add(vendor_data["slug"])
+            try:
+                catalog = self._fetch_comparison_vendor_catalog(
+                    vendor_data,
+                    parser_llm_config_uuid=parser_llm_config_uuid,
+                    task_id=task_id,
+                    primary_models=primary_models,
+                    strict_api_only=strict_api_failure_raises,
+                )
+                logger.info(
+                    "[ai_pricehub] fetched comparison catalog vendor=%s models=%s source=%s stage=%s",
+                    vendor_data["slug"],
+                    len(catalog.get("models", [])),
+                    catalog.get("source_type"),
+                    (catalog.get("raw_payload") or {}).get("source_stage"),
+                )
+            except Exception as exc:
+                catalog = {
+                    "models": [],
+                    "source_type": "vendor_agent_skill",
+                    "raw_payload": {"error": str(exc)},
+                }
+                failure_count += 1
+                errors.append(f"{vendor_data['name']}: {exc}")
+                if (
+                    strict_api_failure_raises
+                    and self._is_strict_vendor_sync(vendor_data)
+                ):
+                    raise
+            synced_count, synced_failures = self._sync_vendor_models(
+                vendor_data=vendor_data,
+                catalog=catalog,
+                role="comparison",
+                collected_hour=collected_hour,
+            )
+            snapshot_count += synced_count
+            failure_count += synced_failures
+            logger.info(
+                "[ai_pricehub] synced comparison catalog vendor=%s snapshots=%s failures=%s",
+                vendor_data["slug"],
+                synced_count,
+                synced_failures,
+            )
+
+        all_records = list(PricingRecord.objects.all())
+        vendor_total = len({record.vendor_slug for record in all_records})
+        model_total = len(all_records)
+        logger.info(
+            "[ai_pricehub] sync completed platform=%s vendors=%s models=%s snapshots=%s failures=%s errors=%s",
+            platform_slug or "",
+            vendor_total,
+            model_total,
+            snapshot_count,
+            failure_count,
+            errors,
+        )
+        return {
+            "vendors": vendor_total,
+            "models": model_total,
+            "snapshots": snapshot_count,
+            "failures": failure_count,
+            "errors": errors,
+            "accepted": True,
+            "message": "Sync completed.",
+        }
+
+    def _fetch_primary_vendor_models(self, vendor: dict[str, Any]) -> dict[str, Any]:
+        url = vendor.get("models_source", {}).get("url") or vendor.get("pricing_url")
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+        records = self._extract_agione_records(payload)
+        logger.info(
+            "[ai_pricehub] primary source response platform=%s url=%s records=%s",
+            vendor.get("platform_slug") or vendor.get("slug"),
+            url,
+            len(records),
+        )
+        models = []
+        for record in records:
+            model_name = self._derive_agione_model_name(record)
+            if not model_name:
+                continue
+            source_vendors = self._resolve_agione_source_vendors(
+                record,
+                source_url=url,
+            )
+            models.append(
+                {
+                    "model_name": model_name,
+                    "aliases": self._build_agione_aliases(record, model_name),
+                    "family": self._derive_agione_family(record),
+                    "input_price_per_million": self._extract_agione_price(
+                        record,
+                        direct_key="minInputPrice",
+                        points_key="promptPoints",
+                        vendor=vendor,
+                    ),
+                    "output_price_per_million": self._extract_agione_price(
+                        record,
+                        direct_key="minOutputPrice",
+                        points_key="completionPoints",
+                        vendor=vendor,
+                    ),
+                    "currency": vendor.get("currency", "CNY"),
+                    "notes": self._build_agione_notes(record, vendor),
+                    "source_vendors": source_vendors,
+                    "is_aggregate": bool(record.get("isAggregate")),
+                }
+            )
+        return {
+            "models": models,
+            "raw_payload": {"url": url, "record_count": len(records)},
+            "source_type": "agione_model_list",
+        }
+
+    def _resolve_agione_source_vendors(
+        self,
+        record: dict[str, Any],
+        *,
+        source_url: str,
+    ) -> list[str]:
+        detail_records = self._fetch_agione_model_detail_records(
+            source_url=source_url,
+            meta_model_id=record.get("id"),
+        )
+        if detail_records:
+            detail_vendors = self._extract_source_vendors_from_detail_records(detail_records)
+            if detail_vendors:
+                return detail_vendors
+        return self._extract_source_vendors(record)
+
+    def _fetch_agione_model_detail_records(
+        self,
+        *,
+        source_url: str,
+        meta_model_id: Any,
+    ) -> list[dict[str, Any]]:
+        if not meta_model_id:
+            return []
+        detail_url = self._build_agione_model_detail_url(
+            source_url=source_url,
+            meta_model_id=meta_model_id,
+        )
+        try:
+            response = requests.get(detail_url, timeout=15)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as exc:
+            logger.warning(
+                "[ai_pricehub] failed to fetch agione model detail meta_model_id=%s url=%s error=%s",
+                meta_model_id,
+                detail_url,
+                exc,
+            )
+            return []
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            return []
+        records = result.get("records")
+        if not isinstance(records, list):
+            return []
+        return [item for item in records if isinstance(item, dict)]
+
+    @staticmethod
+    def _build_agione_model_detail_url(*, source_url: str, meta_model_id: Any) -> str:
+        parsed = urlsplit(source_url)
+        scheme = parsed.scheme or "https"
+        netloc = parsed.netloc or "agione.cc"
+        query = urlencode({"metaModelId": str(meta_model_id)})
+        return urlunsplit(
+            (
+                scheme,
+                netloc,
+                "/hyperone/xapi/models/square/model-list",
+                query,
+                "",
+            )
+        )
+
+    def _fetch_comparison_vendor_catalog(
+        self,
+        vendor_data: dict[str, Any],
+        *,
+        parser_llm_config_uuid: str | None = None,
+        task_id: str | None = None,
+        primary_models: list[dict[str, Any]] | None = None,
+        strict_api_only: bool = True,
+    ) -> dict[str, Any]:
+        parser_llm_reference = get_llm_config_reference(parser_llm_config_uuid)
+        model_queries = self._build_vendor_model_queries(
+            vendor_data,
+            primary_models or [],
+        )
+        enriched_vendor = {
+            **vendor_data,
+            "parser_llm_config_uuid": parser_llm_reference["uuid"],
+            "parser_llm_config_label": parser_llm_reference["label"],
+            "_primary_model_queries": model_queries,
+            "_tracking_context": {
+                "source_type": "ai_pricehub",
+                "source_task_id": task_id or "",
+            },
+        }
+        return pricing_harness_agent.fetch_vendor_catalog(
+            enriched_vendor,
+            parser_llm_config_uuid=parser_llm_config_uuid,
+            strict_api_only=strict_api_only,
+        )
+
+    @staticmethod
+    def _resolve_parser_llm_config_uuid(
+        primary_vendors: list[dict[str, Any]],
+        *,
+        platform_slug: str | None = None,
+    ) -> str | None:
+        if platform_slug:
+            for vendor in primary_vendors:
+                if vendor.get("platform_slug") == platform_slug:
+                    return vendor.get("parser_llm_config_uuid") or None
+        for vendor in primary_vendors:
+            if vendor.get("parser_llm_config_uuid"):
+                return vendor["parser_llm_config_uuid"]
+        return None
+
+    def _build_vendor_model_queries(
+        self,
+        vendor_data: dict[str, Any],
+        primary_models: list[dict[str, Any]],
+    ) -> list[str]:
+        if not primary_models:
+            return []
+
+        vendor_keys = {
+            self._canonical_vendor_key(vendor_data.get("slug"), vendor_data.get("name"))
+        }
+        for alias in vendor_data.get("aliases") or []:
+            vendor_keys.add(self._canonical_vendor_key(alias, alias))
+
+        queries: list[str] = []
+        for item in primary_models:
+            source_vendors = item.get("source_vendors") or []
+            if not any(
+                self._canonical_vendor_key(name, name) in vendor_keys
+                for name in source_vendors
+            ):
+                continue
+            candidates = [
+                str(item.get("model_name") or "").strip(),
+                *[
+                    str(alias or "").strip()
+                    for alias in (item.get("aliases") or [])
+                ],
+            ]
+            for candidate in candidates:
+                if candidate and candidate not in queries:
+                    queries.append(candidate)
+        return queries
+
+    @staticmethod
+    def _is_strict_vendor_sync(vendor_data: dict[str, Any]) -> bool:
+        acquisition = vendor_data.get("acquisition") or {}
+        return str(acquisition.get("method") or "").strip().lower() == "api"
+
+    def _sync_vendor_models(
+        self,
+        *,
+        vendor_data: dict[str, Any],
+        catalog: dict[str, Any],
+        role: str,
+        collected_hour,
+    ) -> tuple[int, int]:
+        snapshot_count = 0
+        failure_count = 0
+        prepared_records: dict[tuple[str, str], dict[str, Any]] = {}
+        source_type = catalog.get("source_type", "unknown")
+        raw_payload = catalog.get("raw_payload")
+
+        for item in catalog.get("models", []):
+            normalized = self._normalize_catalog_item(
+                item,
+                vendor_data=vendor_data,
+                role=role,
+                source_type=source_type,
+            )
+            key = (normalized["vendor_slug"], normalized["model_slug"])
+            record_data = {
+                **normalized,
+                "collected_hour": collected_hour,
+                "raw_payload": {"catalog": raw_payload, "item": item},
+            }
+            existing = prepared_records.get(key)
+            prepared_records[key] = self._merge_record_data(existing, record_data)
+
+        for record_data in prepared_records.values():
+            PricingRecord.objects.update_or_create(
+                vendor_slug=record_data["vendor_slug"],
+                model_slug=record_data["model_slug"],
+                collected_hour=record_data["collected_hour"],
+                defaults=record_data,
+            )
+            snapshot_count += 1
+            if (
+                record_data.get("input_price_per_million") is None
+                and record_data.get("output_price_per_million") is None
+            ):
+                failure_count += 1
+
+        logger.info(
+            "[ai_pricehub] prepared records vendor=%s role=%s prepared=%s snapshots=%s failures=%s",
+            vendor_data.get("slug"),
+            role,
+            len(prepared_records),
+            snapshot_count,
+            failure_count,
+        )
+
+        return snapshot_count, failure_count
+
+    def _normalize_catalog_item(
+        self,
+        item: dict[str, Any],
+        *,
+        vendor_data: dict[str, Any],
+        role: str,
+        source_type: str,
+    ) -> dict[str, Any]:
+        canonical_name = self._normalize_model_name(item.get("model_name") or "")
+        market_scope = str(item.get("market_scope") or "").strip().lower()
+        model_slug = self._canonical_key(canonical_name)
+        if role == "comparison" and market_scope in {"domestic", "international"}:
+            model_slug = f"{model_slug}-{market_scope}"
+        return {
+            "vendor_slug": vendor_data["slug"],
+            "vendor_name": vendor_data["name"],
+            "vendor_pricing_url": vendor_data.get("pricing_url"),
+            "model_slug": model_slug,
+            "model_name": canonical_name,
+            "family": item.get("family"),
+            "role": role,
+            "description": self._build_description(item),
+            "source_url": vendor_data.get("models_source", {}).get("url") or vendor_data.get("pricing_url"),
+            "currency": item.get("currency") or vendor_data.get("currency", "USD"),
+            "input_price_per_million": item.get("input_price_per_million"),
+            "output_price_per_million": item.get("output_price_per_million"),
+            "source_type": source_type,
+        }
+
+    @staticmethod
+    def _merge_record_data(existing: dict[str, Any] | None, candidate: dict[str, Any]) -> dict[str, Any]:
+        if existing is None:
+            return candidate
+        return candidate if AIPriceHubService._record_score(candidate) > AIPriceHubService._record_score(existing) else existing
+
+    @staticmethod
+    def _record_score(item: dict[str, Any]) -> tuple[int, int]:
+        priced_fields = int(item.get("input_price_per_million") is not None) + int(
+            item.get("output_price_per_million") is not None
+        )
+        note_length = len(str(item.get("description") or ""))
+        return priced_fields, note_length
+
+    @staticmethod
+    def _build_vendor_index(records: list[PricingRecord]) -> dict[str, tuple[int, str]]:
+        vendor_index: dict[str, tuple[int, str]] = {}
+        next_id = 1
+        for record in records:
+            if record.vendor_slug in vendor_index:
+                continue
+            vendor_index[record.vendor_slug] = (next_id, record.vendor_name)
+            next_id += 1
+        return vendor_index
+
+    @staticmethod
+    def _latest_records() -> list[PricingRecord]:
+        records = list(
+            PricingRecord.objects.all().order_by(
+                "vendor_slug",
+                "model_slug",
+                "-collected_hour",
+                "-id",
+            )
+        )
+        latest: dict[tuple[str, str], PricingRecord] = {}
+        for record in records:
+            key = (record.vendor_slug, record.model_slug)
+            latest.setdefault(key, record)
+        return list(latest.values())
+
+    def _serialize_model(
+        self,
+        record: PricingRecord,
+        *,
+        vendor_index: dict[str, tuple[int, str]],
+    ) -> dict[str, Any]:
+        vendor_id, _ = vendor_index[record.vendor_slug]
+        raw_item = record.raw_payload.get("item") if isinstance(record.raw_payload, dict) else {}
+        primary_source = self._primary_source_map().get(record.vendor_slug)
+        return {
+            "id": record.id,
+            "vendor_id": vendor_id,
+            "vendor_slug": record.vendor_slug,
+            "vendor_name": record.vendor_name,
+            "platform_slug": primary_source.get("platform_slug") if primary_source else None,
+            "platform_name": primary_source.get("name") if primary_source else None,
+            "platform_region": primary_source.get("region") if primary_source else None,
+            "slug": record.model_slug,
+            "name": record.model_name,
+            "family": record.family,
+            "role": record.role,
+            "source_url": record.source_url,
+            "input_price_per_million": record.input_price_per_million,
+            "output_price_per_million": record.output_price_per_million,
+            "currency": record.currency,
+            "source_vendors": raw_item.get("source_vendors", []),
+            "is_aggregate": bool(raw_item.get("is_aggregate", False)),
+        }
+
+    def _serialize_comparison(
+        self,
+        record: PricingRecord,
+        primary: PricingRecord,
+        *,
+        vendor_index: dict[str, tuple[int, str]],
+    ) -> dict[str, Any]:
+        vendor_id, _ = vendor_index[record.vendor_slug]
+        input_advantage = self._compute_advantage(
+            primary.input_price_per_million,
+            record.input_price_per_million,
+        )
+        output_advantage = self._compute_advantage(
+            primary.output_price_per_million,
+            record.output_price_per_million,
+        )
+        return {
+            "model_id": record.id,
+            "vendor_id": vendor_id,
+            "vendor_slug": record.vendor_slug,
+            "vendor_name": record.vendor_name,
+            "platform_slug": None,
+            "platform_name": None,
+            "platform_region": None,
+            "model_name": record.model_name,
+            "family": record.family,
+            "role": record.role,
+            "input_price_per_million": record.input_price_per_million,
+            "output_price_per_million": record.output_price_per_million,
+            "currency": record.currency,
+            "input_advantage": input_advantage,
+            "output_advantage": output_advantage,
+            "input_advantage_ratio": self._compute_advantage_ratio(
+                record.input_price_per_million,
+                input_advantage,
+            ),
+            "output_advantage_ratio": self._compute_advantage_ratio(
+                record.output_price_per_million,
+                output_advantage,
+            ),
+        }
+
+    def _preferred_market_scope_for_primary(self, primary: PricingRecord) -> str | None:
+        source = self._primary_source_map().get(primary.vendor_slug) or {}
+        region = str(source.get("region") or "").strip().lower()
+        if any(token in region for token in ["中国", "china", "cn", "大陆", "国内"]):
+            return "domestic"
+        if region:
+            return "international"
+        return None
+
+    def _select_comparison_record(
+        self,
+        *,
+        existing: PricingRecord | None,
+        candidate: PricingRecord,
+        preferred_market_scope: str | None,
+    ) -> PricingRecord:
+        if existing is None:
+            return candidate
+        candidate_scope = self._comparison_market_scope(candidate)
+        existing_scope = self._comparison_market_scope(existing)
+        if preferred_market_scope:
+            if candidate_scope == preferred_market_scope and existing_scope != preferred_market_scope:
+                return candidate
+            if existing_scope == preferred_market_scope and candidate_scope != preferred_market_scope:
+                return existing
+        candidate_score = self._comparison_record_score(candidate)
+        existing_score = self._comparison_record_score(existing)
+        return candidate if candidate_score > existing_score else existing
+
+    @staticmethod
+    def _comparison_market_scope(record: PricingRecord) -> str:
+        if not isinstance(record.raw_payload, dict):
+            return "unknown"
+        item = record.raw_payload.get("item") or {}
+        return str(item.get("market_scope") or "unknown").strip().lower()
+
+    @staticmethod
+    def _comparison_record_score(record: PricingRecord) -> tuple[int, float, float, int]:
+        priced_fields = int(record.input_price_per_million is not None) + int(
+            record.output_price_per_million is not None
+        )
+        total = float(record.input_price_per_million or 0) + float(record.output_price_per_million or 0)
+        description_length = len(record.description or "")
+        return priced_fields, total, float(record.id), description_length
+
+    @staticmethod
+    def _compute_advantage(primary: float | None, candidate: float | None) -> float | None:
+        if primary is None or candidate is None:
+            return None
+        return candidate - primary
+
+    @staticmethod
+    def _compute_advantage_ratio(
+        candidate: float | None,
+        advantage: float | None,
+    ) -> float | None:
+        if candidate in (None, 0) or advantage is None:
+            return None
+        return advantage / candidate
+
+    @staticmethod
+    def _resolve_primary_model(
+        candidates: list[PricingRecord],
+        primary_model_id: int | None,
+    ) -> PricingRecord | None:
+        if not candidates:
+            return None
+        if primary_model_id is None:
+            return candidates[0]
+        return next((item for item in candidates if item.id == primary_model_id), None)
+
+    @staticmethod
+    def _source_vendor_keys(record: PricingRecord) -> set[str]:
+        if not isinstance(record.raw_payload, dict):
+            return set()
+        item = record.raw_payload.get("item") or {}
+        return {
+            AIPriceHubService._canonical_vendor_key(name, name)
+            for name in item.get("source_vendors", [])
+            if name
+        }
+
+    @staticmethod
+    def _canonical_vendor_key(slug: str | None, name: str | None) -> str:
+        base = slug or name or ""
+        return re.sub(r"[^a-z0-9]+", "", base.lower())
+
+    @staticmethod
+    def _canonical_key(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", value.strip().lower()).strip("-")
+
+    @staticmethod
+    def _canonical_name(value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip()
+
+    @staticmethod
+    def _normalize_model_name(value: str) -> str:
+        canonical_name = AIPriceHubService._canonical_name(value)
+        canonical_name = AIPriceHubService._clean_agione_model_name(canonical_name)
+        lowered = canonical_name.lower()
+        aliases = {
+            "glm 4.7": "GLM-4.7",
+            "glm-4.7": "GLM-4.7",
+            "moonshot-kimi-k2-instruct": "Kimi-K2-Instruct",
+            "kimi-k2-instruct": "Kimi-K2-Instruct",
+            "deepseek r1": "DeepSeek-R1",
+            "deepseek-r1": "DeepSeek-R1",
+            "deepseek v3.2": "DeepSeek-V3.2",
+            "deepseek-v3.2": "DeepSeek-V3.2",
+        }
+        return aliases.get(lowered, canonical_name)
+
+    @staticmethod
+    def _build_description(item: dict[str, Any]) -> str | None:
+        notes = [
+            AIPriceHubService._extract_agione_text(item.get("notes")),
+            AIPriceHubService._extract_agione_text(item.get("description")),
+        ]
+        parts = [part.strip() for part in notes if part and part.strip()]
+        return " ".join(parts) if parts else None
+
+    @staticmethod
+    def _derive_agione_model_name(record: dict[str, Any]) -> str:
+        for candidate in AIPriceHubService._agione_text_candidates(record):
+            extracted = AIPriceHubService._extract_model_name_from_text(candidate)
+            if extracted:
+                return AIPriceHubService._normalize_model_name(extracted)
+
+        name = AIPriceHubService._clean_agione_model_name(
+            AIPriceHubService._extract_agione_text(record.get("name"))
+        )
+        if AIPriceHubService._looks_like_clean_model_name(name):
+            return AIPriceHubService._normalize_model_name(name)
+        return ""
+
+    @staticmethod
+    def _agione_text_candidates(record: dict[str, Any]) -> list[str]:
+        candidates = []
+        for key in [
+            "displayName",
+            "name",
+            "metaModelUid",
+            "info",
+            "information",
+            "description",
+            "remark",
+            "summary",
+        ]:
+            value = AIPriceHubService._extract_agione_text(record.get(key))
+            if value and value not in candidates:
+                candidates.append(value)
+        return candidates
+
+    @staticmethod
+    def _extract_agione_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in (
+                "en-US",
+                "en_US",
+                "en",
+                "zh-CN",
+                "zh_CN",
+                "zh",
+                "name",
+                "value",
+                "text",
+                "label",
+            ):
+                extracted = AIPriceHubService._extract_agione_text(value.get(key))
+                if extracted:
+                    return extracted
+            for nested in value.values():
+                extracted = AIPriceHubService._extract_agione_text(nested)
+                if extracted:
+                    return extracted
+        if isinstance(value, list):
+            for item in value:
+                extracted = AIPriceHubService._extract_agione_text(item)
+                if extracted:
+                    return extracted
+        return ""
+
+    @staticmethod
+    def _extract_model_name_from_text(text: str) -> str:
+        patterns = [
+            r"Model\s+(.+?)\s+aggregated",
+            r"Model\s+(.+?)\s+from\s+[A-Za-z0-9 _-]+(?:$|,|\s)",
+            r"^(.+?)\s+aggregated\s+from\b",
+            r"^(.+?)\s+from\s+[A-Za-z0-9 _-]+(?:$|,|\s)",
+            r"模型[名称名]*[:：\s]+(.+?)(?:\s+聚合|\s+来自|$)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                cleaned = AIPriceHubService._clean_agione_model_name(match.group(1))
+                if cleaned:
+                    return cleaned
+
+        cleaned = AIPriceHubService._clean_agione_model_name(text)
+        signature = AIPriceHubService._extract_model_signature(cleaned)
+        if signature:
+            return signature
+        if AIPriceHubService._looks_like_clean_model_name(cleaned):
+            return cleaned
+        return ""
+
+    @staticmethod
+    def _clean_agione_model_name(value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            return ""
+        replacements = [
+            (r"^\[Aggregate\]\s*", ""),
+            (r"^(?:quicker|smarter|faster|cheaper|premium)\s+model\s+", ""),
+            (r"^Model\s+", ""),
+            (r"\s+aggregated\s+from.+$", ""),
+            (r"\s+aggregated.+$", ""),
+            (r"\s+from\s+[A-Za-z0-9._/-]+$", ""),
+            (r"\s+from\s+[A-Za-z0-9._/-]+(?=,)", ""),
+            (r"\s+for\s+LB.+$", ""),
+            (r"\s+聚合自.+$", ""),
+            (r"\s+来自.+$", ""),
+            (r"[\],]\s*which\b.*$", ""),
+            (r"\s+which\b.*$", ""),
+            (r"\s+that\b.*$", ""),
+            (r"\s*[\[(].*$", ""),
+        ]
+        for pattern, replacement in replacements:
+            cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bDeepSeek\s+R1\b", "DeepSeek-R1", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bDeepSeek\s+V3(?:\.2)?\b", lambda match: match.group(0).replace(" ", "-"), cleaned, flags=re.IGNORECASE)
+        return cleaned.strip(" -:：,.;[]()")
+
+    @staticmethod
+    def _extract_model_signature(value: str) -> str:
+        patterns = [
+            r"\b(GLM-[A-Za-z0-9.:-]+)\b",
+            r"\b(DeepSeek-[A-Za-z0-9.:-]+)\b",
+            r"\b(DeepSeek\s+[A-Za-z0-9.:-]+)\b",
+            r"\b(Qwen[A-Za-z0-9._:-]*)\b",
+            r"\b(gpt-[A-Za-z0-9.:-]+)\b",
+            r"\b(gemini-[A-Za-z0-9.:-]+)\b",
+            r"\b(claude-[A-Za-z0-9.:-]+)\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, value, flags=re.IGNORECASE)
+            if match:
+                return AIPriceHubService._clean_agione_model_name(match.group(1).strip())
+        return ""
+
+    @staticmethod
+    def _looks_like_clean_model_name(value: str) -> bool:
+        if not value:
+            return False
+        lowered = value.lower()
+        noise_tokens = [
+            "aggregated",
+            "aggregate",
+            "source vendor",
+            "input_points",
+            "output_points",
+            "promptpoints",
+            "completionpoints",
+        ]
+        if any(token in lowered for token in noise_tokens):
+            return False
+        return len(value) <= 120
+
+    @staticmethod
+    def _build_agione_aliases(record: dict[str, Any], model_name: str) -> list[str]:
+        aliases = [model_name]
+        raw_name = AIPriceHubService._extract_agione_text(record.get("name"))
+        display_name = AIPriceHubService._extract_agione_text(record.get("displayName"))
+        meta_model_uid = AIPriceHubService._extract_agione_text(record.get("metaModelUid"))
+        meta_model_name = meta_model_uid.rsplit("/", 1)[-1] if meta_model_uid else ""
+        description = AIPriceHubService._extract_agione_text(record.get("description"))
+        for value in [display_name, raw_name, meta_model_name, meta_model_uid, description]:
+            if value and value not in aliases:
+                aliases.append(value)
+        return aliases
+
+    @staticmethod
+    def _extract_source_vendors(record: dict[str, Any]) -> list[str]:
+        description = AIPriceHubService._build_description(record) or ""
+        match = re.search(
+            r"aggregated\s+from\s+(.+?)(?:,|\s+for\s+LB|$)",
+            description,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            vendor_text = match.group(1)
+        else:
+            fallback_match = re.search(
+                r"\s+from\s+([A-Za-z0-9._/-]+?)(?:$|,|\s+for\s+LB)",
+                description,
+                flags=re.IGNORECASE,
+            )
+            if not fallback_match:
+                vendor_text = ""
+            else:
+                vendor_text = fallback_match.group(1)
+        vendors = []
+        if vendor_text:
+            for item in re.split(r"/|,|&", vendor_text):
+                cleaned = item.strip()
+                if cleaned and cleaned not in vendors:
+                    vendors.append(cleaned)
+        if vendors:
+            return vendors
+        return AIPriceHubService._expand_agione_vendor_candidates(
+            [
+                AIPriceHubService._extract_agione_text(record.get("authorDisplayName")),
+                AIPriceHubService._extract_agione_text(record.get("authorUid")),
+                AIPriceHubService._extract_agione_text(record.get("metaModelUid")).split("/", 1)[0],
+            ]
+        )
+
+    @staticmethod
+    def _extract_source_vendors_from_detail_records(records: list[dict[str, Any]]) -> list[str]:
+        candidates: list[str] = []
+        for record in records:
+            if record.get("isAggregate"):
+                continue
+            provider_name = AIPriceHubService._extract_agione_text(record.get("providerDisplayName"))
+            bracket_match = re.match(r"^\[([^\]]+)\]", AIPriceHubService._extract_agione_text(record.get("name")))
+            bracket_name = bracket_match.group(1).strip() if bracket_match else ""
+            for value in [bracket_name, provider_name]:
+                if value and value not in candidates:
+                    candidates.append(value)
+        return AIPriceHubService._expand_agione_vendor_candidates(candidates)
+
+    @staticmethod
+    def _expand_agione_vendor_candidates(values: list[str]) -> list[str]:
+        vendor_aliases = {
+            "zhipu": ["Zhipu AI", "Zhipu", "Z.AI", "zhipu"],
+            "deepseek": ["DeepSeek", "deepseek"],
+            "aliyun": ["Aliyun", "Alibaba Cloud", "aliyun"],
+            "volcengine": ["VolcEngine", "Volc Engine", "火山引擎", "volcengine"],
+            "baidu": ["Baidu Qianfan", "Baidu", "Qianfan", "百度千帆", "baidu"],
+        }
+        provider_map = {
+            "zai": "zhipu",
+            "zaiquicker": "zhipu",
+            "zhipu": "zhipu",
+            "deepseek": "deepseek",
+            "aliyun": "aliyun",
+            "alibabacloud": "aliyun",
+            "alibabachina": "aliyun",
+            "qwen": "aliyun",
+            "volcengine": "volcengine",
+            "doubao": "volcengine",
+            "huosanyinqing": "volcengine",
+            "baidu": "baidu",
+            "baiduqianfan": "baidu",
+            "qianfan": "baidu",
+        }
+        vendors: list[str] = []
+        for value in values:
+            cleaned = value.strip()
+            if not cleaned:
+                continue
+            provider_slug = provider_map.get(AIPriceHubService._canonical_vendor_key(cleaned, cleaned))
+            if provider_slug:
+                for alias in vendor_aliases[provider_slug]:
+                    if alias not in vendors:
+                        vendors.append(alias)
+            if cleaned not in vendors:
+                vendors.append(cleaned)
+        return vendors
+
+    @staticmethod
+    def _derive_agione_family(record: dict[str, Any]) -> str | None:
+        tag_list = record.get("tagList") or []
+        if tag_list:
+            name = tag_list[0].get("translations", {}).get("en-US", {}).get("name")
+            if name:
+                return name.lower().replace(" ", "-")
+        series = AIPriceHubService._extract_agione_text(record.get("series"))
+        if series:
+            normalized = re.sub(r"[\s\u2010-\u2015\u2212]+", "-", series).strip("-")
+            if normalized:
+                return normalized.lower()
+        return None
+
+    @staticmethod
+    def _convert_agione_points(value: Any, vendor: dict[str, Any]) -> float | None:
+        try:
+            if value is None:
+                return None
+            points_per_currency_unit = float(
+                vendor.get("points_per_currency_unit") or 10.0
+            )
+            if points_per_currency_unit <= 0:
+                points_per_currency_unit = 10.0
+            return float(value) / points_per_currency_unit
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _extract_agione_price(
+        record: dict[str, Any],
+        direct_key: str,
+        points_key: str,
+        vendor: dict[str, Any],
+    ) -> float | None:
+        direct_value = record.get(direct_key)
+        if direct_value is not None:
+            return AIPriceHubService._convert_agione_points(direct_value, vendor)
+        return AIPriceHubService._convert_agione_points(record.get(points_key), vendor)
+
+    def _build_agione_notes(self, record: dict[str, Any], vendor: dict[str, Any]) -> str | None:
+        description = self._extract_agione_text(record.get("description"))
+        prompt_points = record.get("promptPoints")
+        completion_points = record.get("completionPoints")
+        if prompt_points is None:
+            prompt_points = record.get("minInputPrice")
+        if completion_points is None:
+            completion_points = record.get("minOutputPrice")
+        notes = []
+        if description:
+            notes.append(description)
+        if prompt_points is not None or completion_points is not None:
+            points_per_currency_unit = float(
+                vendor.get("points_per_currency_unit") or 10.0
+            )
+            notes.append(
+                "AGIOne pricing converted from points using "
+                f"{points_per_currency_unit:g} points = 1 "
+                f"{vendor.get('currency', 'CNY')}"
+                f" (input_points={prompt_points}, output_points={completion_points})."
+            )
+        return " ".join(notes) if notes else None
+
+    @staticmethod
+    def _extract_agione_records(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        result = payload.get("result")
+        if isinstance(result, list):
+            return [item for item in result if isinstance(item, dict)]
+        if isinstance(result, dict):
+            records = result.get("records")
+            if isinstance(records, list):
+                return [item for item in records if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _resolve_primary_platform_slug(
+        primary_sources: list[dict[str, Any]],
+        platform_slug: str | None,
+    ) -> str:
+        if platform_slug and any(
+            item["platform_slug"] == platform_slug for item in primary_sources
+        ):
+            return platform_slug
+        return primary_sources[0]["platform_slug"] if primary_sources else ""
+
+    @staticmethod
+    def _serialize_primary_source(
+        source: dict[str, Any],
+        serialized_models: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        model_count = sum(
+            1
+            for item in serialized_models
+            if item["role"] == "primary" and item["vendor_slug"] == source["platform_slug"]
+        )
+        return {
+            "platform_slug": source["platform_slug"],
+            "vendor_slug": source.get("vendor_slug", "agione"),
+            "name": source["name"],
+            "region": source.get("region", ""),
+            "currency": source.get("currency", "CNY"),
+            "endpoint_url": source.get("models_source", {}).get("url", ""),
+            "points_per_currency_unit": source.get("points_per_currency_unit", 10.0),
+            "is_enabled": source.get("is_enabled", True),
+            "model_count": model_count,
+        }
+
+    @staticmethod
+    def _primary_sources() -> list[dict[str, Any]]:
+        return config_loader.get_primary_vendor_configs()
+
+    @staticmethod
+    def _primary_source_map() -> dict[str, dict[str, Any]]:
+        return {
+            item["platform_slug"]: item
+            for item in config_loader.get_primary_vendor_configs()
+        }
+
+
+ai_pricehub_service = AIPriceHubService()
+
+
+def list_primary_source_configs() -> list[dict[str, Any]]:
+    return list_primary_source_configs_from_collector()
+
+
+def sync_primary_source_configs_to_collector(*, owner_user) -> list[dict[str, Any]]:
+    return sync_primary_sources_to_collector_store(owner_user=owner_user)
+
+
+def get_primary_source_config(config_id: int) -> dict[str, Any] | None:
+    return get_primary_source_config_from_collector(config_id)
+
+
+def create_primary_source_config(data: dict[str, Any], *, owner_user) -> dict[str, Any]:
+    return create_primary_source_config_in_collector(data, owner_user=owner_user)
+
+
+def update_primary_source_config(
+    config_id: int,
+    data: dict[str, Any],
+    *,
+    owner_user,
+) -> dict[str, Any] | None:
+    return update_primary_source_config_in_collector(
+        config_id,
+        data,
+        owner_user=owner_user,
+    )

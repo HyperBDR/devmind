@@ -11,7 +11,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from ..dashboard import build_dashboard_overview
+from ..dashboard import CNY_RATE, _build_exchange_rate_info, build_dashboard_overview
 from ..models import BillingData
 from ..serializers import (
     BillingDataListSerializer,
@@ -85,7 +85,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                 collected_at__lt=end_datetime
             )
 
-        return queryset.order_by('-period', '-hour')
+        return queryset.order_by('-day', '-hour', '-collected_at')
 
     @extend_schema(
         tags=['cloud-billing'],
@@ -126,7 +126,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         # Order by hour descending to get the last hour of each period
         latest_billings = {}
         for billing in queryset.order_by(
-            'provider_id', 'account_id', 'period', '-hour',
+            'provider_id', 'account_id', 'period', '-day', '-hour',
             '-collected_at'
         ):
             key = (
@@ -167,6 +167,8 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         )
 
         count = queryset.count()
+        exchange_rate_info = _build_exchange_rate_info()
+        exchange_rate = float(exchange_rate_info.get('exchange_rate') or CNY_RATE)
 
         # Determine if grouping by year or month
         # If start_period and end_period span a full year
@@ -242,6 +244,9 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                 by_provider[provider_key] = {
                     'provider_id': billing.provider_id,
                     'provider_name': billing.provider.display_name,
+                    'provider_notes': (
+                        (billing.provider.notes or '').strip()
+                    ),
                     'account_id': billing.account_id or '',
                     'total_cost': 0,
                     'count': 0,
@@ -276,6 +281,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
             'cost_by_period': cost_by_period,
             'cost_by_service': cost_by_service,
             'by_provider': by_provider,
+            'exchange_rate': exchange_rate,
         })
 
     @extend_schema(
@@ -334,7 +340,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         latest_ids = BillingData.objects.filter(
             provider_id=OuterRef('provider_id'),
             account_id=OuterRef('account_id')
-        ).order_by('-collected_at').values('id')[:1]
+        ).order_by('-day', '-hour', '-collected_at').values('id')[:1]
 
         latest_records = queryset.filter(
             id__in=Subquery(latest_ids)

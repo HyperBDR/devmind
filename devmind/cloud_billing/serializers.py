@@ -26,12 +26,121 @@ def get_balance_support_info(provider):
     }
 
 
+def _get_first_non_empty(config, *keys):
+    """Return the first non-empty config value for the given keys."""
+    for key in keys:
+        value = config.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def get_provider_auth_identifier(provider):
+    """
+    Return a safe-to-display account identifier for the provider.
+
+    We intentionally expose only non-secret identifiers such as access key ID,
+    username, or client ID. Secret values remain excluded from list views.
+    """
+    provider_type = getattr(provider, "provider_type", "")
+    config = getattr(provider, "config", {}) or {}
+
+    identifier_keys = {
+        "aws": (
+            "access_key_id",
+            "AWS_ACCESS_KEY_ID",
+            "aws_access_key_id",
+            "api_key",
+            "access_key",
+        ),
+        "huawei": (
+            "access_key_id",
+            "HUAWEI_ACCESS_KEY_ID",
+            "huawei_access_key_id",
+            "api_key",
+            "ak",
+        ),
+        "huawei-intl": (
+            "access_key_id",
+            "HUAWEI_ACCESS_KEY_ID",
+            "huawei_access_key_id",
+            "api_key",
+            "ak",
+        ),
+        "alibaba": (
+            "access_key_id",
+            "ALIBABA_ACCESS_KEY_ID",
+            "alibaba_access_key_id",
+            "api_key",
+        ),
+        "tencentcloud": (
+            "access_key_id",
+            "TENCENT_ACCESS_KEY_ID",
+            "tencent_access_key_id",
+            "access_key_id",
+        ),
+        "volcengine": (
+            "access_key_id",
+            "VOLCENGINE_ACCESS_KEY_ID",
+            "volcengine_access_key_id",
+            "access_key_id",
+            "api_key",
+        ),
+        "baidu": (
+            "access_key_id",
+            "BAIDU_ACCESS_KEY_ID",
+            "baidu_access_key_id",
+            "access_key_id",
+            "api_key",
+        ),
+        "azure": (
+            "client_id",
+            "AZURE_CLIENT_ID",
+            "azure_client_id",
+            "client_id",
+        ),
+        "zhipu": (
+            "username",
+            "ZHIPU_USERNAME",
+            "zhipu_username",
+            "username",
+        ),
+    }
+
+    _, *keys = identifier_keys.get(provider_type, ("identifier",))
+    if not keys:
+        return ""
+    return _get_first_non_empty(config, *keys)
+
+
+def get_provider_auth_identifier_kind(provider):
+    """Return the identifier kind used for display."""
+    provider_type = getattr(provider, "provider_type", "")
+    kind_map = {
+        "aws": "access_key_id",
+        "huawei": "access_key_id",
+        "huawei-intl": "access_key_id",
+        "alibaba": "access_key_id",
+        "tencentcloud": "access_key_id",
+        "volcengine": "access_key_id",
+        "baidu": "access_key_id",
+        "azure": "client_id",
+        "zhipu": "username",
+    }
+    return kind_map.get(provider_type, "identifier")
+
+
 class CloudProviderSerializer(serializers.ModelSerializer):
     """
     Serializer for CloudProvider model.
     """
     created_by_username = serializers.SerializerMethodField()
     updated_by_username = serializers.SerializerMethodField()
+    auth_identifier = serializers.SerializerMethodField()
+    auth_identifier_kind = serializers.SerializerMethodField()
 
     @staticmethod
     def get_created_by_username(obj):
@@ -40,6 +149,14 @@ class CloudProviderSerializer(serializers.ModelSerializer):
     @staticmethod
     def get_updated_by_username(obj):
         return obj.updated_by.username if obj.updated_by_id else ''
+
+    @staticmethod
+    def get_auth_identifier(obj):
+        return get_provider_auth_identifier(obj)
+
+    @staticmethod
+    def get_auth_identifier_kind(obj):
+        return get_provider_auth_identifier_kind(obj)
     
     # Make name optional for create operations (will be auto-generated)
     name = serializers.CharField(
@@ -54,6 +171,7 @@ class CloudProviderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'provider_type', 'display_name', 'notes', 'tags',
             'balance', 'balance_currency', 'balance_updated_at', 'config',
+            'auth_identifier', 'auth_identifier_kind',
             'is_active', 'created_at', 'updated_at',
             'created_by', 'created_by_username',
             'updated_by', 'updated_by_username',
@@ -152,11 +270,23 @@ class CloudProviderListSerializer(serializers.ModelSerializer):
     """
     Simplified serializer for CloudProvider list view.
     """
+    auth_identifier = serializers.SerializerMethodField()
+    auth_identifier_kind = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_auth_identifier(obj):
+        return get_provider_auth_identifier(obj)
+
+    @staticmethod
+    def get_auth_identifier_kind(obj):
+        return get_provider_auth_identifier_kind(obj)
+
     class Meta:
         model = CloudProvider
         fields = [
             'id', 'name', 'provider_type', 'display_name', 'notes', 'tags',
             'balance', 'balance_currency', 'balance_updated_at',
+            'auth_identifier', 'auth_identifier_kind',
             'is_active', 'created_at'
         ]
 

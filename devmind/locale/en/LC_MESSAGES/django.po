@@ -413,6 +413,10 @@ msgid "Notes"
 msgstr "Notes"
 
 #: cloud_billing/tasks.py
+msgid "Tags"
+msgstr "Tags"
+
+#: cloud_billing/tasks.py
 msgid "Current balance"
 msgstr "Current balance"
 

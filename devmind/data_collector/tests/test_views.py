@@ -35,6 +35,161 @@ class TestCollectorConfigViewSet:
         assert response.data.get("platform") == "feishu"
         assert CollectorConfig.objects.filter(user=user, platform="feishu").exists()
 
+    @patch("data_collector.views.config._sync_ai_pricehub_collect_config")
+    def test_create_ai_pricehub_config_triggers_sync_hook(
+        self,
+        mock_sync_hook,
+        api_client,
+        user,
+    ):
+        payload = {
+            "platform": "ai_pricehub",
+            "key": "ai_pricehub_global",
+            "value": {"project_keys": ["sync"]},
+            "is_enabled": True,
+        }
+        response = api_client.post(
+            "/api/v1/data-collector/configs/",
+            payload,
+            format="json",
+        )
+        assert response.status_code in (200, 201)
+        assert response.data.get("platform") == "ai_pricehub"
+        assert CollectorConfig.objects.filter(
+            user=user,
+            platform="ai_pricehub",
+        ).exists()
+        mock_sync_hook.assert_called_once()
+
+    def test_create_ai_pricehub_config_persists_primary_sources(
+        self,
+        api_client,
+        user,
+    ):
+        payload = {
+            "platform": "ai_pricehub",
+            "key": "ai_pricehub_global",
+            "value": {
+                "project_keys": ["sync"],
+                "primary_sources": [
+                    {
+                        "platform_slug": "agione",
+                        "vendor_name": "AGIOne",
+                        "endpoint_url": "https://example.com/models",
+                        "region": "",
+                        "currency": "CNY",
+                        "points_per_currency_unit": 10.0,
+                        "is_enabled": True,
+                        "notes": "",
+                    }
+                ],
+            },
+            "is_enabled": True,
+        }
+        response = api_client.post(
+            "/api/v1/data-collector/configs/",
+            payload,
+            format="json",
+        )
+        assert response.status_code in (200, 201)
+        config = CollectorConfig.objects.get(user=user, platform="ai_pricehub")
+        sources = (config.value or {}).get("primary_sources") or []
+        assert len(sources) >= 1
+        assert sources[0].get("endpoint_url") == "https://example.com/models"
+
+    def test_create_ai_pricehub_config_preserves_custom_key(
+        self,
+        api_client,
+        user,
+    ):
+        payload = {
+            "platform": "ai_pricehub",
+            "key": "my_ai_pricehub_config",
+            "value": {
+                "project_keys": ["sync"],
+                "primary_sources": [
+                    {
+                        "platform_slug": "agione",
+                        "vendor_name": "AGIOne",
+                        "endpoint_url": "https://example.com/models",
+                        "region": "",
+                        "currency": "CNY",
+                        "points_per_currency_unit": 10.0,
+                        "is_enabled": True,
+                        "notes": "",
+                    }
+                ],
+            },
+            "is_enabled": True,
+        }
+        response = api_client.post(
+            "/api/v1/data-collector/configs/",
+            payload,
+            format="json",
+        )
+
+        assert response.status_code in (200, 201)
+        config = CollectorConfig.objects.get(user=user, platform="ai_pricehub")
+        assert config.key == "my_ai_pricehub_config"
+
+    def test_update_ai_pricehub_config_preserves_custom_key(
+        self,
+        api_client,
+        user,
+    ):
+        config = CollectorConfig.objects.create(
+            user=user,
+            platform="ai_pricehub",
+            key="ai_pricehub_original",
+            value={
+                "project_keys": ["sync"],
+                "primary_sources": [
+                    {
+                        "id": 1,
+                        "vendor_slug": "agione",
+                        "platform_slug": "agione",
+                        "vendor_name": "AGIOne",
+                        "endpoint_url": "https://example.com/models",
+                        "region": "",
+                        "currency": "CNY",
+                        "points_per_currency_unit": 10.0,
+                        "is_enabled": True,
+                        "notes": "",
+                    }
+                ],
+            },
+            is_enabled=True,
+        )
+
+        response = api_client.patch(
+            f"/api/v1/data-collector/configs/{config.uuid}/",
+            {
+                "key": "ai_pricehub_renamed",
+                "value": {
+                    "primary_sources": [
+                        {
+                            "id": 1,
+                            "vendor_slug": "agione",
+                            "platform_slug": "agione",
+                            "vendor_name": "AGIOne CN",
+                            "endpoint_url": "https://example.com/models",
+                            "region": "中国",
+                            "currency": "CNY",
+                            "points_per_currency_unit": 10.0,
+                            "is_enabled": True,
+                            "notes": "",
+                        }
+                    ]
+                },
+                "version": config.version,
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200
+        config.refresh_from_db()
+        assert config.key == "ai_pricehub_renamed"
+
     def test_retrieve_config(self, api_client, collector_config):
         uuid = str(collector_config.uuid)
         response = api_client.get(f"/api/v1/data-collector/configs/{uuid}/")

@@ -3,6 +3,7 @@ Unit tests for cloud_billing Celery tasks: collect_billing_data,
 check_alert_for_provider, send_alert_notification.
 """
 
+import datetime
 import pytest
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
@@ -187,6 +188,36 @@ class TestCheckAlertForProvider:
         mock_send_alert_delay.assert_called_once()
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    def test_alert_message_includes_provider_tags(
+        self,
+        mock_send_alert_delay,
+        cloud_provider,
+        user,
+        billing_data,
+    ):
+        """
+        Alert messages should include provider tags when present.
+        """
+        cloud_provider.tags = ["生产", "核心"]
+        cloud_provider.save(update_fields=["tags"])
+
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            cost_threshold=Decimal("1.00"),
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["alerted"] is True
+        record = AlertRecord.objects.order_by("-created_at").first()
+        assert record is not None
+        assert "标签：生产、核心" in record.alert_message
+        mock_send_alert_delay.assert_called_once()
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
     def test_balance_threshold_triggers_alert(
         self,
@@ -236,11 +267,14 @@ class TestCheckAlertForProvider:
         mock_get_default_webhook_channel.return_value = (mock_channel, {})
         cloud_provider.provider_type = "baidu"
         cloud_provider.display_name = "百度智能云"
+        cloud_provider.tags = ["预付费", "重点"]
         cloud_provider.config = {
             **(cloud_provider.config or {}),
             "notes": "余额告警测试备注",
         }
-        cloud_provider.save(update_fields=["provider_type", "display_name", "config"])
+        cloud_provider.save(
+            update_fields=["provider_type", "display_name", "tags", "config"]
+        )
 
         AlertRule.objects.create(
             provider=cloud_provider,
@@ -256,6 +290,7 @@ class TestCheckAlertForProvider:
         assert result["alerted"] is True
         record = AlertRecord.objects.latest("id")
         assert "备注：余额告警测试备注" in record.alert_message
+        assert "标签：预付费、重点" in record.alert_message
         assert "账号：" in record.alert_message
         mock_send_alert.assert_called_once_with(record.id)
 
@@ -555,6 +590,67 @@ class TestCollectBillingData:
             cloud_provider.id,
             cloud_provider.provider_type,
         )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    @patch("cloud_billing.tasks.timezone.now")
+    def test_sync_keeps_same_hour_snapshots_on_different_days(
+        self,
+        mock_timezone_now,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        first_now = timezone.make_aware(
+            datetime.datetime(2026, 4, 6, 8, 0, 0)
+        )
+        second_now = timezone.make_aware(
+            datetime.datetime(2026, 4, 7, 8, 0, 0)
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.side_effect = [
+            {
+                "status": "success",
+                "data": {
+                    "total_cost": 22.5,
+                    "balance": 100.0,
+                    "currency": "CNY",
+                    "account_id": "acct-zhipu",
+                    "service_costs": {"智谱 AI": 22.5},
+                },
+            },
+            {
+                "status": "success",
+                "data": {
+                    "total_cost": 128.1,
+                    "balance": 80.0,
+                    "currency": "CNY",
+                    "account_id": "acct-zhipu",
+                    "service_costs": {"智谱 AI": 128.1},
+                },
+            },
+        ]
+        mock_provider_service_class.return_value = mock_provider_service
+
+        mock_timezone_now.return_value = first_now
+        collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+        mock_timezone_now.return_value = second_now
+        collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        rows = list(
+            BillingData.objects.filter(
+                provider=cloud_provider,
+                account_id="acct-zhipu",
+                hour=8,
+            ).order_by("day")
+        )
+
+        assert len(rows) == 2
+        assert rows[0].day.isoformat() == "2026-04-06"
+        assert rows[0].total_cost == Decimal("22.50")
+        assert rows[1].day.isoformat() == "2026-04-07"
+        assert rows[1].total_cost == Decimal("128.10")
 
 
 @pytest.mark.django_db

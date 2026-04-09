@@ -5,6 +5,7 @@ Data models for cloud billing management.
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.utils import timezone
 
 from .constants import (
     WEBHOOK_STATUS_FAILED,
@@ -178,16 +179,29 @@ class BillingData(models.Model):
     account_id = models.CharField(
         max_length=100, blank=True, help_text="Account ID"
     )
+    day = models.DateField(
+        default=timezone.localdate,
+        db_index=True,
+        help_text="Collection day in local timezone",
+    )
     collected_at = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:
         db_table = "cloud_billing_data"
         verbose_name = "Billing Data"
         verbose_name_plural = "Billing Data"
-        unique_together = [("provider", "account_id", "period", "hour")]
+        unique_together = [("provider", "account_id", "period", "day", "hour")]
         indexes = [
             models.Index(fields=["provider", "account_id", "period", "hour"]),
+            models.Index(
+                fields=["provider", "account_id", "day", "hour"],
+                name="cloud_billi_provide_5d6967_idx",
+            ),
             models.Index(fields=["provider", "period", "hour"]),
+            models.Index(
+                fields=["provider", "day", "hour"],
+                name="cloud_billi_provide_2811e7_idx",
+            ),
             models.Index(fields=["period", "hour"]),
             models.Index(fields=["collected_at"]),
         ]

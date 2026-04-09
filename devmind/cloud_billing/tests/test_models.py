@@ -1,6 +1,7 @@
 """
 Tests for cloud billing models.
 """
+import datetime
 import pytest
 from decimal import Decimal
 from django.contrib.auth.models import User
@@ -99,7 +100,8 @@ class TestBillingData:
         cloud_provider
     ):
         """
-        Test that (provider, period, hour) must be unique.
+        Test that the same provider/account/month/hour can be stored on
+        different collection days.
         """
         period = '2025-01'
         hour = 10
@@ -108,16 +110,19 @@ class TestBillingData:
             period=period,
             hour=hour,
             total_cost=Decimal('100.50'),
-            currency='USD'
+            currency='USD',
+            account_id='acct-1',
+            day=datetime.date(2025, 1, 1),
         )
-        with pytest.raises(Exception):
-            BillingData.objects.create(
-                provider=cloud_provider,
-                period=period,
-                hour=hour,
-                total_cost=Decimal('200.00'),
-                currency='USD'
-            )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=period,
+            hour=hour,
+            total_cost=Decimal('200.00'),
+            currency='USD',
+            account_id='acct-1',
+            day=datetime.date(2025, 1, 2),
+        )
 
     def test_billing_data_str(self, billing_data):
         """

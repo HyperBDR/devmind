@@ -37,6 +37,29 @@ def extract_provider_notes(provider) -> str:
     return ""
 
 
+def extract_provider_tags(provider) -> list[str]:
+    """Return normalized provider tags for alert messages."""
+    raw_tags = getattr(provider, "tags", []) or []
+    normalized_tags = []
+    seen = set()
+    for tag in raw_tags:
+        value = str(tag or "").strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized_tags.append(value)
+    return normalized_tags
+
+
+def format_provider_tags(tags: list[str], language: str) -> str:
+    """Format provider tags for localized alert messages."""
+    normalized_tags = [str(tag or "").strip() for tag in tags if str(tag or "").strip()]
+    if not normalized_tags:
+        return ""
+    separator = "、" if is_chinese_language(language) else ", "
+    return separator.join(normalized_tags)
+
+
 def extract_account_id_from_message(message: str) -> str:
     for raw_line in str(message or "").splitlines():
         line = raw_line.strip()
@@ -50,6 +73,7 @@ def build_alert_message(
     *,
     provider_name: str,
     provider_notes: str,
+    provider_tags: list[str],
     account_id: str,
     current_cost,
     previous_cost,
@@ -88,6 +112,14 @@ def build_alert_message(
                 format_alert_line(
                     _("Notes"),
                     provider_notes,
+                    language=normalized_language,
+                )
+            )
+        if provider_tags:
+            lines.append(
+                format_alert_line(
+                    "标签" if is_chinese_language(normalized_language) else _("Tags"),
+                    format_provider_tags(provider_tags, normalized_language),
                     language=normalized_language,
                 )
             )
@@ -331,6 +363,7 @@ def build_alert_message_from_record(alert_record, language: str) -> str:
     return build_alert_message(
         provider_name=alert_record.provider.display_name,
         provider_notes=extract_provider_notes(alert_record.provider),
+        provider_tags=extract_provider_tags(alert_record.provider),
         account_id=extract_account_id_from_message(alert_record.alert_message),
         current_cost=alert_record.current_cost,
         previous_cost=alert_record.previous_cost,

@@ -10,6 +10,16 @@ from accounts.models import Role
 
 
 class AccessProfileTests(TestCase):
+    def test_ai_pricehub_alias_normalizes_to_ai_pricehub(self):
+        self.assertEqual(
+            normalize_feature_keys(['ai_model_pricing']),
+            ['ai_pricehub'],
+        )
+        self.assertEqual(
+            normalize_platform_key('ai_model_pricing'),
+            'ai_pricehub',
+        )
+
     def test_hyperbdr_dashboard_alias_normalizes_to_hyperbdr_dashboard(self):
         self.assertEqual(
             normalize_feature_keys(['hyperbdr_dashboard']),
@@ -85,5 +95,11 @@ class AccessProfileTests(TestCase):
 
         self.assertEqual(
             access_profile['visible_features'],
-            ['workspace', 'admin_console', 'operations_console', 'hyperbdr_dashboard'],
+            [
+                'workspace',
+                'admin_console',
+                'operations_console',
+                'hyperbdr_dashboard',
+                'ai_pricehub',
+            ],
         )

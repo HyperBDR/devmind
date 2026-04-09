@@ -34,6 +34,9 @@ dependencies = [
     "requests>=2.31.0",
     "httpx>=0.27.0",
     "cryptography>=44.0.0",
+    "pydantic>=2.7.0",
+    "langchain-openai>=1.0.0,<2.0.0",
+    "deepagents==0.4.9",
     "jira>=3.10.0",
     "python-dateutil>=2.8.2",
     "django-json-widget>=1.1.1",
@@ -70,6 +73,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
 markers = [
     "unit: App-level unit tests (domain logic, services, model methods).",
 ]

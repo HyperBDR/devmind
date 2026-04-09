@@ -1,4 +1,5 @@
 import os
+from kombu import Queue
 
 # For production environments, use Redis or RabbitMQ as result backend.
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL",
@@ -36,6 +37,11 @@ CELERY_ACCEPT_CONTENT = ['json']
 # (not recommended, may have security risks), msgpack (more efficient
 # compression), and yaml (more readable but less efficient).
 CELERY_TASK_SERIALIZER = 'json'
+
+# Dedicated queue for this project to avoid consuming tasks from other apps
+# that share the same broker.
+CELERY_TASK_DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "devmind")
+CELERY_TASK_QUEUES = (Queue(CELERY_TASK_DEFAULT_QUEUE),)
 
 # Prevent task loss in Redis
 CELERY_BROKER_TRANSPORT_OPTIONS = {

@@ -37,6 +37,9 @@ urlpatterns = [
     # Includes cloud billing management endpoints
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),
 
+    # AI Price Hub routes
+    path('api/v1/ai-pricehub/', include('ai_pricehub.urls')),
+
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),
 
