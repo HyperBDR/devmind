@@ -12,6 +12,7 @@ from cloud_billing.models import (
     BillingData,
     AlertRule,
     AlertRecord,
+    RechargeApprovalRecord,
 )
 
 
@@ -134,6 +135,23 @@ class TestCloudProviderViewSet:
         assert response.status_code == 200
         assert response.data["display_name"] == "Updated Display Name"
         assert response.data["updated_by"] == user.id
+
+    def test_update_provider_recharge_info(self, api_client, cloud_provider, user):
+        """
+        Test updating provider recharge info snapshot.
+        """
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+        data = {
+            "name": "test_aws",
+            "provider_type": "aws",
+            "display_name": "Updated Display Name",
+            "recharge_info": '{"amount": 288, "recharge_account": "acct-288"}',
+            "config": cloud_provider.config,
+            "is_active": True,
+        }
+        response = api_client.put(url, data, format="json")
+        assert response.status_code == 200
+        assert response.data["recharge_info"] == data["recharge_info"]
 
     def test_delete_provider(self, api_client, cloud_provider):
         """
@@ -452,6 +470,23 @@ class TestAlertRuleViewSet:
         assert response.data["balance_threshold"] == "150.00"
         assert response.data["updated_by"] == user.id
 
+    def test_update_alert_rule_auto_submit_toggle(self, api_client, alert_rule, user):
+        """
+        Test updating independent recharge approval SOP toggle.
+        """
+        url = f"/api/v1/cloud-billing/alert-rules/{alert_rule.id}/"
+        data = {
+            "provider": alert_rule.provider.id,
+            "cost_threshold": "30.00",
+            "growth_threshold": "15.00",
+            "balance_threshold": "150.00",
+            "auto_submit_recharge_approval": True,
+            "is_active": True,
+        }
+        response = api_client.put(url, data, format="json")
+        assert response.status_code == 200
+        assert response.data["auto_submit_recharge_approval"] is True
+
 
 @pytest.mark.django_db
 class TestAlertRecordViewSet:
@@ -562,3 +597,91 @@ class TestBillingTaskViewSet:
         url = "/api/v1/cloud-billing/tasks/status/"
         response = api_client.get(url)
         assert response.status_code == 400
+
+
+@pytest.mark.django_db
+class TestRechargeApprovalEndpoints:
+    """
+    Tests for recharge approval APIs.
+    """
+
+    def test_submit_recharge_approval_endpoint(self, api_client, cloud_provider, mocker):
+        """
+        Provider endpoint should trigger a dedicated recharge approval task.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        mock_task = mocker.Mock()
+        mock_task.id = "approval-task-id"
+        mocker.patch(
+            "cloud_billing.views.provider.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        response = api_client.post(url, {}, format="json")
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert response.data["task_id"] == "approval-task-id"
+
+    def test_submit_recharge_approval_requires_recharge_info(
+        self, api_client, cloud_provider
+    ):
+        """
+        Provider endpoint should reject manual submission when recharge info is empty.
+        """
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        response = api_client.post(url, {}, format="json")
+
+        assert response.status_code == 400
+        assert response.data["success"] is False
+
+    def test_feishu_callback_challenge(self, api_client):
+        """
+        Callback endpoint should echo the challenge when Feishu verifies the URL.
+        """
+        url = "/api/v1/cloud-billing/recharge-approvals/feishu-callback/"
+        response = api_client.post(
+            url,
+            {"challenge": "verify-me", "type": "url_verification"},
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert response.data["challenge"] == "verify-me"
+
+    def test_feishu_callback_updates_recharge_record(
+        self, api_client, cloud_provider
+    ):
+        """
+        Callback endpoint should update status and timeline for the matched instance.
+        """
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188}',
+            request_payload={"amount": 188},
+            feishu_instance_code="ins_123",
+            feishu_approval_code="approval_123",
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        )
+
+        url = "/api/v1/cloud-billing/recharge-approvals/feishu-callback/"
+        response = api_client.post(
+            url,
+            {
+                "event": {
+                    "instance_code": "ins_123",
+                    "approval_code": "approval_123",
+                    "status": "APPROVED",
+                    "timeline": [{"type": "APPROVE", "user_id": "u_1"}],
+                }
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200
+        record.refresh_from_db()
+        assert record.status == RechargeApprovalRecord.STATUS_APPROVED
+        assert record.approval_timeline == [{"type": "APPROVE", "user_id": "u_1"}]

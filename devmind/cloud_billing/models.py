@@ -49,6 +49,14 @@ class CloudProvider(models.Model):
         null=True,
         help_text="Optional notes or description for this provider",
     )
+    recharge_info = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Raw recharge approval input text. Store all recharge-related "
+            "parameters here and pass it to the recharge approval agent."
+        ),
+    )
     tags = models.JSONField(
         default=list,
         blank=True,
@@ -272,6 +280,13 @@ class AlertRule(models.Model):
         db_index=True,
         help_text="Whether this alert rule is active",
     )
+    auto_submit_recharge_approval = models.BooleanField(
+        default=False,
+        help_text=(
+            "Whether to independently trigger the recharge approval SOP "
+            "when this alert rule is hit."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -442,3 +457,99 @@ class AlertRecord(models.Model):
             f"{self.provider.display_name} - {time_str} - "
             f"{self.increase_percent}%"
         )
+
+
+class RechargeApprovalRecord(models.Model):
+    """
+    Track submitted recharge approvals and Feishu callback state.
+    """
+
+    TRIGGER_SOURCE_MANUAL = "manual"
+    TRIGGER_SOURCE_ALERT = "alert"
+    TRIGGER_SOURCE_CHOICES = [
+        (TRIGGER_SOURCE_MANUAL, "Manual"),
+        (TRIGGER_SOURCE_ALERT, "Alert"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELED = "canceled"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SUBMITTED, "Submitted"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_CANCELED, "Canceled"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    provider = models.ForeignKey(
+        CloudProvider,
+        on_delete=models.CASCADE,
+        related_name="recharge_approval_records",
+    )
+    alert_record = models.ForeignKey(
+        AlertRecord,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recharge_approval_records",
+    )
+    trigger_source = models.CharField(
+        max_length=20,
+        choices=TRIGGER_SOURCE_CHOICES,
+        default=TRIGGER_SOURCE_MANUAL,
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    raw_recharge_info = models.TextField(blank=True, default="")
+    request_payload = models.JSONField(default=dict, blank=True)
+    context_payload = models.JSONField(default=dict, blank=True)
+    response_payload = models.JSONField(null=True, blank=True)
+    callback_payload = models.JSONField(null=True, blank=True)
+    approval_timeline = models.JSONField(default=list, blank=True)
+    feishu_instance_code = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        db_index=True,
+        unique=True,
+    )
+    feishu_approval_code = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+    )
+    status_message = models.TextField(blank=True, default="")
+    submitted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_recharge_approvals",
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    last_callback_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "cloud_billing_recharge_approval_record"
+        verbose_name = "Recharge Approval Record"
+        verbose_name_plural = "Recharge Approval Records"
+        indexes = [
+            models.Index(fields=["provider", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        instance_code = self.feishu_instance_code or "pending"
+        return f"{self.provider.display_name} - {instance_code} - {self.status}"

@@ -17,11 +17,13 @@ from cloud_billing.models import (
     BillingData,
     AlertRule,
     AlertRecord,
+    RechargeApprovalRecord,
 )
 from cloud_billing.tasks import (
     collect_billing_data,
     check_alert_for_provider,
     send_alert_notification,
+    submit_recharge_approval,
 )
 from agentcore_task.adapters.django.models import TaskExecution
 from agentcore_task.constants import TaskStatus
@@ -218,10 +220,12 @@ class TestCheckAlertForProvider:
         mock_send_alert_delay.assert_called_once()
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.submit_recharge_approval.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
     def test_balance_threshold_triggers_alert(
         self,
         mock_get_default_webhook_channel,
+        mock_submit_recharge_approval,
         mock_send_alert,
         cloud_provider,
         user,
@@ -234,9 +238,12 @@ class TestCheckAlertForProvider:
         """
         mock_channel = SimpleNamespace(config={"language": "en"})
         mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        cloud_provider.recharge_info = '{"amount": 288, "recharge_account": "acct-1"}'
+        cloud_provider.save(update_fields=["recharge_info"])
         AlertRule.objects.create(
             provider=cloud_provider,
             balance_threshold=Decimal("550.00"),
+            auto_submit_recharge_approval=True,
             is_active=True,
             created_by=user,
             updated_by=user,
@@ -251,6 +258,11 @@ class TestCheckAlertForProvider:
         assert record.balance_threshold == Decimal("550.00")
         assert "remaining balance" in record.alert_message.lower()
         mock_send_alert.assert_called_once_with(record.id)
+        mock_submit_recharge_approval.assert_called_once_with(
+            cloud_provider.id,
+            alert_record_id=record.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        )
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
@@ -731,3 +743,51 @@ class TestSendAlertNotification:
         assert result["success"] is False
         alert_record.refresh_from_db()
         assert alert_record.webhook_status == "failed"
+
+
+@pytest.mark.django_db
+class TestSubmitRechargeApproval:
+    """Tests for submit_recharge_approval task."""
+
+    @patch("cloud_billing.tasks.run_recharge_approval")
+    def test_submit_recharge_approval_creates_record(
+        self,
+        mock_run_recharge_approval,
+        cloud_provider,
+    ):
+        """
+        Task should create a recharge approval record for manual submissions.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        mock_run_recharge_approval.return_value = {
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "status": "PENDING",
+            "raw": {"ok": True},
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+        )
+
+        assert result["success"] is True
+        record = RechargeApprovalRecord.objects.get(
+            feishu_instance_code="ins_188"
+        )
+        assert record.provider == cloud_provider
+        assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
+        assert record.trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL
+
+    def test_submit_recharge_approval_rejects_missing_info(self, cloud_provider):
+        """
+        Task should fail fast when provider recharge info is empty.
+        """
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+        )
+
+        assert result["success"] is False
+        assert result["reason"] == "missing_recharge_info"

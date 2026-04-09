@@ -24,12 +24,15 @@ class TestCloudProviderSerializer:
     """
 
     def test_serialize_provider(self, cloud_provider):
+        cloud_provider.recharge_info = '{"amount": 200}'
+        cloud_provider.save(update_fields=["recharge_info"])
         serializer = CloudProviderSerializer(cloud_provider)
         data = serializer.data
         assert data["id"] == cloud_provider.id
         assert data["name"] == "test_aws"
         assert data["provider_type"] == "aws"
         assert data["display_name"] == "Test AWS"
+        assert data["recharge_info"] == '{"amount": 200}'
         assert "config" in data
         assert "created_by_username" in data
 
@@ -39,6 +42,7 @@ class TestCloudProviderSerializer:
             "provider_type": "aws",
             "display_name": "New Provider",
             "tags": ["生产", "重点", "生产"],
+            "recharge_info": '{"amount": 300, "recharge_account": "acct-1"}',
             "config": {"access_key": "test", "secret_key": "test"},
             "is_active": True,
         }
@@ -48,6 +52,7 @@ class TestCloudProviderSerializer:
         assert provider.name == "new_provider"
         assert provider.provider_type == "aws"
         assert provider.tags == ["生产", "重点"]
+        assert provider.recharge_info == '{"amount": 300, "recharge_account": "acct-1"}'
 
     def test_validate_unique_name(self, cloud_provider):
         data = {
@@ -88,6 +93,7 @@ class TestAlertRuleSerializer:
         assert "growth_threshold" in data
         assert "balance_threshold" in data
         assert "days_remaining_threshold" in data
+        assert "auto_submit_recharge_approval" in data
 
     def test_deserialize_create_alert_rule(self, cloud_provider, user):
         data = {
@@ -96,6 +102,7 @@ class TestAlertRuleSerializer:
             "growth_threshold": "10.00",
             "balance_threshold": "100.00",
             "days_remaining_threshold": 7,
+            "auto_submit_recharge_approval": True,
             "is_active": True,
         }
         serializer = AlertRuleSerializer(data=data)
@@ -105,6 +112,7 @@ class TestAlertRuleSerializer:
         assert rule.cost_threshold == Decimal("20.00")
         assert rule.balance_threshold == Decimal("100.00")
         assert rule.days_remaining_threshold == 7
+        assert rule.auto_submit_recharge_approval is True
 
     def test_validate_at_least_one_threshold(self, cloud_provider):
         data = {
