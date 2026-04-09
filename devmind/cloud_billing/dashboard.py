@@ -860,8 +860,8 @@ def _build_accounts(
         )
         has_days_remaining_reference = recent_collected_days >= 7
         daily_burn = (
-            recent_spend / RECENT_BURN_WINDOW_DAYS
-            if recent_spend
+            recent_spend / recent_collected_days
+            if recent_spend and recent_collected_days > 0
             else 0.0
         )
         balance_info = get_balance_support_info(provider)

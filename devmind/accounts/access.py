@@ -61,8 +61,6 @@ LEGACY_DEFAULT_FEATURES = (
     'workspace',
     'admin_console',
     'operations_console',
-    'hyperbdr_dashboard',
-    'ai_pricehub',
 )
 
 

@@ -130,8 +130,15 @@ def _sync_ai_pricehub_collect_config(config: CollectorConfig) -> None:
             list_primary_source_configs,
             set_primary_source_configs,
         )
-    except Exception:
-        return
+    except Exception as exc:
+        raise ValidationError(
+            {
+                "value": (
+                    "AI PriceHub source config store is unavailable: "
+                    f"{exc}"
+                )
+            }
+        ) from exc
 
     value = config.value or {}
     value["project_keys"] = value.get("project_keys") or ["sync"]
@@ -142,13 +149,27 @@ def _sync_ai_pricehub_collect_config(config: CollectorConfig) -> None:
                 incoming_sources,
                 owner_user=config.user,
             )
-        except Exception:
-            return
+        except Exception as exc:
+            raise ValidationError(
+                {
+                    "value": (
+                        "Failed to persist AI PriceHub primary sources: "
+                        f"{exc}"
+                    )
+                }
+            ) from exc
     else:
         try:
             value["primary_sources"] = list_primary_source_configs()
-        except Exception:
-            return
+        except Exception as exc:
+            raise ValidationError(
+                {
+                    "value": (
+                        "Failed to load AI PriceHub primary sources: "
+                        f"{exc}"
+                    )
+                }
+            ) from exc
     config.value = value
     config.save(update_fields=["value", "updated_at"])
 

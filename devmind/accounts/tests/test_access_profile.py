@@ -99,7 +99,5 @@ class AccessProfileTests(TestCase):
                 'workspace',
                 'admin_console',
                 'operations_console',
-                'hyperbdr_dashboard',
-                'ai_pricehub',
             ],
         )

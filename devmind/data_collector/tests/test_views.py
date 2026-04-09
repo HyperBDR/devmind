@@ -190,6 +190,50 @@ class TestCollectorConfigViewSet:
         config.refresh_from_db()
         assert config.key == "ai_pricehub_renamed"
 
+    @patch("ai_pricehub.source_config_store.set_primary_source_configs")
+    def test_create_ai_pricehub_config_sync_failure_returns_400(
+        self,
+        mock_set_primary_source_configs,
+        api_client,
+        user,
+    ):
+        mock_set_primary_source_configs.side_effect = ValueError(
+            "invalid primary source"
+        )
+
+        payload = {
+            "platform": "ai_pricehub",
+            "key": "ai_pricehub_global",
+            "value": {
+                "project_keys": ["sync"],
+                "primary_sources": [
+                    {
+                        "platform_slug": "agione",
+                        "vendor_name": "AGIOne",
+                        "endpoint_url": "https://example.com/models",
+                        "region": "",
+                        "currency": "CNY",
+                        "points_per_currency_unit": 10.0,
+                        "is_enabled": True,
+                        "notes": "",
+                    }
+                ],
+            },
+            "is_enabled": True,
+        }
+
+        response = api_client.post(
+            "/api/v1/data-collector/configs/",
+            payload,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert not CollectorConfig.objects.filter(
+            user=user,
+            platform="ai_pricehub",
+        ).exists()
+
     def test_retrieve_config(self, api_client, collector_config):
         uuid = str(collector_config.uuid)
         response = api_client.get(f"/api/v1/data-collector/configs/{uuid}/")
