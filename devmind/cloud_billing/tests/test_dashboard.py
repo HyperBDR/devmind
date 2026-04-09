@@ -13,6 +13,7 @@ from cloud_billing.dashboard import (
     _build_currency_breakdown,
     _build_exchange_rate_info,
     _build_financial_health,
+    _recent_spend_from_snapshots,
     _payment_type_for_provider,
     _build_trend_ranges,
 )
@@ -290,6 +291,241 @@ class AccountFundsTests(SimpleTestCase):
         self.assertEqual(
             financial_health['recharge_alerts'][0]['tags'],
             ['生产', '核心'],
+        )
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_accounts_expose_reference_days_for_days_remaining(
+        self,
+        mock_balance_support,
+    ):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider = SimpleNamespace(
+            id=29,
+            provider_type='zhipu',
+            display_name='智谱 AI',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('300.00'),
+            balance_currency='CNY',
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='acct-9',
+                total_cost=Decimal('90.00'),
+                currency='CNY',
+            )
+        ]
+        recent_rows = [
+            SimpleNamespace(
+                provider_id=29,
+                account_id='acct-9',
+                hourly_cost=Decimal('30.00'),
+                total_cost=Decimal('30.00'),
+                collected_at=datetime(2026, 3, 2, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=29,
+                account_id='acct-9',
+                hourly_cost=Decimal('60.00'),
+                total_cost=Decimal('90.00'),
+                collected_at=datetime(2026, 3, 5, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            recent_rows,
+            recent_rows=recent_rows,
+            local_tz=dt_timezone.utc,
+            now=datetime(2026, 3, 20, 0, 0, tzinfo=dt_timezone.utc),
+        )
+        financial_health = _build_financial_health(accounts)
+
+        self.assertEqual(accounts[0]['recent_collected_days'], 2)
+        self.assertFalse(accounts[0]['has_days_remaining_reference'])
+        self.assertIsNone(financial_health['total_days'])
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_accounts_without_reference_sort_by_balance(
+        self,
+        mock_balance_support,
+    ):
+        mock_balance_support.return_value = {'supported': True}
+
+        provider_a = SimpleNamespace(
+            id=30,
+            provider_type='zhipu',
+            display_name='智谱 A',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('500.00'),
+            balance_currency='CNY',
+        )
+        provider_b = SimpleNamespace(
+            id=31,
+            provider_type='zhipu',
+            display_name='智谱 B',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('100.00'),
+            balance_currency='CNY',
+        )
+        provider_c = SimpleNamespace(
+            id=32,
+            provider_type='alibaba',
+            display_name='阿里云',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('900.00'),
+            balance_currency='CNY',
+        )
+
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider_a,
+                account_id='acct-a',
+                total_cost=Decimal('90.00'),
+                currency='CNY',
+            ),
+            SimpleNamespace(
+                provider=provider_b,
+                account_id='acct-b',
+                total_cost=Decimal('60.00'),
+                currency='CNY',
+            ),
+            SimpleNamespace(
+                provider=provider_c,
+                account_id='acct-c',
+                total_cost=Decimal('300.00'),
+                currency='CNY',
+            ),
+        ]
+        recent_rows = [
+            SimpleNamespace(
+                provider_id=30,
+                account_id='acct-a',
+                hourly_cost=Decimal('30.00'),
+                total_cost=Decimal('30.00'),
+                collected_at=datetime(2026, 3, 2, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=30,
+                account_id='acct-a',
+                hourly_cost=Decimal('60.00'),
+                total_cost=Decimal('90.00'),
+                collected_at=datetime(2026, 3, 5, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=31,
+                account_id='acct-b',
+                hourly_cost=Decimal('20.00'),
+                total_cost=Decimal('20.00'),
+                collected_at=datetime(2026, 3, 2, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=31,
+                account_id='acct-b',
+                hourly_cost=Decimal('40.00'),
+                total_cost=Decimal('60.00'),
+                collected_at=datetime(2026, 3, 4, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+        ]
+        daily_rows = [
+            *recent_rows,
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('10.00'),
+                collected_at=datetime(2026, 3, 1, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('20.00'),
+                collected_at=datetime(2026, 3, 2, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('30.00'),
+                collected_at=datetime(2026, 3, 3, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('40.00'),
+                collected_at=datetime(2026, 3, 4, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('50.00'),
+                collected_at=datetime(2026, 3, 5, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('60.00'),
+                collected_at=datetime(2026, 3, 6, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+            SimpleNamespace(
+                provider_id=32,
+                account_id='acct-c',
+                hourly_cost=Decimal('10.00'),
+                total_cost=Decimal('70.00'),
+                collected_at=datetime(2026, 3, 7, 8, 0, tzinfo=dt_timezone.utc),
+                period='2026-03',
+                hour=8,
+            ),
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            daily_rows,
+            recent_rows=daily_rows,
+            local_tz=dt_timezone.utc,
+            now=datetime(2026, 3, 20, 0, 0, tzinfo=dt_timezone.utc),
+        )
+
+        self.assertEqual(
+            [account['account_id'] for account in accounts],
+            ['acct-c', 'acct-b', 'acct-a'],
         )
 
     @patch('cloud_billing.dashboard.get_balance_support_info')
@@ -632,3 +868,42 @@ class DashboardTimezoneTests(SimpleTestCase):
         self.assertEqual(week_points['03-25']['usd'], 12.5)
         self.assertEqual(recent_points['03-24']['cny'], 88.0)
         self.assertEqual(recent_points['03-25']['usd'], 12.5)
+
+
+class RecentSpendSnapshotTests(SimpleTestCase):
+    def test_uses_real_collection_time_not_hour_slot_order(self):
+        now = datetime(2026, 4, 8, 8, 10, tzinfo=dt_timezone.utc)
+        rows = [
+            SimpleNamespace(
+                period='2026-04',
+                hour=0,
+                total_cost=Decimal('22.46'),
+                hourly_cost=Decimal('0.00'),
+                collected_at=datetime(2026, 4, 6, 0, 11, tzinfo=dt_timezone.utc),
+            ),
+            SimpleNamespace(
+                period='2026-04',
+                hour=7,
+                total_cost=Decimal('125.79'),
+                hourly_cost=Decimal('89.89'),
+                collected_at=datetime(2026, 4, 8, 7, 59, tzinfo=dt_timezone.utc),
+            ),
+            SimpleNamespace(
+                period='2026-04',
+                hour=8,
+                total_cost=Decimal('128.10'),
+                hourly_cost=Decimal('2.31'),
+                collected_at=datetime(2026, 4, 8, 8, 10, tzinfo=dt_timezone.utc),
+            ),
+            SimpleNamespace(
+                period='2026-04',
+                hour=23,
+                total_cost=Decimal('22.50'),
+                hourly_cost=Decimal('0.00'),
+                collected_at=datetime(2026, 4, 6, 23, 13, tzinfo=dt_timezone.utc),
+            ),
+        ]
+
+        spend = _recent_spend_from_snapshots(rows, now)
+
+        self.assertAlmostEqual(spend, 105.64, places=2)

@@ -85,7 +85,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                 collected_at__lt=end_datetime
             )
 
-        return queryset.order_by('-period', '-hour')
+        return queryset.order_by('-day', '-hour', '-collected_at')
 
     @extend_schema(
         tags=['cloud-billing'],
@@ -126,7 +126,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         # Order by hour descending to get the last hour of each period
         latest_billings = {}
         for billing in queryset.order_by(
-            'provider_id', 'account_id', 'period', '-hour',
+            'provider_id', 'account_id', 'period', '-day', '-hour',
             '-collected_at'
         ):
             key = (
@@ -244,6 +244,9 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
                 by_provider[provider_key] = {
                     'provider_id': billing.provider_id,
                     'provider_name': billing.provider.display_name,
+                    'provider_notes': (
+                        (billing.provider.notes or '').strip()
+                    ),
                     'account_id': billing.account_id or '',
                     'total_cost': 0,
                     'count': 0,
@@ -337,7 +340,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         latest_ids = BillingData.objects.filter(
             provider_id=OuterRef('provider_id'),
             account_id=OuterRef('account_id')
-        ).order_by('-collected_at').values('id')[:1]
+        ).order_by('-day', '-hour', '-collected_at').values('id')[:1]
 
         latest_records = queryset.filter(
             id__in=Subquery(latest_ids)

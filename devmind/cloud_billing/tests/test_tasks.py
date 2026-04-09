@@ -3,6 +3,7 @@ Unit tests for cloud_billing Celery tasks: collect_billing_data,
 check_alert_for_provider, send_alert_notification.
 """
 
+import datetime
 import pytest
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
@@ -589,6 +590,67 @@ class TestCollectBillingData:
             cloud_provider.id,
             cloud_provider.provider_type,
         )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    @patch("cloud_billing.tasks.timezone.now")
+    def test_sync_keeps_same_hour_snapshots_on_different_days(
+        self,
+        mock_timezone_now,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        first_now = timezone.make_aware(
+            datetime.datetime(2026, 4, 6, 8, 0, 0)
+        )
+        second_now = timezone.make_aware(
+            datetime.datetime(2026, 4, 7, 8, 0, 0)
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.side_effect = [
+            {
+                "status": "success",
+                "data": {
+                    "total_cost": 22.5,
+                    "balance": 100.0,
+                    "currency": "CNY",
+                    "account_id": "acct-zhipu",
+                    "service_costs": {"智谱 AI": 22.5},
+                },
+            },
+            {
+                "status": "success",
+                "data": {
+                    "total_cost": 128.1,
+                    "balance": 80.0,
+                    "currency": "CNY",
+                    "account_id": "acct-zhipu",
+                    "service_costs": {"智谱 AI": 128.1},
+                },
+            },
+        ]
+        mock_provider_service_class.return_value = mock_provider_service
+
+        mock_timezone_now.return_value = first_now
+        collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+        mock_timezone_now.return_value = second_now
+        collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        rows = list(
+            BillingData.objects.filter(
+                provider=cloud_provider,
+                account_id="acct-zhipu",
+                hour=8,
+            ).order_by("day")
+        )
+
+        assert len(rows) == 2
+        assert rows[0].day.isoformat() == "2026-04-06"
+        assert rows[0].total_cost == Decimal("22.50")
+        assert rows[1].day.isoformat() == "2026-04-07"
+        assert rows[1].total_cost == Decimal("128.10")
 
 
 @pytest.mark.django_db

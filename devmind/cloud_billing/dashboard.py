@@ -166,8 +166,16 @@ def _recent_spend_from_snapshots(account_rows, now) -> float:
         rows_by_period[row_period].append(row)
 
     for period_rows in rows_by_period.values():
-        first_row = period_rows[0]
-        last_row = period_rows[-1]
+        ordered_period_rows = sorted(
+            period_rows,
+            key=lambda row: (
+                getattr(row, 'day', None) or datetime.min.date(),
+                getattr(row, 'collected_at', None) or datetime.min.replace(tzinfo=dt_timezone.utc),
+                getattr(row, 'hour', -1),
+            ),
+        )
+        first_row = ordered_period_rows[0]
+        last_row = ordered_period_rows[-1]
         first_total = _total_cost_value(first_row)
         first_increment = _hourly_cost_value(first_row)
         baseline_total = max(first_total - first_increment, 0.0)
@@ -186,10 +194,12 @@ def _recent_collected_days_from_snapshots(account_rows, now, local_tz) -> int:
     collected_days = set()
 
     for row in account_rows:
-        collected_at = getattr(row, 'collected_at', None)
-        if collected_at is None:
-            continue
-        row_day = collected_at.astimezone(local_tz).date()
+        row_day = getattr(row, 'day', None)
+        if row_day is None:
+            collected_at = getattr(row, 'collected_at', None)
+            if collected_at is None:
+                continue
+            row_day = collected_at.astimezone(local_tz).date()
         if recent_window_start <= row_day <= today:
             collected_days.add(row_day)
 
@@ -202,7 +212,7 @@ def _daily_rows_for_current_month(local_tz):
     rows = BillingData.objects.select_related('provider').filter(
         provider__is_active=True,
         collected_at__gte=month_start.astimezone(dt_timezone.utc),
-    ).order_by('provider_id', 'account_id', 'period', 'hour', 'collected_at')
+    ).order_by('provider_id', 'account_id', 'day', 'hour', 'collected_at')
     return now, month_start, list(rows)
 
 
@@ -219,7 +229,7 @@ def _billing_rows_for_current_year(local_tz):
     rows = BillingData.objects.select_related('provider').filter(
         provider__is_active=True,
         collected_at__gte=year_start.astimezone(dt_timezone.utc),
-    ).order_by('provider_id', 'account_id', 'period', 'hour', 'collected_at')
+    ).order_by('provider_id', 'account_id', 'day', 'hour', 'collected_at')
     return now, year_start, list(rows)
 
 
@@ -234,7 +244,7 @@ def _billing_rows_for_recent_days(local_tz, days: int = 30):
     rows = BillingData.objects.select_related('provider').filter(
         provider__is_active=True,
         collected_at__gte=window_start.astimezone(dt_timezone.utc),
-    ).order_by('provider_id', 'account_id', 'period', 'hour', 'collected_at')
+    ).order_by('provider_id', 'account_id', 'day', 'hour', 'collected_at')
     return now, window_start, list(rows)
 
 
@@ -246,6 +256,7 @@ def _latest_billings():
     billings = BillingData.objects.select_related('provider').order_by(
         'provider_id',
         'account_id',
+        '-day',
         '-collected_at',
         '-period',
         '-hour',
@@ -503,6 +514,28 @@ def _risk_for_days(days_remaining: int) -> str:
     if days_remaining <= 30:
         return 'medium'
     return 'low'
+
+
+def _account_sort_key(account: dict[str, object]):
+    has_reference = bool(account.get('has_days_remaining_reference'))
+    if has_reference:
+        return (
+            0,
+            int(account.get('days_remaining') or 0),
+            -_to_float(account.get('cost')),
+        )
+
+    raw_balance = account.get('balance')
+    fallback_balance = (
+        _to_float(raw_balance)
+        if raw_balance is not None
+        else _to_float(account.get('display_funds'))
+    )
+    return (
+        1,
+        fallback_balance,
+        -_to_float(account.get('cost')),
+    )
 
 
 def _build_account_detail(
@@ -825,6 +858,7 @@ def _build_accounts(
             now,
             local_tz,
         )
+        has_days_remaining_reference = recent_collected_days >= 7
         daily_burn = (
             recent_spend / recent_collected_days
             if recent_spend and recent_collected_days > 0
@@ -884,6 +918,8 @@ def _build_accounts(
                 'display_funds': funds['display_funds'],
                 'display_funds_currency': funds['display_funds_currency'],
                 'days_remaining': days_remaining,
+                'recent_collected_days': recent_collected_days,
+                'has_days_remaining_reference': has_days_remaining_reference,
                 'type': payment_type,
                 'usage_rate': None,
                 'account_id': billing.account_id or '',
@@ -905,7 +941,7 @@ def _build_accounts(
             }
         )
 
-    accounts.sort(key=lambda item: (item['days_remaining'], -item['cost']))
+    accounts.sort(key=_account_sort_key)
     return accounts
 
 
@@ -920,9 +956,19 @@ def _build_financial_health(accounts):
         provider_balances[provider_key] = _to_float(item.get('balance'))
 
     total_funds = round(sum(provider_balances.values()), 2)
-    total_days = min((item['days_remaining'] for item in accounts), default=0)
+    referenced_accounts = [
+        item for item in accounts if item.get('has_days_remaining_reference')
+    ]
+    total_days = min(
+        (item['days_remaining'] for item in referenced_accounts),
+        default=None,
+    )
     bottleneck = next(
-        (item['name'] for item in accounts if item['days_remaining'] == total_days),
+        (
+            item['name']
+            for item in referenced_accounts
+            if item['days_remaining'] == total_days
+        ),
         '',
     )
     recharge_alerts = [
@@ -933,6 +979,11 @@ def _build_financial_health(accounts):
             'notes': item['notes'],
             'tags': item.get('tags', []),
             'days_remaining': item['days_remaining'],
+            'recent_collected_days': item.get('recent_collected_days', 0),
+            'has_days_remaining_reference': item.get(
+                'has_days_remaining_reference',
+                False,
+            ),
         }
         for item in accounts
     ]
