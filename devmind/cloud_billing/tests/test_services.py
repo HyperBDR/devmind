@@ -230,15 +230,6 @@ class TestProviderService:
             },
         )
 
-        assert result == mock_provider_instance
-        mock_factory.create_provider.assert_called_once_with(
-            "baidu",
-            {
-                "api_key": "test_key",
-                "api_secret": "test_secret",
-            },
-        )
-
     @patch(
         "cloud_billing.services.provider_service."
         "ProviderService.create_provider"

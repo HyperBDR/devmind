@@ -18,6 +18,11 @@ FEATURE_DEFINITIONS = (
         'default_path': '/operations/dashboard',
     },
     {
+        'key': 'hyperbdr_dashboard',
+        'label': 'HyperMotion / HyperBDR Dashboard',
+        'default_path': '/hyperbdr-dashboard',
+    },
+    {
         'key': 'ai_pricehub',
         'label': 'LLM Pricing Comparison',
         'default_path': '/ai-pricehub',
@@ -56,7 +61,6 @@ LEGACY_DEFAULT_FEATURES = (
     'workspace',
     'admin_console',
     'operations_console',
-    'ai_pricehub',
 )
 
 
@@ -83,7 +87,8 @@ def normalize_feature_keys(values: Iterable[str] | None) -> list[str]:
 
 def normalize_platform_key(value: str | None) -> str:
     """Return a valid platform key or an empty string."""
-    platform_key = str(value or '').strip()
+    raw_platform_key = str(value or '').strip()
+    platform_key = FEATURE_ALIASES.get(raw_platform_key, raw_platform_key)
     if platform_key in PLATFORM_KEY_SET:
         return platform_key
     return ''
@@ -181,6 +186,10 @@ def get_effective_feature_keys(
     effective_roles=None,
 ) -> list[str]:
     """Return visible feature keys for the given user."""
+    # Staff users automatically get all features
+    if getattr(user, 'is_staff', False):
+        return list(FEATURE_KEYS)
+
     resolved_roles = effective_roles or get_effective_roles(user)
     feature_keys = []
     for role in resolved_roles:

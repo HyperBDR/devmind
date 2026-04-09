@@ -88,12 +88,12 @@ services:
       - ./data.dev/postgresql/data:/var/lib/postgresql/data
       - ./data.dev/logs/postgresql:/var/log/postgresql
     entrypoint: ["bash", "-c", "mkdir -p /var/log/postgresql && chown -R postgres:postgres /var/log/postgresql && chmod -R 755 /var/log/postgresql && exec docker-entrypoint.sh \"$$@\""]
+    ports:
+      - "5432:5432"
     command:
       - "postgres"
       - "-c"
       - "config_file=/etc/postgresql/postgresql.conf"
-    ports:
-      - "5432:5432"
     networks:
       - devmind_network
     healthcheck:

@@ -51,8 +51,6 @@ RUN apt-get install -y --no-install-recommends \
     libxml2-dev \
     libxslt1-dev \
     zlib1g-dev \
-    libjpeg-dev \
-    libpng-dev \
     libmagic1 \
     libmagic-dev \
     gettext \

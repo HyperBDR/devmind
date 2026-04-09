@@ -94,6 +94,35 @@ class CollectorConfigSerializer(serializers.ModelSerializer):
             for key in _default_runtime_state():
                 if key not in runtime:
                     runtime[key] = None
+        platform = self.initial_data.get("platform") or getattr(
+            getattr(self, "instance", None),
+            "platform",
+            None,
+        )
+        if platform == "hyperbdr":
+            auth = data.get("auth") or {}
+            current_auth = (
+                (getattr(getattr(self, "instance", None), "value", None) or {})
+                .get("auth", {})
+            )
+            missing = []
+            for field in ("base_url", "username"):
+                if not str(auth.get(field) or "").strip():
+                    missing.append(field)
+            has_password = str(auth.get("password") or "").strip() or str(
+                current_auth.get("password") or ""
+            ).strip()
+            if not has_password:
+                missing.append("password")
+            if missing:
+                raise serializers.ValidationError(
+                    {
+                        "value": [
+                            "HyperBDR auth missing required fields: "
+                            + ", ".join(missing)
+                        ]
+                    }
+                )
         return data
 
 

@@ -3,6 +3,7 @@ Tests for cloud billing API views.
 """
 
 import pytest
+from datetime import datetime
 from decimal import Decimal
 from django.contrib.auth.models import User
 
