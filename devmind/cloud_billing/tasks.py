@@ -4,7 +4,7 @@ Celery tasks for cloud billing collection and alert checking.
 
 import logging
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from typing import Dict, Optional
 
@@ -74,6 +74,7 @@ def _get_latest_known_balance(
     provider: CloudProvider,
     account_id: str,
     current_period: str,
+    current_day,
     current_hour: int,
 ):
     """Return the most recent non-null balance before the current collection."""
@@ -83,9 +84,27 @@ def _get_latest_known_balance(
         balance__isnull=False,
     ).exclude(
         period=current_period,
+        day=current_day,
         hour=current_hour,
-    ).order_by('-collected_at', '-period', '-hour')
+    ).order_by('-day', '-hour', '-collected_at')
     return queryset.values_list('balance', flat=True).first()
+
+
+def _get_previous_billing_snapshot(
+    provider: CloudProvider,
+    account_id: str,
+    current_day,
+    current_hour: int,
+):
+    return (
+        BillingData.objects.filter(
+            provider=provider,
+            account_id=account_id,
+        )
+        .exclude(day=current_day, hour=current_hour)
+        .order_by('-day', '-hour', '-collected_at')
+        .first()
+    )
 
 
 def _recent_spend_from_snapshots(rows, now) -> Decimal:
@@ -105,8 +124,17 @@ def _recent_spend_from_snapshots(rows, now) -> Decimal:
         rows_by_period.setdefault(row.period, []).append(row)
 
     for period_rows in rows_by_period.values():
-        first_row = period_rows[0]
-        last_row = period_rows[-1]
+        ordered_period_rows = sorted(
+            period_rows,
+            key=lambda row: (
+                getattr(row, "day", None) or datetime.min.date(),
+                getattr(row, "collected_at", None)
+                or datetime.min.replace(tzinfo=dt_timezone.utc),
+                getattr(row, "hour", -1),
+            ),
+        )
+        first_row = ordered_period_rows[0]
+        last_row = ordered_period_rows[-1]
         first_total = Decimal(str(first_row.total_cost))
         first_increment = Decimal(str(first_row.hourly_cost or 0))
         baseline_total = max(first_total - first_increment, Decimal("0"))
@@ -129,7 +157,7 @@ def _estimate_days_remaining(provider, current_billing, now) -> tuple[Decimal, i
             provider=provider,
             account_id=account_id,
             collected_at__gte=window_start,
-        ).order_by("period", "hour", "collected_at")
+        ).order_by("day", "hour", "collected_at")
     )
     recent_spend = _recent_spend_from_snapshots(recent_rows, now)
     if recent_spend <= 0:
@@ -254,6 +282,7 @@ def collect_billing_data(
         provider_service = ProviderService()
         now = timezone.now()
         current_period = now.strftime("%Y-%m")
+        current_day = timezone.localdate(now)
         current_hour = now.hour
 
         for provider in providers:
@@ -336,6 +365,7 @@ def collect_billing_data(
                         provider=provider,
                         account_id=account_id,
                         current_period=current_period,
+                        current_day=current_day,
                         current_hour=current_hour,
                     )
                     if fallback_balance is not None:
@@ -348,7 +378,7 @@ def collect_billing_data(
                             account_id=account_id,
                             period=current_period,
                         )
-                        .order_by("-hour", "-collected_at")
+                        .order_by("-day", "-hour", "-collected_at")
                         .values_list("total_cost", flat=True)
                         .first()
                     )
@@ -382,45 +412,21 @@ def collect_billing_data(
                         f"balance={balance}, balance_debug={balance_debug})"
                     )
 
-                # Calculate hourly incremental cost
-                # Rule: If this month has no data yet, hourly_cost = total_cost
-                # Otherwise, calculate increment from previous hour
-                has_data_this_period = BillingData.objects.filter(
-                    provider=provider, period=current_period
-                ).exists()
+                previous_billing = _get_previous_billing_snapshot(
+                    provider=provider,
+                    account_id=account_id,
+                    current_day=current_day,
+                    current_hour=current_hour,
+                )
 
-                if not has_data_this_period:
-                    # First collection for this month,
-                    # hourly_cost equals total_cost
+                if previous_billing is None:
                     hourly_cost = total_cost
                 else:
-                    # This month has data, try to get previous hour's record
-                    previous_hour = current_hour - 1
-                    previous_period = current_period
-
-                    # Handle cross-month case
-                    # (hour 0 -> previous month hour 23)
-                    if previous_hour < 0:
-                        previous_hour = 23
-                        prev_date = timezone.now() - timedelta(days=1)
-                        previous_period = prev_date.strftime("%Y-%m")
-
-                    try:
-                        previous_billing = BillingData.objects.get(
-                            provider=provider,
-                            account_id=account_id,
-                            period=previous_period,
-                            hour=previous_hour,
-                        )
-                        # Calculate incremental cost: current - previous
+                    if previous_billing.period == current_period:
                         hourly_cost = total_cost - previous_billing.total_cost
-                        # Ensure hourly_cost is not negative (safety check)
                         if hourly_cost < 0:
                             hourly_cost = Decimal("0")
-                    except BillingData.DoesNotExist:
-                        # Previous hour not found, use total_cost as fallback
-                        # This should rarely happen if data collection
-                        # is regular
+                    else:
                         hourly_cost = total_cost
 
                 with transaction.atomic():
@@ -429,6 +435,7 @@ def collect_billing_data(
                             provider=provider,
                             account_id=account_id,
                             period=current_period,
+                            day=current_day,
                             hour=current_hour,
                             defaults={
                                 "total_cost": total_cost,
@@ -449,6 +456,7 @@ def collect_billing_data(
                         billing_record.currency = currency
                         billing_record.service_costs = service_costs
                         billing_record.account_id = account_id
+                        billing_record.day = current_day
 
                         # Update collected_at to reflect the latest
                         # collection time
@@ -464,6 +472,7 @@ def collect_billing_data(
                                 "currency",
                                 "service_costs",
                                 "account_id",
+                                "day",
                                 "collected_at",
                             ]
                         )
@@ -705,12 +714,13 @@ def check_alert_for_provider(
 
         now = timezone.now()
         current_period = now.strftime("%Y-%m")
+        current_day = timezone.localdate(now)
         current_hour = now.hour
 
         # Get all current billing records for this provider
         # (may have multiple accounts)
         current_billings = BillingData.objects.filter(
-            provider=provider, period=current_period, hour=current_hour
+            provider=provider, day=current_day, hour=current_hour
         )
 
         if not current_billings.exists():
@@ -729,14 +739,6 @@ def check_alert_for_provider(
                 )
             return result
 
-        previous_hour = current_hour - 1
-        previous_period = current_period
-
-        if previous_hour < 0:
-            previous_hour = 23
-            prev_date = timezone.now() - timedelta(days=1)
-            previous_period = prev_date.strftime("%Y-%m")
-
         # Check alerts for each account_id separately
         alerts_created = []
         for current_billing in current_billings:
@@ -750,21 +752,21 @@ def check_alert_for_provider(
             )
             previous_billing = None
             previous_cost = Decimal("0")
-            try:
-                previous_billing = BillingData.objects.get(
-                    provider=provider,
-                    account_id=account_id,
-                    period=previous_period,
-                    hour=previous_hour,
-                )
+            previous_billing = _get_previous_billing_snapshot(
+                provider=provider,
+                account_id=account_id,
+                current_day=current_day,
+                current_hour=current_hour,
+            )
+            if previous_billing is not None:
                 previous_cost = Decimal(str(previous_billing.total_cost))
-            except BillingData.DoesNotExist:
+            else:
                 logger.info(
                     f"Task check_alert_for_provider: "
                     f"No previous billing data found "
                     f"(provider_id={provider.id}, name={provider.name}, "
-                    f"account_id={account_id}, period={previous_period}, "
-                    f"hour={previous_hour})"
+                    f"account_id={account_id}, day={current_day}, "
+                    f"hour={current_hour})"
                 )
 
             if previous_cost <= 0 and current_balance is None:
@@ -773,8 +775,7 @@ def check_alert_for_provider(
                     f"Previous cost is zero or negative "
                     f"(provider_id={provider.id}, name={provider.name}, "
                     f"account_id={account_id}, "
-                    f"previous_cost={previous_cost}, "
-                    f"period={previous_period}, hour={previous_hour})"
+                    f"previous_cost={previous_cost})"
                 )
                 continue
 
@@ -820,20 +821,13 @@ def check_alert_for_provider(
                 or alert_rule.growth_amount_threshold is not None
             )
             if needs_previous_billing:
-                try:
-                    previous_billing = BillingData.objects.get(
-                        provider=provider,
-                        account_id=account_id,
-                        period=previous_period,
-                        hour=previous_hour,
-                    )
-                except BillingData.DoesNotExist:
+                if previous_billing is None:
                     logger.info(
                         f"Task check_alert_for_provider: "
                         f"No previous billing data found "
                         f"(provider_id={provider.id}, name={provider.name}, "
-                        f"account_id={account_id}, period={previous_period}, "
-                        f"hour={previous_hour})"
+                        f"account_id={account_id}, day={current_day}, "
+                        f"hour={current_hour})"
                     )
                     if not should_alert:
                         continue
@@ -846,8 +840,7 @@ def check_alert_for_provider(
                             f"Previous cost is zero or negative "
                             f"(provider_id={provider.id}, name={provider.name}, "
                             f"account_id={account_id}, "
-                            f"previous_cost={previous_cost}, "
-                            f"period={previous_period}, hour={previous_hour})"
+                            f"previous_cost={previous_cost})"
                         )
                         if not cost_threshold_triggered:
                             continue

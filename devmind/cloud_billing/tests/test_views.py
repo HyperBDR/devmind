@@ -319,7 +319,10 @@ class TestBillingDataViewSet:
         """
         cloud_provider.balance = Decimal("88.00")
         cloud_provider.balance_currency = "USD"
-        cloud_provider.save(update_fields=["balance", "balance_currency"])
+        cloud_provider.notes = "生产账号"
+        cloud_provider.save(
+            update_fields=["balance", "balance_currency", "notes"]
+        )
         url = (
             f"/api/v1/cloud-billing/billing-data/stats/"
             f"?provider_id={cloud_provider.id}"
@@ -331,6 +334,9 @@ class TestBillingDataViewSet:
         assert "average_cost" in response.data
         assert "count" in response.data
         assert "cost_by_period" in response.data
+        by_provider = response.data["by_provider"]
+        first_row = next(iter(by_provider.values()))
+        assert first_row["provider_notes"] == "生产账号"
 
     def test_list_excludes_inactive_provider_data(
         self, api_client, cloud_provider_inactive
