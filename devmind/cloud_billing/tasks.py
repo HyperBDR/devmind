@@ -46,6 +46,7 @@ from .services.provider_service import ProviderService
 
 logger = logging.getLogger(__name__)
 RECENT_BURN_WINDOW_DAYS = 30
+MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
 
 
 def _resolve_notification_language(provider: CloudProvider) -> str:
@@ -144,6 +145,27 @@ def _recent_spend_from_snapshots(rows, now) -> Decimal:
     return spend
 
 
+def _recent_collected_days_from_snapshots(rows, now) -> int:
+    if not rows:
+        return 0
+
+    recent_window_start = (now - timedelta(days=RECENT_BURN_WINDOW_DAYS - 1)).date()
+    recent_dates = set()
+    for row in rows:
+        collected_at = getattr(row, "collected_at", None)
+        if collected_at is None:
+            continue
+        if timezone.is_naive(collected_at):
+            collected_at = timezone.make_aware(
+                collected_at,
+                dt_timezone.utc,
+            )
+        collected_date = collected_at.astimezone(dt_timezone.utc).date()
+        if collected_date >= recent_window_start:
+            recent_dates.add(collected_date)
+    return len(recent_dates)
+
+
 def _estimate_days_remaining(provider, current_billing, now) -> tuple[Decimal, int | None]:
     account_id = current_billing.account_id or ""
     window_start = (now - timedelta(days=RECENT_BURN_WINDOW_DAYS - 1)).replace(
@@ -160,10 +182,16 @@ def _estimate_days_remaining(provider, current_billing, now) -> tuple[Decimal, i
         ).order_by("day", "hour", "collected_at")
     )
     recent_spend = _recent_spend_from_snapshots(recent_rows, now)
+    recent_collected_days = _recent_collected_days_from_snapshots(
+        recent_rows,
+        now,
+    )
+    if recent_collected_days < MIN_DAYS_REMAINING_REFERENCE_DAYS:
+        return Decimal("0"), None
     if recent_spend <= 0:
         return Decimal("0"), None
 
-    daily_burn = recent_spend / Decimal(str(RECENT_BURN_WINDOW_DAYS))
+    daily_burn = recent_spend / Decimal(str(recent_collected_days))
     if daily_burn <= 0:
         daily_burn = Decimal("0")
 

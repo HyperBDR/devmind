@@ -27,6 +27,7 @@ EXCHANGE_RATE_SOURCE_URL = 'https://www.exchangerate-api.com/'
 EXCHANGE_RATE_CACHE_PREFIX = 'cloud_billing:exchange_rate'
 EXCHANGE_RATE_CACHE_TTL = 60 * 60 * 24
 RECENT_BURN_WINDOW_DAYS = 30
+MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
 PROVIDER_PAYMENT_TYPES = {
     'aws': 'postpaid',
     'azure': 'postpaid',
@@ -508,7 +509,9 @@ def _build_currency_breakdown(accounts, exchange_rate: float | None = None):
     return items
 
 
-def _risk_for_days(days_remaining: int) -> str:
+def _risk_for_days(days_remaining: int | None) -> str:
+    if days_remaining is None:
+        return 'unknown'
     if days_remaining <= 10:
         return 'high'
     if days_remaining <= 30:
@@ -793,7 +796,9 @@ def _build_account_detail(
 
     peak_daily_cost = max((item['value'] for item in recent_trend), default=0.0)
     recommended_recharge = round(max(daily_burn * 30 - display_funds, 0), 2)
-    if payment_type == 'postpaid':
+    if days_remaining is None:
+        recommendation_status = 'unknown'
+    elif payment_type == 'postpaid':
         recommendation_status = 'healthy' if days_remaining > 14 else 'attention'
     else:
         recommendation_status = 'healthy' if days_remaining > 21 else 'attention'
@@ -858,10 +863,16 @@ def _build_accounts(
             now,
             local_tz,
         )
-        has_days_remaining_reference = recent_collected_days >= 7
+        has_days_remaining_reference = (
+            recent_collected_days >= MIN_DAYS_REMAINING_REFERENCE_DAYS
+        )
         daily_burn = (
             recent_spend / recent_collected_days
-            if recent_spend and recent_collected_days > 0
+            if (
+                has_days_remaining_reference
+                and recent_spend
+                and recent_collected_days > 0
+            )
             else 0.0
         )
         balance_info = get_balance_support_info(provider)
@@ -871,7 +882,9 @@ def _build_accounts(
         )
         funds = _normalize_account_funds(provider, billing, payment_type)
         display_funds = float(funds['display_funds'])
-        if funds['uses_credit_limit_days'] and display_funds > 0 and daily_burn > 0:
+        if not has_days_remaining_reference:
+            days_remaining = None
+        elif funds['uses_credit_limit_days'] and display_funds > 0 and daily_burn > 0:
             days_remaining = max(int(display_funds / daily_burn), 1)
         elif float(funds['balance']) > 0 and daily_burn > 0:
             days_remaining = max(int(float(funds['balance']) / daily_burn), 1)

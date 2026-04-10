@@ -6,6 +6,7 @@ import pytest
 from datetime import datetime
 from decimal import Decimal
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 from cloud_billing.models import (
     CloudProvider,
@@ -14,6 +15,7 @@ from cloud_billing.models import (
     AlertRecord,
     RechargeApprovalRecord,
 )
+from cloud_billing.serializers import BillingDataListSerializer
 
 
 @pytest.mark.django_db
@@ -321,6 +323,18 @@ class TestBillingDataViewSet:
             item["period"] == period for item in response.data["results"]
         )
 
+    def test_list_includes_provider_notes(self, api_client, billing_data):
+        """
+        Billing list should expose provider notes for unified display labels.
+        """
+        billing_data.provider.notes = "生产账号"
+        billing_data.provider.save(update_fields=["notes"])
+
+        response = api_client.get("/api/v1/cloud-billing/billing-data/")
+
+        assert response.status_code == 200
+        assert response.data["results"][0]["provider_notes"] == "生产账号"
+
     def test_retrieve_billing_data(self, api_client, billing_data):
         """
         Test retrieving specific billing data.
@@ -356,6 +370,241 @@ class TestBillingDataViewSet:
         by_provider = response.data["by_provider"]
         first_row = next(iter(by_provider.values()))
         assert first_row["provider_notes"] == "生产账号"
+
+    def test_stats_uses_latest_record_per_provider_account_period(
+        self, api_client, cloud_provider
+    ):
+        """
+        Stats should use the latest row in each provider/account/period group.
+        """
+        cloud_provider.balance = Decimal("90.00")
+        cloud_provider.balance_currency = "USD"
+        cloud_provider.save(update_fields=["balance", "balance_currency"])
+
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=9,
+            total_cost=Decimal("100.00"),
+            balance=Decimal("500.00"),
+            currency="USD",
+            service_costs={"ec2": "100.00"},
+            account_id="acct-1",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=18,
+            total_cost=Decimal("130.00"),
+            balance=Decimal("480.00"),
+            currency="USD",
+            service_costs={"ec2": "130.00"},
+            account_id="acct-1",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=17,
+            total_cost=Decimal("75.00"),
+            balance=Decimal("450.00"),
+            currency="USD",
+            service_costs={"s3": "75.00"},
+            account_id="acct-2",
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/stats/?start_period=2026-04&end_period=2026-04"
+        )
+
+        assert response.status_code == 200
+        assert response.data["total_cost"] == 205.0
+        assert response.data["average_cost"] == 102.5
+        assert response.data["cost_by_period"] == {"2026-04": 205.0}
+
+    def test_list_filters_by_search(self, api_client, cloud_provider):
+        """
+        Billing list should support backend search by provider name and account.
+        """
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=10,
+            total_cost=Decimal("50.00"),
+            balance=Decimal("100.00"),
+            currency="USD",
+            service_costs={"ec2": "50.00"},
+            account_id="team-alpha",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=11,
+            total_cost=Decimal("60.00"),
+            balance=Decimal("90.00"),
+            currency="USD",
+            service_costs={"ec2": "60.00"},
+            account_id="team-beta",
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/?search=alpha"
+        )
+
+        assert response.status_code == 200
+        assert len(response.data["results"]) == 1
+        assert response.data["results"][0]["account_id"] == "team-alpha"
+
+    def test_daily_series_endpoint_returns_latest_total_per_day(
+        self, api_client, cloud_provider
+    ):
+        """
+        Daily series should return the latest total for each day and account.
+        """
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 9).date(),
+            hour=8,
+            total_cost=Decimal("80.00"),
+            balance=Decimal("400.00"),
+            currency="USD",
+            service_costs={"ec2": "80.00"},
+            account_id="acct-1",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 9).date(),
+            hour=20,
+            total_cost=Decimal("95.00"),
+            balance=Decimal("390.00"),
+            currency="USD",
+            service_costs={"ec2": "95.00"},
+            account_id="acct-1",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=19,
+            total_cost=Decimal("120.00"),
+            balance=Decimal("370.00"),
+            currency="USD",
+            service_costs={"ec2": "120.00"},
+            account_id="acct-1",
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/daily-series/?start_date=2026-04-09&end_date=2026-04-10"
+        )
+
+        assert response.status_code == 200
+        assert response.data["results"] == [
+            {
+                "provider_id": cloud_provider.id,
+                "account_id": "acct-1",
+                "day": "2026-04-09",
+                "hour": 20,
+                "total_cost": 95.0,
+                "currency": "USD",
+                "collected_at": response.data["results"][0]["collected_at"],
+            },
+            {
+                "provider_id": cloud_provider.id,
+                "account_id": "acct-1",
+                "day": "2026-04-10",
+                "hour": 19,
+                "total_cost": 120.0,
+                "currency": "USD",
+                "collected_at": response.data["results"][1]["collected_at"],
+            },
+        ]
+
+    def test_list_serializer_includes_change_from_last_hour_from_db(
+        self, cloud_provider
+    ):
+        """
+        List serializer should compute hourly change from database history
+        instead of relying on the current page rows.
+        """
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=10,
+            total_cost=Decimal("100.00"),
+            balance=Decimal("400.00"),
+            currency="USD",
+            service_costs={"ec2": "100.00"},
+            account_id="acct-1",
+        )
+        current = BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=11,
+            total_cost=Decimal("150.00"),
+            balance=Decimal("350.00"),
+            currency="USD",
+            service_costs={"ec2": "150.00"},
+            account_id="acct-1",
+        )
+        for index in range(3):
+            BillingData.objects.create(
+                provider=cloud_provider,
+                period="2026-04",
+                day=datetime(2026, 4, 10).date(),
+                hour=12 + index,
+                total_cost=Decimal(f"{200 + index}.00"),
+                balance=Decimal("300.00"),
+                currency="USD",
+                service_costs={"ec2": f"{200 + index}.00"},
+                account_id=f"acct-{index + 2}",
+            )
+
+        payload = BillingDataListSerializer(current).data
+
+        assert payload["id"] == current.id
+        assert payload["hour"] == 11
+        assert payload["change_from_last_hour"] == 50.0
+
+    def test_latest_by_provider_account_includes_entire_end_day(
+        self, api_client, cloud_provider
+    ):
+        """
+        Latest-by-provider-account should treat end_date as inclusive for the
+        full day.
+        """
+        billing = BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-04",
+            day=datetime(2026, 4, 10).date(),
+            hour=18,
+            total_cost=Decimal("180.00"),
+            balance=Decimal("320.00"),
+            currency="USD",
+            service_costs={"ec2": "180.00"},
+            account_id="acct-1",
+        )
+        BillingData.objects.filter(id=billing.id).update(
+            collected_at=timezone.make_aware(datetime(2026, 4, 10, 18, 30, 0))
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/latest-by-provider-account/?provider_id="
+            f"{cloud_provider.id}&start_date=2026-04-10&end_date=2026-04-10"
+        )
+
+        assert response.status_code == 200
+        assert any(
+            item["account_id"] == "acct-1" and item["hour"] == 18
+            for item in response.data
+        )
 
     def test_list_excludes_inactive_provider_data(
         self, api_client, cloud_provider_inactive

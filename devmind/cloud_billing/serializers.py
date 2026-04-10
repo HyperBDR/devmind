@@ -1,6 +1,8 @@
 """
 Serializers for cloud billing API.
 """
+from datetime import date as date_cls
+
 from django.contrib.auth.models import User
 from django.utils.translation import gettext as _
 
@@ -301,6 +303,9 @@ class BillingDataSerializer(serializers.ModelSerializer):
     provider_type = serializers.CharField(
         source='provider.provider_type', read_only=True
     )
+    provider_notes = serializers.CharField(
+        source='provider.notes', read_only=True
+    )
     balance = serializers.SerializerMethodField()
     balance_supported = serializers.SerializerMethodField()
     balance_note = serializers.SerializerMethodField()
@@ -321,6 +326,7 @@ class BillingDataSerializer(serializers.ModelSerializer):
         model = BillingData
         fields = [
             'id', 'provider', 'provider_name', 'provider_type',
+            'provider_notes',
             'period', 'hour', 'total_cost', 'balance', 'hourly_cost', 'currency',
             'service_costs', 'account_id', 'collected_at',
             'balance_supported', 'balance_note',
@@ -338,9 +344,13 @@ class BillingDataListSerializer(serializers.ModelSerializer):
     provider_type = serializers.CharField(
         source='provider.provider_type', read_only=True
     )
+    provider_notes = serializers.CharField(
+        source='provider.notes', read_only=True
+    )
     balance = serializers.SerializerMethodField()
     balance_supported = serializers.SerializerMethodField()
     balance_note = serializers.SerializerMethodField()
+    change_from_last_hour = serializers.SerializerMethodField()
 
     @staticmethod
     def get_balance(obj):
@@ -354,12 +364,57 @@ class BillingDataListSerializer(serializers.ModelSerializer):
     def get_balance_note(obj):
         return get_balance_support_info(obj.provider)["note"]
 
+    @staticmethod
+    def get_change_from_last_hour(obj):
+        current_cost = float(obj.total_cost or 0)
+        if current_cost <= 0:
+            return None
+
+        account_id = obj.account_id or ''
+        current_hour = obj.hour
+        previous_hour = 23 if current_hour == 0 else current_hour - 1
+        previous_period = obj.period
+
+        if current_hour == 0:
+            year, month = obj.period.split('-')
+            previous_month = date_cls(int(year), int(month), 1).replace(day=1)
+            if previous_month.month == 1:
+                previous_period = f"{previous_month.year - 1}-12"
+            else:
+                previous_period = (
+                    f"{previous_month.year}-"
+                    f"{str(previous_month.month - 1).zfill(2)}"
+                )
+
+        previous = (
+            BillingData.objects.filter(
+                provider_id=obj.provider_id,
+                account_id=account_id,
+                period=previous_period,
+                hour=previous_hour,
+                provider__is_active=True,
+            )
+            .order_by('-day', '-collected_at')
+            .first()
+        )
+        if not previous or previous.total_cost is None:
+            return None
+
+        previous_cost = float(previous.total_cost or 0)
+        if previous_cost > 0:
+            return ((current_cost - previous_cost) / previous_cost) * 100
+        if current_cost > 0:
+            return 100.0
+        return None
+
     class Meta:
         model = BillingData
         fields = [
             'id', 'provider', 'provider_name', 'provider_type',
+            'provider_notes',
             'period', 'hour', 'total_cost', 'balance', 'hourly_cost', 'currency',
             'collected_at', 'account_id', 'balance_supported', 'balance_note',
+            'change_from_last_hour',
         ]
 
 
