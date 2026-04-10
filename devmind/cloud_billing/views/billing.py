@@ -1,9 +1,9 @@
 """
 Views for BillingData API.
 """
-from datetime import datetime, timedelta
 
-from django.db.models import Avg, Max, Sum, OuterRef, Q, Subquery
+from django.db.models import F, Sum, OuterRef, Q, Subquery
+from django.utils.dateparse import parse_date
 
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import viewsets
@@ -62,6 +62,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         account_id = self.request.query_params.get('account_id', None)
         start_date = self.request.query_params.get('start_date', None)
         end_date = self.request.query_params.get('end_date', None)
+        search = (self.request.query_params.get('search') or '').strip()
 
         if provider_id:
             queryset = queryset.filter(provider_id=provider_id)
@@ -70,22 +71,44 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         if account_id is not None and account_id != '':
             queryset = queryset.filter(account_id=account_id)
         if start_date:
-            # Start date: include from 00:00:00 of that day
-            queryset = queryset.filter(
-                collected_at__gte=start_date
-            )
+            start_day = parse_date(start_date)
+            if start_day:
+                queryset = queryset.filter(day__gte=start_day)
         if end_date:
-            # End date: include until 23:59:59 of that day
-            # Add one day and use __lt to include the entire end_date
-            end_datetime = (
-                datetime.strptime(end_date, '%Y-%m-%d') +
-                timedelta(days=1)
-            )
+            end_day = parse_date(end_date)
+            if end_day:
+                queryset = queryset.filter(day__lte=end_day)
+        if search:
             queryset = queryset.filter(
-                collected_at__lt=end_datetime
+                Q(account_id__icontains=search)
+                | Q(provider__display_name__icontains=search)
+                | Q(provider__name__icontains=search)
+                | Q(provider__notes__icontains=search)
             )
 
         return queryset.order_by('-day', '-hour', '-collected_at')
+
+    @staticmethod
+    def _latest_per_period_queryset(queryset):
+        latest_ids = queryset.filter(
+            provider_id=OuterRef('provider_id'),
+            account_id=OuterRef('account_id'),
+            period=OuterRef('period'),
+        ).order_by('-day', '-hour', '-collected_at').values('id')[:1]
+        return queryset.annotate(
+            latest_group_id=Subquery(latest_ids)
+        ).filter(id=F('latest_group_id'))
+
+    @staticmethod
+    def _latest_per_day_queryset(queryset):
+        latest_ids = queryset.filter(
+            provider_id=OuterRef('provider_id'),
+            account_id=OuterRef('account_id'),
+            day=OuterRef('day'),
+        ).order_by('-hour', '-collected_at').values('id')[:1]
+        return queryset.annotate(
+            latest_group_id=Subquery(latest_ids)
+        ).filter(id=F('latest_group_id'))
 
     @extend_schema(
         tags=['cloud-billing'],
@@ -120,31 +143,21 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         if end_period:
             queryset = queryset.filter(period__lte=end_period)
 
-        # Get the latest billing record for each
-        # (provider, account_id, period)
-        # This represents the cumulative total cost for that month
-        # Order by hour descending to get the last hour of each period
-        latest_billings = {}
-        for billing in queryset.order_by(
-            'provider_id', 'account_id', 'period', '-day', '-hour',
-            '-collected_at'
-        ):
-            key = (
-                f"{billing.provider_id}_{billing.account_id or ''}_"
-                f"{billing.period}"
+        latest_billings_queryset = self._latest_per_period_queryset(queryset)
+        latest_billings = list(
+            latest_billings_queryset.select_related('provider').order_by(
+                'provider_id', 'account_id', 'period'
             )
-            # Keep only the first (latest) record for each key
-            # This ensures we get the last hour's data for each month
-            if key not in latest_billings:
-                latest_billings[key] = billing
+        )
 
-        # Total cost: sum of latest total_cost for each
-        # (provider, account_id, period)
-        total_cost = sum(
-            float(b.total_cost) for b in latest_billings.values()
+        total_cost = float(
+            latest_billings_queryset.aggregate(total_cost=Sum('total_cost'))[
+                'total_cost'
+            ]
+            or 0
         )
         unique_providers = {
-            billing.provider_id: billing.provider for billing in latest_billings.values()
+            billing.provider_id: billing.provider for billing in latest_billings
         }
         total_balance = sum(
             float(provider.balance)
@@ -156,7 +169,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         # (provider, account_id) combinations
         # Count unique provider+account combinations across all periods
         unique_provider_accounts = set()
-        for billing in latest_billings.values():
+        for billing in latest_billings:
             unique_provider_accounts.add(
                 (billing.provider_id, billing.account_id or '')
             )
@@ -193,7 +206,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         # Track which months are included for debugging
         months_by_year = {} if group_by_year else None
 
-        for billing in latest_billings.values():
+        for billing in latest_billings:
             if group_by_year:
                 # Extract year from period (YYYY-MM -> YYYY)
                 # This groups all months of the same year together
@@ -301,6 +314,37 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(
         tags=['cloud-billing'],
+        summary="Get daily billing series",
+        description=(
+            "Return the latest daily billing total for each provider/account "
+            "combination within the selected range."
+        ),
+        responses={200: {'type': 'object'}},
+    )
+    @action(detail=False, methods=['get'], url_path='daily-series')
+    def daily_series(self, request):
+        """
+        Return the latest billing record for each provider/account/day.
+        """
+        queryset = self._latest_per_day_queryset(self.get_queryset()).order_by(
+            'day', 'provider__display_name', 'account_id'
+        )
+        results = [
+            {
+                'provider_id': billing.provider_id,
+                'account_id': billing.account_id or '',
+                'day': billing.day.isoformat(),
+                'hour': billing.hour,
+                'total_cost': float(billing.total_cost),
+                'currency': billing.currency,
+                'collected_at': billing.collected_at.isoformat(),
+            }
+            for billing in queryset
+        ]
+        return Response({'results': results})
+
+    @extend_schema(
+        tags=['cloud-billing'],
         summary="Get latest billing data by provider and account",
         description=(
             "Get the latest billing data grouped by provider and account_id. "
@@ -331,9 +375,13 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         if provider_id:
             queryset = queryset.filter(provider_id=provider_id)
         if start_date:
-            queryset = queryset.filter(collected_at__gte=start_date)
+            start_day = parse_date(start_date)
+            if start_day:
+                queryset = queryset.filter(day__gte=start_day)
         if end_date:
-            queryset = queryset.filter(collected_at__lte=end_date)
+            end_day = parse_date(end_date)
+            if end_day:
+                queryset = queryset.filter(day__lte=end_day)
 
         # Get the latest billing record for each provider + account_id
         # combination using subquery
