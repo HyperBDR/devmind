@@ -2,6 +2,7 @@
 Tests for cloud billing API views.
 """
 
+import json
 import pytest
 from datetime import datetime
 from decimal import Decimal
@@ -16,6 +17,8 @@ from cloud_billing.models import (
     RechargeApprovalRecord,
 )
 from cloud_billing.serializers import BillingDataListSerializer
+from agentcore_task.adapters.django.models import TaskExecution
+from agentcore_task.constants import TaskStatus
 
 
 @pytest.mark.django_db
@@ -854,10 +857,66 @@ class TestRechargeApprovalEndpoints:
     Tests for recharge approval APIs.
     """
 
+    def test_list_recharge_approvals_serializes_llm_usage_id(
+        self, api_client, cloud_provider
+    ):
+        """
+        List endpoint should serialize approval records without DRF source
+        assertion errors.
+        """
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188}',
+            request_payload={"amount": 188},
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        )
+
+        url = "/api/v1/cloud-billing/recharge-approvals/"
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        assert response.data["results"][0]["id"] == record.id
+        assert "latest_llm_usage_id" in response.data["results"][0]
+        assert response.data["results"][0]["latest_llm_usage_id"] is None
+
     def test_submit_recharge_approval_endpoint(self, api_client, cloud_provider, mocker):
         """
         Provider endpoint should trigger a dedicated recharge approval task.
         """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        mock_task = mocker.Mock()
+        mock_task.id = "approval-task-id"
+        mocked_delay = mocker.patch(
+            "cloud_billing.views.provider.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        response = api_client.post(
+            url,
+            {},
+            format="json",
+            HTTP_ACCEPT_LANGUAGE="zh-CN",
+        )
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert response.data["task_id"] == "approval-task-id"
+        assert response.data["message"] == "充值审批任务已提交。"
+        assert mocked_delay.call_args.kwargs["submitter_user_id"] == ""
+        execution = TaskExecution.objects.get(task_id="approval-task-id")
+        assert execution.task_name == "cloud_billing.tasks.submit_recharge_approval"
+        assert execution.module == "cloud_billing"
+        assert execution.status == TaskStatus.PENDING
+        assert execution.created_by is not None
+        assert execution.task_kwargs["provider_id"] == cloud_provider.id
+        assert execution.metadata["trigger_source"] == "manual"
+
+    def test_submit_recharge_approval_endpoint_english_message(
+        self, api_client, cloud_provider, mocker
+    ):
         cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
         cloud_provider.save(update_fields=["recharge_info"])
         mock_task = mocker.Mock()
@@ -868,23 +927,275 @@ class TestRechargeApprovalEndpoints:
         )
 
         url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        response = api_client.post(
+            url,
+            {},
+            format="json",
+            HTTP_ACCEPT_LANGUAGE="en-US",
+        )
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert response.data["message"] == "Recharge approval task started."
+
+    def test_submit_recharge_approval_endpoint_defers_ongoing_check_to_task(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
+    ):
+        """
+        Provider endpoint should return quickly; ongoing approval checks happen
+        in the async task.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.config = {
+            "recharge_approval": {
+                "submitter_identifier": "finance@example.com",
+                "resolved_submitter_user_id": "ou_123",
+            }
+        }
+        cloud_provider.save(update_fields=["recharge_info", "config"])
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_188")
+        RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188, "recharge_account": "acct-188"}',
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            submitter_identifier="other@example.com",
+            resolved_submitter_user_id="ou_999",
+            feishu_instance_code="ins_188",
+            feishu_approval_code="approval_188",
+        )
+        mock_task = mocker.Mock()
+        mock_task.id = "approval-task-id"
+        mocked_delay = mocker.patch(
+            "cloud_billing.views.provider.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        response = api_client.post(
+            url,
+            {
+                "submitter_user_id": "finance@example.com",
+                "submitter_user_label": "Finance",
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert response.data["task_id"] == "approval-task-id"
+        mocked_delay.assert_called_once()
+
+    def test_submit_recharge_approval_endpoint_allows_same_submitter_new_account(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
+    ):
+        """
+        Provider endpoint should allow a new submission when only the
+        submitter matches and the recharge account is different.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188-new"}'
+        cloud_provider.config = {
+            "recharge_approval": {
+                "submitter_identifier": "finance@example.com",
+                "resolved_submitter_user_id": "ou_123",
+            }
+        }
+        cloud_provider.save(update_fields=["recharge_info", "config"])
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_old")
+        RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188, "recharge_account": "acct-188-old"}',
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            submitter_identifier="finance@example.com",
+            resolved_submitter_user_id="ou_123",
+            feishu_instance_code="ins_old",
+            feishu_approval_code="approval_old",
+        )
+        mock_task = mocker.Mock()
+        mock_task.id = "approval-task-id"
+        mocked_delay = mocker.patch(
+            "cloud_billing.views.provider.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        response = api_client.post(
+            url,
+            {
+                "submitter_user_id": "finance@example.com",
+                "submitter_user_label": "Finance",
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert response.data["task_id"] == "approval-task-id"
+        assert mocked_delay.call_args.kwargs["submitter_user_id"] == "finance@example.com"
+        assert mocked_delay.call_args.kwargs["submitter_user_label"] == "Finance"
+
+    def test_submit_recharge_approval_allows_missing_recharge_info_for_history_lookup(
+        self, api_client, cloud_provider, mocker
+    ):
+        """
+        Provider endpoint should allow empty recharge_info so the async task can
+        infer it from Feishu history.
+        """
+        mock_task = mocker.Mock()
+        mock_task.id = "approval-task-id"
+        mocked_delay = mocker.patch(
+            "cloud_billing.views.provider.submit_recharge_approval.delay",
+            return_value=mock_task,
+        )
+
+        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
         response = api_client.post(url, {}, format="json")
 
         assert response.status_code == 200
         assert response.data["success"] is True
         assert response.data["task_id"] == "approval-task-id"
+        mocked_delay.assert_called_once()
 
-    def test_submit_recharge_approval_requires_recharge_info(
-        self, api_client, cloud_provider
+    def test_sync_recharge_info_from_feishu_returns_preview_only(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
     ):
         """
-        Provider endpoint should reject manual submission when recharge info is empty.
+        Provider endpoint should infer recharge info from Feishu history and
+        return it as a preview without persisting it to CloudProvider.
         """
-        url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_188")
+        cloud_provider.config = {
+            "recharge_approval": {
+                "cloud_type": "智谱",
+                "recharge_account": "acct-188",
+            }
+        }
+        cloud_provider.recharge_info = ""
+        cloud_provider.save(update_fields=["config", "recharge_info"])
+        payload = {
+            "cloud_type": "智谱",
+            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_account": "acct-188",
+            "amount": 188,
+            "currency": "CNY",
+            "payment_company": "深圳壹铂云科技有限公司",
+        }
+        mocked_infer = mocker.patch(
+            "cloud_billing.views.provider.infer_recharge_info_from_history",
+            return_value=payload,
+        )
+
+        url = (
+            f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+            "sync-recharge-info-from-feishu/"
+        )
+        response = api_client.post(url, {}, format="json")
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert response.data["source"] == "feishu_history"
+        assert response.data["request_payload"] == payload
+        cloud_provider.refresh_from_db()
+        assert cloud_provider.recharge_info == ""
+        mocked_infer.assert_called_once()
+
+    def test_sync_recharge_info_from_feishu_drops_placeholder_remark(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
+    ):
+        """
+        Provider sync should not persist placeholder remark-only text.
+        """
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_188")
+        cloud_provider.config = {
+            "recharge_approval": {
+                "cloud_type": "智谱",
+                "recharge_account": "acct-188",
+            }
+        }
+        cloud_provider.recharge_info = ""
+        cloud_provider.save(update_fields=["config", "recharge_info"])
+        payload = {
+            "cloud_type": "智谱",
+            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_account": "acct-188",
+            "amount": 188,
+            "currency": "CNY",
+            "payment_company": "深圳壹铂云科技有限公司",
+            "remark": "备注",
+        }
+        mocker.patch(
+            "cloud_billing.views.provider.infer_recharge_info_from_history",
+            return_value=payload,
+        )
+
+        url = (
+            f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+            "sync-recharge-info-from-feishu/"
+        )
+        response = api_client.post(url, {}, format="json")
+
+        assert response.status_code == 200
+        assert response.data["success"] is True
+        assert "remark" not in response.data["request_payload"]
+        cloud_provider.refresh_from_db()
+        assert cloud_provider.recharge_info == ""
+
+    def test_sync_recharge_info_from_feishu_requires_approval_code(
+        self,
+        api_client,
+        cloud_provider,
+        monkeypatch,
+    ):
+        monkeypatch.delenv("FEISHU_APPROVAL_CODE", raising=False)
+
+        url = (
+            f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+            "sync-recharge-info-from-feishu/"
+        )
         response = api_client.post(url, {}, format="json")
 
         assert response.status_code == 400
+        assert response.data["reason"] == "missing_approval_code"
+
+    def test_sync_recharge_info_from_feishu_history_not_found_is_not_http_404(
+        self,
+        api_client,
+        cloud_provider,
+        mocker,
+        monkeypatch,
+    ):
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_188")
+        mocker.patch(
+            "cloud_billing.views.provider.infer_recharge_info_from_history",
+            return_value={},
+        )
+
+        url = (
+            f"/api/v1/cloud-billing/providers/{cloud_provider.id}/"
+            "sync-recharge-info-from-feishu/"
+        )
+        response = api_client.post(url, {}, format="json")
+
+        assert response.status_code == 200
         assert response.data["success"] is False
+        assert response.data["reason"] == "history_not_found"
 
     def test_feishu_callback_challenge(self, api_client):
         """
@@ -901,11 +1212,12 @@ class TestRechargeApprovalEndpoints:
         assert response.data["challenge"] == "verify-me"
 
     def test_feishu_callback_updates_recharge_record(
-        self, api_client, cloud_provider
+        self, api_client, cloud_provider, monkeypatch
     ):
         """
         Callback endpoint should update status and timeline for the matched instance.
         """
+        monkeypatch.setenv("FEISHU_CALLBACK_VERIFICATION_TOKEN", "verify-123")
         record = RechargeApprovalRecord.objects.create(
             provider=cloud_provider,
             trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
@@ -920,6 +1232,7 @@ class TestRechargeApprovalEndpoints:
         response = api_client.post(
             url,
             {
+                "token": "verify-123",
                 "event": {
                     "instance_code": "ins_123",
                     "approval_code": "approval_123",
@@ -934,3 +1247,39 @@ class TestRechargeApprovalEndpoints:
         record.refresh_from_db()
         assert record.status == RechargeApprovalRecord.STATUS_APPROVED
         assert record.approval_timeline == [{"type": "APPROVE", "user_id": "u_1"}]
+
+    def test_feishu_callback_rejects_missing_verification_token(
+        self, api_client, cloud_provider, monkeypatch
+    ):
+        """
+        Callback endpoint should reject forged event payloads without the
+        configured verification token.
+        """
+        monkeypatch.setenv("FEISHU_CALLBACK_VERIFICATION_TOKEN", "verify-123")
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188}',
+            request_payload={"amount": 188},
+            feishu_instance_code="ins_999",
+            feishu_approval_code="approval_999",
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        )
+
+        url = "/api/v1/cloud-billing/recharge-approvals/feishu-callback/"
+        response = api_client.post(
+            url,
+            {
+                "event": {
+                    "instance_code": "ins_999",
+                    "approval_code": "approval_999",
+                    "status": "APPROVED",
+                }
+            },
+            format="json",
+        )
+
+        assert response.status_code == 403
+        assert response.data["reason"] == "invalid_callback_token"
+        record.refresh_from_db()
+        assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED

@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 import hashlib
 import logging
+import math
 import os
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -795,7 +796,7 @@ def _build_account_detail(
         )
 
     peak_daily_cost = max((item['value'] for item in recent_trend), default=0.0)
-    recommended_recharge = round(max(daily_burn * 30 - display_funds, 0), 2)
+    recommended_recharge = math.ceil(daily_burn * 30)
     if days_remaining is None:
         recommendation_status = 'unknown'
     elif payment_type == 'postpaid':
@@ -913,6 +914,10 @@ def _build_accounts(
                 'provider': provider.display_name,
                 'provider_type': provider.provider_type,
                 'notes': (getattr(provider, 'notes', '') or '').strip(),
+                'recharge_info_configured': bool(
+                    str(getattr(provider, 'recharge_info', '') or '').strip()
+                ),
+                'recharge_info': str(getattr(provider, 'recharge_info', '') or '').strip(),
                 'tags': list(getattr(provider, 'tags', []) or []),
                 'category': (
                     'LLM'
@@ -986,11 +991,30 @@ def _build_financial_health(accounts):
     )
     recharge_alerts = [
         {
+            'provider_id': item.get('provider_id'),
             'name': item['name'],
             'category': item['category'],
             'account_id': item['account_id'],
             'notes': item['notes'],
             'tags': item.get('tags', []),
+            'recharge_info_configured': item.get(
+                'recharge_info_configured',
+                False,
+            ),
+            'recommended_recharge': (
+                (item.get('detail') or {}).get('recommended_recharge')
+                or 0
+            ),
+            'recommended_window_days': (
+                (item.get('detail') or {}).get('recommended_window_days')
+                or 30
+            ),
+            'recommendation_currency': (
+                (item.get('detail') or {}).get('service_breakdown_currency')
+                or item.get('display_funds_currency')
+                or item.get('balance_currency')
+                or 'CNY'
+            ),
             'days_remaining': item['days_remaining'],
             'recent_collected_days': item.get('recent_collected_days', 0),
             'has_days_remaining_reference': item.get(

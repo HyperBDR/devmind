@@ -8,7 +8,15 @@ from django.utils.translation import gettext as _
 
 from rest_framework import serializers
 
-from .models import AlertRecord, AlertRule, BillingData, CloudProvider
+from .models import (
+    AlertRecord,
+    AlertRule,
+    BillingData,
+    CloudProvider,
+    RechargeApprovalEvent,
+    RechargeApprovalLLMRun,
+    RechargeApprovalRecord,
+)
 
 
 def get_balance_support_info(provider):
@@ -171,7 +179,8 @@ class CloudProviderSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProvider
         fields = [
-            'id', 'name', 'provider_type', 'display_name', 'notes', 'tags',
+            'id', 'name', 'provider_type', 'display_name', 'notes',
+            'recharge_info', 'tags',
             'balance', 'balance_currency', 'balance_updated_at', 'config',
             'auth_identifier', 'auth_identifier_kind',
             'is_active', 'created_at', 'updated_at',
@@ -286,7 +295,8 @@ class CloudProviderListSerializer(serializers.ModelSerializer):
     class Meta:
         model = CloudProvider
         fields = [
-            'id', 'name', 'provider_type', 'display_name', 'notes', 'tags',
+            'id', 'name', 'provider_type', 'display_name', 'notes',
+            'recharge_info', 'tags',
             'balance', 'balance_currency', 'balance_updated_at',
             'auth_identifier', 'auth_identifier_kind',
             'is_active', 'created_at'
@@ -312,7 +322,10 @@ class BillingDataSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_balance(obj):
-        return obj.provider.balance
+        balance = obj.provider.balance
+        if balance is None:
+            return None
+        return f"{balance:.2f}"
 
     @staticmethod
     def get_balance_supported(obj):
@@ -354,7 +367,10 @@ class BillingDataListSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def get_balance(obj):
-        return obj.provider.balance
+        balance = obj.provider.balance
+        if balance is None:
+            return None
+        return f"{balance:.2f}"
 
     @staticmethod
     def get_balance_supported(obj):
@@ -443,6 +459,7 @@ class AlertRuleSerializer(serializers.ModelSerializer):
             'cost_threshold', 'growth_threshold',
             'growth_amount_threshold', 'balance_threshold',
             'days_remaining_threshold', 'is_active',
+            'auto_submit_recharge_approval',
             'created_at', 'updated_at',
             'created_by', 'created_by_username',
             'updated_by', 'updated_by_username',
@@ -506,6 +523,7 @@ class AlertRuleListSerializer(serializers.ModelSerializer):
             'cost_threshold', 'growth_threshold',
             'growth_amount_threshold', 'balance_threshold',
             'days_remaining_threshold', 'is_active',
+            'auto_submit_recharge_approval',
             'created_at', 'updated_at',
         ]
 
@@ -560,4 +578,77 @@ class AlertRecordListSerializer(serializers.ModelSerializer):
             'days_remaining_threshold', 'alert_message',
             'webhook_status',
             'created_at',
+        ]
+
+
+class RechargeApprovalEventSerializer(serializers.ModelSerializer):
+    operator_username = serializers.SerializerMethodField()
+
+    @staticmethod
+    def get_operator_username(obj):
+        return obj.operator.username if obj.operator_id else ''
+
+    class Meta:
+        model = RechargeApprovalEvent
+        fields = [
+            'id', 'record', 'trace_id', 'event_type', 'stage', 'source',
+            'message', 'payload', 'operator', 'operator_username',
+            'operator_label', 'created_at',
+        ]
+
+
+class RechargeApprovalLLMRunSerializer(serializers.ModelSerializer):
+    llm_usage_id = serializers.UUIDField(read_only=True)
+
+    class Meta:
+        model = RechargeApprovalLLMRun
+        fields = [
+            'id', 'record', 'trace_id', 'span_id', 'parent_span_id',
+            'runner_type', 'stage', 'llm_usage', 'llm_usage_id',
+            'provider', 'model', 'input_snapshot', 'output_snapshot',
+            'parsed_payload', 'usage_payload', 'stdout', 'stderr',
+            'success', 'error_message', 'started_at', 'finished_at',
+            'latency_ms', 'created_at',
+        ]
+
+
+class RechargeApprovalRecordSerializer(serializers.ModelSerializer):
+    provider_name = serializers.CharField(
+        source='provider.display_name', read_only=True
+    )
+    triggered_by_username = serializers.SerializerMethodField()
+    submitted_by_username = serializers.SerializerMethodField()
+    latest_llm_usage_id = serializers.UUIDField(read_only=True)
+    events = RechargeApprovalEventSerializer(many=True, read_only=True)
+    llm_runs = RechargeApprovalLLMRunSerializer(many=True, read_only=True)
+
+    @staticmethod
+    def get_triggered_by_username(obj):
+        return obj.triggered_by.username if obj.triggered_by_id else ''
+
+    @staticmethod
+    def get_submitted_by_username(obj):
+        return obj.submitted_by.username if obj.submitted_by_id else ''
+
+    class Meta:
+        model = RechargeApprovalRecord
+        fields = [
+            'id', 'provider', 'provider_name', 'trace_id', 'alert_record',
+            'trigger_source', 'trigger_reason', 'status', 'latest_stage',
+            'raw_recharge_info', 'request_payload', 'context_payload',
+            'response_payload', 'callback_payload', 'approval_timeline',
+            'feishu_instance_code', 'feishu_approval_code', 'status_message',
+            'triggered_by', 'triggered_by_username',
+            'triggered_by_username_snapshot',
+            'submitted_by', 'submitted_by_username',
+            'submitter_identifier', 'resolved_submitter_user_id',
+            'submitter_user_label',
+            'latest_llm_usage', 'latest_llm_usage_id', 'llm_trace_summary',
+            'latest_node_name', 'latest_node_status', 'last_latency_ms',
+            'submitted_at', 'last_callback_at', 'created_at', 'updated_at',
+            'events', 'llm_runs',
+        ]
+        read_only_fields = [
+            'id', 'trace_id', 'created_at', 'updated_at',
+            'events', 'llm_runs',
         ]

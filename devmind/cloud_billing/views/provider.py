@@ -3,6 +3,8 @@ Views for CloudProvider API.
 """
 
 import logging
+import json
+import os
 import re
 
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -11,13 +13,34 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from agentcore_task.adapters.django import TaskStatus, register_task_execution
+
 from ..models import CloudProvider
+from ..alert_messages import is_chinese_language
 from ..serializers import (
     CloudProviderListSerializer,
     CloudProviderSerializer,
 )
 from ..services.provider_service import ProviderService
+from ..services.recharge_approval import (
+    extract_recharge_history_lookup,
+    infer_recharge_info_from_history,
+    parse_recharge_info,
+    sanitize_recharge_request_payload,
+)
+from ..tasks import submit_recharge_approval
 from ..utils.logging import mask_sensitive_config
+
+logger = logging.getLogger(__name__)
+
+
+def get_request_language(request) -> str:
+    header = ""
+    if hasattr(request, "headers"):
+        header = str(request.headers.get("Accept-Language", "") or "")
+    if not header and hasattr(request, "META"):
+        header = str(request.META.get("HTTP_ACCEPT_LANGUAGE", "") or "")
+    return "zh-hans" if is_chinese_language(header) else "en"
 
 
 PROVIDER_CONFIG_SCHEMAS = {
@@ -385,6 +408,73 @@ PROVIDER_CONFIG_SCHEMAS = {
 }
 
 
+def build_recharge_info_override(
+    raw_recharge_info,
+    *,
+    recharge_account="",
+    recharge_customer_name="",
+    payment_company="",
+    payment_way="",
+    payment_type="",
+    remit_method="",
+    amount="",
+    currency="",
+    expected_date="",
+):
+    override_fields = {
+        "recharge_account": recharge_account,
+        "recharge_customer_name": recharge_customer_name,
+        "payment_company": payment_company,
+        "payment_way": payment_way,
+        "payment_type": payment_type,
+        "remit_method": remit_method,
+    }
+    amount_str = str(amount or "").strip()
+    currency = str(currency or "").strip().upper()
+    expected_date = str(expected_date or "").strip()
+
+    # Collect all non-empty overrides (including amount/expected_date)
+    overrides_to_apply = {
+        k: v for k, v in override_fields.items() if v
+    }
+    if amount_str:
+        overrides_to_apply["_amount"] = amount_str
+    if expected_date:
+        overrides_to_apply["_expected_date"] = expected_date
+
+    # If nothing to override, return as-is
+    if not overrides_to_apply:
+        return ""
+
+    try:
+        payload = parse_recharge_info(raw_recharge_info or "")
+        if isinstance(payload, dict):
+            for k, v in override_fields.items():
+                if v:
+                    payload[k] = v
+            if amount_str:
+                currency_to_use = currency or payload.get("currency") or "CNY"
+                payload["amount"] = f"{amount_str} {currency_to_use}"
+            elif currency:
+                payload["currency"] = currency
+            if expected_date:
+                payload["expected_date"] = expected_date
+            return json.dumps(payload, ensure_ascii=False)
+    except Exception:
+        pass
+
+    # Fallback: append overrides as key:value lines
+    additions = []
+    for k, v in override_fields.items():
+        if v:
+            additions.append(f"{k}: {v}")
+    if amount_str:
+        additions.append(f"amount: {amount_str} {currency or 'CNY'}")
+    if expected_date:
+        additions.append(f"expected_date: {expected_date}")
+    return "\n".join([str(raw_recharge_info or "").strip(), *additions]).strip()
+
+
 @extend_schema_view(
     list=extend_schema(
         tags=["cloud-billing"],
@@ -577,6 +667,191 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
 
     @extend_schema(
         tags=["cloud-billing"],
+        summary="Submit recharge approval for a provider",
+        description=(
+            "Manually trigger a recharge approval submission for the given "
+            "cloud provider."
+        ),
+        responses={200: {"type": "object"}},
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="submit-recharge-approval",
+    )
+    def submit_recharge_approval(self, request, pk=None):
+        provider = self.get_object()
+
+        submitter_identifier = str(
+            request.data.get("submitter_identifier")
+            or request.data.get("submitter_user_id")
+            or ""
+        ).strip()
+        submitter_user_label = str(
+            request.data.get("submitter_user_label") or ""
+        ).strip()
+        trigger_reason = str(
+            request.data.get("trigger_reason") or "manual"
+        ).strip()
+        recharge_info_override = build_recharge_info_override(
+            provider.recharge_info or "",
+            recharge_account=request.data.get("recharge_account") or "",
+            recharge_customer_name=request.data.get("recharge_customer_name") or "",
+            payment_company=request.data.get("payment_company") or "",
+            payment_way=request.data.get("payment_way") or "",
+            payment_type=request.data.get("payment_type") or "",
+            remit_method=request.data.get("remit_method") or "",
+            amount=request.data.get("amount") or request.data.get("recharge_amount") or "",
+            currency=request.data.get("currency") or "",
+            expected_date=request.data.get("expected_date") or "",
+        )
+        task = submit_recharge_approval.delay(
+            provider.id,
+            trigger_source="manual",
+            user_id=request.user.id if request.user.is_authenticated else None,
+            submitter_user_id=submitter_identifier,
+            submitter_user_label=submitter_user_label,
+            trigger_reason=trigger_reason,
+            recharge_info_override=recharge_info_override,
+        )
+        user = request.user if request.user.is_authenticated else None
+        register_task_execution(
+            task_id=task.id,
+            task_name="cloud_billing.tasks.submit_recharge_approval",
+            module="cloud_billing",
+            task_kwargs={
+                "provider_id": provider.id,
+                "trigger_source": "manual",
+                "user_id": user.id if user else None,
+                "submitter_user_id": submitter_identifier,
+                "submitter_user_label": submitter_user_label,
+                "trigger_reason": trigger_reason,
+                "has_recharge_info_override": bool(recharge_info_override),
+            },
+            created_by=user,
+            metadata={
+                "provider_id": provider.id,
+                "provider_name": provider.display_name,
+                "provider_type": provider.provider_type,
+                "trigger_source": "manual",
+                "trigger_reason": trigger_reason,
+            },
+            initial_status=TaskStatus.PENDING,
+        )
+        language = get_request_language(request)
+        message = (
+            "充值审批任务已提交。"
+            if language == "zh-hans"
+            else "Recharge approval task started."
+        )
+        return Response(
+            {
+                "success": True,
+                "message": message,
+                "task_id": task.id,
+            }
+        )
+
+    @extend_schema(
+        tags=["cloud-billing"],
+        summary="Sync provider recharge info from Feishu history",
+        description=(
+            "Infer recharge approval input from historical Feishu approval "
+            "records for the current cloud provider account."
+        ),
+        responses={200: {"type": "object"}},
+    )
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="sync-recharge-info-from-feishu",
+    )
+    def sync_recharge_info_from_feishu(self, request, pk=None):
+        provider = self.get_object()
+        approval_code = str(
+            request.data.get("approval_code") or os.getenv("FEISHU_APPROVAL_CODE", "")
+        ).strip()
+        if not approval_code:
+            return Response(
+                {
+                    "success": False,
+                    "reason": "missing_approval_code",
+                    "message": "FEISHU_APPROVAL_CODE is not configured.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        lookup = extract_recharge_history_lookup(provider)
+        lookback_days = int(request.data.get("lookback_days") or 90)
+        limit = int(request.data.get("limit") or 20)
+        logger.info(
+            "Sync recharge info from Feishu history started "
+            "(provider_id=%s, approval_code=%s, lookback_days=%s, limit=%s, "
+            "lookup=%s)",
+            provider.id,
+            approval_code,
+            lookback_days,
+            limit,
+            lookup,
+        )
+        try:
+            payload = infer_recharge_info_from_history(
+                provider,
+                approval_code=approval_code,
+                lookback_days=lookback_days,
+                limit=limit,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to sync recharge info from Feishu history "
+                "(provider_id=%s, lookup=%s)",
+                provider.id,
+                lookup,
+            )
+            return Response(
+                {
+                    "success": False,
+                    "reason": "sync_failed",
+                    "message": str(exc),
+                    "lookup": lookup,
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        if not payload:
+            return Response(
+                {
+                    "success": False,
+                    "reason": "history_not_found",
+                    "message": "No matching Feishu recharge approval history found.",
+                    "lookup": lookup,
+                }
+            )
+
+        payload = sanitize_recharge_request_payload(payload)
+        if not payload:
+            return Response(
+                {
+                    "success": False,
+                    "reason": "history_not_found",
+                    "message": "No matching Feishu recharge approval history found.",
+                    "lookup": lookup,
+                }
+            )
+
+        recharge_info = json.dumps(payload, ensure_ascii=False, indent=2)
+        return Response(
+            {
+                "success": True,
+                "recharge_info": recharge_info,
+                "request_payload": payload,
+                "lookup": lookup,
+                "source": "feishu_history",
+            }
+        )
+
+    @extend_schema(
+        tags=["cloud-billing"],
         summary="Get cloud provider config schemas",
         description=(
             "Return form schemas for supported cloud provider billing drivers."
@@ -670,7 +945,6 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
             )
 
         try:
-            logger = logging.getLogger(__name__)
             sanitized_config = mask_sensitive_config(config)
             logger.info(
                 f"validate_config called with provider_type={provider_type}, "

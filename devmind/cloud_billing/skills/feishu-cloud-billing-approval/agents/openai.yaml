@@ -1,0 +1,4 @@
+interface:
+  display_name: "Feishu Cloud Billing Approval"
+  short_description: "Submit recharge approvals"
+  default_prompt: "Use $feishu-cloud-billing-approval to plan the recharge request, keep payee account details in remark instead of structured JSON, execute the generated request file, and return the structured result."

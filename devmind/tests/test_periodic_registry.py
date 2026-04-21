@@ -77,3 +77,41 @@ def test_task_registry_skips_existing_periodic_task():
     assert task.crontab_id == existing_schedule.id
     assert task.crontab.minute == "0"
     assert task.interval is None
+
+
+@pytest.mark.django_db
+def test_remove_periodic_tasks_deletes_retired_monitor_rows():
+    module = _load_periodic_registry_module()
+
+    from django_celery_beat.models import IntervalSchedule, PeriodicTask
+
+    interval = IntervalSchedule.objects.create(every=600, period="seconds")
+    PeriodicTask.objects.create(
+        name="hyperbdr_monitor.collect_due_sources",
+        task="hyperbdr_monitor.tasks.collect_due_sources",
+        interval=interval,
+    )
+    PeriodicTask.objects.create(
+        name="custom legacy monitor schedule",
+        task="onepro_monitor.tasks.collect_due_sources",
+        interval=interval,
+    )
+    active = PeriodicTask.objects.create(
+        name="cloud_billing.collect_billing_data",
+        task="cloud_billing.tasks.collect_billing_data",
+        interval=interval,
+    )
+
+    removed_count = module.remove_periodic_tasks(
+        names=("hyperbdr_monitor.collect_due_sources",),
+        task_names=("onepro_monitor.tasks.collect_due_sources",),
+    )
+
+    assert removed_count == 2
+    assert PeriodicTask.objects.filter(pk=active.pk).exists()
+    assert not PeriodicTask.objects.filter(
+        task__in=[
+            "hyperbdr_monitor.tasks.collect_due_sources",
+            "onepro_monitor.tasks.collect_due_sources",
+        ]
+    ).exists()

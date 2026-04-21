@@ -1,0 +1,8 @@
+[defaults]
+base_url = "https://open.feishu.cn"
+timeout_seconds = 30
+
+[apps.default]
+display_name = "Default Feishu App"
+app_id = "cli_xxx"
+app_secret_env = "FEISHU_DEFAULT_APP_SECRET"

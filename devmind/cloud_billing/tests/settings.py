@@ -1,14 +1,15 @@
 """
 Minimal Django settings for cloud_billing tests.
-Runs without agentcore_metering so tests can run in isolation.
 """
 SECRET_KEY = "test-secret"
 DEBUG = True
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "django_celery_beat",
     "rest_framework",
     "cloud_billing",
+    "agentcore_metering.adapters.django",
     "agentcore_notifier.adapters.django",
     "agentcore_task.adapters.django",
 ]
