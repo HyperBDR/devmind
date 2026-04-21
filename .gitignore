@@ -218,6 +218,31 @@ releasenotes/build
 # Build output directory
 output
 
+# Frontend workspace
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/playwright/.auth/
+frontend/.auth/
+frontend/storage-state*.json
+frontend/.vite/
+frontend/.npm/
+frontend/.yarn/
+frontend/.eslintcache
+frontend/*.tsbuildinfo
+frontend/.cursor/
+frontend/.idea/
+frontend/.vscode/
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
 # AI Price Hub runtime artifacts
 devmind/ai_pricehub/runtime/
 

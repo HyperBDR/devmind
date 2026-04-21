@@ -1,25 +1,26 @@
 services:
-  devmind-api:
-    image: devmind:latest
-    container_name: devmind-api-dev
+  backend-api:
+    image: devmind-backend:dev
+    container_name: backend-api-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
     build:
       context: .
       dockerfile: Dockerfile
+      target: backend
       args:
         USE_MIRROR: ${USE_MIRROR:-true}
         DEV_MODE: "1"
     volumes:
-      - ./data.dev/django/staticfiles:/opt/devmind/core/staticfiles
+      - ./data.dev/django/staticfiles:/opt/backend/core/staticfiles
       - ./data.dev/logs/api:/var/log/gunicorn
-      - ./devmind:/opt/devmind
+      - ./backend:/opt/backend
       - ./cache.dev:/opt/cache
-      - ./docker/nginx/certs:/opt/devmind/docker/nginx/certs
+      - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
       - ./data.dev/storage:/opt/storage
     networks:
-      - devmind_network
+      - backend_network
     depends_on:
       - postgresql
     command: development
@@ -30,40 +31,40 @@ services:
       retries: 3
       start_period: 120s
 
-  devmind-worker:
-    image: devmind:latest
-    container_name: devmind-worker-dev
+  backend-worker:
+    image: devmind-backend:dev
+    container_name: backend-worker-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
     environment:
-      WORKSPACE_ROOT: /opt/devmind
+      WORKSPACE_ROOT: /opt/backend
     volumes:
       - ./cache.dev:/opt/cache
       - ./data.dev/logs/worker:/var/log/celery
       - ./data.dev/storage:/opt/storage
-      - ./devmind:/opt/devmind
+      - ./backend:/opt/backend
     networks:
-      - devmind_network
+      - backend_network
     depends_on:
-      - devmind-api
+      - backend-api
       - postgresql
       - redis
     command: celery
 
-  devmind-scheduler:
-    image: devmind:latest
-    container_name: devmind-scheduler-dev
+  backend-scheduler:
+    image: devmind-backend:dev
+    container_name: backend-scheduler-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
     volumes:
       - ./data.dev/logs/scheduler:/var/log/celery
-      - ./devmind:/opt/devmind
+      - ./backend:/opt/backend
     networks:
-      - devmind_network
+      - backend_network
     depends_on:
-      devmind-api:
+      backend-api:
         condition: service_started
       postgresql:
         condition: service_started
@@ -73,14 +74,14 @@ services:
 
   postgresql:
     image: postgres:17
-    container_name: devmind-postgresql-dev
+    container_name: postgresql-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-devmind}
+      POSTGRES_DB: ${POSTGRES_DB:-backend}
       PGDATA: /var/lib/postgresql/data/pgdata
       # Allow password authentication from any host (safe in Docker network)
       POSTGRES_HOST_AUTH_METHOD: md5
@@ -97,9 +98,9 @@ services:
       - "-c"
       - "config_file=/etc/postgresql/postgresql.conf"
     networks:
-      - devmind_network
+      - backend_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-devmind}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-backend}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -107,57 +108,57 @@ services:
 
   redis:
     image: redis:alpine
-    container_name: devmind-redis-dev
+    container_name: redis-dev
     restart: unless-stopped
     command: redis-server
     volumes:
       - ./data.dev/redis:/data
       - ./data.dev/logs/redis:/var/log/redis
     networks:
-      - devmind_network
+      - backend_network
 
   flower:
-    image: devmind:latest
-    container_name: devmind-flower-dev
+    image: devmind-backend:dev
+    container_name: backend-flower-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
     ports:
       - "${FLOWER_HOST_PORT:-5555}:5555"
     depends_on:
-      devmind-api:
+      backend-api:
         condition: service_started
       redis:
         condition: service_started
     command: flower
     networks:
-      - devmind_network
+      - backend_network
 
-  devmind-ui:
+  frontend:
     build:
-      context: ../devmind-ui
+      context: ./frontend
       dockerfile: Dockerfile.dev
-    image: devmind-ui:dev
-    container_name: devmind-ui-dev
+    image: devmind-frontend:dev
+    container_name: frontend-dev
     pull_policy: missing
     restart: unless-stopped
     volumes:
-      - ../devmind-ui/src:/app/src:ro
-      - ../devmind-ui/public:/app/public:ro
-      - ../devmind-ui/index.html:/app/index.html:ro
-      - ../devmind-ui/vite.config.js:/app/vite.config.js:ro
-      - ../devmind-ui/tailwind.config.js:/app/tailwind.config.js:ro
-      - ../devmind-ui/postcss.config.js:/app/postcss.config.js:ro
-      - ../devmind-ui/package.json:/app/package.json:ro
+      - ./frontend/src:/app/src:ro
+      - ./frontend/public:/app/public:ro
+      - ./frontend/index.html:/app/index.html:ro
+      - ./frontend/vite.config.js:/app/vite.config.js:ro
+      - ./frontend/tailwind.config.js:/app/tailwind.config.js:ro
+      - ./frontend/postcss.config.js:/app/postcss.config.js:ro
+      - ./frontend/package.json:/app/package.json:ro
     networks:
-      - devmind_network
+      - backend_network
     depends_on:
-      devmind-api:
+      backend-api:
         condition: service_started
 
   nginx:
     image: nginx:latest
-    container_name: devmind-nginx-dev
+    container_name: nginx-dev
     restart: unless-stopped
     env_file:
       - ./.env.dev
@@ -169,11 +170,11 @@ services:
     ports:
       - "${DJANGO_HOST_PORT:-8000}:80"
     networks:
-      - devmind_network
+      - backend_network
     depends_on:
-      devmind-api:
+      backend-api:
         condition: service_healthy
-      devmind-ui:
+      frontend:
         condition: service_started
     healthcheck:
       test: ["CMD", "nginx", "-t"]
@@ -183,5 +184,5 @@ services:
       start_period: 30s
 
 networks:
-  devmind_network:
+  backend_network:
     driver: bridge

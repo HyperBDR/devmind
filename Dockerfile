@@ -1,5 +1,5 @@
 # Use official Python 3.12 on Ubuntu 24.04 LTS
-FROM ubuntu:24.04
+FROM ubuntu:24.04 AS backend
 
 # Build argument to control mirror usage
 ARG USE_MIRROR=false
@@ -82,11 +82,11 @@ RUN set -eux; \
     export PATH="/root/.local/bin:$PATH"
 
 # Set working directory
-WORKDIR /opt/devmind
+WORKDIR /opt/backend
 
 # Copy project files
-COPY devmind /opt/devmind
-COPY pyproject.toml /opt/devmind/
+COPY backend /opt/backend
+COPY pyproject.toml /opt/backend/
 
 # Install project dependencies with mirror selection
 RUN set -eux; \
@@ -105,7 +105,7 @@ RUN set -eux; \
 # Without DEV_MODE=1, agentcore-task/agentcore-metering come from GitHub only (see
 # pyproject.toml). Use DEV_MODE=1 when building to pick up local agentcore fixes
 # (e.g. django __getattr__ recursion fix) without publishing to GitHub first.
-# COPY devmind /opt/devmind puts agentcore at /opt/devmind/agentcore/, so loop uses agentcore/*/
+# COPY backend /opt/backend puts agentcore at /opt/backend/agentcore/, so loop uses agentcore/*/
 ARG DEV_MODE=0
 RUN set -eux; \
     if [ "$DEV_MODE" = "1" ]; then \
@@ -122,7 +122,7 @@ RUN set -eux; \
 RUN python manage.py compilemessages -l zh_Hans -l en
 
 # Create necessary directories
-RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/devmind
+RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/backend
 
 # Copy entrypoint script
 COPY docker/entrypoint.sh /entrypoint.sh
@@ -130,3 +130,31 @@ RUN chmod +x /entrypoint.sh
 
 # Set default command
 ENTRYPOINT ["/entrypoint.sh"]
+
+# -----------------------------------------------------------------------------
+# Frontend image
+# -----------------------------------------------------------------------------
+
+FROM node:22-alpine AS frontend-builder
+
+WORKDIR /app
+
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
+COPY frontend/package*.json ./
+
+RUN npm ci --only=production=false
+
+COPY frontend ./
+
+RUN npm run build
+
+FROM nginx:alpine AS frontend
+
+COPY --from=frontend-builder /app/dist /usr/share/nginx/html
+COPY frontend/docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

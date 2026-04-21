@@ -48,7 +48,7 @@ sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./nginx-selfsigned.key
 sudo certbot renew --dry-run
 
 # Setup auto-renewal (cron)
-0 0 * * * certbot renew --quiet --post-hook "docker restart devmind-nginx"
+0 0 * * * certbot renew --quiet --post-hook "docker restart backend-nginx"
 ```
 
 ### Option 2: Commercial CA (e.g., DigiCert, GeoTrust)
@@ -135,5 +135,5 @@ docker-compose -f docker-compose.dev.yml up -d
 # 2. Copy to this directory
 # 3. Ensure files are named correctly
 # 4. Restart nginx
-docker restart devmind-nginx
+docker restart backend-nginx
 ```

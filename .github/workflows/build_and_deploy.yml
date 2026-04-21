@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the leading v
+        required: false
+        default: ''
 
 concurrency:
   group: devmind-deploy
@@ -12,15 +17,41 @@ concurrency:
 
 env:
   REGISTRY: ${{ vars.REGISTRY }}
-  IMAGE_NAME: ${{ vars.DEVMIND_IMAGE_NAME }}
   SSH_HOST: ${{ vars.DEVMIND_SSH_HOST }}
   SSH_USER: ${{ vars.DEVMIND_SSH_USER }}
   SSH_PORT: ${{ vars.DEVMIND_SSH_PORT }}
   DEPLOY_PATH: ${{ vars.DEVMIND_DEPLOY_PATH }}
 
 jobs:
-  build-and-deploy:
+  prepare-version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ -n "${GITHUB_REF_NAME}" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_SHA::7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build-images:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-version
+    strategy:
+      matrix:
+        include:
+          - image_name: devmind-backend
+            target: backend
+          - image_name: devmind-frontend
+            target: frontend
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,30 +66,27 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=semver,pattern=latest
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: Dockerfile
+          target: ${{ matrix.target }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version }}
           build-args: |
             USE_MIRROR=false
+            VITE_API_BASE_URL=${{ vars.VITE_API_BASE_URL }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-version
+      - build-images
+    steps:
       - name: Install SSH Key
         uses: shimataro/ssh-key-action@v2
         with:
@@ -76,6 +104,7 @@ jobs:
           command_timeout: 3600s
           script: |
             cd ${{ env.DEPLOY_PATH }}
+            APP_VERSION="${{ needs.prepare-version.outputs.version }}"
             LOCK_FILE="/tmp/devmind-deploy.lock"
             MAX_WAIT=300
             WAIT_INTERVAL=5
@@ -96,14 +125,14 @@ jobs:
             echo "$$ $(date)" > "$LOCK_FILE"
             trap "rm -f $LOCK_FILE" EXIT
 
-            echo "Starting devmind deployment..."
+            echo "Starting devmind deployment for version ${APP_VERSION}..."
             # Pull the specified image tag
-            docker-compose -f docker-compose.yml pull
+            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml pull
             # Start containers in detached mode - this returns immediately
             # The containers will gracefully shutdown old tasks in the background
-            docker-compose -f docker-compose.yml up -d --force-recreate
+            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml up -d --force-recreate
             docker system prune -f
 
-            echo "devmind deployment completed"
+            echo "devmind deployment completed for version ${APP_VERSION}"
             echo "Note: Celery workers are gracefully shutting down old tasks in the background (up to 30 minutes)"
             rm -f "$LOCK_FILE"

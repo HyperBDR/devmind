@@ -4,159 +4,160 @@
 
 面向企业内部使用的 AI 加速平台，支持 AI 驱动的研发项目管理、财务数据分析等智能工作流。
 
-## 设计原则
+## 架构总览
 
-为解耦，**每个应用（app）应自行管理自身资源**，包括数据库、接口、配置等。详见 [docs/DESIGN_PRINCIPLES.zh-CN.md](docs/DESIGN_PRINCIPLES.zh-CN.md)。  
-Design principles (English): [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md).
+```
+devmind/
+├── backend/               # Django REST API
+│   ├── core/              # 项目配置（settings/、urls.py、celery.py、periodic_registry.py）
+│   ├── accounts/          # 用户认证、Profile、Role、Permission
+│   ├── cloud_billing/     # 云账单管理（AWS / Azure / 阿里云 / 华为云 / 腾讯云）
+│   ├── data_collector/   # 从 JIRA、飞书等系统拉取原始数据
+│   ├── ai_pricehub/      # AI 模型价格对比
+│   ├── app_config/        # 全局配置（Feature Flag）
+│   └── agentcore/        # Git 子模块
+│       ├── agentcore-metering/   # LLM 用量追踪  → /api/v1/admin/
+│       ├── agentcore-task/       # 统一任务管理   → /api/v1/tasks/
+│       └── agentcore-notifier/   # 飞书通知       → /api/v1/admin/notifications/
+└── frontend/              # Vue 3（Vite + Pinia + Tailwind + vue-i18n）
+```
 
-## Agentcore 子模块
+**技术栈要点**：
+- 所有数据存储均为 UTC，前端负责用户本地时区转换
+- 每个 Django app 自包含（models、views、serializers、services、migrations、tests 自管）
+- 定时任务通过 `periodic_tasks.register_periodic_tasks()` 注册，写入 django_celery_beat；现有记录不会被覆盖
 
-通用模块（如 LLM 追踪、任务执行追踪、通知等）以独立仓库维护，通过 **Git 子模块** 引入到 `devmind/agentcore/` 下。
+## 快速上手
 
-### Agentcore 的安装方式
-
-- **生产环境（Docker）**  
-  依赖写在 `pyproject.toml` 中，并指向 GitHub。使用 `docker-compose up -d`（或先 `docker-compose build`）构建镜像时，Dockerfile 会按 pyproject.toml 安装全部依赖，agentcore 包从 GitHub 安装，不依赖本地路径。
-
-- **开发环境（Docker）**  
-  使用 `docker-compose -f docker-compose.dev.yml` 启动时，镜像会以 `DEV_MODE=1` 构建。Dockerfile 在安装完统一依赖后多做一步：对 `devmind/agentcore/*/` 下每个带 `pyproject.toml` 的目录执行 `pip install -e .`，用**本地** agentcore 代码以可编辑方式覆盖 GitHub 版本，便于在 `devmind/agentcore/` 下改代码、调试，而无需重新构建镜像（配合 docker-compose.dev.yml 的 volume 挂载效果更佳）。
-
-- **本地 / 非 Docker**  
-  克隆后执行 `git submodule update --init --recursive`，再安装项目。若要在本地开发 agentcore，可对每个子模块做可编辑安装（见下）。
-
-### 克隆仓库后：请先拉取子模块
-
-**若你刚克隆本仓库，必须先初始化并拉取子模块**，否则 agentcore 包不可用，Python 导入和 Django 应用会报错。
+### 1. 拉取子模块（克隆后必做）
 
 ```bash
 git submodule update --init --recursive
 ```
 
-### 以可编辑方式安装 agentcore 包（本地 / 非 Docker 开发）
-
-在仓库根目录（即包含 `pyproject.toml` 的 `devmind/` 目录）下执行：
+### 2. 配置并启动（Docker 开发）
 
 ```bash
-for d in devmind/agentcore/*/; do
+cp env.sample .env.dev
+# 编辑 .env.dev，按需配置数据库、AI 服务
+docker-compose -f docker-compose.dev.yml up -d
+```
+
+### 3. 访问服务
+
+| 服务 | 地址 |
+|---|---|
+| Web UI | http://localhost:8000 |
+| API 文档 | http://localhost:8000/swagger/ |
+| 管理后台 | http://localhost:8000/admin/ |
+| Celery 监控 | http://localhost:5555 |
+
+### 4. 常用开发命令
+
+```bash
+# Backend
+pytest                                    # 运行所有测试
+pytest path/to/test.py                    # 单个测试文件
+black --check backend/                    # 检查代码格式
+isort --check backend/                    # 检查 import 顺序
+
+# Django 管理
+python backend/manage.py migrate
+python backend/manage.py register_periodic_tasks   # 注册定时任务
+python backend/manage.py createsuperuser
+
+# Frontend
+cd frontend && npm install
+npm run dev          # 开发服务器
+npm run build        # 生产构建
+npm run lint
+npm run test:e2e     # Playwright E2E
+```
+
+## Agentcore 子模块详解
+
+通用模块（LLM 追踪、任务管理、通知）以独立 Git 仓库维护，作为子模块引入。
+
+### 安装方式对照
+
+| 环境 | 方式 |
+|---|---|
+| 生产（Docker） | `pyproject.toml` 依赖指向 GitHub，镜像构建时自动安装 |
+| 开发（Docker） | `DEV_MODE=1` 镜像额外执行 `pip install -e .` 覆盖本地 agentcore |
+| 本地 / 非 Docker | 克隆后手动 `pip install -e "$d"`（见下方） |
+
+### 本地可编辑安装
+
+```bash
+for d in backend/agentcore/*/; do
   [ -f "${d}pyproject.toml" ] && pip install -e "$d"
 done
 ```
 
-若使用 `uv`：
+### 子模块映射
 
-```bash
-for d in devmind/agentcore/*/; do
-  [ -f "${d}pyproject.toml" ] && uv pip install -e "$d"
-done
-```
+| 子模块 | Django app (INSTALLED_APPS) | URL 前缀 |
+|---|---|---|
+| `agentcore-metering` | `agentcore_metering.adapters.django` | `/api/v1/admin/` |
+| `agentcore-task` | `agentcore_task.adapters.django` | `/api/v1/tasks/` |
+| `agentcore-notifier` | `agentcore_notifier.adapters.django` | `/api/v1/admin/notifications/` |
 
-### 子模块与用法对照
+## Celery 任务加载与定时任务机制
 
-| 子模块               | 替代（已废弃） | Django 应用 (INSTALLED_APPS)           | 导入 / URL 挂载                    |
-|----------------------|----------------|----------------------------------------|-------------------------------------|
-| `agentcore-metering` | llm_tracker    | `agentcore_metering.adapters.django`   | `agentcore_metering.*`、`api/v1/admin/` |
-| `agentcore-task`     | —              | `agentcore_task.adapters.django`       | `agentcore_task.*`、`api/v1/tasks/` |
+### 任务发现
 
-## Celery：自动加载 app 任务与 entrypoint 生效逻辑
+`core/celery.py` 调用 `app.autodiscover_tasks()`，自动加载 `INSTALLED_APPS` 中每个 app 的 `tasks.py`。只要在 `INSTALLED_APPS` 中且提供 `tasks.py` 的 Django app 都会被自动发现，无需额外配置。
 
-### 任务代码如何被加载
+### 定时任务注册
 
-- 在 `core/celery.py` 中，Celery 应用会调用 `app.autodiscover_tasks()`（无参数）。Celery 会在 Django `INSTALLED_APPS` 里的每个应用中查找 `tasks.py` 并导入，因此各 app 中通过 `@app.task` / `@shared_task` 定义的任务都会被注册。
-- 只要某个 Django 应用（含 agentcore 包）在 `INSTALLED_APPS` 中且提供 `tasks.py`，就会被自动发现，无需额外配置。
+定时任务不依赖 Celery 自动发现，而是通过 `python manage.py register_periodic_tasks` 写入 **django_celery_beat** 数据库：
 
-### 定时任务如何注册
+1. 遍历 `INSTALLED_APPS` 中每个 app，查找 `periodic_tasks` 模块
+2. 若该模块定义了 `register_periodic_tasks()`，调用它
+3. 各 app 使用 `core.periodic_registry` 声明 cron 项
+4. 注册器**只创建缺失记录**，已存在的 django_celery_beat 记录保持不变
 
-- 定时（类 cron）任务仅靠 Celery 不会自动发现，需要写入 **django_celery_beat** 后，beat 调度器才会执行。
-- 管理命令 `python manage.py register_periodic_tasks` 会遍历 `INSTALLED_APPS` 中的每个应用，查找其下的 `periodic_tasks` 模块；若该模块定义了 `register_periodic_tasks()`，则调用它。各应用通过项目中的 `core.periodic_registry` 声明 cron 项；注册器只创建缺失记录，已存在的 django_celery_beat 记录会保持不变。
+### entrypoint.sh 中的执行顺序
 
-### 在 `docker/entrypoint.sh` 中的生效方式
+| 容器 | 行为 |
+|---|---|
+| gunicorn / development | `wait_for_db` → `migrate` → `register_periodic_tasks` → 启动服务 |
+| celery | `wait_for_db` → 启动 worker（`autodiscover_tasks` 加载 tasks） |
+| celery-beat | `wait_for_db` → 启动 beat（`DatabaseScheduler` 从数据库读取调度表） |
 
-- entrypoint 会设置 `PYTHONPATH=/opt/devmind` 和 `DJANGO_SETTINGS_MODULE=core.settings`，这样在通过 `-A core` 启动 Celery 时，会加载 `core.celery`，且能正确使用 Django 配置（含 `INSTALLED_APPS`）。
-- **`celery`（worker）** 与 **`celery-beat`**：容器执行 `celery -A core worker` 或 `celery -A core beat` 时，导入 `core.celery` 会执行 `autodiscover_tasks()`，所有 app 的 `tasks.py` 被加载，任务对 worker 和 beat 可见；beat 使用 `DatabaseScheduler`，从数据库读取调度表。
-- **`gunicorn`** 与 **`development`**：在 `wait_for_db` 和 `run_migrations` 之后，entrypoint 会执行 `python manage.py register_periodic_tasks`（或 true）。该命令会汇总各 app 的 `periodic_tasks.register_periodic_tasks()` 并创建缺失的 django_celery_beat 记录，但不会覆盖已有记录。典型多容器部署下，由 Web 容器（gunicorn）在启动时执行一次迁移和 `register_periodic_tasks`；celery 与 celery-beat 容器共用同一数据库，因此无需再执行该命令即可看到已注册的任务与调度。
+典型多容器部署下，gunicorn 容器执行一次 `register_periodic_tasks`；celery / celery-beat 共用同一数据库，无需重复执行。
 
-## 开发环境
+## 设计原则
 
-### 环境要求
-
-- Docker 与 Docker Compose
-- Git
-
-### 搭建步骤
-
-0. **若为克隆得到的仓库**：请先执行 `git submodule update --init --recursive`（见上文 [Agentcore 子模块](#克隆仓库后请先拉取子模块)）。
-
-1. 复制环境配置：
-
-```bash
-cp env.sample .env.dev
-```
-
-2. 配置环境变量：
-
-编辑 `.env.dev`，按需配置数据库、AI 服务等。
-
-3. 启动服务：
-
-```bash
-docker-compose -f docker-compose.dev.yml up -d
-```
-
-4. 访问地址：
-
-- 前端：http://localhost:8000
-- API 文档：http://localhost:8000/swagger/
-- 管理后台：http://localhost:8000/admin/
-- Celery 监控：http://localhost:5555
+为解耦，**每个应用（app）应自行管理自身资源**，包括数据库、接口、配置等。详见 [docs/DESIGN_PRINCIPLES.zh-CN.md](docs/DESIGN_PRINCIPLES.zh-CN.md)。  
+Design principles (English): [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.md).
 
 ## 生产环境
 
-### 环境要求
-
-- Docker 与 Docker Compose
-- 服务器资源建议：至少 4 核 CPU、8GB 内存
-
-### 部署步骤
-
-1. 复制环境配置：
-
 ```bash
 cp env.sample .env
+# 编辑 .env：SECRET_KEY、DJANGO_DEBUG=false、ALLOWED_HOSTS、数据库、AI 服务等
+APP_VERSION=1.2.3 docker-compose -f docker-compose.yml up -d
 ```
 
-2. 配置生产环境变量：
+**默认端口**：HTTP 10080、HTTPS 10443（通过 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT` 修改）
 
-编辑 `.env`，配置例如：
+> 生产镜像版本由 `APP_VERSION` 决定。打 tag 发布时，GitHub Actions 会自动
+> 把 `v1.2.3` 转成 `APP_VERSION=1.2.3`，再执行 `docker-compose pull` 和
+> `docker-compose up -d`。手工部署时也要显式传这个变量，否则 compose 会
+> 因为 `APP_VERSION is required` 直接失败。
 
-- `SECRET_KEY`：Django 密钥（生产环境务必修改）
-- `DJANGO_DEBUG=false`：关闭调试
-- `ALLOWED_HOSTS`：允许的域名
-- `CSRF_TRUSTED_ORIGINS`：可信域名
-- 数据库（推荐 PostgreSQL，或 MySQL/MariaDB 以兼容旧环境）
-- AI 服务（OpenAI / Azure OpenAI 等）
-- 其他生产所需配置
+## 前端
 
-3. 启动服务：
+- Vue 3 + Composition API + `<script setup>`
+- Vite + Pinia + Vue Router + vue-i18n + Tailwind CSS
+- E2E：Playwright
 
 ```bash
-docker-compose up -d
+cd frontend
+npm install
+npm run dev          # http://localhost:5173
+npm run build        # Docker 构建使用根目录 Dockerfile frontend target
 ```
 
-4. 查看服务状态：
-
-```bash
-docker-compose ps
-```
-
-5. 查看日志：
-
-```bash
-docker-compose logs -f
-```
-
-### 默认端口
-
-- HTTP：10080
-- HTTPS：10443
-
-可通过 `.env` 中的 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT` 修改端口。
+环境变量：`VITE_API_BASE_URL`、`VITE_APP_TITLE`、`VITE_API_TIMEOUT`
