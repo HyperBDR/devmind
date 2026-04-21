@@ -13,8 +13,18 @@ agentcore_task_path = (
     / "agentcore"
     / "agentcore-task"
 )
+agentcore_metering_path = (
+    Path(__file__).resolve().parent.parent.parent
+    / "agentcore"
+    / "agentcore-metering"
+)
 if agentcore_task_path.exists() and str(agentcore_task_path) not in sys.path:
     sys.path.insert(0, str(agentcore_task_path))
+if (
+    agentcore_metering_path.exists()
+    and str(agentcore_metering_path) not in sys.path
+):
+    sys.path.insert(0, str(agentcore_metering_path))
 
 # NOTE(Ray): Django test bootstrap requires DJANGO_SETTINGS_MODULE set
 # before importing django; import order here is intentional.
@@ -25,6 +35,7 @@ django.setup()
 import pytest
 from decimal import Decimal
 from datetime import timedelta
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -36,6 +47,31 @@ from cloud_billing.models import (
     AlertRule,
     AlertRecord,
 )
+
+
+@pytest.fixture
+def mocker():
+    """
+    Lightweight subset of pytest-mock's fixture used by local tests.
+    """
+    patchers = []
+
+    class _Mocker:
+        Mock = mock.Mock
+        MagicMock = mock.MagicMock
+
+        @staticmethod
+        def patch(target, *args, **kwargs):
+            patcher = mock.patch(target, *args, **kwargs)
+            patchers.append(patcher)
+            return patcher.start()
+
+    instance = _Mocker()
+    try:
+        yield instance
+    finally:
+        while patchers:
+            patchers.pop().stop()
 
 
 @pytest.fixture

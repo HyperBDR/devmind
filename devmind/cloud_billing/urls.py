@@ -12,6 +12,9 @@ from .views import (
     BillingDataViewSet,
     BillingTaskViewSet,
     CloudProviderViewSet,
+    RechargeApprovalDetailView,
+    RechargeApprovalFeishuCallbackView,
+    RechargeApprovalListView,
 )
 
 router = DefaultRouter()
@@ -22,5 +25,20 @@ router.register(r"alert-records", AlertRecordViewSet, basename="alert-record")
 router.register(r"tasks", BillingTaskViewSet, basename="task")
 
 urlpatterns = [
+    path(
+        "recharge-approvals/feishu-callback/",
+        RechargeApprovalFeishuCallbackView.as_view(),
+        name="recharge-approval-feishu-callback",
+    ),
+    path(
+        "recharge-approvals/",
+        RechargeApprovalListView.as_view(),
+        name="recharge-approval-list",
+    ),
+    path(
+        "recharge-approvals/<int:pk>/",
+        RechargeApprovalDetailView.as_view(),
+        name="recharge-approval-detail",
+    ),
     path("", include(router.urls)),
 ]

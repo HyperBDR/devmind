@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Optional
 
 from django.utils import translation
 from django.utils.translation import gettext as _
@@ -12,6 +13,10 @@ from .constants import DEFAULT_LANGUAGE
 
 def is_chinese_language(language: str) -> bool:
     return str(language or "").lower().startswith("zh")
+
+
+def localized_text(language: str, english: str, chinese: str) -> str:
+    return chinese if is_chinese_language(language) else _(english)
 
 
 def format_alert_line(
@@ -87,14 +92,17 @@ def build_alert_message(
     balance_threshold_triggered: bool,
     days_remaining_threshold_triggered: bool,
     language: str,
-    alert_type: str | None = None,
+    alert_type: Optional[str] = None,
 ) -> str:
-    normalized_language = str(language or DEFAULT_LANGUAGE).lower()
+    raw_language = str(language or DEFAULT_LANGUAGE).strip()
+    normalized_language = (
+        "zh_Hans" if raw_language.lower().startswith("zh") else raw_language.lower()
+    )
 
     with translation.override(normalized_language):
         lines = [
             format_alert_line(
-                _("Cloud provider"),
+                localized_text(normalized_language, "Cloud provider", "公有云类型"),
                 provider_name,
                 language=normalized_language,
             ),
@@ -102,7 +110,7 @@ def build_alert_message(
         if account_id:
             lines.append(
                 format_alert_line(
-                    _("Account"),
+                    localized_text(normalized_language, "Account", "账号"),
                     account_id,
                     language=normalized_language,
                 )
@@ -110,7 +118,7 @@ def build_alert_message(
         if provider_notes:
             lines.append(
                 format_alert_line(
-                    _("Notes"),
+                    localized_text(normalized_language, "Notes", "备注"),
                     provider_notes,
                     language=normalized_language,
                 )
@@ -133,31 +141,45 @@ def build_alert_message(
             lines.insert(
                 0,
                 format_alert_line(
-                    _("Alert type"),
-                    _("Balance threshold alert"),
+                    localized_text(normalized_language, "Alert type", "告警类型"),
+                    localized_text(
+                        normalized_language,
+                        "Balance threshold alert",
+                        "余额阈值告警",
+                    ),
                     language=normalized_language,
                 ),
             )
             lines.append(
                 format_alert_line(
-                    _("Current balance"),
+                    localized_text(
+                        normalized_language, "Current balance", "当前余额"
+                    ),
                     f"{current_balance:.2f} {currency}",
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Alert threshold"),
+                    localized_text(
+                        normalized_language, "Alert threshold", "告警阈值"
+                    ),
                     f"{alert_rule.balance_threshold:.2f} {currency}",
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Alert description"),
-                    _(
+                    localized_text(
+                        normalized_language,
+                        "Alert description",
+                        "告警说明",
+                    ),
+                    localized_text(
+                        normalized_language,
                         "Remaining balance is below the configured threshold. "
-                        "Please recharge promptly."
+                        "Please recharge promptly.",
+                        "账户剩余余额低于设定阈值，请及时充值",
                     ),
                     language=normalized_language,
                 )
@@ -171,38 +193,56 @@ def build_alert_message(
             lines.insert(
                 0,
                 format_alert_line(
-                    _("Alert type"),
-                    _("Estimated days remaining alert"),
+                    localized_text(normalized_language, "Alert type", "告警类型"),
+                    localized_text(
+                        normalized_language,
+                        "Estimated days remaining alert",
+                        "预计使用天数告警",
+                    ),
                     language=normalized_language,
                 ),
             )
             lines.append(
                 format_alert_line(
-                    _("Current balance"),
+                    localized_text(
+                        normalized_language, "Current balance", "当前余额"
+                    ),
                     f"{current_balance:.2f} {currency}",
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Estimated days remaining"),
+                    localized_text(
+                        normalized_language,
+                        "Estimated days remaining",
+                        "预计使用天数",
+                    ),
                     str(current_days_remaining),
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Alert threshold"),
+                    localized_text(
+                        normalized_language, "Alert threshold", "告警阈值"
+                    ),
                     str(alert_rule.days_remaining_threshold),
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Alert description"),
-                    _(
+                    localized_text(
+                        normalized_language,
+                        "Alert description",
+                        "告警说明",
+                    ),
+                    localized_text(
+                        normalized_language,
                         "Projected remaining days are below the configured "
-                        "threshold. Please recharge promptly."
+                        "threshold. Please recharge promptly.",
+                        "预计使用天数低于设定阈值，请及时充值",
                     ),
                     language=normalized_language,
                 )
@@ -216,36 +256,58 @@ def build_alert_message(
             lines.insert(
                 0,
                 format_alert_line(
-                    _("Alert type"),
-                    _("Cost threshold alert"),
+                    localized_text(normalized_language, "Alert type", "告警类型"),
+                    localized_text(
+                        normalized_language,
+                        "Cost threshold alert",
+                        "成本阈值告警",
+                    ),
                     language=normalized_language,
                 ),
             )
             lines.append(
                 format_alert_line(
-                    _("Current total cost"),
+                    localized_text(
+                        normalized_language,
+                        "Current total cost",
+                        "当前累计成本",
+                    ),
                     f"{current_cost:.2f} {currency}",
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Alert threshold"),
+                    localized_text(
+                        normalized_language, "Alert threshold", "告警阈值"
+                    ),
                     f"{alert_rule.cost_threshold:.2f} {currency}",
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Previous hour cost"),
+                    localized_text(
+                        normalized_language,
+                        "Previous hour cost",
+                        "上一小时成本",
+                    ),
                     f"{previous_cost:.2f} {currency}",
                     language=normalized_language,
                 )
             )
             lines.append(
                 format_alert_line(
-                    _("Alert description"),
-                    _("Current total cost exceeds the configured threshold"),
+                    localized_text(
+                        normalized_language,
+                        "Alert description",
+                        "告警说明",
+                    ),
+                    localized_text(
+                        normalized_language,
+                        "Current total cost exceeds the configured threshold",
+                        "当前累计成本已超过设定阈值",
+                    ),
                     language=normalized_language,
                 )
             )

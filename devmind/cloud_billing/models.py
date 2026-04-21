@@ -2,6 +2,8 @@
 Data models for cloud billing management.
 """
 
+import uuid
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -48,6 +50,14 @@ class CloudProvider(models.Model):
         blank=True,
         null=True,
         help_text="Optional notes or description for this provider",
+    )
+    recharge_info = models.TextField(
+        blank=True,
+        default="",
+        help_text=(
+            "Raw recharge approval input text. Store all recharge-related "
+            "parameters here and pass it to the recharge approval agent."
+        ),
     )
     tags = models.JSONField(
         default=list,
@@ -293,6 +303,13 @@ class AlertRule(models.Model):
         db_index=True,
         help_text="Whether this alert rule is active",
     )
+    auto_submit_recharge_approval = models.BooleanField(
+        default=False,
+        help_text=(
+            "Whether to independently trigger the recharge approval SOP "
+            "when this alert rule is hit."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -463,3 +480,290 @@ class AlertRecord(models.Model):
             f"{self.provider.display_name} - {time_str} - "
             f"{self.increase_percent}%"
         )
+
+
+class RechargeApprovalRecord(models.Model):
+    """
+    Track submitted recharge approvals and Feishu callback state.
+    """
+
+    TRIGGER_SOURCE_MANUAL = "manual"
+    TRIGGER_SOURCE_ALERT = "alert"
+    TRIGGER_SOURCE_CHOICES = [
+        (TRIGGER_SOURCE_MANUAL, "Manual"),
+        (TRIGGER_SOURCE_ALERT, "Alert"),
+    ]
+
+    STATUS_PENDING = "pending"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+    STATUS_CANCELED = "canceled"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SUBMITTED, "Submitted"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+        (STATUS_CANCELED, "Canceled"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    provider = models.ForeignKey(
+        CloudProvider,
+        on_delete=models.CASCADE,
+        related_name="recharge_approval_records",
+    )
+    trace_id = models.UUIDField(
+        default=uuid.uuid4,
+        db_index=True,
+        help_text="Trace id used to correlate approval events and LLM runs.",
+    )
+    alert_record = models.ForeignKey(
+        AlertRecord,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recharge_approval_records",
+    )
+    trigger_source = models.CharField(
+        max_length=20,
+        choices=TRIGGER_SOURCE_CHOICES,
+        default=TRIGGER_SOURCE_MANUAL,
+    )
+    trigger_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Why this approval was triggered, e.g. manual or balance_threshold.",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    latest_stage = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Latest execution stage, such as parse_input or submit_request.",
+    )
+    raw_recharge_info = models.TextField(blank=True, default="")
+    request_payload = models.JSONField(default=dict, blank=True)
+    context_payload = models.JSONField(default=dict, blank=True)
+    response_payload = models.JSONField(null=True, blank=True)
+    callback_payload = models.JSONField(null=True, blank=True)
+    approval_timeline = models.JSONField(default=list, blank=True)
+    feishu_instance_code = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        default=None,
+        db_index=True,
+        unique=True,
+    )
+    feishu_approval_code = models.CharField(
+        max_length=128,
+        blank=True,
+        null=True,
+        default=None,
+    )
+    status_message = models.TextField(blank=True, default="")
+    triggered_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="triggered_recharge_approvals",
+    )
+    triggered_by_username_snapshot = models.CharField(
+        max_length=150,
+        blank=True,
+        default="",
+        help_text="Trigger user's username snapshot for auditing.",
+    )
+    submitted_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submitted_recharge_approvals",
+    )
+    submitter_identifier = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Submitter email address or mobile number provided by the user.",
+    )
+    resolved_submitter_user_id = models.CharField(
+        max_length=128,
+        blank=True,
+        default="",
+        help_text="Resolved Feishu applicant user_id used for the actual submission.",
+    )
+    submitter_user_label = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Display label snapshot for the Feishu applicant.",
+    )
+    latest_llm_usage = models.ForeignKey(
+        "agentcore_metering.LLMUsage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recharge_approval_records",
+    )
+    llm_trace_summary = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Compact summary of related LLM or agent execution.",
+    )
+    latest_node_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Latest approval node name or execution node label.",
+    )
+    latest_node_status = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Latest approval node status snapshot.",
+    )
+    last_latency_ms = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Latency of the latest execution stage in milliseconds.",
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    last_callback_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "cloud_billing_recharge_approval_record"
+        verbose_name = "Recharge Approval Record"
+        verbose_name_plural = "Recharge Approval Records"
+        indexes = [
+            models.Index(fields=["provider", "created_at"]),
+            models.Index(fields=["status", "created_at"]),
+            models.Index(fields=["trace_id"]),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        instance_code = self.feishu_instance_code or "pending"
+        return f"{self.provider.display_name} - {instance_code} - {self.status}"
+
+
+class RechargeApprovalEvent(models.Model):
+    """
+    Append-only event stream for recharge approval execution and callbacks.
+    """
+
+    record = models.ForeignKey(
+        RechargeApprovalRecord,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    trace_id = models.UUIDField(
+        db_index=True,
+        help_text="Trace id copied from the parent approval record.",
+    )
+    event_type = models.CharField(max_length=64, db_index=True)
+    stage = models.CharField(max_length=64, blank=True, default="")
+    source = models.CharField(max_length=64, blank=True, default="")
+    message = models.TextField(blank=True, default="")
+    payload = models.JSONField(default=dict, blank=True)
+    operator = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recharge_approval_events",
+    )
+    operator_label = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "cloud_billing_recharge_approval_event"
+        verbose_name = "Recharge Approval Event"
+        verbose_name_plural = "Recharge Approval Events"
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["record", "created_at"]),
+            models.Index(fields=["trace_id", "created_at"]),
+            models.Index(fields=["event_type", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.record_id} - {self.event_type} - {self.stage}"
+
+
+class RechargeApprovalLLMRun(models.Model):
+    """
+    Execution evidence for approval agent/script/LLM runs.
+    """
+
+    RUNNER_TYPE_AGENT = "agent"
+    RUNNER_TYPE_LLM = "llm"
+    RUNNER_TYPE_SCRIPT = "script"
+    RUNNER_TYPE_SKILL_HTTP = "skill_http"
+    RUNNER_TYPE_CHOICES = [
+        (RUNNER_TYPE_AGENT, "Agent"),
+        (RUNNER_TYPE_LLM, "LLM"),
+        (RUNNER_TYPE_SCRIPT, "Script"),
+        (RUNNER_TYPE_SKILL_HTTP, "Skill HTTP"),
+    ]
+
+    record = models.ForeignKey(
+        RechargeApprovalRecord,
+        on_delete=models.CASCADE,
+        related_name="llm_runs",
+    )
+    trace_id = models.UUIDField(db_index=True)
+    span_id = models.UUIDField(default=uuid.uuid4, db_index=True)
+    parent_span_id = models.UUIDField(null=True, blank=True, db_index=True)
+    runner_type = models.CharField(
+        max_length=20,
+        choices=RUNNER_TYPE_CHOICES,
+        default=RUNNER_TYPE_AGENT,
+    )
+    stage = models.CharField(max_length=64, db_index=True)
+    llm_usage = models.ForeignKey(
+        "agentcore_metering.LLMUsage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recharge_approval_llm_runs",
+    )
+    provider = models.CharField(max_length=128, blank=True, default="")
+    model = models.CharField(max_length=200, blank=True, default="")
+    input_snapshot = models.TextField(blank=True, default="")
+    output_snapshot = models.TextField(blank=True, default="")
+    parsed_payload = models.JSONField(default=dict, blank=True)
+    usage_payload = models.JSONField(default=dict, blank=True)
+    stdout = models.TextField(blank=True, default="")
+    stderr = models.TextField(blank=True, default="")
+    success = models.BooleanField(default=True, db_index=True)
+    error_message = models.TextField(blank=True, default="")
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    latency_ms = models.PositiveIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = "cloud_billing_recharge_approval_llm_run"
+        verbose_name = "Recharge Approval LLM Run"
+        verbose_name_plural = "Recharge Approval LLM Runs"
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["record", "created_at"]),
+            models.Index(fields=["trace_id", "created_at"]),
+            models.Index(fields=["stage", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.record_id} - {self.stage} - {self.success}"

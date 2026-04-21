@@ -41,9 +41,19 @@ class TestFeishuTimeHelpers:
 
 @pytest.mark.unit
 class TestFeishuProviderAuthenticate:
-    def test_authenticate_returns_false_when_empty_config(self):
+    @patch("data_collector.services.providers.feishu.requests.post")
+    def test_authenticate_uses_default_config_when_empty(self, mock_post):
+        mock_post.return_value.json.return_value = {
+            "code": 0,
+            "tenant_access_token": "t",
+            "expire": 7200,
+        }
+        mock_post.return_value.raise_for_status = lambda: None
         provider = FeishuProvider()
-        assert provider.authenticate({}) is False
+        assert provider.authenticate({}) is True
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["app_id"].startswith("cli_")
+        assert payload["app_secret"]
 
     @patch("data_collector.services.providers.feishu.requests.post")
     def test_authenticate_success(self, mock_post):
@@ -55,6 +65,10 @@ class TestFeishuProviderAuthenticate:
         mock_post.return_value.raise_for_status = lambda: None
         provider = FeishuProvider()
         assert provider.authenticate({"app_id": "id", "app_secret": "secret"}) is True
+        assert mock_post.call_args.kwargs["json"] == {
+            "app_id": "id",
+            "app_secret": "secret",
+        }
 
     @patch("data_collector.services.providers.feishu.requests.post")
     def test_authenticate_failure_returns_false(self, mock_post):

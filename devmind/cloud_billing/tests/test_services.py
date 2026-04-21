@@ -7,9 +7,10 @@ from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
 from cloud_billing.services.notification_service import (
     CloudBillingNotificationService,
+    RechargeApprovalNotificationService,
 )
 from cloud_billing.services.provider_service import ProviderService
-from cloud_billing.models import CloudProvider, AlertRecord
+from cloud_billing.models import CloudProvider, AlertRecord, RechargeApprovalRecord
 
 
 @pytest.mark.django_db
@@ -593,3 +594,262 @@ class TestCloudBillingNotificationService:
         assert result["success"] is False
         err = result["error"].lower()
         assert "not found" in err or "inactive" in err
+
+
+@pytest.mark.django_db
+class TestRechargeApprovalNotificationService:
+    """
+    Tests for recharge approval notification message content.
+    """
+
+    def test_build_recharge_message_includes_actor_and_recharge_details(
+        self,
+        cloud_provider,
+        user,
+    ):
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            trigger_reason="operations_console_timeline",
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            triggered_by=user,
+            triggered_by_username_snapshot=user.username,
+            submitted_by=user,
+            submitter_identifier="finance@example.com",
+            resolved_submitter_user_id="ou_123",
+            submitter_user_label="Finance Bot",
+            request_payload={
+                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_account": "acct-188",
+                "amount": "188.50",
+                "currency": "CNY",
+                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_way": "公司支付",
+                "payment_type": "仅充值",
+                "remit_method": "转账",
+                "expected_date": "2026-04-27",
+                "payment_note": "余额低于阈值",
+                "payee": {
+                    "account_name": "北京智谱华章科技股份有限公司",
+                    "bank_name": "招商银行",
+                },
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        message = service._build_recharge_message(
+            record,
+            "submitted",
+            "zh-hans",
+        )
+
+        assert "**触发方式**: 人工触发" in message
+        assert f"**公有云类型**: {cloud_provider.display_name}" in message
+        assert "**触发人**: testuser" in message
+        assert "**提交名义**: Finance Bot / finance@example.com" in message
+        assert "**触发原因**: operations_console_timeline" in message
+        assert "**充值账号**: acct-188" in message
+        assert "**充值客户**: 深圳壹铂云科技有限公司" in message
+        assert "**付款金额**: 188.50 CNY" in message
+        assert "**付款公司**: 深圳壹铂云科技有限公司" in message
+        assert "**支付方式**: 公司支付" in message
+        assert "**付款类型**: 仅充值" in message
+        assert "**付款方式**: 转账" in message
+        assert "**期望到账时间**: 2026-04-27" in message
+        assert "**收款信息**" in message
+        assert "  - 户名: 北京智谱华章科技股份有限公司" in message
+        assert "  - 银行: 招商银行" in message
+        assert "**备注**" not in message
+
+    def test_build_recharge_message_merges_alert_details(
+        self,
+        cloud_provider,
+        alert_record,
+    ):
+        alert_record.alert_message = (
+            "告警类型：预计使用天数告警\n"
+            "当前余额：480.00 CNY\n"
+            "预计使用天数：6\n"
+            "告警阈值：7 天\n"
+            "告警说明：预计剩余可用天数低于阈值，请及时充值"
+        )
+        alert_record.save(update_fields=["alert_message"])
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            alert_record=alert_record,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            trigger_reason="days_remaining_threshold",
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            request_payload={
+                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_account": "acct-188",
+                "amount": 188,
+                "currency": "CNY",
+                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_way": "公司支付",
+                "payment_type": "仅充值",
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        message = service._build_recharge_message(
+            record,
+            "submitted",
+            "zh-hans",
+        )
+
+        assert "**触发方式**: 告警触发" in message
+        assert f"**公有云类型**: {cloud_provider.display_name}" in message
+        assert "**触发原因**: days_remaining_threshold" in message
+        assert "告警信息" in message
+        assert "告警类型: 预计使用天数告警" in message
+        assert "预计使用天数: 6" in message
+        assert "告警阈值: 7 天" in message
+        assert "告警说明: 预计剩余可用天数低于阈值，请及时充值" in message
+
+    def test_build_recharge_message_skips_empty_expected_date_and_payee_only_remark(
+        self,
+        cloud_provider,
+        user,
+    ):
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            triggered_by=user,
+            triggered_by_username_snapshot=user.username,
+            submitted_by=user,
+            submitter_identifier="finance@example.com",
+            resolved_submitter_user_id="ou_123",
+            submitter_user_label="Finance Bot",
+            request_payload={
+                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_account": "acct-188",
+                "amount": "188.50",
+                "currency": "CNY",
+                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_way": "公司支付",
+                "payment_type": "仅充值",
+                "remit_method": "转账",
+                "remark": (
+                    "收款类型：对公账户\n"
+                    "户名：北京智谱华章科技股份有限公司\n"
+                    "账号：11093851041070210011884\n"
+                    "银行：招商银行\n"
+                    "银行地区：北京市/北京市\n"
+                    "支行：招商银行股份有限公司北京上地支行"
+                ),
+                "payee": {
+                    "account_name": "北京智谱华章科技股份有限公司",
+                    "bank_name": "招商银行",
+                },
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        message = service._build_recharge_message(
+            record,
+            "submitted",
+            "zh-hans",
+        )
+
+        assert "**期望到账时间**" not in message
+        assert "**备注**" not in message
+        assert "**收款信息**" in message
+        assert "  - 户名: 北京智谱华章科技股份有限公司" in message
+        assert "  - 银行: 招商银行" in message
+
+    def test_generate_feishu_payload_uses_interactive_card_for_recharge_notifications(
+        self,
+        cloud_provider,
+        user,
+    ):
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            triggered_by=user,
+            triggered_by_username_snapshot=user.username,
+            submitted_by=user,
+            submitter_identifier="finance@example.com",
+            resolved_submitter_user_id="ou_123",
+            submitter_user_label="Finance Bot",
+            request_payload={
+                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_account": "acct-188",
+                "amount": "188.50",
+                "currency": "CNY",
+                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_way": "公司支付",
+                "payment_type": "仅充值",
+                "remit_method": "转账",
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        payload = service._generate_feishu_payload(record, "submitted", "zh-hans")
+
+        assert payload["msg_type"] == "interactive"
+        assert payload["card"]["header"]["title"]["content"] == "【充值审批】提交成功"
+        elements = payload["card"]["elements"]
+        assert len(elements) == 1
+        assert elements[0]["tag"] == "div"
+        assert elements[0]["text"]["tag"] == "lark_md"
+        assert elements[0]["text"]["content"].startswith("**触发方式**: 人工触发")
+        assert "\n\n" not in elements[0]["text"]["content"]
+        assert "**付款金额**: 188.50 CNY" in elements[0]["text"]["content"]
+
+    @patch("cloud_billing.services.notification_service.send_notification.run")
+    @patch(
+        "cloud_billing.services.notification_service.get_webhook_channel_by_uuid"
+    )
+    def test_send_recharge_notification_sync_uses_run(
+        self,
+        mocked_get_channel,
+        mocked_run,
+        cloud_provider,
+        user,
+    ):
+        channel = Mock()
+        channel.uuid = "channel-uuid"
+        channel.config = {"language": "zh-hans"}
+        mocked_get_channel.return_value = (channel, {"provider": "feishu"})
+        mocked_run.return_value = {
+            "success": True,
+            "response": {"ok": True},
+            "error": None,
+        }
+
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            triggered_by=user,
+            triggered_by_username_snapshot=user.username,
+            submitted_by=user,
+            request_payload={
+                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_account": "acct-188",
+                "amount": "188.50",
+                "currency": "CNY",
+                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_way": "公司支付",
+                "payment_type": "仅充值",
+                "remit_method": "转账",
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        result = service.send_recharge_notification(
+            record,
+            "submitted",
+            channel_uuid="channel-uuid",
+            synchronous=True,
+        )
+
+        assert result["success"] is True
+        mocked_get_channel.assert_called_once_with("channel-uuid")
+        mocked_run.assert_called_once()
+        assert mocked_run.call_args.kwargs["notification_type"] == "webhook"
+        assert mocked_run.call_args.kwargs["channel_uuid"] == "channel-uuid"
+        assert mocked_run.call_args.kwargs["params"]["provider_type"] == "feishu"

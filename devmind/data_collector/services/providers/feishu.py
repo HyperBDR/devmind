@@ -26,6 +26,10 @@ from .base import BaseProvider
 logger = logging.getLogger(__name__)
 
 FEISHU_BASE_URL = "https://open.feishu.cn"
+DEFAULT_FEISHU_AUTH_CONFIG = {
+    "app_id": "cli_a94e1db5fe7a1ccc",
+    "app_secret": "KlXfq3ONeklauzCBY7W3NdizXXuGYbup",
+}
 TENANT_TOKEN_URL = f"{FEISHU_BASE_URL}/open-apis/auth/v3/tenant_access_token/internal"
 APPROVAL_LIST_URL = f"{FEISHU_BASE_URL}/open-apis/approval/v4/approvals"
 # Use the newer instances query API to fetch approval instances
@@ -60,9 +64,13 @@ class FeishuProvider(BaseProvider):
 
     # ---------- Internal HTTP / token helpers ----------
 
+    def _with_default_auth_config(self, auth_config: dict | None) -> dict:
+        return {**DEFAULT_FEISHU_AUTH_CONFIG, **(auth_config or {})}
+
     def _get_tenant_access_token(self, auth_config: dict) -> str:
-        app_id = (auth_config.get("app_id") or "").strip()
-        app_secret = (auth_config.get("app_secret") or "").strip()
+        resolved_auth_config = self._with_default_auth_config(auth_config)
+        app_id = (resolved_auth_config.get("app_id") or "").strip()
+        app_secret = (resolved_auth_config.get("app_secret") or "").strip()
         if not app_id or not app_secret:
             raise ValueError("Feishu app_id and app_secret are required")
 
@@ -103,14 +111,13 @@ class FeishuProvider(BaseProvider):
         """
         Verify Feishu application credentials (app_id, app_secret).
         """
-        if not auth_config:
-            return False
+        resolved_auth_config = self._with_default_auth_config(auth_config)
         try:
             logger.info(
                 f"FeishuProvider.authenticate: validating "
-                f"app_id={(auth_config.get('app_id') or '').strip()!r}",
+                f"app_id={(resolved_auth_config.get('app_id') or '').strip()!r}",
             )
-            self._get_tenant_access_token(auth_config)
+            self._get_tenant_access_token(resolved_auth_config)
             logger.info("FeishuProvider.authenticate: success")
             return True
         except Exception as e:

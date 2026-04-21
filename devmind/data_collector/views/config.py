@@ -40,19 +40,19 @@ def _is_hyperbdr_config(config: CollectorConfig) -> bool:
 
 
 def _get_hyperbdr_data_source_model():
-    from hyperbdr_monitor.models import DataSource
+    from onepro_monitor.models import DataSource
 
     return DataSource
 
 
 def _get_hyperbdr_collection_task_model():
-    from hyperbdr_monitor.models import CollectionTask
+    from onepro_monitor.models import CollectionTask
 
     return CollectionTask
 
 
 def _get_hyperbdr_collection_runner():
-    from hyperbdr_monitor.tasks import run_collection_for_data_source
+    from onepro_monitor.tasks import run_collection_for_data_source
 
     return run_collection_for_data_source
 
@@ -298,7 +298,7 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             hyperbdr_task, celery_task = _queue_hyperbdr_collect(config)
             register_task_execution(
                 task_id=celery_task.id,
-                task_name="hyperbdr_monitor.tasks.run_collection_for_data_source",
+                task_name="onepro_monitor.tasks.run_collection_for_data_source",
                 module="data_collector",
                 task_kwargs={
                     "data_source_id": hyperbdr_task.data_source_id,

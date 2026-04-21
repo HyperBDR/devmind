@@ -10,6 +10,7 @@ WEBHOOK_STATUS_FAILED = 'failed'
 # Source app and type for notifications
 SOURCE_APP_CLOUD_BILLING = 'cloud_billing'
 SOURCE_TYPE_ALERT = 'alert'
+SOURCE_TYPE_RECHARGE_APPROVAL = 'recharge_approval'
 
 # Language codes
 LANGUAGE_ZH_HANS = 'zh-hans'

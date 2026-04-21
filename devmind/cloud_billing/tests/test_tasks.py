@@ -4,6 +4,7 @@ check_alert_for_provider, send_alert_notification.
 """
 
 import datetime
+import json
 import pytest
 from decimal import Decimal
 from unittest.mock import patch, MagicMock
@@ -17,11 +18,13 @@ from cloud_billing.models import (
     BillingData,
     AlertRule,
     AlertRecord,
+    RechargeApprovalRecord,
 )
 from cloud_billing.tasks import (
     collect_billing_data,
     check_alert_for_provider,
     send_alert_notification,
+    submit_recharge_approval,
 )
 from agentcore_task.adapters.django.models import TaskExecution
 from agentcore_task.constants import TaskStatus
@@ -158,6 +161,38 @@ class TestCheckAlertForProvider:
         mock_send_alert_delay.assert_called_once()
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.submit_recharge_approval.delay")
+    def test_cost_threshold_does_not_auto_submit_recharge_approval(
+        self,
+        mock_submit_recharge_approval,
+        mock_send_alert_delay,
+        cloud_provider,
+        user,
+        billing_data,
+    ):
+        """
+        Auto recharge approval should only react to balance or days remaining
+        alerts, not cost/growth-only alerts.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        AlertRule.objects.create(
+            provider=cloud_provider,
+            cost_threshold=Decimal("1.00"),
+            auto_submit_recharge_approval=True,
+            is_active=True,
+            created_by=user,
+            updated_by=user,
+        )
+
+        result = check_alert_for_provider(cloud_provider.id)
+
+        assert result["checked"] is True
+        assert result["alerted"] is True
+        mock_send_alert_delay.assert_called_once()
+        mock_submit_recharge_approval.assert_not_called()
+
+    @patch("cloud_billing.tasks.send_alert_notification.delay")
     def test_alert_message_includes_provider_notes(
         self,
         mock_send_alert_delay,
@@ -218,10 +253,12 @@ class TestCheckAlertForProvider:
         mock_send_alert_delay.assert_called_once()
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
+    @patch("cloud_billing.tasks.submit_recharge_approval.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
     def test_balance_threshold_triggers_alert(
         self,
         mock_get_default_webhook_channel,
+        mock_submit_recharge_approval,
         mock_send_alert,
         cloud_provider,
         user,
@@ -234,9 +271,12 @@ class TestCheckAlertForProvider:
         """
         mock_channel = SimpleNamespace(config={"language": "en"})
         mock_get_default_webhook_channel.return_value = (mock_channel, {})
+        cloud_provider.recharge_info = '{"amount": 288, "recharge_account": "acct-1"}'
+        cloud_provider.save(update_fields=["recharge_info"])
         AlertRule.objects.create(
             provider=cloud_provider,
             balance_threshold=Decimal("550.00"),
+            auto_submit_recharge_approval=True,
             is_active=True,
             created_by=user,
             updated_by=user,
@@ -251,6 +291,11 @@ class TestCheckAlertForProvider:
         assert record.balance_threshold == Decimal("550.00")
         assert "remaining balance" in record.alert_message.lower()
         mock_send_alert.assert_called_once_with(record.id)
+        mock_submit_recharge_approval.assert_called_once_with(
+            cloud_provider.id,
+            alert_record_id=record.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        )
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
     @patch("cloud_billing.tasks.get_default_webhook_channel")
@@ -775,3 +820,330 @@ class TestSendAlertNotification:
         assert result["success"] is False
         alert_record.refresh_from_db()
         assert alert_record.webhook_status == "failed"
+
+
+@pytest.mark.django_db
+class TestSubmitRechargeApproval:
+    """Tests for submit_recharge_approval task."""
+
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    @patch(
+        "cloud_billing.tasks.current_task",
+        new=SimpleNamespace(request=SimpleNamespace(id="approval-task-logs")),
+    )
+    def test_submit_recharge_approval_records_detailed_task_logs(
+        self,
+        mock_execute_agent,
+        cloud_provider,
+    ):
+        """
+        TaskExecution metadata should include detailed recharge approval steps.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        mock_execute_agent.return_value = {
+            "request_payload": {"amount": 188, "recharge_account": "acct-188"},
+            "submission_payload": {"ok": True},
+            "submitter_identifier": "",
+            "resolved_submitter_user_id": "",
+            "submitter_user_label": "",
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+        )
+
+        assert result["success"] is True
+        execution = TaskExecution.objects.get(task_id="approval-task-logs")
+        logs = execution.metadata["logs"]
+        messages = [item["message"] for item in logs]
+        assert any("Starting recharge approval submission" in item for item in messages)
+        assert any("Loaded provider" in item for item in messages)
+        assert any("Created recharge approval record" in item for item in messages)
+        assert any("Executing recharge approval agent" in item for item in messages)
+        assert any("Recharge approval agent completed successfully" in item for item in messages)
+        assert execution.metadata["log_summary"]["total"] >= 5
+
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_creates_record(
+        self,
+        mock_execute_agent,
+        cloud_provider,
+    ):
+        """
+        Task should create a recharge approval record for manual submissions.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        mock_execute_agent.return_value = {
+            "request_payload": {"amount": 188, "recharge_account": "acct-188"},
+            "submission_payload": {"ok": True},
+            "submitter_identifier": "",
+            "resolved_submitter_user_id": "",
+            "submitter_user_label": "",
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+        )
+
+        assert result["success"] is True
+        record = RechargeApprovalRecord.objects.get(
+            feishu_instance_code="ins_188"
+        )
+        assert record.provider == cloud_provider
+        assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
+        assert record.trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL
+
+    @patch("cloud_billing.tasks.check_ongoing_recharge_approval_submission")
+    @patch("cloud_billing.tasks.resolve_submitter_identity")
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_blocks_ongoing_account(
+        self,
+        mock_execute_agent,
+        mock_resolve_submitter_identity,
+        mock_inspect_account_state,
+        cloud_provider,
+        monkeypatch,
+    ):
+        """
+        Task should stop before agent execution when the same recharge account
+        already has a live pending approval, regardless of submitter.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.config = {
+            "recharge_approval": {
+                "submitter_identifier": "finance@example.com",
+                "resolved_submitter_user_id": "ou_123",
+            }
+        }
+        cloud_provider.save(update_fields=["recharge_info", "config"])
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_188")
+        existing = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188, "recharge_account": "acct-188"}',
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            submitter_identifier="other@example.com",
+            resolved_submitter_user_id="ou_999",
+            feishu_instance_code="ins_188",
+            feishu_approval_code="approval_188",
+        )
+        mock_inspect_account_state.return_value = {
+            "blocked": True,
+            "reason": "ongoing_approval_exists",
+            "record_id": existing.id,
+            "status": "PENDING",
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "recharge_account": "acct-188",
+            "account_state": {
+                "state": "ongoing",
+                "approval_code": "approval_188",
+                "recharge_account": "acct-188",
+                "instance_code": "ins_188",
+                "serial_number": "SN-188",
+                "status": "PENDING",
+                "user_id": "ou_999",
+                "start_time": "2025-01-01T00:00:00Z",
+            },
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            submitter_identifier="finance@example.com",
+            submitter_user_label="Finance",
+        )
+
+        assert result["success"] is False
+        assert result["reason"] == "ongoing_approval_exists"
+        assert result["record_id"] == existing.id
+        mock_execute_agent.assert_not_called()
+        mock_resolve_submitter_identity.assert_not_called()
+
+    @patch("cloud_billing.tasks.check_ongoing_recharge_approval_submission")
+    @patch("cloud_billing.tasks.resolve_submitter_identity")
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_allows_same_submitter_different_account(
+        self,
+        mock_execute_agent,
+        mock_resolve_submitter_identity,
+        mock_inspect_account_state,
+        cloud_provider,
+        monkeypatch,
+    ):
+        """
+        Task should allow a new submission when only the submitter matches and
+        the recharge account is different.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188-new"}'
+        cloud_provider.config = {
+            "recharge_approval": {
+                "submitter_identifier": "finance@example.com",
+                "resolved_submitter_user_id": "ou_123",
+            }
+        }
+        cloud_provider.save(update_fields=["recharge_info", "config"])
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_old")
+        RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188, "recharge_account": "acct-188-old"}',
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            submitter_identifier="finance@example.com",
+            resolved_submitter_user_id="ou_123",
+            feishu_instance_code="ins_old",
+            feishu_approval_code="approval_old",
+        )
+        mock_inspect_account_state.return_value = {
+            "blocked": False,
+            "reason": "",
+            "record_id": 0,
+            "status": "APPROVED",
+            "instance_code": "ins_old",
+            "approval_code": "approval_old",
+            "recharge_account": "acct-188-old",
+            "account_state": {
+                "state": "finished",
+                "approval_code": "approval_old",
+                "recharge_account": "acct-188-old",
+                "instance_code": "ins_old",
+                "serial_number": "SN-old",
+                "status": "APPROVED",
+                "user_id": "ou_123",
+                "start_time": "2025-01-01T00:00:00Z",
+            },
+        }
+        mock_resolve_submitter_identity.return_value = (
+            "finance@example.com",
+            "Finance",
+            "ou_123",
+        )
+        mock_execute_agent.return_value = {
+            "request_payload": {
+                "amount": 188,
+                "recharge_account": "acct-188-new",
+            },
+            "submission_payload": {"ok": True},
+            "submitter_identifier": "finance@example.com",
+            "resolved_submitter_user_id": "ou_123",
+            "submitter_user_label": "Finance",
+            "instance_code": "ins_188_new",
+            "approval_code": "approval_188_new",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            submitter_identifier="finance@example.com",
+            submitter_user_label="Finance",
+        )
+
+        assert result["success"] is True
+        assert result["instance_code"] == "ins_188_new"
+        mock_execute_agent.assert_called_once()
+
+    @patch("cloud_billing.tasks.infer_recharge_info_from_history")
+    @patch("cloud_billing.tasks.check_ongoing_recharge_approval_submission")
+    @patch("cloud_billing.tasks.resolve_submitter_identity")
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_infers_missing_recharge_info_from_history(
+        self,
+        mock_execute_agent,
+        mock_resolve_submitter_identity,
+        mock_inspect_account_state,
+        mock_infer_recharge_info,
+        cloud_provider,
+        monkeypatch,
+    ):
+        """
+        Task should recover missing provider recharge_info from Feishu history
+        before executing the approval agent.
+        """
+        cloud_provider.recharge_info = ""
+        cloud_provider.config = {
+            "recharge_approval": {
+                "cloud_type": "智谱",
+                "recharge_account": "18017606559",
+            }
+        }
+        cloud_provider.save(update_fields=["recharge_info", "config"])
+        monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval_history")
+        inferred_payload = {
+            "cloud_type": "智谱",
+            "payment_type": "仅充值",
+            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_account": "18017606559",
+            "payment_way": "公司支付",
+            "payment_company": "深圳壹铂云科技有限公司",
+            "remit_method": "转账",
+            "amount": 200,
+            "payee": {
+                "type": "对公账户",
+                "account_name": "北京智谱华章科技股份有限公司",
+                "account_number": "11093851041070210011884",
+                "bank_name": "招商银行",
+                "bank_region": "北京市/北京市",
+                "bank_branch": "招商银行股份有限公司北京上地支行",
+            },
+        }
+        mock_infer_recharge_info.return_value = inferred_payload
+        mock_inspect_account_state.return_value = {
+            "blocked": False,
+            "reason": "",
+            "record_id": 0,
+            "status": "",
+            "instance_code": "",
+            "approval_code": "approval_history",
+            "recharge_account": "18017606559",
+            "account_state": {"state": "none"},
+        }
+        mock_resolve_submitter_identity.return_value = ("", "", "")
+        mock_execute_agent.return_value = {
+            "request_payload": inferred_payload,
+            "submission_payload": {"ok": True},
+            "instance_code": "ins_history",
+            "approval_code": "approval_history",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted from inferred history",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+        )
+
+        assert result["success"] is True
+        record = RechargeApprovalRecord.objects.get(feishu_instance_code="ins_history")
+        assert json.loads(record.raw_recharge_info)["recharge_account"] == "18017606559"
+        mock_execute_agent.assert_called_once()
+        assert mock_execute_agent.call_args.kwargs["raw_recharge_info"] == record.raw_recharge_info
+
+    def test_submit_recharge_approval_rejects_missing_info(self, cloud_provider):
+        """
+        Task should fail fast when provider recharge info is empty.
+        """
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+        )
+
+        assert result["success"] is False
+        assert result["reason"] == "missing_recharge_info"

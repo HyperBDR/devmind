@@ -169,8 +169,6 @@ INSTALLED_APPS += [
     'ai_pricehub',
     'cloud_billing',
     'data_collector',
-    'hyperbdr_monitor',
-    'hyperbdr_dashboard',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -532,6 +530,7 @@ from .celery import *
 from .rest import *
 from .swagger import *
 from .cache import *
+from .langfuse import *
 
 # Unified storage root; data_collector uses DATA_COLLECTOR_ROOT for attachments
 STORAGE_ROOT = os.getenv("STORAGE_ROOT", "/opt/storage")

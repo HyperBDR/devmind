@@ -36,6 +36,8 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.dev
+    environment:
+      WORKSPACE_ROOT: /opt/devmind
     volumes:
       - ./cache.dev:/opt/cache
       - ./data.dev/logs/worker:/var/log/celery
