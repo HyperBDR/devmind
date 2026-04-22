@@ -9,10 +9,10 @@ set -e
 # -----------------------------------------------------------------------------
 
 # --- Change to project directory ---
-cd /opt/devmind || { echo "Error: Cannot change to /opt/devmind directory"; exit 1; }
+cd /opt/backend || { echo "Error: Cannot change to /opt/backend directory"; exit 1; }
 
 # --- Global Variables ---
-export PYTHONPATH=/opt/devmind
+export PYTHONPATH=/opt/backend
 export DJANGO_SETTINGS_MODULE=core.settings
 
 LOG_BASE_DIR="/var/log/gunicorn"
@@ -111,7 +111,7 @@ collect_static() {
 start_gunicorn() {
     log "Starting Gunicorn..."
     exec gunicorn core.wsgi:application \
-        --name devmind \
+        --name backend \
         --bind 0.0.0.0:8000 \
         --workers $WORKERS \
         --threads $THREADS \

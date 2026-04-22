@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "devmind"
+name = "backend"
 version = "0.1.0"
-description = "DevMind API"
+description = "Backend API"
 authors = [
     {name = "Ray Sun", email = "xiaoquqi@gmail.com"}
 ]
@@ -80,7 +80,7 @@ markers = [
 ]
 
 [tool.setuptools]
-packages = ["devmind"]
+packages = ["backend"]
 
 [project.scripts]
-devmind-manager = "devmind.manage:main"
+backend-manager = "backend.manage:main"

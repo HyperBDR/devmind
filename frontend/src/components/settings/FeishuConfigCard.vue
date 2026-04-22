@@ -1,0 +1,355 @@
+<template>
+  <div class="bg-white rounded border border-gray-200 shadow-sm">
+    <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+      <div class="flex items-center gap-2 text-gray-800">
+        <svg
+          class="w-4 h-4 flex-none"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+          />
+        </svg>
+        <h3 class="text-sm font-semibold">
+          {{ t('settings.feishu.configTitle') }}
+        </h3>
+      </div>
+    </div>
+    <div class="p-4">
+      <p class="text-xs text-gray-600 mb-3">
+        {{ t('settings.feishu.configDesc') }}
+      </p>
+      <form @submit.prevent="saveConfig" class="space-y-3">
+        <!-- Enable Toggle -->
+        <div class="flex items-center justify-between">
+          <div>
+            <label class="text-sm font-medium text-gray-700">
+              {{ t('settings.feishu.enable') }}
+            </label>
+            <p class="text-xs text-gray-500 mt-0.5">
+              {{ t('settings.feishu.enableDesc') }}
+            </p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input
+              v-model="localConfig.enable"
+              type="checkbox"
+              class="sr-only peer"
+            />
+            <div
+              class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
+            ></div>
+          </label>
+        </div>
+
+        <template v-if="localConfig.enable">
+          <!-- App ID -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="appId"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('settings.feishu.appId') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('settings.feishu.appIdDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <input
+                id="appId"
+                v-model="localConfig.app_id"
+                type="text"
+                :placeholder="t('settings.feishu.appIdPlaceholder')"
+                class="block w-full px-3 py-2 text-sm border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+          </div>
+
+          <!-- App Secret -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="appSecret"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('settings.feishu.appSecret') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('settings.feishu.appSecretDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <input
+                id="appSecret"
+                v-model="localConfig.app_secret"
+                type="password"
+                :placeholder="t('settings.feishu.appSecretPlaceholder')"
+                class="block w-full px-3 py-2 text-sm border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+          </div>
+
+          <!-- Webhook URL -->
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="webhookUrl"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('settings.feishu.webhookUrl') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('settings.feishu.webhookUrlDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <input
+                id="webhookUrl"
+                v-model="localConfig.webhook_url"
+                type="url"
+                :placeholder="t('settings.feishu.webhookUrlPlaceholder')"
+                class="block w-full px-3 py-2 text-sm border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+          </div>
+        </template>
+
+        <div v-if="error" class="rounded-md bg-red-50 p-2.5">
+          <div class="flex gap-2">
+            <div class="flex-shrink-0 pt-0.5">
+              <svg
+                class="h-4 w-4 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <p class="text-xs font-medium text-red-800">
+                {{ error }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="success" class="rounded-md bg-green-50 p-2.5">
+          <div class="flex gap-2">
+            <div class="flex-shrink-0 pt-0.5">
+              <svg
+                class="h-4 w-4 text-green-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <p class="text-xs font-medium text-green-800">
+                {{ success }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="validationError" class="rounded-md bg-red-50 p-2.5">
+          <div class="flex gap-2">
+            <div class="flex-shrink-0 pt-0.5">
+              <svg
+                class="h-4 w-4 text-red-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <p class="text-xs font-medium text-red-800">
+                {{ validationError }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="validationSuccess" class="rounded-md bg-green-50 p-2.5">
+          <div class="flex gap-2">
+            <div class="flex-shrink-0 pt-0.5">
+              <svg
+                class="h-4 w-4 text-green-400"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+            </div>
+            <div class="flex-1">
+              <p class="text-xs font-medium text-green-800">
+                {{ validationSuccess }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="border-t border-gray-200 my-4"></div>
+
+        <div class="flex justify-end gap-2">
+          <BaseButton
+            type="button"
+            variant="secondary"
+            class="w-full sm:w-auto"
+            :loading="validating"
+            :disabled="validating || saving || !hasRequiredFields"
+            :title="
+              !hasRequiredFields ? t('settings.pleaseFillRequiredFields') : ''
+            "
+            @click="handleValidate"
+          >
+            {{
+              validating ? t('common.loading') : t('settings.feishu.validate')
+            }}
+          </BaseButton>
+          <BaseButton
+            type="submit"
+            variant="primary"
+            class="w-full sm:w-auto"
+            :loading="saving"
+            :disabled="saving || validating"
+          >
+            {{ saving ? t('common.saving') : t('common.save') }}
+          </BaseButton>
+        </div>
+      </form>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, watch, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { settingsApi } from '@/api/settings'
+import BaseButton from '@/components/ui/BaseButton.vue'
+
+const props = defineProps({
+  modelValue: {
+    type: Object,
+    required: true
+  }
+})
+
+const emit = defineEmits(['update:modelValue'])
+
+const { t } = useI18n()
+
+const localConfig = reactive({
+  enable: false,
+  app_id: '',
+  app_secret: '',
+  webhook_url: ''
+})
+
+const saving = ref(false)
+const validating = ref(false)
+const error = ref('')
+const success = ref('')
+const validationError = ref('')
+const validationSuccess = ref('')
+
+const hasRequiredFields = computed(() => {
+  return localConfig.app_id && localConfig.app_secret
+})
+
+watch(
+  () => props.modelValue,
+  (newValue) => {
+    if (newValue) {
+      Object.assign(localConfig, newValue)
+    }
+  },
+  { immediate: true, deep: true }
+)
+
+watch(
+  localConfig,
+  (newValue) => {
+    emit('update:modelValue', { ...newValue })
+  },
+  { deep: true }
+)
+
+const handleValidate = async () => {
+  validating.value = true
+  validationError.value = ''
+  validationSuccess.value = ''
+
+  try {
+    const response = await settingsApi.validateFeishuConfig(localConfig)
+    const validation = response.data || response
+
+    if (!validation.valid) {
+      const errors = validation.errors || [
+        validation.message || t('settings.feishu.validateError')
+      ]
+      validationError.value = Array.isArray(errors) ? errors.join(', ') : errors
+    } else {
+      validationSuccess.value = t('settings.feishu.validateSuccess')
+      setTimeout(() => {
+        validationSuccess.value = ''
+      }, 3000)
+    }
+  } catch (err) {
+    console.error('Failed to validate Feishu config:', err)
+    const errorData = err.response?.data
+    if (errorData?.data?.errors) {
+      const errors = errorData.data.errors
+      validationError.value = Array.isArray(errors) ? errors.join(', ') : errors
+    } else {
+      validationError.value =
+        errorData?.message || err.message || t('settings.feishu.validateError')
+    }
+  } finally {
+    validating.value = false
+  }
+}
+
+const saveConfig = async () => {
+  saving.value = true
+  error.value = ''
+  success.value = ''
+
+  try {
+    await settingsApi.updateFeishuConfig(localConfig)
+    success.value = t('settings.feishu.saveSuccess')
+    setTimeout(() => {
+      success.value = ''
+    }, 3000)
+  } catch (err) {
+    console.error('Failed to save Feishu config:', err)
+    error.value = err.response?.data?.message || t('settings.feishu.saveError')
+  } finally {
+    saving.value = false
+  }
+}
+</script>
