@@ -43,6 +43,9 @@ urlpatterns = [
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),
 
+    # HyperBDR Dashboard routes
+    path('api/v1/hyperbdr-dashboard/', include('hyperbdr_dashboard.urls')),
+
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 

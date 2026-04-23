@@ -10,7 +10,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "accounts",
     "hyperbdr_monitor",
-    "hyperbdr_dashboard",
 ]
 
 DATABASES = {

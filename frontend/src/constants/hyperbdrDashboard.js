@@ -38,7 +38,7 @@ export const KPIS = [
     value: '34.6%',
     trend: 'up',
     trendPercent: '+5.4%',
-    type: 'gradient'
+    type: 'accent'
   }
 ]
 

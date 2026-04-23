@@ -13,6 +13,7 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('access_token'))
   const loading = ref(false)
   const error = ref(null)
+  let pendingAuthCheck = Promise.resolve()
 
   // Getters
   const isAuthenticated = computed(() => !!token.value && !!user.value)
@@ -53,7 +54,6 @@ export const useUserStore = defineStore('user', () => {
       }
 
       await loadUserPreferences()
-      await checkAuthStatus()
 
       return data
     } catch (err) {
@@ -70,6 +70,7 @@ export const useUserStore = defineStore('user', () => {
   const clearAuthState = () => {
     user.value = null
     token.value = null
+    pendingAuthCheck = Promise.resolve()
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
   }
@@ -87,55 +88,70 @@ export const useUserStore = defineStore('user', () => {
   }
 
   const checkAuth = async () => {
-    // Check if we have a token in localStorage
     const storedToken = localStorage.getItem('access_token')
     if (!storedToken) {
       clearAuthState()
       return false
     }
 
-    // Update token if it's not already set
     if (!token.value) {
       token.value = storedToken
     }
 
-    try {
-      const response = await authApi.getProfile()
-      // Handle the actual response format from backend
-      const data = response.data.data || response.data
-      user.value = data
-
-      await loadUserPreferences()
-
+    if (user.value) {
       return true
-    } catch (err) {
-      clearAuthState()
-      return false
     }
+
+    await pendingAuthCheck
+    if (user.value) {
+      return true
+    }
+
+    pendingAuthCheck = (async () => {
+      try {
+        const response = await authApi.getProfile()
+        const data = response.data.data || response.data
+        user.value = data
+        await loadUserPreferences()
+        return true
+      } catch (err) {
+        clearAuthState()
+        return false
+      }
+    })()
+
+    return pendingAuthCheck
   }
 
   const checkAuthStatus = async () => {
-    try {
-      const response = await authApi.getProfile()
-      const data = response.data.data || response.data
-
-      user.value = data
-
-      if (!token.value && localStorage.getItem('access_token')) {
-        token.value = localStorage.getItem('access_token')
-      }
-
-      await loadUserPreferences()
-
-      return data
-    } catch (err) {
-      // Silently handle 502 errors (backend service unavailable)
-      // Only log other errors for debugging
-      if (err?.response?.status !== 502 && err?.code !== 'ERR_BAD_RESPONSE') {
-        console.error('Check auth status failed:', err)
-      }
-      return null
+    if (user.value) {
+      return user.value
     }
+
+    await pendingAuthCheck
+    if (user.value) {
+      return user.value
+    }
+
+    pendingAuthCheck = (async () => {
+      try {
+        const response = await authApi.getProfile()
+        const data = response.data.data || response.data
+        user.value = data
+        if (!token.value && localStorage.getItem('access_token')) {
+          token.value = localStorage.getItem('access_token')
+        }
+        await loadUserPreferences()
+        return data
+      } catch (err) {
+        if (err?.response?.status !== 502 && err?.code !== 'ERR_BAD_RESPONSE') {
+          console.error('Check auth status failed:', err)
+        }
+        return null
+      }
+    })()
+
+    return pendingAuthCheck
   }
 
   const updateProfile = async (profileData) => {
