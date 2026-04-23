@@ -25,6 +25,7 @@ from cloud_billing.services.recharge_approval import (
     _get_feishu_access_token,
     _skill_root_path,
     _resolve_user_id_by_email_or_mobile,
+    resolve_submitter_identity,
     extract_recharge_history_lookup,
     check_ongoing_recharge_approval_submission,
     parse_recharge_info,
@@ -2228,12 +2229,37 @@ def test_recharge_approval_resolves_user_id_with_query_param_and_include_resigne
         "t-token",
     )
 
-    assert result == "ou_123"
+    assert result == ("ou_123", "")
     assert captured["url"].endswith("/open-apis/contact/v3/users/batch_get_id?user_id_type=user_id")
     assert captured["body"]["include_resigned"] is True
     assert captured["body"]["emails"] == ["zhengwei@oneprocloud.cn"]
     assert captured["body"]["mobiles"] == []
     assert "Authorization" in captured["headers"]
+
+
+def test_resolve_submitter_identity_prefers_feishu_user_name(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        recharge_service,
+        "_get_feishu_access_token",
+        lambda: "tenant-token",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_resolve_user_id_by_email_or_mobile",
+        lambda identifier, access_token: ("ou_456", "郑伟"),
+    )
+
+    identifier, label, user_id = resolve_submitter_identity(
+        provider_config={"recharge_approval": {"submitter_identifier": "zhengwei@oneprocloud.cn"}},
+        explicit_identifier="",
+        explicit_label="财务机器人",
+    )
+
+    assert identifier == "zhengwei@oneprocloud.cn"
+    assert label == "郑伟"
+    assert user_id == "ou_456"
 
 
 def test_submit_recharge_skill_resolves_user_id_with_query_param():

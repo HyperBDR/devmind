@@ -46,36 +46,22 @@
         />
       </div>
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div class="space-y-2">
-          <label class="block text-sm font-medium text-gray-700">
-            <span class="text-red-500">*</span>
-            {{ t('cloudBilling.providers.submitterIdentifier') }}
-          </label>
-          <BaseInput
-            v-model="form.submitter_identifier"
-            type="text"
-            :placeholder="
-              t('cloudBilling.providers.submitterIdentifierPlaceholder')
-            "
-            required
-          />
-          <p class="text-xs text-gray-500">
-            {{ t('cloudBilling.providers.submitterIdentifierRequiredHint') }}
-          </p>
-        </div>
-        <div class="space-y-2">
-          <label class="block text-sm font-medium text-gray-700">
-            {{ t('cloudBilling.providers.submitterUserLabel') }}
-          </label>
-          <BaseInput
-            v-model="form.submitter_user_label"
-            type="text"
-            :placeholder="
-              t('cloudBilling.providers.submitterUserLabelPlaceholder')
-            "
-          />
-        </div>
+      <div class="space-y-2">
+        <label class="block text-sm font-medium text-gray-700">
+          <span class="text-red-500">*</span>
+          {{ t('cloudBilling.providers.submitterIdentifier') }}
+        </label>
+        <BaseInput
+          v-model="form.submitter_identifier"
+          type="text"
+          :placeholder="
+            t('cloudBilling.providers.submitterIdentifierPlaceholder')
+          "
+          required
+        />
+        <p class="text-xs text-gray-500">
+          {{ t('cloudBilling.providers.submitterIdentifierRequiredHint') }}
+        </p>
       </div>
 
       <div
@@ -316,8 +302,7 @@ const showSubmitDialog = ref(false)
 const approvals = ref([])
 const form = reactive({
   recharge_info: '',
-  submitter_identifier: '',
-  submitter_user_label: ''
+  submitter_identifier: ''
 })
 const submitApprovalForm = reactive({
   amount: '',
@@ -637,17 +622,53 @@ function buildRechargeInfoStorageObject(source) {
 }
 
 function extractRechargeApprovalFromSource(source) {
+  const approval = extractRechargeApprovalObjectFromSource(source)
+  return {
+    submitter_identifier: formatRechargeInfoValue(
+      approval.submitter_identifier ||
+        approval.submitter_user_id ||
+        approval.resolved_submitter_user_id
+    )
+  }
+}
+
+function extractRechargeApprovalObjectFromSource(source) {
   const payload = parseRechargeInfoForStorage(source)
   const approval =
     payload && typeof payload.recharge_approval === 'object'
-      ? payload.recharge_approval
+      ? { ...payload.recharge_approval }
       : {}
-  return {
-    submitter_identifier: formatRechargeInfoValue(
-      approval.submitter_identifier
-    ),
-    submitter_user_label: formatRechargeInfoValue(approval.submitter_user_label)
+  const legacySubmitterIdentifier = formatRechargeInfoValue(
+    approval.submitter_identifier ||
+      approval.submitter_user_id ||
+      approval.resolved_submitter_user_id ||
+      payload.submitter_identifier ||
+      payload.审批发起人 ||
+      payload.提交名义 ||
+      payload['发起人邮箱或手机号']
+  )
+  if (legacySubmitterIdentifier && !approval.submitter_identifier) {
+    approval.submitter_identifier = legacySubmitterIdentifier
   }
+  const legacySubmitterUserId = formatRechargeInfoValue(
+    approval.submitter_user_id || payload.submitter_user_id
+  )
+  if (legacySubmitterUserId && !approval.submitter_user_id) {
+    approval.submitter_user_id = legacySubmitterUserId
+  }
+  const resolvedSubmitterUserId = formatRechargeInfoValue(
+    approval.resolved_submitter_user_id || payload.resolved_submitter_user_id
+  )
+  if (resolvedSubmitterUserId && !approval.resolved_submitter_user_id) {
+    approval.resolved_submitter_user_id = resolvedSubmitterUserId
+  }
+  const submitterUserLabel = formatRechargeInfoValue(
+    approval.submitter_user_label || payload.submitter_user_label
+  )
+  if (submitterUserLabel && !approval.submitter_user_label) {
+    approval.submitter_user_label = submitterUserLabel
+  }
+  return approval
 }
 
 function looksLikePayeeDetails(value) {
@@ -715,11 +736,6 @@ const syncForm = () => {
   form.submitter_identifier =
     approvalConfig.submitter_identifier ||
     props.provider?.config?.recharge_approval?.submitter_identifier ||
-    props.provider?.config?.recharge_approval?.submitter_user_id ||
-    ''
-  form.submitter_user_label =
-    approvalConfig.submitter_user_label ||
-    props.provider?.config?.recharge_approval?.submitter_user_label ||
     ''
 }
 
@@ -777,11 +793,6 @@ const hydrateProviderDetail = async () => {
     form.submitter_identifier =
       approvalConfig.submitter_identifier ||
       provider?.config?.recharge_approval?.submitter_identifier ||
-      provider?.config?.recharge_approval?.submitter_user_id ||
-      ''
-    form.submitter_user_label =
-      approvalConfig.submitter_user_label ||
-      provider?.config?.recharge_approval?.submitter_user_label ||
       ''
   } catch (error) {
     console.error('Failed to load provider detail for recharge modal:', error)
@@ -833,12 +844,17 @@ const handleSave = async ({ emitSaved = true } = {}) => {
     )
     delete rechargeInfoPayload.amount
     delete rechargeInfoPayload.currency
-    if (form.submitter_identifier || form.submitter_user_label) {
-      rechargeInfoPayload.recharge_approval = {
-        ...(rechargeInfoPayload.recharge_approval || {}),
-        submitter_identifier: getSubmitterIdentifier(),
-        submitter_user_label: form.submitter_user_label.trim()
-      }
+    const existingApproval = extractRechargeApprovalObjectFromSource(
+      props.provider?.recharge_info || props.provider?.config || {}
+    )
+    const approvalPayload = { ...existingApproval }
+    if (form.submitter_identifier) {
+      approvalPayload.submitter_identifier = getSubmitterIdentifier()
+    }
+    if (
+      Object.values(approvalPayload).some((value) => String(value || '').trim())
+    ) {
+      rechargeInfoPayload.recharge_approval = approvalPayload
     } else {
       delete rechargeInfoPayload.recharge_approval
     }
@@ -907,7 +923,6 @@ const submitApprovalFromDialog = async () => {
       props.provider.id,
       {
         submitter_identifier: submitterIdentifier,
-        submitter_user_label: form.submitter_user_label.trim(),
         amount,
         expected_date: expectedDate
       }
