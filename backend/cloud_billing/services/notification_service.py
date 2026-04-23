@@ -38,6 +38,7 @@ from cloud_billing.constants import (
     WECHAT_MSGTYPE_MARKDOWN,
 )
 from cloud_billing.models import AlertRecord, RechargeApprovalRecord
+from cloud_billing.services.recharge_approval import parse_recharge_info
 
 logger = logging.getLogger(__name__)
 
@@ -426,7 +427,60 @@ class RechargeApprovalNotificationService:
         for value in (label, identifier):
             if value and value not in parts:
                 parts.append(value)
-        return " / ".join(parts) if parts else "—"
+        if parts:
+            return " / ".join(parts)
+        if record.trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT:
+            return "系统自动提交"
+        return "—"
+
+    def _build_trigger_reason_label(
+        self,
+        record: RechargeApprovalRecord,
+        language: str,
+    ) -> str:
+        if record.trigger_source != RechargeApprovalRecord.TRIGGER_SOURCE_ALERT:
+            reason = str(
+                record.trigger_reason or record.context_payload.get("trigger_reason") or ""
+            ).strip()
+            return reason or "—"
+
+        alert_record = record.alert_record
+        if alert_record is not None:
+            if alert_record.alert_type == alert_record.ALERT_TYPE_BALANCE:
+                balance = self._stringify_display_value(alert_record.current_balance)
+                threshold = self._stringify_display_value(
+                    alert_record.balance_threshold
+                )
+                if self._is_chinese_language(language):
+                    return f"余额不足（当前余额 {balance}，阈值 {threshold}）"
+                return (
+                    "Balance below threshold "
+                    f"(current balance {balance}, threshold {threshold})"
+                )
+            if alert_record.alert_type == alert_record.ALERT_TYPE_DAYS_REMAINING:
+                days_remaining = self._stringify_display_value(
+                    alert_record.current_days_remaining
+                )
+                threshold_days = self._stringify_display_value(
+                    alert_record.days_remaining_threshold
+                )
+                if self._is_chinese_language(language):
+                    return (
+                        f"剩余天数不足（当前预计 {days_remaining} 天，"
+                        f"阈值 {threshold_days} 天）"
+                    )
+                return (
+                    "Days remaining below threshold "
+                    f"(current estimate {days_remaining} days, "
+                    f"threshold {threshold_days} days)"
+                )
+
+        reason = str(
+            record.trigger_reason or record.context_payload.get("trigger_reason") or ""
+        ).strip()
+        if reason and reason != record.trigger_source:
+            return reason
+        return "告警触发"
 
     def _build_triggered_by_label(self, record: RechargeApprovalRecord) -> str:
         triggered_by = (
@@ -434,12 +488,15 @@ class RechargeApprovalNotificationService:
             if getattr(record, "triggered_by_id", None)
             else ""
         )
-        return (
+        label = (
             triggered_by
             or record.triggered_by_username_snapshot
             or record.context_payload.get("triggered_by")
             or "—"
         )
+        if label == "—" and record.trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT:
+            return "系统自动触发"
+        return label
 
     def _build_alert_detail_lines(
         self,
@@ -509,6 +566,56 @@ class RechargeApprovalNotificationService:
         if agent_msg:
             return agent_msg
         separator = ": "
+
+        def build_display_payload() -> dict[str, Any]:
+            payload: dict[str, Any] = {}
+            if record.raw_recharge_info:
+                try:
+                    parsed = parse_recharge_info(record.raw_recharge_info)
+                except Exception:
+                    parsed = {}
+                if isinstance(parsed, dict):
+                    payload.update(parsed)
+            if isinstance(record.request_payload, dict):
+                for key, value in record.request_payload.items():
+                    if value in (None, "", {}):
+                        continue
+                    if key == "payee" and isinstance(value, dict):
+                        existing_payee = payload.get("payee")
+                        if isinstance(existing_payee, dict):
+                            payload["payee"] = {**existing_payee, **value}
+                        else:
+                            payload["payee"] = value
+                        continue
+                    payload[key] = value
+            if isinstance(record.context_payload, dict):
+                for key in (
+                    "recharge_account",
+                    "recharge_customer_name",
+                    "payment_company",
+                    "payment_way",
+                    "payment_type",
+                    "remit_method",
+                    "amount",
+                    "currency",
+                    "expected_date",
+                    "payment_note",
+                    "remark",
+                    "payee",
+                ):
+                    value = record.context_payload.get(key)
+                    if value in (None, "", {}):
+                        continue
+                    if key == "payee" and isinstance(value, dict):
+                        existing_payee = payload.get("payee")
+                        if isinstance(existing_payee, dict):
+                            payload["payee"] = {**existing_payee, **value}
+                        else:
+                            payload["payee"] = value
+                        continue
+                    if not payload.get(key):
+                        payload[key] = value
+            return payload
 
         def fmt_label(label: str) -> str:
             label_text = str(label or "").strip()
@@ -602,18 +709,27 @@ class RechargeApprovalNotificationService:
             language,
             self.TRIGGER_SOURCE_LABELS,
         )
-        trigger_reason = str(
-            record.trigger_reason
-            or record.context_payload.get("trigger_reason")
-            or record.trigger_source
-            or ""
-        ).strip()
+        trigger_reason = self._build_trigger_reason_label(record, language)
+        if self._is_chinese_language(language):
+            open_paren, close_paren = "（", "）"
+            trigger_context = (
+                f"{trigger_source}{open_paren}{trigger_reason}{close_paren}"
+                if trigger_reason and trigger_reason != "—"
+                else trigger_source
+            )
+        else:
+            open_paren, close_paren = "(", ")"
+            trigger_context = (
+                f"{trigger_source} {open_paren}{trigger_reason}{close_paren}"
+                if trigger_reason and trigger_reason != "—"
+                else trigger_source
+            )
 
         # Provider info
         provider_name = record.provider.display_name or "—"
 
         # Recharge details from request_payload
-        payload = record.request_payload or {}
+        payload = build_display_payload()
         recharge_account = self._stringify_display_value(
             payload.get("recharge_account")
         )
@@ -651,14 +767,10 @@ class RechargeApprovalNotificationService:
 
         # Title is handled separately by each channel generator; do not include it in rows.
         lines = [
-            f"{fmt_label(self._get_field_label('trigger_source', language))}{separator}{trigger_source}",
+            f"{fmt_label(self._get_field_label('trigger_source', language))}{separator}{trigger_context}",
             f"{fmt_label(self._get_field_label('triggered_by', language))}{separator}{triggered_by}",
             f"{fmt_label(self._get_field_label('submitter', language))}{separator}{submitter}",
         ]
-        if trigger_reason:
-            lines.append(
-                f"{fmt_label(self._get_field_label('trigger_reason', language))}{separator}{trigger_reason}"
-            )
         lines.extend([
             f"{fmt_label(self._get_field_label('cloud_provider', language))}{separator}{provider_name}",
             f"{fmt_label(self._get_field_label('recharge_account', language))}{separator}{recharge_account}",
@@ -700,7 +812,7 @@ class RechargeApprovalNotificationService:
         labels = {
             "triggered_by": ("触发人", "Triggered By"),
             "trigger_source": ("触发方式", "Trigger Source"),
-            "submitter": ("提交名义", "Submitted As"),
+            "submitter": ("审批发起人", "Approval Initiator"),
             "trigger_reason": ("触发原因", "Trigger Reason"),
             "alert_details": ("告警信息", "Alert Details"),
             "alert_type": ("告警类型", "Alert Type"),

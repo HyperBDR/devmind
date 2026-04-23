@@ -643,11 +643,10 @@ class TestRechargeApprovalNotificationService:
             "zh-hans",
         )
 
-        assert "**触发方式**: 人工触发" in message
+        assert "**触发方式**: 人工触发（operations_console_timeline）" in message
         assert f"**公有云类型**: {cloud_provider.display_name}" in message
         assert "**触发人**: testuser" in message
-        assert "**提交名义**: Finance Bot / finance@example.com" in message
-        assert "**触发原因**: operations_console_timeline" in message
+        assert "**审批发起人**: Finance Bot / finance@example.com" in message
         assert "**充值账号**: acct-188" in message
         assert "**充值客户**: 深圳壹铂云科技有限公司" in message
         assert "**付款金额**: 188.50 CNY" in message
@@ -698,14 +697,164 @@ class TestRechargeApprovalNotificationService:
             "zh-hans",
         )
 
-        assert "**触发方式**: 告警触发" in message
+        assert "**触发方式**: 告警触发（days_remaining_threshold）" in message
         assert f"**公有云类型**: {cloud_provider.display_name}" in message
-        assert "**触发原因**: days_remaining_threshold" in message
         assert "告警信息" in message
         assert "告警类型: 预计使用天数告警" in message
         assert "预计使用天数: 6" in message
         assert "告警阈值: 7 天" in message
         assert "告警说明: 预计剩余可用天数低于阈值，请及时充值" in message
+
+    def test_build_recharge_message_falls_back_to_raw_recharge_info(
+        self,
+        cloud_provider,
+        alert_record,
+    ):
+        alert_record.alert_message = (
+            "告警类型：预计使用天数告警\n"
+            "当前余额：407.52 CNY\n"
+            "预计使用天数：1598\n"
+            "告警阈值：3000\n"
+            "告警说明：预计使用天数低于设定阈值，请及时充值"
+        )
+        alert_record.alert_type = AlertRecord.ALERT_TYPE_DAYS_REMAINING
+        alert_record.save(update_fields=["alert_message", "alert_type"])
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            alert_record=alert_record,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            trigger_reason="alert",
+            status=RechargeApprovalRecord.STATUS_FAILED,
+            status_message=(
+                "Script exited 1: Request file is missing required field: "
+                "amount"
+            ),
+            raw_recharge_info=(
+                '{"recharge_account": "18017606559", '
+                '"recharge_customer_name": "深圳壹铂云科技有限公司", '
+                '"amount": 358, "currency": "CNY", '
+                '"payment_company": "深圳壹铂云科技有限公司", '
+                '"payment_way": "公司支付", '
+                '"payment_type": "仅充值", '
+                '"remit_method": "转账", '
+                '"payment_note": "请尽快安排", '
+                '"expected_date": "2026-04-25"}'
+            ),
+            request_payload={},
+        )
+
+        service = RechargeApprovalNotificationService()
+        message = service._build_recharge_message(
+            record,
+            "failed",
+            "zh-hans",
+        )
+
+        assert "**触发方式**: 告警触发（剩余天数不足（当前预计 6 天，阈值 7 天））" in message
+        assert "**充值账号**: 18017606559" in message
+        assert "**充值客户**: 深圳壹铂云科技有限公司" in message
+        assert "**付款金额**: 358 CNY" in message
+        assert "**付款公司**: 深圳壹铂云科技有限公司" in message
+        assert "**支付方式**: 公司支付" in message
+        assert "**付款类型**: 仅充值" in message
+        assert "**付款方式**: 转账" in message
+        assert "**期望到账时间**: 2026-04-25" in message
+        assert (
+            "**失败原因**: Script exited 1: Request file is missing "
+            "required field: amount"
+        ) in message
+
+    def test_build_recharge_message_uses_balance_reason_for_balance_alert(
+        self,
+        cloud_provider,
+        alert_record,
+    ):
+        alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+        alert_record.current_balance = Decimal("407.52")
+        alert_record.balance_threshold = Decimal("500.00")
+        alert_record.current_days_remaining = None
+        alert_record.days_remaining_threshold = None
+        alert_record.alert_message = "余额阈值告警"
+        alert_record.save(
+            update_fields=[
+                "alert_type",
+                "current_balance",
+                "balance_threshold",
+                "current_days_remaining",
+                "days_remaining_threshold",
+                "alert_message",
+            ]
+        )
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            alert_record=alert_record,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            raw_recharge_info='{"amount": 92, "recharge_account": "acct-1"}',
+            request_payload={
+                "amount": 92,
+                "currency": "CNY",
+                "recharge_account": "acct-1",
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        message = service._build_recharge_message(
+            record,
+            "submitted",
+            "zh-hans",
+        )
+
+        assert (
+            "**触发方式**: 告警触发（余额不足（当前余额 407.52，阈值 500.00））"
+            in message
+        )
+
+    def test_build_recharge_message_localizes_alert_reason_in_english(
+        self,
+        cloud_provider,
+        alert_record,
+    ):
+        alert_record.alert_type = AlertRecord.ALERT_TYPE_DAYS_REMAINING
+        alert_record.current_balance = Decimal("407.52")
+        alert_record.balance_threshold = Decimal("3000.00")
+        alert_record.current_days_remaining = Decimal("1598")
+        alert_record.days_remaining_threshold = Decimal("3000")
+        alert_record.alert_message = "Days remaining alert"
+        alert_record.save(
+            update_fields=[
+                "alert_type",
+                "current_balance",
+                "balance_threshold",
+                "current_days_remaining",
+                "days_remaining_threshold",
+                "alert_message",
+            ]
+        )
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            alert_record=alert_record,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+            request_payload={
+                "amount": 358,
+                "currency": "CNY",
+                "recharge_account": "18017606559",
+            },
+        )
+
+        service = RechargeApprovalNotificationService()
+        message = service._build_recharge_message(
+            record,
+            "submitted",
+            "en",
+        )
+
+        assert (
+            "**Trigger Source**: Alert Trigger (Days remaining below threshold "
+            "(current estimate 1598 days, threshold 3000 days))"
+            in message
+        )
 
     def test_build_recharge_message_skips_empty_expected_date_and_payee_only_remark(
         self,

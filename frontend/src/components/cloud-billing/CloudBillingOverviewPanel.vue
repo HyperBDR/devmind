@@ -483,7 +483,10 @@
                         >
                           {{ t('cloudBilling.billing.submitRechargeApproval') }}
                         </span>
-                        <span v-else class="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                        <span
+                          v-else
+                          class="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent"
+                        />
                       </button>
                     </div>
                   </div>
@@ -1415,12 +1418,48 @@
               :value="rechargeSubmitForm.recharge_info_text"
               disabled
               rows="8"
-              :placeholder="t('cloudBilling.billing.rechargeApprovalConfigureHint')"
+              :placeholder="
+                t('cloudBilling.billing.rechargeApprovalConfigureHint')
+              "
               class="block w-full cursor-not-allowed rounded-md border border-gray-200 bg-gray-100 px-3 py-2 text-sm font-mono text-gray-500 resize-none"
-              style="height: 280px"
+              style="height: 290px"
             />
             <p class="text-xs text-gray-500">
               {{ t('cloudBilling.billing.rechargeApprovalConfigureHint') }}
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-sm font-medium text-gray-700">
+              {{ t('cloudBilling.billing.rechargeApprovalSubmitter') }}
+            </label>
+            <input
+              v-model="rechargeSubmitForm.submitter_identifier"
+              type="text"
+              :placeholder="
+                t('cloudBilling.billing.rechargeApprovalSubmitterPlaceholder')
+              "
+              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <p class="text-xs text-gray-500">
+              {{ t('cloudBilling.billing.rechargeApprovalSubmitterHint') }}
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-sm font-medium text-gray-700">
+              {{ t('cloudBilling.billing.rechargeApprovalPaymentNote') }}
+            </label>
+            <textarea
+              v-model="rechargeSubmitForm.payment_note"
+              rows="3"
+              :placeholder="
+                t('cloudBilling.billing.rechargeApprovalPaymentNotePlaceholder')
+              "
+              class="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            />
+            <p class="text-xs text-gray-500">
+              {{ t('cloudBilling.billing.rechargeApprovalPaymentNoteHint') }}
             </p>
           </div>
 
@@ -1607,6 +1646,8 @@ const rechargeSubmitTarget = ref(null)
 const submittingRechargeKey = ref('')
 const rechargeSubmitForm = ref({
   recharge_info_text: '',
+  submitter_identifier: '',
+  payment_note: '',
   recharge_account: '',
   recharge_customer_name: '',
   payment_company: '',
@@ -2866,6 +2907,8 @@ function parseRechargeInfo(text) {
     payment_way: '',
     payment_type: '',
     remit_method: '',
+    submitter_identifier: '',
+    payment_note: ''
   }
   if (!text) return result
 
@@ -2873,12 +2916,25 @@ function parseRechargeInfo(text) {
   try {
     const parsed = JSON.parse(text)
     if (parsed && typeof parsed === 'object') {
-      result.recharge_account = parsed.recharge_account || parsed.充值云账号 || parsed.充值账号 || ''
-      result.recharge_customer_name = parsed.recharge_customer_name || parsed.充值客户名称 || parsed.充值客户 || ''
+      result.recharge_account =
+        parsed.recharge_account || parsed.充值云账号 || parsed.充值账号 || ''
+      result.recharge_customer_name =
+        parsed.recharge_customer_name ||
+        parsed.充值客户名称 ||
+        parsed.充值客户 ||
+        ''
       result.payment_company = parsed.payment_company || parsed.付款公司 || ''
       result.payment_way = parsed.payment_way || parsed.支付方式 || ''
       result.payment_type = parsed.payment_type || parsed.付款类型 || ''
       result.remit_method = parsed.remit_method || parsed.付款方式 || ''
+      result.payment_note = parsed.payment_note || parsed.付款说明 || ''
+      result.submitter_identifier =
+        parsed.recharge_approval?.submitter_identifier ||
+        parsed.recharge_approval?.submitter_user_id ||
+        parsed.submitter_identifier ||
+        parsed.审批发起人 ||
+        parsed.提交名义 ||
+        ''
       return result
     }
   } catch {
@@ -2890,33 +2946,37 @@ function parseRechargeInfo(text) {
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) continue
-    const separatorIndex = Math.max(
-      trimmed.indexOf('：'),
-      trimmed.indexOf(':')
-    )
+    const separatorIndex = Math.max(trimmed.indexOf('：'), trimmed.indexOf(':'))
     if (separatorIndex === -1) continue
     const key = trimmed.slice(0, separatorIndex).trim()
     const value = trimmed.slice(separatorIndex + 1).trim()
 
     const keyMap = {
-      '公有云类型': 'cloud_type',
-      'recharge_account': 'recharge_account',
-      '充值云账号': 'recharge_account',
-      '充值账号': 'recharge_account',
-      '账号': 'recharge_account',
-      'recharge_customer_name': 'recharge_customer_name',
-      '充值客户名称': 'recharge_customer_name',
-      '充值客户': 'recharge_customer_name',
-      '客户名称': 'recharge_customer_name',
-      '客户': 'recharge_customer_name',
-      'payment_company': 'payment_company',
-      '付款公司': 'payment_company',
-      'payment_way': 'payment_way',
-      '支付方式': 'payment_way',
-      'payment_type': 'payment_type',
-      '付款类型': 'payment_type',
-      'remit_method': 'remit_method',
-      '付款方式': 'remit_method',
+      公有云类型: 'cloud_type',
+      recharge_account: 'recharge_account',
+      充值云账号: 'recharge_account',
+      充值账号: 'recharge_account',
+      账号: 'recharge_account',
+      recharge_customer_name: 'recharge_customer_name',
+      充值客户名称: 'recharge_customer_name',
+      充值客户: 'recharge_customer_name',
+      客户名称: 'recharge_customer_name',
+      客户: 'recharge_customer_name',
+      payment_company: 'payment_company',
+      付款公司: 'payment_company',
+      payment_way: 'payment_way',
+      支付方式: 'payment_way',
+      payment_type: 'payment_type',
+      付款类型: 'payment_type',
+      remit_method: 'remit_method',
+      付款方式: 'remit_method',
+      payment_note: 'payment_note',
+      付款说明: 'payment_note',
+      submitter_identifier: 'submitter_identifier',
+      充值发起人: 'submitter_identifier',
+      审批发起人: 'submitter_identifier',
+      提交名义: 'submitter_identifier',
+      发起人邮箱或手机号: 'submitter_identifier'
     }
     const fieldKey = keyMap[key]
     if (fieldKey) {
@@ -2924,6 +2984,46 @@ function parseRechargeInfo(text) {
     }
   }
   return result
+}
+
+function extractRechargeInfoDisplayObject(source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return {}
+  }
+
+  const payee =
+    source.payee && typeof source.payee === 'object' ? source.payee : {}
+  return {
+    cloud_type: source.cloud_type || source.公有云类型 || '',
+    recharge_customer_name:
+      source.recharge_customer_name ||
+      source.充值客户名称 ||
+      source.充值客户 ||
+      '',
+    recharge_account:
+      source.recharge_account ||
+      source.充值云账号 ||
+      source.充值账号 ||
+      source.account ||
+      '',
+    payment_company: source.payment_company || source.付款公司 || '',
+    payment_way: source.payment_way || source.支付方式 || '',
+    payment_type: source.payment_type || source.付款类型 || '',
+    remit_method: source.remit_method || source.付款方式 || '',
+    amount: source.amount || source.付款金额 || '',
+    currency: source.currency || source.币种 || '',
+    expected_date: source.expected_date || source.期望到账时间 || '',
+    payment_note: source.payment_note || source.付款说明 || '',
+    remark: source.remark || source.备注 || '',
+    payee: {
+      type: payee.type || payee.收款类型 || '',
+      account_name: payee.account_name || payee.户名 || '',
+      account_number: payee.account_number || payee.账号 || '',
+      bank_name: payee.bank_name || payee.银行 || '',
+      bank_region: payee.bank_region || payee.银行地区 || '',
+      bank_branch: payee.bank_branch || payee.支行 || ''
+    }
+  }
 }
 
 function formatRechargeInfoText(source) {
@@ -2954,6 +3054,49 @@ function formatRechargeInfoText(source) {
   }
 
   return String(source).trim()
+}
+
+function extractRechargeApprovalInfo(source) {
+  const result = {
+    submitter_identifier: '',
+    payment_note: ''
+  }
+  if (!source) return result
+
+  if (typeof source === 'string') {
+    const trimmed = source.trim()
+    if (!trimmed) return result
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (parsed && typeof parsed === 'object') {
+        result.submitter_identifier =
+          parsed.recharge_approval?.submitter_identifier ||
+          parsed.recharge_approval?.submitter_user_id ||
+          parsed.submitter_identifier ||
+          parsed.审批发起人 ||
+          parsed.提交名义 ||
+          ''
+        result.payment_note = parsed.payment_note || parsed.付款说明 || ''
+      }
+    } catch {
+      const parsedText = parseRechargeInfo(trimmed)
+      result.submitter_identifier = parsedText.submitter_identifier || ''
+      result.payment_note = parsedText.payment_note || ''
+    }
+    return result
+  }
+
+  if (typeof source === 'object') {
+    result.submitter_identifier =
+      source.recharge_approval?.submitter_identifier ||
+      source.recharge_approval?.submitter_user_id ||
+      source.submitter_identifier ||
+      source.审批发起人 ||
+      source.提交名义 ||
+      ''
+    result.payment_note = source.payment_note || source.付款说明 || ''
+  }
+  return result
 }
 
 const RECHARGE_INFO_LABEL_MAP = {
@@ -3001,10 +3144,8 @@ function shouldSkipRechargeInfoKey(key, value) {
   const text = String(value || '').trim()
   return (
     !text ||
-    (
-      translateRechargeInfoKey(key) === '备注' &&
-      ['备注', 'remark'].includes(text)
-    )
+    (translateRechargeInfoKey(key) === '备注' &&
+      ['备注', 'remark'].includes(text))
   )
 }
 
@@ -3024,6 +3165,9 @@ function renderRechargeInfoObject(source, prefix = '') {
     const path = prefix ? `${prefix}.${key}` : key
 
     if (value === null || value === undefined || value === '') {
+      continue
+    }
+    if (path === 'recharge_approval') {
       continue
     }
 
@@ -3067,16 +3211,38 @@ function renderRechargeInfoObject(source, prefix = '') {
   return lines.join('\n')
 }
 
+const ALERT_RECHARGE_APPROVAL_EXPECTED_DAYS = 3
+
 async function openRechargeSubmitDialog(item) {
   const today = getTodayDateString(selectedTimezone.value)
-  const parsed = parseRechargeInfo(item.recharge_info || '')
-  let rechargeInfoText = formatRechargeInfoText(item.recharge_info || '')
+  let rechargeApprovalSource = item.recharge_info || ''
+  let parsed =
+    typeof rechargeApprovalSource === 'object'
+      ? extractRechargeInfoDisplayObject(rechargeApprovalSource)
+      : parseRechargeInfo(rechargeApprovalSource)
+  let approval = extractRechargeApprovalInfo(rechargeApprovalSource)
+  let rechargeInfoText = formatRechargeInfoText(
+    typeof rechargeApprovalSource === 'object'
+      ? extractRechargeInfoDisplayObject(rechargeApprovalSource)
+      : rechargeApprovalSource
+  )
 
   if (!rechargeInfoText && item?.provider_id) {
     try {
       const response = await cloudBillingApi.getProvider(item.provider_id)
       const provider = extractResponseData(response)
-      rechargeInfoText = formatRechargeInfoText(provider?.recharge_info || '')
+      rechargeApprovalSource =
+        provider?.recharge_info || provider?.config || rechargeApprovalSource
+      parsed =
+        typeof rechargeApprovalSource === 'object'
+          ? extractRechargeInfoDisplayObject(rechargeApprovalSource)
+          : parseRechargeInfo(rechargeApprovalSource)
+      approval = extractRechargeApprovalInfo(rechargeApprovalSource)
+      rechargeInfoText = formatRechargeInfoText(
+        typeof rechargeApprovalSource === 'object'
+          ? extractRechargeInfoDisplayObject(rechargeApprovalSource)
+          : rechargeApprovalSource
+      )
     } catch (error) {
       console.error('Failed to load provider recharge info:', error)
     }
@@ -3085,6 +3251,9 @@ async function openRechargeSubmitDialog(item) {
   rechargeSubmitTarget.value = item
   rechargeSubmitForm.value = {
     recharge_info_text: rechargeInfoText,
+    submitter_identifier:
+      approval.submitter_identifier || parsed.submitter_identifier || '',
+    payment_note: parsed.payment_note || approval.payment_note || '',
     recharge_account: parsed.recharge_account || item.account_id || '',
     recharge_customer_name: parsed.recharge_customer_name || '',
     payment_company: parsed.payment_company || '',
@@ -3092,7 +3261,10 @@ async function openRechargeSubmitDialog(item) {
     payment_type: parsed.payment_type || '仅充值',
     remit_method: parsed.remit_method || '转账',
     amount: '',
-    expected_date: addDaysToDateString(today, 7)
+    expected_date: addDaysToDateString(
+      today,
+      ALERT_RECHARGE_APPROVAL_EXPECTED_DAYS
+    )
   }
   showRechargeSubmitDialog.value = true
 }
@@ -3103,6 +3275,8 @@ function closeRechargeSubmitDialog() {
   rechargeSubmitTarget.value = null
   rechargeSubmitForm.value = {
     recharge_info_text: '',
+    submitter_identifier: '',
+    payment_note: '',
     recharge_account: '',
     recharge_customer_name: '',
     payment_company: '',
@@ -3121,6 +3295,16 @@ async function submitRechargeApprovalFromDialog() {
   const expectedDate = String(
     rechargeSubmitForm.value.expected_date || ''
   ).trim()
+  const submitterIdentifier = String(
+    rechargeSubmitForm.value.submitter_identifier || ''
+  ).trim()
+  const paymentNote = String(rechargeSubmitForm.value.payment_note || '').trim()
+  if (!submitterIdentifier) {
+    showWarning(
+      t('cloudBilling.billing.rechargeApprovalSubmitterRequiredWarning')
+    )
+    return
+  }
   if (!amount || !expectedDate) {
     showWarning(t('cloudBilling.billing.rechargeApprovalRequiredFields'))
     return
@@ -3133,12 +3317,14 @@ async function submitRechargeApprovalFromDialog() {
       item.provider_id,
       {
         account_id: item.account_id,
+        submitter_identifier: submitterIdentifier,
         recharge_account: rechargeSubmitForm.value.recharge_account,
         recharge_customer_name: rechargeSubmitForm.value.recharge_customer_name,
         payment_company: rechargeSubmitForm.value.payment_company,
         payment_way: rechargeSubmitForm.value.payment_way,
         payment_type: rechargeSubmitForm.value.payment_type,
         remit_method: rechargeSubmitForm.value.remit_method,
+        payment_note: paymentNote,
         amount,
         currency: item.recommendation_currency || selectedCurrency.value,
         expected_date: expectedDate,

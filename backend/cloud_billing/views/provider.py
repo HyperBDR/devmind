@@ -482,6 +482,7 @@ def build_recharge_info_override(
     payment_way="",
     payment_type="",
     remit_method="",
+    payment_note="",
     amount="",
     currency="",
     expected_date="",
@@ -493,6 +494,7 @@ def build_recharge_info_override(
         "payment_way": payment_way,
         "payment_type": payment_type,
         "remit_method": remit_method,
+        "payment_note": payment_note,
     }
     amount_str = str(amount or "").strip()
     currency = str(currency or "").strip().upper()
@@ -767,6 +769,7 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
             payment_way=request.data.get("payment_way") or "",
             payment_type=request.data.get("payment_type") or "",
             remit_method=request.data.get("remit_method") or "",
+            payment_note=request.data.get("payment_note") or "",
             amount=request.data.get("amount") or request.data.get("recharge_amount") or "",
             currency=request.data.get("currency") or "",
             expected_date=request.data.get("expected_date") or "",

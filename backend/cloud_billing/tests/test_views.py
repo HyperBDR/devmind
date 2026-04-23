@@ -159,6 +159,7 @@ class TestCloudProviderViewSet:
                     "payment_company": "深圳壹铂云科技有限公司",
                     "payment_type": "仅充值",
                     "remit_method": "转账",
+                    "payment_note": "用于团队扩容充值",
                     "amount": 288,
                     "currency": "CNY",
                     "payee": {
@@ -180,6 +181,7 @@ class TestCloudProviderViewSet:
         saved_payload = json.loads(response.data["recharge_info"])
         assert saved_payload["cloud_type"] == "阿里云"
         assert saved_payload["recharge_account"] == "acct-288"
+        assert saved_payload["payment_note"] == "用于团队扩容充值"
         assert saved_payload["payee"]["account_number"] == "11093851041070210011884"
         assert response.data["recharge_info"] == json.dumps(
             saved_payload,
@@ -997,7 +999,10 @@ class TestRechargeApprovalEndpoints:
         url = f"/api/v1/cloud-billing/providers/{cloud_provider.id}/submit-recharge-approval/"
         response = api_client.post(
             url,
-            {"account_id": "acct-188"},
+            {
+                "account_id": "acct-188",
+                "payment_note": "用于本月团队扩容",
+            },
             format="json",
             HTTP_ACCEPT_LANGUAGE="zh-CN",
         )
@@ -1007,6 +1012,10 @@ class TestRechargeApprovalEndpoints:
         assert response.data["task_id"] == "approval-task-id"
         assert response.data["message"] == "充值审批任务已提交。"
         assert mocked_delay.call_args.kwargs["submitter_user_id"] == ""
+        override_payload = json.loads(
+            mocked_delay.call_args.kwargs["recharge_info_override"]
+        )
+        assert override_payload["payment_note"] == "用于本月团队扩容"
         execution = TaskExecution.objects.get(task_id="approval-task-id")
         assert execution.task_name == "cloud_billing.tasks.submit_recharge_approval"
         assert execution.module == "cloud_billing"
@@ -1195,6 +1204,7 @@ class TestRechargeApprovalEndpoints:
             "payment_way": "公司支付",
             "payment_type": "仅充值",
             "remit_method": "转账",
+            "payment_note": "用于模型调用充值",
             "amount": 188,
             "currency": "CNY",
             "payee": {
@@ -1221,6 +1231,7 @@ class TestRechargeApprovalEndpoints:
         assert response.data["success"] is True
         assert response.data["source"] == "feishu_history"
         assert response.data["request_payload"] == payload
+        assert response.data["request_payload"]["payment_note"] == "用于模型调用充值"
         assert response.data["request_payload"]["recharge_account"] == "acct-188"
         cloud_provider.refresh_from_db()
         assert cloud_provider.recharge_info == ""
@@ -1249,6 +1260,7 @@ class TestRechargeApprovalEndpoints:
             "payment_way": "公司支付",
             "payment_type": "仅充值",
             "remit_method": "转账",
+            "payment_note": "用于月度充值",
             "amount": 188,
             "currency": "CNY",
             "payee": {
@@ -1284,6 +1296,7 @@ class TestRechargeApprovalEndpoints:
         assert saved_payload["recharge_account"] == "acct-save"
         assert saved_payload["amount"] == 188
         assert saved_payload["currency"] == "CNY"
+        assert saved_payload["payment_note"] == "用于月度充值"
         assert saved_payload["payee"]["account_number"] == "11093851041070210011884"
         assert saved_payload["recharge_approval"] == {
             "submitter_identifier": "zhengwei@oneprocloud.cn",

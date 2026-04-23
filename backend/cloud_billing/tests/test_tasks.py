@@ -6,7 +6,7 @@ check_alert_for_provider, send_alert_notification.
 import datetime
 import json
 import pytest
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 
@@ -20,6 +20,7 @@ from cloud_billing.models import (
     AlertRecord,
     RechargeApprovalRecord,
 )
+from cloud_billing.constants import WEBHOOK_STATUS_PENDING
 from cloud_billing.tasks import (
     collect_billing_data,
     check_alert_for_provider,
@@ -295,6 +296,8 @@ class TestCheckAlertForProvider:
             cloud_provider.id,
             alert_record_id=record.id,
             trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            amount="30",
+            currency="USD",
         )
 
     @patch("cloud_billing.tasks.send_alert_notification.delay")
@@ -908,6 +911,190 @@ class TestSubmitRechargeApproval:
         assert record.trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL
 
     @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_defaults_alert_expected_date_to_three_days(
+        self,
+        mock_execute_agent,
+        cloud_provider,
+        monkeypatch,
+    ):
+        """
+        Alert-triggered submissions should default expected_date to three days out.
+        """
+        cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        monkeypatch.setattr(
+            timezone,
+            "localdate",
+            lambda: datetime.date(2026, 4, 22),
+        )
+        mock_execute_agent.return_value = {
+            "request_payload": {"amount": 188, "recharge_account": "acct-188"},
+            "submission_payload": {"ok": True},
+            "submitter_identifier": "",
+            "resolved_submitter_user_id": "",
+            "submitter_user_label": "",
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            alert_record_id=None,
+        )
+
+        assert result["success"] is True
+        raw_recharge_info = mock_execute_agent.call_args.kwargs["raw_recharge_info"]
+        assert json.loads(raw_recharge_info)["expected_date"] == "2026-04-25"
+
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_infers_alert_amount(
+        self,
+        mock_execute_agent,
+        cloud_provider,
+        monkeypatch,
+    ):
+        """
+        Alert-triggered submissions should infer an amount when it is missing.
+        """
+        cloud_provider.recharge_info = '{"recharge_account": "acct-188"}'
+        cloud_provider.save(update_fields=["recharge_info"])
+        monkeypatch.setattr(
+            timezone,
+            "localdate",
+            lambda: datetime.date(2026, 4, 22),
+        )
+        record = AlertRecord.objects.create(
+            provider=cloud_provider,
+            alert_rule=None,
+            alert_type=AlertRecord.ALERT_TYPE_DAYS_REMAINING,
+            current_cost=Decimal("100.50"),
+            previous_cost=Decimal("80.00"),
+            increase_cost=Decimal("20.50"),
+            increase_percent=Decimal("25.63"),
+            currency="CNY",
+            current_balance=Decimal("407.52"),
+            balance_threshold=None,
+            current_days_remaining=1598,
+            days_remaining_threshold=3000,
+            alert_message="days remaining alert",
+            webhook_status=WEBHOOK_STATUS_PENDING,
+        )
+        mock_execute_agent.return_value = {
+            "request_payload": {
+                "recharge_account": "acct-188",
+                "amount": 358,
+                "currency": "CNY",
+            },
+            "submission_payload": {"ok": True},
+            "submitter_identifier": "",
+            "resolved_submitter_user_id": "",
+            "submitter_user_label": "",
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            alert_record_id=record.id,
+        )
+
+        assert result["success"] is True
+        raw_recharge_info = mock_execute_agent.call_args.kwargs["raw_recharge_info"]
+        payload = json.loads(raw_recharge_info)
+        expected_amount = (
+            Decimal("407.52")
+            * Decimal("1402")
+            / Decimal("1598")
+        ).quantize(Decimal("1"), rounding=ROUND_CEILING)
+        assert payload["amount"] == int(expected_amount)
+        assert payload["currency"] == "CNY"
+        assert payload["expected_date"] == "2026-04-25"
+
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
+    def test_submit_recharge_approval_populates_alert_context_labels(
+        self,
+        mock_execute_agent,
+        cloud_provider,
+    ):
+        """
+        Alert-triggered submissions should persist explicit trigger and submitter
+        labels even when the caller does not pass a human operator.
+        """
+        cloud_provider.recharge_info = (
+            '{"recharge_account": "18017606559", '
+            '"recharge_customer_name": "深圳壹铂云科技有限公司", '
+            '"payment_company": "深圳壹铂云科技有限公司", '
+            '"payment_way": "公司支付", '
+            '"payment_type": "仅充值", '
+            '"remit_method": "转账"}'
+        )
+        cloud_provider.save(update_fields=["recharge_info"])
+        alert_record = AlertRecord.objects.create(
+            provider=cloud_provider,
+            alert_rule=None,
+            alert_type=AlertRecord.ALERT_TYPE_DAYS_REMAINING,
+            current_cost=Decimal("100.50"),
+            previous_cost=Decimal("80.00"),
+            increase_cost=Decimal("20.50"),
+            increase_percent=Decimal("25.63"),
+            currency="CNY",
+            current_balance=Decimal("407.52"),
+            balance_threshold=None,
+            current_days_remaining=1598,
+            days_remaining_threshold=3000,
+            alert_message="days remaining alert",
+            webhook_status=WEBHOOK_STATUS_PENDING,
+        )
+        mock_execute_agent.return_value = {
+            "request_payload": {
+                "recharge_account": "18017606559",
+                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "amount": 358,
+                "currency": "CNY",
+                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_way": "公司支付",
+                "payment_type": "仅充值",
+                "remit_method": "转账",
+            },
+            "submission_payload": {"ok": True},
+            "submitter_identifier": "",
+            "resolved_submitter_user_id": "",
+            "submitter_user_label": "",
+            "instance_code": "ins_188",
+            "approval_code": "approval_188",
+            "status": "PENDING",
+            "success": True,
+            "summary": "submitted",
+        }
+
+        result = submit_recharge_approval(
+            cloud_provider.id,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+            alert_record_id=alert_record.id,
+        )
+
+        assert result["success"] is True
+        record = RechargeApprovalRecord.objects.get(feishu_instance_code="ins_188")
+        assert record.triggered_by_username_snapshot == "系统自动触发"
+        assert record.submitter_user_label == "系统自动提交"
+        assert record.trigger_reason == (
+            "剩余天数不足（当前预计 1598 天，阈值 3000 天）"
+        )
+        assert record.context_payload["triggered_by"] == "系统自动触发"
+        assert record.context_payload["submitter_label"] == "系统自动提交"
+        assert record.context_payload["trigger_reason"] == (
+            "剩余天数不足（当前预计 1598 天，阈值 3000 天）"
+        )
+
+    @patch("cloud_billing.tasks.execute_recharge_approval_agent")
     def test_submit_recharge_approval_uses_request_account_id(
         self,
         mock_execute_agent,
@@ -1230,14 +1417,19 @@ class TestSubmitRechargeApproval:
 
         assert result["success"] is True
         record = RechargeApprovalRecord.objects.get(feishu_instance_code="ins_history")
-        assert json.loads(record.raw_recharge_info)["recharge_account"] == "current-platform-account"
+        assert json.loads(record.raw_recharge_info)["recharge_account"] == "18017606559"
         mock_execute_agent.assert_called_once()
         assert mock_execute_agent.call_args.kwargs["raw_recharge_info"] == record.raw_recharge_info
 
-    def test_submit_recharge_approval_rejects_missing_info(self, cloud_provider):
+    def test_submit_recharge_approval_rejects_missing_info(
+        self,
+        cloud_provider,
+        monkeypatch,
+    ):
         """
         Task should fail fast when provider recharge info is empty.
         """
+        monkeypatch.delenv("FEISHU_APPROVAL_CODE", raising=False)
         result = submit_recharge_approval(
             cloud_provider.id,
             trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,

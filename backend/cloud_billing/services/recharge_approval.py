@@ -761,7 +761,7 @@ def build_notification_message_from_payload(
     lines = [
         f"{fmt_label('触发方式')}{sep}{_trigger_source_label(trigger_source)}",
         f"{fmt_label('触发人')}{sep}{fmt_value(trigger_user_label)}",
-        f"{fmt_label('提交名义')}{sep}{fmt_value(submitter_label)}",
+        f"{fmt_label('审批发起人')}{sep}{fmt_value(submitter_label)}",
     ]
     if trigger_reason:
         lines.append(f"{fmt_label('触发原因')}{sep}{fmt_value(trigger_reason)}")
@@ -1325,7 +1325,7 @@ def infer_recharge_info_from_history(
 def _resolve_user_id_by_email_or_mobile(
     identifier: str,
     access_token: str,
-) -> Optional[str]:
+) -> Optional[Tuple[str, str]]:
     """
     Query Feishu user_id by email or mobile phone.
 
@@ -1337,7 +1337,7 @@ def _resolve_user_id_by_email_or_mobile(
         access_token: Feishu tenant access token
 
     Returns:
-        User user_id (not open_id) if found, None otherwise
+        A tuple of (user_id, user_name) if found, None otherwise.
     """
     if not identifier or not access_token:
         return None
@@ -1411,13 +1411,19 @@ def _resolve_user_id_by_email_or_mobile(
         if result.get("code") == 0:
             users = result.get("data", {}).get("user_list", [])
             if users:
-                user_id = users[0].get("user_id")
+                user = users[0] or {}
+                user_id = str(user.get("user_id") or "").strip()
+                user_name = str(
+                    user.get("name") or user.get("en_name") or ""
+                ).strip()
                 logger.info(
-                    "Feishu user resolved: identifier=%s -> user_id=%s",
+                    "Feishu user resolved: identifier=%s -> user_id=%s, name=%s",
                     identifier,
-                    user_id
+                    user_id,
+                    user_name or "(not set)",
                 )
-                return user_id
+                if user_id:
+                    return user_id, user_name
             else:
                 logger.warning(
                     "Feishu user not found: identifier=%s, response=%s",
@@ -2445,6 +2451,7 @@ def resolve_submitter_identity(
         or approval_cfg.get("user_id")
         or os.getenv("FEISHU_USER_ID", "")
     ).strip()
+    resolved_user_name = ""
 
     if resolved_user_id:
         logger.info(
@@ -2460,7 +2467,12 @@ def resolve_submitter_identity(
         # try to resolve it via Feishu API
         access_token = _get_feishu_access_token()
         if access_token:
-            resolved_user_id = _resolve_user_id_by_email_or_mobile(identifier, access_token) or ""
+            resolved_user = _resolve_user_id_by_email_or_mobile(
+                identifier,
+                access_token,
+            )
+            if resolved_user:
+                resolved_user_id, resolved_user_name = resolved_user
         else:
             logger.warning(
                 "Cannot query Feishu API: access token not available"
@@ -2474,13 +2486,19 @@ def resolve_submitter_identity(
         "Submitter identity resolved:\n"
         "  identifier: %s\n"
         "  label: %s\n"
+        "  user_name: %s\n"
         "  resolved_user_id: %s",
         identifier or "(not set)",
         label or "(not set)",
-        resolved_user_id[:10] + "***" if resolved_user_id and len(resolved_user_id) > 10 else (resolved_user_id or "(not set)")
+        resolved_user_name or "(not set)",
+        (
+            resolved_user_id[:10] + "***"
+            if resolved_user_id and len(resolved_user_id) > 10
+            else (resolved_user_id or "(not set)")
+        ),
     )
 
-    return identifier, label, resolved_user_id
+    return identifier, (resolved_user_name or label), resolved_user_id
 
 
 def create_recharge_approval_event(

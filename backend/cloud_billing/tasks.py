@@ -8,7 +8,7 @@ import os
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from typing import Dict, Optional, Tuple
 
 from celery import shared_task
@@ -77,10 +77,15 @@ def _inject_recharge_fields(
     raw_recharge_info: str,
     account_id: str,
     cloud_type: str,
+    *,
+    amount: str = "",
+    currency: str = "",
 ) -> str:
     account_id = str(account_id or "").strip()
     cloud_type = str(cloud_type or "").strip()
-    if not account_id and not cloud_type:
+    amount_text = str(amount or "").strip()
+    currency_text = str(currency or "").strip().upper()
+    if not account_id and not cloud_type and not amount_text and not currency_text:
         return raw_recharge_info
 
     try:
@@ -92,7 +97,69 @@ def _inject_recharge_fields(
         payload["recharge_account"] = account_id
     if cloud_type:
         payload["cloud_type"] = cloud_type
+    if amount_text and not str(payload.get("amount") or "").strip():
+        payload["amount"] = amount_text
+        if currency_text:
+            payload["currency"] = currency_text
+    elif currency_text and not str(payload.get("currency") or "").strip():
+        payload["currency"] = currency_text
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _quantize_amount_to_whole_unit(value: Decimal) -> Decimal:
+    if value <= 0:
+        return Decimal("0")
+    return value.quantize(Decimal("1"), rounding=ROUND_CEILING)
+
+
+def _suggest_alert_recharge_amount(
+    alert_record: AlertRecord,
+) -> tuple[Optional[Decimal], str]:
+    current_balance = Decimal(str(alert_record.current_balance or 0))
+    currency = str(alert_record.currency or "").strip().upper() or "CNY"
+    suggestions = []
+
+    if (
+        alert_record.days_remaining_threshold is not None
+        and alert_record.current_days_remaining is not None
+    ):
+        current_days_remaining = Decimal(
+            str(alert_record.current_days_remaining)
+        )
+        threshold_days = Decimal(str(alert_record.days_remaining_threshold))
+        if (
+            current_days_remaining > 0
+            and threshold_days > current_days_remaining
+            and current_balance > 0
+        ):
+            shortage_days = threshold_days - current_days_remaining
+            suggested = (
+                current_balance
+                * shortage_days
+                / current_days_remaining
+            )
+            suggestions.append(_quantize_amount_to_whole_unit(suggested))
+
+    if (
+        alert_record.balance_threshold is not None
+        and current_balance > 0
+    ):
+        threshold_balance = Decimal(str(alert_record.balance_threshold))
+        if threshold_balance > current_balance:
+            suggestions.append(
+                _quantize_amount_to_whole_unit(
+                    threshold_balance - current_balance
+                )
+            )
+
+    if not suggestions:
+        return None, currency
+
+    return max(suggestions), currency
+
+
+def _default_alert_expected_date(days: int = 3) -> str:
+    return (timezone.localdate() + timedelta(days=days)).isoformat()
 
 
 def _resolve_notification_language(provider: CloudProvider) -> str:
@@ -1090,10 +1157,19 @@ def check_alert_for_provider(
                 )
                 and str(provider.recharge_info or "").strip()
             ):
+                suggested_amount, suggested_currency = (
+                    _suggest_alert_recharge_amount(alert_record)
+                )
+                submit_kwargs = {
+                    "alert_record_id": alert_record.id,
+                    "trigger_source": RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+                }
+                if suggested_amount is not None:
+                    submit_kwargs["amount"] = str(suggested_amount)
+                    submit_kwargs["currency"] = suggested_currency
                 submit_recharge_approval.delay(
                     provider.id,
-                    alert_record_id=alert_record.id,
-                    trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+                    **submit_kwargs,
                 )
 
             logger.info(
@@ -1194,6 +1270,8 @@ def submit_recharge_approval(
     trigger_reason: str = "",
     recharge_info_override: str = "",
     account_id: str = "",
+    amount: str = "",
+    currency: str = "",
 ):
     """
     Submit recharge approval for a provider and persist execution evidence.
@@ -1336,9 +1414,39 @@ def submit_recharge_approval(
                             "Provider recharge info is missing and no reusable "
                             "Feishu history record could be found."
                         ),
-                    ),
-                )
+                ),
+            )
             return result
+
+    if trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT:
+        try:
+            alert_payload = parse_recharge_info(raw_recharge_info)
+        except Exception:
+            alert_payload = {}
+        if not str(alert_payload.get("expected_date") or "").strip():
+            alert_payload["expected_date"] = _default_alert_expected_date()
+        amount_value = str(amount or "").strip()
+        currency_text = str(currency or "").strip().upper()
+        if not amount_value and alert_record_id:
+            alert_record = AlertRecord.objects.filter(
+                id=alert_record_id
+            ).first()
+            if alert_record is not None:
+                suggested_amount, suggested_currency = (
+                    _suggest_alert_recharge_amount(alert_record)
+                )
+                if suggested_amount is not None:
+                    amount_value = int(suggested_amount)
+                    currency_text = currency_text or suggested_currency
+        if amount_value and not str(alert_payload.get("amount") or "").strip():
+            alert_payload["amount"] = amount_value
+            if currency_text:
+                alert_payload["currency"] = currency_text
+        elif currency_text and not str(
+            alert_payload.get("currency") or ""
+        ).strip():
+            alert_payload["currency"] = currency_text
+        raw_recharge_info = json.dumps(alert_payload, ensure_ascii=False)
     log_collector.info(
         "Validated provider recharge info "
         f"(length={len(raw_recharge_info)})"
@@ -1395,6 +1503,8 @@ def submit_recharge_approval(
         raw_recharge_info,
         submission_account_id,
         cloud_type,
+        amount=amount,
+        currency=currency,
     )
     log_collector.info(
         "Recharge approval payload bound to submission account "
@@ -1477,6 +1587,22 @@ def submit_recharge_approval(
                 f"status={finished_status})"
             )
 
+    def _build_alert_reason_label(alert: AlertRecord | None) -> str:
+        if alert is None:
+            return ""
+        if alert.alert_type == AlertRecord.ALERT_TYPE_BALANCE:
+            current_balance = str(alert.current_balance or "").strip() or "—"
+            threshold = str(alert.balance_threshold or "").strip() or "—"
+            return f"余额不足（当前余额 {current_balance}，阈值 {threshold}）"
+        if alert.alert_type == AlertRecord.ALERT_TYPE_DAYS_REMAINING:
+            current_days = str(alert.current_days_remaining or "").strip() or "—"
+            threshold_days = str(alert.days_remaining_threshold or "").strip() or "—"
+            return (
+                f"剩余天数不足（当前预计 {current_days} 天，"
+                f"阈值 {threshold_days} 天）"
+            )
+        return "告警触发"
+
     # Resolve submitter identity after account-level de-duplication so we do
     # not block unrelated accounts that happen to share the same submitter.
     raw_submitter_identifier = (submitter_identifier or submitter_user_id or "").strip()
@@ -1502,6 +1628,31 @@ def submit_recharge_approval(
         )
     )
 
+    effective_triggered_by = (
+        trigger_user.username
+        if trigger_user is not None
+        else (
+            "系统自动触发"
+            if trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT
+            else ""
+        )
+    )
+    effective_submitter_label = (
+        resolved_submitter_user_label
+        or (
+            "系统自动提交"
+            if trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT
+            else ""
+        )
+    )
+    effective_trigger_reason = str(trigger_reason or "").strip()
+    if trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT:
+        effective_trigger_reason = (
+            _build_alert_reason_label(alert_record)
+            or effective_trigger_reason
+            or "告警触发"
+        )
+
     trace_id = uuid.uuid4()
     context_payload = {
         "provider_id": provider.id,
@@ -1509,8 +1660,10 @@ def submit_recharge_approval(
         "provider_type": provider.provider_type,
         "alert_record_id": alert_record_id,
         "trigger_source": trigger_source,
-        "trigger_reason": trigger_reason or trigger_source,
+        "trigger_reason": effective_trigger_reason or trigger_source,
         "source_task_id": task_id,
+        "triggered_by": effective_triggered_by,
+        "submitter_label": effective_submitter_label,
     }
     if alert_record is not None:
         context_payload.update(
@@ -1530,19 +1683,17 @@ def submit_recharge_approval(
         trace_id=trace_id,
         alert_record=alert_record,
         trigger_source=trigger_source,
-        trigger_reason=trigger_reason or trigger_source,
+        trigger_reason=effective_trigger_reason or trigger_source,
         status=RechargeApprovalRecord.STATUS_PENDING,
         latest_stage="queued",
         raw_recharge_info=raw_recharge_info,
         context_payload=context_payload,
         triggered_by=trigger_user,
-        triggered_by_username_snapshot=(
-            trigger_user.username if trigger_user else ""
-        ),
+        triggered_by_username_snapshot=effective_triggered_by,
         submitted_by=trigger_user,
         submitter_identifier=raw_submitter_identifier,
         resolved_submitter_user_id=resolved_submitter_user_id,
-        submitter_user_label=resolved_submitter_user_label,
+        submitter_user_label=effective_submitter_label,
     )
     create_recharge_approval_event(
         record=record,
@@ -1591,7 +1742,7 @@ def submit_recharge_approval(
             user_id=user_id,
             source_task_id=task_id,
             submitter_identifier=raw_submitter_identifier,
-            submitter_user_label=resolved_submitter_user_label,
+            submitter_user_label=effective_submitter_label,
             resolved_submitter_user_id=resolved_submitter_user_id,
         )
         finished_at = timezone.now()
@@ -1625,7 +1776,7 @@ def submit_recharge_approval(
         )
         record.submitter_user_label = (
             agent_payload.get("submitter_user_label")
-            or resolved_submitter_user_label
+            or effective_submitter_label
         )
 
         # Store the pre-formatted notification message from the agent result
