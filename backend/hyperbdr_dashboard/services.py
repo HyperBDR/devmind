@@ -1,7 +1,7 @@
 """
 Dashboard aggregation service for the HyperBDR Data Operations Dashboard.
 
-This module builds the dashboard payload from existing onepro_monitor models,
+This module builds the dashboard payload from existing hyperbdr_monitor models,
 reshaping the data into the product-facing dashboard contract.
 
 Business rules (from spec):
@@ -20,7 +20,7 @@ from django.db.models import IntegerField, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from onepro_monitor.models import DataSource, Host, License, Tenant
+from hyperbdr_monitor.models import DataSource, Host, License, Tenant
 
 
 def _prefetch_licenses(tenants):
@@ -94,7 +94,7 @@ def _is_poc(tenant: Tenant, licenses: list[dict]) -> bool:
 
 
 def _build_dashboard_stats():
-    """Return raw counts and aggregates from onepro_monitor models."""
+    """Return raw counts and aggregates from hyperbdr_monitor models."""
     tenant_qs = Tenant.objects.filter(data_source__is_active=True)
     license_qs = License.objects.filter(data_source__is_active=True).select_related("tenant")
     host_qs = Host.objects.filter(data_source__is_active=True)
@@ -304,7 +304,6 @@ def _build_tenant_rows_from_tenants(tenants: list, licenses_by_tenant: dict) -> 
 
         scenes = list({lic.get("scene") or "" for lic in licenses})
         scene_display = ", ".join(scenes) if scenes else "-"
-
         rows.append({
             "id": tenant.source_tenant_id,
             "name": tenant.name,

@@ -1415,7 +1415,7 @@ const dynamicKPIS = computed(() => {
       key: 'conversionRate',
       labelKey: 'hyperbdrDashboard.conversionRate',
       value: `${convRate}%`,
-      type: 'gradient',
+      type: 'accent',
       progress: parseFloat(convRate),
       progressLabelKey: 'hyperbdrDashboard.conversionRate',
       trend: convRate > 0 ? `+${convRate}%` : null,
