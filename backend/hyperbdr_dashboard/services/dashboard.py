@@ -1,7 +1,7 @@
 """
 Dashboard aggregation service for the HyperBDR Data Operations Dashboard.
 
-This module builds the dashboard payload from existing hyperbdr_monitor models,
+This module builds the dashboard payload from hyperbdr_dashboard models,
 reshaping the data into the product-facing dashboard contract.
 
 Business rules (from spec):
@@ -20,7 +20,7 @@ from django.db.models import IntegerField, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from hyperbdr_monitor.models import DataSource, Host, License, Tenant
+from ..models import DataSource, Host, License, Tenant
 
 
 def _prefetch_licenses(tenants):
@@ -94,7 +94,7 @@ def _is_poc(tenant: Tenant, licenses: list[dict]) -> bool:
 
 
 def _build_dashboard_stats():
-    """Return raw counts and aggregates from hyperbdr_monitor models."""
+    """Return raw counts and aggregates from hyperbdr_dashboard models."""
     tenant_qs = Tenant.objects.filter(data_source__is_active=True)
     license_qs = License.objects.filter(data_source__is_active=True).select_related("tenant")
     host_qs = Host.objects.filter(data_source__is_active=True)
@@ -173,7 +173,6 @@ def _build_focus_cards_from_tenants(tenants: list, licenses_by_tenant: dict) -> 
         rem = cls["remaining_days"]
         util = cls["utilization"]
 
-        # Only count future expirations (remaining_days >= 0)
         if rem is not None and 0 <= rem <= 30:
             expiring.append(tenant)
         if _is_poc(tenant, licenses) and rem is not None and 0 <= rem <= 7:
@@ -343,14 +342,10 @@ def build_hyperbdr_dashboard_overview(year: int | None = None, month: int | None
     """
     period_start, period_end = _compute_period_range(year, month)
 
-    # Base queryset: all active tenants
     base_qs = Tenant.objects.filter(data_source__is_active=True)
     all_tenants = list(base_qs.select_related("data_source").order_by("name"))
 
-    # Filter tenants by license expiration within the period
-    # Only filter when year is specified; year=None means "all" (no period filter)
     if year is not None and period_start and period_end:
-        # A tenant is "in period" if any of its licenses expire within [period_start, period_end]
         period_tenant_ids = set(
             License.objects.filter(
                 data_source__is_active=True,
@@ -396,7 +391,6 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
     """
     today = timezone.now().date()
 
-    # Determine the 12-month window
     if year is not None:
         start_date = date(year, 1, 1)
         end_date = date(year, 12, 31)
@@ -410,7 +404,6 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
         start_date = months_ago_11
         end_date = today
 
-    # Build ordered month list first
     month_keys = []
     current = date(start_date.year, start_date.month, 1)
     end = date(end_date.year, end_date.month, 1)
@@ -421,7 +414,6 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
         else:
             current = date(current.year, current.month + 1, 1)
 
-    # Count tenants by created month, and track which are official
     all_tenants = list(Tenant.objects.filter(data_source__is_active=True))
     licenses_all = _prefetch_licenses(all_tenants)
     counts_by_month = defaultdict(int)
@@ -440,8 +432,6 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
             if not _is_poc(tenant, licenses_all.get(tenant.id, [])):
                 official_by_month[key] += 1
 
-        # Monthly churn: official license expired in the month and already overdue.
-        # Use set to dedupe tenant ids within one month.
         for lic in licenses_all.get(tenant.id, []):
             scene = lic.get("scene")
             expire_at = lic.get("expire_at")
@@ -451,7 +441,6 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
             if start_date <= expire_date <= end_date and expire_date <= today:
                 churned_by_month[(expire_date.year, expire_date.month)].add(tenant.id)
 
-    # Build cumulative monthly list
     cumulative = 0
     official_cumulative = 0
     months = []
@@ -472,7 +461,6 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
             "conversion_rate": conv_rate,
         })
 
-    # Global conversion rate for summary
     poc_total = sum(1 for t in all_tenants if _is_poc(t, licenses_all.get(t.id, [])))
     official_total = len(all_tenants) - poc_total
     total = poc_total + official_total

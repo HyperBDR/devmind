@@ -9,7 +9,7 @@ INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "rest_framework",
     "accounts",
-    "hyperbdr_monitor",
+    "hyperbdr_dashboard",
 ]
 
 DATABASES = {

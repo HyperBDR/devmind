@@ -436,48 +436,6 @@ class TestCollectorConfigViewSet:
         assert synced_config.uuid == config.uuid
         assert synced_config.is_enabled is False
 
-    def test_sync_hyperbdr_data_source_uses_hyperbdr_monitor_shape(self, user):
-        config = CollectorConfig.objects.create(
-            user=user,
-            platform="hyperbdr",
-            key="hyperbdr_primary",
-            value={
-                "auth": {
-                    "base_url": "https://admin-preprod.hyperbdr.com/",
-                    "username": "collector",
-                    "password": "secret",
-                },
-                "schedule_cron": "0 */2 * * *",
-            },
-            is_enabled=True,
-        )
-        update_or_create = Mock()
-        fake_model = SimpleNamespace(
-            objects=SimpleNamespace(update_or_create=update_or_create)
-        )
-
-        with patch(
-            "data_collector.views.config._get_hyperbdr_data_source_model",
-            return_value=fake_model,
-        ):
-            from data_collector.views.config import _sync_hyperbdr_data_source
-
-            _sync_hyperbdr_data_source(config)
-
-        fake_model.objects.update_or_create.assert_called_once_with(
-            name="hyperbdr_primary",
-            defaults={
-                "api_url": "https://admin-preprod.hyperbdr.com",
-                "username": "collector",
-                "password": "secret",
-                "is_active": True,
-                "api_timeout": 30,
-                "api_retry_count": 3,
-                "api_retry_delay": 2,
-                "collect_interval": 7200,
-            },
-        )
-
     @patch("data_collector.views.config._queue_hyperbdr_collect")
     def test_collect_hyperbdr_config_registers_task_execution(
         self,
@@ -513,7 +471,7 @@ class TestCollectorConfigViewSet:
         assert response.data["task_id"] == "celery-hyperbdr-1"
         task_execution = TaskExecution.objects.get(task_id="celery-hyperbdr-1")
         assert task_execution.module == "data_collector"
-        assert task_execution.task_name == "hyperbdr_monitor.tasks.run_collection_for_data_source"
+        assert task_execution.task_name == "hyperbdr_dashboard.tasks.run_collection_for_data_source"
         assert task_execution.metadata["config_platform"] == "hyperbdr"
         assert task_execution.metadata["config_key"] == "hyperbdr_primary"
         assert task_execution.metadata["hyperbdr_collection_task_id"] == 11

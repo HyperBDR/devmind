@@ -17,7 +17,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
 from accounts.models import Role
-from hyperbdr_monitor.models import DataSource, License, Tenant
+from hyperbdr_dashboard.models import DataSource, License, Tenant
 
 
 @pytest.fixture
@@ -104,7 +104,9 @@ def official_tenant(db, data_source):
 @pytest.fixture
 def poc_license(db, poc_tenant, data_source):
     from datetime import timedelta
+
     from django.utils import timezone
+
     return License.objects.create(
         data_source=data_source,
         tenant=poc_tenant,
@@ -119,7 +121,9 @@ def poc_license(db, poc_tenant, data_source):
 @pytest.fixture
 def official_license(db, official_tenant, data_source):
     from datetime import timedelta
+
     from django.utils import timezone
+
     return License.objects.create(
         data_source=data_source,
         tenant=official_tenant,

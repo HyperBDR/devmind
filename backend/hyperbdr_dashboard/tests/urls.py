@@ -1,5 +1,5 @@
-from django.urls import path, include
+from django.urls import include, path
 
 urlpatterns = [
-    path("api/v1/hyperbdr-dashboard/", include("hyperbdr_dashboard.urls")),
+    path("api/v1/hyperbdr-monitor/", include("hyperbdr_dashboard.urls")),
 ]

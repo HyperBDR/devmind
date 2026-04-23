@@ -170,7 +170,6 @@ INSTALLED_APPS += [
     'cloud_billing',
     'data_collector',
     'hyperbdr_dashboard',
-    'hyperbdr_monitor',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',

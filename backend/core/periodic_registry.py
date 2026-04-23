@@ -178,28 +178,3 @@ def apply_registry():
     """Apply the global TASK_REGISTRY to django_celery_beat."""
     TASK_REGISTRY.apply()
 
-
-def remove_periodic_tasks(*, names=(), task_names=()):
-    """
-    Remove retired django_celery_beat rows by PeriodicTask name or task name.
-
-    This is intentionally separate from TaskRegistry.apply(), which preserves
-    existing rows so operators can customize active schedules in the DB.
-    """
-    from django_celery_beat.models import PeriodicTask, PeriodicTasks
-
-    name_set = {str(name) for name in names if name}
-    task_name_set = {str(task_name) for task_name in task_names if task_name}
-    if not name_set and not task_name_set:
-        return 0
-
-    queryset = PeriodicTask.objects.none()
-    if name_set:
-        queryset = queryset | PeriodicTask.objects.filter(name__in=name_set)
-    if task_name_set:
-        queryset = queryset | PeriodicTask.objects.filter(task__in=task_name_set)
-
-    deleted_count, _ = queryset.delete()
-    if deleted_count:
-        PeriodicTasks.update_changed()
-    return deleted_count
