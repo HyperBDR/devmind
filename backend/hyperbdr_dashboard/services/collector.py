@@ -52,6 +52,27 @@ def _host_entries(payload):
     return ((payload.get("data") or {}).get("hosts") or [])
 
 
+def _collect_licenses_for_scene(client, enterprise_id, scene, page_size=100):
+    """Paginate through all license pages for a given scene."""
+    all_items = []
+    page = 1
+    while True:
+        payload = client.get_tenant_licenses_details(
+            enterprise_id=enterprise_id,
+            scene=scene,
+            page=page,
+            page_size=page_size,
+        )
+        items = _license_entries(payload)
+        if not items:
+            break
+        all_items.extend(items)
+        if len(items) < page_size:
+            break
+        page += 1
+    return all_items
+
+
 def _collect_hosts_for_tenant(client, source, tenant):
     detail = client.get_tenant_detail(tenant.source_tenant_id)
     users = ((detail.get("data") or {}).get("users") or [])
@@ -171,24 +192,56 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
                 tenant_count += 1
 
                 seen_license_scenes = set()
-                license_payload = client.get_tenant_licenses_details(
-                    enterprise_id=source_tenant_id,
-                    scene="dr",
-                    page=1,
-                    page_size=100,
-                )
-                for item in _license_entries(license_payload):
-                    scene = item.get("scene") or item.get("apply_scene") or "dr"
+                for item in _collect_licenses_for_scene(
+                    client, source_tenant_id, "dr"
+                ):
+                    scene = "dr"
                     seen_license_scenes.add(scene)
                     License.objects.update_or_create(
                         data_source=source,
                         tenant=tenant,
                         scene=scene,
                         defaults={
-                            "total_amount": _to_int(item.get("total_amount", item.get("amount", 0))),
-                            "total_used": _to_int(item.get("total_used", item.get("used", 0))),
-                            "total_unused": _to_int(item.get("total_unused", item.get("unused", 0))),
-                            "start_at": parse_remote_datetime(item.get("start_at")),
+                            "total_amount": _to_int(
+                                item.get("total_amount", item.get("amount", 0))
+                            ),
+                            "total_used": _to_int(
+                                item.get("total_used", item.get("used", 0))
+                            ),
+                            "total_unused": _to_int(
+                                item.get("total_unused", item.get("unused", 0))
+                            ),
+                            "start_at": parse_remote_datetime(
+                                item.get("start_at")
+                            ),
+                            "expire_at": parse_remote_datetime(item.get("expire_at")),
+                            "last_collected_at": timezone.now(),
+                        },
+                    )
+                    license_count += 1
+
+                for item in _collect_licenses_for_scene(
+                    client, source_tenant_id, "migration"
+                ):
+                    scene = "migration"
+                    seen_license_scenes.add(scene)
+                    License.objects.update_or_create(
+                        data_source=source,
+                        tenant=tenant,
+                        scene=scene,
+                        defaults={
+                            "total_amount": _to_int(
+                                item.get("total_amount", item.get("amount", 0))
+                            ),
+                            "total_used": _to_int(
+                                item.get("total_used", item.get("used", 0))
+                            ),
+                            "total_unused": _to_int(
+                                item.get("total_unused", item.get("unused", 0))
+                            ),
+                            "start_at": parse_remote_datetime(
+                                item.get("start_at")
+                            ),
                             "expire_at": parse_remote_datetime(item.get("expire_at")),
                             "last_collected_at": timezone.now(),
                         },

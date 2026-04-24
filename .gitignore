@@ -272,3 +272,6 @@ requirements-dev.txt
 devmind/images
 .brv/*
 backend/ai_pricehub/runtime/
+
+# Code review graph evaluation
+evaluate/

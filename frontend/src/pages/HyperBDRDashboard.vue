@@ -455,8 +455,8 @@
         </div>
       </div>
 
-      <!-- Focus Cards & Utilization Structure Row -->
-      <div class="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <!-- Focus Cards, License Status, Utilization Structure Row -->
+      <div class="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <!-- Focus Cards - Horizontal Layout -->
         <div
           class="overflow-hidden rounded-lg border border-slate-100 bg-white p-6 shadow-sm"
@@ -582,6 +582,48 @@
                     />
                   </svg>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- License Status Pie Chart -->
+        <div class="overflow-hidden rounded-lg border border-slate-100 bg-white p-6 shadow-sm">
+          <div class="mb-6">
+            <div class="flex items-center gap-2">
+              <h2 class="text-base font-bold text-slate-800">
+                {{ t('hyperbdrDashboard.licenseStatus') }}
+              </h2>
+            </div>
+            <p class="mt-1 text-xs text-slate-400">
+              {{ t('hyperbdrDashboard.licenseStatusDesc') }}
+            </p>
+          </div>
+          <div class="flex items-center gap-6">
+            <div class="w-40 h-40 flex-shrink-0">
+              <Chart type="doughnut" :data="licenseStatusChartData" :options="licenseStatusChartOptions" />
+            </div>
+            <div class="flex flex-col gap-3 flex-1">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="h-3 w-3 rounded-full bg-emerald-500" />
+                  <span class="text-xs font-medium text-slate-600">{{ t('hyperbdrDashboard.validLicense') }}</span>
+                </div>
+                <span class="text-sm font-bold text-slate-800">{{ overviewData?.license_stats?.valid_amount ?? 0 }}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="h-3 w-3 rounded-full bg-red-500" />
+                  <span class="text-xs font-medium text-slate-600">{{ t('hyperbdrDashboard.exhaustedLicense') }}</span>
+                </div>
+                <span class="text-sm font-bold text-slate-800">{{ overviewData?.license_stats?.exhausted_amount ?? 0 }}</span>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="h-3 w-3 rounded-full bg-slate-400" />
+                  <span class="text-xs font-medium text-slate-600">{{ t('hyperbdrDashboard.inactiveLicense') }}</span>
+                </div>
+                <span class="text-sm font-bold text-slate-800">{{ overviewData?.license_stats?.inactive_amount ?? 0 }}</span>
               </div>
             </div>
           </div>
@@ -730,13 +772,8 @@
                 <th class="px-4 py-4">
                   {{ t('hyperbdrDashboard.utilization') }}
                 </th>
-                <th class="px-4 py-4">
+                                <th class="px-4 py-4">
                   {{ t('hyperbdrDashboard.remainingDays') }}
-                </th>
-                <th
-                  class="px-8 py-4 text-right sticky right-0 z-10 border-l border-slate-100 bg-slate-50/50 shadow-[-4px_0_12px_rgba(0,0,0,0.02)]"
-                >
-                  {{ t('common.actions') }}
                 </th>
               </tr>
             </thead>
@@ -816,17 +853,6 @@
                   >
                     {{ formatRemainingDays(tenant.remaining_days) }}
                   </span>
-                </td>
-                <td
-                  class="sticky right-0 z-10 border-l border-slate-100 bg-white px-8 py-5 text-right shadow-[-4px_0_12px_rgba(0,0,0,0.05)] transition-colors group-hover:bg-slate-50/50"
-                >
-                  <div class="flex items-center justify-end gap-2">
-                    <button
-                      class="rounded-lg bg-blue-600 px-4 py-1.5 text-[10px] font-bold text-white shadow-md shadow-blue-100 transition-all hover:bg-blue-700 whitespace-nowrap"
-                    >
-                      {{ t('hyperbdrDashboard.followUp') }}
-                    </button>
-                  </div>
                 </td>
               </tr>
             </tbody>
@@ -1232,7 +1258,9 @@ import {
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  ArcElement,
+  DoughnutController
 } from 'chart.js'
 import { hyperbdrDashboardApi } from '@/api/hyperbdrDashboard'
 
@@ -1245,7 +1273,9 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  Filler
+  Filler,
+  ArcElement,
+  DoughnutController
 )
 
 const { t } = useI18n()
@@ -1341,6 +1371,72 @@ watch([selectedYear, selectedMonth], () => {
   fetchTrends()
 })
 
+// ─── License Panel (merged from 3 separate KPI cards) ────────────────────────
+const licensePanel = computed(() => {
+  const stats = overviewData.value?.license_stats ?? {}
+  const totalAmount = stats.total_amount ?? 0
+  const totalUsed = stats.total_used ?? 0
+  const totalUnused = stats.total_unused ?? 0
+  const usageRatio = stats.usage_ratio ?? 0
+  return {
+    total: totalAmount,
+    used: totalUsed,
+    remaining: totalUnused,
+    usageRatio
+  }
+})
+
+const licenseStatusTotal = computed(() => {
+  const stats = overviewData.value?.license_stats ?? {}
+  const valid = stats.valid_amount ?? 0
+  const exhausted = stats.exhausted_amount ?? 0
+  const inactive = stats.inactive_amount ?? 0
+  return valid + exhausted + inactive
+})
+
+const licenseStatusChartData = computed(() => {
+  const stats = overviewData.value?.license_stats ?? {}
+  const valid = stats.valid_amount ?? 0
+  const exhausted = stats.exhausted_amount ?? 0
+  const inactive = stats.inactive_amount ?? 0
+  return {
+    labels: [
+      t('hyperbdrDashboard.validLicense'),
+      t('hyperbdrDashboard.exhaustedLicense'),
+      t('hyperbdrDashboard.inactiveLicense')
+    ],
+    datasets: [
+      {
+        data: [valid, exhausted, inactive],
+        backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
+        borderColor: ['#10b981', '#ef4444', '#94a3b8'],
+        borderWidth: 1
+      }
+    ]
+  }
+})
+
+const licenseStatusChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  cutout: '65%',
+  plugins: {
+    legend: {
+      display: false
+    },
+    tooltip: {
+      backgroundColor: 'white',
+      titleColor: '#334155',
+      bodyColor: '#64748b',
+      borderColor: '#e2e8f0',
+      borderWidth: 1,
+      padding: 12,
+      cornerRadius: 12,
+      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'
+    }
+  }
+}
+
 // ─── KPI ──────────────────────────────────────────────────────────────────────
 const dynamicKPIS = computed(() => {
   const tenants = sceneFilteredTenants.value
@@ -1433,35 +1529,6 @@ const dynamicKPIS = computed(() => {
       progressSuffix: ')',
       trendValue: `${compareLabel} ${conversionDiffText}${t('hyperbdrDashboard.days')}`,
       descriptionKey: 'hyperbdrDashboard.conversionCycleDesc'
-    },
-    {
-      key: 'totalLicenses',
-      labelKey: 'hyperbdrDashboard.totalLicenses',
-      value: overviewData.value?.license_stats?.total ?? 0,
-      type: 'default',
-      trend: null,
-      trendValue: null,
-      descriptionKey: 'hyperbdrDashboard.totalLicensesDesc'
-    },
-    {
-      key: 'licenseUsage',
-      labelKey: 'hyperbdrDashboard.licenseUsage',
-      value: `${overviewData.value?.license_stats?.usage_ratio ?? 0}%`,
-      type: 'accent',
-      progress: overviewData.value?.license_stats?.usage_ratio ?? 0,
-      progressLabelKey: 'hyperbdrDashboard.licenseUsage',
-      trend: null,
-      trendValue: null,
-      descriptionKey: 'hyperbdrDashboard.licenseUsageDesc'
-    },
-    {
-      key: 'licenseRemaining',
-      labelKey: 'hyperbdrDashboard.licenseRemaining',
-      value: overviewData.value?.license_stats?.total_unused ?? 0,
-      type: 'secondary',
-      trend: null,
-      trendValue: null,
-      descriptionKey: 'hyperbdrDashboard.licenseRemainingDesc'
     }
   ]
 })

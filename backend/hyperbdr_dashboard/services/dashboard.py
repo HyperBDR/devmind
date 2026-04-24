@@ -16,7 +16,7 @@ from calendar import monthrange
 from collections import defaultdict
 from datetime import date
 
-from django.db.models import IntegerField, Sum
+from django.db.models import Count, IntegerField, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -93,51 +93,44 @@ def _is_poc(tenant: Tenant, licenses: list[dict]) -> bool:
     return _classify_tenant(tenant, licenses)["tenant_type"] == "poc"
 
 
-def _build_dashboard_stats():
-    """Return raw counts and aggregates from hyperbdr_dashboard models."""
-    tenant_qs = Tenant.objects.filter(data_source__is_active=True)
-    license_qs = License.objects.filter(data_source__is_active=True).select_related("tenant")
-    host_qs = Host.objects.filter(data_source__is_active=True)
-
-    total_tenants = tenant_qs.count()
-    active_data_sources = DataSource.objects.filter(is_active=True).count()
-
-    license_agg = license_qs.aggregate(
-        total_amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField()),
-        total_used=Coalesce(Sum("total_used"), 0, output_field=IntegerField()),
-    )
-
-    return {
-        "total_tenants": total_tenants,
-        "active_data_sources": active_data_sources,
-        "total_hosts": host_qs.count(),
-        "total_licenses": license_qs.count(),
-        "license_agg": license_agg,
-    }
-
-
 def _build_license_stats_summary() -> dict:
     """Return global license aggregates for the overview endpoint."""
     license_qs = License.objects.filter(data_source__is_active=True)
-    agg = license_qs.aggregate(
+    base = license_qs.aggregate(
         total_amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField()),
         total_used=Coalesce(Sum("total_used"), 0, output_field=IntegerField()),
         total_unused=Coalesce(Sum("total_unused"), 0, output_field=IntegerField()),
         total=Count("id"),
     )
-    total_amount = agg["total_amount"] or 0
-    total_used = agg["total_used"] or 0
+    total_amount = base["total_amount"] or 0
+    total_used = base["total_used"] or 0
     usage_ratio = round((total_used / total_amount) * 100, 2) if total_amount > 0 else 0.0
+    valid_amount = license_qs.filter(
+        total_unused__gt=0, start_at__lte=timezone.now()
+    ).aggregate(
+        amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField())
+    )["amount"] or 0
+    exhausted_amount = license_qs.filter(
+        total_unused__lte=0, start_at__lte=timezone.now()
+    ).aggregate(
+        amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField())
+    )["amount"] or 0
+    inactive_amount = license_qs.filter(
+        start_at__gt=timezone.now()
+    ).aggregate(
+        amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField())
+    )["amount"] or 0
     return {
-        "total": agg["total"] or 0,
+        "total": base["total"] or 0,
         "total_amount": total_amount,
         "total_used": total_used,
-        "total_unused": agg["total_unused"] or 0,
+        "total_unused": base["total_unused"] or 0,
         "usage_ratio": usage_ratio,
         "dr_count": license_qs.filter(scene="dr").count(),
         "migration_count": license_qs.filter(scene="migration").count(),
-        "valid_count": license_qs.filter(total_unused__gt=0).count(),
-        "exhausted_count": license_qs.filter(total_unused__lte=0).count(),
+        "valid_amount": valid_amount,
+        "exhausted_amount": exhausted_amount,
+        "inactive_amount": inactive_amount,
     }
 
 
@@ -389,24 +382,31 @@ def build_hyperbdr_dashboard_overview(year: int | None = None, month: int | None
     return {
         "kpis": _build_kpis_from_tenants(filtered_tenants, licenses_by_tenant),
         "license_stats": license_stats,
-        "focus_cards": _build_focus_cards_from_tenants(filtered_tenants, licenses_by_tenant),
-        "distribution": _build_distribution_from_tenants(filtered_tenants, licenses_by_tenant),
+        "focus_cards": _build_focus_cards_from_tenants(
+            filtered_tenants, licenses_by_tenant
+        ),
+        "distribution": _build_distribution_from_tenants(
+            filtered_tenants, licenses_by_tenant
+        ),
         "funnel": _build_funnel_from_tenants(filtered_tenants, licenses_by_tenant),
-        "tenant_table": _build_tenant_rows_from_tenants(filtered_tenants, licenses_by_tenant),
+        "tenant_table": _build_tenant_rows_from_tenants(
+            filtered_tenants, licenses_by_tenant
+        ),
     }
 
 
 def _compute_period_range(year: int | None, month: int | None):
     """Return (period_start, period_end) date tuple for filtering."""
+    today = timezone.now().date()
     if year is None:
         return None, None
     if month:
         _, last_day = monthrange(year, month)
         period_start = date(year, month, 1)
-        period_end = date(year, month, last_day)
+        period_end = min(date(year, month, last_day), today)
     else:
         period_start = date(year, 1, 1)
-        period_end = date(year, 12, 31)
+        period_end = min(date(year, 12, 31), today)
     return period_start, period_end
 
 
@@ -421,7 +421,7 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
 
     if year is not None:
         start_date = date(year, 1, 1)
-        end_date = date(year, 12, 31)
+        end_date = min(date(year, 12, 31), today)
     else:
         months_ago_11 = date(today.year, today.month, 1)
         for _ in range(11):
@@ -510,7 +510,6 @@ def build_hyperbdr_dashboard_trends(days: int = 30) -> dict:
     longitudinal history. Future versions can query CollectionTask records
     over time for a proper trend chart.
     """
-    stats = _build_dashboard_stats()
     tenants_for_dist = list(Tenant.objects.filter(data_source__is_active=True))
     licenses_for_dist = _prefetch_licenses(tenants_for_dist)
     dist = _build_distribution_from_tenants(tenants_for_dist, licenses_for_dist)

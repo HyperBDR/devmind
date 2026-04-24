@@ -1,7 +1,7 @@
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 from requests.exceptions import HTTPError
@@ -257,7 +257,14 @@ class HyperBDRClient:
 def parse_remote_datetime(value):
     if not value:
         return None
+    dt_str = str(value).replace("Z", "+00:00")
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone(timezone.utc)
+        dt = datetime.fromisoformat(dt_str)
     except Exception:
         return None
+    if dt.tzinfo is None:
+        # No timezone info: assume CST (UTC+8) from HyperBDR API
+        dt = dt.replace(tzinfo=timezone(timedelta(hours=8)))
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt
