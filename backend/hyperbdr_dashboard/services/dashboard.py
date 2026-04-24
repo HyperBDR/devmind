@@ -65,7 +65,8 @@ def _classify_tenant(tenant: Tenant, licenses: list[dict]) -> dict:
     total_amount = sum(lic.get("total_amount") or 0 for lic in licenses)
     total_used = sum(lic.get("total_used") or 0 for lic in licenses)
 
-    utilization = round((total_used / total_amount) * 100, 2) if total_amount > 0 else 0.0
+    utilization = round((total_used / total_amount) * 100,
+                        2) if total_amount > 0 else 0.0
 
     expire_dates = [
         lic.get("expire_at")
@@ -97,14 +98,17 @@ def _build_license_stats_summary() -> dict:
     """Return global license aggregates for the overview endpoint."""
     license_qs = License.objects.filter(data_source__is_active=True)
     base = license_qs.aggregate(
-        total_amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField()),
+        total_amount=Coalesce(Sum("total_amount"), 0,
+                              output_field=IntegerField()),
         total_used=Coalesce(Sum("total_used"), 0, output_field=IntegerField()),
-        total_unused=Coalesce(Sum("total_unused"), 0, output_field=IntegerField()),
+        total_unused=Coalesce(Sum("total_unused"), 0,
+                              output_field=IntegerField()),
         total=Count("id"),
     )
     total_amount = base["total_amount"] or 0
     total_used = base["total_used"] or 0
-    usage_ratio = round((total_used / total_amount) * 100, 2) if total_amount > 0 else 0.0
+    usage_ratio = round((total_used / total_amount) * 100,
+                        2) if total_amount > 0 else 0.0
     valid_amount = license_qs.filter(
         total_unused__gt=0, start_at__lte=timezone.now()
     ).aggregate(
@@ -134,11 +138,41 @@ def _build_license_stats_summary() -> dict:
     }
 
 
+def _build_license_stats_summary() -> dict:
+    """Return global license aggregates for the overview endpoint."""
+    license_qs = License.objects.filter(data_source__is_active=True)
+    agg = license_qs.aggregate(
+        total_amount=Coalesce(Sum("total_amount"), 0,
+                              output_field=IntegerField()),
+        total_used=Coalesce(Sum("total_used"), 0, output_field=IntegerField()),
+        total_unused=Coalesce(Sum("total_unused"), 0,
+                              output_field=IntegerField()),
+        total=Count("id"),
+    )
+    total_amount = agg["total_amount"] or 0
+    total_used = agg["total_used"] or 0
+    usage_ratio = round((total_used / total_amount) * 100,
+                        2) if total_amount > 0 else 0.0
+    return {
+        "total": agg["total"] or 0,
+        "total_amount": total_amount,
+        "total_used": total_used,
+        "total_unused": agg["total_unused"] or 0,
+        "usage_ratio": usage_ratio,
+        "dr_count": license_qs.filter(scene="dr").count(),
+        "migration_count": license_qs.filter(scene="migration").count(),
+        "valid_count": license_qs.filter(total_unused__gt=0).count(),
+        "exhausted_count": license_qs.filter(total_unused__lte=0).count(),
+    }
+
+
 def _build_kpis_from_tenants(tenants: list, licenses_by_tenant: dict) -> list[dict]:
-    poc_count = sum(1 for t in tenants if _is_poc(t, licenses_by_tenant.get(t.id, [])))
+    poc_count = sum(1 for t in tenants if _is_poc(
+        t, licenses_by_tenant.get(t.id, [])))
     official_count = len(tenants) - poc_count
     total = poc_count + official_count
-    conversion_rate_val = round((official_count / total) * 100, 2) if total > 0 else 0.0
+    conversion_rate_val = round(
+        (official_count / total) * 100, 2) if total > 0 else 0.0
 
     return [
         {
@@ -236,7 +270,8 @@ def _build_focus_cards_from_tenants(tenants: list, licenses_by_tenant: dict) -> 
 
 def _build_distribution_from_tenants(tenants: list, licenses_by_tenant: dict) -> dict:
     """PoC vs official breakdown with utilization distribution."""
-    poc_count = sum(1 for t in tenants if _is_poc(t, licenses_by_tenant.get(t.id, [])))
+    poc_count = sum(1 for t in tenants if _is_poc(
+        t, licenses_by_tenant.get(t.id, [])))
     official_count = len(tenants) - poc_count
     total = poc_count + official_count
 
@@ -276,7 +311,8 @@ def _build_funnel_from_tenants(tenants: list, licenses_by_tenant: dict) -> dict:
     """
     Conversion funnel: total -> trialed (PoC) -> converted (official).
     """
-    poc_count = sum(1 for t in tenants if _is_poc(t, licenses_by_tenant.get(t.id, [])))
+    poc_count = sum(1 for t in tenants if _is_poc(
+        t, licenses_by_tenant.get(t.id, [])))
     official_count = len(tenants) - poc_count
     total = poc_count + official_count
 
@@ -371,7 +407,8 @@ def build_hyperbdr_dashboard_overview(year: int | None = None, month: int | None
                 expire_at__lte=period_end,
             ).values_list("tenant_id", flat=True)
         )
-        filtered_tenants = [t for t in all_tenants if t.id in period_tenant_ids]
+        filtered_tenants = [
+            t for t in all_tenants if t.id in period_tenant_ids]
     else:
         filtered_tenants = all_tenants
 
@@ -428,7 +465,8 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
             if months_ago_11.month == 1:
                 months_ago_11 = date(months_ago_11.year - 1, 12, 1)
             else:
-                months_ago_11 = date(months_ago_11.year, months_ago_11.month - 1, 1)
+                months_ago_11 = date(months_ago_11.year,
+                                     months_ago_11.month - 1, 1)
         start_date = months_ago_11
         end_date = today
 
@@ -467,7 +505,8 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
                 continue
             expire_date = expire_at.date()
             if start_date <= expire_date <= end_date and expire_date <= today:
-                churned_by_month[(expire_date.year, expire_date.month)].add(tenant.id)
+                churned_by_month[(expire_date.year, expire_date.month)].add(
+                    tenant.id)
 
     cumulative = 0
     official_cumulative = 0
@@ -477,7 +516,8 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
         monthly_official = official_by_month.get(key, 0)
         cumulative += monthly_count
         official_cumulative += monthly_official
-        conv_rate = round((official_cumulative / cumulative) * 100, 2) if cumulative > 0 else 0.0
+        conv_rate = round((official_cumulative / cumulative)
+                          * 100, 2) if cumulative > 0 else 0.0
         months.append({
             "year": key[0],
             "month": key[1],
@@ -489,10 +529,12 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
             "conversion_rate": conv_rate,
         })
 
-    poc_total = sum(1 for t in all_tenants if _is_poc(t, licenses_all.get(t.id, [])))
+    poc_total = sum(1 for t in all_tenants if _is_poc(
+        t, licenses_all.get(t.id, [])))
     official_total = len(all_tenants) - poc_total
     total = poc_total + official_total
-    global_conv_rate = round((official_total / total) * 100, 2) if total > 0 else 0.0
+    global_conv_rate = round((official_total / total)
+                             * 100, 2) if total > 0 else 0.0
 
     return {
         "period_year": year,
@@ -512,7 +554,8 @@ def build_hyperbdr_dashboard_trends(days: int = 30) -> dict:
     """
     tenants_for_dist = list(Tenant.objects.filter(data_source__is_active=True))
     licenses_for_dist = _prefetch_licenses(tenants_for_dist)
-    dist = _build_distribution_from_tenants(tenants_for_dist, licenses_for_dist)
+    dist = _build_distribution_from_tenants(
+        tenants_for_dist, licenses_for_dist)
     return {
         "period_days": days,
         "snapshot_at": timezone.now().isoformat(),

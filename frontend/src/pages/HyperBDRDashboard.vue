@@ -1529,6 +1529,35 @@ const dynamicKPIS = computed(() => {
       progressSuffix: ')',
       trendValue: `${compareLabel} ${conversionDiffText}${t('hyperbdrDashboard.days')}`,
       descriptionKey: 'hyperbdrDashboard.conversionCycleDesc'
+    },
+    {
+      key: 'totalLicenses',
+      labelKey: 'hyperbdrDashboard.totalLicenses',
+      value: overviewData.value?.license_stats?.total ?? 0,
+      type: 'default',
+      trend: null,
+      trendValue: null,
+      descriptionKey: 'hyperbdrDashboard.totalLicensesDesc'
+    },
+    {
+      key: 'licenseUsage',
+      labelKey: 'hyperbdrDashboard.licenseUsage',
+      value: `${overviewData.value?.license_stats?.usage_ratio ?? 0}%`,
+      type: 'accent',
+      progress: overviewData.value?.license_stats?.usage_ratio ?? 0,
+      progressLabelKey: 'hyperbdrDashboard.licenseUsage',
+      trend: null,
+      trendValue: null,
+      descriptionKey: 'hyperbdrDashboard.licenseUsageDesc'
+    },
+    {
+      key: 'licenseRemaining',
+      labelKey: 'hyperbdrDashboard.licenseRemaining',
+      value: overviewData.value?.license_stats?.total_unused ?? 0,
+      type: 'secondary',
+      trend: null,
+      trendValue: null,
+      descriptionKey: 'hyperbdrDashboard.licenseRemainingDesc'
     }
   ]
 })
