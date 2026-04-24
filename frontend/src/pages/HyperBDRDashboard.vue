@@ -587,7 +587,7 @@
           </div>
         </div>
 
-        <!-- License Status Pie Chart -->
+        <!-- License Status Distribution -->
         <div class="overflow-hidden rounded-lg border border-slate-100 bg-white p-6 shadow-sm">
           <div class="mb-6">
             <div class="flex items-center gap-2">
@@ -599,9 +599,14 @@
               {{ t('hyperbdrDashboard.licenseStatusDesc') }}
             </p>
           </div>
+
           <div class="flex items-center gap-6">
-            <div class="w-40 h-40 flex-shrink-0">
-              <Chart type="doughnut" :data="licenseStatusChartData" :options="licenseStatusChartOptions" />
+            <div class="w-40 h-40 flex-shrink-0 relative">
+              <Doughnut :data="licenseStatusChartData" :options="licenseStatusChartOptions" />
+              <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <span class="text-2xl font-black text-slate-800">{{ licenseStats.total }}</span>
+                <span class="text-[10px] text-slate-400">Total</span>
+              </div>
             </div>
             <div class="flex flex-col gap-3 flex-1">
               <div class="flex items-center justify-between">
@@ -609,21 +614,21 @@
                   <div class="h-3 w-3 rounded-full bg-emerald-500" />
                   <span class="text-xs font-medium text-slate-600">{{ t('hyperbdrDashboard.validLicense') }}</span>
                 </div>
-                <span class="text-sm font-bold text-slate-800">{{ overviewData?.license_stats?.valid_amount ?? 0 }}</span>
+                <span class="text-sm font-bold text-slate-800">{{ licenseStats.valid }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <div class="h-3 w-3 rounded-full bg-red-500" />
                   <span class="text-xs font-medium text-slate-600">{{ t('hyperbdrDashboard.exhaustedLicense') }}</span>
                 </div>
-                <span class="text-sm font-bold text-slate-800">{{ overviewData?.license_stats?.exhausted_amount ?? 0 }}</span>
+                <span class="text-sm font-bold text-slate-800">{{ licenseStats.exhausted }}</span>
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-2">
                   <div class="h-3 w-3 rounded-full bg-slate-400" />
                   <span class="text-xs font-medium text-slate-600">{{ t('hyperbdrDashboard.inactiveLicense') }}</span>
                 </div>
-                <span class="text-sm font-bold text-slate-800">{{ overviewData?.license_stats?.inactive_amount ?? 0 }}</span>
+                <span class="text-sm font-bold text-slate-800">{{ licenseStats.inactive }}</span>
               </div>
             </div>
           </div>
@@ -1247,7 +1252,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { Chart } from 'vue-chartjs'
+import { Chart, Doughnut } from 'vue-chartjs'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -1371,34 +1376,18 @@ watch([selectedYear, selectedMonth], () => {
   fetchTrends()
 })
 
-// ─── License Panel (merged from 3 separate KPI cards) ────────────────────────
-const licensePanel = computed(() => {
+// ─── License Stats ─────────────────────────────────────────────────────────────
+const licenseStats = computed(() => {
   const stats = overviewData.value?.license_stats ?? {}
-  const totalAmount = stats.total_amount ?? 0
-  const totalUsed = stats.total_used ?? 0
-  const totalUnused = stats.total_unused ?? 0
-  const usageRatio = stats.usage_ratio ?? 0
   return {
-    total: totalAmount,
-    used: totalUsed,
-    remaining: totalUnused,
-    usageRatio
+    valid: stats.valid_amount ?? 0,
+    exhausted: stats.exhausted_amount ?? 0,
+    inactive: stats.inactive_amount ?? 0,
+    total: (stats.valid_amount ?? 0) + (stats.exhausted_amount ?? 0) + (stats.inactive_amount ?? 0)
   }
 })
 
-const licenseStatusTotal = computed(() => {
-  const stats = overviewData.value?.license_stats ?? {}
-  const valid = stats.valid_amount ?? 0
-  const exhausted = stats.exhausted_amount ?? 0
-  const inactive = stats.inactive_amount ?? 0
-  return valid + exhausted + inactive
-})
-
 const licenseStatusChartData = computed(() => {
-  const stats = overviewData.value?.license_stats ?? {}
-  const valid = stats.valid_amount ?? 0
-  const exhausted = stats.exhausted_amount ?? 0
-  const inactive = stats.inactive_amount ?? 0
   return {
     labels: [
       t('hyperbdrDashboard.validLicense'),
@@ -1407,7 +1396,7 @@ const licenseStatusChartData = computed(() => {
     ],
     datasets: [
       {
-        data: [valid, exhausted, inactive],
+        data: [licenseStats.value.valid, licenseStats.value.exhausted, licenseStats.value.inactive],
         backgroundColor: ['#10b981', '#ef4444', '#94a3b8'],
         borderColor: ['#10b981', '#ef4444', '#94a3b8'],
         borderWidth: 1
@@ -1419,7 +1408,7 @@ const licenseStatusChartData = computed(() => {
 const licenseStatusChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
-  cutout: '65%',
+  cutout: '70%',
   plugins: {
     legend: {
       display: false
