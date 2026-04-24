@@ -116,6 +116,31 @@ def _build_dashboard_stats():
     }
 
 
+def _build_license_stats_summary() -> dict:
+    """Return global license aggregates for the overview endpoint."""
+    license_qs = License.objects.filter(data_source__is_active=True)
+    agg = license_qs.aggregate(
+        total_amount=Coalesce(Sum("total_amount"), 0, output_field=IntegerField()),
+        total_used=Coalesce(Sum("total_used"), 0, output_field=IntegerField()),
+        total_unused=Coalesce(Sum("total_unused"), 0, output_field=IntegerField()),
+        total=Count("id"),
+    )
+    total_amount = agg["total_amount"] or 0
+    total_used = agg["total_used"] or 0
+    usage_ratio = round((total_used / total_amount) * 100, 2) if total_amount > 0 else 0.0
+    return {
+        "total": agg["total"] or 0,
+        "total_amount": total_amount,
+        "total_used": total_used,
+        "total_unused": agg["total_unused"] or 0,
+        "usage_ratio": usage_ratio,
+        "dr_count": license_qs.filter(scene="dr").count(),
+        "migration_count": license_qs.filter(scene="migration").count(),
+        "valid_count": license_qs.filter(total_unused__gt=0).count(),
+        "exhausted_count": license_qs.filter(total_unused__lte=0).count(),
+    }
+
+
 def _build_kpis_from_tenants(tenants: list, licenses_by_tenant: dict) -> list[dict]:
     poc_count = sum(1 for t in tenants if _is_poc(t, licenses_by_tenant.get(t.id, [])))
     official_count = len(tenants) - poc_count
@@ -359,8 +384,11 @@ def build_hyperbdr_dashboard_overview(year: int | None = None, month: int | None
 
     licenses_by_tenant = _prefetch_licenses(filtered_tenants)
 
+    license_stats = _build_license_stats_summary()
+
     return {
         "kpis": _build_kpis_from_tenants(filtered_tenants, licenses_by_tenant),
+        "license_stats": license_stats,
         "focus_cards": _build_focus_cards_from_tenants(filtered_tenants, licenses_by_tenant),
         "distribution": _build_distribution_from_tenants(filtered_tenants, licenses_by_tenant),
         "funnel": _build_funnel_from_tenants(filtered_tenants, licenses_by_tenant),
