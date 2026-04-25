@@ -885,7 +885,12 @@ def check_alert_for_provider(
         for current_billing in current_billings:
             account_id = current_billing.account_id or ""
 
-            current_cost = Decimal(str(current_billing.total_cost))
+            current_hourly_cost = current_billing.hourly_cost
+            current_cost = (
+                Decimal(str(current_hourly_cost))
+                if current_hourly_cost is not None
+                else Decimal("0")
+            )
             current_balance = (
                 Decimal(str(current_billing.balance))
                 if current_billing.balance is not None
@@ -900,8 +905,10 @@ def check_alert_for_provider(
                 current_hour=current_hour,
             )
             if previous_billing is not None:
-                previous_cost = Decimal(str(previous_billing.total_cost))
-            else:
+                previous_hourly_cost = previous_billing.hourly_cost
+                if previous_hourly_cost is not None:
+                    previous_cost = Decimal(str(previous_hourly_cost))
+            if previous_billing is None or previous_cost == Decimal("0"):
                 logger.info(
                     f"Task check_alert_for_provider: "
                     f"No previous billing data found "
@@ -974,7 +981,11 @@ def check_alert_for_provider(
                         continue
 
                 if previous_billing is not None:
-                    previous_cost = Decimal(str(previous_billing.total_cost))
+                    previous_cost = (
+                        Decimal(str(previous_billing.hourly_cost))
+                        if previous_billing.hourly_cost is not None
+                        else previous_cost
+                    )
                     if previous_cost <= 0:
                         logger.info(
                             f"Task check_alert_for_provider: "
