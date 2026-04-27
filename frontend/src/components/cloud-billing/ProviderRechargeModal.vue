@@ -15,24 +15,12 @@
       </div>
 
       <div class="space-y-2">
-        <div
-          class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        <label
+          for="providerRechargeInfo"
+          class="block text-sm font-medium text-gray-700"
         >
-          <label
-            for="providerRechargeInfo"
-            class="block text-sm font-medium text-gray-700"
-          >
-            {{ t('cloudBilling.providers.rechargeInfo') }}
-          </label>
-          <BaseButton
-            variant="outline"
-            size="sm"
-            :loading="syncingRechargeInfo"
-            @click="handleSyncRechargeInfoFromFeishu"
-          >
-            {{ t('cloudBilling.providers.syncRechargeInfoFromFeishu') }}
-          </BaseButton>
-        </div>
+          {{ t('cloudBilling.providers.rechargeInfo') }}
+        </label>
         <p class="text-xs text-gray-500">
           {{ t('cloudBilling.providers.rechargeInfoInputModeHint') }}
         </p>
@@ -42,7 +30,7 @@
           rows="10"
           :placeholder="t('cloudBilling.providers.rechargeInfoPlaceholder')"
           class="block w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono shadow-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-          style="height: 280px"
+          style="height: 290px"
         />
       </div>
 
@@ -53,11 +41,7 @@
         </label>
         <BaseInput
           v-model="form.submitter_identifier"
-          type="text"
-          :placeholder="
-            t('cloudBilling.providers.submitterIdentifierPlaceholder')
-          "
-          required
+          :placeholder="t('cloudBilling.providers.submitterIdentifierPlaceholder')"
         />
         <p class="text-xs text-gray-500">
           {{ t('cloudBilling.providers.submitterIdentifierRequiredHint') }}
@@ -296,7 +280,6 @@ const { showSuccess, showError, showWarning } = useToast()
 
 const saving = ref(false)
 const submitting = ref(false)
-const syncingRechargeInfo = ref(false)
 const loadingRecords = ref(false)
 const showSubmitDialog = ref(false)
 const approvals = ref([])
@@ -345,7 +328,7 @@ const RECHARGE_INFO_FIELD_LABELS = {
   expected_date: '期望到账时间',
   payment_note: '付款说明',
   remark: '备注',
-  'payee.type': '收款类型',
+  'payee.type': '账户类型',
   'payee.account_name': '户名',
   'payee.account_number': '账号',
   'payee.bank_name': '银行',
@@ -377,7 +360,7 @@ const RECHARGE_INFO_TEXT_KEY_MAP = {
   remark: 'remark',
   备注: 'remark',
   'payee.type': 'payee.type',
-  收款类型: 'payee.type',
+  账户类型: 'payee.type',
   'payee.account_name': 'payee.account_name',
   户名: 'payee.account_name',
   'payee.account_number': 'payee.account_number',
@@ -393,7 +376,7 @@ const RECHARGE_INFO_TEXT_KEY_MAP = {
 }
 
 const PAYEE_DETAIL_PREFIXES = [
-  '收款类型',
+  '账户类型',
   '收款账户类型',
   '账户类型',
   '户名',
@@ -797,38 +780,6 @@ const hydrateProviderDetail = async () => {
   } catch (error) {
     console.error('Failed to load provider detail for recharge modal:', error)
     syncForm()
-  }
-}
-
-const handleSyncRechargeInfoFromFeishu = async () => {
-  if (!props.provider?.id) return
-  syncingRechargeInfo.value = true
-  try {
-    const response = await cloudBillingApi.syncProviderRechargeInfoFromFeishu(
-      props.provider.id
-    )
-    const data = extractResponseData(response)
-    if (!data?.success) {
-      showWarning(
-        data?.message || t('cloudBilling.providers.syncRechargeInfoNotFound')
-      )
-      return
-    }
-    form.recharge_info = formatRechargeInfoText(
-      data?.request_payload || data?.recharge_info || '',
-      { includeAmount: false }
-    )
-    showSuccess(t('cloudBilling.providers.syncRechargeInfoSuccess'))
-  } catch (error) {
-    console.error('Failed to sync recharge info from Feishu:', error)
-    showError(
-      extractErrorMessage(
-        error,
-        t('cloudBilling.providers.syncRechargeInfoError')
-      )
-    )
-  } finally {
-    syncingRechargeInfo.value = false
   }
 }
 

@@ -19,7 +19,6 @@ from .models import (
 )
 from .services.recharge_approval import (
     CLOUD_TYPE_LABELS,
-    extract_recharge_history_lookup,
     prepare_recharge_request_payload,
     serialize_recharge_request_payload,
 )
@@ -295,11 +294,6 @@ class CloudProviderSerializer(serializers.ModelSerializer):
             return text
 
         cloud_type = ""
-        try:
-            provider_lookup = extract_recharge_history_lookup(provider)
-            cloud_type = str(provider_lookup.get("cloud_type") or "").strip()
-        except Exception:
-            cloud_type = ""
         if not cloud_type:
             provider_config = getattr(provider, "config", {}) or {}
             recharge_cfg = provider_config.get("recharge_approval") or {}

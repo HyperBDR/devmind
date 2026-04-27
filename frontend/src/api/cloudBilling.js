@@ -73,11 +73,8 @@ export const cloudBillingApi = {
     return response
   },
 
-  async syncProviderRechargeInfoFromFeishu(id, data = {}) {
-    const response = await apiClient.post(
-      `/v1/cloud-billing/providers/${id}/sync-recharge-info-from-feishu/`,
-      data
-    )
+  async getFeishuUsers() {
+    const response = await apiClient.get('/v1/cloud-billing/feishu-users/')
     return response
   },
 

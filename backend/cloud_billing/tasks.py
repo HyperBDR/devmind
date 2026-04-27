@@ -61,7 +61,6 @@ from .services.recharge_approval import (
     check_ongoing_recharge_approval_submission,
     create_recharge_approval_event,
     execute_recharge_approval_agent,
-    infer_recharge_info_from_history,
     parse_recharge_info,
     normalize_feishu_status,
     resolve_submitter_identity,
@@ -1289,6 +1288,7 @@ def submit_recharge_approval(
     """
     task_id = current_task.request.id if current_task else None
     log_collector = TaskLogCollector(max_records=500)
+    approval_code = os.getenv("FEISHU_APPROVAL_CODE", "").strip()
 
     def task_log_metadata(**extra):
         metadata = {
@@ -1375,59 +1375,24 @@ def submit_recharge_approval(
     raw_recharge_info = str(
         recharge_info_override or provider.recharge_info or ""
     ).strip()
-    approval_code = str(os.getenv("FEISHU_APPROVAL_CODE", "")).strip()
     if not raw_recharge_info:
-        inferred_recharge_info = {}
-        if approval_code:
-            try:
-                inferred_recharge_info = infer_recharge_info_from_history(
-                    provider,
-                    approval_code=approval_code,
-                )
-            except Exception as exc:
-                log_collector.warning(
-                    "Failed to infer recharge info from Feishu history "
-                    f"(error={exc})"
-                )
-        if inferred_recharge_info:
-            raw_recharge_info = json.dumps(inferred_recharge_info, ensure_ascii=False)
-            log_collector.info(
-                "Provider recharge info was inferred from Feishu history "
-                f"(length={len(raw_recharge_info)})"
-            )
-            if task_id:
-                TaskTracker.update_task_status(
-                    task_id=task_id,
-                    status=TaskStatus.STARTED,
-                    metadata=task_log_metadata(
-                        progress_step="recharge_info_inferred",
-                        progress_message="Recharge info inferred from Feishu history.",
-                    ),
-                )
-        else:
-            result = {
-                "success": False,
-                "reason": "recharge_history_not_found" if approval_code else "missing_recharge_info",
-            }
-            log_collector.error(
-                "Provider recharge info is missing and no reusable Feishu "
-                "history record could be found."
-            )
-            if task_id:
-                TaskTracker.update_task_status(
-                    task_id=task_id,
-                    status=TaskStatus.FAILURE,
-                    result=result,
-                    error=result["reason"],
-                    metadata=task_log_metadata(
-                        progress_step="validate_recharge_info",
-                        progress_message=(
-                            "Provider recharge info is missing and no reusable "
-                            "Feishu history record could be found."
-                        ),
+        result = {
+            "success": False,
+            "reason": "missing_recharge_info",
+        }
+        log_collector.error("Provider recharge info is missing.")
+        if task_id:
+            TaskTracker.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.FAILURE,
+                result=result,
+                error=result["reason"],
+                metadata=task_log_metadata(
+                    progress_step="validate_recharge_info",
+                    progress_message="Provider recharge info is missing.",
                 ),
             )
-            return result
+        return result
 
     if trigger_source == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT:
         try:

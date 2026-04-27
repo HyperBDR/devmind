@@ -207,3 +207,22 @@ class RechargeApprovalFeishuCallbackView(APIView):
                 # async notification broker is temporarily unavailable.
                 pass
         return Response({"ok": True, "record_id": record.id, "status": record.status})
+
+
+class FeishuUserListView(APIView):
+    """Return a list of Feishu users for dropdown selection."""
+
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["cloud-billing"],
+        summary="List Feishu users",
+        description="Return all users from Feishu Contact API for submitter selection dropdown.",
+        responses={200: {"type": "object"}},
+    )
+    def get(self, request):
+        from ..services.recharge_approval import list_feishu_users
+
+        users = list_feishu_users()
+        return Response({"users": users})
+

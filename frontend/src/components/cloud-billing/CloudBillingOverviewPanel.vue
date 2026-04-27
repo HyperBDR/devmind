@@ -3016,7 +3016,7 @@ function extractRechargeInfoDisplayObject(source) {
     payment_note: source.payment_note || source.付款说明 || '',
     remark: source.remark || source.备注 || '',
     payee: {
-      type: payee.type || payee.收款类型 || '',
+      type: payee.type || payee.账户类型 || '',
       account_name: payee.account_name || payee.户名 || '',
       account_number: payee.account_number || payee.账号 || '',
       bank_name: payee.bank_name || payee.银行 || '',
@@ -3127,7 +3127,7 @@ const RECHARGE_INFO_LABEL_MAP = {
   付款说明: '付款说明',
   remark: '备注',
   备注: '备注',
-  'payee.type': '收款类型',
+  'payee.type': '账户类型',
   'payee.account_name': '户名',
   'payee.account_number': '账号',
   'payee.bank_name': '银行',

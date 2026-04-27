@@ -80,7 +80,7 @@ RECHARGE_INFO_KEY_MAP = {
     "remark": "remark",
     "备注": "remark",
     "payee.type": "payee.type",
-    "收款类型": "payee.type",
+    "账户类型": "payee.type",
     "账户类型": "payee.type",
     "收款账户类型": "payee.type",
     "payee.account_name": "payee.account_name",
@@ -677,7 +677,7 @@ def build_notification_message_from_payload(
         if not remark_text:
             return True
         allowed_keys = {
-            "收款类型",
+            "账户类型",
             "收款账户类型",
             "户名",
             "账号",
@@ -717,7 +717,7 @@ def build_notification_message_from_payload(
             receipt_lines.append(f"  - {label_text}: {value_text}")
 
         if isinstance(payee, dict):
-            add_line("收款类型", payee.get("type"))
+            add_line("账户类型", payee.get("type"))
             add_line("户名", payee.get("account_name"))
             add_line("账号", payee.get("account_number"))
             add_line("银行", payee.get("bank_name"))
@@ -732,9 +732,8 @@ def build_notification_message_from_payload(
             return receipt_lines
 
         label_map = {
-            "收款类型": "收款类型",
-            "收款账户类型": "收款类型",
-            "账户类型": "收款类型",
+            "账户类型": "账户类型",
+            "收款账户类型": "账户类型",
             "户名": "户名",
             "账号": "账号",
             "银行": "银行",
@@ -773,7 +772,6 @@ def build_notification_message_from_payload(
     )
     lines.append(f"{fmt_label('付款公司')}{sep}{fmt_value(payload.get('payment_company'))}")
     lines.append(f"{fmt_label('支付方式')}{sep}{fmt_value(payload.get('payment_way'))}")
-    lines.append(f"{fmt_label('付款类型')}{sep}{fmt_value(payload.get('payment_type'))}")
     lines.append(f"{fmt_label('付款方式')}{sep}{fmt_value(payload.get('remit_method'))}")
     expected_date = str(payload.get("expected_date") or "").strip()
     if expected_date:
@@ -876,9 +874,6 @@ def _extract_script_stdout_from_error(error_text: str) -> str:
 FEISHU_AUTH_URL = "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal"
 FEISHU_USER_QUERY_URL = "https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id?user_id_type=user_id"
 FEISHU_APPROVAL_BASE_URL = "https://www.feishu.cn"
-FEISHU_INSTANCE_DETAIL_URL = (
-    f"{FEISHU_APPROVAL_BASE_URL}/approval/openapi/v2/instance/get"
-)
 
 
 def _get_feishu_config() -> Dict[str, str]:
@@ -990,84 +985,188 @@ def _get_feishu_access_token() -> Optional[str]:
     return None
 
 
-def _request_feishu_approval_instance_detail(
-    approval_code: str,
-    instance_code: str,
-    *,
-    approval_base_url: str = FEISHU_APPROVAL_BASE_URL,
-) -> Optional[Dict[str, Any]]:
+FEISHU_LIST_USERS_URL = "https://open.feishu.cn/open-apis/contact/v3/users?user_id_type=user_id&department_id=0&page_size=50"
+FEISHU_LIST_USERS_SIMPLE_URL = "https://open.feishu.cn/open-apis/contact/v3/users/simple?user_id_type=user_id&department_id=0&page_size=50"
+
+
+def list_feishu_users() -> List[Dict[str, str]]:
+    """
+    List all users from Feishu Contact API (with pagination).
+
+    Tries the full /users endpoint first (name, email, mobile if permissions allow),
+    then falls back to /users/simple (user_id, name only, no extra permissions).
+    """
     token = _get_feishu_access_token()
     if not token:
-        return None
+        logger.warning("Cannot list Feishu users: no access token.")
+        return []
 
-    approval_code = str(approval_code or "").strip()
-    instance_code = str(instance_code or "").strip()
-    if not approval_code or not instance_code:
-        return None
+    import urllib.request
+    import urllib.error
 
-    try:
-        import urllib.request
-        import urllib.error
+    users = []
 
-        base_url = str(approval_base_url or FEISHU_APPROVAL_BASE_URL).rstrip("/")
-        url = f"{base_url}/approval/openapi/v2/instance/get"
-        payload = json.dumps(
-            {
-                "approval_code": approval_code,
-                "instance_code": instance_code,
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
-        request = urllib.request.Request(
-            url=url,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            body = response.read().decode("utf-8")
-        data = json.loads(body)
-        if data.get("code") != 0:
-            logger.warning(
-                "Feishu instance detail request failed: code=%s, msg=%s, "
-                "approval_code=%s, instance_code=%s",
+    # Try full contact API first
+    result = _fetch_feishu_user_page(token, FEISHU_LIST_USERS_URL)
+    if result is not None:
+        users = result
+
+    # If no users returned (permissions denied / empty), try simple endpoint
+    if not users:
+        logger.info("Full contact API returned no users, trying simple endpoint")
+        result = _fetch_feishu_user_page(token, FEISHU_LIST_USERS_SIMPLE_URL)
+        if result is not None:
+            users = result
+
+    # Populate missing fields from full endpoint to simple results
+    if users and not any(u.get("email") or u.get("mobile") for u in users):
+        logger.info("Simple endpoint used; enriching with full contact data")
+        _enrich_user_details(token, users)
+
+    logger.info("Feishu list users returned %d users", len(users))
+    return users
+
+
+def _fetch_feishu_user_page(token: str, url: str) -> Optional[List[Dict[str, str]]]:
+    """Fetch one page of users from a Feishu contact API endpoint."""
+    import urllib.request
+    import urllib.error
+
+    import_result: Optional[List[Dict[str, str]]] = None
+    base_url = url
+    page_users = []
+
+    while base_url:
+        try:
+            request = urllib.request.Request(
+                url=base_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                method="GET",
+            )
+
+            start_time = time.monotonic()
+            with urllib.request.urlopen(request, timeout=10) as response:
+                body = response.read().decode("utf-8")
+                latency_ms = int((time.monotonic() - start_time) * 1000)
+
+            data = json.loads(body)
+
+            logger.info(
+                "Feishu list users API Response: %dms code=%s msg=%s url=%s",
+                latency_ms,
                 data.get("code"),
                 data.get("msg", ""),
-                approval_code,
-                instance_code,
+                base_url,
             )
-            return None
-        return data
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        logger.warning(
-            "Feishu instance detail HTTP error: status=%s, approval_code=%s, "
-            "instance_code=%s, body=%s",
-            e.code,
-            approval_code,
-            instance_code,
-            body[:500],
-        )
-    except urllib.error.URLError as e:
-        logger.warning(
-            "Feishu instance detail network error: approval_code=%s, "
-            "instance_code=%s, error=%s",
-            approval_code,
-            instance_code,
-            str(e.reason),
-        )
-    except Exception as e:
-        logger.warning(
-            "Feishu instance detail exception: approval_code=%s, "
-            "instance_code=%s, error=%s",
-            approval_code,
-            instance_code,
-            str(e),
-        )
-    return None
+
+            if data.get("code") != 0:
+                logger.warning(
+                    "Feishu list users failed: code=%s, msg=%s, url=%s",
+                    data.get("code"),
+                    data.get("msg", ""),
+                    base_url,
+                )
+                break
+
+            for item in data.get("data", {}).get("items", []):
+                page_users.append({
+                    "user_id": str(item.get("user_id") or "").strip(),
+                    "name": str(item.get("name") or item.get("en_name") or "").strip(),
+                    "email": str(item.get("email") or "").strip(),
+                    "mobile": str(item.get("mobile") or "").strip(),
+                })
+
+            page_data = data.get("data", {})
+            has_more = page_data.get("has_more", False)
+            page_token = page_data.get("page_token")
+            if has_more and page_token:
+                base_url = url.split("?")[0] + (
+                    f"?user_id_type=user_id&department_id=0&page_size=50"
+                    f"&page_token={page_token}"
+                )
+            else:
+                base_url = None
+
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            logger.warning(
+                "Feishu list users HTTP error: status=%s body=%s",
+                e.code,
+                body[:500],
+            )
+            break
+        except urllib.error.URLError as e:
+            logger.warning(
+                "Feishu list users network error: %s",
+                str(e.reason),
+            )
+            break
+        except Exception as e:
+            logger.warning("Feishu list users exception: %s", str(e))
+            break
+        else:
+            import_result = page_users
+
+    return import_result
+
+
+def _enrich_user_details(token: str, users: List[Dict[str, str]]) -> None:
+    """
+    Fetch email/mobile for each user individually from the full contact API.
+    Only populates fields that are currently empty.
+    """
+    import urllib.request
+    import urllib.error
+
+    base_user_url = (
+        FEISHU_LIST_USERS_URL.split("?")[0]
+        + "?user_id_type=user_id&department_id=0&page_size=50"
+    )
+
+    for user in users:
+        if user.get("email") or user.get("mobile"):
+            continue
+
+        try:
+            # Use user search endpoint to get full details per user
+            search_url = (
+                "https://open.feishu.cn/open-apis/contact/v3/users/search?"
+                "user_id_type=user_id&department_id_type=open_department_id"
+                "&page_size=50"
+            )
+            payload = json.dumps({
+                "query_user": {"user_ids": [user["user_id"]]},
+            }).encode("utf-8")
+
+            request = urllib.request.Request(
+                url=search_url,
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                method="POST",
+            )
+
+            with urllib.request.urlopen(request, timeout=10) as response:
+                body = response.read().decode("utf-8")
+
+            data = json.loads(body)
+            if data.get("code") == 0:
+                items = data.get("data", {}).get("items", [])
+                if items:
+                    item = items[0]
+                    if not user.get("name"):
+                        user["name"] = str(
+                            item.get("name") or item.get("en_name") or ""
+                        ).strip()
+                    user["email"] = str(item.get("email") or "").strip()
+                    user["mobile"] = str(item.get("mobile") or "").strip()
+        except Exception:
+            pass
 
 
 def inspect_recharge_account_submission_state(
@@ -1206,120 +1305,6 @@ def check_ongoing_recharge_approval_submission(
         }
     )
     return result
-
-
-def extract_recharge_history_lookup(provider: CloudProvider) -> Dict[str, str]:
-    config = provider.config or {}
-    approval_cfg = config.get("recharge_approval") or {}
-    parsed_recharge_info: Dict[str, Any] = {}
-    if str(provider.recharge_info or "").strip():
-        try:
-            parsed = parse_recharge_info(provider.recharge_info)
-            if isinstance(parsed, dict):
-                parsed_recharge_info = parsed
-        except Exception:
-            parsed_recharge_info = {}
-    cloud_type = str(
-        parsed_recharge_info.get("cloud_type")
-        or approval_cfg.get("cloud_type")
-        or approval_cfg.get("provider_cloud_type")
-        or CLOUD_TYPE_LABELS.get(provider.provider_type, provider.display_name)
-        or ""
-    ).strip()
-    recharge_account = str(
-        parsed_recharge_info.get("recharge_account")
-        or approval_cfg.get("recharge_account")
-        or approval_cfg.get("account")
-        or approval_cfg.get("account_id")
-        or config.get("recharge_account")
-        or config.get("account_id")
-        or config.get("customer_id")
-        or config.get("payer_id")
-        or config.get("billing_account_id")
-        or config.get("project_id")
-        or config.get("app_id")
-        or config.get("username")
-        or config.get("zhipu_username")
-        or config.get("ZHIPU_USERNAME")
-        or ""
-    ).strip()
-    return {"cloud_type": cloud_type, "recharge_account": recharge_account}
-
-
-def infer_recharge_info_from_history(
-    provider: CloudProvider,
-    *,
-    approval_code: str,
-    lookback_days: int = 90,
-    limit: int = 20,
-    approval_base_url: str = FEISHU_APPROVAL_BASE_URL,
-) -> Dict[str, Any]:
-    lookup = extract_recharge_history_lookup(provider)
-    cloud_type = lookup["cloud_type"]
-    recharge_account = lookup["recharge_account"]
-    logger.info(
-        "Inferring recharge info from Feishu history "
-        "(provider_id=%s, approval_code=%s, lookback_days=%s, limit=%s, "
-        "cloud_type=%s, recharge_account=%s)",
-        provider.id,
-        approval_code,
-        lookback_days,
-        limit,
-        cloud_type or "(empty)",
-        recharge_account or "(empty)",
-    )
-    if not cloud_type or not recharge_account:
-        logger.info(
-            "Cannot infer recharge info from history: missing lookup keys "
-            "(provider_id=%s, cloud_type=%s, recharge_account=%s)",
-            provider.id,
-            cloud_type or "(empty)",
-            recharge_account or "(empty)",
-        )
-        return {}
-
-    token = _get_feishu_access_token()
-    if not token:
-        logger.warning("Cannot infer recharge info from history: no Feishu access token.")
-        return {}
-
-    module = _load_skill_script_module("scripts/submit_recharge_approval.py")
-    result = module.find_historical_recharge_request(
-        approval_base_url,
-        token,
-        approval_code,
-        cloud_type,
-        recharge_account,
-        lookback_days,
-        limit,
-    )
-    logger.info(
-        "Feishu history inference result "
-        "(provider_id=%s, found=%s, inspected_count=%s, matched_count=%s, "
-        "source_instance=%s)",
-        provider.id,
-        bool(result.get("found")) if isinstance(result, dict) else False,
-        result.get("inspected_count") if isinstance(result, dict) else None,
-        result.get("matched_count") if isinstance(result, dict) else None,
-        (result.get("source_instance") or {}).get("instance_code")
-        if isinstance(result, dict)
-        else None,
-    )
-    request_data = result.get("request_data") if isinstance(result, dict) else {}
-    if isinstance(request_data, dict) and request_data:
-        request_data = sanitize_recharge_request_payload(request_data)
-        if not request_data:
-            return {}
-        logger.info(
-            "Inferred recharge info from Feishu history "
-            "(provider_id=%s, cloud_type=%s, recharge_account=%s, source_instance=%s)",
-            provider.id,
-            cloud_type,
-            recharge_account,
-            (result.get("source_instance") or {}).get("instance_code") if isinstance(result, dict) else "",
-        )
-        return request_data
-    return {}
 
 
 def _resolve_user_id_by_email_or_mobile(

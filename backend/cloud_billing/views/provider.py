@@ -4,7 +4,6 @@ Views for CloudProvider API.
 
 import logging
 import json
-import os
 import re
 
 from drf_spectacular.utils import extend_schema, extend_schema_view
@@ -23,80 +22,12 @@ from ..serializers import (
 )
 from ..services.provider_service import ProviderService
 from ..services.recharge_approval import (
-    extract_recharge_history_lookup,
-    infer_recharge_info_from_history,
     parse_recharge_info,
-    prepare_recharge_request_payload,
-    sanitize_recharge_request_payload,
-    serialize_recharge_request_payload,
 )
 from ..tasks import submit_recharge_approval
 from ..utils.logging import mask_sensitive_config
 
 logger = logging.getLogger(__name__)
-
-
-# Chinese field name mapping for textarea format (reverse of RECHARGE_INFO_KEY_MAP)
-_PAYLOAD_TO_TEXTAREA_KEYS = {
-    "cloud_type": "公有云类型",
-    "payment_type": "支付类型",
-    "recharge_customer_name": "充值客户名称",
-    "recharge_account": "充值云账号",
-    "payment_way": "支付方式",
-    "payment_company": "付款公司",
-    "remit_method": "付款方式",
-    "amount": "付款金额",
-    "expected_date": "期望到账时间",
-    "remark": "备注",
-    "payment_note": "付款说明",
-}
-_PAYLOAD_PAYEE_TO_TEXTAREA_KEYS = {
-    "type": "收款类型",
-    "account_name": "户名",
-    "account_number": "账号",
-    "bank_name": "银行",
-    "bank_region": "银行地区",
-    "bank_branch": "支行",
-}
-
-
-# Keys to skip when converting Feishu payload to textarea (not recharge fields)
-_SKIP_KEYS = {"payee", "recharge_approval"}
-
-
-def _feishu_payload_to_raw_textarea(payload: dict) -> str:
-    """
-    Convert a Feishu recharge payload dict back to raw textarea format
-    using Chinese field names (matching what users see in the admin textarea).
-
-    Nested objects (payee) are flattened into individual lines.
-    Non-recharge keys are skipped.
-    """
-    lines = []
-
-    def fmt_value(v: object) -> str:
-        if v is None:
-            return ""
-        if isinstance(v, (int, float)):
-            return str(v)
-        return str(v).strip()
-
-    for key, value in payload.items():
-        if key in _SKIP_KEYS or not key:
-            continue
-        if isinstance(value, dict):
-            for sub_key, sub_val in value.items():
-                chinese_name = _PAYLOAD_PAYEE_TO_TEXTAREA_KEYS.get(sub_key, sub_key)
-                val = fmt_value(sub_val)
-                if val:
-                    lines.append(f"{chinese_name}：{val}")
-        else:
-            chinese_name = _PAYLOAD_TO_TEXTAREA_KEYS.get(key, key)
-            val = fmt_value(value)
-            if val:
-                lines.append(f"{chinese_name}：{val}")
-
-    return "\n".join(lines)
 
 
 def get_request_language(request) -> str:
@@ -820,134 +751,6 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
                 "success": True,
                 "message": message,
                 "task_id": task.id,
-            }
-        )
-
-    @extend_schema(
-        tags=["cloud-billing"],
-        summary="Sync provider recharge info from Feishu history",
-        description=(
-            "Infer recharge approval input from historical Feishu approval "
-            "records for the current cloud provider account."
-        ),
-        responses={200: {"type": "object"}},
-    )
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="sync-recharge-info-from-feishu",
-    )
-    def sync_recharge_info_from_feishu(self, request, pk=None):
-        provider = self.get_object()
-        approval_code = str(
-            request.data.get("approval_code") or os.getenv("FEISHU_APPROVAL_CODE", "")
-        ).strip()
-        if not approval_code:
-            return Response(
-                {
-                    "success": False,
-                    "reason": "missing_approval_code",
-                    "message": "FEISHU_APPROVAL_CODE is not configured.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        lookup = extract_recharge_history_lookup(provider)
-        lookback_days = int(request.data.get("lookback_days") or 90)
-        limit = int(request.data.get("limit") or 20)
-        save = bool(request.data.get("save", False))
-        logger.info(
-            "Sync recharge info from Feishu history started "
-            "(provider_id=%s, approval_code=%s, lookback_days=%s, limit=%s, "
-            "save=%s, lookup=%s)",
-            provider.id,
-            approval_code,
-            lookback_days,
-            limit,
-            save,
-            lookup,
-        )
-        try:
-            payload = infer_recharge_info_from_history(
-                provider,
-                approval_code=approval_code,
-                lookback_days=lookback_days,
-                limit=limit,
-            )
-        except Exception as exc:
-            logger.exception(
-                "Failed to sync recharge info from Feishu history "
-                "(provider_id=%s, lookup=%s)",
-                provider.id,
-                lookup,
-            )
-            return Response(
-                {
-                    "success": False,
-                    "reason": "sync_failed",
-                    "message": str(exc),
-                    "lookup": lookup,
-                },
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        if not payload:
-            return Response(
-                {
-                    "success": False,
-                    "reason": "history_not_found",
-                    "message": "No matching Feishu recharge approval history found.",
-                    "lookup": lookup,
-                }
-            )
-
-        payload = sanitize_recharge_request_payload(payload)
-        if not payload:
-            return Response(
-                {
-                    "success": False,
-                    "reason": "history_not_found",
-                    "message": "No matching Feishu recharge approval history found.",
-                    "lookup": lookup,
-                }
-            )
-
-        try:
-            payload = prepare_recharge_request_payload(
-                json.dumps(payload, ensure_ascii=False),
-                cloud_type=str(lookup.get("cloud_type") or "").strip(),
-            )
-        except ValueError as exc:
-            return Response(
-                {
-                    "success": False,
-                    "reason": "invalid_recharge_info",
-                    "message": str(exc),
-                    "lookup": lookup,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        recharge_info_json = serialize_recharge_request_payload(payload)
-
-        if save:
-            provider.recharge_info = recharge_info_json
-            provider.save(update_fields=["recharge_info", "updated_at"])
-            logger.info(
-                "Synced recharge info from Feishu and saved to provider "
-                "(provider_id=%s, cloud_type=%s, save=%s)",
-                provider.id,
-                payload.get("cloud_type"),
-                save,
-            )
-
-        return Response(
-            {
-                "success": True,
-                "recharge_info": recharge_info_json,
-                "request_payload": payload,
-                "lookup": lookup,
-                "source": "feishu_history",
-                "saved": save,
             }
         )
 

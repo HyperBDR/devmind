@@ -164,9 +164,9 @@ def _find_payee_from_history(
         if str(form_map.get("充值云账号") or "").strip() != recharge_account:
             continue
         remark_map = _parse_remark_lines(form_map.get("备注"))
-        # Support both 收款类型 and 收款账户类型 as the type field key
+        # Support both 账户类型 and 收款账户类型 as the type field key
         payee_type = (
-            remark_map.get("收款类型")
+            remark_map.get("账户类型")
             or remark_map.get("收款账户类型")
             or ""
         ).strip()
@@ -239,7 +239,7 @@ def _form_list_to_name_map(form_list: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def _build_remark(payee: Dict[str, Any]) -> str:
     lines = [
-        f"收款类型：{payee.get('type', '')}",
+        f"账户类型：{payee.get('type', '')}",
         f"户名：{payee.get('account_name', '')}",
         f"账号：{payee.get('account_number', '')}",
         f"银行：{payee.get('bank_name', '')}",
@@ -253,7 +253,7 @@ def _extract_payee_from_remark(remark: str | None) -> Dict[str, str]:
     remark_map = _parse_remark_lines(remark)
     return {
         "type": str(
-            remark_map.get("收款类型")
+            remark_map.get("账户类型")
             or remark_map.get("收款账户类型")
             or ""
         ).strip(),
