@@ -881,7 +881,7 @@ class TestRechargeApprovalNotificationService:
                 "payment_type": "仅充值",
                 "remit_method": "转账",
                 "remark": (
-                    "收款类型：对公账户\n"
+                    "账户类型：对公账户\n"
                     "户名：北京智谱华章科技股份有限公司\n"
                     "账号：11093851041070210011884\n"
                     "银行：招商银行\n"

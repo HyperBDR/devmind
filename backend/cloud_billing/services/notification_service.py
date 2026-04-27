@@ -626,7 +626,7 @@ class RechargeApprovalNotificationService:
             if not remark_text:
                 return True
             allowed_keys = {
-                "收款类型",
+                "账户类型",
                 "收款账户类型",
                 "户名",
                 "账号",
@@ -664,7 +664,7 @@ class RechargeApprovalNotificationService:
                 receipt_lines.append(f"  - {label_text}: {value_text}")
 
             if isinstance(payee, dict):
-                add_line("收款类型", payee.get("type"))
+                add_line("账户类型", payee.get("type"))
                 add_line("户名", payee.get("account_name"))
                 add_line("账号", payee.get("account_number"))
                 add_line("银行", payee.get("bank_name"))
@@ -681,9 +681,9 @@ class RechargeApprovalNotificationService:
                 return receipt_lines
 
             label_map = {
-                "收款类型": "收款类型",
-                "收款账户类型": "收款类型",
-                "账户类型": "收款类型",
+                "账户类型": "账户类型",
+                "收款账户类型": "账户类型",
+                "账户类型": "账户类型",
                 "户名": "户名",
                 "账号": "账号",
                 "银行": "银行",

@@ -12,6 +12,7 @@ from .views import (
     BillingDataViewSet,
     BillingTaskViewSet,
     CloudProviderViewSet,
+    FeishuUserListView,
     RechargeApprovalDetailView,
     RechargeApprovalFeishuCallbackView,
     RechargeApprovalListView,
@@ -39,6 +40,11 @@ urlpatterns = [
         "recharge-approvals/<int:pk>/",
         RechargeApprovalDetailView.as_view(),
         name="recharge-approval-detail",
+    ),
+    path(
+        "feishu-users/",
+        FeishuUserListView.as_view(),
+        name="feishu-user-list",
     ),
     path("", include(router.urls)),
 ]

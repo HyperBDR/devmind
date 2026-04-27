@@ -686,7 +686,7 @@ def default_expected_date() -> str:
 def build_remark(request_data: dict[str, Any]) -> str:
     payee = request_data["payee"]
     lines = [
-        f"收款类型：{payee['type']}",
+        f"账户类型：{payee['type']}",
         f"户名：{payee['account_name']}",
         f"账号：{payee['account_number']}",
         f"银行：{payee['bank_name']}",
@@ -713,7 +713,7 @@ def payee_from_remark(remark: str | None) -> dict[str, str]:
     remark_map = parse_remark_lines(remark)
     return {
         "type": str(
-            remark_map.get("收款类型")
+            remark_map.get("账户类型")
             or remark_map.get("收款账户类型")
             or ""
         ).strip(),
@@ -728,7 +728,7 @@ def payee_from_remark(remark: str | None) -> dict[str, str]:
 def request_data_from_history_form(form_map: dict[str, Any]) -> dict[str, Any]:
     remark_map = parse_remark_lines(form_map.get(FIELD_REMARK))
     payee = {
-        "type": str(remark_map.get("收款类型") or "").strip(),
+        "type": str(remark_map.get("账户类型") or "").strip(),
         "account_name": str(remark_map.get("户名") or "").strip(),
         "account_number": str(remark_map.get("账号") or "").strip(),
         "bank_name": str(remark_map.get("银行") or "").strip(),
@@ -897,7 +897,7 @@ def _infer_payee_from_history(cloud_type: str, recharge_account: str, token: str
             continue
         remark_map = _parse_remark_lines(form_map.get(FIELD_REMARK))
         payee = {
-            "type": str(remark_map.get("收款类型") or remark_map.get("收款账户类型") or "").strip(),
+            "type": str(remark_map.get("账户类型") or remark_map.get("收款账户类型") or "").strip(),
             "account_name": str(remark_map.get("户名") or "").strip(),
             "account_number": str(remark_map.get("账号") or "").strip(),
             "bank_name": str(remark_map.get("银行") or "").strip(),
@@ -1109,7 +1109,7 @@ def extract_payee_from_request(request_data: dict[str, Any]) -> dict[str, str]:
     if not isinstance(payee, dict):
         payee = payee_from_remark(request_data.get("remark"))
     return {
-        "收款类型": str(payee["type"]).strip(),
+        "账户类型": str(payee["type"]).strip(),
         "户名": str(payee["account_name"]).strip(),
         "账号": str(payee["account_number"]).strip(),
         "银行": str(payee["bank_name"]).strip(),

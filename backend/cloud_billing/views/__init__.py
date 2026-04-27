@@ -6,6 +6,7 @@ from .alert import AlertRecordViewSet, AlertRuleViewSet
 from .billing import BillingDataViewSet
 from .provider import CloudProviderViewSet
 from .recharge_approval import (
+    FeishuUserListView,
     RechargeApprovalDetailView,
     RechargeApprovalFeishuCallbackView,
     RechargeApprovalListView,
@@ -18,6 +19,7 @@ __all__ = [
     "BillingDataViewSet",
     "BillingTaskViewSet",
     "CloudProviderViewSet",
+    "FeishuUserListView",
     "RechargeApprovalDetailView",
     "RechargeApprovalFeishuCallbackView",
     "RechargeApprovalListView",

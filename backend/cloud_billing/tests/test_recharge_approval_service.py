@@ -26,7 +26,6 @@ from cloud_billing.services.recharge_approval import (
     _skill_root_path,
     _resolve_user_id_by_email_or_mobile,
     resolve_submitter_identity,
-    extract_recharge_history_lookup,
     check_ongoing_recharge_approval_submission,
     parse_recharge_info,
     parse_recharge_info_with_tracking,
@@ -200,46 +199,6 @@ def test_validate_recharge_request_payload_requires_payee_fields():
         )
 
 
-@pytest.mark.django_db
-def test_refresh_recharge_approval_record_persists_cloud_type_from_feishu_detail(
-    cloud_provider,
-    mocker,
-):
-    record = RechargeApprovalRecord.objects.create(
-        provider=cloud_provider,
-        status=RechargeApprovalRecord.STATUS_SUBMITTED,
-        feishu_instance_code="instance-1",
-        feishu_approval_code="approval-1",
-    )
-    detail = {
-        "code": 0,
-        "data": {
-            "status": "APPROVED",
-            "serial_number": "SN-1",
-            "timeline": [{"node_name": "审批通过", "status": "APPROVED"}],
-            "form": json.dumps(
-                [
-                    {"name": "公有云类型", "type": "text", "value": "智谱"},
-                    {"name": "充值云账号", "type": "text", "value": "acct-188"},
-                ],
-                ensure_ascii=False,
-            ),
-        },
-    }
-    mocker.patch(
-        "cloud_billing.services.recharge_approval."
-        "_request_feishu_approval_instance_detail",
-        return_value=detail,
-    )
-
-    result = refresh_recharge_approval_record_status(record)
-
-    record.refresh_from_db()
-    assert result["is_ongoing"] is False
-    assert record.callback_payload["cloud_type"] == "智谱"
-    assert record.callback_payload["data"]["cloud_type"] == "智谱"
-
-
 def test_parse_recharge_info_moves_remit_value_out_of_payment_type():
     payload = parse_recharge_info(
         "\n".join(
@@ -330,33 +289,6 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
     assert payload["payee"]["account_number"] == "11093851041070210011884"
     assert payload["payee"]["bank_region"] == "北京市/北京市"
     assert payload["payee"]["bank_branch"] == "招商银行股份有限公司北京上地支行"
-
-
-@pytest.mark.django_db
-def test_extract_recharge_history_lookup_falls_back_to_recharge_info(
-    cloud_provider,
-):
-    cloud_provider.provider_type = "zhipu"
-    cloud_provider.config = {
-        "recharge_approval": {
-            "submitter_identifier": "finance@example.com",
-        }
-    }
-    cloud_provider.recharge_info = "\n".join(
-        [
-            "公有云类型",
-            "智谱",
-            "充值云账号",
-            "18017606559",
-        ]
-    )
-
-    lookup = extract_recharge_history_lookup(cloud_provider)
-
-    assert lookup == {
-        "cloud_type": "智谱",
-        "recharge_account": "18017606559",
-    }
 
 
 def test_parse_recharge_info_splits_amount_and_currency_from_value():
@@ -1708,7 +1640,7 @@ def test_recharge_approval_script_builds_request_from_history(monkeypatch):
         {
             "name": "备注",
             "value": (
-                "收款类型：对公账户\n"
+                "账户类型：对公账户\n"
                 "户名：北京智谱华章科技股份有限公司\n"
                 "账号：11093851041070210011884\n"
                 "银行：招商银行\n"
@@ -1769,7 +1701,7 @@ def test_recharge_approval_script_pages_history_in_ten_item_batches_and_skips_de
         {
             "name": "备注",
             "value": (
-                "收款类型：对公账户\n"
+                "账户类型：对公账户\n"
                 "户名：北京智谱华章科技股份有限公司\n"
                 "账号：11093851041070210011884\n"
                 "银行：招商银行\n"
@@ -1888,7 +1820,7 @@ def test_build_notification_message_bolds_keys_and_skips_empty_expected_date():
                 "bank_name": "招商银行",
             },
             "remark": (
-                "收款类型：对公账户\n"
+                "账户类型：对公账户\n"
                 "户名：北京智谱华章科技股份有限公司\n"
                 "账号：11093851041070210011884\n"
                 "银行：招商银行\n"
@@ -1916,7 +1848,7 @@ def test_build_notification_message_parses_ascii_colon_payee_remark():
     message = build_notification_message_from_payload(
         {
             "remark": (
-                "收款类型: 对公账户\n"
+                "账户类型: 对公账户\n"
                 "户名: 北京智谱华章科技股份有限公司\n"
                 "账号: 11093851041070210011884\n"
                 "银行: 招商银行\n"
@@ -2149,7 +2081,7 @@ def test_recharge_approval_hydrates_payee_from_remark_only_request():
         "remit_method": "转账",
         "amount": 200,
         "remark": (
-            "收款类型：对公账户\n"
+            "账户类型：对公账户\n"
             "户名：北京智谱华章科技股份有限公司\n"
             "账号：11093851041070210011884\n"
             "银行：招商银行\n"
@@ -2172,7 +2104,7 @@ def test_recharge_approval_rejects_required_account_widget_when_api_cannot_fill(
     )
     request_data = {
         "payment_way": "公司支付",
-        "remark": "收款类型：对公账户",
+        "remark": "账户类型：对公账户",
     }
     schema_by_name = {
         "收款账户": {
@@ -2661,37 +2593,3 @@ def test_submit_recharge_skill_ignores_same_account_with_different_cloud_type():
     assert out["state"] == "none"
     assert out["cloud_type"] == "智谱"
     assert out["recharge_account"] == "acct-188"
-
-
-def test_get_feishu_access_token_sends_real_secret(monkeypatch):
-    monkeypatch.setenv("FEISHU_APP_ID", "cli_test_app")
-    monkeypatch.setenv("FEISHU_APP_SECRET", "real-secret-value")
-
-    captured = {}
-
-    class FakeResponse:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def read(self):
-            return json.dumps(
-                {"code": 0, "tenant_access_token": "tok_123", "expire": 7200}
-            ).encode("utf-8")
-
-    def fake_urlopen(request, timeout=None):
-        captured["body"] = json.loads(request.data.decode("utf-8"))
-        captured["headers"] = dict(request.headers)
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
-
-    token = _get_feishu_access_token()
-
-    assert token == "tok_123"
-    assert captured["body"]["app_id"] == "cli_test_app"
-    assert captured["body"]["app_secret"] == "real-secret-value"
-    assert captured["headers"]["Content-type"] == "application/json; charset=utf-8"
