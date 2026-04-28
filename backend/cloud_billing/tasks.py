@@ -72,6 +72,24 @@ MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
 User = get_user_model()
 
 
+def _get_alert_min_cost_threshold() -> Decimal:
+    """
+    Return the minimum cost threshold for sending cost/growth alerts.
+    Returns Decimal("0") when the env var is not set or invalid.
+    """
+    raw = os.getenv("CLOUD_BILLING_ALERT_MIN_COST_THRESHOLD", "").strip()
+    if not raw:
+        return Decimal("0")
+    try:
+        return Decimal(str(raw))
+    except Exception:
+        logger.warning(
+            f"Invalid CLOUD_BILLING_ALERT_MIN_COST_THRESHOLD value: {raw!r}; "
+            f"defaulting to 0"
+        )
+        return Decimal("0")
+
+
 def _inject_recharge_fields(
     raw_recharge_info: str,
     account_id: str,
@@ -1103,6 +1121,24 @@ def check_alert_for_provider(
                 alert_type = AlertRecord.ALERT_TYPE_COST
             else:
                 alert_type = AlertRecord.ALERT_TYPE_GROWTH
+
+            # Apply minimum cost threshold for cost/growth alerts.
+            # Balance and days_remaining alerts are not subject to this check.
+            if alert_type in (
+                AlertRecord.ALERT_TYPE_COST,
+                AlertRecord.ALERT_TYPE_GROWTH,
+            ):
+                min_cost_threshold = _get_alert_min_cost_threshold()
+                if min_cost_threshold > 0 and current_cost <= min_cost_threshold:
+                    logger.info(
+                        f"Task check_alert_for_provider: "
+                        f"Alert suppressed by min cost threshold "
+                        f"(provider_id={provider.id}, name={provider.name}, "
+                        f"account_id={account_id}, "
+                        f"current_cost={current_cost}, "
+                        f"min_cost_threshold={min_cost_threshold})"
+                    )
+                    continue
 
             language = _resolve_notification_language(provider)
 
