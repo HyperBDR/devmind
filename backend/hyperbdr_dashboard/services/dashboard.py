@@ -4,12 +4,16 @@ Dashboard aggregation service for the HyperBDR Data Operations Dashboard.
 This module builds the dashboard payload from hyperbdr_dashboard models,
 reshaping the data into the product-facing dashboard contract.
 
-Business rules (from spec):
+Business rules:
 - expiring soon:           remaining_days <= 30
 - PoC expiring soon:      is_poc and remaining_days <= 7
 - high-potential:          is_poc and utilization >= 60% and remaining_days <= 30
-- low activity:            utilization < 30%
+- low activity:            utilization < 30% and total_amount > 0
 - conversion_rate:        official_count / (poc_count + official_count)
+
+Tenant classification:
+- PoC: any license has remaining_days <= 1
+- official: otherwise
 """
 
 from calendar import monthrange
@@ -20,7 +24,46 @@ from django.db.models import Count, IntegerField, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
-from ..models import DataSource, Host, License, Tenant
+from ..models import License, Tenant
+
+
+def _get_license_remaining_days(lic: dict) -> int | None:
+    """
+    Return remaining days for a single license.
+    Returns None if no expire_at or license is expired.
+    """
+    expire_at = lic.get("expire_at")
+    if expire_at is None:
+        return None
+    delta = expire_at - timezone.now()
+    return delta.days
+
+
+def _is_test_tenant(tenant: Tenant, licenses: list[dict]) -> bool:
+    """
+    Return True if the tenant is a test user based on license count and expiration.
+
+    Test user criteria (ALL must be true):
+    - License count <= 3
+    - ALL licenses have remaining_days <= 14
+
+    Otherwise -> real user.
+    """
+    if not licenses:
+        # No license -> real user
+        return False
+
+    if len(licenses) > 3:
+        # More than 3 licenses -> real user
+        return False
+
+    # Check all licenses have remaining_days <= 14
+    for lic in licenses:
+        remaining = _get_license_remaining_days(lic)
+        if remaining is None or remaining > 14:
+            return False
+
+    return True
 
 
 def _prefetch_licenses(tenants):
@@ -50,17 +93,19 @@ def _classify_tenant(tenant: Tenant, licenses: list[dict]) -> dict:
     """
     Return tenant-level classification metadata.
 
-    Classification logic (preferred order):
-    1. Explicit trialed flag -> PoC
-    2. Any license with scene != 'dr' -> official
-    3. Default -> PoC
+    Classification logic:
+    - If any license has remaining_days <= 1 -> PoC
+    - Otherwise -> official
     """
-    if tenant.trialed:
-        tenant_type = "poc"
-    elif any(lic.get("scene") not in ("dr", "", None) for lic in licenses):
-        tenant_type = "official"
-    else:
-        tenant_type = "poc"
+    # Check if any license has remaining_days <= 1
+    is_poc = False
+    for lic in licenses:
+        remaining = _get_license_remaining_days(lic)
+        if remaining is not None and remaining <= 1:
+            is_poc = True
+            break
+
+    tenant_type = "poc" if is_poc else "official"
 
     total_amount = sum(lic.get("total_amount") or 0 for lic in licenses)
     total_used = sum(lic.get("total_used") or 0 for lic in licenses)
@@ -180,11 +225,13 @@ def _build_kpis_from_tenants(tenants: list, licenses_by_tenant: dict) -> list[di
 
 def _build_focus_cards_from_tenants(tenants: list, licenses_by_tenant: dict) -> list[dict]:
     """
-    Focus card rules (from spec):
-    - expiring soon:        remaining_days in [0, 30]  (future expiration within 30 days)
+    Focus card rules:
+    - expiring soon:        remaining_days in [0, 30]
     - PoC expiring soon:   is_poc and remaining_days in [0, 7]
     - high-potential:       is_poc and utilization >= 60% and remaining_days in [0, 30]
-    - low activity:         utilization < 30%
+    - low activity:         utilization < 30% and total_amount > 0
+
+    PoC: any license has remaining_days <= 1
     """
     expiring = []
     poc_expiring = []
@@ -203,8 +250,15 @@ def _build_focus_cards_from_tenants(tenants: list, licenses_by_tenant: dict) -> 
             poc_expiring.append(tenant)
         if _is_poc(tenant, licenses) and util >= 60 and rem is not None and 0 <= rem <= 30:
             high_potential.append(tenant)
-        if util < 30:
+        if util < 30 and cls["total_amount"] > 0:
             low_activity.append(tenant)
+
+    def _sort_by_auth(tenant_list):
+        """Sort tenants by total_authorization descending."""
+        def get_auth(t):
+            licenses = licenses_by_tenant.get(t.id, [])
+            return sum(lic.get("total_amount") or 0 for lic in licenses)
+        return sorted(tenant_list, key=get_auth, reverse=True)
 
     cards = [
         {
@@ -212,28 +266,28 @@ def _build_focus_cards_from_tenants(tenants: list, licenses_by_tenant: dict) -> 
             "labelKey": "hyperbdrDashboard.expiringSoon",
             "descriptionKey": "hyperbdrDashboard.expiringSoonDesc",
             "count": len(expiring),
-            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in expiring[:5]],
+            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in _sort_by_auth(expiring)[:5]],
         },
         {
             "key": "high_potential",
             "labelKey": "hyperbdrDashboard.highPotential",
             "descriptionKey": "hyperbdrDashboard.highPotentialDesc",
             "count": len(high_potential),
-            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in high_potential[:5]],
+            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in _sort_by_auth(high_potential)[:5]],
         },
         {
             "key": "poc_expiring",
             "labelKey": "hyperbdrDashboard.pocExpiring",
             "descriptionKey": "hyperbdrDashboard.pocExpiringDesc",
             "count": len(poc_expiring),
-            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in poc_expiring[:5]],
+            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in _sort_by_auth(poc_expiring)[:5]],
         },
         {
             "key": "low_activity",
             "labelKey": "hyperbdrDashboard.lowActivity",
             "descriptionKey": "hyperbdrDashboard.lowActivityDesc",
             "count": len(low_activity),
-            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in low_activity[:5]],
+            "tenants": [{"id": t.source_tenant_id, "name": t.name} for t in _sort_by_auth(low_activity)[:5]],
         },
     ]
 
@@ -355,13 +409,19 @@ def _build_tenant_rows_from_tenants(tenants: list, licenses_by_tenant: dict) -> 
     return rows
 
 
-def build_hyperbdr_dashboard_overview(year: int | None = None, month: int | None = None) -> dict:
+def build_hyperbdr_dashboard_overview(
+    year: int | None = None,
+    month: int | None = None,
+    customer_type: str = "all",
+) -> dict:
     """
     Build the complete HyperBDR dashboard overview payload.
 
     Args:
         year: filter to a specific year (e.g. 2026)
         month: filter to a specific month (1-12), requires year
+        customer_type: filter tenant scope - "all", "real" (exclude test accounts),
+                      or "test" (only test accounts)
 
     Returns:
         dict with keys: kpis, focus_cards, distribution, funnel, tenant_table
@@ -370,6 +430,15 @@ def build_hyperbdr_dashboard_overview(year: int | None = None, month: int | None
 
     base_qs = Tenant.objects.filter(data_source__is_active=True)
     all_tenants = list(base_qs.select_related("data_source").order_by("name"))
+
+    # Prefetch licenses for customer_type filtering
+    licenses_for_filter = _prefetch_licenses(all_tenants)
+
+    # Apply customer_type filter
+    if customer_type == "real":
+        all_tenants = [t for t in all_tenants if not _is_test_tenant(t, licenses_for_filter.get(t.id, []))]
+    elif customer_type == "test":
+        all_tenants = [t for t in all_tenants if _is_test_tenant(t, licenses_for_filter.get(t.id, []))]
 
     if year is not None and period_start and period_end:
         period_tenant_ids = set(
@@ -419,11 +488,12 @@ def _compute_period_range(year: int | None, month: int | None):
     return period_start, period_end
 
 
-def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
+def build_hyperbdr_dashboard_monthly_trends(year: int | None = None, customer_type: str = "all") -> dict:
     """
     Return monthly tenant growth and conversion trends (cumulative).
 
     Groups tenants by their source system created_at month.
+    Filters by customer_type (real/test/all) based on license count <= 3 AND all remaining_days <= 14.
     Each month shows the cumulative count from the start up to that month.
     """
     today = timezone.now().date()
@@ -454,6 +524,12 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
 
     all_tenants = list(Tenant.objects.filter(data_source__is_active=True))
     licenses_all = _prefetch_licenses(all_tenants)
+
+    # Apply customer_type filter
+    if customer_type == "real":
+        all_tenants = [t for t in all_tenants if not _is_test_tenant(t, licenses_all.get(t.id, []))]
+    elif customer_type == "test":
+        all_tenants = [t for t in all_tenants if _is_test_tenant(t, licenses_all.get(t.id, []))]
     counts_by_month = defaultdict(int)
     official_by_month = defaultdict(int)
     churned_by_month = defaultdict(set)
@@ -482,6 +558,7 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
 
     cumulative = 0
     official_cumulative = 0
+    prev_cumulative = 0
     months = []
     for key in month_keys:
         monthly_count = counts_by_month.get(key, 0)
@@ -490,16 +567,23 @@ def build_hyperbdr_dashboard_monthly_trends(year: int | None = None) -> dict:
         official_cumulative += monthly_official
         conv_rate = round((official_cumulative / cumulative)
                           * 100, 2) if cumulative > 0 else 0.0
+        churned_count = len(churned_by_month.get(key, set()))
+        net_growth = monthly_count - churned_count
+        growth_rate = round((net_growth / prev_cumulative) * 100, 2) if prev_cumulative > 0 else 0.0
         months.append({
             "year": key[0],
             "month": key[1],
             "label": f"{key[0]}-{key[1]:02d}",
             "total_tenants": cumulative,
+            "new_tenants": monthly_count,
+            "churned_tenants": churned_count,
+            "net_growth": net_growth,
+            "growth_rate": growth_rate,
             "total_licenses": 0,
             "total_hosts": 0,
-            "churned_tenants": len(churned_by_month.get(key, set())),
             "conversion_rate": conv_rate,
         })
+        prev_cumulative = cumulative
 
     poc_total = sum(1 for t in all_tenants if _is_poc(
         t, licenses_all.get(t.id, [])))

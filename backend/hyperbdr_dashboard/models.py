@@ -10,8 +10,6 @@ class DataSource(models.Model):
     api_timeout = models.PositiveIntegerField(default=30)
     api_retry_count = models.PositiveIntegerField(default=3)
     api_retry_delay = models.PositiveIntegerField(default=2)
-    collect_interval = models.PositiveIntegerField(default=3600)
-    last_collected_at = models.DateTimeField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -109,58 +107,6 @@ class License(models.Model):
         ordering = ["tenant__name", "scene"]
 
 
-class Host(models.Model):
-    source_host_id = models.CharField(max_length=50)
-    data_source = models.ForeignKey(
-        DataSource,
-        on_delete=models.CASCADE,
-        related_name="hosts",
-    )
-    tenant = models.ForeignKey(
-        Tenant,
-        on_delete=models.CASCADE,
-        related_name="hosts",
-    )
-    name = models.CharField(max_length=255, db_index=True)
-    status = models.CharField(max_length=50, db_index=True, blank=True, default="")
-    boot_status = models.CharField(max_length=50, db_index=True, blank=True, default="")
-    health_status = models.CharField(max_length=50, db_index=True, blank=True, default="")
-    os_type = models.CharField(max_length=100, db_index=True, blank=True, default="")
-    host_type = models.CharField(max_length=100, db_index=True, blank=True, default="")
-    cpu_num = models.PositiveIntegerField(default=0)
-    ram_size = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    license_valid = models.BooleanField(default=False, db_index=True)
-    error_message = models.TextField(blank=True, default="")
-    last_collected_at = models.DateTimeField(db_index=True, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        app_label = "hyperbdr_dashboard"
-        db_table = "hyperbdr_dashboard_host"
-        constraints = [
-            models.UniqueConstraint(
-                fields=["data_source", "source_host_id"],
-                name="hyperbdr_dash_host_src_uniq",
-            )
-        ]
-        indexes = [
-            models.Index(
-                fields=["data_source", "tenant"],
-                name="hbdr_dash_host_tenant_idx",
-            ),
-            models.Index(
-                fields=["data_source", "status"],
-                name="hbdr_dash_host_status_idx",
-            ),
-            models.Index(
-                fields=["data_source", "health_status"],
-                name="hbdr_dash_host_health_idx",
-            ),
-        ]
-        ordering = ["tenant__name", "name", "source_host_id"]
-
-
 class CollectionTask(models.Model):
     STATUS_PENDING = "pending"
     STATUS_RUNNING = "running"
@@ -191,7 +137,6 @@ class CollectionTask(models.Model):
     duration_seconds = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     total_tenants = models.PositiveIntegerField(default=0)
     total_licenses = models.PositiveIntegerField(default=0)
-    total_hosts = models.PositiveIntegerField(default=0)
     error_message = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
