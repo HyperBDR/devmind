@@ -254,7 +254,7 @@ import { format } from 'date-fns'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
-import { getRechargeApprovalSubmitErrorContext } from './rechargeApprovalErrors'
+import { getRechargeApprovalSubmitErrorContext, getRechargeInfoSaveErrorContext } from './rechargeApprovalErrors'
 import { cloudBillingApi } from '@/api/cloudBilling'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -458,6 +458,17 @@ function validateRechargeInfoBeforeSave() {
 
   if (!getSubmitterIdentifier()) {
     showWarning(t('cloudBilling.providers.submitterIdentifierRequiredWarning'))
+    return false
+  }
+
+  const parsedPayload = parseRechargeInfoForStorage(form.recharge_info || '')
+  const paymentType = String(parsedPayload.payment_type || '').trim()
+  if (paymentType && paymentType !== '仅充值') {
+    showWarning(
+      t('cloudBilling.providers.rechargeInfoPaymentTypeNotSupported', {
+        type: paymentType
+      })
+    )
     return false
   }
 
@@ -821,7 +832,23 @@ const handleSave = async ({ emitSaved = true } = {}) => {
     return savedProvider || true
   } catch (error) {
     console.error('Failed to save recharge info:', error)
-    showError(t('cloudBilling.providers.rechargeInfoSaveError'))
+    const errorContext = getRechargeInfoSaveErrorContext(error)
+    if (errorContext.missingFields.length > 0) {
+      const fieldLabels = errorContext.missingFields
+        .map((f) => RECHARGE_INFO_FIELD_LABELS[f] || f)
+        .join('、')
+      if (fieldLabels) {
+        showError(
+          t('cloudBilling.providers.rechargeInfoSaveErrorMissingFields', {
+            fields: fieldLabels
+          })
+        )
+      } else {
+        showError(t('cloudBilling.providers.rechargeInfoSaveError'))
+      }
+    } else {
+      showError(t('cloudBilling.providers.rechargeInfoSaveError'))
+    }
     return false
   } finally {
     saving.value = false

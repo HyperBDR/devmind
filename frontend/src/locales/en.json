@@ -1351,6 +1351,8 @@
       "rechargeInfoEmpty": "Recharge info not configured",
       "rechargeInfoSaveSuccess": "Recharge info saved successfully",
       "rechargeInfoSaveError": "Failed to save recharge info",
+      "rechargeInfoSaveErrorMissingFields": "Failed to save recharge info. Missing required fields: {{fields}}",
+      "rechargeInfoPaymentTypeNotSupported": "Only \"Recharge Only\" payment type is currently supported. Your payment type \"{{type}}\" is not yet supported.",
       "rechargePayeeTitle": "Payee Account Info (for approval remark)",
       "rechargePayeeAccountType": "Account Type",
       "rechargePayeeAccountName": "Account Name",

@@ -1360,6 +1360,8 @@
       "rechargeInfoEmpty": "未配置充值信息",
       "rechargeInfoSaveSuccess": "充值信息保存成功",
       "rechargeInfoSaveError": "保存充值信息失败",
+      "rechargeInfoSaveErrorMissingFields": "保存充值信息失败，缺少以下必填字段：{{fields}}",
+      "rechargeInfoPaymentTypeNotSupported": "当前仅支持「仅充值」场景，你填写的付款类型「{{type}}」暂不支持。",
       "rechargePayeeTitle": "收款账户信息（用于充值审批备注）",
       "rechargePayeeAccountType": "账户类型",
       "rechargePayeeAccountName": "户名",
