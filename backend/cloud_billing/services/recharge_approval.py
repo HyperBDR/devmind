@@ -14,6 +14,21 @@ import importlib.util
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Optional, Tuple
 
+
+class MissingRechargeFieldsError(ValueError):
+    """
+    Raised when recharge info is missing required fields.
+    Carries the list of missing field names for structured error responses.
+    """
+
+    def __init__(self, missing_fields: List[str], message: str = ""):
+        self.missing_fields = missing_fields
+        default_message = (
+            "Recharge info is missing required fields: "
+            + ", ".join(missing_fields)
+        )
+        super().__init__(message or default_message)
+
 from langchain_core.callbacks.base import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 from langchain_core.tools import tool
@@ -577,10 +592,7 @@ def validate_recharge_request_payload(
                 missing_fields.append(f"payee.{key}")
 
     if missing_fields:
-        raise ValueError(
-            "Recharge info is missing required fields: "
-            + ", ".join(missing_fields)
-        )
+        raise MissingRechargeFieldsError(missing_fields)
     return normalized
 
 

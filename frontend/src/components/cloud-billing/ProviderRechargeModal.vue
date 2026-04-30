@@ -838,11 +838,7 @@ const handleSave = async ({ emitSaved = true } = {}) => {
         .map((f) => RECHARGE_INFO_FIELD_LABELS[f] || f)
         .join('、')
       if (fieldLabels) {
-        showError(
-          t('cloudBilling.providers.rechargeInfoSaveErrorMissingFields', {
-            fields: fieldLabels
-          })
-        )
+        showError(t('cloudBilling.providers.rechargeInfoSaveError') + '，缺少以下必填字段：' + fieldLabels)
       } else {
         showError(t('cloudBilling.providers.rechargeInfoSaveError'))
       }
