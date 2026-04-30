@@ -28,8 +28,17 @@ export function getRechargeApprovalSubmitErrorContext(error) {
 export function getRechargeInfoSaveErrorContext(error) {
   const responseData = error?.response?.data
 
-  // Primary: { recharge_info: ["missing required fields: ..."] }
-  const fieldError = responseData?.recharge_info
+  // Unified response format: { code, message, data: { recharge_info: {...} } }
+  // recharge_info is always inside responseData.data, not directly in responseData
+  const innerData = responseData?.data
+
+  // New structured format: { recharge_info: { missing_fields: [...] } }
+  const fieldError = innerData?.recharge_info
+  if (fieldError?.missing_fields && Array.isArray(fieldError.missing_fields)) {
+    return { missingFields: fieldError.missing_fields }
+  }
+
+  // Legacy string format fallback: { recharge_info: ["Recharge info is missing required fields: ..."] }
   let inner = null
   if (fieldError !== undefined) {
     inner = Array.isArray(fieldError)
@@ -38,7 +47,7 @@ export function getRechargeInfoSaveErrorContext(error) {
         ? fieldError
         : [fieldError]
   } else {
-    inner = Array.isArray(responseData) ? responseData : [responseData]
+    inner = Array.isArray(innerData) ? innerData : [innerData]
   }
 
   let missingFields = []
@@ -71,7 +80,5 @@ export function getRechargeInfoSaveErrorContext(error) {
     }
   }
 
-  return {
-    missingFields: missingFields.filter(Boolean)
-  }
+  return { missingFields: missingFields.filter(Boolean) }
 }

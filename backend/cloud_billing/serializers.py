@@ -19,6 +19,7 @@ from .models import (
 )
 from .services.recharge_approval import (
     CLOUD_TYPE_LABELS,
+    MissingRechargeFieldsError,
     prepare_recharge_request_payload,
     serialize_recharge_request_payload,
 )
@@ -316,6 +317,10 @@ class CloudProviderSerializer(serializers.ModelSerializer):
                 cloud_type=cloud_type,
                 require_cloud_type=True,
             )
+        except MissingRechargeFieldsError as exc:
+            raise serializers.ValidationError(
+                {"missing_fields": exc.missing_fields}
+            ) from exc
         except ValueError as exc:
             raise serializers.ValidationError(str(exc)) from exc
 
