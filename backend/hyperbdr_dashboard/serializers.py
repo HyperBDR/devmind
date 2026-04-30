@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import CollectionTask, DataSource, Host, License, Tenant
+from .models import CollectionTask, DataSource, License, Tenant
 
 
 class DataSourceSerializer(serializers.ModelSerializer):
@@ -23,8 +23,6 @@ class DataSourceSerializer(serializers.ModelSerializer):
             "api_timeout",
             "api_retry_count",
             "api_retry_delay",
-            "collect_interval",
-            "last_collected_at",
             "created_at",
             "updated_at",
         ]
@@ -39,7 +37,6 @@ class DataSourceSerializer(serializers.ModelSerializer):
 class TenantSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="source_tenant_id", read_only=True)
     data_source_id = serializers.IntegerField(read_only=True)
-    host_count = serializers.IntegerField(read_only=True)
     license_total = serializers.IntegerField(read_only=True)
     license_used = serializers.IntegerField(read_only=True)
     license_remaining = serializers.IntegerField(read_only=True)
@@ -57,7 +54,6 @@ class TenantSerializer(serializers.ModelSerializer):
             "agent_enabled",
             "trialed",
             "migration_way",
-            "host_count",
             "license_total",
             "license_used",
             "license_remaining",
@@ -100,37 +96,6 @@ class LicenseSerializer(serializers.ModelSerializer):
         return round((obj.total_used / obj.total_amount) * 100, 2)
 
 
-class HostSerializer(serializers.ModelSerializer):
-    id = serializers.CharField(source="source_host_id", read_only=True)
-    tenant_id = serializers.CharField(source="tenant.source_tenant_id", read_only=True)
-    tenant_name = serializers.CharField(source="tenant.name", read_only=True)
-    data_source_id = serializers.IntegerField(read_only=True)
-    data_source_name = serializers.CharField(source="data_source.name", read_only=True)
-
-    class Meta:
-        model = Host
-        fields = [
-            "id",
-            "data_source_id",
-            "data_source_name",
-            "tenant_id",
-            "tenant_name",
-            "name",
-            "status",
-            "boot_status",
-            "health_status",
-            "os_type",
-            "host_type",
-            "cpu_num",
-            "ram_size",
-            "license_valid",
-            "error_message",
-            "last_collected_at",
-            "created_at",
-            "updated_at",
-        ]
-
-
 class CollectionTaskSerializer(serializers.ModelSerializer):
     data_source_id = serializers.IntegerField(read_only=True)
     data_source_name = serializers.CharField(source="data_source.name", read_only=True)
@@ -149,7 +114,6 @@ class CollectionTaskSerializer(serializers.ModelSerializer):
             "duration_seconds",
             "total_tenants",
             "total_licenses",
-            "total_hosts",
             "error_message",
             "created_at",
             "updated_at",

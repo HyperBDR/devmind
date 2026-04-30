@@ -64,6 +64,29 @@
             {{ t(scene.labelKey) }}
           </button>
         </div>
+
+        <div
+          class="flex items-center gap-1 rounded-lg border border-slate-100 bg-white p-1.5 shadow-sm"
+        >
+          <span
+            class="px-2 text-[10px] font-black uppercase tracking-widest text-slate-400"
+            >{{ t('hyperbdrDashboard.customerType') }}</span
+          >
+          <button
+            v-for="ct in customerTypeOptions"
+            :key="ct.value"
+            type="button"
+            class="whitespace-nowrap rounded-lg px-4 py-1.5 text-xs font-bold transition-all"
+            :class="
+              customerTypeFilter === ct.value
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-200'
+                : 'text-slate-500 hover:bg-slate-50'
+            "
+            @click="customerTypeFilter = ct.value"
+          >
+            {{ t(ct.labelKey) }}
+          </button>
+        </div>
       </div>
 
       <!-- KPI Cards -->
@@ -950,28 +973,9 @@
             >
           </div>
           <div class="flex items-center gap-2 bg-slate-50 p-1 rounded-lg">
-            <button
-              class="rounded-md px-3 py-1.5 text-[10px] font-bold transition-all"
-              :class="
-                topSortBy === 'auth'
-                  ? 'bg-white shadow-sm text-blue-600'
-                  : 'text-slate-400 hover:text-slate-600'
-              "
-              @click="topSortBy = 'auth'"
-            >
+            <span class="rounded-md px-3 py-1.5 text-[10px] font-bold bg-white shadow-sm text-blue-600">
               {{ t('hyperbdrDashboard.sortByAuth') }}
-            </button>
-            <button
-              class="rounded-md px-3 py-1.5 text-[10px] font-bold transition-all"
-              :class="
-                topSortBy === 'growth'
-                  ? 'bg-white shadow-sm text-blue-600'
-                  : 'text-slate-400 hover:text-slate-600'
-              "
-              @click="topSortBy = 'growth'"
-            >
-              {{ t('hyperbdrDashboard.sortByGrowth') }}
-            </button>
+            </span>
           </div>
         </div>
         <div class="overflow-x-auto">
@@ -991,9 +995,6 @@
                 </th>
                 <th class="px-4 py-4">
                   {{ t('hyperbdrDashboard.top5Share') }}
-                </th>
-                <th class="px-4 py-4">
-                  {{ t('hyperbdrDashboard.growthRate') }}
                 </th>
                 <th class="px-8 py-4 text-right">
                   {{ t('hyperbdrDashboard.authShare') }}
@@ -1035,11 +1036,6 @@
                 <td class="px-4 py-5">
                   <span class="text-xs font-bold text-slate-500"
                     >{{ top5Share(tenant) }}%</span
-                  >
-                </td>
-                <td class="px-4 py-5">
-                  <span class="text-xs font-black text-emerald-500"
-                    >+{{ top5Growth(tenant) }}%</span
                   >
                 </td>
                 <td class="px-8 py-5 text-right">
@@ -1303,7 +1299,13 @@ const sceneOptions = [
   { value: 'disaster', labelKey: 'hyperbdrDashboard.disasterRecovery' }
 ]
 
+const customerTypeOptions = [
+  { value: 'all', labelKey: 'hyperbdrDashboard.allCustomers' },
+  { value: 'real', labelKey: 'hyperbdrDashboard.realCustomers' }
+]
+
 const sceneFilter = ref('all')
+const customerTypeFilter = ref('all')
 const tableFilter = ref('all')
 const trendChartType = ref('累计')
 
@@ -1341,6 +1343,9 @@ async function fetchOverview() {
         params.month = parseInt(selectedMonth.value)
       }
     }
+    if (customerTypeFilter.value !== 'all') {
+      params.customer_type = customerTypeFilter.value
+    }
     const res = await hyperbdrDashboardApi.overview(params)
     overviewData.value = extractData(res)
   } catch (err) {
@@ -1355,6 +1360,9 @@ async function fetchTrends() {
     const params = {}
     if (selectedYear.value !== 'all') {
       params.year = selectedYear.value
+    }
+    if (customerTypeFilter.value !== 'all') {
+      params.customer_type = customerTypeFilter.value
     }
     const res = await hyperbdrDashboardApi.monthlyTrends(params)
     trendsData.value = extractData(res)
@@ -1371,7 +1379,7 @@ onMounted(() => {
   refresh()
 })
 
-watch([selectedYear, selectedMonth], () => {
+watch([selectedYear, selectedMonth, customerTypeFilter], () => {
   fetchOverview()
   fetchTrends()
 })
@@ -2136,21 +2144,12 @@ function openDrawer(card) {
 }
 
 // ─── Top 5 Ranking ───────────────────────────────────────────────────────────
-const topSortBy = ref('auth')
 const tenantColors = ['#2563eb', '#8a4cfc', '#f97316', '#22c55e', '#06b6d4']
 
 const top5Tenants = computed(() => {
   const sorted = [...allTenants.value]
-    .map((t, idx) => {
-      // Mock growth based on index
-      const growthBase = [8.4, 5.2, 12.1, 3.5, 7.8, 4.2, 9.1, 6.3][idx % 8]
-      const growthValue = growthBase * 1.0
-      return { ...t, growth: growthValue }
-    })
     .sort((a, b) => {
-      if (topSortBy.value === 'auth')
-        return (b.total_authorization || 0) - (a.total_authorization || 0)
-      return b.growth - a.growth
+      return (b.total_authorization || 0) - (a.total_authorization || 0)
     })
   return sorted.slice(0, 5)
 })
@@ -2172,10 +2171,6 @@ function top5Share(tenant) {
         1
       )
     : '0.0'
-}
-
-function top5Growth(tenant) {
-  return tenant.growth?.toFixed(1) || '0.0'
 }
 
 function top5BarWidth(tenant) {

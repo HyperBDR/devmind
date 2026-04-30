@@ -222,6 +222,17 @@ class HyperBDRClient:
             },
         )
 
+    def get_all_licenses_statistics(self, scene="dr", page=1, page_size=100):
+        """Get all licenses without enterprise_id filter - for batch collection."""
+        return self._fetch(
+            "/admin/api/v2/admin-getTenantsLicensesStatistics",
+            params={
+                "scene": scene,
+                "page": page,
+                "page_size": page_size,
+            },
+        )
+
     def get_tenant_licenses_details(self, enterprise_id, scene="dr", page=1, page_size=100):
         try:
             return self._fetch(
@@ -240,19 +251,6 @@ class HyperBDRClient:
                 page=page,
                 page_size=page_size,
             )
-
-    def get_tenant_hosts(self, project_id, user_id, scene="dr", page=1, page_size=100):
-        return self._fetch(
-            "/admin/api/v2/admin-getTenantHosts",
-            params={
-                "project_id": project_id,
-                "user_id": user_id,
-                "scene": scene,
-                "page": page,
-                "page_size": page_size,
-            },
-        )
-
 
 def parse_remote_datetime(value):
     if not value:

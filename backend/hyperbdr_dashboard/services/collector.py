@@ -1,12 +1,10 @@
 import logging
-import sys
-from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
 
 from ..client import HyperBDRClient, parse_remote_datetime
-from ..models import CollectionTask, DataSource, Host, License, Tenant
+from ..models import CollectionTask, DataSource, License, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +15,6 @@ def _to_int(value, default=0):
         return max(v, 0)
     except Exception:
         return default
-
-
-def _to_decimal(value, default="0"):
-    try:
-        v = Decimal(str(value))
-        return max(v, Decimal("0"))
-    except Exception:
-        return Decimal(default)
 
 
 def _tenant_defaults(payload):
@@ -48,97 +38,47 @@ def _license_entries(payload):
     return entries
 
 
-def _host_entries(payload):
-    return ((payload.get("data") or {}).get("hosts") or [])
-
-
-def _collect_licenses_for_scene(client, enterprise_id, scene, page_size=100):
-    """Paginate through all license pages for a given scene."""
-    all_items = []
+def _collect_all_licenses_for_scene(client, scene, page_size=500):
+    """
+    Collect all licenses for a scene in batch, without filtering by enterprise_id.
+    Returns a dict mapping enterprise_id -> list of license items.
+    """
+    all_licenses_by_tenant = {}
     page = 1
     while True:
-        payload = client.get_tenant_licenses_details(
-            enterprise_id=enterprise_id,
-            scene=scene,
-            page=page,
-            page_size=page_size,
-        )
-        items = _license_entries(payload)
-        if not items:
+        payload = client.get_all_licenses_statistics(scene=scene, page=page, page_size=page_size)
+        data = payload.get("data") or {}
+        entries = data.get("pages") or data.get("licenses") or data.get("list") or []
+        if isinstance(entries, dict):
+            entries = [entries]
+        if not entries:
             break
-        all_items.extend(items)
-        if len(items) < page_size:
+        for item in entries:
+            enterprise_id = str(item.get("enterprise_id") or item.get("id") or "")
+            if not enterprise_id:
+                continue
+            if enterprise_id not in all_licenses_by_tenant:
+                all_licenses_by_tenant[enterprise_id] = []
+            all_licenses_by_tenant[enterprise_id].append(item)
+        if len(entries) < page_size:
             break
         page += 1
-    return all_items
-
-
-def _collect_hosts_for_tenant(client, source, tenant):
-    detail = client.get_tenant_detail(tenant.source_tenant_id)
-    users = ((detail.get("data") or {}).get("users") or [])
-    for user in users:
-        user_id = user.get("id")
-        if not user_id:
-            continue
-        try:
-            page = 1
-            page_size = 200
-            collected_hosts = []
-            seen_host_ids = set()
-
-            while True:
-                payload = client.get_tenant_hosts(
-                    project_id=tenant.source_tenant_id,
-                    user_id=user_id,
-                    scene="dr",
-                    page=page,
-                    page_size=page_size,
-                )
-                hosts = _host_entries(payload)
-                if not hosts:
-                    break
-
-                new_host_count = 0
-                for host in hosts:
-                    source_host_id = str(host.get("id") or "").strip()
-                    if source_host_id and source_host_id in seen_host_ids:
-                        continue
-                    if source_host_id:
-                        seen_host_ids.add(source_host_id)
-                    collected_hosts.append(host)
-                    new_host_count += 1
-
-                if len(hosts) < page_size or new_host_count == 0:
-                    break
-                page += 1
-
-            if collected_hosts:
-                return collected_hosts
-        except Exception as exc:
-            logger.warning(
-                "Failed to fetch hosts for tenant %s via user %s: %s",
-                tenant.source_tenant_id,
-                user_id,
-                exc,
-            )
-    return []
+    logger.info(
+        "[HyperBDR Collect] Batch licenses collected: scene=%s, tenant_count=%s",
+        scene,
+        len(all_licenses_by_tenant),
+    )
+    return all_licenses_by_tenant
 
 
 def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", celery_task_id=""):
-    logger.warning(
+    logger.info(
         "[HyperBDR Collect] Starting: data_source_id=%s, task_id=%s, trigger_mode=%s",
         data_source_id,
         task_id,
         trigger_mode,
     )
     source = DataSource.objects.get(pk=data_source_id)
-    logger.warning(
-        "[HyperBDR Collect] DataSource: name=%s, api_url=%s, username=%s, password=%s",
-        source.name,
-        source.api_url,
-        source.username,
-        source.password,
-    )
     task = None
     if task_id:
         task = CollectionTask.objects.get(pk=task_id)
@@ -156,15 +96,8 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
         )
 
     password = source.password
-    logger.warning(
-        "HyperBDR collection auth: api_url=%s, username=%s, password=%s",
-        source.api_url,
-        source.username,
-        password,
-    )
     tenant_count = 0
     license_count = 0
-    host_count = 0
     try:
         with HyperBDRClient(
             api_url=source.api_url,
@@ -174,122 +107,88 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
             retry_count=source.api_retry_count,
             retry_delay=source.api_retry_delay,
         ) as client:
-            payload = client.get_tenants(page=1, page_size=1000)
-            tenant_rows = ((payload.get("data") or {}).get("pages") or [])
+            # Step 1: Get all tenants (with pagination)
+            all_tenant_rows = []
+            page = 1
+            while True:
+                payload = client.get_tenants(page=page, page_size=1000)
+                tenant_rows = ((payload.get("data") or {}).get("pages") or [])
+                if not tenant_rows:
+                    break
+                all_tenant_rows.extend(tenant_rows)
+                if len(tenant_rows) < 1000:
+                    break
+                page += 1
             current_tenant_ids = set()
-            current_host_ids = set()
 
-            for tenant_payload in tenant_rows:
-                source_tenant_id = str(tenant_payload.get("id") or "").strip()
-                if not source_tenant_id:
-                    continue
-                current_tenant_ids.add(source_tenant_id)
-                tenant, _ = Tenant.objects.update_or_create(
-                    data_source=source,
-                    source_tenant_id=source_tenant_id,
-                    defaults=_tenant_defaults(tenant_payload),
-                )
-                tenant_count += 1
+            # Step 2: Batch collect all licenses for both DR and Migration scenes
+            all_dr_licenses = _collect_all_licenses_for_scene(client, "dr")
+            all_migration_licenses = _collect_all_licenses_for_scene(client, "migration")
 
-                seen_license_scenes = set()
-                for item in _collect_licenses_for_scene(
-                    client, source_tenant_id, "dr"
-                ):
-                    scene = "dr"
-                    seen_license_scenes.add(scene)
-                    License.objects.update_or_create(
-                        data_source=source,
-                        tenant=tenant,
-                        scene=scene,
-                        defaults={
-                            "total_amount": _to_int(
-                                item.get("total_amount", item.get("amount", 0))
-                            ),
-                            "total_used": _to_int(
-                                item.get("total_used", item.get("used", 0))
-                            ),
-                            "total_unused": _to_int(
-                                item.get("total_unused", item.get("unused", 0))
-                            ),
-                            "start_at": parse_remote_datetime(
-                                item.get("start_at")
-                            ),
-                            "expire_at": parse_remote_datetime(item.get("expire_at")),
-                            "last_collected_at": timezone.now(),
-                        },
-                    )
-                    license_count += 1
-
-                for item in _collect_licenses_for_scene(
-                    client, source_tenant_id, "migration"
-                ):
-                    scene = "migration"
-                    seen_license_scenes.add(scene)
-                    License.objects.update_or_create(
-                        data_source=source,
-                        tenant=tenant,
-                        scene=scene,
-                        defaults={
-                            "total_amount": _to_int(
-                                item.get("total_amount", item.get("amount", 0))
-                            ),
-                            "total_used": _to_int(
-                                item.get("total_used", item.get("used", 0))
-                            ),
-                            "total_unused": _to_int(
-                                item.get("total_unused", item.get("unused", 0))
-                            ),
-                            "start_at": parse_remote_datetime(
-                                item.get("start_at")
-                            ),
-                            "expire_at": parse_remote_datetime(item.get("expire_at")),
-                            "last_collected_at": timezone.now(),
-                        },
-                    )
-                    license_count += 1
-                if seen_license_scenes:
-                    License.objects.filter(
-                        data_source=source,
-                        tenant=tenant,
-                    ).exclude(scene__in=seen_license_scenes).delete()
-
-                hosts = _collect_hosts_for_tenant(client, source, tenant)
-                seen_host_ids = set()
-                for host_payload in hosts:
-                    source_host_id = str(host_payload.get("id") or "").strip()
-                    if not source_host_id:
+            # Step 3: Process all data in a single transaction
+            with transaction.atomic():
+                for tenant_payload in all_tenant_rows:
+                    source_tenant_id = str(tenant_payload.get("id") or "").strip()
+                    if not source_tenant_id:
                         continue
-                    seen_host_ids.add(source_host_id)
-                    current_host_ids.add(source_host_id)
-                    Host.objects.update_or_create(
+                    current_tenant_ids.add(source_tenant_id)
+                    tenant, _ = Tenant.objects.update_or_create(
                         data_source=source,
-                        source_host_id=source_host_id,
-                        defaults={
-                            "tenant": tenant,
-                            "name": host_payload.get("name") or "",
-                            "status": host_payload.get("status") or "",
-                            "boot_status": host_payload.get("boot_status") or "",
-                            "health_status": host_payload.get("health_status") or "",
-                            "os_type": host_payload.get("os_type") or "",
-                            "host_type": host_payload.get("host_type") or "",
-                            "cpu_num": _to_int(host_payload.get("cpu_num")),
-                            "ram_size": _to_decimal(host_payload.get("ram_size", 0)),
-                            "license_valid": bool(host_payload.get("license_valid", False)),
-                            "error_message": host_payload.get("task_error_description") or host_payload.get("error_message") or "",
-                            "last_collected_at": timezone.now(),
-                        },
+                        source_tenant_id=source_tenant_id,
+                        defaults=_tenant_defaults(tenant_payload),
                     )
-                    host_count += 1
-                Host.objects.filter(
-                    data_source=source,
-                    tenant=tenant,
-                ).exclude(source_host_id__in=seen_host_ids).delete()
+                    tenant_count += 1
 
-            Tenant.objects.filter(data_source=source).exclude(
-                source_tenant_id__in=current_tenant_ids
-            ).delete()
-            source.last_collected_at = timezone.now()
-            source.save(update_fields=["last_collected_at", "updated_at"])
+                    seen_license_scenes = set()
+                    now = timezone.now()
+
+                    # Process DR licenses
+                    for item in all_dr_licenses.get(source_tenant_id, []):
+                        seen_license_scenes.add("dr")
+                        License.objects.update_or_create(
+                            data_source=source,
+                            tenant=tenant,
+                            scene="dr",
+                            defaults={
+                                "total_amount": _to_int(item.get("total_amount", item.get("amount", 0))),
+                                "total_used": _to_int(item.get("total_used", item.get("used", 0))),
+                                "total_unused": _to_int(item.get("total_unused", item.get("unused", 0))),
+                                "start_at": parse_remote_datetime(item.get("start_at")),
+                                "expire_at": parse_remote_datetime(item.get("expire_at")),
+                                "last_collected_at": now,
+                            },
+                        )
+                        license_count += 1
+
+                    # Process Migration licenses
+                    for item in all_migration_licenses.get(source_tenant_id, []):
+                        seen_license_scenes.add("migration")
+                        License.objects.update_or_create(
+                            data_source=source,
+                            tenant=tenant,
+                            scene="migration",
+                            defaults={
+                                "total_amount": _to_int(item.get("total_amount", item.get("amount", 0))),
+                                "total_used": _to_int(item.get("total_used", item.get("used", 0))),
+                                "total_unused": _to_int(item.get("total_unused", item.get("unused", 0))),
+                                "start_at": parse_remote_datetime(item.get("start_at")),
+                                "expire_at": parse_remote_datetime(item.get("expire_at")),
+                                "last_collected_at": now,
+                            },
+                        )
+                        license_count += 1
+
+                    # Delete licenses for scenes not in seen_license_scenes
+                    if seen_license_scenes:
+                        License.objects.filter(
+                            data_source=source,
+                            tenant=tenant,
+                        ).exclude(scene__in=seen_license_scenes).delete()
+
+                # Delete tenants no longer in the remote data
+                Tenant.objects.filter(data_source=source).exclude(
+                    source_tenant_id__in=current_tenant_ids
+                ).delete()
 
         end_time = timezone.now()
         duration = round((end_time - task.start_time).total_seconds(), 2)
@@ -299,7 +198,6 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
             duration_seconds=duration,
             total_tenants=tenant_count,
             total_licenses=license_count,
-            total_hosts=host_count,
             error_message="",
         )
         return {
@@ -307,7 +205,6 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
             "status": CollectionTask.STATUS_COMPLETED,
             "total_tenants": tenant_count,
             "total_licenses": license_count,
-            "total_hosts": host_count,
         }
     except Exception as exc:
         end_time = timezone.now()
@@ -318,7 +215,6 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
             duration_seconds=duration,
             total_tenants=tenant_count,
             total_licenses=license_count,
-            total_hosts=host_count,
             error_message=str(exc),
         )
         logger.exception("HyperBDR data collection failed for data source %s", data_source_id)
@@ -326,13 +222,8 @@ def collect_data_source(data_source_id, task_id=None, trigger_mode="manual", cel
 
 
 def collect_due_data_sources():
-    now = timezone.now()
-    due_source_ids = []
-    for source in DataSource.objects.filter(is_active=True):
-        if not source.last_collected_at:
-            due_source_ids.append(source.id)
-            continue
-        elapsed = (now - source.last_collected_at).total_seconds()
-        if elapsed >= source.collect_interval:
-            due_source_ids.append(source.id)
-    return due_source_ids
+    """
+    Return all active data source IDs for full data collection.
+    Ignores time interval check to force full sync on every run.
+    """
+    return list(DataSource.objects.filter(is_active=True).values_list("id", flat=True))
