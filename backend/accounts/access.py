@@ -51,6 +51,7 @@ PLATFORM_DEFAULT_PATHS = FEATURE_DEFAULT_PATHS
 FEATURE_ALIASES = {
     'cloud_billing': 'operations_console',
     'data_collector': 'operations_console',
+    'sals': 'operations_console',
     'ai_model_pricing': 'ai_pricehub',
     'llm_console': 'admin_console',
     'task_management_console': 'admin_console',

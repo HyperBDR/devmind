@@ -46,6 +46,9 @@ urlpatterns = [
     # HyperBDR Dashboard routes
     path('api/v1/hyperbdr-dashboard/', include('hyperbdr_dashboard.urls')),
 
+    # SALS routes (operations console: incident management & stats)
+    path('api/v1/sals/', include('sals.urls')),
+
     # Task management routes (agentcore-task)
     path('api/v1/tasks/', include('agentcore_task.adapters.django.urls')),
 
