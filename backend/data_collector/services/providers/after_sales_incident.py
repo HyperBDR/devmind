@@ -14,11 +14,12 @@ Expected auth_config:
     "table_name": "after_sale_incident",  # optional, defaults to after_sale_incident
 }
 """
+import base64
 import hashlib
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import requests
 
@@ -32,6 +33,32 @@ REQUEST_TIMEOUT = 60
 BATCH_SIZE = 200
 # Default SLA thresholds per priority
 SLA_MAP = {"P1": 4, "P2": 8, "P3": 24, "P4": 72}
+
+
+# ── Token 缓存 ─────────────────────────────────────
+_token_cache: dict = {}
+
+
+def _jwt_exp(token: str) -> Optional[int]:
+    """从 JWT 中解析 exp 字段（unix 秒），解析失败返回 None"""
+    try:
+        payload_b64 = token.split(".")[1]
+        rem = len(payload_b64) % 4
+        if rem:
+            payload_b64 += "=" * (4 - rem)
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return payload.get("exp")
+    except Exception:
+        return None
+
+
+def _is_token_valid(token: str) -> bool:
+    """检查 token 是否有效（提前 5 分钟视为过期）"""
+    exp = _jwt_exp(token)
+    if exp is None:
+        return True  # 无法解析时保守返回有效，依赖 401 触发刷新
+    now = datetime.now(timezone.utc).timestamp()
+    return now < (exp - 300)
 
 
 def _fmt_priority(v: Any) -> str:
@@ -118,36 +145,47 @@ class AfterSalesIncidentProvider(BaseProvider):
             "auth_type": "glide.local.authentication",
             "preferred_language": "zh",
         }
+        logger.info("[Login] 请求 body: %s", payload)
         try:
             resp = requests.post(url, json=payload, timeout=30, verify=False)
             if resp.status_code == 200:
                 body = resp.json()
-                token = body.get("token") or resp.headers.get("X-Subject-Token")
+                token = (
+                    body.get("token")
+                    or body.get("data", {}).get("token")
+                    or resp.headers.get("X-Subject-Token")
+                )
                 if token:
-                    logger.info("AfterSalesIncidentProvider login successful")
+                    logger.info("AfterSalesIncidentProvider login successful, token obtained")
                     return token
-                user_sys_id = body.get("data", {}).get("user_info", {}).get("user_sys_id")
-                if user_sys_id:
-                    logger.warning("Login succeeded but no JWT, using user_sys_id")
-                    return user_sys_id
-                logger.warning("Login succeeded but no token found")
+                resp_text = resp.text
+                token_in_body = "token" in resp_text
+                logger.warning(
+                    "Login succeeded but no JWT or X-Subject-Token (token in body: %s): %s",
+                    token_in_body,
+                    resp_text[:500],
+                )
                 return None
-            logger.warning("Login failed: %s %s", resp.status_code, resp.text[:200])
+            logger.warning("Login failed: %s %s", resp.status_code, resp.text[:500])
             return None
         except Exception as e:
             logger.warning("Login exception: %s", e)
             return None
 
-    def _ensure_token(self, auth_config: dict) -> str | None:
-        if self._token:
+    def _ensure_token(self, auth_config: dict, force_refresh: bool = False) -> str | None:
+        if not force_refresh and self._token and _is_token_valid(self._token):
             return self._token
         # Try direct bearer token first
         _, token, _ = self._resolve_config(auth_config)
+        if token and (force_refresh or not _is_token_valid(token)):
+            # bearer token 已过期或强制刷新，走登录
+            token = None
         if token:
             self._token = token
             return token
         # Fall back to login
         self._token = self._do_login(auth_config)
+        return self._token
         return self._token
 
     def _build_headers(self, token: str) -> dict:
@@ -253,6 +291,28 @@ class AfterSalesIncidentProvider(BaseProvider):
             if resp.status_code == 200:
                 logger.info("AfterSalesIncidentProvider authenticate: success")
                 return True
+            if resp.status_code == 401:
+                logger.warning(
+                    "AfterSalesIncidentProvider authenticate: 收到 401，尝试重新登录..."
+                )
+                new_token = self._ensure_token(auth_config, force_refresh=True)
+                if new_token:
+                    resp = requests.get(
+                        url,
+                        headers=self._build_headers(new_token),
+                        params=params,
+                        timeout=30,
+                        verify=False,
+                    )
+                    if resp.status_code == 200:
+                        logger.info("AfterSalesIncidentProvider authenticate: success (刷新后)")
+                        return True
+                    logger.warning(
+                        "AfterSalesIncidentProvider authenticate failed after refresh: %s %s",
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+                return False
             logger.warning(
                 "AfterSalesIncidentProvider authenticate failed: %s %s",
                 resp.status_code,
@@ -309,6 +369,17 @@ class AfterSalesIncidentProvider(BaseProvider):
                 )
                 break
 
+            if resp.status_code == 401:
+                logger.warning(
+                    "AfterSalesIncidentProvider.collect: 收到 401，Token 可能已过期，尝试重新登录..."
+                )
+                new_token = self._ensure_token(auth_config, force_refresh=True)
+                if new_token:
+                    headers = self._build_headers(new_token)
+                    logger.info("AfterSalesIncidentProvider.collect: Token 已刷新，重试当前批次")
+                    continue
+                logger.warning("AfterSalesIncidentProvider.collect: Token 刷新失败，停止拉取")
+                break
             if resp.status_code != 200:
                 logger.warning(
                     "AfterSalesIncidentProvider.collect API failed [%s]: %s",
