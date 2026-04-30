@@ -1698,7 +1698,8 @@
       "jira": "Jira",
       "license": "授权管理平台",
       "hyperbdr": "HyperBDR",
-      "ai_pricehub": "大模型价格"
+      "ai_pricehub": "大模型价格",
+      "after_sales_incident": "售后工单"
     },
     "records": {
       "pageTitle": "采集数据",
@@ -1945,6 +1946,21 @@
       "currentSelected": "当前已选",
       "step2Desc": "选择需要同步的比价采集类型",
       "syncCollection": "比价同步采集"
+    },
+    "afterSalesIncident": {
+      "baseUrl": "API 地址",
+      "baseUrlDesc": "OneProCloud 平台 URL，如 https://support.oneprocloud.com",
+      "baseUrlPlaceholder": "https://support.oneprocloud.com",
+      "username": "用户名",
+      "usernameDesc": "平台登录用户名",
+      "usernamePlaceholder": "admin",
+      "password": "密码",
+      "passwordDesc": "平台登录密码",
+      "passwordPlaceholder": "••••••••",
+      "passwordPlaceholderEdit": "不修改请留空",
+      "tableName": "表名",
+      "tableNameDesc": "OneProCloud API 表名，默认为 after_sale_incident",
+      "tableNamePlaceholder": "after_sale_incident"
     }
   },
   "llm": {

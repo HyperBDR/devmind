@@ -1689,7 +1689,8 @@
       "jira": "Jira",
       "license": "License",
       "hyperbdr": "HyperBDR",
-      "ai_pricehub": "AI Pricing"
+      "ai_pricehub": "AI Pricing",
+      "after_sales_incident": "After-Sales Work Order"
     },
     "records": {
       "pageTitle": "Collection data",
@@ -1936,6 +1937,21 @@
       "currentSelected": "currently selected",
       "step2Desc": "Select pricing collection targets to sync",
       "syncCollection": "Pricing sync collection"
+    },
+    "afterSalesIncident": {
+      "baseUrl": "API URL",
+      "baseUrlDesc": "OneProCloud platform URL, e.g. https://support.oneprocloud.com",
+      "baseUrlPlaceholder": "https://support.oneprocloud.com",
+      "username": "Username",
+      "usernameDesc": "Platform login username",
+      "usernamePlaceholder": "admin",
+      "password": "Password",
+      "passwordDesc": "Platform login password",
+      "passwordPlaceholder": "••••••••",
+      "passwordPlaceholderEdit": "Leave blank to keep existing",
+      "tableName": "Table Name",
+      "tableNameDesc": "OneProCloud API table name, defaults to after_sale_incident",
+      "tableNamePlaceholder": "after_sale_incident"
     }
   },
   "llm": {
