@@ -708,7 +708,8 @@
     "adminConsole": "管理员控制台",
     "llmConsole": "LLM 控制台",
     "taskManagementConsole": "任务控制台",
-    "notificationConsole": "通知控制台"
+    "notificationConsole": "通知控制台",
+    "salesWorkOrders": "销售工单"
   },
   "operations": {
     "menuTitle": "运营看板",
@@ -717,6 +718,39 @@
       "title": "运营总览看板",
       "subtitle": "集中查看平台成本趋势、资金健康度与关键账号风险分布，作为运营控制台的统一入口。",
       "currency": "货币"
+    }
+  },
+  "sals": {
+    "dashboard": {
+      "badge": "销售",
+      "title": "销售运营仪表盘",
+      "subtitle": "售后工单管理与数据分析",
+      "sync": "同步",
+      "stateDistribution": "状态分布",
+      "monthlyTrend": "月度趋势",
+      "priorityDistribution": "优先级分布",
+      "slaOverview": "SLA 概览",
+      "groupStats": "小组统计",
+      "customerStats": "客户统计",
+      "assigneeStats": "处理人统计",
+      "kpiTotal": "工单总数",
+      "kpiPending": "活跃工单",
+      "kpiSlaRate": "SLA 达标率",
+      "kpiAvgHours": "平均处理时长",
+      "kpiAvgHoursHint": "小时/工单",
+      "resolved": "已解决",
+      "priority": "优先级",
+      "total": "总计",
+      "slaMet": "SLA 达标",
+      "slaRate": "SLA 达标率",
+      "avgHours": "平均时长",
+      "group": "处理组",
+      "resolvedRate": "解决率",
+      "company": "客户",
+      "product": "产品",
+      "assignee": "处理人",
+      "pendingCount": "待处理",
+      "count": "数量"
     }
   },
   "hyperbdrDashboard": {

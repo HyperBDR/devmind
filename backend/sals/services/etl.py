@@ -54,20 +54,11 @@ def _fmt_state(v: Any) -> str:
         return str(v)
 
 
-def login_api() -> Optional[str]:
-    bearer = os.getenv("ONEPRO_BEARER_TOKEN", "").strip()
-    if bearer:
-        logger.info("Using pre-configured Bearer token")
-        return bearer
-
-    if not API_USERNAME or not API_PASSWORD:
-        logger.warning("No API credentials configured")
-        return None
-
-    url = f"{API_BASE_URL}/api/hyper/auth/login"
+def _do_login_with_creds(username: str, password: str, base_url: str) -> Optional[str]:
+    url = f"{base_url}/api/hyper/auth/login"
     payload = {
-        "user_name": API_USERNAME,
-        "user_password": API_PASSWORD,
+        "user_name": username,
+        "user_password": password,
         "auth_type": "glide.local.authentication",
         "preferred_language": "zh",
     }
@@ -75,13 +66,13 @@ def login_api() -> Optional[str]:
         resp = requests.post(url, json=payload, timeout=30, verify=False)
         if resp.status_code == 200:
             body = resp.json()
-            token = body.get("token") or resp.headers.get("X-Subject-Token")
+            token = resp.headers.get("X-Subject-Token") or body.get("token")
             if token:
                 logger.info("API login successful")
                 return token
             user_sys_id = body.get("data", {}).get("user_info", {}).get("user_sys_id")
             if user_sys_id:
-                logger.warning("Login succeeded but no JWT, using user_sys_id")
+                logger.warning("Login succeeded but no JWT, using user_sys_id: %s", user_sys_id)
                 return user_sys_id
             logger.error("Login succeeded but no token found")
             return None
@@ -91,6 +82,77 @@ def login_api() -> Optional[str]:
     except Exception as e:
         logger.error("API login exception: %s", e)
         return None
+
+
+def _login_from_collector_config() -> Optional[str]:
+    """
+    从 data_collector 的 CollectorConfig 读取凭证并登录。
+    尝试 after_sales_incident 和 incident 两个平台，取第一个启用且有有效凭证的配置。
+    直接复用各 provider 的 _do_login 以确保认证行为一致。
+    """
+    try:
+        from data_collector.models import CollectorConfig
+    except ImportError:
+        return None
+
+    for platform in ("after_sales_incident", "incident"):
+        configs = CollectorConfig.objects.filter(
+            platform=platform,
+            is_enabled=True,
+        ).order_by("id")[:1]
+        for config in configs:
+            value = config.value or {}
+            auth = value.get("auth") or {}
+            # 构建与 provider 相同的 auth_config 格式
+            auth_config = {**value, **auth}
+            # bearer_token 直接优先使用
+            bearer_token = (auth.get("bearer_token") or "").strip()
+            if bearer_token:
+                logger.info(
+                    "Using bearer_token from CollectorConfig (platform=%s)",
+                    platform,
+                )
+                return bearer_token
+            # 使用 provider 的 _do_login（已验证可用）
+            try:
+                if platform == "after_sales_incident":
+                    from data_collector.services.providers.after_sales_incident import (
+                        AfterSalesIncidentProvider,
+                    )
+                    provider = AfterSalesIncidentProvider()
+                    token = provider._do_login(auth_config)
+                    if token:
+                        logger.info(
+                            "Login from CollectorConfig successful (platform=%s)",
+                            platform,
+                        )
+                        return token
+            except Exception as exc:
+                logger.warning(
+                    "Provider login failed for platform=%s: %s",
+                    platform,
+                    exc,
+                )
+    return None
+
+
+def login_api() -> Optional[str]:
+    bearer = os.getenv("ONEPRO_BEARER_TOKEN", "").strip()
+    if bearer:
+        logger.info("Using pre-configured Bearer token")
+        return bearer
+
+    if API_USERNAME and API_PASSWORD:
+        token = _do_login_with_creds(API_USERNAME, API_PASSWORD, API_BASE_URL)
+        if token:
+            return token
+
+    token = _login_from_collector_config()
+    if token:
+        return token
+
+    logger.warning("No API credentials available")
+    return None
 
 
 def _build_headers(token: str) -> Dict[str, str]:

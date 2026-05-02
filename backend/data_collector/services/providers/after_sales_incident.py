@@ -186,7 +186,6 @@ class AfterSalesIncidentProvider(BaseProvider):
         # Fall back to login
         self._token = self._do_login(auth_config)
         return self._token
-        return self._token
 
     def _build_headers(self, token: str) -> dict:
         return {

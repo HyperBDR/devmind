@@ -771,5 +771,38 @@
       "testMailSuccess": "Correo de prueba enviado",
       "testMailError": "No se pudo enviar el correo de prueba"
     }
+  },
+  "sals": {
+    "dashboard": {
+      "badge": "Ventas",
+      "title": "Panel de Operaciones de Ventas",
+      "subtitle": "Gestión y análisis de órdenes de servicio postventa",
+      "sync": "Sincronizar",
+      "stateDistribution": "Distribución por Estado",
+      "monthlyTrend": "Tendencia Mensual",
+      "priorityDistribution": "Distribución por Prioridad",
+      "slaOverview": "Resumen SLA",
+      "groupStats": "Estadísticas por Grupo",
+      "customerStats": "Estadísticas por Cliente",
+      "assigneeStats": "Estadísticas por Asignado",
+      "kpiTotal": "Total de Incidentes",
+      "kpiPending": "Incidentes Activos",
+      "kpiSlaRate": "Cumplimiento SLA",
+      "kpiAvgHours": "Tiempo Promedio",
+      "kpiAvgHoursHint": "Horas por incidente",
+      "resolved": "resuelto",
+      "priority": "Prioridad",
+      "total": "Total",
+      "slaMet": "SLA Cumplido",
+      "slaRate": "Tasa SLA",
+      "avgHours": "Horas Promedio",
+      "group": "Grupo",
+      "resolvedRate": "Tasa de Resolución",
+      "company": "Empresa",
+      "product": "Producto",
+      "assignee": "Asignado",
+      "pendingCount": "Pendiente",
+      "count": "Cantidad"
+    }
   }
 }

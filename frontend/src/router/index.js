@@ -74,6 +74,16 @@ const routes = [
     meta: { requiresAuth: true, requiredFeature: 'operations_console' }
   },
   {
+    path: '/sals',
+    redirect: '/sals/dashboard'
+  },
+  {
+    path: '/sals/dashboard',
+    name: 'SalesDashboard',
+    component: () => import('@/pages/Sales/SalesDashboard.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+  },
+  {
     path: '/hyperbdr-dashboard',
     name: 'HyperBRDDashboard',
     component: () => import('@/pages/HyperBDRDashboard.vue'),

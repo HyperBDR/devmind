@@ -698,7 +698,8 @@
     "adminConsole": "Admin Console",
     "llmConsole": "LLM Console",
     "taskManagementConsole": "Task Console",
-    "notificationConsole": "Notification Console"
+    "notificationConsole": "Notification Console",
+    "salesWorkOrders": "Sales Work Orders"
   },
   "operations": {
     "menuTitle": "Operations Dashboard",
@@ -707,6 +708,39 @@
       "title": "Operations Overview Dashboard",
       "subtitle": "Track platform cost trends, financial health, and account risk distribution from a dedicated operations landing page.",
       "currency": "Currency"
+    }
+  },
+  "sals": {
+    "dashboard": {
+      "badge": "Sales",
+      "title": "Sales Operations Dashboard",
+      "subtitle": "After-sales work order management and analytics",
+      "sync": "Sync",
+      "stateDistribution": "State Distribution",
+      "monthlyTrend": "Monthly Trend",
+      "priorityDistribution": "Priority Distribution",
+      "slaOverview": "SLA Overview",
+      "groupStats": "Group Statistics",
+      "customerStats": "Customer Statistics",
+      "assigneeStats": "Assignee Statistics",
+      "kpiTotal": "Total Incidents",
+      "kpiPending": "Active Incidents",
+      "kpiSlaRate": "SLA Compliance",
+      "kpiAvgHours": "Avg Resolve Time",
+      "kpiAvgHoursHint": "Hours per incident",
+      "resolved": "resolved",
+      "priority": "Priority",
+      "total": "Total",
+      "slaMet": "SLA Met",
+      "slaRate": "SLA Rate",
+      "avgHours": "Avg Hours",
+      "group": "Group",
+      "resolvedRate": "Resolved Rate",
+      "company": "Company",
+      "product": "Product",
+      "assignee": "Assignee",
+      "pendingCount": "Pending",
+      "count": "Count"
     }
   },
   "hyperbdrDashboard": {
