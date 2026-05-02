@@ -81,7 +81,7 @@ const routes = [
     path: '/sals/dashboard',
     name: 'SalesDashboard',
     component: () => import('@/pages/Sales/SalesDashboard.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: { requiresAuth: true, requiredFeature: 'sales_work_orders' }
   },
   {
     path: '/hyperbdr-dashboard',
