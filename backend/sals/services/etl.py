@@ -4,6 +4,7 @@ API 为默认主数据源，Excel 仅作为无 API 凭证时的备用。
 """
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -27,11 +28,27 @@ _STATE_MAP = {
     1: "New",
     2: "In Progress",
     3: "On Hold",
-    4: "Resolved",
+    4: "Closed",
     5: "Closed",
-    6: "Canceled",
+    6: "Resolved",
     7: "Pending",
+    8: "Canceled",
 }
+
+# Reverse lookup: display values (any locale) → state code
+_STATE_DISPLAY_TO_CODE: Dict[str, int] = {}
+for _code, _name in _STATE_MAP.items():
+    _STATE_DISPLAY_TO_CODE[_name.lower()] = _code
+# Common Chinese display values
+_STATE_DISPLAY_TO_CODE.update({
+    "新建": 1, "待处理": 1, "新": 1,
+    "处理中": 2, "进行中": 2,
+    "暂停": 3, "挂起": 3,
+    "已关闭": 4, "关闭": 4, "已结束": 5,
+    "已解决": 6, "解决": 6,
+    "待定": 7, "等待": 7, "挂起中": 7,
+    "已取消": 8, "取消": 8,
+})
 
 
 def _fmt_priority(v: Any) -> str:
@@ -48,10 +65,17 @@ def _fmt_priority(v: Any) -> str:
 def _fmt_state(v: Any) -> str:
     if v is None:
         return "Unknown"
+    # Numeric code
     try:
         return _STATE_MAP.get(int(v), "Unknown")
     except (TypeError, ValueError):
-        return str(v)
+        pass
+    # String: try reverse lookup (handles any locale display value)
+    s = str(v).strip().lower()
+    code = _STATE_DISPLAY_TO_CODE.get(s)
+    if code is not None:
+        return _STATE_MAP[code]
+    return "Unknown"
 
 
 def _do_login_with_creds(username: str, password: str, base_url: str) -> Optional[str]:
@@ -163,14 +187,61 @@ def _build_headers(token: str) -> Dict[str, str]:
     }
 
 
-def fetch_incidents_from_api(token: str, limit: int = 200) -> List[Dict[str, Any]]:
+def _parse_raw_incident(raw: dict) -> Optional[dict]:
+    """Extract structured fields from a single API record."""
+    if not isinstance(raw, dict):
+        return None
+    data_map = raw.get("record_data_map", raw)
+    group_name = (
+        data_map.get("assignment_group_special_name")
+        or data_map.get("assignment_group")
+    )
+    assignee_name = (
+        data_map.get("assigned_to_special_name")
+        or data_map.get("assigned_to")
+    )
+    mapped = {
+        "number": data_map.get("number") or raw.get("number"),
+        "short_description": data_map.get("short_description"),
+        "priority": data_map.get("priority"),
+        "state": _fmt_state(data_map.get("state")),
+        "category": data_map.get("category"),
+        "assignment_group": group_name,
+        "assigned_to": assignee_name,
+        "company": (
+            data_map.get("company_special_name")
+            or data_map.get("company")
+        ),
+        "caller": (
+            data_map.get("caller_id_special_name")
+            or data_map.get("u_caller_special_name")
+        ),
+        "sys_created_on": data_map.get("sys_created_on"),
+        "sys_updated_on": data_map.get("sys_updated_on"),
+        "sys_created_by": data_map.get("sys_created_by"),
+        "sys_updated_by": data_map.get("sys_updated_by"),
+        "parent_incident": data_map.get("parent"),
+        "resolution_code": data_map.get("close_code"),
+    }
+    mapped = {k: v for k, v in mapped.items() if v is not None}
+    return mapped if mapped.get("number") else None
+
+
+def fetch_incidents_from_api(
+    token: str,
+    limit: Optional[int] = 200,
+) -> List[Dict[str, Any]]:
     headers = _build_headers(token)
     all_records: List[Dict[str, Any]] = []
-    batch_size = min(200, limit)
+    batch_size = 200
     offset = 0
 
-    while len(all_records) < limit:
-        remaining = limit - len(all_records)
+    while limit is None or len(all_records) < limit:
+        remaining = (
+            (limit - len(all_records))
+            if limit is not None
+            else batch_size
+        )
         params = {
             "sysparm_limit": min(batch_size, remaining),
             "sysparm_offset": offset,
@@ -178,13 +249,21 @@ def fetch_incidents_from_api(token: str, limit: int = 200) -> List[Dict[str, Any
         }
         url = f"{API_BASE_URL}/api/hyper/table/incident"
         try:
-            resp = requests.get(url, headers=headers, params=params, timeout=60, verify=False)
+            resp = requests.get(
+                url, headers=headers, params=params,
+                timeout=60, verify=False,
+            )
         except Exception as e:
-            logger.error("Request exception at offset %s: %s", offset, e)
+            logger.error(
+                "Request exception at offset %s: %s", offset, e,
+            )
             break
 
         if resp.status_code != 200:
-            logger.error("API request failed [%s]: %s", resp.status_code, resp.text[:300])
+            logger.error(
+                "API request failed [%s]: %s",
+                resp.status_code, resp.text[:300],
+            )
             break
 
         body = resp.json()
@@ -193,47 +272,21 @@ def fetch_incidents_from_api(token: str, limit: int = 200) -> List[Dict[str, Any
             break
 
         for raw in records:
-            if not isinstance(raw, dict):
-                continue
-            data_map = raw.get("record_data_map", raw)
-            group_name = (
-                data_map.get("assignment_group_special_name")
-                or data_map.get("assignment_group")
-            )
-            assignee_name = (
-                data_map.get("assigned_to_special_name")
-                or data_map.get("assigned_to")
-            )
-            mapped = {
-                "number": data_map.get("number") or raw.get("number"),
-                "short_description": data_map.get("short_description"),
-                "priority": data_map.get("priority"),
-                "state": _fmt_state(data_map.get("state")),
-                "category": data_map.get("category"),
-                "assignment_group": group_name,
-                "assigned_to": assignee_name,
-                "company": data_map.get("company_special_name") or data_map.get("company"),
-                "caller": (
-                    data_map.get("caller_id_special_name")
-                    or data_map.get("u_caller_special_name")
-                ),
-                "sys_created_on": data_map.get("sys_created_on"),
-                "sys_updated_on": data_map.get("sys_updated_on"),
-                "sys_created_by": data_map.get("sys_created_by"),
-                "sys_updated_by": data_map.get("sys_updated_by"),
-                "parent_incident": data_map.get("parent"),
-                "resolution_code": data_map.get("close_code"),
-            }
-            mapped = {k: v for k, v in mapped.items() if v is not None}
-            if mapped.get("number"):
-                all_records.append(mapped)
+            parsed = _parse_raw_incident(raw)
+            if parsed:
+                all_records.append(parsed)
 
-        logger.info("Fetched %s records (offset=%s)", len(all_records), offset)
+        logger.info(
+            "Fetched %s records (offset=%s)",
+            len(all_records), offset,
+        )
         offset += batch_size
         if len(records) < batch_size:
             break
 
-    return all_records[:limit]
+    if limit is not None:
+        return all_records[:limit]
+    return all_records
 
 
 def fetch_companies_from_api(token: str) -> List[Dict[str, Any]]:
@@ -395,8 +448,11 @@ def _record_to_dict(raw: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def sync_companies_from_api() -> Dict[str, Any]:
-    token = login_api()
+def sync_companies_from_api(
+    token: Optional[str] = None,
+) -> Dict[str, Any]:
+    if not token:
+        token = login_api()
     if not token:
         return {"status": "error", "message": "API 认证失败"}
 
@@ -473,52 +529,160 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
     if not token:
         return {
             "status": "error",
-            "message": "API 认证失败，请检查 ONEPRO_BEARER_TOKEN 或 ONEPRO_USERNAME/PASSWORD 环境变量",
+            "message": (
+                "API 认证失败，请检查 "
+                "ONEPRO_BEARER_TOKEN 或 "
+                "ONEPRO_USERNAME/PASSWORD 环境变量"
+            ),
         }
 
-    limit = API_SYNC_LIMIT
-    records = fetch_incidents_from_api(token, limit=limit)
-    if not records:
-        return {"status": "error", "message": "API 未返回任何记录"}
-
-    # 先同步公司映射表
-    sync_companies_result = sync_companies_from_api()
+    # 1. 同步公司映射表（写入前需要 company name）
+    sync_companies_result = sync_companies_from_api(token)
     logger.info("Company sync result: %s", sync_companies_result)
 
-    # 构建 sys_id -> name 映射
     company_map: Dict[str, str] = {
         c.sys_id: c.name or c.sys_id
         for c in Company.objects.all()
         if c.sys_id
     }
 
-    mapped = []
-    for raw in records:
-        co_sys_id = raw.get("company") or ""
-        raw["company"] = company_map.get(co_sys_id, co_sys_id)
-        m = _record_to_dict(raw)
-        if m:
-            mapped.append(m)
+    # 2. 并发分页拉取 → 清洗 → 写入
+    headers = _build_headers(token)
+    url = f"{API_BASE_URL}/api/hyper/table/incident"
+    batch_size = 200
+    concurrency = 4
+    total_synced = 0
+    limit = None if full_sync else API_SYNC_LIMIT
+    offset = 0
 
-    with transaction.atomic():
-        if full_sync:
-            Incident.objects.all().delete()
-            logger.info("Old incidents deleted (full sync)")
+    def _fetch_page(off: int) -> tuple[int, list]:
+        """Fetch a single page; returns (offset, records)."""
+        try:
+            params = {
+                "sysparm_limit": batch_size,
+                "sysparm_offset": off,
+                "sysparm_display_value": "true",
+            }
+            resp = requests.get(
+                url, headers=headers, params=params,
+                timeout=60, verify=False,
+            )
+        except Exception as e:
+            logger.error(
+                "Request exception offset=%s: %s", off, e,
+            )
+            return off, []
+        if resp.status_code != 200:
+            logger.error(
+                "API request failed [%s] offset=%s: %s",
+                resp.status_code, off, resp.text[:200],
+            )
+            return off, []
+        return off, resp.json().get("data", []) or []
 
-        for row in mapped:
-            defaults = {k: v for k, v in row.items() if k != "number"}
-            _, created = Incident.objects.update_or_create(
-                number=row["number"],
-                defaults=defaults,
+    def _write_batch(records: list) -> tuple[int, set]:
+        """Transform and persist one batch.
+        Returns (count_written, set_of_numbers)."""
+        written = 0
+        numbers: set = set()
+        with transaction.atomic():
+            for raw in records:
+                parsed = _parse_raw_incident(raw)
+                if not parsed:
+                    continue
+                co_sys_id = parsed.get("company") or ""
+                parsed["company"] = company_map.get(
+                    co_sys_id, co_sys_id,
+                )
+                row = _record_to_dict(parsed)
+                if not row:
+                    continue
+                numbers.add(row["number"])
+                defaults = {
+                    k: v for k, v in row.items()
+                    if k != "number"
+                }
+                Incident.objects.update_or_create(
+                    number=row["number"],
+                    defaults=defaults,
+                )
+                written += 1
+        return written, numbers
+
+    # 全量模式：先写新数据，成功后再删旧数据
+    # 记录同步前的旧 number 集合
+    old_numbers: set = set()
+    if full_sync:
+        old_numbers = set(
+            Incident.objects.values_list("number", flat=True)
+        )
+
+    synced_numbers: set = set()
+    done = False
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        while not done:
+            wave_offsets = [
+                offset + i * batch_size
+                for i in range(concurrency)
+            ]
+            if not wave_offsets:
+                break
+
+            futures = {
+                pool.submit(_fetch_page, off): off
+                for off in wave_offsets
+            }
+
+            results: dict[int, list] = {}
+            for future in as_completed(futures):
+                off, records = future.result()
+                results[off] = records
+
+            for off in sorted(results):
+                records = results[off]
+                if not records:
+                    done = True
+                    break
+                written, numbers = _write_batch(records)
+                total_synced += written
+                synced_numbers |= numbers
+                logger.info(
+                    "Batch done: offset=%s "
+                    "written=%s total=%s",
+                    off, written, total_synced,
+                )
+                if len(records) < batch_size:
+                    done = True
+                    break
+
+                # 增量模式到达 limit 时停止
+                if limit is not None and total_synced >= limit:
+                    done = True
+                    break
+
+            offset += concurrency * batch_size
+
+    # 全量模式：删除本次同步未覆盖的旧记录
+    if full_sync and synced_numbers:
+        stale = old_numbers - synced_numbers
+        if stale:
+            deleted, _ = Incident.objects.filter(
+                number__in=stale,
+            ).delete()
+            logger.info(
+                "Removed %s stale incidents", deleted,
             )
 
     total = Incident.objects.count()
-    logger.info("Incident sync done: processed=%s, total=%s", len(mapped), total)
+    logger.info(
+        "Incident sync done: synced=%s, total=%s",
+        total_synced, total,
+    )
 
     user_result = sync_users_from_api()
     return {
         "status": "ok",
-        "synced": len(mapped),
+        "synced": total_synced,
         "total": total,
         "mode": "full" if full_sync else "incremental",
         "users": user_result,

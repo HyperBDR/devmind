@@ -5,7 +5,7 @@ import logging
 import re
 from collections import Counter
 
-from django.db.models import Avg, Count, Q, Sum, Case, When, IntegerField, FloatField
+from django.db.models import Avg, Count, Q, Sum, Case, When, Value, CharField, IntegerField, FloatField
 from django.db.models.functions import Coalesce
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.access import get_effective_feature_keys
+from core.paginations import APIPagination
 from rest_framework.exceptions import PermissionDenied
 
 from .models import Company, User, Incident
@@ -435,9 +436,6 @@ class IncidentListAPIView(APIView):
     @extend_schema(tags=["sals"], summary="List incidents")
     def get(self, request):
         _check_feature_permission(request.user)
-        page = max(1, int(request.query_params.get("page", 1)))
-        page_size = int(request.query_params.get("page_size", 20))
-        page_size = max(1, min(page_size, 1000))
 
         priority = request.query_params.get("priority")
         state = request.query_params.get("state")
@@ -459,42 +457,18 @@ class IncidentListAPIView(APIView):
         if company:
             qs = qs.filter(company=company)
 
-        allowed_sorts = ["created_at", "priority", "state", "resolve_hours"]
+        allowed_sorts = [
+            "created_at", "priority", "state", "resolve_hours",
+        ]
         if sort_by not in allowed_sorts:
             sort_by = "created_at"
-        col = getattr(Incident, sort_by, Incident.created_at)
-        if order == "desc":
-            col = col.desc()
+        order_prefix = "-" if order == "desc" else ""
+        qs = qs.order_by(f"{order_prefix}{sort_by}")
 
-        offset = (page - 1) * page_size
-        return Response(IncidentSerializer(qs.order_by(col)[offset:offset + page_size], many=True).data)
-
-
-class IncidentCountAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(tags=["sals"], summary="Count incidents")
-    def get(self, request):
-        _check_feature_permission(request.user)
-        priority = request.query_params.get("priority")
-        state = request.query_params.get("state")
-        group = request.query_params.get("group")
-        category = request.query_params.get("category")
-        company = request.query_params.get("company")
-
-        qs = Incident.objects.all()
-        if priority:
-            qs = qs.filter(priority=priority)
-        if state:
-            qs = qs.filter(state=state)
-        if group:
-            qs = qs.filter(assignment_group=group)
-        if category:
-            qs = qs.filter(category=category)
-        if company:
-            qs = qs.filter(company=company)
-
-        return Response({"count": qs.count()})
+        paginator = APIPagination()
+        page = paginator.paginate_queryset(qs, request)
+        serializer = IncidentSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
 
 class RecentIncidentsAPIView(APIView):
@@ -598,6 +572,84 @@ class SyncUsersAPIView(APIView):
         return Response(result, status=status_code)
 
 
+class EscalationStatsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(tags=["sals"], summary="L1-to-L2 escalation stats")
+    def get(self, request):
+        _check_feature_permission(request.user)
+        from .services.escalation import L1_GROUPS, L2_GROUPS
+
+        classified = Incident.objects.annotate(
+            support_level=Case(
+                When(
+                    assignment_group__in=L1_GROUPS,
+                    then=Value("L1"),
+                ),
+                When(
+                    assignment_group__in=L2_GROUPS,
+                    then=Value("L2"),
+                ),
+                default=Value("unclassified"),
+                output_field=CharField(),
+            )
+        )
+
+        # Summary counts
+        level_counts = (
+            classified.values("support_level")
+            .annotate(count=Count("id"))
+        )
+        counts = {r["support_level"]: r["count"] for r in level_counts}
+        l1 = counts.get("L1", 0)
+        l2 = counts.get("L2", 0)
+        total_classified = l1 + l2
+        rate = round(l2 / total_classified * 100, 1) if total_classified else 0
+
+        # Priority distribution
+        priority_rows = (
+            classified
+            .filter(support_level__in=["L1", "L2"])
+            .values("priority", "support_level")
+            .annotate(count=Count("id"))
+            .order_by("priority")
+        )
+        prio_map: dict = {}
+        for r in priority_rows:
+            p = r["priority"] or "未知"
+            if p not in prio_map:
+                prio_map[p] = {"priority": p, "l1": 0, "l2": 0}
+            prio_map[p][r["support_level"].lower()] = r["count"]
+
+        # Monthly trend
+        trend_rows = (
+            classified
+            .filter(
+                support_level__in=["L1", "L2"],
+                month__isnull=False,
+            )
+            .values("month", "support_level")
+            .annotate(count=Count("id"))
+            .order_by("month")
+        )
+        trend_map: dict = {}
+        for r in trend_rows:
+            m = r["month"]
+            if m not in trend_map:
+                trend_map[m] = {"month": m, "l1": 0, "l2": 0}
+            trend_map[m][r["support_level"].lower()] = r["count"]
+
+        return Response({
+            "summary": {
+                "l1_count": l1,
+                "l2_count": l2,
+                "escalation_rate": rate,
+            },
+            "priority_dist": list(prio_map.values()),
+            "monthly_trend": list(trend_map.values()),
+        })
+
+
 class DashboardAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -638,6 +690,13 @@ class DashboardAPIView(APIView):
         matrix_view = ProductStateMatrixAPIView()
         matrix_response = matrix_view.get(request)
 
+        escalation_view = EscalationStatsAPIView()
+        escalation_response = escalation_view.get(request)
+
+        recent_view = RecentIncidentsAPIView()
+        recent_view.request = request
+        recent_response = recent_view.get(request)
+
         return Response({
             "kpi": kpi_response.data,
             "priority_dist": priority_response.data,
@@ -649,6 +708,8 @@ class DashboardAPIView(APIView):
             "product_stats": product_response.data,
             "sla_stats": sla_response.data,
             "product_state_matrix": matrix_response.data,
+            "escalation_stats": escalation_response.data,
+            "recent_incidents": recent_response.data,
         })
 
 

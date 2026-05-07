@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import { 
   Ticket, 
   CheckCircle2, 
@@ -43,24 +43,24 @@ import {
   ZAxis
 } from 'recharts';
 import { motion } from 'motion/react';
-import { 
-  MOCK_INCIDENTS, 
-  getStats, 
-  getTrendData, 
-  getPriorityData, 
-  getStateData, 
-  getGroupStats, 
-  getUserStats,
-  getClientHealthData,
+import {
+  MOCK_WORK_ORDERS,
+  getStats,
+  getTrendData,
+  getStageData as getPriorityData,
+  getStateData,
+  getRepStats as getGroupStats,
+  getRepStats as getUserStats,
+  getCompanyStats as getClientHealthData,
   getProductData,
-  getSlaByPriority,
-  Priority
+  getStageData as getSlaByPriority,
+  STAGE_COLORS,
 } from './mockData';
+import type { SaleStage } from './mockData';
 import { StatCard } from './components/StatCard';
 import { cn } from './lib/utils';
 import { format } from 'date-fns';
 import { translations, Language } from './i18n';
-import { api } from './lib/api';
 
 const PRIORITY_COLORS = {
   P1: '#f43f5e', // rose-500
@@ -77,29 +77,8 @@ export default function App() {
   const [stateFilter, setStateFilter] = useState<string>('all');
   const [groupFilter, setGroupFilter] = useState<string>('all');
   const [efficiencyMode, setEfficiencyMode] = useState<'group' | 'user'>('group');
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   const t = translations[lang];
-
-  const handleRefresh = useCallback(async () => {
-    if (syncing) return;
-    setSyncing(true);
-    setSyncMessage(null);
-    try {
-      const result = await api.initDb('api', false);
-      if (result.status === 'ok') {
-        setSyncMessage(`${t.syncSuccess}: ${result.synced ?? 0} ${t.syncedRecords}`);
-      } else {
-        setSyncMessage(`${t.syncError}: ${result.message ?? result.status}`);
-      }
-    } catch (err: any) {
-      setSyncMessage(`${t.syncError}: ${err.message}`);
-    } finally {
-      setSyncing(false);
-      setTimeout(() => setSyncMessage(null), 4000);
-    }
-  }, [syncing, t]);
 
   const getStateLabel = (state: string) => {
     if (lang === 'en') return state;
@@ -114,26 +93,26 @@ export default function App() {
     return stateMap[state] || state;
   };
 
-  const stats = useMemo(() => getStats(MOCK_INCIDENTS), []);
-  const trendData = useMemo(() => getTrendData(MOCK_INCIDENTS), []);
-  const priorityData = useMemo(() => getPriorityData(MOCK_INCIDENTS), []);
-  const stateData = useMemo(() => getStateData(MOCK_INCIDENTS), []);
-  const groupStats = useMemo(() => getGroupStats(MOCK_INCIDENTS), []);
-  const userStats = useMemo(() => getUserStats(MOCK_INCIDENTS), []);
-  const healthData = useMemo(() => getClientHealthData(MOCK_INCIDENTS), []);
-  const productData = useMemo(() => getProductData(MOCK_INCIDENTS), []);
-  const slaByPriority = useMemo(() => getSlaByPriority(MOCK_INCIDENTS), []);
+  const stats = useMemo(() => getStats(MOCK_WORK_ORDERS), []);
+  const trendData = useMemo(() => getTrendData(MOCK_WORK_ORDERS), []);
+  const priorityData = useMemo(() => getPriorityData(MOCK_WORK_ORDERS), []);
+  const stateData = useMemo(() => getStateData(MOCK_WORK_ORDERS), []);
+  const groupStats = useMemo(() => getGroupStats(MOCK_WORK_ORDERS), []);
+  const userStats = useMemo(() => getUserStats(MOCK_WORK_ORDERS), []);
+  const healthData = useMemo(() => getClientHealthData(MOCK_WORK_ORDERS), []);
+  const productData = useMemo(() => getProductData(MOCK_WORK_ORDERS), []);
+  const slaByPriority = useMemo(() => getSlaByPriority(MOCK_WORK_ORDERS), []);
 
-  const filteredIncidents = useMemo(() => {
-    return MOCK_INCIDENTS.filter(incident => {
-      const matchPriority = priorityFilter === 'all' || incident.priority === priorityFilter;
-      const matchState = stateFilter === 'all' || incident.state === stateFilter;
-      const matchGroup = groupFilter === 'all' || incident.assignment_group === groupFilter;
+  const filteredOrders = useMemo(() => {
+    return MOCK_WORK_ORDERS.filter(order => {
+      const matchPriority = priorityFilter === 'all' || order.stage === priorityFilter;
+      const matchState = stateFilter === 'all' || order.state === stateFilter;
+      const matchGroup = groupFilter === 'all' || order.sales_rep === groupFilter;
       return matchPriority && matchState && matchGroup;
     }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [priorityFilter, stateFilter, groupFilter]);
 
-  const recentIncidents = useMemo(() => filteredIncidents.slice(0, 15), [filteredIncidents]);
+  const recentOrders = useMemo(() => filteredOrders.slice(0, 15), [filteredOrders]);
 
   const resetFilters = () => {
     setPriorityFilter('all');
@@ -187,32 +166,15 @@ export default function App() {
               </div>
               <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
                 <FileText className="w-4 h-4 text-slate-400" />
-                <span className="text-xs font-bold text-slate-600 font-mono">{MOCK_INCIDENTS.length} {t.recordsFound}</span>
+                <span className="text-xs font-bold text-slate-600 font-mono">{MOCK_WORK_ORDERS.length} {t.recordsFound}</span>
               </div>
             </div>
-            <button
-              onClick={handleRefresh}
-              disabled={syncing}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2.5 rounded-xl text-white text-xs font-bold shadow-lg transition-all",
-                syncing
-                  ? "bg-indigo-400 cursor-not-allowed"
-                  : "bg-indigo-600 shadow-indigo-100 hover:bg-indigo-700 active:scale-95"
-              )}
-            >
-              <RefreshCw className={cn("w-4 h-4", syncing && "animate-spin")} />
-              {syncing ? t.syncing : t.refresh}
+            <button className="flex items-center gap-2 bg-indigo-600 px-4 py-2.5 rounded-xl text-white text-xs font-bold shadow-lg shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95">
+              <RefreshCw className="w-4 h-4" />
+              {t.refresh}
             </button>
           </div>
         </div>
-        {syncMessage && (
-          <div className={cn(
-            "max-w-screen-2xl mx-auto px-8 py-2 text-xs font-bold rounded-b-lg",
-            syncMessage.includes(t.syncError) ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-700"
-          )}>
-            {syncMessage}
-          </div>
-        )}
       </header>
 
       <main className="max-w-screen-2xl mx-auto p-8 flex flex-col gap-8 pb-20">
@@ -354,17 +316,17 @@ export default function App() {
                       return (
                         <div className="bg-slate-900 text-white p-3 rounded-lg shadow-xl text-[11px]">
                           <p className="font-bold border-b border-white/10 pb-1 mb-1">{payload[0].payload.name}</p>
-                          <p>MTTR: <span className="font-bold text-emerald-400">{payload[0].value} hours</span></p>
-                          <p>Volume: <span className="font-bold text-sky-400">{payload[0].payload.count} cases</span></p>
+                          <p>Won: <span className="font-bold text-emerald-400">{payload[0].value} deals</span></p>
+                          <p>Amount: <span className="font-bold text-sky-400">¥{(payload[0].payload.amount / 10000).toFixed(0)}w</span></p>
                         </div>
                       );
                     }
                     return null;
                   }}
                 />
-                <Bar dataKey="avgHours" radius={[0, 6, 6, 0]} barSize={24}>
+                <Bar dataKey="won" radius={[0, 6, 6, 0]} barSize={24}>
                   {(efficiencyMode === 'group' ? groupStats : userStats).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.avgHours > 24 ? '#f43f5e' : entry.avgHours > 8 ? '#f59e0b' : '#10b981'} />
+                    <Cell key={`cell-${index}`} fill={entry.won > 3 ? '#10b981' : entry.won > 1 ? '#f59e0b' : '#f43f5e'} />
                   ))}
                 </Bar>
               </BarChart>
@@ -386,13 +348,13 @@ export default function App() {
                   <ResponsiveContainer width="100%" height="100%">
                     <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis type="number" dataKey="volume" name="Incidents" unit=" tks" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                      <YAxis type="number" dataKey="mttr" name="MTTR" unit=" h" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                      <XAxis type="number" dataKey="volume" name="Deals" unit=" deals" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                      <YAxis type="number" dataKey="wonAmount" name="Won Amount" unit="w" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
                       <ZAxis type="number" dataKey="volume" range={[100, 1500]} />
                       <Tooltip cursor={{ strokeDasharray: '3 3' }} />
                       <Scatter name="Clients" data={healthData.slice(0, 15)}>
                         {healthData.slice(0, 15).map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.mttr > 24 ? '#f43f5e' : entry.mttr > 12 ? '#f59e0b' : '#3b82f6'} opacity={0.6} />
+                          <Cell key={`cell-${index}`} fill={entry.wonAmount > 500000 ? '#10b981' : entry.wonAmount > 100000 ? '#f59e0b' : '#f43f5e'} opacity={0.6} />
                         ))}
                       </Scatter>
                     </ScatterChart>
@@ -420,10 +382,10 @@ export default function App() {
                     {slaByPriority.map((item) => (
                       <div key={item.name} className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                          <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: PRIORITY_COLORS[item.name as Priority] }}></div>
-                          <span className="text-xs font-bold text-slate-600">{item.name} Tier</span>
+                          <div className="w-1.5 h-6 rounded-full" style={{ backgroundColor: STAGE_COLORS[item.name as SaleStage] }}></div>
+                          <span className="text-xs font-bold text-slate-600">{item.name}</span>
                         </div>
-                        <span className="text-sm font-mono font-bold text-slate-900">{item.rate.toFixed(1)}%</span>
+                        <span className="text-sm font-mono font-bold text-slate-900">{item.value} deals</span>
                       </div>
                     ))}
                   </div>
@@ -438,7 +400,7 @@ export default function App() {
           <div className="px-8 py-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div className="flex items-center gap-4">
               <h3 className="font-bold text-slate-800">{t.incidentRegistry}</h3>
-              <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-bold font-mono">{filteredIncidents.length} {t.recordsFound}</span>
+              <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-lg font-bold font-mono">{filteredOrders.length} {t.recordsFound}</span>
             </div>
             
             <div className="flex flex-wrap items-center gap-3">
@@ -450,7 +412,7 @@ export default function App() {
                   className="text-[11px] font-bold text-slate-600 bg-transparent border-none focus:ring-0 cursor-pointer outline-none min-w-[80px]"
                 >
                   <option value="all">{t.tier}: {t.all}</option>
-                  {['P1', 'P2', 'P3', 'P4'].map(p => <option key={p} value={p}>{p}</option>)}
+                  {['Prospect', 'Qualified', 'Proposal Sent', 'Negotiation', 'Won', 'Lost'].map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
 
@@ -461,7 +423,7 @@ export default function App() {
                   className="text-[11px] font-bold text-slate-600 bg-transparent border-none focus:ring-0 cursor-pointer outline-none min-w-[100px]"
                 >
                   <option value="all">{t.state}: {t.all}</option>
-                  {MOCK_INCIDENTS.map(i => i.state).filter((v, i, a) => a.indexOf(v) === i).map(s => <option key={s} value={s}>{getStateLabel(s)}</option>)}
+                  {MOCK_WORK_ORDERS.map(i => i.state).filter((v, i, a) => a.indexOf(v) === i).map(s => <option key={s} value={s}>{getStateLabel(s)}</option>)}
                 </select>
               </div>
 
@@ -472,7 +434,7 @@ export default function App() {
                   className="text-[11px] font-bold text-slate-600 bg-transparent border-none focus:ring-0 cursor-pointer outline-none min-w-[120px]"
                 >
                   <option value="all">{t.group}: {t.all}</option>
-                  {[...new Set(MOCK_INCIDENTS.map(i => i.assignment_group))].map(g => <option key={g} value={g}>{g}</option>)}
+                  {[...new Set(MOCK_WORK_ORDERS.map(i => i.sales_rep))].map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
               </div>
 
@@ -505,36 +467,36 @@ export default function App() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100/50">
-                {recentIncidents.map((incident) => (
-                  <tr key={incident.id} className="hover:bg-slate-50/50 transition-colors group cursor-default">
+                {recentOrders.map((order) => (
+                  <tr key={order.id} className="hover:bg-slate-50/50 transition-colors group cursor-default">
                     <td className="px-8 py-4">
-                      <span className="text-[13px] font-bold text-indigo-600 font-mono tracking-tighter">#{incident.number.replace('INC', '')}</span>
+                      <span className="text-[13px] font-bold text-indigo-600 font-mono tracking-tighter">#{order.number.replace('WO-2026-', '')}</span>
                     </td>
                     <td className="px-4 py-4">
-                      <span className="text-[11px] font-bold" style={{ color: PRIORITY_COLORS[incident.priority as Priority] }}>{incident.priority}</span>
+                      <span className="text-[11px] font-bold" style={{ color: STAGE_COLORS[order.stage] }}>{order.stage}</span>
                     </td>
                     <td className="px-4 py-4">
                       <span className={cn(
                         "inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide",
-                        incident.state === 'Resolved' || incident.state === 'Closed' ? "bg-emerald-50 text-emerald-600" :
-                        incident.state === 'New' ? "bg-indigo-50 text-indigo-600" :
+                        order.state === 'Closed Won' || order.state === 'Closed Lost' ? "bg-emerald-50 text-emerald-600" :
+                        order.state === 'New' ? "bg-indigo-50 text-indigo-600" :
                         "bg-amber-50 text-amber-600"
                       )}>
-                        {getStateLabel(incident.state)}
+                        {getStateLabel(order.state)}
                       </span>
                     </td>
-                    <td className="px-4 py-4 text-[13px] font-medium text-slate-700">{incident.company}</td>
-                    <td className="px-4 py-4 text-[13px] text-slate-500">{incident.caller}</td>
-                    <td className="px-4 py-4 text-[13px] max-w-[200px] truncate text-slate-600 font-medium">{incident.short_description}</td>
-                    <td className="px-4 py-4 text-[12px] text-slate-500 font-medium">{incident.assignment_group}</td>
-                    <td className="px-4 py-4 text-[12px] text-slate-500">{incident.assigned_to || '--'}</td>
-                    <td className="px-4 py-4 text-[12px] text-slate-400 font-medium font-mono">{format(new Date(incident.created_at), 'MM-dd HH:mm')}</td>
+                    <td className="px-4 py-4 text-[13px] font-medium text-slate-700">{order.company}</td>
+                    <td className="px-4 py-4 text-[13px] text-slate-500">{order.contact}</td>
+                    <td className="px-4 py-4 text-[13px] max-w-[200px] truncate text-slate-600 font-medium">{order.product_name}</td>
+                    <td className="px-4 py-4 text-[12px] text-slate-500 font-medium">{order.sales_rep}</td>
+                    <td className="px-4 py-4 text-[12px] text-slate-500">{order.sales_rep}</td>
+                    <td className="px-4 py-4 text-[12px] text-slate-400 font-medium font-mono">{format(new Date(order.created_at), 'MM-dd HH:mm')}</td>
                     <td className="px-8 py-4 text-right">
                       <span className={cn(
                         "text-[13px] font-bold font-mono",
-                        (incident.resolve_hours || 0) > (incident.sla_limit || 24) ? "text-rose-500" : "text-slate-900"
+                        order.deal_amount != null ? "text-emerald-600" : "text-slate-900"
                       )}>
-                        {Math.round(incident.resolve_hours || 0)}h
+                        ¥{(order.quote_amount / 10000).toFixed(0)}w
                       </span>
                     </td>
                   </tr>

@@ -157,6 +157,30 @@ class DailyBreakdownSerializer(serializers.Serializer):
     hourly_dist = serializers.DictField(child=serializers.IntegerField())
 
 
+class EscalationSummarySerializer(serializers.Serializer):
+    l1_count = serializers.IntegerField()
+    l2_count = serializers.IntegerField()
+    escalation_rate = serializers.FloatField()
+
+
+class EscalationPriorityItemSerializer(serializers.Serializer):
+    priority = serializers.CharField()
+    l1 = serializers.IntegerField()
+    l2 = serializers.IntegerField()
+
+
+class EscalationTrendItemSerializer(serializers.Serializer):
+    month = serializers.CharField()
+    l1 = serializers.IntegerField()
+    l2 = serializers.IntegerField()
+
+
+class EscalationStatsSerializer(serializers.Serializer):
+    summary = EscalationSummarySerializer()
+    priority_dist = EscalationPriorityItemSerializer(many=True)
+    monthly_trend = EscalationTrendItemSerializer(many=True)
+
+
 class DashboardDataSerializer(serializers.Serializer):
     kpi = KpiStatSerializer()
     priority_dist = PriorityDistSerializer(many=True)
@@ -170,3 +194,4 @@ class DashboardDataSerializer(serializers.Serializer):
     product_state_matrix = serializers.DictField(
         child=serializers.DictField(child=serializers.IntegerField())
     )
+    escalation_stats = EscalationStatsSerializer()

@@ -72,22 +72,43 @@ def _fmt_priority(v: Any) -> str:
         return "P3"
 
 
+_STATE_MAP = {
+    1: "New",
+    2: "In Progress",
+    3: "On Hold",
+    4: "Closed",
+    5: "Closed",
+    6: "Resolved",
+    7: "Pending",
+    8: "Canceled",
+}
+
+_STATE_DISPLAY_TO_CODE: dict[str, int] = {}
+for _code, _name in _STATE_MAP.items():
+    _STATE_DISPLAY_TO_CODE[_name.lower()] = _code
+_STATE_DISPLAY_TO_CODE.update({
+    "新建": 1, "待处理": 1, "新": 1,
+    "处理中": 2, "进行中": 2,
+    "暂停": 3, "挂起": 3,
+    "已关闭": 4, "关闭": 4, "已结束": 5,
+    "已解决": 6, "解决": 6,
+    "待定": 7, "等待": 7, "挂起中": 7,
+    "已取消": 8, "取消": 8,
+})
+
+
 def _fmt_state(v: Any) -> str:
-    state_map = {
-        1: "New",
-        2: "In Progress",
-        3: "On Hold",
-        4: "Resolved",
-        5: "Closed",
-        6: "Canceled",
-        7: "Pending",
-    }
     if v is None:
         return "Unknown"
     try:
-        return state_map.get(int(v), "Unknown")
+        return _STATE_MAP.get(int(v), "Unknown")
     except (TypeError, ValueError):
-        return str(v)
+        pass
+    s = str(v).strip().lower()
+    code = _STATE_DISPLAY_TO_CODE.get(s)
+    if code is not None:
+        return _STATE_MAP[code]
+    return "Unknown"
 
 
 def _parse_datetime(value: Any) -> datetime | None:

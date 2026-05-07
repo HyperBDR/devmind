@@ -26,10 +26,10 @@ urlpatterns = [
     path("stats/keywords/", views.KeywordStatsAPIView.as_view(), name="sals-stats-keywords"),
     path("stats/product-state-matrix/", views.ProductStateMatrixAPIView.as_view(), name="sals-stats-product-state-matrix"),
     path("stats/daily-breakdown/", views.DailyBreakdownAPIView.as_view(), name="sals-stats-daily-breakdown"),
+    path("stats/escalation/", views.EscalationStatsAPIView.as_view(), name="sals-stats-escalation"),
 
     # Incidents
     path("incidents/", views.IncidentListAPIView.as_view(), name="sals-incidents"),
-    path("incidents/count/", views.IncidentCountAPIView.as_view(), name="sals-incidents-count"),
     path("incidents/recent/", views.RecentIncidentsAPIView.as_view(), name="sals-incidents-recent"),
 
     # Companies

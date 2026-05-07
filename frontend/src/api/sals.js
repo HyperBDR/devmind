@@ -51,6 +51,11 @@ export const salsApi = {
     return response
   },
 
+  async getEscalationStats() {
+    const response = await apiClient.get('/v1/sals/stats/escalation/')
+    return response
+  },
+
   async getProductStateMatrix() {
     const response = await apiClient.get('/v1/sals/stats/product-state-matrix/')
     return response
@@ -58,6 +63,11 @@ export const salsApi = {
 
   async getRecentIncidents(params = {}) {
     const response = await apiClient.get('/v1/sals/incidents/recent/', { params })
+    return response
+  },
+
+  async getIncidents(params = {}) {
+    const response = await apiClient.get('/v1/sals/incidents/', { params })
     return response
   },
 
