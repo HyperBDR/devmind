@@ -304,3 +304,126 @@ class TencentCloud(BaseCloudProvider):
         except Exception as exc:
             logger.exception(f"Unexpected error in Tencent billing: {exc}")
             return {"status": "error", "data": None, "error": str(exc)}
+
+    def get_resource_cost_breakdown(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        group_by: str = "SERVICE",
+    ) -> Dict[str, Any]:
+        """Get cost breakdown by resource/service dimension.
+
+        Args:
+            start_date: Not used for Tencent, uses period from billing data
+            end_date: Not used for Tencent
+            group_by: Grouping type (SERVICE or INSTANCE)
+
+        Returns:
+            Dict with cost breakdown items
+        """
+        try:
+            period = self._normalize_period(start_date)
+            total_cost_dec, _service_costs, items = self._query_bill_summary(period)
+            total_cost = float(total_cost_dec)
+            formatted_items = [
+                {"name": item.get("service_name", "Unknown"), "cost": item.get("amount", 0)}
+                for item in items
+                if item.get("amount", 0) > 0
+            ]
+            formatted_items.sort(key=lambda x: x["cost"], reverse=True)
+            logger.info(
+                f"Tencent get_resource_cost_breakdown: found {len(formatted_items)} items, "
+                f"total={total_cost}"
+            )
+            return {
+                "status": "success",
+                "group_by": group_by,
+                "items": formatted_items[:50],
+                "total_cost": total_cost,
+            }
+        except TencentCloudSDKException as exc:
+            logger.warning(f"Tencent get_resource_cost_breakdown failed: {exc}")
+            return {"status": "error", "error": str(exc), "items": []}
+        except Exception as exc:
+            logger.exception(f"Tencent get_resource_cost_breakdown error: {exc}")
+            return {"status": "error", "error": str(exc), "items": []}
+
+    _OWNER_TAG_KEYS = {
+        "created_by", "createdby", "creator",
+        "owner", "owner_email",
+        "CreatedBy", "Owner",
+    }
+
+    def _extract_owner_from_tags(self, tags: list) -> str:
+        """Extract owner from Tencent instance tags list."""
+        for tag in tags or []:
+            key = str(tag.get("Key", "")).strip()
+            value = str(tag.get("Value", "")).strip()
+            if key.lower() in self._OWNER_TAG_KEYS:
+                return value
+        return ""
+
+    def list_instances_with_tags(self) -> list:
+        """List CVM instances with their tags for owner resolution.
+
+        Uses tencentcloud-sdk-python-cvm to list instances with tags.
+        """
+        try:
+            from tencentcloud.cvm.v20170312 import cvm_client
+            from tencentcloud.cvm.v20170312 import models as cvm_models
+        except ImportError:
+            logger.warning(
+                "Tencent list_instances_with_tags requires "
+                "tencentcloud-sdk-python-cvm"
+            )
+            return []
+        try:
+            credential = Credential(
+                self.config.access_key_id,
+                self.config.access_key_secret,
+            )
+            http_profile = HttpProfile(
+                endpoint="cvm.tencentcloudapi.com",
+                reqTimeout=self.config.timeout or 60,
+            )
+            client_profile = ClientProfile(httpProfile=http_profile)
+            cvm = cvm_client.CvmClient(
+                credential,
+                self.config.region or DEFAULT_REGION,
+                client_profile,
+            )
+
+            instances = []
+            offset = 0
+            limit = 100
+            while True:
+                request = cvm_models.DescribeInstancesRequest()
+                request.Offset = offset
+                request.Limit = limit
+                response = cvm.DescribeInstances(request)
+                inst_list = getattr(response, "InstanceSet", []) or []
+                for inst in inst_list:
+                    instance_id = getattr(inst, "InstanceId", "")
+                    instance_name = getattr(inst, "InstanceName", "")
+                    tags = getattr(inst, "Tags", []) or []
+                    owner = self._extract_owner_from_tags(tags)
+                    instances.append({
+                        "instance_id": instance_id,
+                        "instance_name": instance_name,
+                        "owner": owner,
+                    })
+                total = getattr(response, "TotalCount", 0)
+                if offset + limit >= total:
+                    break
+                offset += limit
+
+            logger.info(
+                "Tencent list_instances_with_tags: found %d instances",
+                len(instances),
+            )
+            return instances
+        except Exception as e:
+            logger.warning(
+                "Tencent list_instances_with_tags failed: %s", e
+            )
+            return []

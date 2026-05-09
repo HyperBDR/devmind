@@ -15,6 +15,48 @@ def is_chinese_language(language: str) -> bool:
     return str(language or "").lower().startswith("zh")
 
 
+def _format_resource_cost_lines(
+    resource_cost_items: list,
+    currency: str,
+    normalized_language: str,
+    max_items: int = 5,
+) -> list[str]:
+    """Format resource cost items into alert message lines.
+
+    Includes owner information when available.
+    """
+    lines = []
+    lines.append(
+        format_alert_line(
+            localized_text(
+                normalized_language,
+                "Cost breakdown",
+                "费用明细",
+            ),
+            "",
+            language=normalized_language,
+        )
+    )
+    for item in resource_cost_items[:max_items]:
+        item_name = item.get(
+            "name", item.get("service_name", "Unknown")
+        )
+        item_cost = item.get("cost", 0)
+        owner = item.get("owner", "")
+        if owner:
+            label = f"  • {item_name} ({owner})"
+        else:
+            label = f"  • {item_name}"
+        lines.append(
+            format_alert_line(
+                label,
+                f"{item_cost:.2f} {currency}",
+                language=normalized_language,
+            )
+        )
+    return lines
+
+
 def localized_text(language: str, english: str, chinese: str) -> str:
     return chinese if is_chinese_language(language) else _(english)
 
@@ -93,6 +135,7 @@ def build_alert_message(
     days_remaining_threshold_triggered: bool,
     language: str,
     alert_type: Optional[str] = None,
+    resource_cost_items: Optional[list] = None,
 ) -> str:
     raw_language = str(language or DEFAULT_LANGUAGE).strip()
     normalized_language = (
@@ -296,6 +339,22 @@ def build_alert_message(
                     language=normalized_language,
                 )
             )
+            if current_balance is not None:
+                lines.append(
+                    format_alert_line(
+                        localized_text(
+                            normalized_language,
+                            "Current balance",
+                            "当前余额",
+                        ),
+                        f"{current_balance:.2f} {currency}",
+                        language=normalized_language,
+                    )
+                )
+            if resource_cost_items:
+                lines.extend(_format_resource_cost_lines(
+                    resource_cost_items, currency, normalized_language,
+                ))
             lines.append(
                 format_alert_line(
                     localized_text(
@@ -316,35 +375,55 @@ def build_alert_message(
         lines.insert(
             0,
             format_alert_line(
-                _("Alert type"),
-                _("Cost growth alert"),
+                localized_text(normalized_language, "Alert type", "告警类型"),
+                localized_text(
+                    normalized_language,
+                    "Cost growth alert",
+                    "成本增长告警",
+                ),
                 language=normalized_language,
             ),
         )
         lines.append(
             format_alert_line(
-                _("Current total cost"),
+                localized_text(
+                    normalized_language,
+                    "Current total cost",
+                    "当前累计成本",
+                ),
                 f"{current_cost:.2f} {currency}",
                 language=normalized_language,
             )
         )
         lines.append(
             format_alert_line(
-                _("Previous hour cost"),
+                localized_text(
+                    normalized_language,
+                    "Previous hour cost",
+                    "上一小时成本",
+                ),
                 f"{previous_cost:.2f} {currency}",
                 language=normalized_language,
             )
         )
         lines.append(
             format_alert_line(
-                _("Increase amount"),
+                localized_text(
+                    normalized_language,
+                    "Increase amount",
+                    "增加金额",
+                ),
                 f"{increase_cost:.2f} {currency}",
                 language=normalized_language,
             )
         )
         lines.append(
             format_alert_line(
-                _("Growth rate"),
+                localized_text(
+                    normalized_language,
+                    "Growth rate",
+                    "增长率",
+                ),
                 f"{increase_percent:.2f}%",
                 language=normalized_language,
             )
@@ -352,7 +431,11 @@ def build_alert_message(
         if alert_rule.growth_threshold is not None:
             lines.append(
                 format_alert_line(
-                    _("Percentage threshold"),
+                    localized_text(
+                        normalized_language,
+                        "Percentage threshold",
+                        "百分比阈值",
+                    ),
                     f"{alert_rule.growth_threshold:.2f}%",
                     language=normalized_language,
                 )
@@ -360,22 +443,54 @@ def build_alert_message(
         if alert_rule.growth_amount_threshold is not None:
             lines.append(
                 format_alert_line(
-                    _("Amount threshold"),
+                    localized_text(
+                        normalized_language,
+                        "Amount threshold",
+                        "金额阈值",
+                    ),
                     f"{alert_rule.growth_amount_threshold:.2f} {currency}",
                     language=normalized_language,
                 )
             )
+        if current_balance is not None:
+            lines.append(
+                format_alert_line(
+                    localized_text(
+                        normalized_language,
+                        "Current balance",
+                        "当前余额",
+                    ),
+                    f"{current_balance:.2f} {currency}",
+                    language=normalized_language,
+                )
+            )
+        if resource_cost_items:
+            lines.extend(_format_resource_cost_lines(
+                resource_cost_items, currency, normalized_language,
+            ))
         lines.append(
             format_alert_line(
-                _("Alert description"),
-                _("Billing growth exceeds the configured threshold"),
+                localized_text(
+                    normalized_language,
+                    "Alert description",
+                    "告警说明",
+                ),
+                localized_text(
+                    normalized_language,
+                    "Billing growth exceeds the configured threshold",
+                    "账单增长已超过设定阈值",
+                ),
                 language=normalized_language,
             )
         )
         return "\n".join(lines)
 
 
-def build_alert_message_from_record(alert_record, language: str) -> str:
+def build_alert_message_from_record(
+    alert_record,
+    language: str,
+    resource_cost_items: Optional[list] = None,
+) -> str:
     alert_rule = alert_record.alert_rule or SimpleNamespace(
         cost_threshold=None,
         growth_threshold=None,
@@ -440,4 +555,5 @@ def build_alert_message_from_record(alert_record, language: str) -> str:
         balance_threshold_triggered=balance_threshold_triggered,
         days_remaining_threshold_triggered=days_remaining_threshold_triggered,
         language=language,
+        resource_cost_items=resource_cost_items,
     )

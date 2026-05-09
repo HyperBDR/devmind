@@ -56,6 +56,7 @@ from .services.notification_service import (
     RechargeApprovalNotificationService,
 )
 from .services.provider_service import ProviderService
+from .clouds.service import BillingService
 from .services.recharge_approval import (
     CLOUD_TYPE_LABELS,
     check_ongoing_recharge_approval_submission,
@@ -348,6 +349,82 @@ def _estimate_days_remaining(provider, current_billing, now) -> Tuple[Decimal, O
         days_remaining = 120
 
     return daily_burn, days_remaining
+
+
+def _query_resource_costs_for_alert(
+    provider: CloudProvider,
+    period: str,
+    now,
+) -> list:
+    """Query resource-level cost breakdown for alert enhancement.
+
+    This is called on-demand when an alert is triggered, not during
+    regular billing collection. Also attempts to resolve instance
+    owners from tags when possible.
+    """
+    try:
+        billing_service = BillingService(
+            provider.provider_type, provider.config or {}
+        )
+        now_local = timezone.localtime(now)
+        start_date = now_local.strftime("%Y-%m-%d")
+        end_date = (
+            now_local + timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+        result = billing_service.get_resource_cost_breakdown(
+            start_date=start_date,
+            end_date=end_date,
+            group_by="SERVICE",
+        )
+        if result.get("status") != "success":
+            logger.warning(
+                f"Alert resource costs failed: "
+                f"provider={provider.id}, "
+                f"error={result.get('error')}"
+            )
+            return []
+
+        items = result.get("items", [])
+
+        # Attempt to resolve instance owners from tags
+        try:
+            instances = billing_service.list_instances_with_tags()
+            if instances:
+                owner_map = {}
+                for inst in instances:
+                    owner = inst.get("owner", "")
+                    if not owner:
+                        continue
+                    name = (
+                        inst.get("instance_name", "")
+                        or inst.get("instance_id", "")
+                    )
+                    if name:
+                        owner_map[name] = owner
+                # Merge owner into resource cost items
+                for item in items:
+                    item_name = item.get("name", "")
+                    for inst_name, owner in owner_map.items():
+                        if inst_name in item_name:
+                            item["owner"] = owner
+                            break
+        except Exception as e:
+            logger.debug(
+                f"Alert instance owner lookup skipped: {e}"
+            )
+
+        logger.info(
+            f"Alert resource costs: provider={provider.id}, "
+            f"items={len(items)}, "
+            f"total={result.get('total_cost', 0)}"
+        )
+        return items
+    except Exception as e:
+        logger.warning(
+            f"Alert resource costs error: "
+            f"provider={provider.id}, error={e}"
+        )
+    return []
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")
@@ -1142,6 +1219,19 @@ def check_alert_for_provider(
 
             language = _resolve_notification_language(provider)
 
+            resource_cost_items = []
+            if alert_type in (
+                AlertRecord.ALERT_TYPE_COST,
+                AlertRecord.ALERT_TYPE_GROWTH,
+            ):
+                resource_cost_items = (
+                    _query_resource_costs_for_alert(
+                        provider=provider,
+                        period=current_period,
+                        now=now,
+                    )
+                )
+
             alert_message = build_alert_message(
                 provider_name=provider.display_name,
                 provider_notes=extract_provider_notes(provider),
@@ -1160,6 +1250,7 @@ def check_alert_for_provider(
                 balance_threshold_triggered=balance_threshold_triggered,
                 days_remaining_threshold_triggered=days_remaining_threshold_triggered,
                 language=language,
+                resource_cost_items=resource_cost_items,
             )
 
             # Always create alert record, even if webhook is not configured
