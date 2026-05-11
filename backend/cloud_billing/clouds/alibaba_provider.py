@@ -528,35 +528,56 @@ class AlibabaCloud(BaseCloudProvider):
     ) -> Dict[str, Any]:
         """Get cost breakdown by service/product dimension.
 
+        Uses QueryAccountBill with Granularity=DAILY for date-level
+        precision when start_date is provided (YYYY-MM-DD), falling
+        back to the monthly QueryBill API otherwise.
+
         Args:
-            start_date: Not used for Alibaba, uses period from billing
-            end_date: Not used for Alibaba
+            start_date: Start date in YYYY-MM-DD format (preferred)
+            end_date: End date (unused, Alibaba returns start_date data)
             group_by: Grouping type (SERVICE)
 
         Returns:
             Dict with cost breakdown items
         """
         try:
-            # Accept YYYY-MM-DD input by extracting YYYY-MM
-            period_input = (
-                start_date[:7] if start_date else None
-            )
+            billing_date = None
+            period_input = None
+            if start_date and len(start_date) >= 10:
+                billing_date = start_date[:10]
+                period_input = start_date[:7]
+            elif start_date:
+                period_input = start_date[:7]
             period = self._validate_period(period_input)
-            start_dt, end_dt = self._get_period_dates(period)
-            response = self._query_billing_api(start_dt, end_dt)
-            _, _, service_costs = self._calculate_total_cost(response)
 
-            items = [
-                {"name": name, "cost": cost}
-                for name, cost in service_costs.items()
-                if cost > 0
-            ]
-            items.sort(key=lambda x: x["cost"], reverse=True)
-            total_cost = sum(item["cost"] for item in items)
+            if billing_date:
+                items = self._query_daily_service_costs(
+                    period, billing_date
+                )
+            else:
+                items = []
+
+            if not items:
+                start_dt, end_dt = self._get_period_dates(period)
+                response = self._query_billing_api(start_dt, end_dt)
+                _, _, service_costs = self._calculate_total_cost(
+                    response
+                )
+                items = [
+                    {"name": name, "cost": cost}
+                    for name, cost in service_costs.items()
+                    if cost > 0
+                ]
+
+            items.sort(
+                key=lambda x: float(x["cost"]), reverse=True
+            )
+            total_cost = sum(float(it["cost"]) for it in items)
 
             logger.info(
-                f"Alibaba get_resource_cost_breakdown: found {len(items)} items, "
-                f"total={total_cost}"
+                f"Alibaba get_resource_cost_breakdown: "
+                f"found {len(items)} items, total={total_cost}, "
+                f"billing_date={billing_date or 'monthly'}"
             )
             return {
                 "status": "success",
@@ -565,8 +586,87 @@ class AlibabaCloud(BaseCloudProvider):
                 "total_cost": total_cost,
             }
         except Exception as e:
-            logger.warning(f"Alibaba get_resource_cost_breakdown failed: {e}")
-            return {"status": "error", "error": str(e), "items": []}
+            logger.warning(
+                f"Alibaba get_resource_cost_breakdown failed: {e}"
+            )
+            return {
+                "status": "error",
+                "error": str(e),
+                "items": [],
+            }
+
+    def _query_daily_service_costs(
+        self, period: str, billing_date: str
+    ) -> list:
+        """Query daily service-level costs via QueryAccountBill.
+
+        Args:
+            period: Billing cycle in YYYY-MM format
+            billing_date: Specific date in YYYY-MM-DD format
+
+        Returns:
+            List of {name, cost} dicts, empty on failure
+        """
+        try:
+            from alibabacloud_bssopenapi20171214 import (
+                models as bss_models,
+            )
+
+            request = bss_models.QueryAccountBillRequest(
+                billing_cycle=period,
+                billing_date=billing_date,
+                granularity="DAILY",
+                is_group_by_product="true",
+                page_size=100,
+            )
+            response = self.client.query_account_bill(request)
+            body = response.body
+            if not body or not body.success:
+                logger.warning(
+                    f"Alibaba QueryAccountBill failed: "
+                    f"code={getattr(body, 'code', '')}, "
+                    f"message={getattr(body, 'message', '')}"
+                )
+                return []
+
+            data = body.data
+            if not data:
+                return []
+
+            items_list = getattr(
+                getattr(data, "items", None), "item", []
+            ) or []
+            results = []
+            for item in items_list:
+                product_name = getattr(
+                    item, "product_name", "Unknown"
+                )
+                product_code = getattr(item, "product_code", "")
+                pretax_amount = float(
+                    getattr(item, "pretax_amount", 0) or 0
+                )
+                if pretax_amount <= 0:
+                    continue
+                label = (
+                    f"{product_name} ({product_code})"
+                    if product_code
+                    else product_name
+                )
+                results.append({
+                    "name": label,
+                    "cost": pretax_amount,
+                })
+
+            logger.info(
+                f"Alibaba QueryAccountBill daily: "
+                f"date={billing_date}, items={len(results)}"
+            )
+            return results
+        except Exception as e:
+            logger.warning(
+                f"Alibaba QueryAccountBill daily failed: {e}"
+            )
+            return []
 
     _OWNER_TAG_KEYS = {
         "created_by", "createdby", "creator",

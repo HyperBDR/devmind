@@ -355,13 +355,17 @@ def _query_resource_costs_for_alert(
     provider: CloudProvider,
     period: str,
     now,
+    current_billing: Optional[BillingData] = None,
 ) -> list:
     """Query resource-level cost breakdown for alert enhancement.
 
-    This is called on-demand when an alert is triggered, not during
-    regular billing collection. Also attempts to resolve instance
-    owners from tags when possible.
+    Tries the cloud provider API for daily-granularity service costs
+    (most relevant for hourly growth alerts). Falls back to the
+    service_costs stored in the current BillingData record (monthly
+    totals collected during regular billing collection). Also attempts
+    to resolve instance owners from tags when possible.
     """
+    items = []
     try:
         billing_service = BillingService(
             provider.provider_type, provider.config or {}
@@ -376,55 +380,83 @@ def _query_resource_costs_for_alert(
             end_date=end_date,
             group_by="SERVICE",
         )
-        if result.get("status") != "success":
+        if result.get("status") == "success":
+            items = result.get("items", [])
+            logger.info(
+                f"Alert resource costs from API: "
+                f"provider={provider.id}, "
+                f"items={len(items)}, "
+                f"total={result.get('total_cost', 0)}"
+            )
+        else:
             logger.warning(
-                f"Alert resource costs failed: "
+                f"Alert resource costs API failed: "
                 f"provider={provider.id}, "
                 f"error={result.get('error')}"
             )
-            return []
-
-        items = result.get("items", [])
-
-        # Attempt to resolve instance owners from tags
-        try:
-            instances = billing_service.list_instances_with_tags()
-            if instances:
-                owner_map = {}
-                for inst in instances:
-                    owner = inst.get("owner", "")
-                    if not owner:
-                        continue
-                    name = (
-                        inst.get("instance_name", "")
-                        or inst.get("instance_id", "")
-                    )
-                    if name:
-                        owner_map[name] = owner
-                # Merge owner into resource cost items
-                for item in items:
-                    item_name = item.get("name", "")
-                    for inst_name, owner in owner_map.items():
-                        if inst_name in item_name:
-                            item["owner"] = owner
-                            break
-        except Exception as e:
-            logger.debug(
-                f"Alert instance owner lookup skipped: {e}"
-            )
-
-        logger.info(
-            f"Alert resource costs: provider={provider.id}, "
-            f"items={len(items)}, "
-            f"total={result.get('total_cost', 0)}"
-        )
-        return items
     except Exception as e:
         logger.warning(
-            f"Alert resource costs error: "
+            f"Alert resource costs API error: "
             f"provider={provider.id}, error={e}"
         )
-    return []
+
+    if not items:
+        stored_service_costs = (
+            current_billing.service_costs
+            if current_billing is not None
+            else None
+        )
+        if stored_service_costs and isinstance(
+            stored_service_costs, dict
+        ):
+            items = [
+                {"name": name, "cost": cost}
+                for name, cost in stored_service_costs.items()
+                if cost and float(cost) > 0
+            ]
+            items.sort(
+                key=lambda x: float(x["cost"]), reverse=True
+            )
+            total = sum(float(it["cost"]) for it in items)
+            logger.info(
+                f"Alert resource costs from stored data: "
+                f"provider={provider.id}, "
+                f"items={len(items)}, total={total}"
+            )
+
+    if not items:
+        return []
+
+    # Attempt to resolve instance owners from tags
+    try:
+        billing_service = BillingService(
+            provider.provider_type, provider.config or {}
+        )
+        instances = billing_service.list_instances_with_tags()
+        if instances:
+            owner_map = {}
+            for inst in instances:
+                owner = inst.get("owner", "")
+                if not owner:
+                    continue
+                name = (
+                    inst.get("instance_name", "")
+                    or inst.get("instance_id", "")
+                )
+                if name:
+                    owner_map[name] = owner
+            for item in items:
+                item_name = item.get("name", "")
+                for inst_name, owner in owner_map.items():
+                    if inst_name in item_name:
+                        item["owner"] = owner
+                        break
+    except Exception as e:
+        logger.debug(
+            f"Alert instance owner lookup skipped: {e}"
+        )
+
+    return items[:5]
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")
@@ -1229,6 +1261,7 @@ def check_alert_for_provider(
                         provider=provider,
                         period=current_period,
                         now=now,
+                        current_billing=current_billing,
                     )
                 )
 
@@ -1280,6 +1313,7 @@ def check_alert_for_provider(
                     else None
                 ),
                 alert_message=alert_message,
+                resource_cost_details=resource_cost_items,
                 webhook_status=WEBHOOK_STATUS_PENDING,
             )
 

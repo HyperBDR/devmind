@@ -41,7 +41,7 @@ def _format_resource_cost_lines(
         item_name = item.get(
             "name", item.get("service_name", "Unknown")
         )
-        item_cost = item.get("cost", 0)
+        item_cost = float(item.get("cost", 0))
         owner = item.get("owner", "")
         if owner:
             label = f"  • {item_name} ({owner})"
@@ -491,6 +491,10 @@ def build_alert_message_from_record(
     language: str,
     resource_cost_items: Optional[list] = None,
 ) -> str:
+    if not resource_cost_items:
+        resource_cost_items = getattr(
+            alert_record, "resource_cost_details", None
+        ) or []
     alert_rule = alert_record.alert_rule or SimpleNamespace(
         cost_threshold=None,
         growth_threshold=None,
