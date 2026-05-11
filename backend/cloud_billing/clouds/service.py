@@ -124,3 +124,35 @@ class BillingService:
             Dict[str, Any]: Billing information
         """
         return self.provider.get_billing_info(period=period)
+
+    def get_resource_cost_breakdown(
+        self,
+        start_date: str,
+        end_date: str,
+        group_by: str = "SERVICE",
+    ) -> Dict[str, Any]:
+        """Get cost breakdown by resource dimension.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            group_by: Dimension to group by (SERVICE, INSTANCE_TYPE, etc.)
+
+        Returns:
+            Dict with cost breakdown by resource
+        """
+        if hasattr(self.provider, "get_resource_cost_breakdown"):
+            return self.provider.get_resource_cost_breakdown(
+                start_date, end_date, group_by
+            )
+        return {"status": "error", "error": "Not supported", "items": []}
+
+    def list_instances_with_tags(self) -> list:
+        """List instances with tags for owner resolution.
+
+        Returns a list of dicts with instance_id, instance_name, owner.
+        Returns empty list if not supported by the provider.
+        """
+        if hasattr(self.provider, "list_instances_with_tags"):
+            return self.provider.list_instances_with_tags()
+        return []

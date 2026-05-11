@@ -106,6 +106,7 @@ class AWSCloud(BaseCloudProvider):
         """
         super().__init__(config)
         self._client = None
+        self._ec2_client = None
         self._sts_client = None
         self._mturk_client = None
         self.name = "aws"
@@ -163,6 +164,74 @@ class AWSCloud(BaseCloudProvider):
                 region_name="us-east-1",
             )
         return self._mturk_client
+
+    @property
+    def ec2_client(self):
+        """Get AWS EC2 client for instance list with tags."""
+        if self._ec2_client is None:
+            self._ec2_client = boto3.client(
+                "ec2",
+                aws_access_key_id=self.config.api_key,
+                aws_secret_access_key=self.config.api_secret,
+                region_name=self.config.region,
+            )
+        return self._ec2_client
+
+    _OWNER_TAG_KEYS = {
+        "created_by", "createdby", "creator",
+        "owner", "owner_email", "owner_email",
+        "CreatedBy", "Owner",
+    }
+
+    def _extract_owner_from_tags(self, tags: list) -> str:
+        """Extract owner from instance tags by known key patterns."""
+        for tag in tags or []:
+            key = str(tag.get("Key", "")).strip()
+            value = str(tag.get("Value", "")).strip()
+            if key.lower() in self._OWNER_TAG_KEYS:
+                return value
+        return ""
+
+    def list_instances_with_tags(self) -> list:
+        """List EC2 instances with their tags for owner resolution.
+
+        Returns a list of dicts with instance_id, instance_name,
+        and owner extracted from tags.
+        """
+        try:
+            instances = []
+            paginator = self.ec2_client.get_paginator(
+                "describe_instances"
+            )
+            for page in paginator.paginate():
+                for reservation in page.get("Reservations", []):
+                    for inst in reservation.get("Instances", []):
+                        instance_id = inst.get("InstanceId", "")
+                        tags = inst.get("Tags", [])
+                        name = ""
+                        owner = ""
+                        for tag in tags:
+                            key = str(tag.get("Key", "")).strip()
+                            value = str(tag.get("Value", "")).strip()
+                            if key == "Name":
+                                name = value
+                            if not owner and key.lower() in self._OWNER_TAG_KEYS:
+                                owner = value
+                        instances.append({
+                            "instance_id": instance_id,
+                            "instance_name": name,
+                            "owner": owner,
+                        })
+            logger.info(
+                "AWS list_instances_with_tags: found %d instances",
+                len(instances),
+            )
+            return instances
+        except Exception as e:
+            logger.warning(
+                "AWS list_instances_with_tags failed: %s", e
+            )
+            return []
 
     def _validate_period(self, period: Optional[str]) -> str:
         """Validate and return the billing period.
@@ -262,6 +331,81 @@ class AWSCloud(BaseCloudProvider):
         )
 
         return total_cost, currency
+
+    def get_resource_cost_breakdown(
+        self,
+        start_date: str,
+        end_date: str,
+        group_by: str = "SERVICE",
+    ) -> Dict[str, Any]:
+        """Query cost breakdown by resource dimension.
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            group_by: Dimension to group by.
+                Options: SERVICE, INSTANCE_TYPE, REGION, LINKED_ACCOUNT,
+                         OPERATION, USAGE_TYPE, TAG
+
+        Returns:
+            Dict with cost breakdown by resource/service
+        """
+        logger.info(
+            f"AWS get_resource_cost_breakdown: start={start_date}, "
+            f"end={end_date}, group_by={group_by}"
+        )
+        try:
+            response = self.client.get_cost_and_usage(
+                TimePeriod={
+                    "Start": start_date,
+                    "End": end_date,
+                },
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+                GroupBy=[
+                    {
+                        "Type": "DIMENSION",
+                        "Key": group_by,
+                    },
+                ],
+            )
+            results = []
+            total_cost = 0.0
+            for time_result in response.get("ResultsByTime", []):
+                for group in time_result.get("Groups", []):
+                    keys = group.get("Keys", [])
+                    if not keys:
+                        continue
+                    key_name = keys[0]
+                    amount = float(
+                        group.get("Metrics", {}).get("UnblendedCost", {}).get("Amount", 0)
+                    )
+                    unit = group.get("Metrics", {}).get("UnblendedCost", {}).get("Unit", "USD")
+                    if amount > 0:
+                        results.append({
+                            "name": key_name,
+                            "cost": amount,
+                            "currency": unit,
+                        })
+                        total_cost += amount
+
+            results.sort(key=lambda x: x["cost"], reverse=True)
+            logger.info(
+                f"AWS get_resource_cost_breakdown: found {len(results)} items, "
+                f"total={total_cost}"
+            )
+            return {
+                "status": "success",
+                "group_by": group_by,
+                "items": results[:50],
+                "total_cost": total_cost,
+            }
+        except ClientError as e:
+            logger.warning(f"AWS get_resource_cost_breakdown failed: {e}")
+            return {"status": "error", "error": str(e), "items": []}
+        except Exception as e:
+            logger.exception(f"AWS get_resource_cost_breakdown error: {e}")
+            return {"status": "error", "error": str(e), "items": []}
 
     def get_balance(self) -> Optional[float]:
         """Get AWS billing balance when available.

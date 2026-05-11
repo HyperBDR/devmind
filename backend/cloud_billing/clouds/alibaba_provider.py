@@ -330,7 +330,10 @@ class AlibabaCloud(BaseCloudProvider):
             return None
 
     def _extract_cash_balance(self, response: Any) -> Optional[float]:
-        """Extract cash balance from Alibaba Cloud balance response."""
+        """Extract cash balance from Alibaba Cloud balance response.
+
+        For international accounts, balance = cash_amount + credit_amount.
+        """
         body = self._get_nested_value(response, "body")
         plain_body = self._to_plain_dict(body)
         data = self._get_nested_value(body, "data")
@@ -343,33 +346,76 @@ class AlibabaCloud(BaseCloudProvider):
         )
 
         candidate_sources = [data, self._to_plain_dict(data), body, plain_body]
-        candidate_fields = [
+        cash_fields = [
             "available_cash_amount",
             "AvailableCashAmount",
-            "available_amount",
-            "AvailableAmount",
             "cash_amount",
             "CashAmount",
+            "available_amount",
+            "AvailableAmount",
             "balance_amount",
             "BalanceAmount",
         ]
+        credit_fields = [
+            "credit_amount",
+            "CreditAmount",
+            "credit_limit",
+            "CreditLimit",
+        ]
+
+        cash_amount = 0.0
+        credit_amount = 0.0
+        has_cash = False
+        has_credit = False
 
         for source in candidate_sources:
             if source is None:
                 continue
-            for field in candidate_fields:
-                value = self._get_nested_value(source, field)
-                if value in (None, ""):
-                    continue
-                parsed_value = self._parse_amount(value)
-                if parsed_value is None:
-                    continue
+            # Extract cash balance (only if not already found)
+            if not has_cash:
+                for field in cash_fields:
+                    value = self._get_nested_value(source, field)
+                    if value in (None, ""):
+                        continue
+                    parsed_value = self._parse_amount(value)
+                    if parsed_value is None:
+                        continue
+                    logger.warning(
+                        "Alibaba QueryAccountBalance matched cash field %s=%s",
+                        field,
+                        parsed_value,
+                    )
+                    cash_amount = parsed_value
+                    has_cash = True
+                    break
+            # Extract credit/信控额度 (only if not already found)
+            if not has_credit:
+                for field in credit_fields:
+                    value = self._get_nested_value(source, field)
+                    if value in (None, ""):
+                        continue
+                    parsed_value = self._parse_amount(value)
+                    if parsed_value is None:
+                        continue
+                    logger.warning(
+                        "Alibaba QueryAccountBalance matched credit field %s=%s",
+                        field,
+                        parsed_value,
+                    )
+                    credit_amount = parsed_value
+                    has_credit = True
+                    break
+
+        if has_cash or has_credit:
+            total_balance = cash_amount + credit_amount
+            if has_credit:
                 logger.warning(
-                    "Alibaba QueryAccountBalance matched field %s=%s",
-                    field,
-                    parsed_value,
+                    "Alibaba balance: cash=%.2f + credit=%.2f = %.2f",
+                    cash_amount,
+                    credit_amount,
+                    total_balance,
                 )
-                return parsed_value
+            return total_balance
 
         logger.warning(
             "Alibaba QueryAccountBalance returned no recognizable cash "
@@ -386,11 +432,40 @@ class AlibabaCloud(BaseCloudProvider):
         if data is None:
             data = self._get_nested_value(plain_body, "data")
         plain_data = self._to_plain_dict(data)
+
+        # Extract cash and credit amounts for debugging
+        cash_amount = None
+        credit_amount = None
+        cash_fields = [
+            "available_cash_amount", "AvailableCashAmount",
+            "cash_amount", "CashAmount",
+        ]
+        credit_fields = ["credit_amount", "CreditAmount"]
+        for source in [plain_data, data, plain_body]:
+            if source is None:
+                continue
+            if cash_amount is None:
+                for field in cash_fields:
+                    val = self._get_nested_value(source, field)
+                    if val is not None and val != "":
+                        cash_amount = val
+                        break
+            if credit_amount is None:
+                for field in credit_fields:
+                    val = self._get_nested_value(source, field)
+                    if val is not None and val != "":
+                        credit_amount = val
+                        break
+            if cash_amount is not None and credit_amount is not None:
+                break
+
         return {
             "body_keys": sorted(plain_body.keys())
             if isinstance(plain_body, dict)
             else [],
             "data": plain_data,
+            "cash_amount": cash_amount,
+            "credit_amount": credit_amount,
         }
 
     def get_billing_info(
@@ -444,6 +519,141 @@ class AlibabaCloud(BaseCloudProvider):
                 "data": None,
                 "error": str(e)
             }
+
+    def get_resource_cost_breakdown(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        group_by: str = "SERVICE",
+    ) -> Dict[str, Any]:
+        """Get cost breakdown by service/product dimension.
+
+        Args:
+            start_date: Not used for Alibaba, uses period from billing
+            end_date: Not used for Alibaba
+            group_by: Grouping type (SERVICE)
+
+        Returns:
+            Dict with cost breakdown items
+        """
+        try:
+            # Accept YYYY-MM-DD input by extracting YYYY-MM
+            period_input = (
+                start_date[:7] if start_date else None
+            )
+            period = self._validate_period(period_input)
+            start_dt, end_dt = self._get_period_dates(period)
+            response = self._query_billing_api(start_dt, end_dt)
+            _, _, service_costs = self._calculate_total_cost(response)
+
+            items = [
+                {"name": name, "cost": cost}
+                for name, cost in service_costs.items()
+                if cost > 0
+            ]
+            items.sort(key=lambda x: x["cost"], reverse=True)
+            total_cost = sum(item["cost"] for item in items)
+
+            logger.info(
+                f"Alibaba get_resource_cost_breakdown: found {len(items)} items, "
+                f"total={total_cost}"
+            )
+            return {
+                "status": "success",
+                "group_by": group_by,
+                "items": items[:50],
+                "total_cost": total_cost,
+            }
+        except Exception as e:
+            logger.warning(f"Alibaba get_resource_cost_breakdown failed: {e}")
+            return {"status": "error", "error": str(e), "items": []}
+
+    _OWNER_TAG_KEYS = {
+        "created_by", "createdby", "creator",
+        "owner", "owner_email",
+        "CreatedBy", "Owner",
+    }
+
+    def _extract_owner_from_tags(self, tags: dict) -> str:
+        """Extract owner from instance tags dict."""
+        for key, value in (tags or {}).items():
+            if str(key).strip().lower() in self._OWNER_TAG_KEYS:
+                return str(value).strip()
+        return ""
+
+    def list_instances_with_tags(self) -> list:
+        """List ECS instances with their tags for owner resolution.
+
+        Uses alibabacloud-ecs SDK to list instances with tags.
+        """
+        try:
+            from alibabacloud_ecs20140526.client import Client as EcsClient
+            from alibabacloud_ecs20140526 import models as ecs_models
+            from alibabacloud_tea_openapi.models import Config as EcsConfig
+        except ImportError:
+            logger.warning(
+                "Alibaba list_instances_with_tags requires "
+                "alibabacloud-ecs: pip install alibabacloud-ecs"
+            )
+            return []
+        try:
+            ecs_config = EcsConfig(
+                access_key_id=self.config.api_key,
+                access_key_secret=self.config.api_secret,
+            )
+            ecs_config.endpoint = f"ecs.{self.config.region}.aliyuncs.com"
+            ecs_client = EcsClient(ecs_config)
+
+            instances = []
+            page_number = 1
+            page_size = 50
+            while True:
+                request = ecs_models.DescribeInstancesRequest(
+                    region_id=self.config.region,
+                    page_number=page_number,
+                    page_size=page_size,
+                )
+                response = ecs_client.describe_instances(request)
+                body = response.body
+                inst_list = getattr(
+                    getattr(body, "instances", None),
+                    "instance", [],
+                )
+                for inst in inst_list:
+                    instance_id = getattr(inst, "instance_id", "")
+                    instance_name = getattr(inst, "instance_name", "")
+                    tags_obj = getattr(inst, "tags", None)
+                    tag_list = (
+                        getattr(tags_obj, "tag", [])
+                        if tags_obj else []
+                    )
+                    tags = {
+                        getattr(t, "tag_key", ""): getattr(
+                            t, "tag_value", ""
+                        )
+                        for t in tag_list
+                    }
+                    owner = self._extract_owner_from_tags(tags)
+                    instances.append({
+                        "instance_id": instance_id,
+                        "instance_name": instance_name,
+                        "owner": owner,
+                    })
+                total = getattr(body, "total_count", 0)
+                if page_number * page_size >= total:
+                    break
+                page_number += 1
+
+            logger.info(
+                "Alibaba list_instances_with_tags: found %d instances",
+                len(instances),
+            )
+            return instances
+        except Exception as e:
+            logger.warning(
+                "Alibaba list_instances_with_tags failed: %s", e
+            )
+            return []
 
     def get_account_id(self) -> str:
         """Get the Alibaba Cloud account ID via STS GetCallerIdentity (same as working script)."""
