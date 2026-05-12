@@ -24,6 +24,12 @@ from agentcore_notifier.adapters.django.services.webhook_service import (
     get_default_webhook_channel,
     get_webhook_channel_by_uuid,
 )
+from agentcore_notifier.adapters.django.tasks.send import (
+    NOTIFICATION_TYPE_EMAIL,
+    NOTIFICATION_TYPE_WEBHOOK,
+    send_notification,
+)
+from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
 from agentcore_task.adapters.django import (
     prevent_duplicate_task,
     TaskLogCollector,
@@ -2344,3 +2350,279 @@ def send_recharge_approval_notification(
         )
 
     return result
+
+
+@shared_task(name="cloud_billing.tasks.send_daily_cost_report")
+def send_daily_cost_report():
+    """Build and send the daily cloud cost report.
+
+    Calls build_dashboard_overview() to aggregate all provider data,
+    formats a daily report via build_daily_report(), and dispatches
+    it to all configured notification channels (webhook + email).
+    """
+    from .dashboard import build_dashboard_overview
+    from .daily_report import build_daily_report
+
+    task_id = current_task.request.id if current_task else None
+    log_collector = TaskLogCollector(max_records=200)
+
+    if task_id:
+        TaskTracker.register_task(
+            task_id=task_id,
+            task_name="cloud_billing.tasks.send_daily_cost_report",
+            module="cloud_billing",
+        )
+        TaskTracker.update_task_status(
+            task_id=task_id, status=TaskStatus.STARTED
+        )
+
+    log_collector.info("Building daily cost report")
+    logger.info("Task send_daily_cost_report: started")
+
+    try:
+        overview = build_dashboard_overview()
+        now_local = timezone.localtime(timezone.now())
+        report_date = now_local.strftime("%Y-%m-%d")
+        report_body = build_daily_report(
+            overview, report_date, language="zh"
+        )
+
+        log_collector.info(
+            f"Report generated: {len(report_body)} chars, "
+            f"accounts={len(overview.get('accounts', []))}"
+        )
+
+        # Collect all active webhook and email channels from
+        # providers that have notification config
+        channels_seen = set()
+        dispatches = []
+
+        for provider in CloudProvider.objects.filter(
+            is_active=True
+        ):
+            notification = (provider.config or {}).get(
+                "notification"
+            )
+            if not isinstance(notification, dict):
+                continue
+            channel_type = str(
+                notification.get("type") or ""
+            ).strip().lower()
+            channel_uuid = str(
+                notification.get("channel_uuid") or ""
+            ).strip()
+            if not channel_uuid:
+                continue
+            key = f"{channel_type}:{channel_uuid}"
+            if key in channels_seen:
+                continue
+            channels_seen.add(key)
+            dispatches.append(
+                (channel_type, channel_uuid, provider)
+            )
+
+        sent_count = 0
+        for channel_type, channel_uuid, provider in dispatches:
+            try:
+                _send_daily_report_to_channel(
+                    report_body=report_body,
+                    report_date=report_date,
+                    channel_type=channel_type,
+                    channel_uuid=channel_uuid,
+                    provider=provider,
+                )
+                sent_count += 1
+                log_collector.info(
+                    f"Dispatched to {channel_type} "
+                    f"channel {channel_uuid}"
+                )
+            except Exception as e:
+                log_collector.warning(
+                    f"Failed to dispatch to {channel_type} "
+                    f"channel {channel_uuid}: {e}"
+                )
+
+        # Also send to default webhook if no provider channels
+        if not dispatches:
+            try:
+                _send_daily_report_to_channel(
+                    report_body=report_body,
+                    report_date=report_date,
+                    channel_type="webhook",
+                    channel_uuid="",
+                    provider=None,
+                )
+                sent_count += 1
+                log_collector.info(
+                    "Dispatched to default webhook"
+                )
+            except Exception as e:
+                log_collector.warning(
+                    f"Failed to dispatch to default "
+                    f"webhook: {e}"
+                )
+
+        result = {
+            "success": True,
+            "report_date": report_date,
+            "channels_sent": sent_count,
+            "report_length": len(report_body),
+        }
+        log_collector.info(
+            f"Daily report completed: sent to "
+            f"{sent_count} channel(s)"
+        )
+        logger.info(
+            f"Task send_daily_cost_report: completed, "
+            f"sent to {sent_count} channel(s)"
+        )
+
+        if task_id:
+            TaskTracker.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.SUCCESS,
+                result=result,
+                metadata={
+                    "logs": log_collector.get_logs(),
+                    "log_summary": log_collector.get_summary(),
+                },
+            )
+        return result
+
+    except Exception as e:
+        error_msg = str(e)
+        log_collector.error(
+            f"Daily report failed: {error_msg}"
+        )
+        logger.error(
+            f"Task send_daily_cost_report: {error_msg}",
+            exc_info=True,
+        )
+        result = {"success": False, "error": error_msg}
+        if task_id:
+            TaskTracker.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.FAILURE,
+                result=result,
+                error=error_msg,
+                metadata={
+                    "logs": log_collector.get_logs(),
+                    "log_summary": log_collector.get_summary(),
+                },
+            )
+        return result
+
+
+def _send_daily_report_to_channel(
+    report_body: str,
+    report_date: str,
+    channel_type: str,
+    channel_uuid: str,
+    provider=None,
+):
+    """Dispatch daily report to a specific notification channel."""
+    from .constants import (
+        FEISHU_MSG_TYPE_POST,
+        FEISHU_TAG_TEXT,
+        SOURCE_APP_CLOUD_BILLING,
+        WECHAT_MSGTYPE_MARKDOWN,
+    )
+
+    if channel_type == "email":
+        to_addresses = []
+        if provider:
+            notification = (provider.config or {}).get(
+                "notification"
+            ) or {}
+            email_to = notification.get("email_to")
+            if isinstance(email_to, list):
+                to_addresses = [
+                    a.strip()
+                    for a in email_to
+                    if (a or "").strip()
+                ]
+            elif isinstance(email_to, str) and email_to.strip():
+                to_addresses = [email_to.strip()]
+        if not to_addresses:
+            return
+
+        subject = f"云平台费用日报 — {report_date}"
+        body_md = "\n".join(
+            f"**{line}**" if line and not line.startswith(
+                (" ", "=", "-")
+            ) else line
+            for line in report_body.splitlines()
+        )
+        send_notification.delay(
+            notification_type=NOTIFICATION_TYPE_EMAIL,
+            source_app=SOURCE_APP_CLOUD_BILLING,
+            source_type="daily_report",
+            source_id=report_date,
+            user_id=None,
+            channel_uuid=channel_uuid,
+            params={
+                "subject": subject,
+                "body": body_md,
+                "to": to_addresses,
+            },
+        )
+        return
+
+    # Webhook (Feishu / WeChat)
+    if channel_uuid:
+        channel, config = get_webhook_channel_by_uuid(
+            channel_uuid
+        )
+    else:
+        channel, config = get_default_webhook_channel()
+
+    if not channel or not config:
+        return
+
+    provider_type = config.get("provider", Provider.FEISHU)
+    language = (channel.config or {}).get(
+        "language", DEFAULT_LANGUAGE
+    )
+    title = f"云平台费用日报 — {report_date}"
+
+    if provider_type in FEISHU_PROVIDERS:
+        content = []
+        for line in report_body.splitlines():
+            content.append([{
+                "tag": FEISHU_TAG_TEXT,
+                "text": line or " ",
+            }])
+        payload = {
+            "msg_type": FEISHU_MSG_TYPE_POST,
+            "content": {
+                "post": {
+                    language: {
+                        "title": title,
+                        "content": content,
+                    }
+                }
+            },
+        }
+    elif provider_type == Provider.WECHAT:
+        payload = {
+            "msgtype": WECHAT_MSGTYPE_MARKDOWN,
+            "markdown": {
+                "content": f"## {title}\n\n```\n{report_body}\n```"
+            },
+        }
+    else:
+        return
+
+    user = provider.created_by if provider else None
+    send_notification.delay(
+        notification_type=NOTIFICATION_TYPE_WEBHOOK,
+        source_app=SOURCE_APP_CLOUD_BILLING,
+        source_type="daily_report",
+        source_id=report_date,
+        user_id=user.id if user else None,
+        channel_uuid=str(channel.uuid),
+        params={
+            "payload": payload,
+            "provider_type": provider_type,
+        },
+    )

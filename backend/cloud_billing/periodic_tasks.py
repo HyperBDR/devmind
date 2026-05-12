@@ -30,3 +30,20 @@ def register_periodic_tasks():
         queue=None,
         enabled=True,
     )
+
+    # Daily cost report (default 9:00 AM, configurable)
+    report_hour = os.getenv("CLOUD_BILLING_REPORT_HOUR", "9")
+    report_minute = os.getenv("CLOUD_BILLING_REPORT_MINUTE", "0")
+
+    TASK_REGISTRY.add(
+        name="cloud_billing_daily_report",
+        task="cloud_billing.tasks.send_daily_cost_report",
+        schedule=crontab(
+            hour=int(report_hour),
+            minute=int(report_minute),
+        ),
+        args=(),
+        kwargs={},
+        queue=None,
+        enabled=True,
+    )
