@@ -127,18 +127,33 @@ class AlibabaCloud(BaseCloudProvider):
             return f"business.{region}.aliyuncs.com"
         return BSS_OPENAPI_ENDPOINT
 
+    def _get_fallback_bss_endpoint(self) -> str:
+        """Return the alternative BSS endpoint for retry.
+
+        When the primary endpoint fails (e.g. international account
+        hitting China endpoint), try the other one.
+        """
+        primary = self._get_bss_endpoint()
+        if primary == BSS_ENDPOINT_CHINA:
+            return BSS_OPENAPI_ENDPOINT
+        return BSS_ENDPOINT_CHINA
+
+    def _build_client(self, endpoint: str) -> Client:
+        """Build a BSS client for the given endpoint."""
+        config = Config(
+            access_key_id=self.config.api_key,
+            access_key_secret=self.config.api_secret,
+            endpoint=endpoint,
+        )
+        return Client(config)
+
     @property
     def client(self) -> Client:
         """Get Alibaba Cloud BSS client."""
         if self._client is None:
             endpoint = self._get_bss_endpoint()
             logger.debug("Using Alibaba BSS endpoint: %s", endpoint)
-            config = Config(
-                access_key_id=self.config.api_key,
-                access_key_secret=self.config.api_secret,
-                endpoint=endpoint,
-            )
-            self._client = Client(config)
+            self._client = self._build_client(endpoint)
         return self._client
 
     def _validate_period(self, period: Optional[str] = None) -> str:
@@ -229,7 +244,7 @@ class AlibabaCloud(BaseCloudProvider):
         if items_obj:
             # Get item list (attribute is 'item' in lowercase)
             items = getattr(items_obj, 'item', [])
-            
+
             if not isinstance(items, list):
                 items = [items]
 
@@ -238,12 +253,15 @@ class AlibabaCloud(BaseCloudProvider):
                     # Handle both dict and object items
                     if isinstance(item, dict):
                         pretax_amount = float(item.get('PretaxAmount', 0))
-                        product_name = item.get('ProductName', 'Unknown Service')
+                        product_name = item.get(
+                            'ProductName', 'Unknown Service')
                         product_code = item.get('ProductCode', '')
                         item_currency = item.get('Currency', 'CNY')
                     else:
-                        pretax_amount = float(getattr(item, 'pretax_amount', 0))
-                        product_name = getattr(item, 'product_name', 'Unknown Service')
+                        pretax_amount = float(
+                            getattr(item, 'pretax_amount', 0))
+                        product_name = getattr(
+                            item, 'product_name', 'Unknown Service')
                         product_code = getattr(item, 'product_code', '')
                         item_currency = getattr(item, 'currency', 'CNY')
 
@@ -255,7 +273,8 @@ class AlibabaCloud(BaseCloudProvider):
                     else:
                         service_key = product_name
 
-                    service_costs[service_key] = service_costs.get(service_key, 0) + pretax_amount
+                    service_costs[service_key] = service_costs.get(
+                        service_key, 0) + pretax_amount
                 except (AttributeError, ValueError, TypeError, KeyError):
                     continue
 
@@ -484,7 +503,8 @@ class AlibabaCloud(BaseCloudProvider):
             start_date, end_date = self._get_period_dates(period)
 
             response = self._query_billing_api(start_date, end_date)
-            total_cost, currency, service_costs = self._calculate_total_cost(response)
+            total_cost, currency, service_costs = self._calculate_total_cost(
+                response)
             balance_response = self._query_account_balance()
             balance = self._extract_cash_balance(balance_response)
             balance_debug = self._build_balance_debug_info(balance_response)
@@ -600,6 +620,9 @@ class AlibabaCloud(BaseCloudProvider):
     ) -> list:
         """Query daily service-level costs via QueryAccountBill.
 
+        Tries primary BSS endpoint first, falls back to alternative
+        on failure to handle China vs international accounts.
+
         Args:
             period: Billing cycle in YYYY-MM format
             billing_date: Specific date in YYYY-MM-DD format
@@ -607,66 +630,293 @@ class AlibabaCloud(BaseCloudProvider):
         Returns:
             List of {name, cost} dicts, empty on failure
         """
-        try:
-            from alibabacloud_bssopenapi20171214 import (
-                models as bss_models,
-            )
+        from alibabacloud_bssopenapi20171214 import (
+            models as bss_models,
+        )
 
-            request = bss_models.QueryAccountBillRequest(
-                billing_cycle=period,
-                billing_date=billing_date,
-                granularity="DAILY",
-                is_group_by_product="true",
-                page_size=100,
-            )
-            response = self.client.query_account_bill(request)
-            body = response.body
-            if not body or not body.success:
-                logger.warning(
-                    f"Alibaba QueryAccountBill failed: "
-                    f"code={getattr(body, 'code', '')}, "
-                    f"message={getattr(body, 'message', '')}"
-                )
-                return []
+        request = bss_models.QueryAccountBillRequest(
+            billing_cycle=period,
+            billing_date=billing_date,
+            granularity="DAILY",
+            is_group_by_product=True,
+            page_size=100,
+        )
 
-            data = body.data
-            if not data:
-                return []
+        endpoints = [
+            self._get_bss_endpoint(),
+            self._get_fallback_bss_endpoint(),
+        ]
+        seen = set()
+        unique_endpoints = []
+        for ep in endpoints:
+            if ep not in seen:
+                seen.add(ep)
+                unique_endpoints.append(ep)
 
-            items_list = getattr(
-                getattr(data, "items", None), "item", []
-            ) or []
-            results = []
-            for item in items_list:
-                product_name = getattr(
-                    item, "product_name", "Unknown"
-                )
-                product_code = getattr(item, "product_code", "")
-                pretax_amount = float(
-                    getattr(item, "pretax_amount", 0) or 0
-                )
-                if pretax_amount <= 0:
+        for endpoint in unique_endpoints:
+            try:
+                client = self._build_client(endpoint)
+                response = client.query_account_bill(request)
+                body = response.body
+                if not body or not body.success:
+                    code = getattr(body, "code", "")
+                    if code in (
+                        "NotApplicable",
+                        "NotAuthorized",
+                    ):
+                        logger.info(
+                            f"Alibaba QueryAccountBill "
+                            f"endpoint {endpoint} not "
+                            f"applicable, trying next"
+                        )
+                        continue
+                    logger.warning(
+                        f"Alibaba QueryAccountBill "
+                        f"failed: code={code}, "
+                        f"msg={getattr(body, 'message', '')}"
+                    )
                     continue
-                label = (
-                    f"{product_name} ({product_code})"
-                    if product_code
-                    else product_name
-                )
-                results.append({
-                    "name": label,
-                    "cost": pretax_amount,
-                })
 
-            logger.info(
-                f"Alibaba QueryAccountBill daily: "
-                f"date={billing_date}, items={len(results)}"
+                data = body.data
+                if not data:
+                    continue
+
+                items_list = getattr(
+                    getattr(data, "items", None), "item", []
+                ) or []
+                results = []
+                for item in items_list:
+                    product_name = getattr(
+                        item, "product_name", "Unknown"
+                    )
+                    product_code = getattr(
+                        item, "product_code", ""
+                    )
+                    pretax_amount = float(
+                        getattr(item, "pretax_amount", 0)
+                        or 0
+                    )
+                    if pretax_amount <= 0:
+                        continue
+                    label = (
+                        f"{product_name} ({product_code})"
+                        if product_code
+                        else product_name
+                    )
+                    results.append({
+                        "name": label,
+                        "cost": pretax_amount,
+                    })
+
+                logger.info(
+                    f"Alibaba QueryAccountBill daily: "
+                    f"date={billing_date}, "
+                    f"items={len(results)}"
+                )
+                return results
+            except Exception as e:
+                logger.warning(
+                    f"Alibaba QueryAccountBill "
+                    f"endpoint {endpoint} failed: {e}"
+                )
+                continue
+
+        return []
+
+    def _query_instance_cost_details(
+        self, period: str, billing_date: str
+    ) -> list:
+        """Query daily instance-level costs via DescribeInstanceBill.
+
+        Tries the primary BSS endpoint first. On failure, retries
+        with the fallback endpoint to handle China vs international
+        account differences.
+
+        Args:
+            period: Billing cycle in YYYY-MM format
+            billing_date: Specific date in YYYY-MM-DD format
+
+        Returns:
+            List of {name, cost, instance_id, instance_name} dicts,
+            merged by instance, sorted by cost descending.
+        """
+        from alibabacloud_bssopenapi20171214 import (
+            models as bss_models,
+        )
+
+        request = bss_models.DescribeInstanceBillRequest(
+            billing_cycle=period,
+            billing_date=billing_date,
+            granularity="DAILY",
+            max_results=200,
+        )
+
+        endpoints = [
+            self._get_bss_endpoint(),
+            self._get_fallback_bss_endpoint(),
+        ]
+        # Deduplicate while preserving order
+        seen = set()
+        unique_endpoints = []
+        for ep in endpoints:
+            if ep not in seen:
+                seen.add(ep)
+                unique_endpoints.append(ep)
+
+        for endpoint in unique_endpoints:
+            try:
+                client = self._build_client(endpoint)
+                response = client.describe_instance_bill(
+                    request
+                )
+                body = response.body
+                if not body or not body.success:
+                    code = getattr(body, "code", "")
+                    if code in (
+                        "NotApplicable",
+                        "NotAuthorized",
+                    ):
+                        logger.info(
+                            f"Alibaba DescribeInstanceBill "
+                            f"endpoint {endpoint} not "
+                            f"applicable, trying next"
+                        )
+                        continue
+                    logger.warning(
+                        f"Alibaba DescribeInstanceBill "
+                        f"failed: code={code}, "
+                        f"msg={getattr(body, 'message', '')}"
+                    )
+                    continue
+
+                data = body.data
+                if not data:
+                    continue
+
+                items_list = data.items or []
+                merged = {}
+                for item in items_list:
+                    product = getattr(
+                        item, "product_name", "Unknown"
+                    )
+                    product_code = getattr(
+                        item, "product_code", ""
+                    )
+                    instance_name = (
+                        getattr(item, "nick_name", "")
+                        or getattr(item, "instance_id", "")
+                    )
+                    instance_id = getattr(
+                        item, "instance_id", ""
+                    )
+                    amount = float(
+                        getattr(item, "pretax_amount", 0)
+                        or 0
+                    )
+                    if amount <= 0:
+                        continue
+
+                    if instance_name:
+                        key = (
+                            f"{product} / {instance_name}"
+                        )
+                    else:
+                        key = (
+                            f"{product} ({product_code})"
+                            if product_code
+                            else product
+                        )
+
+                    if key in merged:
+                        merged[key]["cost"] += amount
+                    else:
+                        merged[key] = {
+                            "name": key,
+                            "cost": amount,
+                            "instance_id": instance_id,
+                            "instance_name": instance_name,
+                        }
+
+                results = sorted(
+                    merged.values(),
+                    key=lambda x: x["cost"],
+                    reverse=True,
+                )
+                if endpoint != self._get_bss_endpoint():
+                    logger.info(
+                        f"Alibaba DescribeInstanceBill "
+                        f"switched to endpoint {endpoint}"
+                    )
+                logger.info(
+                    f"Alibaba DescribeInstanceBill: "
+                    f"date={billing_date}, "
+                    f"instances={len(results)}"
+                )
+                return results
+            except Exception as e:
+                logger.warning(
+                    f"Alibaba DescribeInstanceBill "
+                    f"endpoint {endpoint} failed: {e}"
+                )
+                continue
+
+        return []
+
+    def get_instance_cost_breakdown(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Get instance-level cost breakdown.
+
+        Uses DescribeInstanceBill with DAILY granularity.
+
+        Args:
+            start_date: Date in YYYY-MM-DD format
+            end_date: Unused (Alibaba returns start_date data)
+
+        Returns:
+            Dict with instance cost items
+        """
+        try:
+            billing_date = None
+            period_input = None
+            if start_date and len(start_date) >= 10:
+                billing_date = start_date[:10]
+                period_input = start_date[:7]
+            elif start_date:
+                period_input = start_date[:7]
+            period = self._validate_period(period_input)
+
+            items = []
+            if billing_date:
+                items = self._query_instance_cost_details(
+                    period, billing_date
+                )
+
+            total_cost = sum(
+                float(it["cost"]) for it in items
             )
-            return results
+            logger.info(
+                f"Alibaba get_instance_cost_breakdown: "
+                f"instances={len(items)}, "
+                f"total={total_cost}"
+            )
+            return {
+                "status": "success",
+                "items": items[:50],
+                "total_cost": total_cost,
+            }
         except Exception as e:
             logger.warning(
-                f"Alibaba QueryAccountBill daily failed: {e}"
+                f"Alibaba get_instance_cost_breakdown "
+                f"failed: {e}"
             )
-            return []
+            return {
+                "status": "error",
+                "error": str(e),
+                "items": [],
+            }
 
     _OWNER_TAG_KEYS = {
         "created_by", "createdby", "creator",
@@ -783,7 +1033,8 @@ class AlibabaCloud(BaseCloudProvider):
                 if body and getattr(body, "account_id", None):
                     return True
             except Exception as e:
-                logger.warning("Alibaba STS GetCallerIdentity failed, trying BSS: %s", e)
+                logger.warning(
+                    "Alibaba STS GetCallerIdentity failed, trying BSS: %s", e)
         # Fallback: BSS QueryAccountBalance (no account_id, but validates credentials)
         try:
             self.client.query_account_balance()

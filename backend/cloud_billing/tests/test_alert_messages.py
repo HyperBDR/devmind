@@ -28,7 +28,7 @@ class TestFormatResourceCostLines:
     """Test the _format_resource_cost_lines helper."""
 
     def test_basic_items(self):
-        """Should format basic resource cost items."""
+        """Should format items as table with Resource/Cost columns."""
         items = [
             {"name": "ECS", "cost": 100.0},
             {"name": "RDS", "cost": 50.0},
@@ -36,24 +36,29 @@ class TestFormatResourceCostLines:
         lines = _format_resource_cost_lines(
             items, "CNY", "zh_Hans",
         )
-        assert len(lines) == 3  # header + 2 items
+        # header + table header + separator + 2 data rows
+        assert len(lines) == 5
         assert "费用明细" in lines[0]
-        assert "ECS" in lines[1]
-        assert "100.00 CNY" in lines[1]
-        assert "RDS" in lines[2]
+        assert "资源" in lines[1]
+        assert "ECS" in lines[3]
+        assert "100.00 CNY" in lines[3]
+        assert "RDS" in lines[4]
 
     def test_owner_info_displayed(self):
-        """Should include owner when present."""
+        """Should include owner column when any item has owner."""
         items = [
-            {"name": "ECS", "cost": 100.0, "owner": "zhangsan"},
+            {
+                "name": "ECS",
+                "cost": 100.0,
+                "owner": "zhangsan",
+            },
             {"name": "RDS", "cost": 50.0},
         ]
         lines = _format_resource_cost_lines(
             items, "CNY", "zh_Hans",
         )
-        assert "zhangsan" in lines[1]
-        # Second item has no owner, no parentheses
-        assert "(" not in lines[2] or "RDS" in lines[2]
+        assert "创建者" in lines[1]
+        assert "zhangsan" in lines[3]
 
     def test_max_items_limit(self):
         """Should limit items to max_items."""
@@ -64,8 +69,8 @@ class TestFormatResourceCostLines:
         lines = _format_resource_cost_lines(
             items, "USD", "en", max_items=3,
         )
-        # header + 3 items
-        assert len(lines) == 4
+        # header + table header + separator + 3 data rows
+        assert len(lines) == 6
 
     def test_service_name_fallback(self):
         """Should use service_name if name is missing."""
@@ -73,7 +78,8 @@ class TestFormatResourceCostLines:
         lines = _format_resource_cost_lines(
             items, "USD", "en",
         )
-        assert "EC2" in lines[1]
+        # data row is line index 3
+        assert "EC2" in lines[3]
 
     def test_unknown_fallback(self):
         """Should use 'Unknown' if both name and service_name missing."""
@@ -81,7 +87,7 @@ class TestFormatResourceCostLines:
         lines = _format_resource_cost_lines(
             items, "USD", "en",
         )
-        assert "Unknown" in lines[1]
+        assert "Unknown" in lines[3]
 
     def test_empty_items(self):
         """Should handle empty items list."""

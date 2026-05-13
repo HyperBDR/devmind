@@ -19,41 +19,89 @@ def _format_resource_cost_lines(
     resource_cost_items: list,
     currency: str,
     normalized_language: str,
-    max_items: int = 5,
+    max_items: int = 10,
 ) -> list[str]:
-    """Format resource cost items into alert message lines.
+    """Format resource cost items as a table.
 
-    Includes owner information when available.
+    Table layout with columns: Resource, Cost, Creator.
+    Plain strings (no label:value separator) for table rows,
+    so notification service renders them as raw text.
     """
-    lines = []
-    lines.append(
-        format_alert_line(
+    if is_chinese_language(normalized_language):
+        header = (
             localized_text(
                 normalized_language,
                 "Cost breakdown",
                 "费用明细",
-            ),
-            "",
-            language=normalized_language,
+            )
+            + "："
         )
+        col_resource = "资源"
+        col_cost = "花费"
+        col_creator = "创建者"
+    else:
+        header = (
+            localized_text(
+                normalized_language,
+                "Cost breakdown",
+                "费用明细",
+            )
+            + ": "
+        )
+        col_resource = "Resource"
+        col_cost = "Cost"
+        col_creator = "Creator"
+
+    lines = [header]
+
+    if not resource_cost_items:
+        return lines
+
+    has_owner = any(
+        item.get("owner", "") for item in resource_cost_items
     )
+
+    if has_owner:
+        col_w = 32
+        cost_w = 14
+        lines.append(
+            f"  {col_resource:<{col_w}}"
+            f"{col_cost:<{cost_w}}"
+            f"{col_creator}"
+        )
+        lines.append(
+            f"  {'─' * col_w}{'─' * cost_w}{'─' * 12}"
+        )
+    else:
+        col_w = 40
+        cost_w = 14
+        lines.append(
+            f"  {col_resource:<{col_w}}{col_cost}"
+        )
+        lines.append(
+            f"  {'─' * col_w}{'─' * cost_w}"
+        )
+
     for item in resource_cost_items[:max_items]:
         item_name = item.get(
             "name", item.get("service_name", "Unknown")
         )
         item_cost = float(item.get("cost", 0))
         owner = item.get("owner", "")
-        if owner:
-            label = f"  • {item_name} ({owner})"
-        else:
-            label = f"  • {item_name}"
-        lines.append(
-            format_alert_line(
-                label,
-                f"{item_cost:.2f} {currency}",
-                language=normalized_language,
+        cost_str = f"{item_cost:.2f} {currency}"
+
+        if has_owner:
+            row = (
+                f"  {item_name:<{col_w}}"
+                f"{cost_str:<{cost_w}}"
+                f"{owner}"
             )
-        )
+        else:
+            row = (
+                f"  {item_name:<{col_w}}{cost_str}"
+            )
+        lines.append(row)
+
     return lines
 
 

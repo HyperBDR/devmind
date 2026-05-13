@@ -375,25 +375,44 @@ def _query_resource_costs_for_alert(
         end_date = (
             now_local + timedelta(days=1)
         ).strftime("%Y-%m-%d")
-        result = billing_service.get_resource_cost_breakdown(
+
+        # Try instance-level breakdown first (more detail)
+        result = billing_service.get_instance_cost_breakdown(
             start_date=start_date,
             end_date=end_date,
-            group_by="SERVICE",
         )
         if result.get("status") == "success":
             items = result.get("items", [])
             logger.info(
-                f"Alert resource costs from API: "
+                f"Alert instance costs from API: "
                 f"provider={provider.id}, "
                 f"items={len(items)}, "
                 f"total={result.get('total_cost', 0)}"
             )
-        else:
-            logger.warning(
-                f"Alert resource costs API failed: "
-                f"provider={provider.id}, "
-                f"error={result.get('error')}"
+
+        # Fall back to service-level breakdown
+        if not items:
+            result = (
+                billing_service.get_resource_cost_breakdown(
+                    start_date=start_date,
+                    end_date=end_date,
+                    group_by="SERVICE",
+                )
             )
+            if result.get("status") == "success":
+                items = result.get("items", [])
+                logger.info(
+                    f"Alert service costs from API: "
+                    f"provider={provider.id}, "
+                    f"items={len(items)}, "
+                    f"total={result.get('total_cost', 0)}"
+                )
+            else:
+                logger.warning(
+                    f"Alert resource costs API failed: "
+                    f"provider={provider.id}, "
+                    f"error={result.get('error')}"
+                )
     except Exception as e:
         logger.warning(
             f"Alert resource costs API error: "
@@ -456,7 +475,7 @@ def _query_resource_costs_for_alert(
             f"Alert instance owner lookup skipped: {e}"
         )
 
-    return items[:5]
+    return items[:10]
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")

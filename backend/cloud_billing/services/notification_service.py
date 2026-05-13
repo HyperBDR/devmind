@@ -115,6 +115,14 @@ class CloudBillingNotificationService:
         content = []
         for line in message.splitlines():
             label, value = self._split_label_value(line)
+            if not value and ("：" not in line and ":" not in line):
+                # Table row — render as raw text to preserve
+                # column alignment
+                content.append([{
+                    "tag": FEISHU_TAG_TEXT,
+                    "text": line,
+                }])
+                continue
             row = [{
                 "tag": FEISHU_TAG_TEXT,
                 "text": f"{label}：",
@@ -160,6 +168,12 @@ class CloudBillingNotificationService:
         rows = []
         for line in self._get_alert_body(alert_record, language).splitlines():
             label, value = self._split_label_value(line)
+            if not value and (
+                "：" not in line and ":" not in line
+            ):
+                # Table row — code block for monospace alignment
+                rows.append(f"`{line}`")
+                continue
             if value:
                 separator = "：" if self._is_chinese_language(language) else ": "
                 rows.append(f"**{label}**{separator}{value}")
@@ -191,6 +205,11 @@ class CloudBillingNotificationService:
         rows = []
         for line in self._get_alert_body(alert_record, language).splitlines():
             label, value = self._split_label_value(line)
+            if not value and (
+                "：" not in line and ":" not in line
+            ):
+                rows.append(line)
+                continue
             if value:
                 separator = "：" if self._is_chinese_language(language) else ": "
                 rows.append(f"**{label}**{separator}{value}")
