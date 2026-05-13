@@ -449,6 +449,14 @@ class AlertRecord(models.Model):
         help_text="Projected remaining days threshold that triggered the alert",
     )
     alert_message = models.TextField(help_text="Alert message content")
+    resource_cost_details = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Resource-level cost breakdown at alert time, "
+            "format: [{name, cost, owner?}, ...]"
+        ),
+    )
     webhook_status = models.CharField(
         max_length=20,
         choices=WEBHOOK_STATUS_CHOICES,

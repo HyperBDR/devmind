@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/zhengwei/Workspace/OnePro/devmind/**)",
+      "Bash(python -c ':*)",
+      "Bash(python3 devmind/cloud_billing/skills/feishu-cloud-billing-approval/scripts/submit_recharge_approval.py --user-identifier zhengwei@oneprocloud.cn --request-file /tmp/test_recharge_request.json submit)",
+      "Bash(FEISHU_APP_ID=cli_a94e1db5fe7a1ccc FEISHU_APP_SECRET=KlXfq3ONeklauzCBY7W3NdizXXuGYbup FEISHU_APPROVAL_CODE=7DB0EFE8-D1EB-4ECA-BFFD-D3DFD5C086A7 python3:*)",
+      "Bash(python3:*)",
+      "Bash(ls /Users/zhengwei/Workspace/OnePro/devmind/.venv/bin/python*)",
+      "Bash(ls /Users/zhengwei/Workspace/OnePro/devmind/venv/bin/python*)",
+      "Bash(/Users/zhengwei/Workspace/OnePro/devmind/.venv/bin/python3:*)",
+      "Bash(grep:*)",
+      "Bash(docker exec devmind-api-dev:*)",
+      "Bash(docker exec devmind-postgresql-dev:*)",
+      "Bash(docker cp:*)",
+      "Bash(docker restart:*)",
+      "Bash(docker exec devmind-worker-dev:*)"
+    ]
+  }
+}

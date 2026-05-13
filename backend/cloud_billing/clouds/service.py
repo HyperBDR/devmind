@@ -147,6 +147,20 @@ class BillingService:
             )
         return {"status": "error", "error": "Not supported", "items": []}
 
+    def get_instance_cost_breakdown(
+        self, start_date: str, end_date: str
+    ) -> Dict[str, Any]:
+        """Get instance-level cost breakdown by resource dimension."""
+        if hasattr(self.provider, "get_instance_cost_breakdown"):
+            return self.provider.get_instance_cost_breakdown(
+                start_date, end_date
+            )
+        return {
+            "status": "error",
+            "error": "Not supported",
+            "items": [],
+        }
+
     def list_instances_with_tags(self) -> list:
         """List instances with tags for owner resolution.
 
