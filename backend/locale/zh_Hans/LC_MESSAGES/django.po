@@ -526,6 +526,81 @@ msgstr "人民币"
 msgid "Cloud Billing Alert"
 msgstr "云平台账单消费提醒"
 
+#: cloud_billing/alert_messages.py — alert type labels
+msgid "Balance Alert"
+msgstr "余额阈值告警"
+
+msgid "Days Remaining Alert"
+msgstr "预计使用天数告警"
+
+msgid "Cost Threshold Alert"
+msgstr "成本阈值告警"
+
+msgid "Cost Growth Alert"
+msgstr "成本增长告警"
+
+#: cloud_billing/alert_messages.py — trigger texts
+msgid "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
+msgstr "余额 %(bal).2f %(cur)s 低于阈值 %(thr).2f %(cur)s"
+
+msgid "%(days)s days remaining below threshold %(thr)s"
+msgstr "预计剩余 %(days)s 天 低于阈值 %(thr)s 天"
+
+msgid "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
+msgstr "累计成本 %(cost).2f %(cur)s 超过阈值 %(thr).2f %(cur)s"
+
+msgid "Growth %(pct).1f%%"
+msgstr "增长 %(pct).1f%%"
+
+msgid "threshold %(thr).1f%%"
+msgstr "阈值 %(thr).1f%%"
+
+#: cloud_billing/alert_messages.py — structural labels
+msgid "Provider"
+msgstr "云平台"
+
+msgid "Balance"
+msgstr "当前余额"
+
+msgid "Cost Breakdown"
+msgstr "费用明细"
+
+msgid "Resource"
+msgstr "资源"
+
+msgid "Cost"
+msgstr "花费"
+
+msgid "Owner"
+msgstr "创建者"
+
+msgid "DevMind Cloud Billing · @all"
+msgstr "DevMind 云账单监控 · @所有人"
+
+msgid ": "
+msgstr "："
+
+msgid ", "
+msgstr "，"
+
+msgid "Current Total"
+msgstr "当前累计"
+
+msgid "Previous Hour"
+msgstr "上一小时"
+
+msgid "Increase"
+msgstr "增加金额"
+
+msgid "Growth Rate"
+msgstr "增长率"
+
+msgid "Growth %"
+msgstr "百分比阈值"
+
+msgid "Amount"
+msgstr "金额阈值"
+
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""

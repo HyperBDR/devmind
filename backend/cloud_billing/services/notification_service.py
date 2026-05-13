@@ -25,13 +25,12 @@ from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
 from django.utils import translation
 from django.utils.translation import gettext as _
 
-from cloud_billing.alert_messages import build_alert_message_from_record
+from cloud_billing.alert_messages import (
+    build_alert_message_from_record,
+    build_alert_sections_from_record,
+)
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
-    FEISHU_MSG_TYPE_POST,
-    FEISHU_TAG_AT,
-    FEISHU_TAG_TEXT,
-    FEISHU_USER_ID_ALL,
     SOURCE_APP_CLOUD_BILLING,
     SOURCE_TYPE_ALERT,
     SOURCE_TYPE_RECHARGE_APPROVAL,
@@ -41,6 +40,95 @@ from cloud_billing.models import AlertRecord, RechargeApprovalRecord
 from cloud_billing.services.recharge_approval import parse_recharge_info
 
 logger = logging.getLogger(__name__)
+
+
+def _feishu_cost_table(
+    items: list,
+    currency: str,
+    labels: dict,
+) -> list:
+    """Build Feishu column_set elements for cost breakdown table.
+
+    Returns a title div + header row (blue bg) + data rows.
+    Columns: Resource, Cost, Owner (always shown, "-" if empty).
+    ``labels`` is the ``sections["labels"]`` dict from
+    ``build_alert_sections`` — all strings are pre-localized.
+    """
+    rows = []
+
+    # Title
+    rows.append({
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": f"**📋 {labels['cost_breakdown']}**",
+        },
+    })
+
+    # Header row
+    cols = [
+        labels["col_resource"],
+        labels["col_cost"],
+        labels["col_owner"],
+    ]
+    widths = ["weighted", "weighted", "weighted"]
+    weights = [4, 3, 2]
+
+    header_columns = []
+    for i, col in enumerate(cols):
+        header_columns.append({
+            "tag": "column",
+            "width": widths[i],
+            "weight": weights[i],
+            "elements": [{
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**{col}**",
+                },
+            }],
+        })
+    rows.append({
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "blue",
+        "columns": header_columns,
+    })
+
+    # Data rows (alternating grey/white)
+    for idx, it in enumerate(items):
+        name = it.get("name", "?")
+        cost = float(it.get("cost", 0))
+        owner = it.get("owner", "") or "-"
+        row_cols = [
+            name,
+            f"{cost:.2f} {currency}",
+            owner,
+        ]
+
+        bg = "grey" if idx % 2 == 0 else "default"
+        columns = []
+        for i, text in enumerate(row_cols):
+            columns.append({
+                "tag": "column",
+                "width": widths[i],
+                "weight": weights[i],
+                "elements": [{
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": str(text),
+                    },
+                }],
+            })
+        rows.append({
+            "tag": "column_set",
+            "flex_mode": "none",
+            "background_style": bg,
+            "columns": columns,
+        })
+
+    return rows
 
 
 class CloudBillingNotificationService:
@@ -100,46 +188,199 @@ class CloudBillingNotificationService:
     def _generate_feishu_payload(
         self, alert_record: AlertRecord, language: str
     ) -> Dict[str, Any]:
-        """
-        Generate Feishu webhook payload from alert record.
+        """Generate Feishu interactive card payload.
 
-        Args:
-            alert_record: AlertRecord instance
-            language: Message language (zh-hans/en)
-
-        Returns:
-            Feishu webhook payload dictionary
+        Uses color-coded header, font-colored metrics, column_set
+        table, and note component for a polished card layout.
         """
-        title = self._get_alert_title(language, "feishu")
-        message = self._get_alert_body(alert_record, language)
-        content = []
-        for line in message.splitlines():
-            label, value = self._split_label_value(line)
-            row = [{
-                "tag": FEISHU_TAG_TEXT,
-                "text": f"{label}：",
-            }]
-            if value:
-                row.append({
-                    "tag": FEISHU_TAG_TEXT,
-                    "text": value,
+        sections = build_alert_sections_from_record(
+            alert_record, language
+        )
+        L = sections["labels"]
+        sep = L["sep"]
+        currency = sections.get("currency", "CNY")
+        alert_type = sections.get("alert_type", "")
+
+        # Header color by severity
+        if "Balance" in alert_type:
+            header_template = "red"
+        elif "Days" in alert_type:
+            header_template = "orange"
+        elif "Growth" in alert_type:
+            header_template = "orange"
+        else:
+            header_template = "blue"
+
+        elements = []
+
+        # ── 1. Trigger reason (highlighted) ──
+        trigger_icon = sections.get("trigger_icon", "")
+        trigger_text = sections.get("trigger_text", "")
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": (
+                    f"{trigger_icon} "
+                    f"<font color='orange'>"
+                    f"**{trigger_text}**</font>"
+                ),
+            },
+        })
+
+        # ── 2. Account info ──
+        info_parts = []
+        for key, label_key in [
+            ("provider", "provider"),
+            ("account_id", "account"),
+            ("notes", "notes"),
+        ]:
+            if sections.get(key):
+                info_parts.append(
+                    f"**{L[label_key]}**{sep}{sections[key]}"
+                )
+        if sections.get("tags"):
+            tag_str = "、".join(sections["tags"])
+            info_parts.append(
+                f"**{L['tags']}**{sep}{tag_str}"
+            )
+        if info_parts:
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "\n".join(info_parts),
+                },
+            })
+
+        elements.append({"tag": "hr"})
+
+        # ── 3. Metrics cards (column_set with bg color) ──
+        metrics = sections.get("metrics", [])
+        if metrics:
+            columns = []
+            for m in metrics:
+                val = m["value"]
+                label = m["label"]
+                is_pct = "%" in str(val)
+                unit = "" if is_pct else f" {currency}"
+                if m.get("highlight"):
+                    val_md = (
+                        f"<font color='red'>**"
+                        f"{val}{unit}**</font>"
+                    )
+                    bg = "orange"
+                else:
+                    val_md = f"**{val}**{unit}"
+                    bg = "grey"
+                columns.append({
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "vertical_align": "center",
+                    "elements": [{
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"{label}\n{val_md}"
+                            ),
+                        },
+                    }],
                 })
-            content.append(row)
-        content.append([{
-            "tag": FEISHU_TAG_AT,
-            "user_id": FEISHU_USER_ID_ALL
-        }])
+            elements.append({
+                "tag": "column_set",
+                "flex_mode": "stretch",
+                "background_style": "grey",
+                "columns": columns,
+            })
+
+        # ── 4. Thresholds (column_set cards) ──
+        thresholds = sections.get("thresholds", [])
+        if thresholds:
+            t_columns = []
+            for t in thresholds:
+                label = t["label"]
+                value = t["value"]
+                t_columns.append({
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "vertical_align": "center",
+                    "elements": [{
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"{label}\n"
+                                f"<font color='grey'>"
+                                f"{value}</font>"
+                            ),
+                        },
+                    }],
+                })
+            elements.append({
+                "tag": "column_set",
+                "flex_mode": "stretch",
+                "background_style": "grey",
+                "columns": t_columns,
+            })
+
+        # ── 5. Cost breakdown table ──
+        resource_costs = sections.get("resource_costs", [])
+        if resource_costs:
+            elements.append({"tag": "hr"})
+            elements.extend(
+                _feishu_cost_table(
+                    resource_costs[:10],
+                    currency,
+                    L,
+                )
+            )
+
+        # ── 6. Balance ──
+        balance_info = sections.get("balance")
+        if balance_info:
+            bal = balance_info["value"]
+            bal_cur = balance_info["currency"]
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**{L['balance']}**{sep}{bal:.2f} {bal_cur}",
+                },
+            })
+
+        # ── 7. Footer note + @all ──
+        elements.append({
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": L["footer"],
+                },
+                {
+                    "tag": "lark_md",
+                    "content": "<at id=all></at>",
+                },
+            ],
+        })
 
         payload = {
-            "msg_type": FEISHU_MSG_TYPE_POST,
-            "content": {
-                "post": {
-                    language: {
-                        "title": title,
-                        "content": content
-                    }
-                }
-            }
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": self._get_alert_title(
+                            language, "feishu"
+                        ),
+                    },
+                    "template": header_template,
+                },
+                "elements": elements,
+            },
         }
 
         return payload
@@ -147,28 +388,88 @@ class CloudBillingNotificationService:
     def _generate_wechat_payload(
         self, alert_record: AlertRecord, language: str
     ) -> Dict[str, Any]:
-        """
-        Generate WeChat Work webhook payload from alert record.
+        """Generate WeChat Work webhook payload with enhanced layout."""
+        sections = build_alert_sections_from_record(
+            alert_record, language
+        )
+        L = sections["labels"]
+        sep = L["sep"]
+        currency = sections.get("currency", "CNY")
 
-        Args:
-            alert_record: AlertRecord instance
-            language: Message language (zh-hans/en)
-
-        Returns:
-            WeChat webhook payload dictionary
-        """
         rows = []
-        for line in self._get_alert_body(alert_record, language).splitlines():
-            label, value = self._split_label_value(line)
-            if value:
-                separator = "：" if self._is_chinese_language(language) else ": "
-                rows.append(f"**{label}**{separator}{value}")
-            else:
-                rows.append(f"**{label}**")
+
+        # Trigger
+        rows.append(
+            f"> {sections.get('trigger_icon', '')}"
+            f" **{sections.get('trigger_text', '')}**"
+        )
+        rows.append("")
+
+        # Account info
+        for key, label_key in [
+            ("provider", "provider"),
+            ("account_id", "account"),
+            ("notes", "notes"),
+        ]:
+            if sections.get(key):
+                rows.append(
+                    f"**{L[label_key]}**{sep}{sections[key]}"
+                )
+
+        # Metrics
+        metrics = sections.get("metrics", [])
+        if metrics:
+            rows.append("")
+            for m in metrics:
+                val = m["value"]
+                bold = "**" if m.get("highlight") else ""
+                unit = "" if "%" in str(val) else f" {currency}"
+                rows.append(
+                    f"  {m['label']}{sep}{bold}{val}{unit}{bold}"
+                )
+
+        # Thresholds
+        thresholds = sections.get("thresholds", [])
+        if thresholds:
+            rows.append("")
+            rows.append(" | ".join(
+                f"{t['label']}{sep}{t['value']}"
+                for t in thresholds
+            ))
+
+        # Cost breakdown
+        resource_costs = sections.get("resource_costs", [])
+        if resource_costs:
+            rows.append("")
+            rows.append(f"**{L['cost_breakdown']}**{sep}")
+            rows.append(
+                f"| {L['col_resource']} | {L['col_cost']} | {L['col_owner']} |"
+            )
+            rows.append("| --- | ---: | --- |")
+            for it in resource_costs[:10]:
+                name = it.get("name", "?")
+                cost = float(it.get("cost", 0))
+                owner = it.get("owner", "") or "-"
+                rows.append(
+                    f"| {name} | {cost:.2f} {currency} "
+                    f"| {owner} |"
+                )
+
+        # Balance
+        balance_info = sections.get("balance")
+        if balance_info:
+            rows.append("")
+            rows.append(
+                f"**{L['balance']}**{sep}"
+                f"{balance_info['value']:.2f} {balance_info['currency']}"
+            )
+
+        rows.append("")
+        rows.append("<@all>")
+
         content = (
             self._get_alert_title(language, "wechat")
             + "\n".join(rows)
-            + "\n\n<@all>"
         )
 
         payload = {
@@ -183,20 +484,87 @@ class CloudBillingNotificationService:
     def _generate_email_subject_and_body(
         self, alert_record: AlertRecord, language: str
     ) -> tuple:
-        """
-        Generate plain text subject and body for email from alert record.
-        Returns (subject, body).
-        """
+        """Generate email subject and markdown body."""
         subject = self._get_alert_title(language, "email_subject")
+        sections = build_alert_sections_from_record(
+            alert_record, language
+        )
+        L = sections["labels"]
+        sep = L["sep"]
+        currency = sections.get("currency", "CNY")
+
         rows = []
-        for line in self._get_alert_body(alert_record, language).splitlines():
-            label, value = self._split_label_value(line)
-            if value:
-                separator = "：" if self._is_chinese_language(language) else ": "
-                rows.append(f"**{label}**{separator}{value}")
-            else:
-                rows.append(f"**{label}**")
-        body = self._get_alert_title(language, "email_body") + "\n".join(rows)
+
+        # Trigger
+        rows.append(
+            f"> {sections.get('trigger_icon', '')}"
+            f" **{sections.get('trigger_text', '')}**"
+        )
+        rows.append("")
+
+        # Account info
+        for key, label_key in [
+            ("provider", "provider"),
+            ("account_id", "account"),
+            ("notes", "notes"),
+        ]:
+            if sections.get(key):
+                rows.append(
+                    f"**{L[label_key]}**{sep}{sections[key]}"
+                )
+
+        # Metrics
+        metrics = sections.get("metrics", [])
+        if metrics:
+            rows.append("")
+            for m in metrics:
+                val = m["value"]
+                bold = "**" if m.get("highlight") else ""
+                unit = "" if "%" in str(val) else f" {currency}"
+                rows.append(
+                    f"  {m['label']}{sep}{bold}{val}{unit}{bold}"
+                )
+
+        # Thresholds
+        thresholds = sections.get("thresholds", [])
+        if thresholds:
+            rows.append("")
+            rows.append(" | ".join(
+                f"{t['label']}{sep}{t['value']}"
+                for t in thresholds
+            ))
+
+        # Cost breakdown
+        resource_costs = sections.get("resource_costs", [])
+        if resource_costs:
+            rows.append("")
+            rows.append(f"**{L['cost_breakdown']}**{sep}")
+            rows.append(
+                f"| {L['col_resource']} | {L['col_cost']} | {L['col_owner']} |"
+            )
+            rows.append("| --- | ---: | --- |")
+            for it in resource_costs[:10]:
+                name = it.get("name", "?")
+                cost = float(it.get("cost", 0))
+                owner = it.get("owner", "") or "-"
+                rows.append(
+                    f"| {name} | {cost:.2f} {currency} "
+                    f"| {owner} |"
+                )
+
+        # Balance
+        balance_info = sections.get("balance")
+        if balance_info:
+            rows.append("")
+            rows.append(
+                f"**{L['balance']}**{sep}"
+                f"{balance_info['value']:.2f} {balance_info['currency']}"
+            )
+
+        body = (
+            self._get_alert_title(language, "email_body")
+            + "\n".join(rows)
+        )
         return subject, body
 
     def send_alert(

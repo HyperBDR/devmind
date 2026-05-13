@@ -185,6 +185,7 @@ def billing_data(cloud_provider):
         period=current_period,
         hour=current_hour,
         total_cost=Decimal("100.50"),
+        hourly_cost=Decimal("100.50"),
         balance=Decimal("520.00"),
         currency="USD",
         service_costs={"ec2": "50.00", "s3": "30.00", "rds": "20.50"},

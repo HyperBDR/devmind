@@ -969,8 +969,15 @@ const toggleProvider = async (id, enabled) => {
   }
 }
 
-const editAuthConfig = (provider) => {
-  editingProvider.value = provider
+const editAuthConfig = async (provider) => {
+  try {
+    const response = await cloudBillingApi.getProvider(provider.id)
+    const data = extractResponseData(response)
+    editingProvider.value = data?.id ? data : (data?.data || data)
+  } catch {
+    showError(t('errors.serverError'))
+    editingProvider.value = provider
+  }
 }
 
 const editNotes = (provider) => {
