@@ -1406,7 +1406,7 @@
           {{ t('common.cancel') }}
         </BaseButton>
         <BaseButton
-          v-if="!props.provider"
+          v-if="!props.provider || configChangedSinceValidation"
           type="button"
           variant="secondary"
           :loading="validating"
@@ -1422,10 +1422,10 @@
         </BaseButton>
         <BaseButton
           :loading="saving"
-          :disabled="saving || validating || (!props.provider && !isValidated)"
+          :disabled="saving || validating || (!props.provider && !isValidated) || (props.provider && configChangedSinceValidation && !isValidated)"
           @click="handleSubmit"
           :title="
-            !props.provider && !isValidated
+            (!props.provider && !isValidated) || (props.provider && configChangedSinceValidation && !isValidated)
               ? t('cloudBilling.providers.pleaseValidateConfigFirst')
               : ''
           "
@@ -1703,6 +1703,42 @@ watch(
   { immediate: false }
 )
 
+// Track if config fields have changed since last validation
+const configChangedSinceValidation = ref(false)
+
+const getCurrentConfigFieldValues = () => ({
+  aws_access_key_id: configFields.aws_access_key_id,
+  aws_secret_access_key: configFields.aws_secret_access_key,
+  aws_region: configFields.aws_region,
+  huawei_access_key_id: configFields.huawei_access_key_id,
+  huawei_secret_access_key: configFields.huawei_secret_access_key,
+  huawei_region: configFields.huawei_region,
+  azure_client_id: configFields.azure_client_id,
+  azure_client_secret: configFields.azure_client_secret,
+  azure_tenant_id: configFields.azure_tenant_id,
+  azure_subscription_id: configFields.azure_subscription_id,
+  azure_billing_account_id: configFields.azure_billing_account_id,
+  alibaba_access_key_id: configFields.alibaba_access_key_id,
+  alibaba_secret_access_key: configFields.alibaba_secret_access_key,
+  alibaba_region: configFields.alibaba_region,
+  tencent_access_key_id: configFields.tencent_access_key_id,
+  tencent_access_key_secret: configFields.tencent_access_key_secret,
+  tencent_app_id: configFields.tencent_app_id,
+  volcengine_access_key_id: configFields.volcengine_access_key_id,
+  volcengine_secret_access_key: configFields.volcengine_secret_access_key,
+  volcengine_region: configFields.volcengine_region,
+  volcengine_endpoint: configFields.volcengine_endpoint,
+  volcengine_payer_id: configFields.volcengine_payer_id,
+  volcengine_service: configFields.volcengine_service,
+  volcengine_version: configFields.volcengine_version,
+  baidu_access_key_id: configFields.baidu_access_key_id,
+  baidu_secret_access_key: configFields.baidu_secret_access_key,
+  zhipu_username: configFields.zhipu_username,
+  zhipu_password: configFields.zhipu_password
+})
+
+const initialConfigSnapshot = ref({})
+
 // Reset validation when config fields change
 watch(
   () => [
@@ -1740,6 +1776,13 @@ watch(
       isValidated.value = false
       validationErrors.value = []
       validationSuccess.value = ''
+    } else {
+      // For editing, check if config has changed
+      const current = getCurrentConfigFieldValues()
+      const changed = Object.keys(current).some(
+        (key) => current[key] !== initialConfigSnapshot.value[key]
+      )
+      configChangedSinceValidation.value = changed
     }
   }
 )
@@ -1876,6 +1919,12 @@ watch(
           config.username || config.ZHIPU_USERNAME || ''
         configFields.zhipu_password =
           config.password || config.ZHIPU_PASSWORD || ''
+
+        // Save initial config snapshot for edit validation tracking
+        initialConfigSnapshot.value = getCurrentConfigFieldValues()
+        // Initial config is considered validated (no changes yet)
+        configChangedSinceValidation.value = false
+        isValidated.value = true
       }
 
       // Load alert rule if exists and showAlertRule is true
@@ -2320,6 +2369,9 @@ const handleValidate = async () => {
         validationSuccess.value += ` (${t('cloudBilling.providers.accountId')}: ${validation.account_id})`
       }
       isValidated.value = true
+      // Update config snapshot after successful validation
+      initialConfigSnapshot.value = getCurrentConfigFieldValues()
+      configChangedSinceValidation.value = false
       setTimeout(() => {
         validationSuccess.value = ''
       }, 5000)
@@ -2355,8 +2407,9 @@ const handleValidate = async () => {
 }
 
 const handleSubmit = async () => {
-  // Check validation for new providers
-  if (!props.provider && !isValidated.value) {
+  // Check validation for new providers or when config has changed during edit
+  const needsValidation = !props.provider || configChangedSinceValidation.value
+  if (needsValidation && !isValidated.value) {
     validationErrors.value = [
       t('cloudBilling.providers.pleaseValidateConfigFirst')
     ]
