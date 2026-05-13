@@ -534,6 +534,260 @@ def build_alert_message(
         return "\n".join(lines)
 
 
+# ── Structured sections for rich rendering ──────────────────
+
+
+def build_alert_sections(
+    *,
+    provider_name: str,
+    provider_notes: str,
+    provider_tags: list[str],
+    account_id: str,
+    current_cost,
+    previous_cost,
+    increase_cost,
+    increase_percent,
+    current_balance,
+    current_days_remaining,
+    currency: str,
+    alert_rule,
+    cost_threshold_triggered: bool,
+    balance_threshold_triggered: bool,
+    days_remaining_threshold_triggered: bool,
+    language: str,
+    alert_type: Optional[str] = None,
+    resource_cost_items: Optional[list] = None,
+) -> dict:
+    """Return structured alert data for rich rendering.
+
+    Returns a dict with named sections that notification services
+    can render as Feishu cards, markdown tables, etc.
+    """
+    raw_language = str(language or DEFAULT_LANGUAGE).strip()
+    is_zh = raw_language.lower().startswith("zh")
+
+    effective_alert_type = str(alert_type or "").strip().lower()
+
+    # ── Determine alert type label and trigger ──
+    if effective_alert_type == "balance" or balance_threshold_triggered:
+        type_label = "余额阈值告警" if is_zh else "Balance Alert"
+        trigger_icon = "💰"
+        if current_balance is not None and alert_rule.balance_threshold:
+            trigger_text = (
+                f"余额 {current_balance:.2f} {currency}"
+                f" 低于阈值 {alert_rule.balance_threshold:.2f} {currency}"
+                if is_zh else
+                f"Balance {current_balance:.2f} {currency}"
+                f" below threshold {alert_rule.balance_threshold:.2f} {currency}"
+            )
+        else:
+            trigger_text = type_label
+    elif effective_alert_type == "days_remaining" or days_remaining_threshold_triggered:
+        type_label = "预计使用天数告警" if is_zh else "Days Remaining Alert"
+        trigger_icon = "⏳"
+        trigger_text = (
+            f"预计剩余 {current_days_remaining} 天"
+            f" 低于阈值 {alert_rule.days_remaining_threshold} 天"
+            if is_zh else
+            f"{current_days_remaining} days remaining"
+            f" below threshold {alert_rule.days_remaining_threshold}"
+        )
+    elif effective_alert_type == "cost" or cost_threshold_triggered:
+        type_label = "成本阈值告警" if is_zh else "Cost Threshold Alert"
+        trigger_icon = "📊"
+        trigger_text = (
+            f"累计成本 {current_cost:.2f} {currency}"
+            f" 超过阈值 {alert_rule.cost_threshold:.2f} {currency}"
+            if is_zh else
+            f"Total cost {current_cost:.2f} {currency}"
+            f" exceeds threshold {alert_rule.cost_threshold:.2f} {currency}"
+        )
+    else:
+        type_label = "成本增长告警" if is_zh else "Cost Growth Alert"
+        trigger_icon = "📈"
+        parts = []
+        if increase_percent > 0:
+            parts.append(
+                f"增长 {increase_percent:.1f}%"
+                if is_zh else
+                f"Growth {increase_percent:.1f}%"
+            )
+        if alert_rule.growth_threshold is not None:
+            parts.append(
+                f"阈值 {alert_rule.growth_threshold:.1f}%"
+                if is_zh else
+                f"threshold {alert_rule.growth_threshold:.1f}%"
+            )
+        trigger_text = "，".join(parts) if is_zh else ", ".join(parts)
+
+    # ── Build sections ──
+    sections = {
+        "alert_type": type_label,
+        "trigger_icon": trigger_icon,
+        "trigger_text": trigger_text,
+        "provider": provider_name,
+        "account_id": account_id,
+        "notes": provider_notes,
+        "tags": provider_tags,
+        "currency": currency,
+        "metrics": [],
+        "thresholds": [],
+        "resource_costs": resource_cost_items or [],
+        "balance": None,
+    }
+
+    # ── Key metrics ──
+    if effective_alert_type in ("growth", "") and not (
+        balance_threshold_triggered or days_remaining_threshold_triggered
+    ):
+        sections["metrics"] = [
+            {
+                "label": "当前累计" if is_zh else "Current Total",
+                "value": f"{current_cost:.2f}",
+                "highlight": False,
+            },
+            {
+                "label": "上一小时" if is_zh else "Previous Hour",
+                "value": f"{previous_cost:.2f}",
+                "highlight": False,
+            },
+            {
+                "label": "增加金额" if is_zh else "Increase",
+                "value": f"{increase_cost:.2f}",
+                "highlight": True,
+            },
+            {
+                "label": "增长率" if is_zh else "Growth Rate",
+                "value": f"{increase_percent:.1f}%",
+                "highlight": True,
+            },
+        ]
+    elif effective_alert_type == "cost" or cost_threshold_triggered:
+        sections["metrics"] = [
+            {
+                "label": "当前累计" if is_zh else "Current Total",
+                "value": f"{current_cost:.2f}",
+                "highlight": True,
+            },
+            {
+                "label": "上一小时" if is_zh else "Previous Hour",
+                "value": f"{previous_cost:.2f}",
+                "highlight": False,
+            },
+        ]
+
+    # ── Thresholds ──
+    if alert_rule.growth_threshold is not None:
+        sections["thresholds"].append({
+            "label": "百分比阈值" if is_zh else "Growth %",
+            "value": f"{alert_rule.growth_threshold:.1f}%",
+        })
+    if alert_rule.growth_amount_threshold is not None:
+        sections["thresholds"].append({
+            "label": "金额阈值" if is_zh else "Amount",
+            "value": f"{alert_rule.growth_amount_threshold:.2f} {currency}",
+        })
+    if alert_rule.cost_threshold is not None:
+        sections["thresholds"].append({
+            "label": "成本阈值" if is_zh else "Cost",
+            "value": f"{alert_rule.cost_threshold:.2f} {currency}",
+        })
+    if alert_rule.balance_threshold is not None:
+        sections["thresholds"].append({
+            "label": "余额阈值" if is_zh else "Balance",
+            "value": f"{alert_rule.balance_threshold:.2f} {currency}",
+        })
+
+    # ── Balance ──
+    if current_balance is not None:
+        sections["balance"] = {
+            "value": current_balance,
+            "currency": currency,
+        }
+
+    return sections
+
+
+def build_alert_sections_from_record(
+    alert_record,
+    language: str,
+    resource_cost_items: Optional[list] = None,
+) -> dict:
+    """Build structured alert sections from an AlertRecord."""
+    if not resource_cost_items:
+        resource_cost_items = getattr(
+            alert_record, "resource_cost_details", None
+        ) or []
+    alert_rule = alert_record.alert_rule or SimpleNamespace(
+        cost_threshold=None,
+        growth_threshold=None,
+        growth_amount_threshold=None,
+        balance_threshold=alert_record.balance_threshold,
+        days_remaining_threshold=alert_record.days_remaining_threshold,
+    )
+    current_balance = getattr(alert_record, "current_balance", None)
+    alert_type = getattr(alert_record, "alert_type", None)
+    balance_threshold = getattr(alert_record, "balance_threshold", None)
+    current_days_remaining = getattr(
+        alert_record, "current_days_remaining", None
+    )
+    days_remaining_threshold = getattr(
+        alert_record, "days_remaining_threshold", None,
+    )
+    current_cost = getattr(alert_record, "current_cost", 0)
+
+    balance_threshold_triggered = (
+        alert_type == "balance"
+        or (
+            current_balance is not None
+            and balance_threshold is not None
+            and current_balance < balance_threshold
+        )
+    )
+    cost_threshold = getattr(alert_rule, "cost_threshold", None)
+    cost_threshold_triggered = (
+        alert_type == "cost"
+        or (
+            not balance_threshold_triggered
+            and current_days_remaining is None
+            and cost_threshold is not None
+            and current_cost > cost_threshold
+        )
+    )
+    days_remaining_threshold_triggered = (
+        alert_type == "days_remaining"
+        or (
+            not balance_threshold_triggered
+            and current_days_remaining is not None
+            and days_remaining_threshold is not None
+            and current_days_remaining < days_remaining_threshold
+        )
+    )
+
+    return build_alert_sections(
+        provider_name=alert_record.provider.display_name,
+        provider_notes=extract_provider_notes(alert_record.provider),
+        provider_tags=extract_provider_tags(alert_record.provider),
+        account_id=extract_account_id_from_message(
+            alert_record.alert_message
+        ),
+        current_cost=alert_record.current_cost,
+        previous_cost=alert_record.previous_cost,
+        increase_cost=alert_record.increase_cost,
+        increase_percent=alert_record.increase_percent,
+        current_balance=current_balance,
+        current_days_remaining=current_days_remaining,
+        currency=alert_record.currency,
+        alert_rule=alert_rule,
+        alert_type=alert_type,
+        cost_threshold_triggered=cost_threshold_triggered,
+        balance_threshold_triggered=balance_threshold_triggered,
+        days_remaining_threshold_triggered=days_remaining_threshold_triggered,
+        language=language,
+        resource_cost_items=resource_cost_items,
+    )
+
+
 def build_alert_message_from_record(
     alert_record,
     language: str,

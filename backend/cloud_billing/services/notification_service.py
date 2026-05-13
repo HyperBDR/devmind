@@ -25,7 +25,10 @@ from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
 from django.utils import translation
 from django.utils.translation import gettext as _
 
-from cloud_billing.alert_messages import build_alert_message_from_record
+from cloud_billing.alert_messages import (
+    build_alert_message_from_record,
+    build_alert_sections_from_record,
+)
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
     FEISHU_MSG_TYPE_POST,
@@ -100,54 +103,192 @@ class CloudBillingNotificationService:
     def _generate_feishu_payload(
         self, alert_record: AlertRecord, language: str
     ) -> Dict[str, Any]:
-        """
-        Generate Feishu webhook payload from alert record.
+        """Generate Feishu interactive card payload."""
+        sections = build_alert_sections_from_record(
+            alert_record, language
+        )
+        is_zh = str(language or "").lower().startswith("zh")
+        currency = sections.get("currency", "CNY")
 
-        Args:
-            alert_record: AlertRecord instance
-            language: Message language (zh-hans/en)
+        elements = []
 
-        Returns:
-            Feishu webhook payload dictionary
-        """
-        title = self._get_alert_title(language, "feishu")
-        message = self._get_alert_body(alert_record, language)
-        content = []
-        for line in message.splitlines():
-            label, value = self._split_label_value(line)
-            if not value and ("：" not in line and ":" not in line):
-                # Table row — render as raw text to preserve
-                # column alignment
-                content.append([{
-                    "tag": FEISHU_TAG_TEXT,
-                    "text": line,
-                }])
-                continue
-            row = [{
-                "tag": FEISHU_TAG_TEXT,
-                "text": f"{label}：",
-            }]
-            if value:
-                row.append({
-                    "tag": FEISHU_TAG_TEXT,
-                    "text": value,
+        # ── Trigger reason ──
+        trigger_icon = sections.get("trigger_icon", "")
+        trigger_text = sections.get("trigger_text", "")
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": (
+                    f"{trigger_icon} **{trigger_text}**"
+                ),
+            },
+        })
+
+        # ── Account info ──
+        info_parts = []
+        if sections.get("provider"):
+            info_parts.append(
+                f"云平台：{sections['provider']}"
+                if is_zh else
+                f"Provider: {sections['provider']}"
+            )
+        if sections.get("account_id"):
+            info_parts.append(
+                f"账号：{sections['account_id']}"
+                if is_zh else
+                f"Account: {sections['account_id']}"
+            )
+        if sections.get("notes"):
+            info_parts.append(
+                f"备注：{sections['notes']}"
+                if is_zh else
+                f"Notes: {sections['notes']}"
+            )
+        if sections.get("tags"):
+            tag_str = "、".join(sections["tags"])
+            info_parts.append(
+                f"标签：{tag_str}"
+                if is_zh else
+                f"Tags: {tag_str}"
+            )
+        if info_parts:
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "\n".join(info_parts),
+                },
+            })
+
+        elements.append({"tag": "hr"})
+
+        # ── Key metrics (2-column grid) ──
+        metrics = sections.get("metrics", [])
+        if metrics:
+            fields = []
+            for m in metrics:
+                val = m["value"]
+                label = m["label"]
+                bold = "**" if m.get("highlight") else ""
+                fields.append({
+                    "is_short": True,
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            f"{label}\n{bold}{val} {currency}{bold}"
+                        ),
+                    },
                 })
-            content.append(row)
-        content.append([{
-            "tag": FEISHU_TAG_AT,
-            "user_id": FEISHU_USER_ID_ALL
-        }])
+            elements.append({
+                "tag": "div",
+                "fields": fields,
+            })
+
+        # ── Thresholds ──
+        thresholds = sections.get("thresholds", [])
+        if thresholds:
+            threshold_strs = [
+                f"{t['label']}：{t['value']}"
+                if is_zh else
+                f"{t['label']}: {t['value']}"
+                for t in thresholds
+            ]
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": " | ".join(threshold_strs),
+                },
+            })
+
+        # ── Cost breakdown table ──
+        resource_costs = sections.get("resource_costs", [])
+        if resource_costs:
+            elements.append({"tag": "hr"})
+            has_owner = any(
+                it.get("owner") for it in resource_costs
+            )
+            if has_owner:
+                header = (
+                    "| 资源 | 花费 | 创建者 |"
+                    if is_zh else
+                    "| Resource | Cost | Owner |"
+                )
+                sep = "| --- | ---: | --- |"
+            else:
+                header = (
+                    "| 资源 | 花费 |"
+                    if is_zh else
+                    "| Resource | Cost |"
+                )
+                sep = "| --- | ---: |"
+
+            table_lines = [header, sep]
+            for it in resource_costs[:10]:
+                name = it.get("name", "?")
+                cost = float(it.get("cost", 0))
+                owner = it.get("owner", "")
+                if has_owner:
+                    table_lines.append(
+                        f"| {name} | {cost:.2f} {currency} "
+                        f"| {owner} |"
+                    )
+                else:
+                    table_lines.append(
+                        f"| {name} | {cost:.2f} {currency} |"
+                    )
+
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "\n".join(table_lines),
+                },
+            })
+
+        # ── Balance ──
+        balance_info = sections.get("balance")
+        if balance_info:
+            elements.append({"tag": "hr"})
+            bal = balance_info["value"]
+            bal_cur = balance_info["currency"]
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**当前余额**：{bal:.2f} {bal_cur}"
+                        if is_zh else
+                        f"**Balance**: {bal:.2f} {bal_cur}"
+                    ),
+                },
+            })
+
+        # ── @all ──
+        elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": "<at id=all></at>",
+            },
+        })
 
         payload = {
-            "msg_type": FEISHU_MSG_TYPE_POST,
-            "content": {
-                "post": {
-                    language: {
-                        "title": title,
-                        "content": content
-                    }
-                }
-            }
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": self._get_alert_title(
+                            language, "feishu"
+                        ),
+                    },
+                    "template": "red",
+                },
+                "elements": elements,
+            },
         }
 
         return payload
@@ -155,34 +296,124 @@ class CloudBillingNotificationService:
     def _generate_wechat_payload(
         self, alert_record: AlertRecord, language: str
     ) -> Dict[str, Any]:
-        """
-        Generate WeChat Work webhook payload from alert record.
+        """Generate WeChat Work webhook payload with enhanced layout."""
+        sections = build_alert_sections_from_record(
+            alert_record, language
+        )
+        is_zh = str(language or "").lower().startswith("zh")
+        currency = sections.get("currency", "CNY")
 
-        Args:
-            alert_record: AlertRecord instance
-            language: Message language (zh-hans/en)
-
-        Returns:
-            WeChat webhook payload dictionary
-        """
         rows = []
-        for line in self._get_alert_body(alert_record, language).splitlines():
-            label, value = self._split_label_value(line)
-            if not value and (
-                "：" not in line and ":" not in line
-            ):
-                # Table row — code block for monospace alignment
-                rows.append(f"`{line}`")
-                continue
-            if value:
-                separator = "：" if self._is_chinese_language(language) else ": "
-                rows.append(f"**{label}**{separator}{value}")
+
+        # Trigger
+        trigger_icon = sections.get("trigger_icon", "")
+        trigger_text = sections.get("trigger_text", "")
+        rows.append(
+            f"> {trigger_icon} **{trigger_text}**"
+        )
+        rows.append("")
+
+        # Account info
+        if sections.get("provider"):
+            rows.append(
+                f"**云平台**：{sections['provider']}"
+                if is_zh else
+                f"**Provider**: {sections['provider']}"
+            )
+        if sections.get("account_id"):
+            rows.append(
+                f"**账号**：{sections['account_id']}"
+                if is_zh else
+                f"**Account**: {sections['account_id']}"
+            )
+        if sections.get("notes"):
+            rows.append(
+                f"**备注**：{sections['notes']}"
+                if is_zh else
+                f"**Notes**: {sections['notes']}"
+            )
+
+        # Metrics
+        metrics = sections.get("metrics", [])
+        if metrics:
+            rows.append("")
+            for m in metrics:
+                val = m["value"]
+                label = m["label"]
+                bold = "**" if m.get("highlight") else ""
+                rows.append(
+                    f"  {label}：{bold}{val} {currency}{bold}"
+                )
+
+        # Thresholds
+        thresholds = sections.get("thresholds", [])
+        if thresholds:
+            rows.append("")
+            t_parts = [
+                f"{t['label']}：{t['value']}"
+                if is_zh else
+                f"{t['label']}: {t['value']}"
+                for t in thresholds
+            ]
+            rows.append(" | ".join(t_parts))
+
+        # Cost breakdown
+        resource_costs = sections.get("resource_costs", [])
+        if resource_costs:
+            rows.append("")
+            rows.append(
+                "**费用明细**：" if is_zh else "**Cost Breakdown**:"
+            )
+            has_owner = any(
+                it.get("owner") for it in resource_costs
+            )
+            if has_owner:
+                rows.append(
+                    "| 资源 | 花费 | 创建者 |"
+                    if is_zh else
+                    "| Resource | Cost | Owner |"
+                )
+                rows.append("| --- | ---: | --- |")
+                for it in resource_costs[:10]:
+                    name = it.get("name", "?")
+                    cost = float(it.get("cost", 0))
+                    owner = it.get("owner", "")
+                    rows.append(
+                        f"| {name} | {cost:.2f} {currency} "
+                        f"| {owner} |"
+                    )
             else:
-                rows.append(f"**{label}**")
+                rows.append(
+                    "| 资源 | 花费 |"
+                    if is_zh else
+                    "| Resource | Cost |"
+                )
+                rows.append("| --- | ---: |")
+                for it in resource_costs[:10]:
+                    name = it.get("name", "?")
+                    cost = float(it.get("cost", 0))
+                    rows.append(
+                        f"| {name} | {cost:.2f} {currency} |"
+                    )
+
+        # Balance
+        balance_info = sections.get("balance")
+        if balance_info:
+            rows.append("")
+            bal = balance_info["value"]
+            bal_cur = balance_info["currency"]
+            rows.append(
+                f"**当前余额**：{bal:.2f} {bal_cur}"
+                if is_zh else
+                f"**Balance**: {bal:.2f} {bal_cur}"
+            )
+
+        rows.append("")
+        rows.append("<@all>")
+
         content = (
             self._get_alert_title(language, "wechat")
             + "\n".join(rows)
-            + "\n\n<@all>"
         )
 
         payload = {
@@ -197,25 +428,111 @@ class CloudBillingNotificationService:
     def _generate_email_subject_and_body(
         self, alert_record: AlertRecord, language: str
     ) -> tuple:
-        """
-        Generate plain text subject and body for email from alert record.
-        Returns (subject, body).
-        """
+        """Generate email subject and markdown body."""
         subject = self._get_alert_title(language, "email_subject")
+        sections = build_alert_sections_from_record(
+            alert_record, language
+        )
+        is_zh = str(language or "").lower().startswith("zh")
+        currency = sections.get("currency", "CNY")
+
         rows = []
-        for line in self._get_alert_body(alert_record, language).splitlines():
-            label, value = self._split_label_value(line)
-            if not value and (
-                "：" not in line and ":" not in line
-            ):
-                rows.append(line)
-                continue
-            if value:
-                separator = "：" if self._is_chinese_language(language) else ": "
-                rows.append(f"**{label}**{separator}{value}")
+
+        # Trigger
+        trigger_icon = sections.get("trigger_icon", "")
+        trigger_text = sections.get("trigger_text", "")
+        rows.append(
+            f"> {trigger_icon} **{trigger_text}**"
+        )
+        rows.append("")
+
+        # Account info
+        if sections.get("provider"):
+            rows.append(
+                f"**云平台**：{sections['provider']}"
+                if is_zh else
+                f"**Provider**: {sections['provider']}"
+            )
+        if sections.get("account_id"):
+            rows.append(
+                f"**账号**：{sections['account_id']}"
+                if is_zh else
+                f"**Account**: {sections['account_id']}"
+            )
+        if sections.get("notes"):
+            rows.append(
+                f"**备注**：{sections['notes']}"
+                if is_zh else
+                f"**Notes**: {sections['notes']}"
+            )
+
+        # Metrics
+        metrics = sections.get("metrics", [])
+        if metrics:
+            rows.append("")
+            for m in metrics:
+                val = m["value"]
+                label = m["label"]
+                bold = "**" if m.get("highlight") else ""
+                rows.append(
+                    f"  {label}：{bold}{val} {currency}{bold}"
+                )
+
+        # Cost breakdown
+        resource_costs = sections.get("resource_costs", [])
+        if resource_costs:
+            rows.append("")
+            rows.append(
+                "**费用明细**：" if is_zh else "**Cost Breakdown**:"
+            )
+            has_owner = any(
+                it.get("owner") for it in resource_costs
+            )
+            if has_owner:
+                rows.append(
+                    "| 资源 | 花费 | 创建者 |"
+                    if is_zh else
+                    "| Resource | Cost | Owner |"
+                )
+                rows.append("| --- | ---: | --- |")
+                for it in resource_costs[:10]:
+                    name = it.get("name", "?")
+                    cost = float(it.get("cost", 0))
+                    owner = it.get("owner", "")
+                    rows.append(
+                        f"| {name} | {cost:.2f} {currency} "
+                        f"| {owner} |"
+                    )
             else:
-                rows.append(f"**{label}**")
-        body = self._get_alert_title(language, "email_body") + "\n".join(rows)
+                rows.append(
+                    "| 资源 | 花费 |"
+                    if is_zh else
+                    "| Resource | Cost |"
+                )
+                rows.append("| --- | ---: |")
+                for it in resource_costs[:10]:
+                    name = it.get("name", "?")
+                    cost = float(it.get("cost", 0))
+                    rows.append(
+                        f"| {name} | {cost:.2f} {currency} |"
+                    )
+
+        # Balance
+        balance_info = sections.get("balance")
+        if balance_info:
+            rows.append("")
+            bal = balance_info["value"]
+            bal_cur = balance_info["currency"]
+            rows.append(
+                f"**当前余额**：{bal:.2f} {bal_cur}"
+                if is_zh else
+                f"**Balance**: {bal:.2f} {bal_cur}"
+            )
+
+        body = (
+            self._get_alert_title(language, "email_body")
+            + "\n".join(rows)
+        )
         return subject, body
 
     def send_alert(
