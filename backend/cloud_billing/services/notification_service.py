@@ -324,23 +324,35 @@ class CloudBillingNotificationService:
                 "columns": columns,
             })
 
-        # ── 4. Thresholds ──
+        # ── 4. Thresholds (column_set cards) ──
         thresholds = sections.get("thresholds", [])
         if thresholds:
-            threshold_strs = [
-                f"<font color='grey'>"
-                f"{t['label']}：{t['value']}</font>"
-                if is_zh else
-                f"<font color='grey'>"
-                f"{t['label']}: {t['value']}</font>"
-                for t in thresholds
-            ]
+            t_columns = []
+            for t in thresholds:
+                label = t["label"]
+                value = t["value"]
+                t_columns.append({
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "vertical_align": "center",
+                    "elements": [{
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"{label}\n"
+                                f"<font color='grey'>"
+                                f"{value}</font>"
+                            ),
+                        },
+                    }],
+                })
             elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": "  |  ".join(threshold_strs),
-                },
+                "tag": "column_set",
+                "flex_mode": "stretch",
+                "background_style": "grey",
+                "columns": t_columns,
             })
 
         # ── 5. Cost breakdown table ──
