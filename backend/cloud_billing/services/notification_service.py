@@ -46,6 +46,94 @@ from cloud_billing.services.recharge_approval import parse_recharge_info
 logger = logging.getLogger(__name__)
 
 
+def _feishu_cost_table(
+    items: list,
+    currency: str,
+    has_owner: bool,
+    is_zh: bool,
+) -> list:
+    """Build Feishu column_set elements for cost breakdown table."""
+    rows = []
+
+    # Header row
+    if has_owner:
+        cols = (
+            ["资源", "花费", "创建者"]
+            if is_zh else
+            ["Resource", "Cost", "Owner"]
+        )
+        widths = ["40%", "35%", "25%"]
+    else:
+        cols = (
+            ["资源", "花费"]
+            if is_zh else
+            ["Resource", "Cost"]
+        )
+        widths = ["60%", "40%"]
+
+    header_columns = []
+    for i, col in enumerate(cols):
+        header_columns.append({
+            "tag": "column",
+            "width": widths[i],
+            "weight": 1,
+            "elements": [{
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**{col}**",
+                },
+            }],
+        })
+    rows.append({
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "grey",
+        "columns": header_columns,
+    })
+
+    # Data rows
+    for it in items:
+        name = it.get("name", "?")
+        cost = float(it.get("cost", 0))
+        owner = it.get("owner", "")
+
+        if has_owner:
+            row_cols = [
+                name,
+                f"{cost:.2f} {currency}",
+                owner or "-",
+            ]
+        else:
+            row_cols = [
+                name,
+                f"{cost:.2f} {currency}",
+            ]
+
+        columns = []
+        for i, text in enumerate(row_cols):
+            columns.append({
+                "tag": "column",
+                "width": widths[i],
+                "weight": 1,
+                "elements": [{
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": str(text),
+                    },
+                }],
+            })
+        rows.append({
+            "tag": "column_set",
+            "flex_mode": "none",
+            "background_style": "default",
+            "columns": columns,
+        })
+
+    return rows
+
+
 class CloudBillingNotificationService:
     """
     Service for sending cloud billing notifications.
@@ -206,46 +294,28 @@ class CloudBillingNotificationService:
         resource_costs = sections.get("resource_costs", [])
         if resource_costs:
             elements.append({"tag": "hr"})
-            has_owner = any(
-                it.get("owner") for it in resource_costs
-            )
-            if has_owner:
-                header = (
-                    "| 资源 | 花费 | 创建者 |"
-                    if is_zh else
-                    "| Resource | Cost | Owner |"
-                )
-                sep = "| --- | ---: | --- |"
-            else:
-                header = (
-                    "| 资源 | 花费 |"
-                    if is_zh else
-                    "| Resource | Cost |"
-                )
-                sep = "| --- | ---: |"
-
-            table_lines = [header, sep]
-            for it in resource_costs[:10]:
-                name = it.get("name", "?")
-                cost = float(it.get("cost", 0))
-                owner = it.get("owner", "")
-                if has_owner:
-                    table_lines.append(
-                        f"| {name} | {cost:.2f} {currency} "
-                        f"| {owner} |"
-                    )
-                else:
-                    table_lines.append(
-                        f"| {name} | {cost:.2f} {currency} |"
-                    )
-
             elements.append({
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": "\n".join(table_lines),
+                    "content": (
+                        "**费用明细**"
+                        if is_zh else
+                        "**Cost Breakdown**"
+                    ),
                 },
             })
+            has_owner = any(
+                it.get("owner") for it in resource_costs
+            )
+            elements.extend(
+                _feishu_cost_table(
+                    resource_costs[:10],
+                    currency,
+                    has_owner,
+                    is_zh,
+                )
+            )
 
         # ── Balance ──
         balance_info = sections.get("balance")
