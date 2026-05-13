@@ -52,8 +52,24 @@ def _feishu_cost_table(
     has_owner: bool,
     is_zh: bool,
 ) -> list:
-    """Build Feishu column_set elements for cost breakdown table."""
+    """Build Feishu column_set elements for cost breakdown table.
+
+    Returns a title div + header row (blue bg) + data rows.
+    """
     rows = []
+
+    # Title
+    rows.append({
+        "tag": "div",
+        "text": {
+            "tag": "lark_md",
+            "content": (
+                "**📋 费用明细**"
+                if is_zh else
+                "**📋 Cost Breakdown**"
+            ),
+        },
+    })
 
     # Header row
     if has_owner:
@@ -62,21 +78,23 @@ def _feishu_cost_table(
             if is_zh else
             ["Resource", "Cost", "Owner"]
         )
-        widths = ["40%", "35%", "25%"]
+        widths = ["weighted", "weighted", "weighted"]
+        weights = [4, 3, 2]
     else:
         cols = (
             ["资源", "花费"]
             if is_zh else
             ["Resource", "Cost"]
         )
-        widths = ["60%", "40%"]
+        widths = ["weighted", "weighted"]
+        weights = [3, 2]
 
     header_columns = []
     for i, col in enumerate(cols):
         header_columns.append({
             "tag": "column",
             "width": widths[i],
-            "weight": 1,
+            "weight": weights[i],
             "elements": [{
                 "tag": "div",
                 "text": {
@@ -88,12 +106,12 @@ def _feishu_cost_table(
     rows.append({
         "tag": "column_set",
         "flex_mode": "none",
-        "background_style": "grey",
+        "background_style": "blue",
         "columns": header_columns,
     })
 
-    # Data rows
-    for it in items:
+    # Data rows (alternating grey/white)
+    for idx, it in enumerate(items):
         name = it.get("name", "?")
         cost = float(it.get("cost", 0))
         owner = it.get("owner", "")
@@ -110,12 +128,13 @@ def _feishu_cost_table(
                 f"{cost:.2f} {currency}",
             ]
 
+        bg = "grey" if idx % 2 == 0 else "default"
         columns = []
         for i, text in enumerate(row_cols):
             columns.append({
                 "tag": "column",
                 "width": widths[i],
-                "weight": 1,
+                "weight": weights[i],
                 "elements": [{
                     "tag": "div",
                     "text": {
@@ -127,7 +146,7 @@ def _feishu_cost_table(
         rows.append({
             "tag": "column_set",
             "flex_mode": "none",
-            "background_style": "default",
+            "background_style": bg,
             "columns": columns,
         })
 
@@ -191,16 +210,31 @@ class CloudBillingNotificationService:
     def _generate_feishu_payload(
         self, alert_record: AlertRecord, language: str
     ) -> Dict[str, Any]:
-        """Generate Feishu interactive card payload."""
+        """Generate Feishu interactive card payload.
+
+        Uses color-coded header, font-colored metrics, column_set
+        table, and note component for a polished card layout.
+        """
         sections = build_alert_sections_from_record(
             alert_record, language
         )
         is_zh = str(language or "").lower().startswith("zh")
         currency = sections.get("currency", "CNY")
+        alert_type = sections.get("alert_type", "")
+
+        # Header color by severity
+        if "余额" in alert_type or "Balance" in alert_type:
+            header_template = "red"
+        elif "天数" in alert_type or "Days" in alert_type:
+            header_template = "orange"
+        elif "增长" in alert_type or "Growth" in alert_type:
+            header_template = "orange"
+        else:
+            header_template = "blue"
 
         elements = []
 
-        # ── Trigger reason ──
+        # ── 1. Trigger reason (highlighted) ──
         trigger_icon = sections.get("trigger_icon", "")
         trigger_text = sections.get("trigger_text", "")
         elements.append({
@@ -208,37 +242,38 @@ class CloudBillingNotificationService:
             "text": {
                 "tag": "lark_md",
                 "content": (
-                    f"{trigger_icon} **{trigger_text}**"
+                    f"{trigger_icon} "
+                    f"<font color='orange'>**{trigger_text}**</font>"
                 ),
             },
         })
 
-        # ── Account info ──
+        # ── 2. Account info ──
         info_parts = []
         if sections.get("provider"):
             info_parts.append(
-                f"云平台：{sections['provider']}"
+                f"**云平台**：{sections['provider']}"
                 if is_zh else
-                f"Provider: {sections['provider']}"
+                f"**Provider**: {sections['provider']}"
             )
         if sections.get("account_id"):
             info_parts.append(
-                f"账号：{sections['account_id']}"
+                f"**账号**：{sections['account_id']}"
                 if is_zh else
-                f"Account: {sections['account_id']}"
+                f"**Account**: {sections['account_id']}"
             )
         if sections.get("notes"):
             info_parts.append(
-                f"备注：{sections['notes']}"
+                f"**备注**：{sections['notes']}"
                 if is_zh else
-                f"Notes: {sections['notes']}"
+                f"**Notes**: {sections['notes']}"
             )
         if sections.get("tags"):
             tag_str = "、".join(sections["tags"])
             info_parts.append(
-                f"标签：{tag_str}"
+                f"**标签**：{tag_str}"
                 if is_zh else
-                f"Tags: {tag_str}"
+                f"**Tags**: {tag_str}"
             )
         if info_parts:
             elements.append({
@@ -251,60 +286,67 @@ class CloudBillingNotificationService:
 
         elements.append({"tag": "hr"})
 
-        # ── Key metrics (2-column grid) ──
+        # ── 3. Metrics cards (column_set with bg color) ──
         metrics = sections.get("metrics", [])
         if metrics:
-            fields = []
+            columns = []
             for m in metrics:
                 val = m["value"]
                 label = m["label"]
-                bold = "**" if m.get("highlight") else ""
-                fields.append({
-                    "is_short": True,
-                    "text": {
-                        "tag": "lark_md",
-                        "content": (
-                            f"{label}\n{bold}{val} {currency}{bold}"
-                        ),
-                    },
+                if m.get("highlight"):
+                    val_md = (
+                        f"<font color='red'>**"
+                        f"{val} {currency}**</font>"
+                    )
+                    bg = "orange"
+                else:
+                    val_md = f"**{val}** {currency}"
+                    bg = "grey"
+                columns.append({
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "vertical_align": "center",
+                    "elements": [{
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"{label}\n{val_md}"
+                            ),
+                        },
+                    }],
                 })
             elements.append({
-                "tag": "div",
-                "fields": fields,
+                "tag": "column_set",
+                "flex_mode": "stretch",
+                "background_style": "grey",
+                "columns": columns,
             })
 
-        # ── Thresholds ──
+        # ── 4. Thresholds ──
         thresholds = sections.get("thresholds", [])
         if thresholds:
             threshold_strs = [
-                f"{t['label']}：{t['value']}"
+                f"<font color='grey'>"
+                f"{t['label']}：{t['value']}</font>"
                 if is_zh else
-                f"{t['label']}: {t['value']}"
+                f"<font color='grey'>"
+                f"{t['label']}: {t['value']}</font>"
                 for t in thresholds
             ]
             elements.append({
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": " | ".join(threshold_strs),
+                    "content": "  |  ".join(threshold_strs),
                 },
             })
 
-        # ── Cost breakdown table ──
+        # ── 5. Cost breakdown table ──
         resource_costs = sections.get("resource_costs", [])
         if resource_costs:
             elements.append({"tag": "hr"})
-            elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": (
-                        "**费用明细**"
-                        if is_zh else
-                        "**Cost Breakdown**"
-                    ),
-                },
-            })
             has_owner = any(
                 it.get("owner") for it in resource_costs
             )
@@ -317,10 +359,9 @@ class CloudBillingNotificationService:
                 )
             )
 
-        # ── Balance ──
+        # ── 6. Balance ──
         balance_info = sections.get("balance")
         if balance_info:
-            elements.append({"tag": "hr"})
             bal = balance_info["value"]
             bal_cur = balance_info["currency"]
             elements.append({
@@ -335,13 +376,23 @@ class CloudBillingNotificationService:
                 },
             })
 
-        # ── @all ──
+        # ── 7. Footer note + @all ──
         elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": "<at id=all></at>",
-            },
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": (
+                        "DevMind 云账单监控 · @所有人"
+                        if is_zh else
+                        "DevMind Cloud Billing · @all"
+                    ),
+                },
+                {
+                    "tag": "lark_md",
+                    "content": "<at id=all></at>",
+                },
+            ],
         })
 
         payload = {
@@ -355,7 +406,7 @@ class CloudBillingNotificationService:
                             language, "feishu"
                         ),
                     },
-                    "template": "red",
+                    "template": header_template,
                 },
                 "elements": elements,
             },
