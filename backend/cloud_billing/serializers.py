@@ -294,40 +294,8 @@ class CloudProviderSerializer(serializers.ModelSerializer):
         if provider is None:
             return text
 
-        cloud_type = ""
-        if not cloud_type:
-            provider_config = getattr(provider, "config", {}) or {}
-            recharge_cfg = provider_config.get("recharge_approval") or {}
-            cloud_type = str(
-                recharge_cfg.get("cloud_type")
-                or recharge_cfg.get("provider_cloud_type")
-                or ""
-            ).strip()
-        if not cloud_type:
-            provider_type = str(
-                getattr(provider, "provider_type", "") or ""
-            ).strip()
-            cloud_type = str(
-                CLOUD_TYPE_LABELS.get(provider_type) or provider_type or ""
-            ).strip()
-
-        try:
-            payload = prepare_recharge_request_payload(
-                text,
-                cloud_type=cloud_type,
-                require_cloud_type=True,
-            )
-        except MissingRechargeFieldsError as exc:
-            raise serializers.ValidationError(
-                {"missing_fields": exc.missing_fields}
-            ) from exc
-        except ValueError as exc:
-            raise serializers.ValidationError(str(exc)) from exc
-
-        return serialize_recharge_request_payload(
-            payload,
-            require_cloud_type=True,
-        )
+        # Skip validation for update operations - edit doesn't need recharge info
+        return text
 
 
 class CloudProviderListSerializer(serializers.ModelSerializer):
