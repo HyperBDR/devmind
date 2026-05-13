@@ -309,15 +309,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="awsSecretAccessKey"
+              <PasswordInput
                 v-model="configFields.aws_secret_access_key"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.awsSecretAccessKeyPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -393,15 +390,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="huaweiSecretAccessKey"
+              <PasswordInput
                 v-model="configFields.huawei_secret_access_key"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.huaweiSecretAccessKeyPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -474,15 +468,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="tencentAccessKeySecret"
+              <PasswordInput
                 v-model="configFields.tencent_access_key_secret"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.tencentAccessKeySecretPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -555,15 +546,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="azureClientSecret"
+              <PasswordInput
                 v-model="configFields.azure_client_secret"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.azureClientSecretPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -687,15 +675,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="alibabaSecretAccessKey"
+              <PasswordInput
                 v-model="configFields.alibaba_secret_access_key"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.alibabaSecretAccessKeyPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -768,17 +753,14 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="volcengineSecretAccessKey"
+              <PasswordInput
                 v-model="configFields.volcengine_secret_access_key"
-                type="password"
                 :placeholder="
                   t(
                     'cloudBilling.providers.volcengineSecretAccessKeyPlaceholder'
                   )
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -951,15 +933,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="baiduSecretAccessKey"
+              <PasswordInput
                 v-model="configFields.baidu_secret_access_key"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.baiduSecretAccessKeyPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -1005,15 +984,12 @@
               </p>
             </div>
             <div class="md:col-span-2">
-              <BaseInput
-                id="zhipuPassword"
+              <PasswordInput
                 v-model="configFields.zhipu_password"
-                type="password"
                 :placeholder="
                   t('cloudBilling.providers.zhipuPasswordPlaceholder')
                 "
                 required
-                class="w-full"
               />
             </div>
           </div>
@@ -1480,6 +1456,7 @@ import { cloudBillingApi } from '@/api/cloudBilling'
 import { notificationsAdminApi } from '@/admin/api'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
+import PasswordInput from '@/components/ui/PasswordInput.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 
 const props = defineProps({
@@ -1807,30 +1784,63 @@ watch(
         emailToRecipients.value = ['', '', '']
       }
       if (newProvider.provider_type === 'aws') {
-        configFields.aws_access_key_id = config.AWS_ACCESS_KEY_ID || ''
-        configFields.aws_secret_access_key = config.AWS_SECRET_ACCESS_KEY || ''
-        configFields.aws_region = config.AWS_REGION || ''
+        configFields.aws_access_key_id =
+          config.access_key_id ||
+          config.AWS_ACCESS_KEY_ID ||
+          config.aws_access_key_id ||
+          ''
+        configFields.aws_secret_access_key =
+          config.secret_access_key ||
+          config.AWS_SECRET_ACCESS_KEY ||
+          config.aws_secret_access_key ||
+          ''
+        configFields.aws_region =
+          config.region || config.AWS_REGION || ''
       } else if (
         newProvider.provider_type === 'huawei' ||
         newProvider.provider_type === 'huawei-intl'
       ) {
-        configFields.huawei_access_key_id = config.HUAWEI_ACCESS_KEY_ID || ''
+        configFields.huawei_access_key_id =
+          config.access_key_id ||
+          config.HUAWEI_ACCESS_KEY_ID ||
+          config.huawei_access_key_id ||
+          ''
         configFields.huawei_secret_access_key =
-          config.HUAWEI_SECRET_ACCESS_KEY || ''
-        configFields.huawei_region = config.HUAWEI_REGION || ''
+          config.secret_access_key ||
+          config.HUAWEI_SECRET_ACCESS_KEY ||
+          config.huawei_secret_access_key ||
+          ''
+        configFields.huawei_region =
+          config.region || config.HUAWEI_REGION || ''
       } else if (newProvider.provider_type === 'azure') {
-        configFields.azure_client_id = config.AZURE_CLIENT_ID || ''
-        configFields.azure_client_secret = config.AZURE_CLIENT_SECRET || ''
-        configFields.azure_tenant_id = config.AZURE_TENANT_ID || ''
-        configFields.azure_subscription_id = config.AZURE_SUBSCRIPTION_ID || ''
+        configFields.azure_client_id =
+          config.client_id || config.AZURE_CLIENT_ID || ''
+        configFields.azure_client_secret =
+          config.client_secret || config.AZURE_CLIENT_SECRET || ''
+        configFields.azure_tenant_id =
+          config.tenant_id || config.AZURE_TENANT_ID || ''
+        configFields.azure_subscription_id =
+          config.subscription_id || config.AZURE_SUBSCRIPTION_ID || ''
         configFields.azure_billing_account_id =
-          config.AZURE_BILLING_ACCOUNT_ID || ''
+          config.billing_account_id ||
+          config.AZURE_BILLING_ACCOUNT_ID ||
+          ''
       } else if (newProvider.provider_type === 'alibaba') {
-        configFields.alibaba_access_key_id = config.ALIBABA_ACCESS_KEY_ID || ''
+        configFields.alibaba_access_key_id =
+          config.access_key_id ||
+          config.ALIBABA_ACCESS_KEY_ID ||
+          config.alibaba_access_key_id ||
+          ''
         configFields.alibaba_secret_access_key =
-          config.ALIBABA_SECRET_ACCESS_KEY || ''
+          config.secret_access_key ||
+          config.ALIBABA_SECRET_ACCESS_KEY ||
+          config.alibaba_secret_access_key ||
+          ''
         configFields.alibaba_region =
-          config.ALIBABA_REGION || config.alibaba_region || ''
+          config.region ||
+          config.ALIBABA_REGION ||
+          config.alibaba_region ||
+          ''
       } else if (newProvider.provider_type === 'tencentcloud') {
         configFields.tencent_access_key_id =
           config.access_key_id || config.TENCENT_ACCESS_KEY_ID || ''

@@ -31,10 +31,6 @@ from cloud_billing.alert_messages import (
 )
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
-    FEISHU_MSG_TYPE_POST,
-    FEISHU_TAG_AT,
-    FEISHU_TAG_TEXT,
-    FEISHU_USER_ID_ALL,
     SOURCE_APP_CLOUD_BILLING,
     SOURCE_TYPE_ALERT,
     SOURCE_TYPE_RECHARGE_APPROVAL,
@@ -49,12 +45,14 @@ logger = logging.getLogger(__name__)
 def _feishu_cost_table(
     items: list,
     currency: str,
-    has_owner: bool,
-    is_zh: bool,
+    labels: dict,
 ) -> list:
     """Build Feishu column_set elements for cost breakdown table.
 
     Returns a title div + header row (blue bg) + data rows.
+    Columns: Resource, Cost, Owner (always shown, "-" if empty).
+    ``labels`` is the ``sections["labels"]`` dict from
+    ``build_alert_sections`` — all strings are pre-localized.
     """
     rows = []
 
@@ -63,31 +61,18 @@ def _feishu_cost_table(
         "tag": "div",
         "text": {
             "tag": "lark_md",
-            "content": (
-                "**📋 费用明细**"
-                if is_zh else
-                "**📋 Cost Breakdown**"
-            ),
+            "content": f"**📋 {labels['cost_breakdown']}**",
         },
     })
 
     # Header row
-    if has_owner:
-        cols = (
-            ["资源", "花费", "创建者"]
-            if is_zh else
-            ["Resource", "Cost", "Owner"]
-        )
-        widths = ["weighted", "weighted", "weighted"]
-        weights = [4, 3, 2]
-    else:
-        cols = (
-            ["资源", "花费"]
-            if is_zh else
-            ["Resource", "Cost"]
-        )
-        widths = ["weighted", "weighted"]
-        weights = [3, 2]
+    cols = [
+        labels["col_resource"],
+        labels["col_cost"],
+        labels["col_owner"],
+    ]
+    widths = ["weighted", "weighted", "weighted"]
+    weights = [4, 3, 2]
 
     header_columns = []
     for i, col in enumerate(cols):
@@ -114,19 +99,12 @@ def _feishu_cost_table(
     for idx, it in enumerate(items):
         name = it.get("name", "?")
         cost = float(it.get("cost", 0))
-        owner = it.get("owner", "")
-
-        if has_owner:
-            row_cols = [
-                name,
-                f"{cost:.2f} {currency}",
-                owner or "-",
-            ]
-        else:
-            row_cols = [
-                name,
-                f"{cost:.2f} {currency}",
-            ]
+        owner = it.get("owner", "") or "-"
+        row_cols = [
+            name,
+            f"{cost:.2f} {currency}",
+            owner,
+        ]
 
         bg = "grey" if idx % 2 == 0 else "default"
         columns = []
@@ -218,16 +196,17 @@ class CloudBillingNotificationService:
         sections = build_alert_sections_from_record(
             alert_record, language
         )
-        is_zh = str(language or "").lower().startswith("zh")
+        L = sections["labels"]
+        sep = L["sep"]
         currency = sections.get("currency", "CNY")
         alert_type = sections.get("alert_type", "")
 
         # Header color by severity
-        if "余额" in alert_type or "Balance" in alert_type:
+        if "Balance" in alert_type:
             header_template = "red"
-        elif "天数" in alert_type or "Days" in alert_type:
+        elif "Days" in alert_type:
             header_template = "orange"
-        elif "增长" in alert_type or "Growth" in alert_type:
+        elif "Growth" in alert_type:
             header_template = "orange"
         else:
             header_template = "blue"
@@ -243,37 +222,27 @@ class CloudBillingNotificationService:
                 "tag": "lark_md",
                 "content": (
                     f"{trigger_icon} "
-                    f"<font color='orange'>**{trigger_text}**</font>"
+                    f"<font color='orange'>"
+                    f"**{trigger_text}**</font>"
                 ),
             },
         })
 
         # ── 2. Account info ──
         info_parts = []
-        if sections.get("provider"):
-            info_parts.append(
-                f"**云平台**：{sections['provider']}"
-                if is_zh else
-                f"**Provider**: {sections['provider']}"
-            )
-        if sections.get("account_id"):
-            info_parts.append(
-                f"**账号**：{sections['account_id']}"
-                if is_zh else
-                f"**Account**: {sections['account_id']}"
-            )
-        if sections.get("notes"):
-            info_parts.append(
-                f"**备注**：{sections['notes']}"
-                if is_zh else
-                f"**Notes**: {sections['notes']}"
-            )
+        for key, label_key in [
+            ("provider", "provider"),
+            ("account_id", "account"),
+            ("notes", "notes"),
+        ]:
+            if sections.get(key):
+                info_parts.append(
+                    f"**{L[label_key]}**{sep}{sections[key]}"
+                )
         if sections.get("tags"):
             tag_str = "、".join(sections["tags"])
             info_parts.append(
-                f"**标签**：{tag_str}"
-                if is_zh else
-                f"**Tags**: {tag_str}"
+                f"**{L['tags']}**{sep}{tag_str}"
             )
         if info_parts:
             elements.append({
@@ -293,14 +262,16 @@ class CloudBillingNotificationService:
             for m in metrics:
                 val = m["value"]
                 label = m["label"]
+                is_pct = "%" in str(val)
+                unit = "" if is_pct else f" {currency}"
                 if m.get("highlight"):
                     val_md = (
                         f"<font color='red'>**"
-                        f"{val} {currency}**</font>"
+                        f"{val}{unit}**</font>"
                     )
                     bg = "orange"
                 else:
-                    val_md = f"**{val}** {currency}"
+                    val_md = f"**{val}**{unit}"
                     bg = "grey"
                 columns.append({
                     "tag": "column",
@@ -359,15 +330,11 @@ class CloudBillingNotificationService:
         resource_costs = sections.get("resource_costs", [])
         if resource_costs:
             elements.append({"tag": "hr"})
-            has_owner = any(
-                it.get("owner") for it in resource_costs
-            )
             elements.extend(
                 _feishu_cost_table(
                     resource_costs[:10],
                     currency,
-                    has_owner,
-                    is_zh,
+                    L,
                 )
             )
 
@@ -380,11 +347,7 @@ class CloudBillingNotificationService:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": (
-                        f"**当前余额**：{bal:.2f} {bal_cur}"
-                        if is_zh else
-                        f"**Balance**: {bal:.2f} {bal_cur}"
-                    ),
+                    "content": f"**{L['balance']}**{sep}{bal:.2f} {bal_cur}",
                 },
             })
 
@@ -394,11 +357,7 @@ class CloudBillingNotificationService:
             "elements": [
                 {
                     "tag": "plain_text",
-                    "content": (
-                        "DevMind 云账单监控 · @所有人"
-                        if is_zh else
-                        "DevMind Cloud Billing · @all"
-                    ),
+                    "content": L["footer"],
                 },
                 {
                     "tag": "lark_md",
@@ -433,38 +392,29 @@ class CloudBillingNotificationService:
         sections = build_alert_sections_from_record(
             alert_record, language
         )
-        is_zh = str(language or "").lower().startswith("zh")
+        L = sections["labels"]
+        sep = L["sep"]
         currency = sections.get("currency", "CNY")
 
         rows = []
 
         # Trigger
-        trigger_icon = sections.get("trigger_icon", "")
-        trigger_text = sections.get("trigger_text", "")
         rows.append(
-            f"> {trigger_icon} **{trigger_text}**"
+            f"> {sections.get('trigger_icon', '')}"
+            f" **{sections.get('trigger_text', '')}**"
         )
         rows.append("")
 
         # Account info
-        if sections.get("provider"):
-            rows.append(
-                f"**云平台**：{sections['provider']}"
-                if is_zh else
-                f"**Provider**: {sections['provider']}"
-            )
-        if sections.get("account_id"):
-            rows.append(
-                f"**账号**：{sections['account_id']}"
-                if is_zh else
-                f"**Account**: {sections['account_id']}"
-            )
-        if sections.get("notes"):
-            rows.append(
-                f"**备注**：{sections['notes']}"
-                if is_zh else
-                f"**Notes**: {sections['notes']}"
-            )
+        for key, label_key in [
+            ("provider", "provider"),
+            ("account_id", "account"),
+            ("notes", "notes"),
+        ]:
+            if sections.get(key):
+                rows.append(
+                    f"**{L[label_key]}**{sep}{sections[key]}"
+                )
 
         # Metrics
         metrics = sections.get("metrics", [])
@@ -472,73 +422,46 @@ class CloudBillingNotificationService:
             rows.append("")
             for m in metrics:
                 val = m["value"]
-                label = m["label"]
                 bold = "**" if m.get("highlight") else ""
+                unit = "" if "%" in str(val) else f" {currency}"
                 rows.append(
-                    f"  {label}：{bold}{val} {currency}{bold}"
+                    f"  {m['label']}{sep}{bold}{val}{unit}{bold}"
                 )
 
         # Thresholds
         thresholds = sections.get("thresholds", [])
         if thresholds:
             rows.append("")
-            t_parts = [
-                f"{t['label']}：{t['value']}"
-                if is_zh else
-                f"{t['label']}: {t['value']}"
+            rows.append(" | ".join(
+                f"{t['label']}{sep}{t['value']}"
                 for t in thresholds
-            ]
-            rows.append(" | ".join(t_parts))
+            ))
 
         # Cost breakdown
         resource_costs = sections.get("resource_costs", [])
         if resource_costs:
             rows.append("")
+            rows.append(f"**{L['cost_breakdown']}**{sep}")
             rows.append(
-                "**费用明细**：" if is_zh else "**Cost Breakdown**:"
+                f"| {L['col_resource']} | {L['col_cost']} | {L['col_owner']} |"
             )
-            has_owner = any(
-                it.get("owner") for it in resource_costs
-            )
-            if has_owner:
+            rows.append("| --- | ---: | --- |")
+            for it in resource_costs[:10]:
+                name = it.get("name", "?")
+                cost = float(it.get("cost", 0))
+                owner = it.get("owner", "") or "-"
                 rows.append(
-                    "| 资源 | 花费 | 创建者 |"
-                    if is_zh else
-                    "| Resource | Cost | Owner |"
+                    f"| {name} | {cost:.2f} {currency} "
+                    f"| {owner} |"
                 )
-                rows.append("| --- | ---: | --- |")
-                for it in resource_costs[:10]:
-                    name = it.get("name", "?")
-                    cost = float(it.get("cost", 0))
-                    owner = it.get("owner", "")
-                    rows.append(
-                        f"| {name} | {cost:.2f} {currency} "
-                        f"| {owner} |"
-                    )
-            else:
-                rows.append(
-                    "| 资源 | 花费 |"
-                    if is_zh else
-                    "| Resource | Cost |"
-                )
-                rows.append("| --- | ---: |")
-                for it in resource_costs[:10]:
-                    name = it.get("name", "?")
-                    cost = float(it.get("cost", 0))
-                    rows.append(
-                        f"| {name} | {cost:.2f} {currency} |"
-                    )
 
         # Balance
         balance_info = sections.get("balance")
         if balance_info:
             rows.append("")
-            bal = balance_info["value"]
-            bal_cur = balance_info["currency"]
             rows.append(
-                f"**当前余额**：{bal:.2f} {bal_cur}"
-                if is_zh else
-                f"**Balance**: {bal:.2f} {bal_cur}"
+                f"**{L['balance']}**{sep}"
+                f"{balance_info['value']:.2f} {balance_info['currency']}"
             )
 
         rows.append("")
@@ -566,38 +489,29 @@ class CloudBillingNotificationService:
         sections = build_alert_sections_from_record(
             alert_record, language
         )
-        is_zh = str(language or "").lower().startswith("zh")
+        L = sections["labels"]
+        sep = L["sep"]
         currency = sections.get("currency", "CNY")
 
         rows = []
 
         # Trigger
-        trigger_icon = sections.get("trigger_icon", "")
-        trigger_text = sections.get("trigger_text", "")
         rows.append(
-            f"> {trigger_icon} **{trigger_text}**"
+            f"> {sections.get('trigger_icon', '')}"
+            f" **{sections.get('trigger_text', '')}**"
         )
         rows.append("")
 
         # Account info
-        if sections.get("provider"):
-            rows.append(
-                f"**云平台**：{sections['provider']}"
-                if is_zh else
-                f"**Provider**: {sections['provider']}"
-            )
-        if sections.get("account_id"):
-            rows.append(
-                f"**账号**：{sections['account_id']}"
-                if is_zh else
-                f"**Account**: {sections['account_id']}"
-            )
-        if sections.get("notes"):
-            rows.append(
-                f"**备注**：{sections['notes']}"
-                if is_zh else
-                f"**Notes**: {sections['notes']}"
-            )
+        for key, label_key in [
+            ("provider", "provider"),
+            ("account_id", "account"),
+            ("notes", "notes"),
+        ]:
+            if sections.get(key):
+                rows.append(
+                    f"**{L[label_key]}**{sep}{sections[key]}"
+                )
 
         # Metrics
         metrics = sections.get("metrics", [])
@@ -605,61 +519,46 @@ class CloudBillingNotificationService:
             rows.append("")
             for m in metrics:
                 val = m["value"]
-                label = m["label"]
                 bold = "**" if m.get("highlight") else ""
+                unit = "" if "%" in str(val) else f" {currency}"
                 rows.append(
-                    f"  {label}：{bold}{val} {currency}{bold}"
+                    f"  {m['label']}{sep}{bold}{val}{unit}{bold}"
                 )
+
+        # Thresholds
+        thresholds = sections.get("thresholds", [])
+        if thresholds:
+            rows.append("")
+            rows.append(" | ".join(
+                f"{t['label']}{sep}{t['value']}"
+                for t in thresholds
+            ))
 
         # Cost breakdown
         resource_costs = sections.get("resource_costs", [])
         if resource_costs:
             rows.append("")
+            rows.append(f"**{L['cost_breakdown']}**{sep}")
             rows.append(
-                "**费用明细**：" if is_zh else "**Cost Breakdown**:"
+                f"| {L['col_resource']} | {L['col_cost']} | {L['col_owner']} |"
             )
-            has_owner = any(
-                it.get("owner") for it in resource_costs
-            )
-            if has_owner:
+            rows.append("| --- | ---: | --- |")
+            for it in resource_costs[:10]:
+                name = it.get("name", "?")
+                cost = float(it.get("cost", 0))
+                owner = it.get("owner", "") or "-"
                 rows.append(
-                    "| 资源 | 花费 | 创建者 |"
-                    if is_zh else
-                    "| Resource | Cost | Owner |"
+                    f"| {name} | {cost:.2f} {currency} "
+                    f"| {owner} |"
                 )
-                rows.append("| --- | ---: | --- |")
-                for it in resource_costs[:10]:
-                    name = it.get("name", "?")
-                    cost = float(it.get("cost", 0))
-                    owner = it.get("owner", "")
-                    rows.append(
-                        f"| {name} | {cost:.2f} {currency} "
-                        f"| {owner} |"
-                    )
-            else:
-                rows.append(
-                    "| 资源 | 花费 |"
-                    if is_zh else
-                    "| Resource | Cost |"
-                )
-                rows.append("| --- | ---: |")
-                for it in resource_costs[:10]:
-                    name = it.get("name", "?")
-                    cost = float(it.get("cost", 0))
-                    rows.append(
-                        f"| {name} | {cost:.2f} {currency} |"
-                    )
 
         # Balance
         balance_info = sections.get("balance")
         if balance_info:
             rows.append("")
-            bal = balance_info["value"]
-            bal_cur = balance_info["currency"]
             rows.append(
-                f"**当前余额**：{bal:.2f} {bal_cur}"
-                if is_zh else
-                f"**Balance**: {bal:.2f} {bal_cur}"
+                f"**{L['balance']}**{sep}"
+                f"{balance_info['value']:.2f} {balance_info['currency']}"
             )
 
         body = (

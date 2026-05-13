@@ -10,9 +10,15 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 
-def _fmt_amount(value: float, currency: str = "CNY") -> str:
+def _fmt_amount(
+    value: float,
+    currency: str = "CNY",
+    is_zh: bool = True,
+) -> str:
     if abs(value) >= 1_000_000:
-        return f"{value / 10_000:.1f}万 {currency}"
+        unit = "万" if is_zh else "M"
+        divisor = 10_000 if is_zh else 1_000_000
+        return f"{value / divisor:.1f}{unit} {currency}"
     return f"{value:,.2f} {currency}"
 
 
@@ -57,17 +63,17 @@ def build_daily_report(
         lines.append("本月概览")
         lines.append("-" * 44)
         lines.append(
-            f"  累计消费    {_fmt_amount(summary.get('current_consumed', 0))}"
+            f"  累计消费    {_fmt_amount(summary.get('current_consumed', 0), is_zh=True)}"
         )
         lines.append(
-            f"  日均消费    {_fmt_amount(summary.get('daily_average', 0))}"
+            f"  日均消费    {_fmt_amount(summary.get('daily_average', 0), is_zh=True)}"
         )
         lines.append(
-            f"  峰值消费    {_fmt_amount(summary.get('peak_cost', 0))}"
+            f"  峰值消费    {_fmt_amount(summary.get('peak_cost', 0), is_zh=True)}"
             f"  ({summary.get('peak_date', '-')})"
         )
         lines.append(
-            f"  预估月费    {_fmt_amount(summary.get('estimated_total', 0))}"
+            f"  预估月费    {_fmt_amount(summary.get('estimated_total', 0), is_zh=True)}"
         )
         lines.append(
             f"  统计天数    {summary.get('collected_days', 0)} 天"
@@ -77,17 +83,17 @@ def build_daily_report(
         lines.append("Monthly Summary")
         lines.append("-" * 44)
         lines.append(
-            f"  Consumed      {_fmt_amount(summary.get('current_consumed', 0))}"
+            f"  Consumed      {_fmt_amount(summary.get('current_consumed', 0), is_zh=False)}"
         )
         lines.append(
-            f"  Daily Avg     {_fmt_amount(summary.get('daily_average', 0))}"
+            f"  Daily Avg     {_fmt_amount(summary.get('daily_average', 0), is_zh=False)}"
         )
         lines.append(
-            f"  Peak          {_fmt_amount(summary.get('peak_cost', 0))}"
+            f"  Peak          {_fmt_amount(summary.get('peak_cost', 0), is_zh=False)}"
             f"  ({summary.get('peak_date', '-')})"
         )
         lines.append(
-            f"  Estimated     {_fmt_amount(summary.get('estimated_total', 0))}"
+            f"  Estimated     {_fmt_amount(summary.get('estimated_total', 0), is_zh=False)}"
         )
 
     # ── Week trend (last 7 days) ──
@@ -103,7 +109,7 @@ def build_daily_report(
             date = pt.get("date", "?")
             total = pt.get("total", 0)
             bar = _mini_bar(total, summary.get("daily_average", 1))
-            lines.append(f"  {date}  {_fmt_amount(total):>18s}  {bar}")
+            lines.append(f"  {date}  {_fmt_amount(total, is_zh=is_zh):>18s}  {bar}")
 
     # ── Accounts ranking ──
     accounts = overview.get("accounts", [])
@@ -137,7 +143,7 @@ def build_daily_report(
             risk_mark = _risk_icon(risk)
             line = (
                 f"  {i}. {label:30s}"
-                f"  {_fmt_amount(cost, currency):>20s}"
+                f"  {_fmt_amount(cost, currency, is_zh=is_zh):>20s}"
                 f"  {pct:5.1f}%"
             )
             if risk_mark:
@@ -172,7 +178,7 @@ def build_daily_report(
                 )
                 lines.append(
                     f"    {svc_name:28s}"
-                    f"  {_fmt_amount(svc_val, cur):>18s}"
+                    f"  {_fmt_amount(svc_val, cur, is_zh=is_zh):>18s}"
                     f"  {svc_pct:5.1f}%"
                 )
 
@@ -204,12 +210,12 @@ def build_daily_report(
             if is_zh:
                 lines.append(
                     f"  {name}  剩余 {days} 天"
-                    f"  建议充值 {_fmt_amount(rec, cur)}"
+                    f"  建议充值 {_fmt_amount(rec, cur, is_zh=True)}"
                 )
             else:
                 lines.append(
                     f"  {name}  {days} days left"
-                    f"  recharge {_fmt_amount(rec, cur)}"
+                    f"  recharge {_fmt_amount(rec, cur, is_zh=False)}"
                 )
 
     # ── Exchange rate ──
@@ -217,7 +223,10 @@ def build_daily_report(
     rate_label = overview.get("rate_source_label", "")
     if rate:
         lines.append("")
-        lines.append(f"  汇率: 1 USD = {rate:.4f} CNY ({rate_label})")
+        if is_zh:
+            lines.append(f"  汇率: 1 USD = {rate:.4f} CNY ({rate_label})")
+        else:
+            lines.append(f"  Rate: 1 USD = {rate:.4f} CNY ({rate_label})")
 
     lines.append("")
     lines.append("=" * 44)

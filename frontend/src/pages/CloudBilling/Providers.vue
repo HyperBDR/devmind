@@ -178,6 +178,8 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { cloudBillingApi } from '@/api/cloudBilling'
+import { extractResponseData } from '@/utils/api'
+import { useToast } from '@/composables/useToast'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import ProviderFormModal from '@/components/cloud-billing/ProviderFormModal.vue'
@@ -189,6 +191,7 @@ import {
 } from '@/utils/providerDisplay'
 
 const { t } = useI18n()
+const { showError } = useToast()
 const loading = ref(true)
 const providers = ref([])
 const tagOptions = ref([])
@@ -257,10 +260,10 @@ const loadTagOptions = async () => {
 const editProvider = async (provider) => {
   try {
     const response = await cloudBillingApi.getProvider(provider.id)
-    const data = response.data
+    const data = extractResponseData(response)
     editingProvider.value = data?.id ? data : (data?.data || data)
-  } catch (error) {
-    console.error('Failed to load provider detail:', error)
+  } catch {
+    showError(t('errors.serverError'))
     editingProvider.value = provider
   }
 }

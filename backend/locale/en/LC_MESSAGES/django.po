@@ -676,3 +676,76 @@ msgstr "Cleanup done"
 
 #~ msgid "Please check if all required fields are filled correctly"
 #~ msgstr "Please check if all required fields are filled correctly"
+
+#: cloud_billing/alert_messages.py
+msgid "Balance Alert"
+msgstr "Balance Alert"
+
+msgid "Days Remaining Alert"
+msgstr "Days Remaining Alert"
+
+msgid "Cost Threshold Alert"
+msgstr "Cost Threshold Alert"
+
+msgid "Cost Growth Alert"
+msgstr "Cost Growth Alert"
+
+msgid "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
+msgstr "Balance %(bal).2f %(cur)s below threshold %(thr).2f %(cur)s"
+
+msgid "%(days)s days remaining below threshold %(thr)s"
+msgstr "%(days)s days remaining below threshold %(thr)s"
+
+msgid "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
+msgstr "Total cost %(cost).2f %(cur)s exceeds threshold %(thr).2f %(cur)s"
+
+msgid "Growth %(pct).1f%%"
+msgstr "Growth %(pct).1f%%"
+
+msgid "threshold %(thr).1f%%"
+msgstr "threshold %(thr).1f%%"
+
+msgid "Provider"
+msgstr "Provider"
+
+msgid "Balance"
+msgstr "Balance"
+
+msgid "Cost Breakdown"
+msgstr "Cost Breakdown"
+
+msgid "Resource"
+msgstr "Resource"
+
+msgid "Cost"
+msgstr "Cost"
+
+msgid "Owner"
+msgstr "Owner"
+
+msgid "DevMind Cloud Billing · @all"
+msgstr "DevMind Cloud Billing · @all"
+
+msgid ": "
+msgstr ": "
+
+msgid ", "
+msgstr ", "
+
+msgid "Current Total"
+msgstr "Current Total"
+
+msgid "Previous Hour"
+msgstr "Previous Hour"
+
+msgid "Increase"
+msgstr "Increase"
+
+msgid "Growth Rate"
+msgstr "Growth Rate"
+
+msgid "Growth %"
+msgstr "Growth %"
+
+msgid "Amount"
+msgstr "Amount"
