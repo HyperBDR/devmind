@@ -254,8 +254,15 @@ const loadTagOptions = async () => {
   }
 }
 
-const editProvider = (provider) => {
-  editingProvider.value = provider
+const editProvider = async (provider) => {
+  try {
+    const response = await cloudBillingApi.getProvider(provider.id)
+    const data = response.data
+    editingProvider.value = data?.id ? data : (data?.data || data)
+  } catch (error) {
+    console.error('Failed to load provider detail:', error)
+    editingProvider.value = provider
+  }
 }
 
 const closeModal = () => {

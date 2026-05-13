@@ -93,29 +93,6 @@
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
           <div class="md:col-span-1">
             <label
-              for="rechargeInfo"
-              class="block text-sm font-medium text-gray-700 mb-1"
-            >
-              {{ t('cloudBilling.providers.rechargeInfo') }}
-            </label>
-            <p class="text-xs text-gray-500 mb-2 md:mb-0">
-              {{ t('cloudBilling.providers.rechargeInfoDesc') }}
-            </p>
-          </div>
-          <div class="md:col-span-2">
-            <textarea
-              id="rechargeInfo"
-              v-model="formData.recharge_info"
-              rows="6"
-              :placeholder="t('cloudBilling.providers.rechargeInfoPlaceholder')"
-              class="block w-full px-3 py-2 text-sm border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 font-mono"
-            ></textarea>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-          <div class="md:col-span-1">
-            <label
               for="providerTagInput"
               class="block text-sm font-medium text-gray-700 mb-1"
             >
