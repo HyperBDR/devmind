@@ -19,6 +19,14 @@ SLA_MAP = {"P1": 4, "P2": 8, "P3": 24, "P4": 72}
 
 EXCEL_PATH = os.getenv("EXCEL_PATH", "")
 
+# Companies excluded from API query (not synced to DB)
+# 逗号分隔的公司名称列表，如 "BOG,测试公司"
+EXCLUDED_COMPANY_NAMES = [
+    name.strip()
+    for name in os.getenv("SUPPORT_EXCLUDED_COMPANIES", "").split(",")
+    if name.strip()
+]
+
 API_BASE_URL = os.getenv("ONEPRO_API_BASE_URL", "https://support.oneprocloud.com")
 API_USERNAME = os.getenv("ONEPRO_USERNAME", "")
 API_PASSWORD = os.getenv("ONEPRO_PASSWORD", "")
@@ -236,6 +244,21 @@ def fetch_incidents_from_api(
     batch_size = 200
     offset = 0
 
+    # 获取要排除的公司 sys_ids（需要先同步 company）
+    excluded_sys_ids = _get_excluded_company_sys_ids()
+
+    def _build_query_param() -> str:
+        """Build sysparm_query to exclude specified companies."""
+        if not excluded_sys_ids:
+            return ""
+        query_parts = []
+        for sys_id in excluded_sys_ids:
+            if sys_id:
+                query_parts.append(f"companyNOT LIKE{sys_id}")
+        if query_parts:
+            return "^".join(query_parts) + "^ORDERBYDESCsys_created_on"
+        return ""
+
     while limit is None or len(all_records) < limit:
         remaining = (
             (limit - len(all_records))
@@ -247,6 +270,10 @@ def fetch_incidents_from_api(
             "sysparm_offset": offset,
             "sysparm_display_value": "true",
         }
+        # 添加排除公司的查询条件
+        query = _build_query_param()
+        if query:
+            params["sysparm_query"] = query
         url = f"{API_BASE_URL}/api/hyper/table/incident"
         try:
             resp = requests.get(
@@ -482,6 +509,31 @@ def sync_companies_from_api(
     return {"status": "ok", "added": added, "skipped": skipped, "total": total}
 
 
+def _get_excluded_company_sys_ids() -> List[str]:
+    """Get sys_ids of companies to exclude from sync.
+    Reads from EXCLUDED_COMPANY_NAMES (env var) and queries Company table.
+    """
+    if not EXCLUDED_COMPANY_NAMES:
+        return []
+    sys_ids = list(
+        Company.objects.filter(
+            name__in=EXCLUDED_COMPANY_NAMES
+        ).values_list("sys_id", flat=True)
+    )
+    if sys_ids:
+        logger.info(
+            "Excluding companies from sync: %s (sys_ids: %s)",
+            EXCLUDED_COMPANY_NAMES,
+            sys_ids,
+        )
+    else:
+        logger.warning(
+            "No companies found for exclusion names: %s",
+            EXCLUDED_COMPANY_NAMES,
+        )
+    return sys_ids
+
+
 def sync_users_from_api() -> Dict[str, Any]:
     token = login_api()
     if not token:
@@ -546,7 +598,10 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
         if c.sys_id
     }
 
-    # 2. 并发分页拉取 → 清洗 → 写入
+    # 2. 获取要排除的公司 sys_ids
+    excluded_sys_ids = _get_excluded_company_sys_ids()
+
+    # 3. 并发分页拉取 → 清洗 → 写入
     headers = _build_headers(token)
     url = f"{API_BASE_URL}/api/hyper/table/incident"
     batch_size = 200
@@ -554,6 +609,18 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
     total_synced = 0
     limit = None if full_sync else API_SYNC_LIMIT
     offset = 0
+
+    def _build_query_param() -> str:
+        """Build sysparm_query to exclude specified companies."""
+        if not excluded_sys_ids:
+            return ""
+        query_parts = []
+        for sys_id in excluded_sys_ids:
+            if sys_id:
+                query_parts.append(f"companyNOT LIKE{sys_id}")
+        if query_parts:
+            return "^".join(query_parts) + "^ORDERBYDESCsys_created_on"
+        return ""
 
     def _fetch_page(off: int) -> tuple[int, list]:
         """Fetch a single page; returns (offset, records)."""
@@ -563,6 +630,10 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
                 "sysparm_offset": off,
                 "sysparm_display_value": "true",
             }
+            # 添加排除公司的查询条件
+            query = _build_query_param()
+            if query:
+                params["sysparm_query"] = query
             resp = requests.get(
                 url, headers=headers, params=params,
                 timeout=60, verify=False,
@@ -591,9 +662,8 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
                 if not parsed:
                     continue
                 co_sys_id = parsed.get("company") or ""
-                parsed["company"] = company_map.get(
-                    co_sys_id, co_sys_id,
-                )
+                company_name = company_map.get(co_sys_id, co_sys_id)
+                parsed["company"] = company_name
                 row = _record_to_dict(parsed)
                 if not row:
                     continue

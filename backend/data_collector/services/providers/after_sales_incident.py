@@ -18,6 +18,7 @@ import base64
 import hashlib
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -33,6 +34,14 @@ REQUEST_TIMEOUT = 60
 BATCH_SIZE = 200
 # Default SLA thresholds per priority
 SLA_MAP = {"P1": 4, "P2": 8, "P3": 24, "P4": 72}
+
+# Companies excluded from API query (not synced to DB)
+# 逗号分隔的公司名称列表，如 "BOG,测试公司"
+EXCLUDED_COMPANY_NAMES = [
+    name.strip()
+    for name in os.getenv("SUPPORT_EXCLUDED_COMPANIES", "").split(",")
+    if name.strip()
+]
 
 
 # ── Token 缓存 ─────────────────────────────────────
@@ -144,6 +153,34 @@ class AfterSalesIncidentProvider(BaseProvider):
         self._token: str | None = None
         self._base_url: str = DEFAULT_BASE_URL
         self._table_name: str = DEFAULT_TABLE_NAME
+
+    def _get_excluded_company_sys_ids(self) -> list[str]:
+        """Get sys_ids of companies to exclude from sync.
+        Reads from EXCLUDED_COMPANY_NAMES (env var) and queries Company table.
+        """
+        if not EXCLUDED_COMPANY_NAMES:
+            return []
+        try:
+            from data_collector.models import CollectorConfig
+        except ImportError:
+            return []
+        # Try to get company sys_ids from CollectorConfig (sync companies first)
+        # For now, we rely on the caller having synced companies via sals.etl
+        # This method is a placeholder for future enhancement
+        return []
+
+    def _build_exclusion_query(self) -> str:
+        """Build sysparm_query to exclude specified companies."""
+        excluded_sys_ids = self._get_excluded_company_sys_ids()
+        if not excluded_sys_ids:
+            return ""
+        query_parts = []
+        for sys_id in excluded_sys_ids:
+            if sys_id:
+                query_parts.append(f"companyNOT LIKE{sys_id}")
+        if query_parts:
+            return "^".join(query_parts) + "^ORDERBYDESCsys_created_on"
+        return ""
 
     def _resolve_config(self, auth_config: dict) -> tuple[str, str, str]:
         base_url = (
@@ -367,12 +404,23 @@ class AfterSalesIncidentProvider(BaseProvider):
         out: list[dict] = []
         offset = 0
 
+        # 构建排除公司的查询条件
+        exclusion_query = self._build_exclusion_query()
+        if exclusion_query:
+            logger.info(
+                "AfterSalesIncidentProvider.collect: excluding companies with query: %s",
+                exclusion_query,
+            )
+
         while True:
             params = {
                 "sysparm_limit": BATCH_SIZE,
                 "sysparm_offset": offset,
                 "sysparm_display_value": "true",
             }
+            # 添加排除公司的查询条件
+            if exclusion_query:
+                params["sysparm_query"] = exclusion_query
             try:
                 resp = requests.get(
                     url,

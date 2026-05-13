@@ -584,11 +584,11 @@ class EscalationStatsAPIView(APIView):
             support_level=Case(
                 When(
                     assignment_group__in=L1_GROUPS,
-                    then=Value("L1"),
+                    then=Value("first_tier"),
                 ),
                 When(
                     assignment_group__in=L2_GROUPS,
-                    then=Value("L2"),
+                    then=Value("second_tier"),
                 ),
                 default=Value("unclassified"),
                 output_field=CharField(),
@@ -601,15 +601,17 @@ class EscalationStatsAPIView(APIView):
             .annotate(count=Count("id"))
         )
         counts = {r["support_level"]: r["count"] for r in level_counts}
-        l1 = counts.get("L1", 0)
-        l2 = counts.get("L2", 0)
-        total_classified = l1 + l2
-        rate = round(l2 / total_classified * 100, 1) if total_classified else 0
+        first_tier = counts.get("first_tier", 0)
+        second_tier = counts.get("second_tier", 0)
+        total = first_tier + second_tier
+
+        # 转二线率 = 二线工单数 / 总工单数
+        escalation_rate = round(second_tier / total * 100, 1) if total else 0
 
         # Priority distribution
         priority_rows = (
             classified
-            .filter(support_level__in=["L1", "L2"])
+            .filter(support_level__in=["first_tier", "second_tier"])
             .values("priority", "support_level")
             .annotate(count=Count("id"))
             .order_by("priority")
@@ -618,14 +620,14 @@ class EscalationStatsAPIView(APIView):
         for r in priority_rows:
             p = r["priority"] or "未知"
             if p not in prio_map:
-                prio_map[p] = {"priority": p, "l1": 0, "l2": 0}
-            prio_map[p][r["support_level"].lower()] = r["count"]
+                prio_map[p] = {"priority": p, "first_tier": 0, "second_tier": 0}
+            prio_map[p][r["support_level"]] = r["count"]
 
         # Monthly trend
         trend_rows = (
             classified
             .filter(
-                support_level__in=["L1", "L2"],
+                support_level__in=["first_tier", "second_tier"],
                 month__isnull=False,
             )
             .values("month", "support_level")
@@ -636,14 +638,15 @@ class EscalationStatsAPIView(APIView):
         for r in trend_rows:
             m = r["month"]
             if m not in trend_map:
-                trend_map[m] = {"month": m, "l1": 0, "l2": 0}
-            trend_map[m][r["support_level"].lower()] = r["count"]
+                trend_map[m] = {"month": m, "first_tier": 0, "second_tier": 0}
+            trend_map[m][r["support_level"]] = r["count"]
 
         return Response({
             "summary": {
-                "l1_count": l1,
-                "l2_count": l2,
-                "escalation_rate": rate,
+                "total": total,
+                "first_tier_resolved": first_tier,
+                "escalated_to_second": second_tier,
+                "escalation_rate": escalation_rate,
             },
             "priority_dist": list(prio_map.values()),
             "monthly_trend": list(trend_map.values()),

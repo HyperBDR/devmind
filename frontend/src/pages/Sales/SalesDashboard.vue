@@ -2,7 +2,7 @@
   <AppLayout :show-sidebar="false">
     <div class="mx-auto w-full max-w-[1440px]">
       <!-- Page Header -->
-      <div class="mb-6 rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div class="mb-6 bg-white border border-gray-200 shadow-sm rounded-xl">
         <div
           class="flex flex-col gap-5 p-6 lg:flex-row lg:items-end lg:justify-between"
         >
@@ -10,7 +10,7 @@
             <div
               class="inline-flex items-center gap-2 rounded-full border border-primary-100 bg-primary-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-700"
             >
-              <span class="h-2 w-2 rounded-full bg-primary-500" />
+              <span class="w-2 h-2 rounded-full bg-primary-500" />
               {{ t('sals.dashboard.badge') }}
             </div>
             <h1
@@ -18,7 +18,7 @@
             >
               {{ t('sals.dashboard.title') }}
             </h1>
-            <p class="mt-2 max-w-2xl text-sm leading-6 text-gray-600">
+            <p class="max-w-2xl mt-2 text-sm leading-6 text-gray-600">
               {{ t('sals.dashboard.subtitle') }}
             </p>
           </div>
@@ -46,7 +46,7 @@
       <!-- Error Banner -->
       <div
         v-if="error"
-        class="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        class="p-4 mb-6 text-sm text-red-700 border border-red-200 rounded-xl bg-red-50"
       >
         {{ error }}
       </div>
@@ -56,19 +56,32 @@
 
       <template v-else>
         <!-- ── Section 1: KPI Cards ── -->
-        <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div class="grid gap-4 mb-6 sm:grid-cols-2 lg:grid-cols-5">
           <!-- Total -->
           <article
-            class="flex items-center gap-4 rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+            class="flex items-center gap-4 p-5 bg-white border border-gray-200 shadow-sm rounded-xl"
           >
-            <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-gray-100">
-              <svg class="h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            <div
+              class="flex items-center justify-center flex-shrink-0 bg-gray-100 h-11 w-11 rounded-xl"
+            >
+              <svg
+                class="w-5 h-5 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                />
               </svg>
             </div>
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-gray-400"
+              >
                 {{ t('sals.dashboard.kpiTotal') }}
               </div>
               <div class="mt-1 text-2xl font-bold tracking-tight text-gray-900">
@@ -79,19 +92,34 @@
 
           <!-- Resolved -->
           <article
-            class="flex items-center gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm"
+            class="flex items-center gap-4 p-5 border shadow-sm rounded-xl border-emerald-200 bg-emerald-50"
           >
-            <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-100">
-              <svg class="h-5 w-5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div
+              class="flex items-center justify-center flex-shrink-0 h-11 w-11 rounded-xl bg-emerald-100"
+            >
+              <svg
+                class="w-5 h-5 text-emerald-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-emerald-500">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-emerald-500"
+              >
                 {{ t('sals.dashboard.kpiResolvedCount') }}
               </div>
-              <div class="mt-1 text-2xl font-bold tracking-tight text-emerald-700">
+              <div
+                class="mt-1 text-2xl font-bold tracking-tight text-emerald-700"
+              >
                 {{ resolvedCount }}
               </div>
             </div>
@@ -99,19 +127,34 @@
 
           <!-- Active (Pending + In Progress) -->
           <article
-            class="flex items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 p-5 shadow-sm"
+            class="flex items-center gap-4 p-5 border shadow-sm rounded-xl border-amber-200 bg-amber-50"
           >
-            <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-amber-100">
-              <svg class="h-5 w-5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div
+              class="flex items-center justify-center flex-shrink-0 h-11 w-11 rounded-xl bg-amber-100"
+            >
+              <svg
+                class="w-5 h-5 text-amber-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
               </svg>
             </div>
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-amber-500">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-amber-500"
+              >
                 {{ t('sals.dashboard.kpiActive') }}
               </div>
-              <div class="mt-1 text-2xl font-bold tracking-tight text-amber-700">
+              <div
+                class="mt-1 text-2xl font-bold tracking-tight text-amber-700"
+              >
                 {{ activeCount }}
               </div>
             </div>
@@ -119,19 +162,34 @@
 
           <!-- Resolution Rate -->
           <article
-            class="flex items-center gap-4 rounded-xl border border-primary-200 bg-primary-50 p-5 shadow-sm"
+            class="flex items-center gap-4 p-5 border shadow-sm rounded-xl border-primary-200 bg-primary-50"
           >
-            <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-primary-100">
-              <svg class="h-5 w-5 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            <div
+              class="flex items-center justify-center flex-shrink-0 h-11 w-11 rounded-xl bg-primary-100"
+            >
+              <svg
+                class="w-5 h-5 text-primary-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
+                />
               </svg>
             </div>
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-primary-500">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-primary-500"
+              >
                 {{ t('sals.dashboard.kpiWinRate') }}
               </div>
-              <div class="mt-1 text-2xl font-bold tracking-tight text-primary-700">
+              <div
+                class="mt-1 text-2xl font-bold tracking-tight text-primary-700"
+              >
                 {{ resolutionRate }}%
               </div>
             </div>
@@ -139,30 +197,46 @@
 
           <!-- Avg Hours -->
           <article
-            class="flex items-center gap-4 rounded-xl border border-purple-200 bg-purple-50 p-5 shadow-sm"
+            class="flex items-center gap-4 p-5 border border-purple-200 shadow-sm rounded-xl bg-purple-50"
           >
-            <div class="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-purple-100">
-              <svg class="h-5 w-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <div
+              class="flex items-center justify-center flex-shrink-0 bg-purple-100 h-11 w-11 rounded-xl"
+            >
+              <svg
+                class="w-5 h-5 text-purple-600"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
               </svg>
             </div>
             <div>
-              <div class="text-[11px] font-semibold uppercase tracking-wider text-purple-500">
+              <div
+                class="text-[11px] font-semibold uppercase tracking-wider text-purple-500"
+              >
                 {{ t('sals.dashboard.kpiAvgHours') }}
               </div>
-              <div class="mt-1 text-2xl font-bold tracking-tight text-purple-700">
-                {{ kpi.avg_resolve_hours ?? 0 }}<span class="text-sm font-normal text-purple-400">h</span>
+              <div
+                class="mt-1 text-2xl font-bold tracking-tight text-purple-700"
+              >
+                {{ kpi.avg_resolve_hours ?? 0
+                }}<span class="text-sm font-normal text-purple-400">h</span>
               </div>
             </div>
           </article>
         </div>
 
         <!-- ── Section 2: Charts Row ── -->
-        <div class="mb-6 grid items-stretch gap-6 lg:grid-cols-12">
+        <div class="grid items-stretch gap-6 mb-6 lg:grid-cols-12">
           <!-- Monthly Trend -->
           <div
-            class="lg:col-span-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+            class="p-6 bg-white border border-gray-200 shadow-sm lg:col-span-8 rounded-xl"
           >
             <h3 class="mb-5 text-sm font-semibold text-gray-900">
               {{ t('sals.dashboard.salesTrend') }}
@@ -177,22 +251,22 @@
           </div>
 
           <!-- Stage Distribution + State Breakdown -->
-          <div class="lg:col-span-4 flex flex-col gap-6">
+          <div class="flex flex-col gap-6 lg:col-span-4">
             <!-- Stage Distribution (Pie) -->
             <div
-              class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+              class="h-full p-6 bg-white border border-gray-200 shadow-sm rounded-xl"
             >
               <h3 class="mb-4 text-sm font-semibold text-gray-900">
                 {{ t('sals.dashboard.stageDistribution') }}
               </h3>
-              <div class="mx-auto h-[160px] w-full max-w-[180px]">
+              <div class="mx-auto h-[180px] w-full max-w-[180px]">
                 <Doughnut
                   v-if="priorityChartData"
                   :data="priorityChartData"
                   :options="doughnutOptions"
                 />
               </div>
-              <div class="mt-3 space-y-1.5">
+              <div class="mt-8 space-y-1.5">
                 <div
                   v-for="(item, idx) in data.priority_dist || []"
                   :key="item.priority"
@@ -200,9 +274,10 @@
                 >
                   <div class="flex items-center gap-1.5">
                     <span
-                      class="h-2 w-2 rounded-full"
+                      class="w-2 h-2 rounded-full"
                       :style="{
-                        backgroundColor: priorityChartColors[idx % priorityChartColors.length]
+                        backgroundColor:
+                          priorityChartColors[idx % priorityChartColors.length]
                       }"
                     />
                     <span class="font-medium text-gray-600">{{
@@ -221,71 +296,72 @@
         <!-- ── Section 2b: Escalation Panel ── -->
         <div
           v-if="escalation.summary"
-          class="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          class="p-6 mb-6 bg-white border border-gray-200 shadow-sm rounded-xl"
         >
           <h3 class="mb-5 text-sm font-semibold text-gray-900">
             {{ t('sals.dashboard.escalationTitle') }}
           </h3>
           <div class="grid gap-6 lg:grid-cols-12">
-            <!-- Funnel Visualization -->
-            <div class="lg:col-span-4 flex flex-col items-center justify-center">
-              <!-- L1 Label -->
-              <div class="mb-2 text-center">
-                <div class="text-[11px] font-semibold text-blue-500 uppercase tracking-wider">
-                  {{ t('sals.dashboard.l1Count') }}
-                </div>
-                <div class="text-2xl font-bold text-blue-700">
-                  {{ escalation.summary.l1_count }}
+            <!-- Pie Chart Visualization -->
+            <div
+              class="flex flex-col items-center justify-center lg:col-span-4"
+            >
+              <!-- 饼图 -->
+              <div class="relative w-full max-w-[180px] aspect-square">
+                <Doughnut
+                  v-if="escalationPieData"
+                  :data="escalationPieData"
+                  :options="escalationPieOptions"
+                />
+                <!-- 中心文字 -->
+                <div
+                  class="absolute inset-0 flex items-center justify-center pointer-events-none"
+                >
+                  <div class="text-center">
+                    <div class="text-2xl font-bold text-gray-900">
+                      {{ escalation.summary.escalation_rate }}%
+                    </div>
+                    <div
+                      class="text-[10px] text-gray-500 uppercase tracking-wider"
+                    >
+                      {{ t('sals.dashboard.escalationRate') }}
+                    </div>
+                  </div>
                 </div>
               </div>
-              <!-- Funnel SVG -->
-              <svg
-                width="100%"
-                viewBox="0 0 200 100"
-                class="max-w-[220px]"
-                preserveAspectRatio="xMidYMid meet"
-              >
-                <defs>
-                  <linearGradient id="funnelGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#3b82f6" />
-                    <stop offset="100%" stop-color="#f59e0b" />
-                  </linearGradient>
-                </defs>
-                <!-- 倒梯形 -->
-                <polygon
-                  points="20,0 180,0 150,70 50,70"
-                  fill="url(#funnelGrad)"
-                  opacity="0.85"
-                />
-                <!-- 转化率文字 -->
-                <text
-                  x="100"
-                  y="42"
-                  text-anchor="middle"
-                  fill="white"
-                  font-size="14"
-                  font-weight="bold"
-                >
-                  {{ escalation.summary.escalation_rate }}%
-                </text>
-              </svg>
-              <!-- L2 Label -->
-              <div class="mt-2 text-center">
-                <div class="text-[11px] font-semibold text-amber-500 uppercase tracking-wider">
-                  {{ t('sals.dashboard.l2Count') }}
+              <!-- 图例 -->
+              <div class="flex items-center gap-6 mt-4">
+                <div class="flex items-center gap-2">
+                  <div class="w-3 h-3 bg-blue-500 rounded-full" />
+                  <div class="text-center">
+                    <div class="text-sm font-semibold text-blue-700">
+                      {{ escalation.summary.first_tier_resolved }}
+                    </div>
+                    <div class="text-[10px] text-gray-500">
+                      {{ t('sals.dashboard.firstTierResolved') }}
+                    </div>
+                  </div>
                 </div>
-                <div class="text-2xl font-bold text-amber-700">
-                  {{ escalation.summary.l2_count }}
+                <div class="flex items-center gap-2">
+                  <div class="w-3 h-3 rounded-full bg-amber-500" />
+                  <div class="text-center">
+                    <div class="text-sm font-semibold text-amber-700">
+                      {{ escalation.summary.escalated_to_second }}
+                    </div>
+                    <div class="text-[10px] text-gray-500">
+                      {{ t('sals.dashboard.escalatedToSecond') }}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
             <!-- Priority Distribution -->
-            <div class="lg:col-span-4 flex flex-col">
-              <div class="text-xs font-semibold text-gray-500 mb-3">
+            <div class="flex flex-col lg:col-span-4">
+              <div class="mb-3 text-xs font-semibold text-gray-500">
                 {{ t('sals.dashboard.priorityDistribution') }}
               </div>
-              <div class="flex flex-1 flex-col justify-between">
+              <div class="flex flex-col justify-between flex-1">
                 <div
                   v-for="row in escalation.priority_dist || []"
                   :key="row.priority"
@@ -296,20 +372,22 @@
                       {{ getPriorityLabel(row.priority) }}
                     </span>
                     <span class="font-mono text-gray-500">
-                      {{ row.l1 }} / {{ row.l2 }}
+                      {{ row.first_tier }} / {{ row.second_tier }}
                     </span>
                   </div>
-                  <div class="flex h-2 overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    class="flex h-2 overflow-hidden bg-gray-100 rounded-full"
+                  >
                     <div
                       class="bg-blue-500"
                       :style="{
-                        width: `${(row.l1 + row.l2) ? (row.l1 / (row.l1 + row.l2) * 100) : 0}%`
+                        width: `${row.first_tier + row.second_tier ? (row.first_tier / (row.first_tier + row.second_tier)) * 100 : 0}%`
                       }"
                     />
                     <div
                       class="bg-amber-500"
                       :style="{
-                        width: `${(row.l1 + row.l2) ? (row.l2 / (row.l1 + row.l2) * 100) : 0}%`
+                        width: `${row.first_tier + row.second_tier ? (row.second_tier / (row.first_tier + row.second_tier)) * 100 : 0}%`
                       }"
                     />
                   </div>
@@ -319,7 +397,7 @@
 
             <!-- Monthly Trend -->
             <div class="lg:col-span-4">
-              <div class="text-xs font-semibold text-gray-500 mb-3">
+              <div class="mb-3 text-xs font-semibold text-gray-500">
                 {{ t('sals.dashboard.escalationTrend') }}
               </div>
               <div class="h-[160px]">
@@ -334,9 +412,9 @@
         </div>
 
         <!-- ── Section 3: SLA + Team Performance ── -->
-        <div class="mb-6 grid gap-6 lg:grid-cols-2">
+        <div class="grid gap-6 mb-6 lg:grid-cols-2">
           <!-- Win Rate by Stage -->
-          <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <div class="p-6 bg-white border border-gray-200 shadow-sm rounded-xl">
             <h3 class="mb-5 text-sm font-semibold text-gray-900">
               {{ t('sals.dashboard.slaOverview') }}
             </h3>
@@ -348,9 +426,10 @@
               >
                 <div class="flex items-center gap-2">
                   <div
-                    class="h-2 w-2 rounded-full"
+                    class="w-2 h-2 rounded-full"
                     :style="{
-                      backgroundColor: priorityColorMap[row.priority] || '#6366f1'
+                      backgroundColor:
+                        priorityColorMap[row.priority] || '#6366f1'
                     }"
                   />
                   <span class="text-xs font-medium text-gray-700">{{
@@ -374,7 +453,7 @@
                     />
                   </div>
                   <span
-                    class="w-10 text-right font-mono text-xs font-semibold text-gray-700"
+                    class="w-10 font-mono text-xs font-semibold text-right text-gray-700"
                     >{{ row.sla_rate ?? 0 }}%</span
                   >
                 </div>
@@ -383,12 +462,12 @@
           </div>
 
           <!-- Team Performance -->
-          <div class="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div class="mb-5 flex items-center justify-between">
+          <div class="p-6 bg-white border border-gray-200 shadow-sm rounded-xl">
+            <div class="flex items-center justify-between mb-5">
               <h3 class="text-sm font-semibold text-gray-900">
                 {{ t('sals.dashboard.teamPerformance') }}
               </h3>
-              <div class="flex gap-1 rounded-lg bg-gray-100 p-1">
+              <div class="flex gap-1 p-1 bg-gray-100 rounded-lg">
                 <button
                   v-for="mode in ['group', 'rep']"
                   :key="mode"
@@ -412,7 +491,7 @@
               <div
                 v-for="row in performanceRows"
                 :key="row.name"
-                class="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
+                class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-50"
               >
                 <div>
                   <div class="text-xs font-semibold text-gray-800">
@@ -438,7 +517,7 @@
 
         <!-- ── Section 4: Customer Stats ── -->
         <div
-          class="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+          class="p-6 mb-6 bg-white border border-gray-200 shadow-sm rounded-xl"
         >
           <h3 class="mb-5 text-sm font-semibold text-gray-900">
             {{ t('sals.dashboard.customerStats') }}
@@ -483,10 +562,10 @@
                   <td class="py-3 font-medium text-gray-700">
                     {{ row.company }}
                   </td>
-                  <td class="py-3 text-right font-mono text-gray-900">
+                  <td class="py-3 font-mono text-right text-gray-900">
                     {{ row.count }}
                   </td>
-                  <td class="py-3 text-right font-mono text-gray-900">
+                  <td class="py-3 font-mono text-right text-gray-900">
                     {{ row.resolved_count ?? '—' }}
                   </td>
                   <td class="py-3 text-right">
@@ -503,8 +582,12 @@
                       {{ row.resolve_rate ?? 0 }}%
                     </span>
                   </td>
-                  <td class="py-3 text-right font-mono text-xs text-gray-500">
-                    {{ row.avg_hours != null ? `${Math.round(row.avg_hours)}h` : '—' }}
+                  <td class="py-3 font-mono text-xs text-right text-gray-500">
+                    {{
+                      row.avg_hours != null
+                        ? `${Math.round(row.avg_hours)}h`
+                        : '—'
+                    }}
                   </td>
                 </tr>
               </tbody>
@@ -513,10 +596,10 @@
         </div>
 
         <!-- ── Section 5: Order Registry ── -->
-        <div class="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div class="bg-white border border-gray-200 shadow-sm rounded-xl">
           <!-- Table Header -->
           <div
-            class="flex flex-col gap-4 border-b border-gray-100 px-6 py-4 md:flex-row md:items-center md:justify-between"
+            class="flex flex-col gap-4 px-6 py-4 border-b border-gray-100 md:flex-row md:items-center md:justify-between"
           >
             <div class="flex items-center gap-3">
               <h3 class="font-semibold text-gray-900">
@@ -614,7 +697,7 @@
 
           <!-- Table -->
           <div class="overflow-x-auto">
-            <table class="w-full text-left text-xs">
+            <table class="w-full text-xs text-left">
               <thead>
                 <tr
                   class="bg-gray-50 text-[10px] font-bold uppercase tracking-widest text-gray-400"
@@ -640,7 +723,7 @@
                 <tr
                   v-for="row in incidents"
                   :key="row.number"
-                  class="hover:bg-gray-50 transition-colors"
+                  class="transition-colors hover:bg-gray-50"
                 >
                   <td
                     class="px-6 py-3 font-mono text-[13px] font-bold text-primary-600"
@@ -651,11 +734,9 @@
                     <span
                       class="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase"
                       :style="{
-                        color:
-                          priorityColorMap[row.priority] || '#6366f1',
+                        color: priorityColorMap[row.priority] || '#6366f1',
                         backgroundColor:
-                          (priorityColorMap[row.priority] ||
-                            '#6366f1') + '15'
+                          (priorityColorMap[row.priority] || '#6366f1') + '15'
                       }"
                     >
                       {{ getPriorityLabel(row.priority) }}
@@ -685,7 +766,7 @@
                     {{ formatDate(row.created_at) }}
                   </td>
                   <td
-                    class="px-6 py-3 text-right font-mono font-semibold"
+                    class="px-6 py-3 font-mono font-semibold text-right"
                     :class="
                       (row.resolve_hours || 0) > 24
                         ? 'text-red-500'
@@ -698,10 +779,14 @@
                 <tr v-if="incidents.length === 0">
                   <td
                     colspan="9"
-                    class="py-12 text-center text-sm text-gray-400"
+                    class="py-12 text-sm text-center text-gray-400"
                   >
-                    <span v-if="incidentsLoading">{{ t('common.loading') }}</span>
-                    <span v-else>{{ t('sals.dashboard.noResults') || 'No matching records' }}</span>
+                    <span v-if="incidentsLoading">{{
+                      t('common.loading')
+                    }}</span>
+                    <span v-else>{{
+                      t('sals.dashboard.noResults') || 'No matching records'
+                    }}</span>
                   </td>
                 </tr>
               </tbody>
@@ -709,23 +794,35 @@
           </div>
           <!-- Pagination -->
           <div
-            class="flex flex-col gap-3 border-t border-gray-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between"
+            class="flex flex-col gap-3 px-6 py-4 border-t border-gray-100 sm:flex-row sm:items-center sm:justify-between"
           >
             <!-- Left: info -->
             <div class="text-xs text-gray-500">
               {{ t('sals.dashboard.showing') }}
               <span class="font-semibold text-gray-700">
-                {{ incidentsTotal > 0 ? (incidentsPage - 1) * incidentsPageSize + 1 : 0 }}–{{ Math.min(incidentsPage * incidentsPageSize, incidentsTotal) }}
+                {{
+                  incidentsTotal > 0
+                    ? (incidentsPage - 1) * incidentsPageSize + 1
+                    : 0
+                }}–{{
+                  Math.min(incidentsPage * incidentsPageSize, incidentsTotal)
+                }}
               </span>
               {{ t('sals.dashboard.of') }}
-              <span class="font-semibold text-gray-700">{{ incidentsTotal }}</span>
+              <span class="font-semibold text-gray-700">{{
+                incidentsTotal
+              }}</span>
               {{ t('sals.dashboard.records') }}
             </div>
             <!-- Center: page buttons -->
             <div class="flex items-center gap-0.5">
               <button
-                class="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-semibold transition-colors"
-                :class="incidentsPage > 1 ? 'text-gray-600 hover:bg-gray-100' : 'cursor-default text-gray-300'"
+                class="flex items-center justify-center w-8 h-8 text-xs font-semibold transition-colors rounded-lg"
+                :class="
+                  incidentsPage > 1
+                    ? 'text-gray-600 hover:bg-gray-100'
+                    : 'cursor-default text-gray-300'
+                "
                 :disabled="incidentsPage <= 1"
                 @click="incidentsPage--"
               >
@@ -735,21 +832,30 @@
                 <span
                   v-if="p === '...'"
                   :key="`e${idx}`"
-                  class="flex h-8 w-8 items-center justify-center text-xs text-gray-400"
-                >…</span>
+                  class="flex items-center justify-center w-8 h-8 text-xs text-gray-400"
+                  >…</span
+                >
                 <button
                   v-else
                   :key="`p${p}`"
-                  class="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-semibold transition-colors"
-                  :class="p === incidentsPage ? 'bg-primary-600 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100'"
+                  class="flex items-center justify-center w-8 h-8 text-xs font-semibold transition-colors rounded-lg"
+                  :class="
+                    p === incidentsPage
+                      ? 'bg-primary-600 text-white shadow-sm'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  "
                   @click="incidentsPage = p"
                 >
                   {{ p }}
                 </button>
               </template>
               <button
-                class="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-semibold transition-colors"
-                :class="incidentsPage < incidentsTotalPages ? 'text-gray-600 hover:bg-gray-100' : 'cursor-default text-gray-300'"
+                class="flex items-center justify-center w-8 h-8 text-xs font-semibold transition-colors rounded-lg"
+                :class="
+                  incidentsPage < incidentsTotalPages
+                    ? 'text-gray-600 hover:bg-gray-100'
+                    : 'cursor-default text-gray-300'
+                "
                 :disabled="incidentsPage >= incidentsTotalPages"
                 @click="incidentsPage++"
               >
@@ -760,7 +866,7 @@
             <div class="flex items-center gap-1.5 text-xs text-gray-500">
               <select
                 v-model.number="incidentsPageSize"
-                class="rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-semibold text-gray-600 outline-none cursor-pointer"
+                class="px-2 py-1 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-md outline-none cursor-pointer"
               >
                 <option :value="10">10</option>
                 <option :value="20">20</option>
@@ -845,18 +951,11 @@ const stateOptions = [
   'Pending'
 ]
 const groupOptions = computed(() =>
-  (data.value.group_stats || [])
-    .map((r) => r.group)
-    .filter(Boolean)
+  (data.value.group_stats || []).map((r) => r.group).filter(Boolean)
 )
 
 // ── Colors ─────────────────────────────────────────
-const priorityChartColors = [
-  '#ef4444',
-  '#f97316',
-  '#eab308',
-  '#22c55e'
-]
+const priorityChartColors = ['#ef4444', '#f97316', '#eab308', '#22c55e']
 const priorityColorMap = {
   P1: '#ef4444',
   P2: '#f97316',
@@ -912,12 +1011,14 @@ async function loadIncidents() {
 
     const res = await salsApi.getIncidents(params)
     const body = res.data?.data ?? res.data
-    incidents.value = Array.isArray(body?.results)
-      ? body.results
-      : []
+    incidents.value = Array.isArray(body?.results) ? body.results : []
     incidentsTotal.value = body?.count ?? 0
   } catch (e) {
-    console.error('[loadIncidents]', e.response?.status, e.response?.data || e.message)
+    console.error(
+      '[loadIncidents]',
+      e.response?.status,
+      e.response?.data || e.message
+    )
     incidents.value = []
     incidentsTotal.value = 0
   } finally {
@@ -936,7 +1037,11 @@ const paginationRange = computed(() => {
   const pages = []
   pages.push(1)
   if (current > 3) pages.push('...')
-  for (let i = Math.max(2, current - 1); i <= Math.min(total - 1, current + 1); i++) {
+  for (
+    let i = Math.max(2, current - 1);
+    i <= Math.min(total - 1, current + 1);
+    i++
+  ) {
     pages.push(i)
   }
   if (current < total - 2) pages.push('...')
@@ -962,9 +1067,7 @@ const resolvedCount = computed(() => kpi.value.resolved ?? 0)
 const activeCount = computed(
   () => (kpi.value.pending ?? 0) + (kpi.value.in_progress ?? 0)
 )
-const resolutionRate = computed(() =>
-  (kpi.value.resolved_rate ?? 0).toFixed(1)
-)
+const resolutionRate = computed(() => (kpi.value.resolved_rate ?? 0).toFixed(1))
 
 // ── Chart Data ─────────────────────────────────────
 const trendChartData = computed(() => {
@@ -998,9 +1101,7 @@ const priorityChartData = computed(() => {
 })
 
 // ── Escalation Chart ──────────────────────────────
-const escalation = computed(
-  () => data.value.escalation_stats || {}
-)
+const escalation = computed(() => data.value.escalation_stats || {})
 const escalationTrendData = computed(() => {
   const trend = escalation.value.monthly_trend || []
   return {
@@ -1008,14 +1109,14 @@ const escalationTrendData = computed(() => {
     datasets: [
       {
         label: t('sals.dashboard.l1Label'),
-        data: trend.map((d) => d.l1 || 0),
+        data: trend.map((d) => d.first_tier || 0),
         backgroundColor: '#3b82f6',
         borderRadius: 4,
         borderWidth: 0
       },
       {
         label: t('sals.dashboard.l2Label'),
-        data: trend.map((d) => d.l2 || 0),
+        data: trend.map((d) => d.second_tier || 0),
         backgroundColor: '#f59e0b',
         borderRadius: 4,
         borderWidth: 0
@@ -1050,6 +1151,37 @@ const escalationBarOptions = {
       ticks: { font: { size: 11 }, color: '#9ca3af' }
     }
   }
+}
+
+// ── Escalation Pie Chart ────────────────────────────
+const escalationPieData = computed(() => {
+  const summary = escalation.value.summary || {}
+  return {
+    labels: [
+      t('sals.dashboard.firstTierResolved'),
+      t('sals.dashboard.escalatedToSecond')
+    ],
+    datasets: [
+      {
+        data: [
+          summary.first_tier_resolved || 0,
+          summary.escalated_to_second || 0
+        ],
+        backgroundColor: ['#3b82f6', '#f59e0b'],
+        borderWidth: 0
+      }
+    ]
+  }
+})
+
+const escalationPieOptions = {
+  responsive: true,
+  maintainAspectRatio: true,
+  plugins: {
+    legend: { display: false },
+    tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${ctx.parsed}` } }
+  },
+  cutout: '65%'
 }
 
 const doughnutOptions = {
