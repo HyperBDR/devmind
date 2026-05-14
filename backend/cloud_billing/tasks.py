@@ -624,14 +624,49 @@ def collect_billing_data(
                     "partial_success",
                 ):
                     error_msg = billing_info.get("error", "Unknown error")
-                    error_log = (
-                        f"Task collect_billing_data: Failed to get billing "
-                        f"(provider_id={provider.id}, name={provider.name}, "
-                        f"type={provider.provider_type}, "
-                        f"period={current_period}, error={error_msg})"
+                    is_config_error = billing_info.get("is_config_error", False)
+                    is_permission_error = billing_info.get(
+                        "is_permission_error", False
                     )
-                    log_collector.error(error_log)
-                    logger.error(f"{error_log}")
+
+                    if is_config_error:
+                        # Configuration errors should be logged as warnings,
+                        # not errors, since they indicate missing/invalid
+                        # configuration rather than system failures
+                        warning_msg = (
+                            f"Task collect_billing_data: Provider configuration "
+                            f"error (provider_id={provider.id}, "
+                            f"name={provider.name}, "
+                            f"type={provider.provider_type}, "
+                            f"period={current_period}, error={error_msg}). "
+                            f"Please configure the provider properly."
+                        )
+                        log_collector.warning(warning_msg)
+                        logger.warning(f"{warning_msg}")
+                    elif is_permission_error:
+                        # Permission errors should be logged as warnings,
+                        # not errors - they indicate missing IAM permissions
+                        # rather than system failures
+                        warning_msg = (
+                            f"Task collect_billing_data: Provider permission "
+                            f"error (provider_id={provider.id}, "
+                            f"name={provider.name}, "
+                            f"type={provider.provider_type}, "
+                            f"period={current_period}, error={error_msg}). "
+                            f"Check IAM permissions in cloud console."
+                        )
+                        log_collector.warning(warning_msg)
+                        logger.warning(f"{warning_msg}")
+                    else:
+                        error_log = (
+                            f"Task collect_billing_data: Failed to get billing "
+                            f"(provider_id={provider.id}, name={provider.name}, "
+                            f"type={provider.provider_type}, "
+                            f"period={current_period}, error={error_msg})"
+                        )
+                        log_collector.error(error_log)
+                        logger.error(f"{error_log}")
+
                     results["failed"].append(
                         {"provider": provider.name, "error": error_msg}
                     )
