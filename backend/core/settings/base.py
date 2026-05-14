@@ -170,6 +170,7 @@ INSTALLED_APPS += [
     'cloud_billing',
     'data_collector',
     'hyperbdr_dashboard',
+    'sals',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -573,6 +574,10 @@ SPECTACULAR_SETTINGS = {
         {
             'name': 'data-collector',
             'description': 'Data collection config, raw records, attachments, stats',
+        },
+        {
+            'name': 'sals',
+            'description': 'SALS operations console: incident management and statistics',
         },
     ],
 }

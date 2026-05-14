@@ -114,6 +114,9 @@
                   <option value="ai_pricehub">
                     {{ t('dataCollector.platforms.ai_pricehub') }}
                   </option>
+                  <option value="after_sales_incident">
+                    {{ t('dataCollector.platforms.after_sales_incident') }}
+                  </option>
                 </select>
               </div>
             </div>
@@ -678,13 +681,96 @@
             </div>
           </template>
 
+          <!-- After-Sales Incident: base_url + username/password -->
+          <template v-else-if="formData.platform === 'after_sales_incident'">
+            <div class="space-y-3 border-b border-gray-200 pb-4">
+              <h4 class="text-sm font-semibold text-gray-900">
+                {{ t('dataCollector.settings.authConfig') }}
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                <div class="md:col-span-1">
+                  <label
+                    for="asiBaseUrl"
+                    class="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    {{ t('dataCollector.afterSalesIncident.baseUrl') }}
+                  </label>
+                  <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                    {{ t('dataCollector.afterSalesIncident.baseUrlDesc') }}
+                  </p>
+                </div>
+                <div class="md:col-span-2">
+                  <BaseInput
+                    id="asiBaseUrl"
+                    v-model="formData.asi_base_url"
+                    type="url"
+                    :placeholder="t('dataCollector.afterSalesIncident.baseUrlPlaceholder')"
+                    required
+                    class="w-full"
+                  />
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                <div class="md:col-span-1">
+                  <label
+                    for="asiUsername"
+                    class="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    {{ t('dataCollector.afterSalesIncident.username') }}
+                  </label>
+                  <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                    {{ t('dataCollector.afterSalesIncident.usernameDesc') }}
+                  </p>
+                </div>
+                <div class="md:col-span-2">
+                  <BaseInput
+                    id="asiUsername"
+                    v-model="formData.asi_username"
+                    type="text"
+                    :placeholder="t('dataCollector.afterSalesIncident.usernamePlaceholder')"
+                    required
+                    class="w-full"
+                  />
+                </div>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                <div class="md:col-span-1">
+                  <label
+                    for="asiPassword"
+                    class="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    {{ t('dataCollector.afterSalesIncident.password') }}
+                  </label>
+                  <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                    {{ t('dataCollector.afterSalesIncident.passwordDesc') }}
+                  </p>
+                </div>
+                <div class="md:col-span-2">
+                  <BaseInput
+                    id="asiPassword"
+                    v-model="formData.asi_password"
+                    type="password"
+                    :placeholder="
+                      config
+                        ? t('dataCollector.afterSalesIncident.passwordPlaceholderEdit')
+                        : t('dataCollector.afterSalesIncident.passwordPlaceholder')
+                    "
+                    :required="!config"
+                    class="w-full"
+                  />
+                </div>
+              </div>
+            </div>
+          </template>
+
           <div
             v-if="
               formData.platform === 'jira' ||
               formData.platform === 'feishu' ||
               formData.platform === 'license' ||
               formData.platform === 'hyperbdr' ||
-              formData.platform === 'ai_pricehub'
+              formData.platform === 'ai_pricehub' ||
+              formData.platform === 'after_sales_incident'
             "
             class="space-y-1 pt-2"
           >
@@ -1018,7 +1104,10 @@
                 />
               </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div
+              v-if="!['after_sales_incident', 'license'].includes(formData.platform)"
+              class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start"
+            >
               <div class="md:col-span-1">
                 <label
                   for="initialRange"
@@ -1150,7 +1239,10 @@
                 />
               </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div
+              v-if="!['after_sales_incident', 'license'].includes(formData.platform)"
+              class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start"
+            >
               <div class="md:col-span-1">
                 <label
                   for="sec-initialRange"
@@ -1361,6 +1453,10 @@ const formData = reactive({
   ai_pricehub_currency: 'CNY',
   ai_pricehub_points_per_currency_unit: 10.0,
   ai_pricehub_parser_llm_config_uuid: '',
+  // After-Sales Incident-specific fields
+  asi_base_url: '',
+  asi_username: '',
+  asi_password: '',
   // Common fields
   selected_project_keys: [],
   schedule_cron: '0 */2 * * *',
@@ -1447,6 +1543,12 @@ const step1AuthFieldsFilled = computed(() => {
       Number(formData.ai_pricehub_points_per_currency_unit) > 0 &&
       !!(formData.ai_pricehub_parser_llm_config_uuid || '').trim()
     )
+  }
+  if (formData.platform === 'after_sales_incident') {
+    const base = (formData.asi_base_url || '').trim()
+    const user = (formData.asi_username || '').trim()
+    const pass = (formData.asi_password || '').trim()
+    return !!(base) && !!(user) && (!!pass || !!props.config)
   }
   return false
 })
@@ -1576,6 +1678,16 @@ function buildAuthValue() {
       ]
     }
   }
+  if (formData.platform === 'after_sales_incident') {
+    return {
+      base_url: (formData.asi_base_url || '').trim(),
+      auth: {
+        base_url: (formData.asi_base_url || '').trim(),
+        username: (formData.asi_username || '').trim(),
+        password: (formData.asi_password || '').trim(),
+      }
+    }
+  }
   return {}
 }
 
@@ -1618,6 +1730,16 @@ function buildAuthValueForPatch() {
       auth: {
         username: formData.license_username,
         password: formData.license_password
+      }
+    }
+  }
+  if (formData.platform === 'after_sales_incident') {
+    return {
+      base_url: (formData.asi_base_url || '').trim(),
+      auth: {
+        base_url: (formData.asi_base_url || '').trim(),
+        username: (formData.asi_username || '').trim(),
+        password: (formData.asi_password || '').trim(),
       }
     }
   }
@@ -1745,6 +1867,13 @@ function buildValue() {
     value.project_keys = Array.isArray(formData.selected_project_keys)
       ? formData.selected_project_keys
       : ['sync']
+  } else if (formData.platform === 'after_sales_incident') {
+    value.base_url = (formData.asi_base_url || '').trim()
+    value.auth = {
+      base_url: (formData.asi_base_url || '').trim(),
+      username: (formData.asi_username || '').trim(),
+      password: (formData.asi_password || '').trim(),
+    }
   }
   return value
 }
@@ -1797,6 +1926,10 @@ function applyConfig(c) {
     Number(primarySource?.points_per_currency_unit) || 10.0
   formData.ai_pricehub_parser_llm_config_uuid =
     primarySource?.parser_llm_config_uuid || ''
+  // After-Sales Incident
+  formData.asi_base_url = v.base_url || auth.base_url || ''
+  formData.asi_username = auth.username || ''
+  formData.asi_password = ''
   formData.schedule_cron = v.schedule_cron || '0 */2 * * *'
   formData.cleanup_cron = v.cleanup_cron || '0 3 * * *'
   formData.retention_days = v.retention_days ?? 180
@@ -1866,6 +1999,9 @@ watch(
         formData.ai_pricehub_currency = 'CNY'
         formData.ai_pricehub_points_per_currency_unit = 10.0
         formData.ai_pricehub_parser_llm_config_uuid = ''
+        formData.asi_base_url = ''
+        formData.asi_username = ''
+        formData.asi_password = ''
         formData.selected_project_keys = []
         formData.schedule_cron = '0 */2 * * *'
         formData.cleanup_cron = '0 3 * * *'
@@ -1929,7 +2065,10 @@ watch(
     ai_pricehub_points_per_currency_unit:
       formData.ai_pricehub_points_per_currency_unit,
     ai_pricehub_parser_llm_config_uuid:
-      formData.ai_pricehub_parser_llm_config_uuid
+      formData.ai_pricehub_parser_llm_config_uuid,
+    asi_base_url: formData.asi_base_url,
+    asi_username: formData.asi_username,
+    asi_password: formData.asi_password,
   }),
   () => {
     step1AuthVerified.value = false

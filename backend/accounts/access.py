@@ -32,6 +32,11 @@ FEATURE_DEFINITIONS = (
         'label': 'Admin Console',
         'default_path': '/management/users',
     },
+    {
+        'key': 'sales_work_orders',
+        'label': 'Sales Work Orders',
+        'default_path': '/sals/dashboard',
+    },
 )
 
 FEATURE_KEYS = tuple(item['key'] for item in FEATURE_DEFINITIONS)
@@ -51,6 +56,7 @@ PLATFORM_DEFAULT_PATHS = FEATURE_DEFAULT_PATHS
 FEATURE_ALIASES = {
     'cloud_billing': 'operations_console',
     'data_collector': 'operations_console',
+    'sals': 'sales_work_orders',
     'ai_model_pricing': 'ai_pricehub',
     'llm_console': 'admin_console',
     'task_management_console': 'admin_console',
