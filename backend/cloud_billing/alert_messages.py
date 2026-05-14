@@ -387,18 +387,6 @@ def build_alert_message(
                     language=normalized_language,
                 )
             )
-            if current_balance is not None:
-                lines.append(
-                    format_alert_line(
-                        localized_text(
-                            normalized_language,
-                            "Current balance",
-                            "当前余额",
-                        ),
-                        f"{current_balance:.2f} {currency}",
-                        language=normalized_language,
-                    )
-                )
             if resource_cost_items:
                 lines.extend(_format_resource_cost_lines(
                     resource_cost_items, currency, normalized_language,
@@ -497,18 +485,6 @@ def build_alert_message(
                         "金额阈值",
                     ),
                     f"{alert_rule.growth_amount_threshold:.2f} {currency}",
-                    language=normalized_language,
-                )
-            )
-        if current_balance is not None:
-            lines.append(
-                format_alert_line(
-                    localized_text(
-                        normalized_language,
-                        "Current balance",
-                        "当前余额",
-                    ),
-                    f"{current_balance:.2f} {currency}",
                     language=normalized_language,
                 )
             )

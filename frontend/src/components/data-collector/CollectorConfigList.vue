@@ -604,11 +604,37 @@ async function toggleEnabled(c, enabled) {
 }
 
 function openCollectModal(c) {
+  // after_sales_incident 不需要选择时间范围，直接触发采集
+  if (c.platform === 'after_sales_incident') {
+    triggerCollectDirect(c)
+    return
+  }
   collectConfig.value = c
   collectRange.value = '1w'
   customStartDate.value = ''
   customEndDate.value = ''
   showCollectModal.value = true
+}
+
+async function triggerCollectDirect(c) {
+  submittingCollect.value = true
+  try {
+    const res = await dataCollectorApi.triggerCollect(c.uuid, {})
+    const data = extractResponseData(res)
+    const taskId = data?.task_id
+    showSuccess(t('dataCollector.settings.collectTriggered'))
+    loadConfigs()
+    if (taskId) {
+      router.push({
+        path: '/data-collector/tasks',
+        query: { task_id: taskId }
+      })
+    }
+  } catch (e) {
+    showError(extractErrorMessage(e, t('common.error')))
+  } finally {
+    submittingCollect.value = false
+  }
 }
 
 function closeCollectModal() {

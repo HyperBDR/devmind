@@ -22,24 +22,7 @@
               {{ t('sals.dashboard.subtitle') }}
             </p>
           </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <BaseButton
-              variant="outline"
-              size="sm"
-              :loading="loading"
-              @click="loadDashboard"
-            >
-              {{ t('common.refresh') }}
-            </BaseButton>
-            <BaseButton
-              variant="outline"
-              size="sm"
-              :loading="syncing"
-              @click="syncDb"
-            >
-              {{ t('sals.dashboard.sync') }}
-            </BaseButton>
-          </div>
+          <div class="flex flex-wrap items-center gap-3" />
         </div>
       </div>
 
@@ -896,7 +879,6 @@ import {
 } from 'chart.js'
 import { Bar, Doughnut } from 'vue-chartjs'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { salsApi } from '@/api/sals'
 
@@ -912,7 +894,6 @@ ChartJS.register(
 const { t } = useI18n()
 
 const loading = ref(false)
-const syncing = ref(false)
 const error = ref('')
 const dashboardLoaded = ref(false)
 const perfMode = ref('group')
@@ -979,22 +960,6 @@ async function loadDashboard() {
       'Failed to load dashboard'
   } finally {
     loading.value = false
-  }
-}
-
-async function syncDb() {
-  syncing.value = true
-  try {
-    await salsApi.syncDb('api', true)
-    await loadDashboard()
-  } catch (e) {
-    error.value =
-      e.response?.data?.message ||
-      e.response?.data?.detail ||
-      e.message ||
-      'Sync failed'
-  } finally {
-    syncing.value = false
   }
 }
 

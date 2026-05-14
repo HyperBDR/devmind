@@ -760,28 +760,6 @@
                   />
                 </div>
               </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label
-                    for="asiTableName"
-                    class="block text-sm font-medium text-gray-700 mb-1"
-                  >
-                    {{ t('dataCollector.afterSalesIncident.tableName') }}
-                  </label>
-                  <p class="text-xs text-gray-500 mb-2 md:mb-0">
-                    {{ t('dataCollector.afterSalesIncident.tableNameDesc') }}
-                  </p>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    id="asiTableName"
-                    v-model="formData.asi_table_name"
-                    type="text"
-                    :placeholder="t('dataCollector.afterSalesIncident.tableNamePlaceholder')"
-                    class="w-full"
-                  />
-                </div>
-              </div>
             </div>
           </template>
 
@@ -1126,7 +1104,10 @@
                 />
               </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div
+              v-if="!['after_sales_incident', 'license'].includes(formData.platform)"
+              class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start"
+            >
               <div class="md:col-span-1">
                 <label
                   for="initialRange"
@@ -1258,7 +1239,10 @@
                 />
               </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div
+              v-if="!['after_sales_incident', 'license'].includes(formData.platform)"
+              class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start"
+            >
               <div class="md:col-span-1">
                 <label
                   for="sec-initialRange"
@@ -1473,7 +1457,6 @@ const formData = reactive({
   asi_base_url: '',
   asi_username: '',
   asi_password: '',
-  asi_table_name: 'after_sale_incident',
   // Common fields
   selected_project_keys: [],
   schedule_cron: '0 */2 * * *',
@@ -1702,7 +1685,6 @@ function buildAuthValue() {
         base_url: (formData.asi_base_url || '').trim(),
         username: (formData.asi_username || '').trim(),
         password: (formData.asi_password || '').trim(),
-        table_name: (formData.asi_table_name || '').trim() || 'after_sale_incident'
       }
     }
   }
@@ -1758,7 +1740,6 @@ function buildAuthValueForPatch() {
         base_url: (formData.asi_base_url || '').trim(),
         username: (formData.asi_username || '').trim(),
         password: (formData.asi_password || '').trim(),
-        table_name: (formData.asi_table_name || '').trim() || 'after_sale_incident'
       }
     }
   }
@@ -1892,7 +1873,6 @@ function buildValue() {
       base_url: (formData.asi_base_url || '').trim(),
       username: (formData.asi_username || '').trim(),
       password: (formData.asi_password || '').trim(),
-      table_name: (formData.asi_table_name || '').trim() || 'after_sale_incident'
     }
   }
   return value
@@ -1950,7 +1930,6 @@ function applyConfig(c) {
   formData.asi_base_url = v.base_url || auth.base_url || ''
   formData.asi_username = auth.username || ''
   formData.asi_password = ''
-  formData.asi_table_name = auth.table_name || 'after_sale_incident'
   formData.schedule_cron = v.schedule_cron || '0 */2 * * *'
   formData.cleanup_cron = v.cleanup_cron || '0 3 * * *'
   formData.retention_days = v.retention_days ?? 180
@@ -2023,7 +2002,6 @@ watch(
         formData.asi_base_url = ''
         formData.asi_username = ''
         formData.asi_password = ''
-        formData.asi_table_name = 'after_sale_incident'
         formData.selected_project_keys = []
         formData.schedule_cron = '0 */2 * * *'
         formData.cleanup_cron = '0 3 * * *'
@@ -2091,7 +2069,6 @@ watch(
     asi_base_url: formData.asi_base_url,
     asi_username: formData.asi_username,
     asi_password: formData.asi_password,
-    asi_table_name: formData.asi_table_name
   }),
   () => {
     step1AuthVerified.value = false

@@ -2033,10 +2033,7 @@
       "password": "Password",
       "passwordDesc": "Platform login password",
       "passwordPlaceholder": "••••••••",
-      "passwordPlaceholderEdit": "Leave blank to keep existing",
-      "tableName": "Table Name",
-      "tableNameDesc": "OneProCloud API table name, defaults to after_sale_incident",
-      "tableNamePlaceholder": "after_sale_incident"
+      "passwordPlaceholderEdit": "Leave blank to keep existing"
     }
   },
   "llm": {

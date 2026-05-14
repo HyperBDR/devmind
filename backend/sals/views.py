@@ -24,6 +24,7 @@ from .serializers import (
     UserSerializer,
 )
 from .services import etl
+from .tasks import sync_incidents
 
 logger = logging.getLogger(__name__)
 
@@ -721,7 +722,8 @@ class InitDbAPIView(APIView):
 
     @extend_schema(
         tags=["sals"],
-        summary="Initialize / sync database",
+        summary="Initialize / sync database (async)",
+        description="Trigger async sync task. Use /sync/task-status/ to check progress.",
         parameters=[
             {"name": "source", "in": "query", "schema": {"type": "string", "enum": ["api", "excel"]}},
             {"name": "full_sync", "in": "query", "schema": {"type": "boolean"}},
@@ -732,16 +734,33 @@ class InitDbAPIView(APIView):
         source = request.query_params.get("source", "api")
         full_sync = request.query_params.get("full_sync", "true").lower() != "false"
 
+        if source != "api":
+            return Response(
+                {"status": "error", "message": "Excel source not supported in Django mode"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
-            if source == "api":
-                result = etl.sync_from_api(full_sync=full_sync)
-            else:
-                result = {"status": "error", "message": "Excel source not supported in Django mode"}
-            status_code = status.HTTP_200_OK if result.get("status") == "ok" else status.HTTP_400_BAD_REQUEST
-            return Response(result, status=status_code)
+            result = sync_incidents.delay(
+                full_sync=full_sync,
+                user_id=request.user.id,
+            )
+            logger.info(
+                "InitDb async task triggered: task_id=%s, full_sync=%s",
+                result.id,
+                full_sync,
+            )
+            return Response({
+                "status": "ok",
+                "message": "Sync task submitted",
+                "task_id": result.id,
+            })
         except Exception as e:
-            logger.exception("InitDb failed")
-            return Response({"status": "error", "message": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception("InitDb trigger failed")
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
 
 class SyncStatusAPIView(APIView):
@@ -755,3 +774,52 @@ class SyncStatusAPIView(APIView):
             "api_configured": bool(etl.login_api()),
             "sync_limit": etl.API_SYNC_LIMIT,
         })
+
+
+class SyncTaskStatusAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        tags=["sals"],
+        summary="Get sync task status",
+        description="Query the status of an async sync task.",
+        parameters=[
+            {"name": "task_id", "in": "query", "schema": {"type": "string"}, "required": True},
+        ],
+    )
+    def get(self, request):
+        _check_feature_permission(request.user)
+        task_id = request.query_params.get("task_id")
+
+        if not task_id:
+            return Response(
+                {"error": "task_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from agentcore_task.adapters.django import TaskTracker
+
+            task = TaskTracker.get_task(task_id, sync=True)
+            if not task:
+                return Response(
+                    {"error": "Task not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            return Response({
+                "task_id": task.task_id,
+                "status": task.status,
+                "result": task.result,
+                "error": task.error,
+                "metadata": task.metadata,
+                "created_at": task.created_at,
+                "started_at": task.started_at,
+                "finished_at": task.finished_at,
+            })
+        except Exception as e:
+            logger.exception("SyncTaskStatus failed for task_id=%s", task_id)
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )

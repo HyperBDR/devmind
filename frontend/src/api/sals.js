@@ -81,5 +81,12 @@ export const salsApi = {
   async getSyncStatus() {
     const response = await apiClient.get('/v1/sals/sync/status/')
     return response
+  },
+
+  async getSyncTaskStatus(taskId) {
+    const response = await apiClient.get('/v1/sals/sync/task-status/', {
+      params: { task_id: taskId }
+    })
+    return response
   }
 }

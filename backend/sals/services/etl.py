@@ -191,7 +191,8 @@ def _build_headers(token: str) -> Dict[str, str]:
     return {
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/147.0.0.0 Safari/537.36",
+        "Referer": f"{API_BASE_URL}/target/incident_list.do",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36",
     }
 
 
@@ -233,87 +234,6 @@ def _parse_raw_incident(raw: dict) -> Optional[dict]:
     }
     mapped = {k: v for k, v in mapped.items() if v is not None}
     return mapped if mapped.get("number") else None
-
-
-def fetch_incidents_from_api(
-    token: str,
-    limit: Optional[int] = 200,
-) -> List[Dict[str, Any]]:
-    headers = _build_headers(token)
-    all_records: List[Dict[str, Any]] = []
-    batch_size = 200
-    offset = 0
-
-    # 获取要排除的公司 sys_ids（需要先同步 company）
-    excluded_sys_ids = _get_excluded_company_sys_ids()
-
-    def _build_query_param() -> str:
-        """Build sysparm_query to exclude specified companies."""
-        if not excluded_sys_ids:
-            return ""
-        query_parts = []
-        for sys_id in excluded_sys_ids:
-            if sys_id:
-                query_parts.append(f"companyNOT LIKE{sys_id}")
-        if query_parts:
-            return "^".join(query_parts) + "^ORDERBYDESCsys_created_on"
-        return ""
-
-    while limit is None or len(all_records) < limit:
-        remaining = (
-            (limit - len(all_records))
-            if limit is not None
-            else batch_size
-        )
-        params = {
-            "sysparm_limit": min(batch_size, remaining),
-            "sysparm_offset": offset,
-            "sysparm_display_value": "true",
-        }
-        # 添加排除公司的查询条件
-        query = _build_query_param()
-        if query:
-            params["sysparm_query"] = query
-        url = f"{API_BASE_URL}/api/hyper/table/incident"
-        try:
-            resp = requests.get(
-                url, headers=headers, params=params,
-                timeout=60, verify=False,
-            )
-        except Exception as e:
-            logger.error(
-                "Request exception at offset %s: %s", offset, e,
-            )
-            break
-
-        if resp.status_code != 200:
-            logger.error(
-                "API request failed [%s]: %s",
-                resp.status_code, resp.text[:300],
-            )
-            break
-
-        body = resp.json()
-        records = body.get("data", [])
-        if not records:
-            break
-
-        for raw in records:
-            parsed = _parse_raw_incident(raw)
-            if parsed:
-                all_records.append(parsed)
-
-        logger.info(
-            "Fetched %s records (offset=%s)",
-            len(all_records), offset,
-        )
-        offset += batch_size
-        if len(records) < batch_size:
-            break
-
-    if limit is not None:
-        return all_records[:limit]
-    return all_records
 
 
 def fetch_companies_from_api(token: str) -> List[Dict[str, Any]]:
@@ -608,7 +528,7 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
     concurrency = 4
     total_synced = 0
     limit = None if full_sync else API_SYNC_LIMIT
-    offset = 0
+    first_row = 1
 
     def _build_query_param() -> str:
         """Build sysparm_query to exclude specified companies."""
@@ -622,12 +542,12 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
             return "^".join(query_parts) + "^ORDERBYDESCsys_created_on"
         return ""
 
-    def _fetch_page(off: int) -> tuple[int, list]:
-        """Fetch a single page; returns (offset, records)."""
+    def _fetch_page(fr: int) -> tuple[int, list]:
+        """Fetch a single page; returns (first_row, records)."""
         try:
             params = {
-                "sysparm_limit": batch_size,
-                "sysparm_offset": off,
+                "sysparm_first_row": fr,
+                "sysparm_rowcount": batch_size,
                 "sysparm_display_value": "true",
             }
             # 添加排除公司的查询条件
@@ -640,16 +560,16 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
             )
         except Exception as e:
             logger.error(
-                "Request exception offset=%s: %s", off, e,
+                "Request exception first_row=%s: %s", fr, e,
             )
-            return off, []
+            return fr, []
         if resp.status_code != 200:
             logger.error(
-                "API request failed [%s] offset=%s: %s",
-                resp.status_code, off, resp.text[:200],
+                "API request failed [%s] first_row=%s: %s",
+                resp.status_code, fr, resp.text[:200],
             )
-            return off, []
-        return off, resp.json().get("data", []) or []
+            return fr, []
+        return fr, resp.json().get("data", []) or []
 
     def _write_batch(records: list) -> tuple[int, set]:
         """Transform and persist one batch.
@@ -691,25 +611,25 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
     done = False
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
         while not done:
-            wave_offsets = [
-                offset + i * batch_size
+            wave_rows = [
+                first_row + i * batch_size
                 for i in range(concurrency)
             ]
-            if not wave_offsets:
+            if not wave_rows:
                 break
 
             futures = {
-                pool.submit(_fetch_page, off): off
-                for off in wave_offsets
+                pool.submit(_fetch_page, fr): fr
+                for fr in wave_rows
             }
 
             results: dict[int, list] = {}
             for future in as_completed(futures):
-                off, records = future.result()
-                results[off] = records
+                fr, records = future.result()
+                results[fr] = records
 
-            for off in sorted(results):
-                records = results[off]
+            for fr in sorted(results):
+                records = results[fr]
                 if not records:
                     done = True
                     break
@@ -717,9 +637,9 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
                 total_synced += written
                 synced_numbers |= numbers
                 logger.info(
-                    "Batch done: offset=%s "
+                    "Batch done: first_row=%s "
                     "written=%s total=%s",
-                    off, written, total_synced,
+                    fr, written, total_synced,
                 )
                 if len(records) < batch_size:
                     done = True
@@ -730,7 +650,7 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
                     done = True
                     break
 
-            offset += concurrency * batch_size
+            first_row += concurrency * batch_size
 
     # 全量模式：删除本次同步未覆盖的旧记录
     if full_sync and synced_numbers:

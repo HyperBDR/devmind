@@ -2037,10 +2037,7 @@
       "password": "密码",
       "passwordDesc": "平台登录密码",
       "passwordPlaceholder": "••••••••",
-      "passwordPlaceholderEdit": "不修改请留空",
-      "tableName": "表名",
-      "tableNameDesc": "OneProCloud API 表名，默认为 after_sale_incident",
-      "tableNamePlaceholder": "after_sale_incident"
+      "passwordPlaceholderEdit": "不修改请留空"
     }
   },
   "llm": {

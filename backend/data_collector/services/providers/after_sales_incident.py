@@ -3,7 +3,7 @@ OneProCloud After-Sales Work Order (售后工单) provider.
 
 Authentication: base_url + username + password; or bearer_token directly.
 POST /api/hyper/auth/login to obtain Bearer token.
-Table API: GET /api/hyper/table/{table_name} with pagination.
+Table API: GET /api/hyper/table/incident with pagination.
 
 Expected auth_config:
 {
@@ -11,7 +11,6 @@ Expected auth_config:
     "username": "...",
     "password": "...",
     "bearer_token": "...",     # optional, takes precedence over username/password
-    "table_name": "after_sale_incident",  # optional, defaults to after_sale_incident
 }
 """
 import base64
@@ -29,7 +28,6 @@ from .base import BaseProvider
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://support.oneprocloud.com"
-DEFAULT_TABLE_NAME = "after_sale_incident"
 REQUEST_TIMEOUT = 60
 BATCH_SIZE = 200
 # Default SLA thresholds per priority
@@ -152,22 +150,29 @@ class AfterSalesIncidentProvider(BaseProvider):
     def __init__(self) -> None:
         self._token: str | None = None
         self._base_url: str = DEFAULT_BASE_URL
-        self._table_name: str = DEFAULT_TABLE_NAME
 
     def _get_excluded_company_sys_ids(self) -> list[str]:
         """Get sys_ids of companies to exclude from sync.
-        Reads from EXCLUDED_COMPANY_NAMES (env var) and queries Company table.
+        Reads from EXCLUDED_COMPANY_NAMES (env var) and queries sals Company table.
         """
         if not EXCLUDED_COMPANY_NAMES:
             return []
         try:
-            from data_collector.models import CollectorConfig
+            from sals.models import Company
         except ImportError:
             return []
-        # Try to get company sys_ids from CollectorConfig (sync companies first)
-        # For now, we rely on the caller having synced companies via sals.etl
-        # This method is a placeholder for future enhancement
-        return []
+        sys_ids = list(
+            Company.objects.filter(
+                name__in=EXCLUDED_COMPANY_NAMES
+            ).values_list("sys_id", flat=True)
+        )
+        if sys_ids:
+            logger.info(
+                "Excluding companies from sync: %s (sys_ids: %s)",
+                EXCLUDED_COMPANY_NAMES,
+                sys_ids,
+            )
+        return sys_ids
 
     def _build_exclusion_query(self) -> str:
         """Build sysparm_query to exclude specified companies."""
@@ -182,14 +187,13 @@ class AfterSalesIncidentProvider(BaseProvider):
             return "^".join(query_parts) + "^ORDERBYDESCsys_created_on"
         return ""
 
-    def _resolve_config(self, auth_config: dict) -> tuple[str, str, str]:
+    def _resolve_config(self, auth_config: dict) -> tuple[str, str]:
         base_url = (
             auth_config.get("base_url")
             or DEFAULT_BASE_URL
         ).rstrip("/")
         token = (auth_config.get("bearer_token") or "").strip()
-        table_name = (auth_config.get("table_name") or DEFAULT_TABLE_NAME).strip()
-        return base_url, token, table_name
+        return base_url, token
 
     def _do_login(self, auth_config: dict) -> str | None:
         username = (auth_config.get("username") or "").strip()
@@ -234,7 +238,7 @@ class AfterSalesIncidentProvider(BaseProvider):
         if not force_refresh and self._token and _is_token_valid(self._token):
             return self._token
         # Try direct bearer token first
-        _, token, _ = self._resolve_config(auth_config)
+        _, token = self._resolve_config(auth_config)
         if token and (force_refresh or not _is_token_valid(token)):
             # bearer token 已过期或强制刷新，走登录
             token = None
@@ -248,14 +252,18 @@ class AfterSalesIncidentProvider(BaseProvider):
     def _build_headers(self, token: str) -> dict:
         return {
             "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{self._base_url}/target/incident_list.do",
             "User-Agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 Chrome/147.0.0.0 Safari/537.36"
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
             ),
+            "sec-ch-ua": '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"macOS"',
         }
 
-    def _record_to_item(self, raw: dict, table_name: str) -> dict | None:
+    def _record_to_item(self, raw: dict) -> dict | None:
         data_map = raw.get("record_data_map", raw)
         number = data_map.get("number") or raw.get("number")
         if not number:
@@ -294,7 +302,7 @@ class AfterSalesIncidentProvider(BaseProvider):
         )
 
         raw_data = {
-            "table_name": table_name,
+            "table_name": "incident",
             "record": data_map,
             "_derived": {
                 "resolve_hours": round(resolve_hours, 2) if resolve_hours is not None else None,
@@ -330,13 +338,18 @@ class AfterSalesIncidentProvider(BaseProvider):
         """Verify OneProCloud credentials via login endpoint."""
         if not auth_config:
             return False
-        self._base_url, _, self._table_name = self._resolve_config(auth_config)
+        self._base_url, _ = self._resolve_config(auth_config)
         token = self._ensure_token(auth_config)
         if not token:
             return False
         # Quick smoke-test: try fetching with the token
-        url = f"{self._base_url}/api/hyper/table/{self._table_name}"
-        params = {"sysparm_limit": 1, "sysparm_offset": 0}
+        url = f"{self._base_url}/api/hyper/table/incident"
+        params = {
+            "sysparm_first_row": 1,
+            "sysparm_rowcount": 1,
+            "sysparm_query_from": "List",
+            "sysparm_view": "Default view",
+        }
         try:
             resp = requests.get(
                 url,
@@ -393,34 +406,59 @@ class AfterSalesIncidentProvider(BaseProvider):
         Fetch after-sales work order records from OneProCloud table API.
         Returns list of collector items.
         """
-        self._base_url, _, self._table_name = self._resolve_config(auth_config)
+        self._base_url, _ = self._resolve_config(auth_config)
         token = self._ensure_token(auth_config)
         if not token:
             logger.warning("AfterSalesIncidentProvider.collect: no token, returning []")
             return []
 
         headers = self._build_headers(token)
-        url = f"{self._base_url}/api/hyper/table/{self._table_name}"
+        url = f"{self._base_url}/api/hyper/table/incident"
         out: list[dict] = []
         offset = 0
+
+        # 构建时间范围查询条件 (使用 ServiceNow 的 gs.dateGenerate 格式)
+        time_query = ""
+        if start_time:
+            st = _parse_datetime(start_time)
+            if st:
+                date_str = st.strftime("%Y-%m-%d")
+                time_str = st.strftime("%H:%M:%S")
+                time_query = f"sys_created_on>=javascript:gs.dateGenerate('{date_str}','{time_str}')"
+        if end_time:
+            et = _parse_datetime(end_time)
+            if et:
+                date_str = et.strftime("%Y-%m-%d")
+                time_str = et.strftime("%H:%M:%S")
+                if time_query:
+                    time_query += "^"
+                time_query += f"sys_created_on<=javascript:gs.dateGenerate('{date_str}','{time_str}')"
 
         # 构建排除公司的查询条件
         exclusion_query = self._build_exclusion_query()
         if exclusion_query:
+            if time_query:
+                time_query += "^" + exclusion_query
+            else:
+                time_query = exclusion_query
+
+        if time_query:
             logger.info(
-                "AfterSalesIncidentProvider.collect: excluding companies with query: %s",
-                exclusion_query,
+                "AfterSalesIncidentProvider.collect: time query: %s",
+                time_query,
             )
 
         while True:
             params = {
-                "sysparm_limit": BATCH_SIZE,
-                "sysparm_offset": offset,
+                "sysparm_first_row": offset + 1,  # ServiceNow 使用 1-based index
+                "sysparm_rowcount": BATCH_SIZE,
                 "sysparm_display_value": "true",
+                "sysparm_query_from": "List",
+                "sysparm_view": "Default view",
             }
-            # 添加排除公司的查询条件
-            if exclusion_query:
-                params["sysparm_query"] = exclusion_query
+            # 添加时间范围和排除公司的查询条件
+            if time_query:
+                params["sysparm_query"] = time_query
             try:
                 resp = requests.get(
                     url,
@@ -457,14 +495,17 @@ class AfterSalesIncidentProvider(BaseProvider):
                 break
 
             body = resp.json()
+            logger.info("AfterSalesIncidentProvider.collect response body keys: %s", list(body.keys()))
             records = body.get("data", [])
+            logger.info("AfterSalesIncidentProvider.collect records count: %s", len(records))
             if not records:
+                logger.info("AfterSalesIncidentProvider.collect raw response: %s", resp.text[:500])
                 break
 
             for raw in records:
                 if not isinstance(raw, dict):
                     continue
-                item = self._record_to_item(raw, self._table_name)
+                item = self._record_to_item(raw)
                 if item:
                     out.append(item)
 
@@ -499,14 +540,14 @@ class AfterSalesIncidentProvider(BaseProvider):
         """
         if not source_unique_ids:
             return []
-        self._base_url, _, self._table_name = self._resolve_config(auth_config)
+        self._base_url, _ = self._resolve_config(auth_config)
         token = self._ensure_token(auth_config)
         if not token:
             return []
 
         missing: list[str] = []
         headers = self._build_headers(token)
-        url = f"{self._base_url}/api/hyper/table/{self._table_name}"
+        url = f"{self._base_url}/api/hyper/table/incident"
 
         for sid in source_unique_ids:
             params = {

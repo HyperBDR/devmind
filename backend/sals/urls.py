@@ -12,6 +12,7 @@ urlpatterns = [
     # Init / sync
     path("init-db/", views.InitDbAPIView.as_view(), name="sals-init-db"),
     path("sync/status/", views.SyncStatusAPIView.as_view(), name="sals-sync-status"),
+    path("sync/task-status/", views.SyncTaskStatusAPIView.as_view(), name="sals-sync-task-status"),
 
     # Stats
     path("stats/kpi/", views.KpiStatAPIView.as_view(), name="sals-stats-kpi"),
