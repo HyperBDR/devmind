@@ -34,7 +34,6 @@ def _init_sentry():
         traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
         profiles_sample_rate=SENTRY_PROFILING_SAMPLE_RATE,
         send_default_pii=SENTRY_SEND_DEFAULT_PII,
-        timeout=SENTRY_TIMEOUT,
         integrations=[
             DjangoIntegration(),
             CeleryIntegration(),
