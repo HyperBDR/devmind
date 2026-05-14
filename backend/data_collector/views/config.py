@@ -365,6 +365,22 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             },
             initial_status=TaskStatus.PENDING,
         )
+
+        # after_sales_incident 采集完成后，触发 sals 同步
+        if config.platform == "after_sales_incident":
+            from sals.tasks import sync_incidents
+
+            sals_task = sync_incidents.delay(full_sync=False, user_id=request.user.id)
+            register_task_execution(
+                task_id=sals_task.id,
+                task_name="sals.tasks.sync_incidents",
+                module="sals",
+                task_kwargs={"full_sync": False},
+                created_by=request.user,
+                metadata={"triggered_by": "data_collector.collect"},
+                initial_status=TaskStatus.PENDING,
+            )
+
         return Response(
             {"task_id": task.id, "message": "Collect task queued."},
             status=status.HTTP_202_ACCEPTED,

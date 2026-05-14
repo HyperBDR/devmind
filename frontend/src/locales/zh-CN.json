@@ -796,7 +796,12 @@
       "nextPage": "下一页",
       "showing": "显示",
       "of": "共",
-      "records": "条"
+      "records": "条",
+      "noResults": "暂无匹配记录",
+      "l1Label": "L1",
+      "l2Label": "L2",
+      "l1Count": "L1 工单数",
+      "l2Count": "L2 工单数"
     }
   },
   "hyperbdrDashboard": {

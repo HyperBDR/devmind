@@ -791,7 +791,12 @@
       "nextPage": "Next",
       "showing": "Showing",
       "of": "of",
-      "records": "records"
+      "records": "records",
+      "noResults": "No matching records",
+      "l1Label": "L1",
+      "l2Label": "L2",
+      "l1Count": "L1 Tickets",
+      "l2Count": "L2 Tickets"
     }
   },
   "hyperbdrDashboard": {
