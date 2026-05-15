@@ -628,6 +628,7 @@ def collect_billing_data(
                     is_permission_error = billing_info.get(
                         "is_permission_error", False
                     )
+                    is_api_error = billing_info.get("is_api_error", False)
 
                     if is_config_error:
                         # Configuration errors should be logged as warnings,
@@ -654,6 +655,20 @@ def collect_billing_data(
                             f"type={provider.provider_type}, "
                             f"period={current_period}, error={error_msg}). "
                             f"Check IAM permissions in cloud console."
+                        )
+                        log_collector.warning(warning_msg)
+                        logger.warning(f"{warning_msg}")
+                    elif is_api_error:
+                        # API errors should be logged as warnings,
+                        # not errors - they indicate API restrictions or
+                        # parameter issues rather than system failures
+                        warning_msg = (
+                            f"Task collect_billing_data: Provider API error "
+                            f"(provider_id={provider.id}, "
+                            f"name={provider.name}, "
+                            f"type={provider.provider_type}, "
+                            f"period={current_period}, error={error_msg}). "
+                            f"Check API documentation for restrictions."
                         )
                         log_collector.warning(warning_msg)
                         logger.warning(f"{warning_msg}")
