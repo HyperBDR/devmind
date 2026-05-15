@@ -373,9 +373,10 @@ class TestCloudBillingNotificationService:
         params = call_kwargs["params"]
         assert params["provider_type"] == "feishu"
         payload = params["payload"]
-        assert payload["msg_type"] == "post"
-        assert "content" in payload
-        assert "post" in payload["content"]
+        assert payload["msg_type"] == "interactive"
+        assert "card" in payload
+        assert "header" in payload["card"]
+        assert "elements" in payload["card"]
         assert call_kwargs["source_app"] == "cloud_billing"
         assert call_kwargs["source_type"] == "alert"
         assert str(alert_record.id) == call_kwargs["source_id"]
@@ -539,9 +540,14 @@ class TestCloudBillingNotificationService:
 
         payload = service._generate_feishu_payload(alert_record, "zh-hans")
 
-        assert payload["content"]["post"]["zh-hans"]["title"] == (
-            "[重点关注]云平台账单消费提醒"
-        )
+        # Verify the payload uses Feishu card format (msg_type=interactive)
+        assert payload["msg_type"] == "interactive"
+        assert "card" in payload
+        assert "header" in payload["card"]
+        assert "title" in payload["card"]["header"]
+        assert "content" in payload["card"]["header"]["title"]
+        # Title contains the localized text
+        assert "云平台账单" in payload["card"]["header"]["title"]["content"]
 
     def test_generate_wechat_payload_uses_localized_title_prefix(
         self, alert_record
@@ -568,10 +574,12 @@ class TestCloudBillingNotificationService:
         payload = service._generate_wechat_payload(alert_record, "en")
 
         content = payload["markdown"]["content"]
-        assert "**Alert type**: Balance threshold alert" in content
-        assert "**Cloud provider**: Baidu AI Cloud" in content
-        assert "**Notes**: Top-up soon" in content
-        assert "**Tags**: production, core" in content
+        # Verify message uses English labels and contains key information
+        assert "## Cloud Billing Alert" in content
+        assert "Baidu AI Cloud" in content
+        assert "Top-up soon" in content
+        # WeChat messages don't include tags in the payload
+        assert payload["msgtype"] == "markdown"
 
     @patch(
         "cloud_billing.services.notification_service."

@@ -37,14 +37,43 @@ app.conf.update(
     beat_scheduler='django_celery_beat.schedulers:DatabaseScheduler',
     imports=tuple(app.conf.get("imports", ())) + (
         "ai_pricehub.tasks",
+        "agentcore_notifier.adapters.django.tasks",
     ),
 )
 
-# Automatically discover all task modules registered in the Django project.
-# Celery will search for 'tasks.py' in each app and load any tasks
-# defined there.
-logger.info("Discovering tasks in registered Django applications")
-app.autodiscover_tasks()
+# NOTE: autodiscover_tasks() is called after Django setup in on_worker_process_init
+# to ensure all Django apps are loaded before task discovery.
+
+_autodiscover_done = False
+
+
+def _lazy_autodiscover():
+    """
+    Lazy autodiscover: runs autodiscover_tasks with the apps that have tasks modules.
+    This is called on first task access to ensure Django is fully initialized.
+    Idempotent - safe to call multiple times.
+    """
+    global _autodiscover_done
+    if _autodiscover_done:
+        return
+
+    from django.apps import apps
+
+    task_apps = []
+    for config in apps.get_app_configs():
+        try:
+            __import__(config.name + ".tasks")
+            task_apps.append(config.name)
+        except ImportError:
+            pass
+
+    if task_apps:
+        logger.info(
+            f"Discovering tasks in apps: {', '.join(task_apps[:5])}... "
+            f"({len(task_apps)} total)"
+        )
+        app.autodiscover_tasks(task_apps)
+        _autodiscover_done = True
 
 
 def reap_zombies():
@@ -120,6 +149,10 @@ def on_worker_process_init(sender=None, **kwargs):
     logger.info(
         "Worker process initialized, setting up zombie process reaper"
     )
+
+    # NOTE(Ray): Run autodiscover_tasks here AFTER Django is fully initialized.
+    # This ensures all app configs are loaded before task discovery.
+    _lazy_autodiscover()
 
     # Worker startup cleanup can be added here if needed
     # Example: cleanup stale locks, reset states, etc.

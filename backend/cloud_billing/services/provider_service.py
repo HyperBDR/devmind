@@ -368,6 +368,21 @@ class ProviderService:
             billing_service = BillingService(provider_type, normalized_config)
             result = billing_service.get_billing_info(period=period)
             return result
+        except ValueError as e:
+            # Configuration errors should not be reported as system errors
+            # to Sentry - they indicate missing/invalid configuration
+            error_msg = str(e)
+            logger.warning(
+                f"ProviderService.get_billing_info: Configuration error "
+                f"(provider_type={provider_type}, period={period}, "
+                f"error={error_msg})"
+            )
+            return {
+                "status": "config_error",
+                "data": None,
+                "error": error_msg,
+                "is_config_error": True,
+            }
         except Exception as e:
             logger.error(
                 f"ProviderService.get_billing_info: Failed to get billing "

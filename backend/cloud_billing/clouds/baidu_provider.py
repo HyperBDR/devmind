@@ -276,14 +276,23 @@ class BaiduCloud(BaseCloudProvider):
         period_start = datetime(year, month, 1)
         period_end = datetime(next_year, next_month, 1) - timedelta(days=1)
         today = timezone.localdate()
+        today_hour = timezone.now().hour
         if year == today.year and month == today.month:
-            yesterday = today - timedelta(days=1)
-            period_end = min(
-                period_end,
-                datetime.combine(yesterday, datetime.min.time()),
-            )
-        if period_end < period_start:
-            period_end = period_start
+            # Baidu API restriction: if endTime = yesterday,
+            # current hour must be > 10
+            if today_hour <= 10:
+                # Use day before yesterday to avoid API restriction
+                candidate_end = datetime.combine(
+                    today - timedelta(days=2), datetime.min.time()
+                )
+                # Handle year boundary (e.g., Jan 1-2 -> Dec 30 of prev year)
+                period_end = min(period_end, max(candidate_end, period_start))
+            else:
+                yesterday = today - timedelta(days=1)
+                period_end = min(
+                    period_end,
+                    datetime.combine(yesterday, datetime.min.time()),
+                )
         return period_start.strftime("%Y-%m-%d"), period_end.strftime("%Y-%m-%d")
 
     def _request_month_bill(
@@ -545,12 +554,33 @@ class BaiduCloud(BaseCloudProvider):
             status_code = (
                 exc.response.status_code if exc.response is not None else None
             )
-            logger.error(
-                "Baidu billing HTTP error (status=%s, body=%s)",
-                status_code,
-                body,
+            # Check if this is a parameter/API restriction error
+            is_api_error = (
+                status_code == 400
+                or "InvalidHTTPRequest" in body
+                or "InvalidParameter" in body
+                or ("Invalid" in body and "request" in body.lower())
             )
-            return {"status": "error", "data": None, "error": body}
+            if is_api_error:
+                # API parameter errors should be logged as warnings,
+                # not errors - they indicate invalid requests or API restrictions
+                logger.warning(
+                    "Baidu billing API error (status=%s, body=%s)",
+                    status_code,
+                    body,
+                )
+            else:
+                logger.error(
+                    "Baidu billing HTTP error (status=%s, body=%s)",
+                    status_code,
+                    body,
+                )
+            return {
+                "status": "error",
+                "data": None,
+                "error": body,
+                "is_api_error": is_api_error,
+            }
         except (requests.RequestException, ValueError, RuntimeError) as exc:
             logger.error("Baidu billing error: %s", exc)
             return {"status": "error", "data": None, "error": str(exc)}

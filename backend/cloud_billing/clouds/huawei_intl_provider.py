@@ -375,18 +375,38 @@ class HuaweiIntlCloud(BaseCloudProvider):
             status_code = getattr(e, 'status_code', 'Unknown')
             request_id = getattr(e, 'request_id', 'Unknown')
 
+            # Check if this is a permission/authorization error
+            error_lower = error_msg.lower()
+            is_permission_error = (
+                status_code in (403, '403')
+                or 'access denied' in error_lower
+                or ('permission' in error_lower and (
+                    'access' in error_lower
+                    or 'denied' in error_lower
+                    or 'required' in error_lower
+                ))
+                or error_code == 'CBC.0151'
+            )
+
             error_message = (
                 f"Huawei International API Error: {error_code} - {error_msg}\n"
                 f"Status Code: {status_code}\n"
                 f"Request ID: {request_id}\n"
                 f"Region: {self.config.region}"
             )
-            logger.error(f"{error_message}")
-            logger.exception(e)
+            if is_permission_error:
+                # Permission errors should be logged as warnings,
+                # not errors - they indicate missing IAM permissions
+                # rather than system failures
+                logger.warning(f"{error_message}")
+            else:
+                logger.error(f"{error_message}")
+                logger.exception(e)
             return {
                 "status": "error",
                 "data": None,
-                "error": error_message
+                "error": error_message,
+                "is_permission_error": is_permission_error,
             }
         except Exception as e:
             error_msg = str(e)
