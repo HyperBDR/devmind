@@ -282,18 +282,17 @@ class BaiduCloud(BaseCloudProvider):
             # current hour must be > 10
             if today_hour <= 10:
                 # Use day before yesterday to avoid API restriction
-                period_end = min(
-                    period_end,
-                    datetime.combine(today - timedelta(days=2), datetime.min.time()),
+                candidate_end = datetime.combine(
+                    today - timedelta(days=2), datetime.min.time()
                 )
+                # Handle year boundary (e.g., Jan 1-2 -> Dec 30 of prev year)
+                period_end = min(period_end, max(candidate_end, period_start))
             else:
                 yesterday = today - timedelta(days=1)
                 period_end = min(
                     period_end,
                     datetime.combine(yesterday, datetime.min.time()),
                 )
-        if period_end < period_start:
-            period_end = period_start
         return period_start.strftime("%Y-%m-%d"), period_end.strftime("%Y-%m-%d")
 
     def _request_month_bill(
@@ -559,7 +558,8 @@ class BaiduCloud(BaseCloudProvider):
             is_api_error = (
                 status_code == 400
                 or "InvalidHTTPRequest" in body
-                or "Invalid" in body
+                or "InvalidParameter" in body
+                or ("Invalid" in body and "request" in body.lower())
             )
             if is_api_error:
                 # API parameter errors should be logged as warnings,

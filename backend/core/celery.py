@@ -44,12 +44,19 @@ app.conf.update(
 # NOTE: autodiscover_tasks() is called after Django setup in on_worker_process_init
 # to ensure all Django apps are loaded before task discovery.
 
+_autodiscover_done = False
+
 
 def _lazy_autodiscover():
     """
     Lazy autodiscover: runs autodiscover_tasks with the apps that have tasks modules.
     This is called on first task access to ensure Django is fully initialized.
+    Idempotent - safe to call multiple times.
     """
+    global _autodiscover_done
+    if _autodiscover_done:
+        return
+
     from django.apps import apps
 
     task_apps = []
@@ -66,6 +73,7 @@ def _lazy_autodiscover():
             f"({len(task_apps)} total)"
         )
         app.autodiscover_tasks(task_apps)
+        _autodiscover_done = True
 
 
 def reap_zombies():
