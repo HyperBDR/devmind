@@ -37,6 +37,3 @@ SENTRY_SEND_DEFAULT_PII = os.getenv("SENTRY_SEND_DEFAULT_PII", "false").lower() 
     "true",
     "yes",
 )
-
-# Request timeout in seconds for Sentry API calls
-SENTRY_TIMEOUT = int(os.getenv("SENTRY_TIMEOUT", "5"))

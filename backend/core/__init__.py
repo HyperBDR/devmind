@@ -15,7 +15,6 @@ def _init_sentry():
         SENTRY_PROFILING_SAMPLE_RATE,
         SENTRY_RELEASE,
         SENTRY_SEND_DEFAULT_PII,
-        SENTRY_TIMEOUT,
         SENTRY_TRACES_SAMPLE_RATE,
     )
 
