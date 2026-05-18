@@ -31,8 +31,8 @@ def _format_resource_cost_lines(
         header = (
             localized_text(
                 normalized_language,
-                "Cost breakdown",
-                "费用明细",
+                "Monthly Cost Breakdown",
+                "当月累计费用明细",
             )
             + "："
         )
@@ -43,8 +43,8 @@ def _format_resource_cost_lines(
         header = (
             localized_text(
                 normalized_language,
-                "Cost breakdown",
-                "费用明细",
+                "Monthly Cost Breakdown",
+                "当月累计费用明细",
             )
             + ": "
         )
@@ -356,36 +356,25 @@ def build_alert_message(
                     language=normalized_language,
                 ),
             )
+            # 当前小时累计 + 上一小时在一行
             lines.append(
-                format_alert_line(
-                    localized_text(
-                        normalized_language,
-                        "Current total cost",
-                        "当前累计成本",
-                    ),
-                    f"{current_cost:.2f} {currency}",
-                    language=normalized_language,
-                )
+                f"{localized_text(normalized_language, 'Current hour total', '当前小时累计')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{current_cost:.2f} {currency}"
+                f"    "
+                f"{localized_text(normalized_language, 'Previous hour', '上一小时')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{previous_cost:.2f} {currency}"
             )
+            # 金额 + 金额阈值在一行
             lines.append(
-                format_alert_line(
-                    localized_text(
-                        normalized_language, "Alert threshold", "告警阈值"
-                    ),
-                    f"{alert_rule.cost_threshold:.2f} {currency}",
-                    language=normalized_language,
-                )
-            )
-            lines.append(
-                format_alert_line(
-                    localized_text(
-                        normalized_language,
-                        "Previous hour cost",
-                        "上一小时成本",
-                    ),
-                    f"{previous_cost:.2f} {currency}",
-                    language=normalized_language,
-                )
+                f"{localized_text(normalized_language, 'Amount', '金额')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{current_cost:.2f} {currency}"
+                f"    "
+                f"{localized_text(normalized_language, 'Amount threshold', '金额阈值')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{alert_rule.cost_threshold:.2f} {currency}"
             )
             if resource_cost_items:
                 lines.extend(_format_resource_cost_lines(
@@ -420,73 +409,46 @@ def build_alert_message(
                 language=normalized_language,
             ),
         )
+        # 当前小时累计 + 上一小时在一行
         lines.append(
-            format_alert_line(
-                localized_text(
-                    normalized_language,
-                    "Current total cost",
-                    "当前累计成本",
-                ),
-                f"{current_cost:.2f} {currency}",
-                language=normalized_language,
-            )
+            f"{localized_text(normalized_language, 'Current hour total', '当前小时累计')}"
+            f"{'：' if is_chinese_language(normalized_language) else ': '}"
+            f"{current_cost:.2f} {currency}"
+            f"    "
+            f"{localized_text(normalized_language, 'Previous hour', '上一小时')}"
+            f"{'：' if is_chinese_language(normalized_language) else ': '}"
+            f"{previous_cost:.2f} {currency}"
         )
-        lines.append(
-            format_alert_line(
-                localized_text(
-                    normalized_language,
-                    "Previous hour cost",
-                    "上一小时成本",
-                ),
-                f"{previous_cost:.2f} {currency}",
-                language=normalized_language,
-            )
+        # 金额 + 金额阈值在一行
+        amount_label = (
+            localized_text(normalized_language, "Increase amount", "增加金额")
         )
-        lines.append(
-            format_alert_line(
-                localized_text(
-                    normalized_language,
-                    "Increase amount",
-                    "增加金额",
-                ),
-                f"{increase_cost:.2f} {currency}",
-                language=normalized_language,
+        amount_value = f"{increase_cost:.2f} {currency}"
+        amount_threshold_line = ""
+        if alert_rule.growth_amount_threshold is not None:
+            amount_threshold_line = (
+                f"    "
+                f"{localized_text(normalized_language, 'Amount threshold', '金额阈值')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{alert_rule.growth_amount_threshold:.2f} {currency}"
             )
-        )
-        lines.append(
-            format_alert_line(
-                localized_text(
-                    normalized_language,
-                    "Growth rate",
-                    "增长率",
-                ),
-                f"{increase_percent:.2f}%",
-                language=normalized_language,
-            )
-        )
+        lines.append(f"{amount_label}{'：' if is_chinese_language(normalized_language) else ': '}{amount_value}{amount_threshold_line}")
+        # 增长率 + 百分比阈值在一行（当前值在左，对照值在右）
         if alert_rule.growth_threshold is not None:
             lines.append(
-                format_alert_line(
-                    localized_text(
-                        normalized_language,
-                        "Percentage threshold",
-                        "百分比阈值",
-                    ),
-                    f"{alert_rule.growth_threshold:.2f}%",
-                    language=normalized_language,
-                )
+                f"{localized_text(normalized_language, 'Growth rate', '增长率')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{increase_percent:.2f}%"
+                f"    "
+                f"{localized_text(normalized_language, 'Percentage threshold', '百分比阈值')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{alert_rule.growth_threshold:.2f}%"
             )
-        if alert_rule.growth_amount_threshold is not None:
+        else:
             lines.append(
-                format_alert_line(
-                    localized_text(
-                        normalized_language,
-                        "Amount threshold",
-                        "金额阈值",
-                    ),
-                    f"{alert_rule.growth_amount_threshold:.2f} {currency}",
-                    language=normalized_language,
-                )
+                f"{localized_text(normalized_language, 'Growth rate', '增长率')}"
+                f"{'：' if is_chinese_language(normalized_language) else ': '}"
+                f"{increase_percent:.2f}%"
             )
         if resource_cost_items:
             lines.extend(_format_resource_cost_lines(
