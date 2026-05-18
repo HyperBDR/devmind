@@ -38,7 +38,7 @@ class TestFormatResourceCostLines:
         )
         # header + table header + separator + 2 data rows
         assert len(lines) == 5
-        assert "费用明细" in lines[0]
+        assert "当月累计费用明细" in lines[0]
         assert "资源" in lines[1]
         assert "ECS" in lines[3]
         assert "100.00 CNY" in lines[3]
@@ -93,21 +93,21 @@ class TestFormatResourceCostLines:
         """Should handle empty items list."""
         lines = _format_resource_cost_lines([], "USD", "en")
         assert len(lines) == 1  # header only
-        assert "Cost breakdown" in lines[0]
+        assert "Monthly Cost Breakdown" in lines[0]
 
     def test_chinese_language(self):
         """Should use Chinese header for zh language."""
         lines = _format_resource_cost_lines(
             [{"name": "x", "cost": 1}], "CNY", "zh_Hans",
         )
-        assert "费用明细" in lines[0]
+        assert "当月累计费用明细" in lines[0]
 
     def test_english_language(self):
         """Should use English header for en language."""
         lines = _format_resource_cost_lines(
             [{"name": "x", "cost": 1}], "USD", "en",
         )
-        assert "Cost breakdown" in lines[0]
+        assert "Monthly Cost Breakdown" in lines[0]
 
 
 # ── build_alert_message: localization ──────────────────────────
@@ -138,9 +138,9 @@ class TestAlertMessageLocalization:
         )
         assert "告警类型" in message
         assert "成本阈值告警" in message
-        assert "当前累计成本" in message
-        assert "告警阈值" in message
-        assert "当前余额" in message
+        assert "当前小时累计" in message
+        assert "金额阈值" in message
+        assert "上一小时" in message
         assert "告警说明" in message
 
     def test_cost_alert_english(self, alert_rule):
@@ -165,9 +165,9 @@ class TestAlertMessageLocalization:
         )
         assert "Alert type" in message
         assert "Cost threshold alert" in message
-        assert "Current total cost" in message
-        assert "Alert threshold" in message
-        assert "Current balance" in message
+        assert "Current hour total" in message
+        assert "Amount threshold" in message
+        assert "Previous hour" in message
         assert "Alert description" in message
 
     def test_growth_alert_chinese(self, alert_rule):
@@ -192,8 +192,8 @@ class TestAlertMessageLocalization:
         )
         assert "告警类型" in message
         assert "成本增长告警" in message
-        assert "当前累计成本" in message
-        assert "上一小时成本" in message
+        assert "当前小时累计" in message
+        assert "上一小时" in message
         assert "增加金额" in message
         assert "增长率" in message
         assert "百分比阈值" in message
@@ -222,8 +222,8 @@ class TestAlertMessageLocalization:
         )
         assert "Alert type" in message
         assert "Cost growth alert" in message
-        assert "Current total cost" in message
-        assert "Previous hour cost" in message
+        assert "Current hour total" in message
+        assert "Previous hour" in message
         assert "Increase amount" in message
         assert "Growth rate" in message
         assert "Percentage threshold" in message
@@ -314,7 +314,7 @@ class TestAlertResourceCostBreakdown:
             language="zh-Hans",
             resource_cost_items=resource_costs,
         )
-        assert "费用明细" in message
+        assert "当月累计费用明细" in message
         assert "ECS" in message
         assert "RDS" in message
         assert "OSS" in message
@@ -344,7 +344,7 @@ class TestAlertResourceCostBreakdown:
             language="en",
             resource_cost_items=resource_costs,
         )
-        assert "Cost breakdown" in message
+        assert "Monthly Cost Breakdown" in message
         assert "EC2" in message
         assert "S3" in message
 
@@ -376,8 +376,8 @@ class TestAlertResourceCostBreakdown:
         assert "zhangsan" in message
         assert "RDS" in message
 
-    def test_growth_alert_has_balance(self, alert_rule):
-        """Growth alert should display current balance."""
+    def test_growth_alert_displays_metrics(self, alert_rule):
+        """Growth alert should display key metrics in two-column format."""
         message = build_alert_message(
             provider_name="AWS",
             provider_notes="",
@@ -396,8 +396,10 @@ class TestAlertResourceCostBreakdown:
             days_remaining_threshold_triggered=False,
             language="en",
         )
-        assert "Current balance" in message
-        assert "1000.00 USD" in message
+        assert "Current hour total" in message
+        assert "Previous hour" in message
+        assert "200.00 USD" in message
+        assert "50.00 USD" in message
 
     def test_no_resource_breakdown_when_empty(self, alert_rule):
         """Should not show cost breakdown when resource_cost_items is empty."""
@@ -501,7 +503,7 @@ class TestBuildAlertMessageFromRecord:
         message = build_alert_message_from_record(
             record, "en", resource_cost_items=resource_costs,
         )
-        assert "Cost breakdown" in message
+        assert "Monthly Cost Breakdown" in message
         assert "EC2" in message
         assert "alice" in message
 
