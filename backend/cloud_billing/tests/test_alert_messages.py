@@ -138,7 +138,7 @@ class TestAlertMessageLocalization:
         )
         assert "告警类型" in message
         assert "成本阈值告警" in message
-        assert "当前小时累计" in message
+        assert "当月累计" in message
         assert "金额阈值" in message
         assert "上一小时" in message
         assert "告警说明" in message
@@ -165,7 +165,7 @@ class TestAlertMessageLocalization:
         )
         assert "Alert type" in message
         assert "Cost threshold alert" in message
-        assert "Current hour total" in message
+        assert "Month total" in message
         assert "Amount threshold" in message
         assert "Previous hour" in message
         assert "Alert description" in message
@@ -192,7 +192,7 @@ class TestAlertMessageLocalization:
         )
         assert "告警类型" in message
         assert "成本增长告警" in message
-        assert "当前小时累计" in message
+        assert "当月累计" in message
         assert "上一小时" in message
         assert "增加金额" in message
         assert "增长率" in message
@@ -222,7 +222,7 @@ class TestAlertMessageLocalization:
         )
         assert "Alert type" in message
         assert "Cost growth alert" in message
-        assert "Current hour total" in message
+        assert "Month total" in message
         assert "Previous hour" in message
         assert "Increase amount" in message
         assert "Growth rate" in message
@@ -396,7 +396,7 @@ class TestAlertResourceCostBreakdown:
             days_remaining_threshold_triggered=False,
             language="en",
         )
-        assert "Current hour total" in message
+        assert "Month total" in message
         assert "Previous hour" in message
         assert "200.00 USD" in message
         assert "50.00 USD" in message

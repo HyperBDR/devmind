@@ -358,7 +358,7 @@ def build_alert_message(
             )
             # 当前小时累计 + 上一小时在一行
             lines.append(
-                f"{localized_text(normalized_language, 'Current hour total', '当前小时累计')}"
+                f"{localized_text(normalized_language, 'Month total', '当月累计')}"
                 f"{'：' if is_chinese_language(normalized_language) else ': '}"
                 f"{current_cost:.2f} {currency}"
                 f"    "
@@ -411,7 +411,7 @@ def build_alert_message(
         )
         # 当前小时累计 + 上一小时在一行
         lines.append(
-            f"{localized_text(normalized_language, 'Current hour total', '当前小时累计')}"
+            f"{localized_text(normalized_language, 'Month total', '当月累计')}"
             f"{'：' if is_chinese_language(normalized_language) else ': '}"
             f"{current_cost:.2f} {currency}"
             f"    "
@@ -432,7 +432,8 @@ def build_alert_message(
                 f"{'：' if is_chinese_language(normalized_language) else ': '}"
                 f"{alert_rule.growth_amount_threshold:.2f} {currency}"
             )
-        lines.append(f"{amount_label}{'：' if is_chinese_language(normalized_language) else ': '}{amount_value}{amount_threshold_line}")
+        sep = '：' if is_chinese_language(normalized_language) else ': '
+        lines.append(f"{amount_label}{sep}{amount_value}{amount_threshold_line}")
         # 增长率 + 百分比阈值在一行（当前值在左，对照值在右）
         if alert_rule.growth_threshold is not None:
             lines.append(
