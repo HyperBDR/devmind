@@ -395,7 +395,7 @@ class ProviderService:
         self, provider_type: str, config_dict: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Validate provider credentials.
+        Validate provider credentials and permissions.
 
         Args:
             provider_type: Provider type
@@ -403,23 +403,31 @@ class ProviderService:
 
         Returns:
             Dictionary with validation result:
-            {valid: bool, message: str, account_id: str}
+            {
+                valid: bool,
+                message: str,
+                account_id: str,
+                error_type: str,
+                required_permissions: List[str]
+            }
         """
         try:
             # create_provider will normalize config automatically
             provider = self.create_provider(provider_type, config_dict)
 
             # Try to validate credentials and capture error details
-            error_code = None
             error_message = None
+            error_classification = None
             try:
                 is_valid = provider.validate_credentials()
                 if not is_valid:
-                    error_code = self._get_error_code(provider_type, None)
+                    error_classification = self._classify_error(provider_type, None)
             except Exception as e:
                 is_valid = False
                 error_message = str(e)
-                error_code = self._get_error_code(provider_type, error_message)
+                error_classification = self._classify_error(
+                    provider_type, error_message
+                )
 
             account_id = ""
 
@@ -441,15 +449,25 @@ class ProviderService:
 
             result = {
                 "valid": is_valid,
-                "error_code": error_code if not is_valid else None,
+                "error_code": (
+                    error_classification["error_code"] if not is_valid else None
+                ),
                 "account_id": account_id,
+                "error_type": (
+                    error_classification["error_type"] if not is_valid else None
+                ),
+                "required_permissions": (
+                    error_classification["required_permissions"]
+                    if not is_valid
+                    else []
+                ),
             }
             if error_message and not is_valid:
                 result["message"] = error_message
             return result
         except Exception as e:
             error_message = str(e)
-            error_code = self._get_error_code(provider_type, error_message)
+            error_classification = self._classify_error(provider_type, error_message)
 
             logger.warning(
                 f"ProviderService.validate_credentials: "
@@ -458,10 +476,325 @@ class ProviderService:
             )
             return {
                 "valid": False,
-                "error_code": error_code,
+                "error_code": error_classification["error_code"],
                 "account_id": "",
                 "message": error_message,
+                "error_type": error_classification["error_type"],
+                "required_permissions": error_classification["required_permissions"],
             }
+
+    def _classify_error(
+        self, provider_type: str, error_msg: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Classify error into credential, permission, or service error.
+
+        Args:
+            provider_type: Type of cloud provider
+            error_msg: Original error message (can be None)
+
+        Returns:
+            Dictionary with error classification:
+            {error_code: str, error_type: str, required_permissions: List[str]}
+        """
+        if not error_msg:
+            return {
+                "error_code": "validation_failed",
+                "error_type": "service_error",
+                "required_permissions": [],
+            }
+
+        error_lower = error_msg.lower()
+
+        # AWS specific errors
+        if provider_type == "aws":
+            if "invalidclienttokenid" in error_lower:
+                return {
+                    "error_code": "aws_invalid_access_key_id",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "signaturedoesnotmatch" in error_lower:
+                return {
+                    "error_code": "aws_invalid_secret_key",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "ssl" in error_lower or "sslerror" in error_lower:
+                return {
+                    "error_code": "aws_ssl_error",
+                    "error_type": "service_error",
+                    "required_permissions": [],
+                }
+            elif "access key" in error_lower:
+                return {
+                    "error_code": "aws_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "region" in error_lower:
+                return {
+                    "error_code": "aws_invalid_region",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "accessdenied" in error_lower:
+                return {
+                    "error_code": "aws_cost_explorer_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": ["ce:GetCostAndUsage"],
+                }
+
+        # Huawei specific errors
+        elif provider_type == "huawei":
+            if "ssl" in error_lower or "sslerror" in error_lower:
+                return {
+                    "error_code": "huawei_ssl_error",
+                    "error_type": "service_error",
+                    "required_permissions": [],
+                }
+            elif "access key" in error_lower or "api_key" in error_lower:
+                return {
+                    "error_code": "huawei_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "region" in error_lower:
+                return {
+                    "error_code": "huawei_invalid_region",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif (
+                "cbc.0151" in error_lower
+                or "access denied" in error_lower
+                or (
+                    "permission" in error_lower
+                    and ("denied" in error_lower or "required" in error_lower)
+                )
+            ):
+                return {
+                    "error_code": "huawei_bss_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": ["bss:bill:read", "bss:account:read"],
+                }
+
+        # Huawei International specific errors
+        elif provider_type == "huawei-intl":
+            if "ssl" in error_lower or "sslerror" in error_lower:
+                return {
+                    "error_code": "huawei_intl_ssl_error",
+                    "error_type": "service_error",
+                    "required_permissions": [],
+                }
+            elif "access key" in error_lower or "api_key" in error_lower:
+                return {
+                    "error_code": "huawei_intl_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif (
+                "cbc.0151" in error_lower
+                or "access denied" in error_lower
+                or (
+                    "permission" in error_lower
+                    and ("denied" in error_lower or "required" in error_lower)
+                )
+            ):
+                return {
+                    "error_code": "huawei_intl_bss_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": [
+                        "BSS Intl Billing Service access"
+                    ],
+                }
+
+        # Azure specific errors
+        elif provider_type == "azure":
+            if "authentication" in error_lower or "unauthorized" in error_lower:
+                return {
+                    "error_code": "azure_invalid_authentication",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "subscription" in error_lower:
+                return {
+                    "error_code": "azure_invalid_subscription",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "permission" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "azure_consumption_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": [
+                        "Microsoft.Consumption/read",
+                        "Microsoft.Billing/billingAccounts/read",
+                    ],
+                }
+
+        # Alibaba specific errors
+        elif provider_type == "alibaba":
+            if "getcalleridentity" in error_lower or "sts:getcalleridentity" in error_lower:
+                return {
+                    "error_code": "alibaba_need_sts_get_caller_identity",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "access key" in error_lower:
+                return {
+                    "error_code": "alibaba_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "region" in error_lower:
+                return {
+                    "error_code": "alibaba_invalid_region",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            elif "permission" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "alibaba_bss_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": ["bss:ReadOnlyAccess"],
+                }
+
+        # Tencent Cloud specific errors
+        elif provider_type == "tencentcloud":
+            # Check more specific patterns first (unauthorizedoperation vs unauthorized)
+            if (
+                "unauthorizedoperation" in error_lower
+                or ("cam" in error_lower and "permission" in error_lower)
+                or ("no permission" in error_lower)
+            ):
+                return {
+                    "error_code": "tencentcloud_billing_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": ["QcloudBillingReadOnlyAccess"],
+                }
+            if "auth" in error_lower or "signatureexpire" in error_lower:
+                return {
+                    "error_code": "tencentcloud_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "secret" in error_lower or "signature" in error_lower:
+                return {
+                    "error_code": "tencentcloud_invalid_secret",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "tencentcloud_no_permission",
+                    "error_type": "permission_error",
+                    "required_permissions": [],
+                }
+
+        # Volcengine specific errors
+        elif provider_type == "volcengine":
+            if "unauthorized" in error_lower or "access denied" in error_lower:
+                return {
+                    "error_code": "volcengine_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "signature" in error_lower or "authorization" in error_lower:
+                return {
+                    "error_code": "volcengine_invalid_secret",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if (
+                "rate limit" in error_lower
+                or "throttl" in error_lower
+                or "429" in error_lower
+            ):
+                return {
+                    "error_code": "volcengine_rate_limit",
+                    "error_type": "service_error",
+                    "required_permissions": [],
+                }
+            if "timeout" in error_lower:
+                return {
+                    "error_code": "volcengine_timeout",
+                    "error_type": "service_error",
+                    "required_permissions": [],
+                }
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "volcengine_billing_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": ["费用中心访问权限"],
+                }
+
+        # Baidu specific errors
+        elif provider_type == "baidu":
+            if "signature" in error_lower or "authorization" in error_lower:
+                return {
+                    "error_code": "baidu_invalid_secret",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "access key" in error_lower or "ak" in error_lower:
+                return {
+                    "error_code": "baidu_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "baidu_billing_permission_denied",
+                    "error_type": "permission_error",
+                    "required_permissions": ["财务服务访问权限"],
+                }
+        elif provider_type == "zhipu":
+            if "password" in error_lower or "username" in error_lower:
+                return {
+                    "error_code": "zhipu_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "token" in error_lower or "authorization" in error_lower:
+                return {
+                    "error_code": "zhipu_invalid_token",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "permission" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "zhipu_no_permission",
+                    "error_type": "permission_error",
+                    "required_permissions": [],
+                }
+
+        # Generic errors
+        if "ssl" in error_lower or "sslerror" in error_lower:
+            return {
+                "error_code": "ssl_error",
+                "error_type": "service_error",
+                "required_permissions": [],
+            }
+        elif "timeout" in error_lower:
+            return {
+                "error_code": "timeout_error",
+                "error_type": "service_error",
+                "required_permissions": [],
+            }
+        elif "connection" in error_lower or "network" in error_lower:
+            return {
+                "error_code": "network_error",
+                "error_type": "service_error",
+                "required_permissions": [],
+            }
+
+        # Default error code
+        return {
+            "error_code": "validation_failed",
+            "error_type": "service_error",
+            "required_permissions": [],
+        }
 
     def _get_error_code(
         self, provider_type: str, error_msg: Optional[str]
@@ -476,107 +809,8 @@ class ProviderService:
         Returns:
             Error code that can be used for i18n translation
         """
-        if not error_msg:
-            return "validation_failed"
-
-        error_lower = error_msg.lower()
-
-        # AWS specific errors
-        if provider_type == "aws":
-            if "invalidclienttokenid" in error_lower:
-                return "aws_invalid_access_key_id"
-            elif "signaturedoesnotmatch" in error_lower:
-                return "aws_invalid_secret_key"
-            elif "ssl" in error_lower or "sslerror" in error_lower:
-                return "aws_ssl_error"
-            elif "access key" in error_lower:
-                return "aws_invalid_credentials"
-            elif "region" in error_lower:
-                return "aws_invalid_region"
-
-        # Huawei specific errors
-        elif provider_type == "huawei":
-            if "ssl" in error_lower or "sslerror" in error_lower:
-                return "huawei_ssl_error"
-            elif "access key" in error_lower or "api_key" in error_lower:
-                return "huawei_invalid_credentials"
-            elif "region" in error_lower:
-                return "huawei_invalid_region"
-
-        # Azure specific errors
-        elif provider_type == "azure":
-            if (
-                "authentication" in error_lower
-                or "unauthorized" in error_lower
-            ):
-                return "azure_invalid_authentication"
-            elif "subscription" in error_lower:
-                return "azure_invalid_subscription"
-
-        # Alibaba specific errors
-        elif provider_type == "alibaba":
-            if (
-                "getcalleridentity" in error_lower
-                or "sts:getcalleridentity" in error_lower
-            ):
-                return "alibaba_need_sts_get_caller_identity"
-            if "access key" in error_lower:
-                return "alibaba_invalid_credentials"
-            elif "region" in error_lower:
-                return "alibaba_invalid_region"
-
-        # Tencent Cloud specific errors
-        elif provider_type == "tencentcloud":
-            if "auth" in error_lower or "unauthorized" in error_lower:
-                return "tencentcloud_invalid_credentials"
-            if "secret" in error_lower or "signature" in error_lower:
-                return "tencentcloud_invalid_secret"
-            if "cam" in error_lower or "permission" in error_lower:
-                return "tencentcloud_no_permission"
-
-        # Volcengine specific errors
-        elif provider_type == "volcengine":
-            if "unauthorized" in error_lower or "access denied" in error_lower:
-                return "volcengine_invalid_credentials"
-            if "signature" in error_lower or "authorization" in error_lower:
-                return "volcengine_invalid_secret"
-            if (
-                "rate limit" in error_lower
-                or "throttl" in error_lower
-                or "429" in error_lower
-            ):
-                return "volcengine_rate_limit"
-            if "timeout" in error_lower:
-                return "volcengine_timeout"
-            if "permission" in error_lower or "forbidden" in error_lower:
-                return "volcengine_no_permission"
-
-        # Baidu specific errors
-        elif provider_type == "baidu":
-            if "signature" in error_lower or "authorization" in error_lower:
-                return "baidu_invalid_secret"
-            if "access key" in error_lower or "ak" in error_lower:
-                return "baidu_invalid_credentials"
-            if "permission" in error_lower or "forbidden" in error_lower:
-                return "baidu_no_permission"
-        elif provider_type == "zhipu":
-            if "password" in error_lower or "username" in error_lower:
-                return "zhipu_invalid_credentials"
-            if "token" in error_lower or "authorization" in error_lower:
-                return "zhipu_invalid_token"
-            if "permission" in error_lower or "forbidden" in error_lower:
-                return "zhipu_no_permission"
-
-        # Generic errors
-        if "ssl" in error_lower or "sslerror" in error_lower:
-            return "ssl_error"
-        elif "timeout" in error_lower:
-            return "timeout_error"
-        elif "connection" in error_lower or "network" in error_lower:
-            return "network_error"
-
-        # Default error code
-        return "validation_failed"
+        classification = self._classify_error(provider_type, error_msg)
+        return classification["error_code"]
 
     def get_account_id(
         self, provider_type: str, config_dict: Dict[str, Any]

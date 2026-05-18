@@ -38,6 +38,7 @@ app.conf.update(
     imports=tuple(app.conf.get("imports", ())) + (
         "ai_pricehub.tasks",
         "agentcore_notifier.adapters.django.tasks",
+        "agentcore_metering.adapters.django.tasks",
     ),
 )
 
