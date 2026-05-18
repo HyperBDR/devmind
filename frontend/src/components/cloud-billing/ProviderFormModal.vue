@@ -1360,12 +1360,45 @@
             </svg>
           </div>
           <div class="flex-1">
-            <p class="text-xs font-medium text-red-800 mb-1">
-              {{ t('cloudBilling.providers.validationErrors') }}
-            </p>
-            <div class="text-xs text-red-700 space-y-1">
-              <div v-for="(error, index) in validationErrors" :key="index">
-                {{ error }}
+            <!-- 凭证错误提示 -->
+            <div v-if="validationErrors.length > 0" class="space-y-2">
+              <p class="text-xs font-medium text-red-800">
+                {{ t('cloudBilling.providers.validationErrors') }}
+              </p>
+              <div class="text-xs text-red-700 space-y-1">
+                <div v-for="(error, index) in validationErrors" :key="index">
+                  {{ error }}
+                </div>
+              </div>
+            </div>
+
+            <!-- 权限不足提示 -->
+            <div v-if="requiredPermissions.length > 0" class="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+              <div class="flex items-start gap-2">
+                <div class="flex-shrink-0 pt-0.5">
+                  <svg class="h-4 w-4 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div class="flex-1">
+                  <p class="text-xs font-semibold text-orange-800">
+                    {{ t('cloudBilling.providers.missingPermissions') || '缺少云平台权限' }}
+                  </p>
+                  <p class="text-xs text-orange-700 mt-1">
+                    {{ t('cloudBilling.providers.missingPermissionsHint') || '请按照以下步骤添加所需权限，然后重新验证' }}
+                  </p>
+                  <div class="mt-2 space-y-1">
+                    <p class="text-xs font-medium text-orange-800">
+                      {{ t('cloudBilling.providers.requiredPermissions') }}:
+                    </p>
+                    <ul class="space-y-1">
+                      <li v-for="(perm, index) in requiredPermissions" :key="index" class="flex items-start gap-1.5">
+                        <span class="text-orange-500 mt-0.5">•</span>
+                        <code class="text-xs bg-orange-100 text-orange-800 px-1.5 py-0.5 rounded font-mono">{{ perm }}</code>
+                      </li>
+                    </ul>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1488,6 +1521,7 @@ const isValidated = ref(false)
 const validationErrors = ref([])
 const validationSuccess = ref('')
 const validationErrorsRef = ref(null)
+const requiredPermissions = ref([])
 
 const formData = reactive({
   name: '',
@@ -2354,6 +2388,7 @@ const handleValidate = async () => {
   validationErrors.value = []
   validationSuccess.value = ''
   isValidated.value = false
+  requiredPermissions.value = []
 
   try {
     const config = buildConfig()
@@ -2384,6 +2419,16 @@ const handleValidate = async () => {
           t('cloudBilling.providers.validationFailed')
         )
       validationErrors.value = [errorMessage]
+      // Only show required permissions for permission errors
+      if (
+        validation.error_type === 'permission_error' &&
+        validation.required_permissions &&
+        validation.required_permissions.length > 0
+      ) {
+        requiredPermissions.value = validation.required_permissions
+      } else {
+        requiredPermissions.value = []
+      }
       isValidated.value = false
       await scrollToValidationErrors()
     }

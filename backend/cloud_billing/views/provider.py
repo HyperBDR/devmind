@@ -866,6 +866,10 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
             }
             if result.get("message"):
                 response_data["message"] = result["message"]
+            if result.get("error_type"):
+                response_data["error_type"] = result["error_type"]
+            if result.get("required_permissions"):
+                response_data["required_permissions"] = result["required_permissions"]
             return Response(response_data)
         except Exception as e:
             return Response(
