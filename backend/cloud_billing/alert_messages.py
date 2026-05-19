@@ -19,6 +19,7 @@ def _format_resource_cost_lines(
     resource_cost_items: list,
     currency: str,
     normalized_language: str,
+    cost_period_label: str,
     max_items: int = 10,
 ) -> list[str]:
     """Format resource cost items as a table.
@@ -27,27 +28,19 @@ def _format_resource_cost_lines(
     Plain strings (no label:value separator) for table rows,
     so notification service renders them as raw text.
     """
+    cost_breakdown_label = localized_text(
+        normalized_language,
+        "Cost Breakdown",
+        "费用明细",
+    )
+    header = f"{cost_period_label} {cost_breakdown_label}"
+    header += "：" if is_chinese_language(normalized_language) else ": "
+
     if is_chinese_language(normalized_language):
-        header = (
-            localized_text(
-                normalized_language,
-                "Monthly Cost Breakdown",
-                "当月累计费用明细",
-            )
-            + "："
-        )
         col_resource = "资源"
-        col_cost = "花费"
+        col_cost = "费用"
         col_creator = "创建者"
     else:
-        header = (
-            localized_text(
-                normalized_language,
-                "Monthly Cost Breakdown",
-                "当月累计费用明细",
-            )
-            + ": "
-        )
         col_resource = "Resource"
         col_cost = "Cost"
         col_creator = "Creator"
@@ -184,6 +177,7 @@ def build_alert_message(
     language: str,
     alert_type: Optional[str] = None,
     resource_cost_items: Optional[list] = None,
+    cost_period: str = "today",
 ) -> str:
     raw_language = str(language or DEFAULT_LANGUAGE).strip()
     normalized_language = (
@@ -191,6 +185,12 @@ def build_alert_message(
     )
 
     with translation.override(normalized_language):
+        # Cost period label for resource breakdown
+        if cost_period == "today":
+            cost_period_label = localized_text(normalized_language, "Today's", "当天")
+        else:
+            cost_period_label = localized_text(normalized_language, "Month's", "当月")
+
         lines = [
             format_alert_line(
                 localized_text(normalized_language, "Cloud provider", "公有云类型"),
@@ -275,6 +275,11 @@ def build_alert_message(
                     language=normalized_language,
                 )
             )
+            if resource_cost_items:
+                lines.extend(_format_resource_cost_lines(
+                    resource_cost_items, currency, normalized_language,
+                    cost_period_label,
+                ))
             return "\n".join(lines)
 
         if (
@@ -338,6 +343,11 @@ def build_alert_message(
                     language=normalized_language,
                 )
             )
+            if resource_cost_items:
+                lines.extend(_format_resource_cost_lines(
+                    resource_cost_items, currency, normalized_language,
+                    cost_period_label,
+                ))
             return "\n".join(lines)
 
         if (
@@ -379,6 +389,7 @@ def build_alert_message(
             if resource_cost_items:
                 lines.extend(_format_resource_cost_lines(
                     resource_cost_items, currency, normalized_language,
+                    cost_period_label,
                 ))
             lines.append(
                 format_alert_line(
@@ -454,6 +465,7 @@ def build_alert_message(
         if resource_cost_items:
             lines.extend(_format_resource_cost_lines(
                 resource_cost_items, currency, normalized_language,
+                cost_period_label,
             ))
         lines.append(
             format_alert_line(
@@ -496,6 +508,7 @@ def build_alert_sections(
     language: str,
     alert_type: Optional[str] = None,
     resource_cost_items: Optional[list] = None,
+    cost_period: str = "today",
 ) -> dict:
     """Return structured alert data for rich rendering.
 
@@ -532,6 +545,8 @@ def build_alert_sections(
             days_remaining_threshold_triggered=days_remaining_threshold_triggered,
             alert_type=alert_type,
             resource_cost_items=resource_cost_items,
+            normalized_language=normalized_language,
+            cost_period=cost_period,
         )
 
 
@@ -554,6 +569,8 @@ def _build_alert_sections_inner(
     days_remaining_threshold_triggered,
     alert_type=None,
     resource_cost_items=None,
+    normalized_language="en",
+    cost_period: str = "today",
 ) -> dict:
     """Inner builder — all ``_()`` calls resolve under the active language."""
 
@@ -618,18 +635,34 @@ def _build_alert_sections_inner(
         trigger_text = joined if joined else type_label
 
     # ── Structural labels (single source of truth) ──
+    # Determine period-specific labels
+    if cost_period == "today":
+        cost_breakdown_label = _("Today's Cost Breakdown")
+        col_cost_label = _("Today's Cost")
+    else:
+        cost_breakdown_label = _("Month's Cost Breakdown")
+        col_cost_label = _("Month's Cost")
+
     labels = {
-        "provider":       _("Provider"),
-        "account":        _("Account"),
-        "notes":          _("Notes"),
-        "tags":           _("Tags"),
-        "balance":        _("Balance"),
-        "cost_breakdown": _("Cost Breakdown"),
-        "col_resource":   _("Resource"),
-        "col_cost":       _("Cost"),
-        "col_owner":      _("Owner"),
-        "footer":         _("DevMind Cloud Billing · @all"),
-        "sep":            _(": "),
+        "provider":                 _("Provider"),
+        "account":                 _("Account"),
+        "notes":                   _("Notes"),
+        "tags":                    _("Tags"),
+        "balance_threshold":       _("Balance Threshold"),
+        "current_balance":         _("Current Balance"),
+        "cost_breakdown":          cost_breakdown_label,
+        "col_resource":            _("Resource"),
+        "col_cost":                col_cost_label,
+        "col_owner":               _("Owner"),
+        "footer":                  _("DevMind Cloud Billing · @all"),
+        "sep":                     ": ",
+        "current_hour_cost":       _("Current Hour Cost"),
+        "previous_hour_cost":      _("Previous Hour Cost"),
+        "growth_rate":             _("Growth Rate"),
+        "increase_amount":         _("Increase Amount"),
+        "growth_percentage_threshold":  _("Growth Percentage Threshold"),
+        "amount_threshold":        _("Amount Threshold"),
+        "cost_threshold":          _("Cost Threshold"),
     }
 
     # ── Build sections ──
@@ -650,23 +683,24 @@ def _build_alert_sections_inner(
     }
 
     # ── Key metrics ──
-    if effective_alert_type in ("growth", "") and not (
+    if (effective_alert_type == "growth" or effective_alert_type == "") and not (
         balance_threshold_triggered
         or days_remaining_threshold_triggered
+        or cost_threshold_triggered
     ):
         sections["metrics"] = [
             {
-                "label": _("Current Total"),
+                "label": _("Current Hour Cost"),
                 "value": f"{current_cost:.2f}",
                 "highlight": False,
             },
             {
-                "label": _("Previous Hour"),
+                "label": _("Previous Hour Cost"),
                 "value": f"{previous_cost:.2f}",
                 "highlight": False,
             },
             {
-                "label": _("Increase"),
+                "label": _("Increase Amount"),
                 "value": f"{increase_cost:.2f}",
                 "highlight": True,
             },
@@ -681,13 +715,23 @@ def _build_alert_sections_inner(
     ):
         sections["metrics"] = [
             {
-                "label": _("Current Total"),
+                "label": _("Current Hour Cost"),
                 "value": f"{current_cost:.2f}",
                 "highlight": True,
             },
             {
-                "label": _("Previous Hour"),
+                "label": _("Previous Hour Cost"),
                 "value": f"{previous_cost:.2f}",
+                "highlight": False,
+            },
+            {
+                "label": _("Growth Rate"),
+                "value": f"{increase_percent:.1f}%",
+                "highlight": False,
+            },
+            {
+                "label": _("Increase Amount"),
+                "value": f"{increase_cost:.2f}",
                 "highlight": False,
             },
         ]
@@ -695,12 +739,12 @@ def _build_alert_sections_inner(
     # ── Thresholds ──
     if alert_rule.growth_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Growth %"),
+            "label": _("Growth Percentage Threshold"),
             "value": f"{alert_rule.growth_threshold:.1f}%",
         })
     if alert_rule.growth_amount_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Amount"),
+            "label": _("Amount Threshold"),
             "value": (
                 f"{alert_rule.growth_amount_threshold:.2f}"
                 f" {currency}"
@@ -708,12 +752,12 @@ def _build_alert_sections_inner(
         })
     if alert_rule.cost_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Cost"),
+            "label": _("Cost Threshold"),
             "value": f"{alert_rule.cost_threshold:.2f} {currency}",
         })
     if alert_rule.balance_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Balance"),
+            "label": _("Balance Threshold"),
             "value": (
                 f"{alert_rule.balance_threshold:.2f} {currency}"
             ),
@@ -785,6 +829,9 @@ def build_alert_sections_from_record(
         )
     )
 
+    # Get cost_period from record (defaults to "today" if not set)
+    cost_period = getattr(alert_record, "cost_period", None) or "today"
+
     return build_alert_sections(
         provider_name=alert_record.provider.display_name,
         provider_notes=extract_provider_notes(alert_record.provider),
@@ -806,6 +853,7 @@ def build_alert_sections_from_record(
         days_remaining_threshold_triggered=days_remaining_threshold_triggered,
         language=language,
         resource_cost_items=resource_cost_items,
+        cost_period=cost_period,
     )
 
 
@@ -864,6 +912,9 @@ def build_alert_message_from_record(
         )
     )
 
+    # Get cost_period from record (defaults to "today" if not set)
+    cost_period = getattr(alert_record, "cost_period", None) or "today"
+
     return build_alert_message(
         provider_name=alert_record.provider.display_name,
         provider_notes=extract_provider_notes(alert_record.provider),
@@ -883,4 +934,5 @@ def build_alert_message_from_record(
         days_remaining_threshold_triggered=days_remaining_threshold_triggered,
         language=language,
         resource_cost_items=resource_cost_items,
+        cost_period=cost_period,
     )

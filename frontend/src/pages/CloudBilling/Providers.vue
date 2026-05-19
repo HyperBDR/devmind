@@ -191,7 +191,7 @@ import {
 } from '@/utils/providerDisplay'
 
 const { t } = useI18n()
-const { showError } = useToast()
+const { showError, showSuccess } = useToast()
 const loading = ref(true)
 const providers = ref([])
 const tagOptions = ref([])
@@ -283,9 +283,9 @@ const validateProvider = async (id) => {
   try {
     const response = await cloudBillingApi.validateProvider(id)
     if (response.data?.valid) {
-      alert(t('cloudBilling.providers.validationSuccess'))
+      showSuccess(t('cloudBilling.providers.validationSuccess'))
     } else {
-      alert(
+      showError(
         t('cloudBilling.providers.validationFailed') +
           ': ' +
           (response.data?.message || '')
@@ -293,7 +293,7 @@ const validateProvider = async (id) => {
     }
   } catch (error) {
     console.error('Failed to validate provider:', error)
-    alert(t('cloudBilling.providers.validationError'))
+    showError(t('cloudBilling.providers.validationError'))
   }
 }
 

@@ -1,6 +1,9 @@
 """
 Minimal Django settings for cloud_billing tests.
 """
+import os
+from pathlib import Path
+
 SECRET_KEY = "test-secret"
 DEBUG = True
 INSTALLED_APPS = [
@@ -32,3 +35,15 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
     }
 }
+
+# Internationalization settings for translation tests
+USE_I18N = True
+USE_L10N = True
+LANGUAGE_CODE = "en"
+LANGUAGES = [
+    ("en", "English"),
+    ("zh-Hans", "Simplified Chinese"),
+]
+LOCALE_PATHS = [
+    Path(__file__).resolve().parent.parent.parent / "locale",
+]

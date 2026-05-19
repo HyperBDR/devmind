@@ -372,8 +372,8 @@ msgid ""
 "\n"
 "<@all>"
 msgstr ""
-"{title}**{provider_name}** 当前总消费 **{current_cost:.2f} {currency}** "
-"超过阈值 **{threshold:.2f} {currency}**\n"
+"{title}**{provider_name}** 当前总消费 **{current_cost:.2f} {currency}** 超过"
+"阈值 **{threshold:.2f} {currency}**\n"
 "\n"
 "- 上一小时费用: {previous_cost:.2f} {currency}\n"
 "\n"
@@ -410,8 +410,8 @@ msgid ""
 "{provider_name}{account_display} current total cost {current_cost:.2f} "
 "{currency} exceeds threshold {threshold:.2f} {currency}"
 msgstr ""
-"{provider_name}{account_display} 当前总消费 {current_cost:.2f} "
-"{currency} 超过阈值 {threshold:.2f} {currency}"
+"{provider_name}{account_display} 当前总消费 {current_cost:.2f} {currency} 超"
+"过阈值 {threshold:.2f} {currency}"
 
 #: cloud_billing/tasks.py:601
 #, python-brace-format
@@ -499,11 +499,15 @@ msgid "Amount threshold"
 msgstr "金额阈值"
 
 #: cloud_billing/tasks.py
-msgid "Remaining balance is below the configured threshold. Please recharge promptly."
+msgid ""
+"Remaining balance is below the configured threshold. Please recharge "
+"promptly."
 msgstr "账户剩余余额低于设定阈值，请及时充值"
 
 #: cloud_billing/tasks.py
-msgid "Projected remaining days are below the configured threshold. Please recharge promptly."
+msgid ""
+"Projected remaining days are below the configured threshold. Please recharge "
+"promptly."
 msgstr "预计使用天数低于设定阈值，请及时充值"
 
 #: cloud_billing/tasks.py
@@ -565,6 +569,9 @@ msgstr "当前余额"
 msgid "Cost Breakdown"
 msgstr "费用明细"
 
+msgid "Monthly Cost Breakdown"
+msgstr "当月累计费用明细"
+
 msgid "Resource"
 msgstr "资源"
 
@@ -574,8 +581,13 @@ msgstr "花费"
 msgid "Owner"
 msgstr "创建者"
 
+#, fuzzy
 msgid "DevMind Cloud Billing · @all"
-msgstr "DevMind 云账单监控 · @所有人"
+msgstr ""
+"#-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#\n"
+"DevMind 云账单监控 · @所有人\n"
+"#-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#\n"
+"DevMind 云账单监控 · @all"
 
 msgid ": "
 msgstr "："
@@ -584,7 +596,7 @@ msgid ", "
 msgstr "，"
 
 msgid "Current Total"
-msgstr "当前累计"
+msgstr "当前小时"
 
 msgid "Previous Hour"
 msgstr "上一小时"
@@ -604,18 +616,17 @@ msgstr "金额阈值"
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""
-"Server cannot reach SMTP host (no route). Check deployment: "
-"firewall/security group outbound rules, or container network. "
-"Original: %(error)s"
+"Server cannot reach SMTP host (no route). Check deployment: firewall/"
+"security group outbound rules, or container network. Original: %(error)s"
 msgstr ""
-"服务器无法连接到 SMTP 主机（无路由）。请检查部署环境：防火墙/安全组是否"
-"放行出站访问该主机与端口；若在容器内，网络是否允许访问外网。原始错误: %(error)s"
+"服务器无法连接到 SMTP 主机（无路由）。请检查部署环境：防火墙/安全组是否放行出"
+"站访问该主机与端口；若在容器内，网络是否允许访问外网。原始错误: %(error)s"
 
 #: agentcore_notifier/adapters/django/views/channels.py
 #, python-format
 msgid ""
-"SMTP connection timed out. Check server network and "
-"firewall/proxy. Original: %(error)s"
+"SMTP connection timed out. Check server network and firewall/proxy. "
+"Original: %(error)s"
 msgstr ""
 "连接 SMTP 服务器超时。请检查：服务器网络是否能访问该主机与端口；防火墙或代理"
 "是否拦截。原始错误: %(error)s"
@@ -675,6 +686,54 @@ msgstr "开始清理"
 #: data_collector/tasks.py
 msgid "Cleanup done"
 msgstr "清理完成"
+
+# #-#-#-#-#  django.po (PACKAGE VERSION)  #-#-#-#-#
+# ── Cloud Billing Alert Labels ──
+msgid "Balance Threshold"
+msgstr "余额阈值"
+
+msgid "Today's Cost Breakdown"
+msgstr "当天 费用明细"
+
+msgid "Month's Cost Breakdown"
+msgstr "当月 费用明细"
+
+msgid "Today's Cost"
+msgstr "当天 费用"
+
+msgid "Month's Cost"
+msgstr "当月 费用"
+
+msgid "Percentage Threshold"
+msgstr "百分比阈值"
+
+msgid "Amount Threshold"
+msgstr "金额阈值"
+
+msgid "Cost Threshold"
+msgstr "成本阈值"
+
+# ── Alert Labels ──
+msgid "Current Balance"
+msgstr "当前余额"
+
+msgid "Current Hour Cost"
+msgstr "当前小时费用"
+
+msgid "Previous Hour Cost"
+msgstr "上一小时费用"
+
+msgid "Increase Amount"
+msgstr "增加金额"
+
+msgid "Growth Percentage Threshold"
+msgstr "百分比阈值"
+
+msgid "Today's"
+msgstr "当天"
+
+msgid "Month's"
+msgstr "当月"
 
 #~ msgid "OSS storage is disabled, validation skipped"
 #~ msgstr "OSS存储已禁用，跳过验证"
