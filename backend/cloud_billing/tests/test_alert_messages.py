@@ -35,11 +35,11 @@ class TestFormatResourceCostLines:
             {"name": "RDS", "cost": 50.0},
         ]
         lines = _format_resource_cost_lines(
-            items, "CNY", "zh_Hans",
+            items, "CNY", "zh_Hans", "当天",
         )
         # header + table header + separator + 2 data rows
         assert len(lines) == 5
-        assert "当月累计费用明细" in lines[0]
+        assert "当天 费用明细" in lines[0]
         assert "资源" in lines[1]
         assert "ECS" in lines[3]
         assert "100.00 CNY" in lines[3]
@@ -56,7 +56,7 @@ class TestFormatResourceCostLines:
             {"name": "RDS", "cost": 50.0},
         ]
         lines = _format_resource_cost_lines(
-            items, "CNY", "zh_Hans",
+            items, "CNY", "zh_Hans", "当天",
         )
         assert "创建者" in lines[1]
         assert "zhangsan" in lines[3]
@@ -68,7 +68,7 @@ class TestFormatResourceCostLines:
             for i in range(10)
         ]
         lines = _format_resource_cost_lines(
-            items, "USD", "en", max_items=3,
+            items, "USD", "en", "Today", max_items=3,
         )
         # header + table header + separator + 3 data rows
         assert len(lines) == 6
@@ -77,7 +77,7 @@ class TestFormatResourceCostLines:
         """Should use service_name if name is missing."""
         items = [{"service_name": "EC2", "cost": 80.0}]
         lines = _format_resource_cost_lines(
-            items, "USD", "en",
+            items, "USD", "en", "Today",
         )
         # data row is line index 3
         assert "EC2" in lines[3]
@@ -86,29 +86,29 @@ class TestFormatResourceCostLines:
         """Should use 'Unknown' if both name and service_name missing."""
         items = [{"cost": 10.0}]
         lines = _format_resource_cost_lines(
-            items, "USD", "en",
+            items, "USD", "en", "Today",
         )
         assert "Unknown" in lines[3]
 
     def test_empty_items(self):
         """Should handle empty items list."""
-        lines = _format_resource_cost_lines([], "USD", "en")
+        lines = _format_resource_cost_lines([], "USD", "en", "Today")
         assert len(lines) == 1  # header only
-        assert "Monthly Cost Breakdown" in lines[0]
+        assert "Cost Breakdown" in lines[0]
 
     def test_chinese_language(self):
         """Should use Chinese header for zh language."""
         lines = _format_resource_cost_lines(
-            [{"name": "x", "cost": 1}], "CNY", "zh_Hans",
+            [{"name": "x", "cost": 1}], "CNY", "zh_Hans", "当天",
         )
-        assert "当月累计费用明细" in lines[0]
+        assert "费用明细" in lines[0]
 
     def test_english_language(self):
         """Should use English header for en language."""
         lines = _format_resource_cost_lines(
-            [{"name": "x", "cost": 1}], "USD", "en",
+            [{"name": "x", "cost": 1}], "USD", "en", "Today",
         )
-        assert "Monthly Cost Breakdown" in lines[0]
+        assert "Cost Breakdown" in lines[0]
 
 
 # ── build_alert_message: localization ──────────────────────────
@@ -315,7 +315,7 @@ class TestAlertResourceCostBreakdown:
             language="zh-Hans",
             resource_cost_items=resource_costs,
         )
-        assert "当月累计费用明细" in message
+        assert "费用明细" in message
         assert "ECS" in message
         assert "RDS" in message
         assert "OSS" in message
@@ -345,7 +345,7 @@ class TestAlertResourceCostBreakdown:
             language="en",
             resource_cost_items=resource_costs,
         )
-        assert "Monthly Cost Breakdown" in message
+        assert "Today's Cost Breakdown" in message
         assert "EC2" in message
         assert "S3" in message
 
@@ -469,6 +469,66 @@ class TestAlertResourceCostBreakdown:
         )
         assert "Current balance" not in message
 
+    def test_balance_alert_with_resource_breakdown(self, alert_rule):
+        """Balance alert should include resource breakdown."""
+        resource_costs = [
+            {"name": "ECS", "cost": 80.0},
+            {"name": "RDS", "cost": 45.0},
+        ]
+        message = build_alert_message(
+            provider_name="阿里云",
+            provider_notes="",
+            provider_tags=[],
+            account_id="123456789",
+            current_cost=150.00,
+            previous_cost=80.00,
+            increase_cost=70.00,
+            increase_percent=87.50,
+            current_balance=100.00,
+            current_days_remaining=None,
+            currency="CNY",
+            alert_rule=alert_rule,
+            cost_threshold_triggered=False,
+            balance_threshold_triggered=True,
+            days_remaining_threshold_triggered=False,
+            language="zh-Hans",
+            resource_cost_items=resource_costs,
+        )
+        assert "余额阈值告警" in message
+        assert "费用明细" in message
+        assert "ECS" in message
+        assert "RDS" in message
+
+    def test_days_remaining_alert_with_resource_breakdown(self, alert_rule):
+        """Days remaining alert should include resource breakdown."""
+        resource_costs = [
+            {"name": "EC2", "cost": 100.0},
+            {"name": "S3", "cost": 50.0},
+        ]
+        message = build_alert_message(
+            provider_name="AWS",
+            provider_notes="",
+            provider_tags=[],
+            account_id="123456789",
+            current_cost=150.00,
+            previous_cost=80.00,
+            increase_cost=70.00,
+            increase_percent=87.50,
+            current_balance=500.00,
+            current_days_remaining=5,
+            currency="USD",
+            alert_rule=alert_rule,
+            cost_threshold_triggered=False,
+            balance_threshold_triggered=False,
+            days_remaining_threshold_triggered=True,
+            language="en",
+            resource_cost_items=resource_costs,
+        )
+        assert "Estimated days remaining alert" in message
+        assert "Today's Cost Breakdown" in message
+        assert "EC2" in message
+        assert "S3" in message
+
 
 # ── build_alert_message_from_record ────────────────────────────
 
@@ -504,7 +564,7 @@ class TestBuildAlertMessageFromRecord:
         message = build_alert_message_from_record(
             record, "en", resource_cost_items=resource_costs,
         )
-        assert "Monthly Cost Breakdown" in message
+        assert "Today's Cost Breakdown" in message
         assert "EC2" in message
         assert "alice" in message
 
@@ -623,7 +683,7 @@ class TestBuildAlertSections:
         thresholds = sections["thresholds"]
         # Should have at least cost threshold
         threshold_labels = [t["label"] for t in thresholds]
-        assert "Cost" in threshold_labels or "花费" in threshold_labels
+        assert "成本阈值" in threshold_labels
         threshold_values = [t["value"] for t in thresholds]
         assert any("100.00 USD" in v for v in threshold_values)
 
@@ -640,33 +700,57 @@ class TestBuildAlertSections:
         threshold_labels = [t["label"] for t in thresholds]
         threshold_values = [t["value"] for t in thresholds]
         # Should have growth percentage threshold
-        assert "Growth %" in threshold_labels or "百分比阈值" in threshold_labels
+        assert "百分比阈值" in threshold_labels
         # Should have amount threshold
-        assert "Amount" in threshold_labels or "金额阈值" in threshold_labels
+        assert "金额阈值" in threshold_labels
         # Verify the number of thresholds (should have growth %, amount, cost)
         assert len(thresholds) >= 2
 
     def test_labels_cost_breakdown_localization(self, common_params):
-        """cost_breakdown label should be localized correctly."""
-        # Chinese
-        sections_zh = build_alert_sections(
+        """cost_breakdown label should be localized correctly based on cost_period."""
+        # Chinese - today (default)
+        sections_zh_today = build_alert_sections(
             **common_params,
             cost_threshold_triggered=True,
             balance_threshold_triggered=False,
             days_remaining_threshold_triggered=False,
             language="zh-Hans",
+            cost_period="today",
         )
-        assert sections_zh["labels"]["cost_breakdown"] == "当月累计费用明细"
+        assert sections_zh_today["labels"]["cost_breakdown"] == "当天 费用明细"
 
-        # English
-        sections_en = build_alert_sections(
+        # Chinese - month
+        sections_zh_month = build_alert_sections(
+            **common_params,
+            cost_threshold_triggered=True,
+            balance_threshold_triggered=False,
+            days_remaining_threshold_triggered=False,
+            language="zh-Hans",
+            cost_period="month",
+        )
+        assert sections_zh_month["labels"]["cost_breakdown"] == "当月 费用明细"
+
+        # English - today
+        sections_en_today = build_alert_sections(
             **common_params,
             cost_threshold_triggered=True,
             balance_threshold_triggered=False,
             days_remaining_threshold_triggered=False,
             language="en",
+            cost_period="today",
         )
-        assert sections_en["labels"]["cost_breakdown"] == "Monthly Cost Breakdown"
+        assert sections_en_today["labels"]["cost_breakdown"] == "Today's Cost Breakdown"
+
+        # English - month
+        sections_en_month = build_alert_sections(
+            **common_params,
+            cost_threshold_triggered=True,
+            balance_threshold_triggered=False,
+            days_remaining_threshold_triggered=False,
+            language="en",
+            cost_period="month",
+        )
+        assert sections_en_month["labels"]["cost_breakdown"] == "Month's Cost Breakdown"
 
     def test_trigger_info_included(self, common_params):
         """Sections should include trigger icon and text."""

@@ -319,18 +319,26 @@ class CloudBillingNotificationService:
                 })
 
         # Determine which alert type is triggered and show relevant metrics
-        cost_threshold = find_threshold("Cost", "花费")
-        current_metric = find_metric("Current Total", "当前累计")
-        growth_metric = find_metric("Growth Rate", "增长率")
-        pct_threshold = find_threshold("Growth %", "百分比阈值")
-        increase_metric = find_metric("Increase", "增加金额")
-        amount_threshold = find_threshold("Amount", "金额阈值")
+        # Only show metrics/thresholds relevant to the current alert type
+        # Use translated label names from L (labels are already translated by Django)
+        cost_threshold = find_threshold(L["cost_threshold"])
+        current_metric = find_metric(L["current_hour_cost"])
+        growth_metric = find_metric(L["growth_rate"])
+        pct_threshold = find_threshold(L["growth_percentage_threshold"])
+        increase_metric = find_metric(L["increase_amount"])
+        amount_threshold = find_threshold(L["amount_threshold"])
 
-        if cost_threshold:
+        if "Balance" in alert_type:
+            # Balance alert: no additional metrics row needed, balance shown separately
+            pass
+        elif "Days" in alert_type:
+            # Days remaining alert: no additional metrics row needed, shown in trigger
+            pass
+        elif "Cost Threshold" in alert_type or "Cost" in alert_type:
             # Cost threshold alert: show current total + cost threshold
             add_metric_row(current_metric, cost_threshold)
         else:
-            # Growth alert: show BOTH growth rate + pct threshold AND increase + amount threshold
+            # Growth alert: show growth rate + pct threshold AND increase + amount threshold
             if growth_metric:
                 add_metric_row(growth_metric, pct_threshold)
             if increase_metric:
@@ -357,7 +365,7 @@ class CloudBillingNotificationService:
                 "tag": "div",
                 "text": {
                     "tag": "lark_md",
-                    "content": f"**{L['balance']}**{sep}{bal:.2f} {bal_cur}",
+                    "content": f"**{L['current_balance']}**{sep}{bal:.2f} {bal_cur}",
                 },
             })
 
@@ -470,7 +478,7 @@ class CloudBillingNotificationService:
         if balance_info:
             rows.append("")
             rows.append(
-                f"**{L['balance']}**{sep}"
+                f"**{L['current_balance']}**{sep}"
                 f"{balance_info['value']:.2f} {balance_info['currency']}"
             )
 
@@ -567,7 +575,7 @@ class CloudBillingNotificationService:
         if balance_info:
             rows.append("")
             rows.append(
-                f"**{L['balance']}**{sep}"
+                f"**{L['current_balance']}**{sep}"
                 f"{balance_info['value']:.2f} {balance_info['currency']}"
             )
 

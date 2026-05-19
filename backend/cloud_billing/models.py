@@ -457,6 +457,12 @@ class AlertRecord(models.Model):
             "format: [{name, cost, owner?}, ...]"
         ),
     )
+    cost_period = models.CharField(
+        max_length=10,
+        default="today",
+        blank=True,
+        help_text="Data source period: 'today' for daily API data, 'month' for stored monthly data",
+    )
     webhook_status = models.CharField(
         max_length=20,
         choices=WEBHOOK_STATUS_CHOICES,

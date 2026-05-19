@@ -24,10 +24,28 @@ def _fmt_amount(
 
 def _risk_icon(risk: str) -> str:
     return {
-        "high": "[!]",
-        "medium": "[~]",
-        "low": "",
-    }.get(risk, "")
+        "high": "🔴",
+        "medium": "🟡",
+        "low": "🟢",
+    }.get(risk, "⚪")
+
+
+def _mini_bar(value: float, reference: float) -> str:
+    """Return a tiny ASCII bar proportional to value/reference."""
+    if reference <= 0:
+        return ""
+    ratio = min(value / reference, 2.0)
+    blocks = max(1, int(ratio * 8))
+    return "█" * blocks
+
+
+def _section_title(title: str, width: int = 44, char: str = "─") -> str:
+    """Create a section title with consistent formatting."""
+    return f"┌{title} {char * max(0, width - len(title) - 2)}┐"
+
+
+def _section_end(width: int = 44, char: str = "─") -> str:
+    return f"└{char * width}┘"
 
 
 def build_daily_report(
@@ -47,69 +65,51 @@ def build_daily_report(
     """
     is_zh = str(language or "").lower().startswith("zh")
     lines: List[str] = []
+    width = 50
 
     # ── Header ──
+    lines.append("")
+    lines.append("╭" + "─" * width + "╮")
     if is_zh:
-        lines.append(f"云平台费用日报 — {report_date}")
-        lines.append("=" * 44)
+        lines.append(f"│  📊 云平台费用日报  {report_date}")
     else:
-        lines.append(f"Cloud Cost Daily Report — {report_date}")
-        lines.append("=" * 44)
+        lines.append(f"│  📊 Cloud Cost Daily Report  {report_date}")
+    lines.append("╰" + "─" * width + "╯")
 
     # ── Monthly summary ──
     summary = overview.get("summary", {})
     if is_zh:
         lines.append("")
-        lines.append("本月概览")
-        lines.append("-" * 44)
-        lines.append(
-            f"  累计消费    {_fmt_amount(summary.get('current_consumed', 0), is_zh=True)}"
-        )
-        lines.append(
-            f"  日均消费    {_fmt_amount(summary.get('daily_average', 0), is_zh=True)}"
-        )
-        lines.append(
-            f"  峰值消费    {_fmt_amount(summary.get('peak_cost', 0), is_zh=True)}"
-            f"  ({summary.get('peak_date', '-')})"
-        )
-        lines.append(
-            f"  预估月费    {_fmt_amount(summary.get('estimated_total', 0), is_zh=True)}"
-        )
-        lines.append(
-            f"  统计天数    {summary.get('collected_days', 0)} 天"
-        )
+        lines.append(_section_title("📈 本月概览", width))
+        lines.append(f"│  累计消费    {_fmt_amount(summary.get('current_consumed', 0), is_zh=True):>18s}")
+        lines.append(f"│  日均消费    {_fmt_amount(summary.get('daily_average', 0), is_zh=True):>18s}")
+        lines.append(f"│  峰值消费    {_fmt_amount(summary.get('peak_cost', 0), is_zh=True):>18s}  ({summary.get('peak_date', '-')})")
+        lines.append(f"│  预估月费    {_fmt_amount(summary.get('estimated_total', 0), is_zh=True):>18s}")
+        lines.append(f"│  统计天数    {summary.get('collected_days', 0)} 天")
+        lines.append(_section_end(width))
     else:
         lines.append("")
-        lines.append("Monthly Summary")
-        lines.append("-" * 44)
-        lines.append(
-            f"  Consumed      {_fmt_amount(summary.get('current_consumed', 0), is_zh=False)}"
-        )
-        lines.append(
-            f"  Daily Avg     {_fmt_amount(summary.get('daily_average', 0), is_zh=False)}"
-        )
-        lines.append(
-            f"  Peak          {_fmt_amount(summary.get('peak_cost', 0), is_zh=False)}"
-            f"  ({summary.get('peak_date', '-')})"
-        )
-        lines.append(
-            f"  Estimated     {_fmt_amount(summary.get('estimated_total', 0), is_zh=False)}"
-        )
+        lines.append(_section_title("📈 Monthly Summary", width))
+        lines.append(f"│  Consumed      {_fmt_amount(summary.get('current_consumed', 0), is_zh=False):>18s}")
+        lines.append(f"│  Daily Avg     {_fmt_amount(summary.get('daily_average', 0), is_zh=False):>18s}")
+        lines.append(f"│  Peak          {_fmt_amount(summary.get('peak_cost', 0), is_zh=False):>18s}  ({summary.get('peak_date', '-')})")
+        lines.append(f"│  Estimated     {_fmt_amount(summary.get('estimated_total', 0), is_zh=False):>18s}")
+        lines.append(_section_end(width))
 
     # ── Week trend (last 7 days) ──
     week = summary.get("trend_ranges", {}).get("week", [])
     if week:
         lines.append("")
         if is_zh:
-            lines.append("近 7 天趋势")
+            lines.append(_section_title("📉 近 7 天趋势", width))
         else:
-            lines.append("7-Day Trend")
-        lines.append("-" * 44)
+            lines.append(_section_title("📉 7-Day Trend", width))
         for pt in week[-7:]:
             date = pt.get("date", "?")
             total = pt.get("total", 0)
             bar = _mini_bar(total, summary.get("daily_average", 1))
-            lines.append(f"  {date}  {_fmt_amount(total, is_zh=is_zh):>18s}  {bar}")
+            lines.append(f"│  {date}  {_fmt_amount(total, is_zh=is_zh):>18s}  {bar}")
+        lines.append(_section_end(width))
 
     # ── Accounts ranking ──
     accounts = overview.get("accounts", [])
@@ -119,10 +119,10 @@ def build_daily_report(
         )
         lines.append("")
         if is_zh:
-            lines.append("账号消费排名")
+            lines.append(_section_title("💰 账号消费排名", width))
         else:
-            lines.append("Account Ranking")
-        lines.append("-" * 44)
+            lines.append(_section_title("💰 Account Ranking", width))
+
         for i, acc in enumerate(sorted_accounts, 1):
             name = acc.get("name", "?")
             cost = acc.get("cost", 0)
@@ -133,60 +133,50 @@ def build_daily_report(
             tags = acc.get("tags", [])
             pct = acc.get("percentage", 0)
 
-            label_parts = [name]
+            # Build label
             if notes:
-                label_parts.append(f"({notes})")
+                label = f"{name} ({notes})"
             elif tags:
-                label_parts.append(f"({', '.join(tags)})")
-            label = " ".join(label_parts)
+                label = f"{name} ({', '.join(tags)})"
+            else:
+                label = name
 
             risk_mark = _risk_icon(risk)
-            line = (
-                f"  {i}. {label:30s}"
-                f"  {_fmt_amount(cost, currency, is_zh=is_zh):>20s}"
-                f"  {pct:5.1f}%"
-            )
-            if risk_mark:
-                line += f"  {risk_mark}"
+            line = f"│  {i}. {risk_mark} {label[:25]:25s}  {_fmt_amount(cost, currency, is_zh=is_zh):>15s}  {pct:5.1f}%"
             if days is not None:
                 if is_zh:
                     line += f"  剩余{days}天"
                 else:
                     line += f"  {days}d left"
             lines.append(line)
+        lines.append(_section_end(width))
 
         # ── Per-account service breakdown (top 3 per account) ──
         lines.append("")
         if is_zh:
-            lines.append("各账号 Top 3 服务")
+            lines.append(_section_title("📋 各账号 Top 3 服务", width))
         else:
-            lines.append("Top 3 Services per Account")
-        lines.append("-" * 44)
+            lines.append(_section_title("📋 Top 3 Services per Account", width))
         for acc in sorted_accounts:
             name = acc.get("name", "?")
             detail = acc.get("detail", {})
             breakdown = detail.get("service_breakdown", [])
             if not breakdown:
                 continue
-            lines.append(f"  [{name}]")
+            lines.append(f"│  ┌─ {name}")
             for svc in breakdown[:3]:
                 svc_name = svc.get("name", "?")
                 svc_val = svc.get("value", 0)
                 svc_pct = svc.get("percentage", 0)
-                cur = detail.get(
-                    "service_breakdown_currency", "CNY"
-                )
+                cur = detail.get("service_breakdown_currency", "CNY")
                 lines.append(
-                    f"    {svc_name:28s}"
-                    f"  {_fmt_amount(svc_val, cur, is_zh=is_zh):>18s}"
-                    f"  {svc_pct:5.1f}%"
+                    f"│  │  {svc_name[:22]:22s}  {_fmt_amount(svc_val, cur, is_zh=is_zh):>15s}  {svc_pct:5.1f}%"
                 )
+            lines.append(f"│  └" + "─" * (width - 3))
+        lines.append(_section_end(width))
 
     # ── Financial health ──
     health = overview.get("financial_health", {})
-    total_funds = health.get("total_funds", 0)
-    total_days = health.get("total_days")
-    bottleneck = health.get("bottleneck", "")
     alerts = health.get("recharge_alerts", [])
 
     needs_recharge = [
@@ -198,10 +188,9 @@ def build_daily_report(
     if needs_recharge:
         lines.append("")
         if is_zh:
-            lines.append("余额预警")
+            lines.append(_section_title("⚠️ 余额预警", width))
         else:
-            lines.append("Balance Alerts")
-        lines.append("-" * 44)
+            lines.append(_section_title("⚠️ Balance Alerts", width))
         for a in needs_recharge:
             name = a.get("name", "?")
             days = a.get("days_remaining", "?")
@@ -209,14 +198,13 @@ def build_daily_report(
             cur = a.get("recommendation_currency", "CNY")
             if is_zh:
                 lines.append(
-                    f"  {name}  剩余 {days} 天"
-                    f"  建议充值 {_fmt_amount(rec, cur, is_zh=True)}"
+                    f"│  🔔 {name[:20]:20s}  剩余 {days} 天  建议充值 {_fmt_amount(rec, cur, is_zh=True)}"
                 )
             else:
                 lines.append(
-                    f"  {name}  {days} days left"
-                    f"  recharge {_fmt_amount(rec, cur, is_zh=False)}"
+                    f"│  🔔 {name[:20]:20s}  {days} days left  recharge {_fmt_amount(rec, cur, is_zh=False)}"
                 )
+        lines.append(_section_end(width))
 
     # ── Exchange rate ──
     rate = overview.get("exchange_rate")
@@ -224,20 +212,16 @@ def build_daily_report(
     if rate:
         lines.append("")
         if is_zh:
-            lines.append(f"  汇率: 1 USD = {rate:.4f} CNY ({rate_label})")
+            lines.append(f"│  💱 汇率: 1 USD = {rate:.4f} CNY ({rate_label})")
         else:
-            lines.append(f"  Rate: 1 USD = {rate:.4f} CNY ({rate_label})")
+            lines.append(f"│  💱 Rate: 1 USD = {rate:.4f} CNY ({rate_label})")
 
     lines.append("")
-    lines.append("=" * 44)
+    lines.append("╭" + "─" * width + "╮")
+    if is_zh:
+        lines.append(f"│  DevMind 云平台费用监控")
+    else:
+        lines.append(f"│  DevMind Cloud Billing Monitor")
+    lines.append("╰" + "─" * width + "╯")
 
     return "\n".join(lines)
-
-
-def _mini_bar(value: float, reference: float) -> str:
-    """Return a tiny ASCII bar proportional to value/reference."""
-    if reference <= 0:
-        return ""
-    ratio = min(value / reference, 2.0)
-    blocks = max(1, int(ratio * 8))
-    return "█" * blocks

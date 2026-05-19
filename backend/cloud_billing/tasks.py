@@ -362,7 +362,7 @@ def _query_resource_costs_for_alert(
     period: str,
     now,
     current_billing: Optional[BillingData] = None,
-) -> list:
+) -> tuple[list, str]:
     """Query resource-level cost breakdown for alert enhancement.
 
     Tries the cloud provider API for daily-granularity service costs
@@ -370,8 +370,13 @@ def _query_resource_costs_for_alert(
     service_costs stored in the current BillingData record (monthly
     totals collected during regular billing collection). Also attempts
     to resolve instance owners from tags when possible.
+
+    Returns:
+        tuple[list, str]: (items, cost_period) where cost_period is
+        "today" for daily API data or "month" for stored monthly data.
     """
     items = []
+    cost_period = "today"  # Default to daily data
     try:
         billing_service = BillingService(
             provider.provider_type, provider.config or {}
@@ -426,6 +431,7 @@ def _query_resource_costs_for_alert(
         )
 
     if not items:
+        cost_period = "month"  # Fall back to monthly data
         stored_service_costs = (
             current_billing.service_costs
             if current_billing is not None
@@ -450,7 +456,7 @@ def _query_resource_costs_for_alert(
             )
 
     if not items:
-        return []
+        return [], cost_period
 
     # Attempt to resolve instance owners from tags
     try:
@@ -481,7 +487,7 @@ def _query_resource_costs_for_alert(
             f"Alert instance owner lookup skipped: {e}"
         )
 
-    return items[:10]
+    return items[:10], cost_period
 
 
 @shared_task(name="cloud_billing.tasks.collect_billing_data")
@@ -1327,11 +1333,14 @@ def check_alert_for_provider(
             language = _resolve_notification_language(provider)
 
             resource_cost_items = []
+            cost_period = "today"  # Default
             if alert_type in (
                 AlertRecord.ALERT_TYPE_COST,
                 AlertRecord.ALERT_TYPE_GROWTH,
+                AlertRecord.ALERT_TYPE_BALANCE,
+                AlertRecord.ALERT_TYPE_DAYS_REMAINING,
             ):
-                resource_cost_items = (
+                resource_cost_items, cost_period = (
                     _query_resource_costs_for_alert(
                         provider=provider,
                         period=current_period,
@@ -1354,6 +1363,7 @@ def check_alert_for_provider(
                 currency=current_billing.currency,
                 alert_rule=alert_rule,
                 alert_type=alert_type,
+                cost_period=cost_period,
                 cost_threshold_triggered=cost_threshold_triggered,
                 balance_threshold_triggered=balance_threshold_triggered,
                 days_remaining_threshold_triggered=days_remaining_threshold_triggered,
@@ -1389,6 +1399,7 @@ def check_alert_for_provider(
                 ),
                 alert_message=alert_message,
                 resource_cost_details=resource_cost_items,
+                cost_period=cost_period,
                 webhook_status=WEBHOOK_STATUS_PENDING,
             )
 
