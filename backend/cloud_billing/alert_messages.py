@@ -532,6 +532,7 @@ def build_alert_sections(
             days_remaining_threshold_triggered=days_remaining_threshold_triggered,
             alert_type=alert_type,
             resource_cost_items=resource_cost_items,
+            normalized_language=normalized_language,
         )
 
 
@@ -554,6 +555,7 @@ def _build_alert_sections_inner(
     days_remaining_threshold_triggered,
     alert_type=None,
     resource_cost_items=None,
+    normalized_language="en",
 ) -> dict:
     """Inner builder — all ``_()`` calls resolve under the active language."""
 
@@ -624,12 +626,19 @@ def _build_alert_sections_inner(
         "notes":          _("Notes"),
         "tags":           _("Tags"),
         "balance":        _("Balance"),
-        "cost_breakdown": _("Cost Breakdown"),
+        "cost_breakdown": _("当月累计费用明细") if is_chinese_language(normalized_language) else _("Monthly Cost Breakdown"),
         "col_resource":   _("Resource"),
         "col_cost":       _("Cost"),
         "col_owner":      _("Owner"),
         "footer":         _("DevMind Cloud Billing · @all"),
         "sep":            _(": "),
+        "current_total":  _("Current Total"),
+        "previous_hour":  _("Previous Hour"),
+        "growth_rate":    _("Growth Rate"),
+        "growth_pct":     _("Growth %"),
+        "increase":       _("Increase"),
+        "amount":         _("Amount"),
+        "cost":           _("Cost"),
     }
 
     # ── Build sections ──
@@ -650,9 +659,10 @@ def _build_alert_sections_inner(
     }
 
     # ── Key metrics ──
-    if effective_alert_type in ("growth", "") and not (
+    if (effective_alert_type == "growth" or effective_alert_type == "") and not (
         balance_threshold_triggered
         or days_remaining_threshold_triggered
+        or cost_threshold_triggered
     ):
         sections["metrics"] = [
             {
@@ -688,6 +698,16 @@ def _build_alert_sections_inner(
             {
                 "label": _("Previous Hour"),
                 "value": f"{previous_cost:.2f}",
+                "highlight": False,
+            },
+            {
+                "label": _("Growth Rate"),
+                "value": f"{increase_percent:.1f}%",
+                "highlight": False,
+            },
+            {
+                "label": _("Increase"),
+                "value": f"{increase_cost:.2f}",
                 "highlight": False,
             },
         ]

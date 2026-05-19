@@ -1342,7 +1342,6 @@
       <!-- Validation Messages -->
       <div
         v-if="validationErrors.length > 0"
-        ref="validationErrorsRef"
         class="rounded-md bg-red-50 p-2.5"
       >
         <div class="flex gap-2">
@@ -1405,28 +1404,6 @@
         </div>
       </div>
 
-      <div v-if="validationSuccess" class="rounded-md bg-green-50 p-2.5">
-        <div class="flex gap-2">
-          <div class="flex-shrink-0 pt-0.5">
-            <svg
-              class="h-4 w-4 text-green-400"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fill-rule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                clip-rule="evenodd"
-              />
-            </svg>
-          </div>
-          <div class="flex-1">
-            <p class="text-xs font-medium text-green-800">
-              {{ validationSuccess }}
-            </p>
-          </div>
-        </div>
-      </div>
     </form>
 
     <template #footer>
@@ -1519,8 +1496,6 @@ const saving = ref(false)
 const validating = ref(false)
 const isValidated = ref(false)
 const validationErrors = ref([])
-const validationSuccess = ref('')
-const validationErrorsRef = ref(null)
 const requiredPermissions = ref([])
 
 const formData = reactive({
@@ -1701,14 +1676,6 @@ const handleClickOutside = (event) => {
   }
 }
 
-const scrollToValidationErrors = async () => {
-  await nextTick()
-  validationErrorsRef.value?.scrollIntoView({
-    behavior: 'smooth',
-    block: 'center'
-  })
-}
-
 // Watch provider_type to auto-generate display_name and name
 watch(
   () => formData.provider_type,
@@ -1732,7 +1699,6 @@ watch(
     // Reset validation when provider type changes
     isValidated.value = false
     validationErrors.value = []
-    validationSuccess.value = ''
   },
   { immediate: false }
 )
@@ -1809,7 +1775,6 @@ watch(
     if (!props.provider) {
       isValidated.value = false
       validationErrors.value = []
-      validationSuccess.value = ''
     } else {
       // For editing, check if config has changed
       const current = getCurrentConfigFieldValues()
@@ -1862,33 +1827,40 @@ watch(
       }
       if (newProvider.provider_type === 'aws') {
         configFields.aws_access_key_id =
-          config.access_key_id ||
-          config.AWS_ACCESS_KEY_ID ||
           config.aws_access_key_id ||
+          config.AWS_ACCESS_KEY_ID ||
+          config.access_key_id ||
           ''
         configFields.aws_secret_access_key =
-          config.secret_access_key ||
-          config.AWS_SECRET_ACCESS_KEY ||
           config.aws_secret_access_key ||
+          config.AWS_SECRET_ACCESS_KEY ||
+          config.secret_access_key ||
           ''
         configFields.aws_region =
-          config.region || config.AWS_REGION || ''
+          config.aws_region ||
+          config.AWS_REGION ||
+          config.region ||
+          ''
       } else if (
         newProvider.provider_type === 'huawei' ||
         newProvider.provider_type === 'huawei-intl'
       ) {
         configFields.huawei_access_key_id =
-          config.access_key_id ||
-          config.HUAWEI_ACCESS_KEY_ID ||
           config.huawei_access_key_id ||
+          config.HUAWEI_ACCESS_KEY_ID ||
+          config.access_key_id ||
           ''
         configFields.huawei_secret_access_key =
-          config.secret_access_key ||
-          config.HUAWEI_SECRET_ACCESS_KEY ||
           config.huawei_secret_access_key ||
+          config.HUAWEI_SECRET_ACCESS_KEY ||
+          config.secret_access_key ||
           ''
         configFields.huawei_region =
-          config.region || config.HUAWEI_REGION || ''
+          config.huawei_region ||
+          config.HUAWEI_REGION ||
+          config.region ||
+          ''
+        configChangedSinceValidation.value = true
       } else if (newProvider.provider_type === 'azure') {
         configFields.azure_client_id =
           config.client_id || config.AZURE_CLIENT_ID || ''
@@ -1904,19 +1876,19 @@ watch(
           ''
       } else if (newProvider.provider_type === 'alibaba') {
         configFields.alibaba_access_key_id =
-          config.access_key_id ||
-          config.ALIBABA_ACCESS_KEY_ID ||
           config.alibaba_access_key_id ||
+          config.ALIBABA_ACCESS_KEY_ID ||
+          config.access_key_id ||
           ''
         configFields.alibaba_secret_access_key =
-          config.secret_access_key ||
-          config.ALIBABA_SECRET_ACCESS_KEY ||
           config.alibaba_secret_access_key ||
+          config.ALIBABA_SECRET_ACCESS_KEY ||
+          config.secret_access_key ||
           ''
         configFields.alibaba_region =
-          config.region ||
-          config.ALIBABA_REGION ||
           config.alibaba_region ||
+          config.ALIBABA_REGION ||
+          config.region ||
           ''
       } else if (newProvider.provider_type === 'tencentcloud') {
         configFields.tencent_access_key_id =
@@ -1927,38 +1899,71 @@ watch(
           config.app_id || config.TENCENT_APP_ID || ''
       } else if (newProvider.provider_type === 'volcengine') {
         configFields.volcengine_access_key_id =
-          config.api_key || config.VOLCENGINE_ACCESS_KEY_ID || ''
+          config.VOLCENGINE_ACCESS_KEY_ID ||
+          config.volcengine_access_key_id ||
+          config.api_key ||
+          ''
         configFields.volcengine_secret_access_key =
-          config.api_secret ||
           config.VOLCENGINE_SECRET_ACCESS_KEY ||
           config.VOLCENGINE_ACCESS_KEY_SECRET ||
+          config.volcengine_secret_access_key ||
+          config.volcengine_access_key_secret ||
+          config.api_secret ||
           ''
         configFields.volcengine_region =
-          config.region || config.VOLCENGINE_REGION || ''
+          config.VOLCENGINE_REGION ||
+          config.volcengine_region ||
+          config.region ||
+          ''
         configFields.volcengine_endpoint =
-          config.endpoint || config.VOLCENGINE_ENDPOINT || ''
+          config.VOLCENGINE_ENDPOINT ||
+          config.volcengine_endpoint ||
+          config.endpoint ||
+          ''
         configFields.volcengine_payer_id =
-          config.payer_id || config.VOLCENGINE_PAYER_ID || ''
+          config.VOLCENGINE_PAYER_ID ||
+          config.volcengine_payer_id ||
+          config.payer_id ||
+          ''
         configFields.volcengine_service =
-          config.service || config.VOLCENGINE_SERVICE || ''
+          config.VOLCENGINE_SERVICE ||
+          config.volcengine_service ||
+          config.service ||
+          ''
         configFields.volcengine_version =
-          config.version || config.VOLCENGINE_VERSION || ''
+          config.VOLCENGINE_VERSION ||
+          config.volcengine_version ||
+          config.version ||
+          ''
+        configChangedSinceValidation.value = true
       } else if (newProvider.provider_type === 'baidu') {
         configFields.baidu_access_key_id =
-          config.api_key || config.BAIDU_ACCESS_KEY_ID || ''
+          config.BAIDU_ACCESS_KEY_ID ||
+          config.baidu_access_key_id ||
+          config.api_key ||
+          ''
         configFields.baidu_secret_access_key =
-          config.api_secret || config.BAIDU_SECRET_ACCESS_KEY || ''
+          config.BAIDU_SECRET_ACCESS_KEY ||
+          config.baidu_secret_access_key ||
+          config.api_secret ||
+          ''
+        configChangedSinceValidation.value = true
       } else if (newProvider.provider_type === 'zhipu') {
         configFields.zhipu_username =
-          config.username || config.ZHIPU_USERNAME || ''
+          config.zhipu_username ||
+          config.username ||
+          config.ZHIPU_USERNAME ||
+          ''
         configFields.zhipu_password =
-          config.password || config.ZHIPU_PASSWORD || ''
+          config.zhipu_password ||
+          config.password ||
+          config.ZHIPU_PASSWORD ||
+          ''
 
         // Save initial config snapshot for edit validation tracking
         initialConfigSnapshot.value = getCurrentConfigFieldValues()
-        // Initial config is considered validated (no changes yet)
-        configChangedSinceValidation.value = false
-        isValidated.value = true
+        configChangedSinceValidation.value = true
+        isValidated.value = false
       }
 
       // Load alert rule if exists and showAlertRule is true
@@ -2386,7 +2391,6 @@ const buildConfig = () => {
 const handleValidate = async () => {
   validating.value = true
   validationErrors.value = []
-  validationSuccess.value = ''
   isValidated.value = false
   requiredPermissions.value = []
 
@@ -2399,17 +2403,14 @@ const handleValidate = async () => {
     const validation = extractResponseData(response)
 
     if (validation.valid) {
-      validationSuccess.value = t('cloudBilling.providers.validationSuccess')
+      let msg = t('cloudBilling.providers.validationSuccess')
       if (validation.account_id) {
-        validationSuccess.value += ` (${t('cloudBilling.providers.accountId')}: ${validation.account_id})`
+        msg += ` (${t('cloudBilling.providers.accountId')}: ${validation.account_id})`
       }
+      showSuccess(msg)
       isValidated.value = true
-      // Update config snapshot after successful validation
       initialConfigSnapshot.value = getCurrentConfigFieldValues()
       configChangedSinceValidation.value = false
-      setTimeout(() => {
-        validationSuccess.value = ''
-      }, 5000)
     } else {
       const errorCode = validation.error_code || 'validation_failed'
       const errorMessage =
@@ -2418,8 +2419,7 @@ const handleValidate = async () => {
           `cloudBilling.providers.validationErrorCodes.${errorCode}`,
           t('cloudBilling.providers.validationFailed')
         )
-      validationErrors.value = [errorMessage]
-      // Only show required permissions for permission errors
+      showError(errorMessage)
       if (
         validation.error_type === 'permission_error' &&
         validation.required_permissions &&
@@ -2430,7 +2430,6 @@ const handleValidate = async () => {
         requiredPermissions.value = []
       }
       isValidated.value = false
-      await scrollToValidationErrors()
     }
   } catch (error) {
     console.error('Failed to validate provider config:', error)
@@ -2443,9 +2442,8 @@ const handleValidate = async () => {
         errorMessage = errorData.detail
       }
     }
-    validationErrors.value = [errorMessage]
+    showError(errorMessage)
     isValidated.value = false
-    await scrollToValidationErrors()
   } finally {
     validating.value = false
   }

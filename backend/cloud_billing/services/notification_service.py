@@ -255,76 +255,86 @@ class CloudBillingNotificationService:
 
         elements.append({"tag": "hr"})
 
-        # ── 3. Metrics cards (column_set with bg color) ──
+        # ── 3. Only show triggered metrics (noise reduction) ──
+        # Determine which alert type is triggered
         metrics = sections.get("metrics", [])
-        if metrics:
-            columns = []
-            for m in metrics:
-                val = m["value"]
-                label = m["label"]
-                is_pct = "%" in str(val)
-                unit = "" if is_pct else f" {currency}"
-                if m.get("highlight"):
-                    val_md = (
-                        f"<font color='red'>**"
-                        f"{val}{unit}**</font>"
-                    )
-                    bg = "orange"
-                else:
-                    val_md = f"**{val}**{unit}"
-                    bg = "grey"
-                columns.append({
-                    "tag": "column",
-                    "width": "weighted",
-                    "weight": 1,
-                    "vertical_align": "center",
-                    "elements": [{
-                        "tag": "div",
-                        "text": {
-                            "tag": "lark_md",
-                            "content": (
-                                f"{label}\n{val_md}"
-                            ),
-                        },
-                    }],
-                })
-            elements.append({
-                "tag": "column_set",
-                "flex_mode": "stretch",
-                "background_style": "grey",
-                "columns": columns,
-            })
-
-        # ── 4. Thresholds (column_set cards) ──
         thresholds = sections.get("thresholds", [])
-        if thresholds:
-            t_columns = []
-            for t in thresholds:
-                label = t["label"]
-                value = t["value"]
-                t_columns.append({
+
+        def find_metric(*labels):
+            for lbl in labels:
+                for m in metrics:
+                    if m["label"] == lbl:
+                        return m
+            return None
+
+        def find_threshold(*labels):
+            for lbl in labels:
+                for t in thresholds:
+                    if t["label"] == lbl:
+                        return t
+            return None
+
+        def add_metric_row(metric, threshold):
+            """Add a row with metric and threshold, threshold is red if triggered."""
+            if not metric and not threshold:
+                return
+            pair_columns = []
+            if metric:
+                val = metric["value"]
+                label = metric["label"]
+                unit = f" {currency}" if not str(val).endswith("%") else ""
+                is_triggered = metric.get("highlight")
+                val_md = f"<font color='red'>**{val}{unit}**</font>" if is_triggered else f"**{val}{unit}**"
+                pair_columns.append({
                     "tag": "column",
                     "width": "weighted",
                     "weight": 1,
                     "vertical_align": "center",
                     "elements": [{
                         "tag": "div",
-                        "text": {
-                            "tag": "lark_md",
-                            "content": (
-                                f"{label}\n"
-                                f"<font color='grey'>"
-                                f"{value}</font>"
-                            ),
-                        },
+                        "text": {"tag": "lark_md", "content": f"{label}\n{val_md}"},
                     }],
                 })
-            elements.append({
-                "tag": "column_set",
-                "flex_mode": "stretch",
-                "background_style": "grey",
-                "columns": t_columns,
-            })
+            if threshold:
+                val = threshold["value"]
+                label = threshold["label"]
+                is_triggered = metric and metric.get("highlight")
+                val_md = f"<font color='red'>**{val}**</font>" if is_triggered else f"**{val}**"
+                pair_columns.append({
+                    "tag": "column",
+                    "width": "weighted",
+                    "weight": 1,
+                    "vertical_align": "center",
+                    "elements": [{
+                        "tag": "div",
+                        "text": {"tag": "lark_md", "content": f"{label}\n{val_md}"},
+                    }],
+                })
+            if pair_columns:
+                elements.append({
+                    "tag": "column_set",
+                    "flex_mode": "stretch",
+                    "background_style": "grey",
+                    "columns": pair_columns,
+                })
+
+        # Determine which alert type is triggered and show relevant metrics
+        cost_threshold = find_threshold("Cost", "花费")
+        current_metric = find_metric("Current Total", "当前累计")
+        growth_metric = find_metric("Growth Rate", "增长率")
+        pct_threshold = find_threshold("Growth %", "百分比阈值")
+        increase_metric = find_metric("Increase", "增加金额")
+        amount_threshold = find_threshold("Amount", "金额阈值")
+
+        if cost_threshold:
+            # Cost threshold alert: show current total + cost threshold
+            add_metric_row(current_metric, cost_threshold)
+        else:
+            # Growth alert: show BOTH growth rate + pct threshold AND increase + amount threshold
+            if growth_metric:
+                add_metric_row(growth_metric, pct_threshold)
+            if increase_metric:
+                add_metric_row(increase_metric, amount_threshold)
 
         # ── 5. Cost breakdown table ──
         resource_costs = sections.get("resource_costs", [])
