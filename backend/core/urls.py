@@ -57,6 +57,7 @@ urlpatterns = [
         'api/v1/admin/notifications/',
         include('agentcore_notifier.adapters.django.urls')
     ),
+    path('api/v1/admin/external-proxy/', include('external_proxy.urls')),
     # LLM metering admin API (agentcore-metering submodule)
     path('api/v1/admin/', include('agentcore_metering.adapters.django.urls')),
 

@@ -25,6 +25,24 @@ export const adminRoutes = [
     meta: { requiresAuth: true, requiredFeature: 'admin_console' }
   },
   {
+    path: '/management/external-sites',
+    name: 'ManagementExternalSites',
+    component: () => import('@/admin/pages/Management/ExternalSites.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/external-sites/open/:id',
+    name: 'ManagementExternalSiteOpen',
+    component: () => import('@/admin/pages/Management/ExternalSiteOpen.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
+    path: '/management/external-sites/frame/:id',
+    name: 'ManagementExternalSiteFrame',
+    component: () => import('@/admin/pages/Management/ExternalSiteFrame.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'admin_console' }
+  },
+  {
     path: '/management/llm',
     redirect: '/management/llm/stats'
   },

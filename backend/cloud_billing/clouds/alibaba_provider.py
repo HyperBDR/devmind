@@ -27,7 +27,9 @@ except ImportError:
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# BSS OpenAPI: China uses business.aliyuncs.com (bssopenapi.*.aliyuncs.com often fails to resolve).
+# BSS OpenAPI: business.aliyuncs.com works for QueryBill and
+# QueryAccountBalance. Region-specific hosts such as
+# business.ap-southeast-1.aliyuncs.com can return AuthSiteFail.
 BSS_ENDPOINT_CHINA = "business.aliyuncs.com"
 DEFAULT_BSS_ENDPOINT = "bssopenapi.aliyuncs.com"
 BSS_OPENAPI_ENDPOINT = DEFAULT_BSS_ENDPOINT  # alias for backward compatibility
@@ -116,16 +118,15 @@ class AlibabaCloud(BaseCloudProvider):
         return self._sts_client
 
     def _get_bss_endpoint(self) -> str:
-        """Resolve BSS endpoint: env override, then China region -> business.aliyuncs.com, else default."""
+        """Resolve the BSS endpoint.
+
+        BSS is account-level rather than resource-region-level, so the
+        provider region must not be interpolated into the endpoint.
+        """
         endpoint = os.environ.get("ALIBABA_BSS_ENDPOINT", "").strip()
         if endpoint:
             return endpoint
-        region = (self.config.region or "").strip().lower()
-        if region and region.startswith("cn-"):
-            return BSS_ENDPOINT_CHINA
-        if region:
-            return f"business.{region}.aliyuncs.com"
-        return BSS_OPENAPI_ENDPOINT
+        return BSS_ENDPOINT_CHINA
 
     def _get_fallback_bss_endpoint(self) -> str:
         """Return the alternative BSS endpoint for retry.

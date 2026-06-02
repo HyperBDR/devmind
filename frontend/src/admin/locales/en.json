@@ -5,6 +5,7 @@
     "userManagement": "User Management",
     "groupManagement": "Group Management",
     "roleManagement": "Role Management",
+    "externalSiteProxy": "External Site Proxy",
     "backToUserPlatform": "Back to User Platform",
     "usersSubtitle": "View and manage all users",
     "groupsSubtitle": "View and manage all groups",

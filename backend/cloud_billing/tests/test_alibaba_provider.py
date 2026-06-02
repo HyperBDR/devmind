@@ -39,6 +39,17 @@ class TestAlibabaCloud:
         result = provider._extract_cash_balance(response)
         assert result == 100.50
 
+    def test_bss_endpoint_ignores_resource_region(self):
+        """BSS endpoint should not be built from resource region."""
+        config = AlibabaConfig(
+            api_key="test-ak",
+            api_secret="test-sk",
+            region="ap-southeast-1",
+        )
+        provider = AlibabaCloud(config)
+
+        assert provider._get_bss_endpoint() == "business.aliyuncs.com"
+
     def test_extract_cash_balance_returns_cash_plus_credit(self):
         """Balance should be cash + credit for international accounts."""
         provider = self._make_provider()

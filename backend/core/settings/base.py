@@ -169,6 +169,7 @@ INSTALLED_APPS += [
     'ai_pricehub',
     'cloud_billing',
     'data_collector',
+    'external_proxy',
     'hyperbdr_dashboard',
     'sals',
     'agentcore_metering.adapters.django',

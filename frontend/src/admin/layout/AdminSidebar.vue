@@ -181,6 +181,38 @@
                 </svg>
                 <span>{{ t('management.roleManagement') }}</span>
               </router-link>
+              <router-link
+                to="/management/external-sites"
+                class="admin-nav-item admin-nav-item-child"
+                :class="
+                  isActive('/management/external-sites')
+                    ? 'admin-nav-item-active'
+                    : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/management/external-sites')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3.6 9h16.8M3.6 15h16.8M12 3a15.3 15.3 0 010 18M12 3a15.3 15.3 0 000 18"
+                  />
+                </svg>
+                <span>{{ t('management.externalSiteProxy') }}</span>
+              </router-link>
             </div>
           </Transition>
         </div>
@@ -666,12 +698,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 
-const props = defineProps({
+defineProps({
   showMobileMenu: {
     type: Boolean,
     default: false
@@ -722,7 +754,8 @@ watch(
     if (
       newPath.startsWith('/management/users') ||
       newPath.startsWith('/management/groups') ||
-      newPath.startsWith('/management/roles')
+      newPath.startsWith('/management/roles') ||
+      newPath.startsWith('/management/external-sites')
     )
       userManagementMenuOpen.value = true
     if (newPath.startsWith('/management/llm')) llmMenuOpen.value = true
@@ -747,10 +780,10 @@ const preloadRoute = (path) => {
         }
       })
     }
-  } catch (_) {}
+  } catch (_) {
+    preloadCache.delete(path)
+  }
 }
-
-onMounted(() => {})
 </script>
 
 <style scoped>

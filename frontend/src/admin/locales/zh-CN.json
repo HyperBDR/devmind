@@ -5,6 +5,7 @@
     "userManagement": "用户管理",
     "groupManagement": "组管理",
     "roleManagement": "角色管理",
+    "externalSiteProxy": "外部站点代理",
     "backToUserPlatform": "返回用户平台",
     "usersSubtitle": "查看与管理全部用户",
     "groupsSubtitle": "查看与管理全部组",

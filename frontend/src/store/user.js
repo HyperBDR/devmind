@@ -7,6 +7,21 @@ import {
   hasFeature
 } from '@/utils/platformAccess'
 
+// Cookie lifetime must not exceed JWT ACCESS_TOKEN_LIFETIME on the backend
+// (1 hour by default). If you change SIMPLE_JWT["ACCESS_TOKEN_LIFETIME"],
+// update this in lockstep — otherwise the cookie outlives the token and
+// users hit "logged in but token expired" states.
+const ACCESS_TOKEN_COOKIE_MAX_AGE = 60 * 60 // 1 hour, matches backend
+
+function writeAccessTokenCookie(value) {
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `access_token=${value}; path=/; max-age=${ACCESS_TOKEN_COOKIE_MAX_AGE}; SameSite=Lax${secure}`
+}
+
+function clearAccessTokenCookie() {
+  document.cookie = 'access_token=; path=/; max-age=0; SameSite=Lax'
+}
+
 export const useUserStore = defineStore('user', () => {
   // State
   const user = ref(null)
@@ -41,8 +56,9 @@ export const useUserStore = defineStore('user', () => {
         token.value = data.access
         user.value = data.user
 
-        // Save tokens to localStorage
+        // Save tokens to localStorage and cookie
         localStorage.setItem('access_token', data.access)
+        writeAccessTokenCookie(data.access)
         if (data.refresh) {
           localStorage.setItem('refresh_token', data.refresh)
         }
@@ -51,6 +67,7 @@ export const useUserStore = defineStore('user', () => {
         token.value = data.token || data.access_token
         user.value = data.user
         localStorage.setItem('access_token', token.value)
+        writeAccessTokenCookie(token.value)
       }
 
       await loadUserPreferences()
@@ -73,6 +90,7 @@ export const useUserStore = defineStore('user', () => {
     pendingAuthCheck = Promise.resolve()
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
+    clearAccessTokenCookie()
   }
 
   const logout = async () => {
@@ -140,6 +158,7 @@ export const useUserStore = defineStore('user', () => {
         user.value = data
         if (!token.value && localStorage.getItem('access_token')) {
           token.value = localStorage.getItem('access_token')
+          writeAccessTokenCookie(token.value)
         }
         await loadUserPreferences()
         return data

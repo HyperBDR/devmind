@@ -29,6 +29,7 @@
         </div>
 
         <div class="flex items-center space-x-4">
+          <ExternalSitesDropdown />
           <LanguageSwitcher variant="dark" />
           <PlatformSwitcher variant="dark" />
           <div class="relative" ref="userMenuRef">
@@ -129,6 +130,7 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
 import PlatformSwitcher from '@/components/layout/PlatformSwitcher.vue'
+import ExternalSitesDropdown from './ExternalSitesDropdown.vue'
 
 defineEmits(['toggle-menu'])
 
@@ -145,6 +147,7 @@ const pageTitle = computed(() => {
     ManagementUsers: t('management.userManagement'),
     ManagementGroups: t('management.groupManagement'),
     ManagementRoles: t('management.roleManagement'),
+    ManagementExternalSites: t('management.externalSiteProxy'),
     LLMStats: t('llm.stats.title'),
     LLMUsage: t('llm.usage.title'),
     LLMConfig: t('llm.config.title'),
