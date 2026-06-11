@@ -110,6 +110,12 @@ const routes = [
     meta: { requiresAuth: true, requiredFeature: 'ai_pricehub' }
   },
   {
+    path: '/llm-ops',
+    name: 'LLMOps',
+    component: () => import('@/pages/LLMOps.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'llm_ops' }
+  },
+  {
     path: '/cloud-billing/tasks',
     name: 'CloudBillingTasks',
     component: () => import('@/pages/CloudBilling/Tasks.vue'),

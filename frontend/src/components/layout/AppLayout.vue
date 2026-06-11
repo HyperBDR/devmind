@@ -19,10 +19,14 @@
       <main
         class="flex-1 min-w-0 overflow-y-auto bg-gray-50"
         :class="
-          resolvedShowSidebar ? 'py-3 px-4' : 'px-6 py-6 sm:px-8 lg:px-10'
+          fullBleed
+            ? 'p-0'
+            : resolvedShowSidebar
+              ? 'py-3 px-4'
+              : 'px-6 py-6 sm:px-8 lg:px-10'
         "
       >
-        <div :key="route.path">
+        <div :key="route.path" :class="fullBleed ? 'h-full' : ''">
           <slot />
         </div>
       </main>
@@ -40,6 +44,10 @@ const props = defineProps({
   showSidebar: {
     type: Boolean,
     default: true
+  },
+  fullBleed: {
+    type: Boolean,
+    default: false
   }
 })
 

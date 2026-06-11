@@ -704,6 +704,7 @@
     "workspace": "用户工作台",
     "operationsConsole": "运营控制台",
     "aiPriceHub": "大模型比价",
+    "llmOps": "大模型运营管理",
     "hyperbdrDashboard": "HyperMotion / HyperBDR数据仪表盘",
     "adminConsole": "管理员控制台",
     "llmConsole": "LLM 控制台",
@@ -1795,6 +1796,7 @@
       "license": "授权管理平台",
       "hyperbdr": "HyperBDR",
       "ai_pricehub": "大模型价格",
+      "llm_ops": "大模型运营管理",
       "after_sales_incident": "售后工单"
     },
     "records": {

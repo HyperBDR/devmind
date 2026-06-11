@@ -694,6 +694,7 @@
     "workspace": "Workspace",
     "operationsConsole": "Operations Console",
     "aiPriceHub": "LLM Pricing Comparison",
+    "llmOps": "LLM Operations",
     "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard",
     "adminConsole": "Admin Console",
     "llmConsole": "LLM Console",
@@ -1791,6 +1792,7 @@
       "license": "License",
       "hyperbdr": "HyperBDR",
       "ai_pricehub": "AI Pricing",
+      "llm_ops": "LLM Operations",
       "after_sales_incident": "After-Sales Work Order"
     },
     "records": {

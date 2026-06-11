@@ -24,6 +24,12 @@ export const FEATURE_DEFINITIONS = [
     matchers: ['/ai-pricehub']
   },
   {
+    key: 'llm_ops',
+    labelKey: 'platforms.llmOps',
+    defaultPath: '/llm-ops',
+    matchers: ['/llm-ops']
+  },
+  {
     key: 'sales_work_orders',
     labelKey: 'platforms.salesWorkOrders',
     defaultPath: '/sals/dashboard',
@@ -48,6 +54,8 @@ const FEATURE_ALIASES = {
   data_collector: 'operations_console',
   sals: 'sales_work_orders',
   ai_model_pricing: 'ai_pricehub',
+  llm_operations: 'llm_ops',
+  llm_ops_management: 'llm_ops',
   llm_console: 'admin_console',
   task_management_console: 'admin_console',
   notification_console: 'admin_console'

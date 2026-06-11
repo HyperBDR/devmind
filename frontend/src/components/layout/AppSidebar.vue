@@ -401,6 +401,36 @@
           </Transition>
         </div>
 
+        <router-link
+          v-if="userStore.userHasFeature('llm_ops')"
+          to="/llm-ops"
+          class="nav-item"
+          :class="isActive('/llm-ops') ? 'nav-item-active' : ''"
+          @click="isMobile && $emit('close')"
+          @mouseenter="preloadRoute('/llm-ops')"
+        >
+          <svg
+            class="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"
+            />
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M8 13h3m3 0h2M8 16h8"
+            />
+          </svg>
+          <span>{{ t('platforms.llmOps') }}</span>
+        </router-link>
+
       </div>
 
       <!-- Settings Menu -->
