@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import uuid
 import importlib.util
@@ -37,6 +38,7 @@ from pydantic import BaseModel, Field
 from agentcore_metering.adapters.django.models import LLMUsage
 from ai_pricehub.llm_config import resolve_parser_llm_settings
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.db.models import Q
 from django.utils import timezone
 from langchain_anthropic import ChatAnthropic
@@ -127,6 +129,110 @@ FEISHU_STATUS_MAP = {
 # ---------------------------------------------------------------------------
 FEISHU_APPROVAL_BASE_URL = "https://www.feishu.cn"
 
+
+def _looks_like_legacy_submitter_identifier(value: str) -> bool:
+    """Return True when a submitter value looks like email or mobile.
+
+    Used by backend tasks and view shims to coerce a historical submitter
+    string (email or phone) into the legacy ``submitter_identifier`` form
+    when the new ``submitter_user_id`` flow is not applicable.
+    """
+    text = str(value or "").strip()
+    return bool(
+        text and ("@" in text or re.match(r"^\+?\d[\d\s-]{5,}$", text))
+    )
+
+
+
+def _redact_feishu_headers(headers: Dict[str, str]) -> Dict[str, str]:
+    """Return Feishu request headers with credentials redacted."""
+    redacted = dict(headers)
+    if "Authorization" in redacted:
+        redacted["Authorization"] = "Bearer ***REDACTED***"
+    return redacted
+
+
+def _redact_feishu_form_for_log(value: Any) -> Any:
+    """Return a Feishu approval form payload with submitted values redacted."""
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return "***REDACTED_FORM***"
+
+    if isinstance(parsed, list):
+        redacted_items: List[Any] = []
+        for item in parsed:
+            if isinstance(item, dict) and "value" in item:
+                redacted_items.append(
+                    {
+                        **item,
+                        "value": "***REDACTED***",
+                    }
+                )
+            else:
+                redacted_items.append(_redact_feishu_payload_for_log(item))
+        return redacted_items
+
+    if isinstance(parsed, dict):
+        redacted_form: Dict[str, Any] = {}
+        for key, item in parsed.items():
+            if key == "value":
+                redacted_form[key] = "***REDACTED***"
+            else:
+                redacted_form[key] = _redact_feishu_payload_for_log(item)
+        return redacted_form
+
+    return "***REDACTED_FORM***"
+
+
+def _redact_feishu_payload_for_log(value: Any) -> Any:
+    """Return Feishu payload data safe enough for application logs."""
+    sensitive_keys = (
+        "account",
+        "amount",
+        "authorization",
+        "bank",
+        "customer",
+        "email",
+        "mobile",
+        "name",
+        "payee",
+        "password",
+        "remark",
+        "secret",
+        "token",
+        "user",
+    )
+    if isinstance(value, dict):
+        redacted: Dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).lower()
+            if normalized_key == "form":
+                redacted[key] = _redact_feishu_form_for_log(item)
+            elif any(part in normalized_key for part in sensitive_keys):
+                redacted[key] = "***REDACTED***"
+            else:
+                redacted[key] = _redact_feishu_payload_for_log(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_feishu_payload_for_log(item) for item in value]
+    return value
+
+
+def _redact_feishu_body_for_log(body: str) -> str:
+    """Return a redacted Feishu response body for logs."""
+    try:
+        payload = json.loads(body)
+    except (TypeError, json.JSONDecodeError):
+        return "***REDACTED_BODY***"
+    return json.dumps(
+        _redact_feishu_payload_for_log(payload),
+        ensure_ascii=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Preflight inspection constants (mirrors skill script field names)
 # ---------------------------------------------------------------------------
@@ -157,29 +263,76 @@ def _feishu_api_request(
 
     try:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
+        logger.info(
+            "Feishu API Request\n"
+            "method=POST\n"
+            "url=%s\n"
+            "headers=%s\n"
+            "payload=%s",
+            url,
+            json.dumps(_redact_feishu_headers(headers), ensure_ascii=False),
+            json.dumps(
+                _redact_feishu_payload_for_log(payload),
+                ensure_ascii=False,
+            ),
+        )
         req = urllib.request.Request(
             url=url,
             data=body,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
+            headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            status_code = getattr(resp, "status", None) or getattr(
+                resp, "code", None
+            )
+            response_body = resp.read().decode("utf-8")
+            data = json.loads(response_body)
+            logger.info(
+                "Feishu API Response\n"
+                "method=POST\n"
+                "url=%s\n"
+                "http_status=%s\n"
+                "feishu_code=%s\n"
+                "feishu_msg=%s\n"
+                "body=%s",
+                url,
+                status_code,
+                data.get("code"),
+                data.get("msg", ""),
+                _redact_feishu_body_for_log(response_body),
+            )
             if data.get("code") != 0:
                 logger.warning(
-                    "Feishu API error: url=%s code=%s msg=%s",
+                    "Feishu API error: url=%s code=%s msg=%s body=%s",
                     url,
                     data.get("code"),
                     data.get("msg", ""),
+                    _redact_feishu_body_for_log(response_body),
                 )
                 return None
             return data
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode("utf-8", errors="replace")
-        logger.warning("Feishu HTTP error: url=%s code=%s body=%s", url, exc.code, body_text[:200])
+        logger.warning(
+            "Feishu API HTTP Error\n"
+            "method=POST\n"
+            "url=%s\n"
+            "http_status=%s\n"
+            "payload=%s\n"
+            "body=%s",
+            url,
+            exc.code,
+            json.dumps(
+                _redact_feishu_payload_for_log(payload),
+                ensure_ascii=False,
+            ),
+            _redact_feishu_body_for_log(body_text),
+        )
     except urllib.error.URLError as exc:
         logger.warning("Feishu network error: url=%s error=%s", url, exc.reason)
     except Exception as exc:
@@ -922,10 +1075,16 @@ def _get_feishu_access_token() -> Optional[str]:
         )
 
         logger.info(
-            "Feishu API Request: POST %s\n"
-            "Headers: Content-Type: application/json\n"
-            "Body: %s",
+            "Feishu API Request\n"
+            "method=POST\n"
+            "url=%s\n"
+            "headers=%s\n"
+            "payload=%s",
             FEISHU_AUTH_URL,
+            json.dumps(
+                {"Content-Type": "application/json; charset=utf-8"},
+                ensure_ascii=False,
+            ),
             json.dumps({
                 "app_id": config["app_id"],
                 "app_secret": "***"  # Mask secret
@@ -938,19 +1097,26 @@ def _get_feishu_access_token() -> Optional[str]:
             latency_ms = int((time.monotonic() - start_time) * 1000)
 
         data = json.loads(body)
+        log_data = {
+            **data,
+            "tenant_access_token": "***REDACTED***"
+            if data.get("tenant_access_token")
+            else "",
+        }
 
         logger.info(
-            "Feishu API Response: %s %dms\n"
-            "Protocol: HTTPS\n"
-            "URL: %s\n"
-            "Status: code=%s, msg=%s\n"
-            "Body: %s",
-            "POST",
-            latency_ms,
+            "Feishu API Response\n"
+            "method=POST\n"
+            "url=%s\n"
+            "latency_ms=%s\n"
+            "feishu_code=%s\n"
+            "feishu_msg=%s\n"
+            "body=%s",
             FEISHU_AUTH_URL,
+            latency_ms,
             data.get("code"),
             data.get("msg", ""),
-            body[:500] if len(body) > 500 else body,
+            json.dumps(log_data, ensure_ascii=False),
         )
 
         if data.get("code") == 0:
@@ -969,13 +1135,14 @@ def _get_feishu_access_token() -> Optional[str]:
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         logger.error(
-            "Feishu API HTTP Error: POST %s\n"
-            "Protocol: HTTPS\n"
-            "Status Code: %d\n"
-            "Body: %s",
+            "Feishu API HTTP Error\n"
+            "method=POST\n"
+            "url=%s\n"
+            "http_status=%s\n"
+            "body=%s",
             FEISHU_AUTH_URL,
             e.code,
-            body[:500],
+            _redact_feishu_body_for_log(body),
         )
     except urllib.error.URLError as e:
         logger.error(
@@ -997,46 +1164,405 @@ def _get_feishu_access_token() -> Optional[str]:
     return None
 
 
-FEISHU_LIST_USERS_URL = "https://open.feishu.cn/open-apis/contact/v3/users?user_id_type=user_id&department_id=0&page_size=50"
-FEISHU_LIST_USERS_SIMPLE_URL = "https://open.feishu.cn/open-apis/contact/v3/users/simple?user_id_type=user_id&department_id=0&page_size=50"
+FEISHU_CONTACT_BASE_URL = "https://open.feishu.cn/open-apis/contact/v3"
+FEISHU_ROOT_DEPARTMENT_ID = "0"
+FEISHU_CONTACT_PAGE_SIZE = 50
+FEISHU_USERS_CACHE_KEY_PREFIX = "cloud_billing:feishu_users:v2"
+FEISHU_USERS_CACHE_TTL_SECONDS = int(
+    os.getenv("FEISHU_USERS_CACHE_TTL_SECONDS", "3600")
+)
+FEISHU_USERS_WALK_DEPARTMENTS = os.getenv(
+    "FEISHU_USERS_WALK_DEPARTMENTS",
+    "auto",
+).strip().lower()
+FEISHU_USERS_DEPARTMENT_MAX_WORKERS = int(
+    os.getenv("FEISHU_USERS_DEPARTMENT_MAX_WORKERS", "8")
+)
+FEISHU_USERS_MAX_DEPARTMENTS = int(
+    os.getenv("FEISHU_USERS_MAX_DEPARTMENTS", "500")
+)
+_FEISHU_USERS_CACHE_LOCK = threading.Lock()
+FEISHU_LIST_USERS_URL = (
+    f"{FEISHU_CONTACT_BASE_URL}/users?"
+    "user_id_type=user_id&department_id_type=open_department_id"
+    f"&department_id={FEISHU_ROOT_DEPARTMENT_ID}"
+    f"&page_size={FEISHU_CONTACT_PAGE_SIZE}&fetch_child=true"
+)
 
 
-def list_feishu_users() -> List[Dict[str, str]]:
+def list_feishu_users(*, force_refresh: bool = False) -> List[Dict[str, str]]:
     """
     List all users from Feishu Contact API (with pagination).
 
-    Tries the full /users endpoint first (name, email, mobile if permissions allow),
-    then falls back to /users/simple (user_id, name only, no extra permissions).
+    Tries the full /users endpoint with child departments enabled, then walks
+    all visible departments and merges users by user_id/email/mobile.
     """
+    cache_key = f"{FEISHU_USERS_CACHE_KEY_PREFIX}:{FEISHU_USERS_WALK_DEPARTMENTS}"
+    if not force_refresh:
+        cached_users = cache.get(cache_key)
+        if isinstance(cached_users, list):
+            logger.info(
+                "Feishu list users returned %d cached users",
+                len(cached_users),
+            )
+            return cached_users
+
+    with _FEISHU_USERS_CACHE_LOCK:
+        if not force_refresh:
+            cached_users = cache.get(cache_key)
+            if isinstance(cached_users, list):
+                logger.info(
+                    "Feishu list users returned %d cached users",
+                    len(cached_users),
+                )
+                return cached_users
+        return _list_feishu_users_uncached(cache_key)
+
+
+def _list_feishu_users_uncached(cache_key: str) -> List[Dict[str, str]]:
+    """Fetch Feishu users from remote API and refresh the shared cache."""
     token = _get_feishu_access_token()
     if not token:
         logger.warning("Cannot list Feishu users: no access token.")
         return []
 
-    import urllib.request
-    import urllib.error
-
     users = []
 
-    # Try full contact API first
+    # Try full contact API first. fetch_child=true should include users in
+    # child departments when the app has visibility for those departments.
     result = _fetch_feishu_user_page(token, FEISHU_LIST_USERS_URL)
     if result is not None:
         users = result
 
-    # If no users returned (permissions denied / empty), try simple endpoint
-    if not users:
-        logger.info("Full contact API returned no users, trying simple endpoint")
-        result = _fetch_feishu_user_page(token, FEISHU_LIST_USERS_SIMPLE_URL)
-        if result is not None:
-            users = result
+    should_walk_departments = (
+        FEISHU_USERS_WALK_DEPARTMENTS in {"1", "true", "yes"}
+        or (
+            FEISHU_USERS_WALK_DEPARTMENTS == "auto"
+            and len(users) <= 1
+        )
+    )
 
-    # Populate missing fields from full endpoint to simple results
-    if users and not any(u.get("email") or u.get("mobile") for u in users):
-        logger.info("Simple endpoint used; enriching with full contact data")
+    # Department walking is slower on large tenants. Use the /users endpoint as
+    # the fast path, but fall back automatically when it only returns the root
+    # department's minimal result.
+    if users and should_walk_departments:
+        users = _dedupe_feishu_users(
+            users + _list_feishu_users_by_departments(token)
+        )
+
+    if not users:
+        logger.info("Root contact API returned no users, trying departments")
+        users = _list_feishu_users_by_departments(token)
+
+    # Populate missing fields from the per-user search endpoint when possible.
+    if users and any(
+        not u.get("name") or not (u.get("email") or u.get("mobile"))
+        for u in users
+    ):
+        logger.info("Enriching Feishu users with per-user contact data")
         _enrich_user_details(token, users)
 
+    _apply_feishu_user_display_names(users)
+    cache.set(
+        cache_key,
+        users,
+        timeout=FEISHU_USERS_CACHE_TTL_SECONDS,
+    )
     logger.info("Feishu list users returned %d users", len(users))
     return users
+
+
+def _build_feishu_contact_url(path: str, params: Dict[str, Any]) -> str:
+    """Build a Feishu Contact API URL with encoded query parameters."""
+    from urllib.parse import urlencode
+
+    clean_params = {
+        key: value
+        for key, value in params.items()
+        if value is not None and value != ""
+    }
+    return f"{FEISHU_CONTACT_BASE_URL}{path}?{urlencode(clean_params)}"
+
+
+def _build_feishu_user_list_url(
+    *,
+    department_id: str,
+    fetch_child: bool,
+) -> str:
+    return _build_feishu_contact_url(
+        "/users",
+        {
+            "user_id_type": "user_id",
+            "department_id_type": "open_department_id",
+            "department_id": department_id,
+            "page_size": FEISHU_CONTACT_PAGE_SIZE,
+            "fetch_child": str(fetch_child).lower(),
+        },
+    )
+
+
+def _append_page_token(url: str, page_token: str) -> str:
+    """Return URL with an updated Feishu page_token query parameter."""
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["page_token"] = page_token
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(query),
+            parts.fragment,
+        )
+    )
+
+
+def _dedupe_feishu_users(users: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Deduplicate Feishu users while preserving the first seen order."""
+    deduped: List[Dict[str, str]] = []
+    seen = set()
+    for user in users:
+        key = (
+            user.get("user_id")
+            or user.get("email")
+            or user.get("mobile")
+            or user.get("name")
+            or ""
+        )
+        key = str(key).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(user)
+    return deduped
+
+
+def _format_email_local_name(email: str) -> str:
+    """Format an email local part as a readable display name."""
+    local_part = str(email or "").split("@", 1)[0].strip()
+    if not local_part:
+        return ""
+    words = [
+        word
+        for word in re.split(r"[._\-\s]+", local_part)
+        if word
+    ]
+    return " ".join(word[:1].upper() + word[1:] for word in words)
+
+
+def _apply_feishu_user_display_names(users: List[Dict[str, str]]) -> None:
+    """Populate display names for Feishu users in-place."""
+    emails = sorted(
+        {
+            str(user.get("email") or "").strip().lower()
+            for user in users
+            if str(user.get("email") or "").strip()
+        }
+    )
+    local_user_names: Dict[str, str] = {}
+    if emails:
+        batch_size = 500
+        for start in range(0, len(emails), batch_size):
+            batch = emails[start:start + batch_size]
+            for user in User.objects.filter(email__in=batch).iterator():
+                email = str(user.email or "").strip().lower()
+                display_name = (
+                    f"{user.first_name or ''} {user.last_name or ''}".strip()
+                    or user.get_username()
+                )
+                if email and display_name:
+                    local_user_names[email] = display_name
+
+    for user in users:
+        email = str(user.get("email") or "").strip()
+        name = str(user.get("name") or "").strip()
+        display_name = (
+            name
+            or local_user_names.get(email.lower(), "")
+            or _format_email_local_name(email)
+            or str(user.get("user_id") or "").strip()
+        )
+        user["name"] = name or display_name
+        user["display_name"] = display_name
+
+
+def _fetch_feishu_department_users(
+    token: str,
+    department_id: str,
+) -> List[Dict[str, str]]:
+    """Fetch users from one Feishu department."""
+    url = _build_feishu_user_list_url(
+        department_id=department_id,
+        fetch_child=False,
+    )
+    page_users = _fetch_feishu_user_page(token, url)
+    return page_users or []
+
+
+def _limit_feishu_departments(department_ids: List[str]) -> List[str]:
+    """Limit Feishu department traversal to protect request latency."""
+    if len(department_ids) <= FEISHU_USERS_MAX_DEPARTMENTS:
+        return department_ids
+    logger.warning(
+        "Feishu department traversal limited from %d to %d departments",
+        len(department_ids),
+        FEISHU_USERS_MAX_DEPARTMENTS,
+    )
+    return department_ids[:FEISHU_USERS_MAX_DEPARTMENTS]
+
+
+def _list_feishu_users_by_departments(
+    token: str,
+) -> List[Dict[str, str]]:
+    """List users from every visible Feishu department and deduplicate."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    department_ids = _limit_feishu_departments(
+        _list_feishu_departments(token)
+    )
+    if not department_ids:
+        return []
+    max_workers = max(1, min(FEISHU_USERS_DEPARTMENT_MAX_WORKERS, 16))
+    users: List[Dict[str, str]] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _fetch_feishu_department_users,
+                token,
+                department_id,
+            ): department_id
+            for department_id in department_ids
+        }
+        for future in as_completed(futures):
+            department_id = futures[future]
+            try:
+                users.extend(future.result())
+            except Exception as exc:
+                logger.warning(
+                    "Feishu department user fetch failed: department_id=%s "
+                    "error=%s",
+                    department_id,
+                    exc,
+                )
+    return _dedupe_feishu_users(users)
+
+
+def _list_feishu_departments(token: str) -> List[str]:
+    """List all visible Feishu department ids using breadth-first traversal."""
+    import urllib.error
+    import urllib.request
+
+    department_ids = [FEISHU_ROOT_DEPARTMENT_ID]
+    queue = [FEISHU_ROOT_DEPARTMENT_ID]
+    seen = {FEISHU_ROOT_DEPARTMENT_ID}
+
+    while queue:
+        department_id = queue.pop(0)
+        base_url = _build_feishu_contact_url(
+            f"/departments/{department_id}/children",
+            {
+                "department_id_type": "open_department_id",
+                "page_size": FEISHU_CONTACT_PAGE_SIZE,
+            },
+        )
+        url = base_url
+        while url:
+            try:
+                headers = {
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                }
+                logger.info(
+                    "Feishu API Request\n"
+                    "method=GET\n"
+                    "url=%s\n"
+                    "headers=%s",
+                    url,
+                    json.dumps(
+                        _redact_feishu_headers(headers),
+                        ensure_ascii=False,
+                    ),
+                )
+                request = urllib.request.Request(
+                    url=url,
+                    headers=headers,
+                    method="GET",
+                )
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    status_code = getattr(response, "status", None) or getattr(
+                        response,
+                        "code",
+                        None,
+                    )
+                    body = response.read().decode("utf-8")
+                data = json.loads(body)
+                logger.info(
+                    "Feishu API Response\n"
+                    "method=GET\n"
+                    "url=%s\n"
+                    "http_status=%s\n"
+                    "feishu_code=%s\n"
+                    "feishu_msg=%s\n"
+                    "body=%s",
+                    url,
+                    status_code,
+                    data.get("code"),
+                    data.get("msg", ""),
+                    _redact_feishu_body_for_log(body),
+                )
+                if data.get("code") != 0:
+                    logger.warning(
+                        "Feishu list departments failed: code=%s, msg=%s, url=%s body=%s",
+                        data.get("code"),
+                        data.get("msg", ""),
+                        url,
+                        _redact_feishu_body_for_log(body),
+                    )
+                    break
+
+                page_data = data.get("data", {}) or {}
+                for item in page_data.get("items", []) or []:
+                    child_id = str(
+                        item.get("open_department_id")
+                        or item.get("department_id")
+                        or ""
+                    ).strip()
+                    if child_id and child_id not in seen:
+                        seen.add(child_id)
+                        department_ids.append(child_id)
+                        queue.append(child_id)
+
+                page_token = str(page_data.get("page_token") or "").strip()
+                if page_data.get("has_more") and page_token:
+                    url = _append_page_token(base_url, page_token)
+                else:
+                    url = ""
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                logger.warning(
+                    "Feishu list departments HTTP error: url=%s status=%s body=%s",
+                    url,
+                    exc.code,
+                    _redact_feishu_body_for_log(body),
+                )
+                break
+            except urllib.error.URLError as exc:
+                logger.warning(
+                    "Feishu list departments network error: %s",
+                    str(exc.reason),
+                )
+                break
+            except Exception as exc:
+                logger.warning("Feishu list departments exception: %s", str(exc))
+                break
+
+    logger.info(
+        "Feishu visible departments returned %d departments",
+        len(department_ids),
+    )
+    return department_ids
 
 
 def _fetch_feishu_user_page(token: str, url: str) -> Optional[List[Dict[str, str]]]:
@@ -1050,36 +1576,63 @@ def _fetch_feishu_user_page(token: str, url: str) -> Optional[List[Dict[str, str
 
     while base_url:
         try:
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            }
+            logger.info(
+                "Feishu API Request\n"
+                "method=GET\n"
+                "url=%s\n"
+                "headers=%s",
+                base_url,
+                json.dumps(
+                    _redact_feishu_headers(headers),
+                    ensure_ascii=False,
+                ),
+            )
             request = urllib.request.Request(
                 url=base_url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json; charset=utf-8",
-                },
+                headers=headers,
                 method="GET",
             )
 
             start_time = time.monotonic()
             with urllib.request.urlopen(request, timeout=10) as response:
+                status_code = getattr(response, "status", None) or getattr(
+                    response,
+                    "code",
+                    None,
+                )
                 body = response.read().decode("utf-8")
                 latency_ms = int((time.monotonic() - start_time) * 1000)
 
             data = json.loads(body)
 
             logger.info(
-                "Feishu list users API Response: %dms code=%s msg=%s url=%s",
+                "Feishu API Response\n"
+                "method=GET\n"
+                "url=%s\n"
+                "http_status=%s\n"
+                "latency_ms=%s\n"
+                "feishu_code=%s\n"
+                "feishu_msg=%s\n"
+                "body=%s",
+                base_url,
+                status_code,
                 latency_ms,
                 data.get("code"),
                 data.get("msg", ""),
-                base_url,
+                _redact_feishu_body_for_log(body),
             )
 
             if data.get("code") != 0:
                 logger.warning(
-                    "Feishu list users failed: code=%s, msg=%s, url=%s",
+                    "Feishu list users failed: code=%s, msg=%s, url=%s body=%s",
                     data.get("code"),
                     data.get("msg", ""),
                     base_url,
+                    _redact_feishu_body_for_log(body),
                 )
                 break
 
@@ -1095,19 +1648,17 @@ def _fetch_feishu_user_page(token: str, url: str) -> Optional[List[Dict[str, str
             has_more = page_data.get("has_more", False)
             page_token = page_data.get("page_token")
             if has_more and page_token:
-                base_url = url.split("?")[0] + (
-                    f"?user_id_type=user_id&department_id=0&page_size=50"
-                    f"&page_token={page_token}"
-                )
+                base_url = _append_page_token(url, page_token)
             else:
                 base_url = None
 
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", errors="replace")
             logger.warning(
-                "Feishu list users HTTP error: status=%s body=%s",
+                "Feishu list users HTTP error: url=%s status=%s body=%s",
+                base_url,
                 e.code,
-                body[:500],
+                _redact_feishu_body_for_log(body),
             )
             break
         except urllib.error.URLError as e:
@@ -1149,24 +1700,61 @@ def _enrich_user_details(token: str, users: List[Dict[str, str]]) -> None:
                 "user_id_type=user_id&department_id_type=open_department_id"
                 "&page_size=50"
             )
-            payload = json.dumps({
+            payload_obj = {
                 "query_user": {"user_ids": [user["user_id"]]},
-            }).encode("utf-8")
+            }
+            payload = json.dumps(payload_obj).encode("utf-8")
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            }
+            logger.info(
+                "Feishu API Request\n"
+                "method=POST\n"
+                "url=%s\n"
+                "headers=%s\n"
+                "payload=%s",
+                search_url,
+                json.dumps(
+                    _redact_feishu_headers(headers),
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    _redact_feishu_payload_for_log(payload_obj),
+                    ensure_ascii=False,
+                ),
+            )
 
             request = urllib.request.Request(
                 url=search_url,
                 data=payload,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json; charset=utf-8",
-                },
+                headers=headers,
                 method="POST",
             )
 
             with urllib.request.urlopen(request, timeout=10) as response:
+                status_code = getattr(response, "status", None) or getattr(
+                    response,
+                    "code",
+                    None,
+                )
                 body = response.read().decode("utf-8")
 
             data = json.loads(body)
+            logger.info(
+                "Feishu API Response\n"
+                "method=POST\n"
+                "url=%s\n"
+                "http_status=%s\n"
+                "feishu_code=%s\n"
+                "feishu_msg=%s\n"
+                "body=%s",
+                search_url,
+                status_code,
+                data.get("code"),
+                data.get("msg", ""),
+                _redact_feishu_body_for_log(body),
+            )
             if data.get("code") == 0:
                 items = data.get("data", {}).get("items", [])
                 if items:
@@ -1359,28 +1947,29 @@ def _resolve_user_id_by_email_or_mobile(
         import urllib.request
         import urllib.error
 
-        # Mask access token in logs
-        masked_token = access_token[:10] + "***" if len(access_token) > 10 else "***"
-
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        }
         logger.info(
-            "Feishu API Request: POST %s\n"
-            "Headers:\n"
-            "  Authorization: Bearer %s\n"
-            "  Content-Type: application/json\n"
-            "Body:\n%s",
+            "Feishu API Request\n"
+            "method=POST\n"
+            "url=%s\n"
+            "headers=%s\n"
+            "payload=%s",
             FEISHU_USER_QUERY_URL,
-            masked_token,
-            json.dumps(payload, ensure_ascii=False, indent=2),
+            json.dumps(_redact_feishu_headers(headers), ensure_ascii=False),
+            json.dumps(
+                _redact_feishu_payload_for_log(payload),
+                ensure_ascii=False,
+            ),
         )
 
         data = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             url=FEISHU_USER_QUERY_URL,
             data=data,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
+            headers=headers,
             method="POST",
         )
 
@@ -1392,17 +1981,18 @@ def _resolve_user_id_by_email_or_mobile(
         result = json.loads(body)
 
         logger.info(
-            "Feishu API Response: POST %s %dms\n"
-            "Protocol: HTTPS\n"
-            "URL: %s\n"
-            "Status: code=%s, msg=%s\n"
-            "Body:\n%s",
+            "Feishu API Response\n"
+            "method=POST\n"
+            "url=%s\n"
+            "latency_ms=%s\n"
+            "feishu_code=%s\n"
+            "feishu_msg=%s\n"
+            "body=%s",
             FEISHU_USER_QUERY_URL,
             latency_ms,
-            FEISHU_USER_QUERY_URL,
             result.get("code"),
             result.get("msg", ""),
-            body[:1000] if len(body) > 1000 else body,
+            _redact_feishu_body_for_log(body),
         )
 
         if result.get("code") == 0:
@@ -1425,7 +2015,7 @@ def _resolve_user_id_by_email_or_mobile(
                 logger.warning(
                     "Feishu user not found: identifier=%s, response=%s",
                     identifier,
-                    result
+                    _redact_feishu_payload_for_log(result),
                 )
         else:
             logger.error(
@@ -1437,13 +2027,19 @@ def _resolve_user_id_by_email_or_mobile(
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         logger.error(
-            "Feishu API HTTP Error: POST %s\n"
-            "Protocol: HTTPS\n"
-            "Status Code: %d\n"
-            "Body: %s",
+            "Feishu API HTTP Error\n"
+            "method=POST\n"
+            "url=%s\n"
+            "http_status=%s\n"
+            "payload=%s\n"
+            "body=%s",
             FEISHU_USER_QUERY_URL,
             e.code,
-            body[:500],
+            json.dumps(
+                _redact_feishu_payload_for_log(payload),
+                ensure_ascii=False,
+            ),
+            _redact_feishu_body_for_log(body),
         )
     except urllib.error.URLError as e:
         logger.error(
@@ -2413,6 +3009,7 @@ def resolve_submitter_identity(
     *,
     provider_config: Optional[Dict[str, Any]],
     explicit_identifier: str = "",
+    explicit_user_id: str = "",
     explicit_label: str = "",
 ) -> Tuple[str, str, str]:
     approval_cfg = (provider_config or {}).get("recharge_approval") or {}
@@ -2422,6 +3019,8 @@ def resolve_submitter_identity(
         or approval_cfg.get("submitter_email")
         or approval_cfg.get("submitter_mobile")
         or approval_cfg.get("submitter_contact")
+        or approval_cfg.get("identifier")
+        or ""
     ).strip()
     label = str(
         explicit_label
@@ -2435,48 +3034,42 @@ def resolve_submitter_identity(
         "  identifier: %s\n"
         "  label: %s\n"
         "  explicit_identifier: %s\n"
+        "  explicit_user_id: %s\n"
         "  source: provider_config.recharge_approval",
         identifier or "(not set)",
         label or "(not set)",
         explicit_identifier or "(not set)",
+        explicit_user_id or "(not set)",
     )
 
-    # First try to get user_id from config
     resolved_user_id = str(
-        approval_cfg.get("resolved_submitter_user_id")
+        explicit_user_id
+        or approval_cfg.get("resolved_submitter_user_id")
         or approval_cfg.get("submitter_user_id")
         or approval_cfg.get("user_id")
-        or os.getenv("FEISHU_USER_ID", "")
     ).strip()
     resolved_user_name = ""
+
+    if not resolved_user_id and identifier:
+        access_token = _get_feishu_access_token()
+        resolved_identity = _resolve_user_id_by_email_or_mobile(
+            identifier,
+            access_token or "",
+        )
+        if resolved_identity:
+            resolved_user_id, resolved_user_name = resolved_identity
+
+    if not resolved_user_id:
+        resolved_user_id = os.getenv("FEISHU_USER_ID", "").strip()
 
     if resolved_user_id:
         logger.info(
             "Submitter user_id found in config: %s",
             resolved_user_id[:10] + "***" if len(resolved_user_id) > 10 else resolved_user_id
         )
-    elif identifier:
-        logger.info(
-            "No user_id in config, will query Feishu API by identifier: %s",
-            identifier
-        )
-        # If no user_id in config and we have an identifier (email or mobile),
-        # try to resolve it via Feishu API
-        access_token = _get_feishu_access_token()
-        if access_token:
-            resolved_user = _resolve_user_id_by_email_or_mobile(
-                identifier,
-                access_token,
-            )
-            if resolved_user:
-                resolved_user_id, resolved_user_name = resolved_user
-        else:
-            logger.warning(
-                "Cannot query Feishu API: access token not available"
-            )
     else:
         logger.warning(
-            "Cannot resolve submitter: no identifier provided and no user_id in config"
+            "Cannot resolve submitter: no user_id provided or configured"
         )
 
     logger.info(
