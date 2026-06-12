@@ -19,6 +19,8 @@ from cloud_billing.models import RechargeApprovalRecord
 from cloud_billing.services.recharge_approval import (
     RechargeApprovalAgentCallbackHandler,
     _approval_skill_path,
+    _redact_feishu_body_for_log,
+    _redact_feishu_payload_for_log,
     _skill_root_path,
     _workspace_root,
     build_deep_agent_model,
@@ -288,30 +290,16 @@ _F_PAYMENT_NOTE = "付款说明"
 
 
 def _local_feishu_token() -> str:
-    import urllib.error, urllib.request
-
-    app_id = os.getenv("FEISHU_APP_ID", "").strip()
-    if not app_id or not os.getenv("FEISHU_APP_SECRET"):
-        raise RuntimeError("FEISHU_APP_ID and FEISHU_APP_SECRET must be set.")
-    payload = json.dumps({"app_id": app_id, "app_secret": os.getenv("FEISHU_APP_SECRET")}).encode()
-    req = urllib.request.Request(
-        f"{AUTH_BASE}/open-apis/auth/v3/tenant_access_token/internal",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    # Delegate to the shared service helper so we share one cached token and
+    # one set of redaction/logging logic between the LLM agent path and the
+    # local executor path. The helper raises a clear RuntimeError on failure.
+    from cloud_billing.services.recharge_approval import (
+        _get_feishu_access_token as _shared_feishu_token,
     )
-    logger.info("[LocalExecutor] Requesting Feishu tenant token (app_id=%s)", app_id[:8] + "***")
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read())
-    code = data.get("code", -1)
-    if code != 0:
-        logger.error("[LocalExecutor] Feishu auth failed code=%s msg=%s", code, data.get("msg", ""))
-        raise RuntimeError(f"Feishu auth failed code={code}: {data.get('msg')}")
-    token = data.get("tenant_access_token", "")
+    token = _shared_feishu_token()
     if not token:
-        logger.error("[LocalExecutor] Feishu auth returned empty token")
-        raise RuntimeError("No tenant_access_token in auth response.")
-    logger.info("[LocalExecutor] Feishu token obtained successfully")
+        raise RuntimeError("Feishu tenant_access_token unavailable.")
+    logger.info("[LocalExecutor] Feishu token obtained via shared cache")
     return str(token)
 
 
@@ -319,19 +307,71 @@ def _local_api(url: str, payload: Dict[str, Any], token: str, method: str = "POS
     import urllib.error, urllib.request
 
     body = json.dumps(payload, ensure_ascii=False).encode()
-    req = urllib.request.Request(url, data=body, headers={
+    headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json; charset=utf-8",
-    }, method=method)
+    }
+    log_headers = dict(headers)
+    log_headers["Authorization"] = "Bearer ***REDACTED***"
+    logger.info(
+        "[LocalExecutor] Feishu API Request\n"
+        "method=%s\n"
+        "url=%s\n"
+        "headers=%s\n"
+        "payload=%s",
+        method,
+        url,
+        json.dumps(log_headers, ensure_ascii=False),
+        json.dumps(
+            _redact_feishu_payload_for_log(payload),
+            ensure_ascii=False,
+        ),
+    )
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        logger.debug("[LocalExecutor] Feishu API: %s %s", method, url)
         with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
+            http_status = getattr(resp, "status", None) or getattr(
+                resp, "code", None
+            )
+            response_body = resp.read().decode("utf-8")
+            result = json.loads(response_body)
+            logger.info(
+                "[LocalExecutor] Feishu API Response\n"
+                "method=%s\n"
+                "url=%s\n"
+                "http_status=%s\n"
+                "feishu_code=%s\n"
+                "feishu_msg=%s\n"
+                "body=%s",
+                method,
+                url,
+                http_status,
+                result.get("code"),
+                result.get("msg", ""),
+                _redact_feishu_body_for_log(response_body),
+            )
     except urllib.error.HTTPError as exc:
         body_text = exc.read().decode(errors="replace")
-        logger.error("[LocalExecutor] Feishu API HTTP error: %s %s code=%s body=%s",
-                     method, url, exc.code, body_text[:300])
-        raise RuntimeError(f"Feishu API HTTP {exc.code} for {url}: {body_text}") from exc
+        logger.error(
+            "[LocalExecutor] Feishu API HTTP Error\n"
+            "method=%s\n"
+            "url=%s\n"
+            "http_status=%s\n"
+            "payload=%s\n"
+            "body=%s",
+            method,
+            url,
+            exc.code,
+            json.dumps(
+                _redact_feishu_payload_for_log(payload),
+                ensure_ascii=False,
+            ),
+            _redact_feishu_body_for_log(body_text),
+        )
+        redacted_body = _redact_feishu_body_for_log(body_text)
+        raise RuntimeError(
+            f"Feishu API HTTP {exc.code} for {url}: {redacted_body}"
+        ) from exc
     except urllib.error.URLError as exc:
         logger.error("[LocalExecutor] Feishu network error: %s %s error=%s", method, url, exc.reason)
         raise RuntimeError(f"Feishu network error for {url}: {exc.reason}") from exc
@@ -612,14 +652,13 @@ def _execute_local(
     *,
     record: RechargeApprovalRecord,
     raw_recharge_info: str,
-    submitter_identifier: str,
     submitter_user_label: str,
     resolved_submitter_user_id: str,
 ) -> Dict[str, Any]:
     """
     Execute recharge approval without LLM:
       1. Parse recharge info
-      2. Resolve Feishu user_id (if not provided)
+      2. Use the provided Feishu user_id
       3. Detect duplicate on Feishu (PENDING with same cloud_type + recharge_account)
       4. Build form payload and submit
       5. Update record and return result
@@ -632,7 +671,7 @@ def _execute_local(
     create_recharge_approval_event(
         record=record, event_type="local_execution_started", stage="skill_workflow",
         source=source, message="Recharge approval local execution started.",
-        payload={"submitter_identifier": submitter_identifier},
+        payload={"resolved_submitter_user_id": resolved_submitter_user_id},
     )
 
     try:
@@ -674,24 +713,12 @@ def _execute_local(
                     approval_code, base_url)
         token = _local_feishu_token()
 
-        # Step 3: resolve user_id
+        # Step 3: validate user_id
         resolved_user_id = resolved_submitter_user_id
-        submitter_ident = submitter_identifier
-        if not resolved_user_id and submitter_ident:
-            logger.info("[LocalExecutor] Step 3/6: Resolving user_id from identifier=%s", submitter_ident[:6] + "***")
-            resolved_user_id = _local_resolve_user_id(submitter_ident, token)
-            create_recharge_approval_event(
-                record=record, event_type="workflow_step_resolve_completed", stage="skill_workflow",
-                source=source, message=f"Resolved user_id={resolved_user_id[:8]}***",
-                payload={"user_id": resolved_user_id, "identifier": submitter_ident},
-            )
-        elif resolved_user_id:
+        if resolved_user_id:
             logger.info("[LocalExecutor] Step 3/6: Using pre-resolved user_id=%s***",
                         resolved_user_id[:8] if len(resolved_user_id) > 8 else resolved_user_id)
         else:
-            logger.warning("[LocalExecutor] Step 3/6: No submitter identifier provided")
-
-        if not resolved_user_id:
             logger.error("[LocalExecutor] No Feishu user_id available")
             raise RuntimeError("No Feishu user_id available.")
 
@@ -754,7 +781,7 @@ def _execute_local(
             trigger_source=getattr(record, "trigger_source", "manual") or "manual",
             trigger_reason=getattr(record, "trigger_reason", "") or "",
             trigger_user_label=trigger_user_label,
-            submitter_label=submitter_user_label or submitter_identifier or "",
+            submitter_label=submitter_user_label or resolved_user_id or "",
             provider_name=getattr(getattr(record, "provider", None), "display_name", None) or "",
             approval_status="已提交",
         )
@@ -769,7 +796,7 @@ def _execute_local(
         record.latest_stage = "skill_workflow"
         record.context_payload = {**(record.context_payload or {}), "notification_message": notification_msg}
         record.submitted_at = finished_at
-        record.submitter_identifier = submitter_identifier
+        record.submitter_identifier = record.submitter_identifier or ""
         record.resolved_submitter_user_id = resolved_user_id
         record.submitter_user_label = submitter_user_label
         record.save(update_fields=[
@@ -790,7 +817,7 @@ def _execute_local(
         )
 
         return {
-            "submitter_identifier": submitter_identifier,
+            "submitter_identifier": record.submitter_identifier or "",
             "resolved_submitter_user_id": resolved_user_id,
             "submitter_user_label": submitter_user_label,
             "request_payload": parsed_payload,
@@ -837,7 +864,6 @@ def execute_recharge_approval_agent(
         return _execute_local(
             record=record,
             raw_recharge_info=raw_recharge_info,
-            submitter_identifier=submitter_identifier,
             submitter_user_label=submitter_user_label,
             resolved_submitter_user_id=resolved_submitter_user_id,
         )
