@@ -184,3 +184,20 @@ class TestHuaweiIntlCloud:
             ]
             == 123.45
         )
+
+    def test_get_billing_info_marks_unauthorized_as_config_error(self):
+        provider = self._make_provider()
+        provider._query_billing_api = Mock(
+            side_effect=Exception(
+                "SdkException - Failed to get domain id, "
+                "ClientRequestException - {status_code:401,"
+                "error_code:APIGW.0301,error_msg:Incorrect IAM "
+                "authentication information: Unauthorized}"
+            )
+        )
+
+        result = provider.get_billing_info("2025-01")
+
+        assert result["status"] == "error"
+        assert result["is_config_error"] is True
+        assert result["is_permission_error"] is False
