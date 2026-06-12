@@ -9,10 +9,10 @@ Use the bound workflow tools only. Do not call scripts directly.
 
 ## Required Flow
 
-1. Call `plan_recharge_approval_workflow(raw_recharge_info, submitter_identifier)`.
-2. Read `request_file`, `submitter_identifier`, and `resolved_submitter_user_id` from the plan.
-3. Call `execute_recharge_approval_plan(request_file, submitter_identifier, resolved_submitter_user_id)`.
-4. Return the execute result as the final structured response.
+1. Call `plan_recharge_approval_workflow(raw_recharge_info, submitter_identifier="", resolved_submitter_user_id=<user_id>)`.
+2. Read `request_file`, `submitter_user_id` / `resolved_submitter_user_id`, and `submitter_user_label` from the plan.
+3. Call `execute_recharge_approval_plan(request_file, submitter_user_id=<user_id>, submitter_user_label=...)`.
+4. `submitter_identifier` is now an optional legacy email/mobile alias kept for backwards-compatible matching; the execution path itself requires a Feishu `user_id`.
 
 The plan step writes a debug JSON file under `/tmp` named with provider, account, and record ids. It is intentionally retained.
 

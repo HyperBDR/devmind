@@ -8,6 +8,7 @@ from cloud_billing.alert_messages import (
     build_alert_message,
     build_alert_message_from_record,
     build_alert_sections,
+    build_alert_sections_from_record,
 )
 
 
@@ -255,6 +256,33 @@ class TestAlertMessageLocalization:
         assert "余额阈值告警" in message
         assert "当前余额" in message
         assert "告警阈值" in message
+
+    def test_balance_alert_chinese_includes_auto_recharge_notice(
+        self, alert_rule
+    ):
+        """Balance alert should mention auto recharge approval."""
+        message = build_alert_message(
+            provider_name="AWS",
+            provider_notes="",
+            provider_tags=[],
+            account_id="123456789",
+            current_cost=80.00,
+            previous_cost=70.00,
+            increase_cost=10.00,
+            increase_percent=14.29,
+            current_balance=30.00,
+            current_days_remaining=None,
+            currency="CNY",
+            alert_rule=alert_rule,
+            cost_threshold_triggered=False,
+            balance_threshold_triggered=True,
+            days_remaining_threshold_triggered=False,
+            language="zh-Hans",
+            auto_recharge_approval_triggered=True,
+        )
+
+        assert "充值审批" in message
+        assert "已自动触发充值审批，请关注审批进度" in message
 
     def test_days_remaining_alert_chinese(self, alert_rule):
         """Days remaining alert should be in Chinese."""
@@ -594,6 +622,43 @@ class TestBuildAlertMessageFromRecord:
             record, "en",
         )
         assert "Cost breakdown" not in message
+
+    def test_sections_from_record_extract_auto_recharge_notice(
+        self, alert_rule
+    ):
+        """Structured alert sections should preserve approval notice."""
+        record = SimpleNamespace(
+            alert_rule=alert_rule,
+            alert_type="balance",
+            current_cost=150.00,
+            previous_cost=80.00,
+            increase_cost=70.00,
+            increase_percent=87.50,
+            current_balance=30.00,
+            balance_threshold=50.00,
+            current_days_remaining=None,
+            days_remaining_threshold=None,
+            currency="CNY",
+            alert_message=(
+                "告警类型：余额阈值告警\n"
+                "账号：123456789\n"
+                "充值审批："
+                "已自动触发充值审批，请关注审批进度"
+            ),
+            provider=SimpleNamespace(
+                display_name="AWS",
+                notes="",
+                tags=[],
+                config={},
+            ),
+        )
+
+        sections = build_alert_sections_from_record(record, "zh-Hans")
+
+        assert sections["labels"]["recharge_approval"] == "充值审批"
+        assert sections["recharge_approval_notice"] == (
+            "已自动触发充值审批，请关注审批进度"
+        )
 
 
 # ── build_alert_sections: metrics and highlights ───────────────────

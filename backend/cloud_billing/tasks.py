@@ -65,6 +65,7 @@ from .services.provider_service import ProviderService
 from .clouds.service import BillingService
 from .services.recharge_approval import (
     CLOUD_TYPE_LABELS,
+    _looks_like_legacy_submitter_identifier,
     check_ongoing_recharge_approval_submission,
     create_recharge_approval_event,
     execute_recharge_approval_agent,
@@ -180,6 +181,58 @@ def _suggest_alert_recharge_amount(
         return None, currency
 
     return max(suggestions), currency
+
+
+def _extract_recharge_approval_config(provider: CloudProvider) -> Dict:
+    """Return recharge approval config from provider config and recharge_info."""
+    approval_cfg = {}
+    provider_cfg = provider.config or {}
+    if isinstance(provider_cfg.get("recharge_approval"), dict):
+        approval_cfg.update(provider_cfg["recharge_approval"])
+
+    raw_recharge_info = provider.recharge_info or ""
+    try:
+        recharge_payload = (
+            json.loads(raw_recharge_info)
+            if isinstance(raw_recharge_info, str)
+            else raw_recharge_info
+        )
+    except (TypeError, json.JSONDecodeError):
+        recharge_payload = {}
+
+    if isinstance(recharge_payload, dict):
+        recharge_approval = recharge_payload.get("recharge_approval")
+        if isinstance(recharge_approval, dict):
+            approval_cfg.update(recharge_approval)
+
+    return approval_cfg
+
+
+def _extract_recharge_submitter_config(
+    provider: CloudProvider,
+) -> Tuple[str, str, str]:
+    """Return configured Feishu submitter user_id, label, and identifier."""
+    approval_cfg = _extract_recharge_approval_config(provider)
+    submitter_user_id = str(
+        approval_cfg.get("submitter_user_id")
+        or approval_cfg.get("resolved_submitter_user_id")
+        or approval_cfg.get("user_id")
+        or ""
+    ).strip()
+    submitter_identifier = str(
+        approval_cfg.get("submitter_identifier")
+        or approval_cfg.get("submitter_email")
+        or approval_cfg.get("submitter_mobile")
+        or approval_cfg.get("submitter_contact")
+        or approval_cfg.get("identifier")
+        or ""
+    ).strip()
+    submitter_label = str(
+        approval_cfg.get("submitter_user_label")
+        or approval_cfg.get("submitter_name")
+        or ""
+    ).strip()
+    return submitter_user_id, submitter_label, submitter_identifier
 
 
 def _default_alert_expected_date(days: int = 3) -> str:
@@ -1331,6 +1384,14 @@ def check_alert_for_provider(
                     continue
 
             language = _resolve_notification_language(provider)
+            auto_recharge_approval_triggered = (
+                alert_rule.auto_submit_recharge_approval
+                and (
+                    balance_threshold_triggered
+                    or days_remaining_threshold_triggered
+                )
+                and bool(str(provider.recharge_info or "").strip())
+            )
 
             resource_cost_items = []
             cost_period = "today"  # Default
@@ -1369,6 +1430,9 @@ def check_alert_for_provider(
                 days_remaining_threshold_triggered=days_remaining_threshold_triggered,
                 language=language,
                 resource_cost_items=resource_cost_items,
+                auto_recharge_approval_triggered=(
+                    auto_recharge_approval_triggered
+                ),
             )
 
             # Always create alert record, even if webhook is not configured
@@ -1406,14 +1470,7 @@ def check_alert_for_provider(
             # Try to send notification (will update webhook_status)
             # Even if webhook is not configured, alert record is still created
             send_alert_notification.delay(alert_record.id)
-            if (
-                alert_rule.auto_submit_recharge_approval
-                and (
-                    balance_threshold_triggered
-                    or days_remaining_threshold_triggered
-                )
-                and str(provider.recharge_info or "").strip()
-            ):
+            if auto_recharge_approval_triggered:
                 suggested_amount, suggested_currency = (
                     _suggest_alert_recharge_amount(alert_record)
                 )
@@ -1828,10 +1885,33 @@ def submit_recharge_approval(
 
     # Resolve submitter identity after account-level de-duplication so we do
     # not block unrelated accounts that happen to share the same submitter.
-    raw_submitter_identifier = (submitter_identifier or submitter_user_id or "").strip()
+    (
+        configured_submitter_user_id,
+        configured_submitter_label,
+        configured_submitter_identifier,
+    ) = (
+        _extract_recharge_submitter_config(provider)
+    )
+    effective_submitter_user_id = str(
+        submitter_user_id or configured_submitter_user_id
+    ).strip()
+    effective_submitter_user_label = str(
+        submitter_user_label or configured_submitter_label
+    ).strip()
+    effective_submitter_identifier = str(
+        submitter_identifier or configured_submitter_identifier
+    ).strip()
+    if (
+        not effective_submitter_identifier
+        and _looks_like_legacy_submitter_identifier(
+            effective_submitter_user_id
+        )
+    ):
+        effective_submitter_identifier = effective_submitter_user_id
+        effective_submitter_user_id = ""
     log_collector.info(
-        "Submitter identity passed to agent as raw identifier (identifier=%s)"
-        % (raw_submitter_identifier or "(not set)",)
+        "Submitter identity passed to agent as user_id (user_id=%s)"
+        % (effective_submitter_user_id or "(not set)",)
     )
     if task_id:
         TaskTracker.update_task_status(
@@ -1846,8 +1926,9 @@ def submit_recharge_approval(
     resolved_submitter_identifier, resolved_submitter_user_label, resolved_submitter_user_id = (
         resolve_submitter_identity(
             provider_config=provider.config,
-            explicit_identifier=raw_submitter_identifier,
-            explicit_label=submitter_user_label,
+            explicit_identifier=effective_submitter_identifier,
+            explicit_user_id=effective_submitter_user_id,
+            explicit_label=effective_submitter_user_label,
         )
     )
 
@@ -1914,7 +1995,7 @@ def submit_recharge_approval(
         triggered_by=trigger_user,
         triggered_by_username_snapshot=effective_triggered_by,
         submitted_by=trigger_user,
-        submitter_identifier=raw_submitter_identifier,
+        submitter_identifier=resolved_submitter_identifier,
         resolved_submitter_user_id=resolved_submitter_user_id,
         submitter_user_label=effective_submitter_label,
     )
@@ -1964,7 +2045,7 @@ def submit_recharge_approval(
             raw_recharge_info=raw_recharge_info,
             user_id=user_id,
             source_task_id=task_id,
-            submitter_identifier=raw_submitter_identifier,
+            submitter_identifier=resolved_submitter_identifier,
             submitter_user_label=effective_submitter_label,
             resolved_submitter_user_id=resolved_submitter_user_id,
         )
@@ -2133,6 +2214,26 @@ def _send_alert_notification_metadata(log_collector):
     }
 
 
+_NOTIFICATION_CONFIG_ERROR_PHRASES = (
+    "channel not found or inactive",
+    "webhook config not found or not active",
+    "webhook config not found",
+    "no default webhook channel configured",
+    "email channel_uuid is required",
+    "no recipients",
+)
+
+
+def _is_notification_config_error(error_msg: Optional[str]) -> bool:
+    """Return True when notification failure is caused by configuration."""
+    if not error_msg:
+        return False
+    error_lower = str(error_msg).lower()
+    return any(
+        phrase in error_lower for phrase in _NOTIFICATION_CONFIG_ERROR_PHRASES
+    )
+
+
 @shared_task(name="cloud_billing.tasks.send_alert_notification")
 def send_alert_notification(alert_record_id: int):
     """
@@ -2214,17 +2315,22 @@ def send_alert_notification(alert_record_id: int):
             )
         else:
             error_msg = result.get("error")
-            log_collector.error(
-                f"Failed to send alert: {error_msg}",
-                exception=result.get("response"),
-            )
-            logger.error(
+            detail = (
                 f"Task send_alert_notification: Failed to send alert "
                 f"notification (alert_record_id={alert_record_id}, "
                 f"provider_id={alert_record.provider.id}, "
                 f"provider_name={alert_record.provider.name}, "
                 f"error={error_msg})"
             )
+            if _is_notification_config_error(error_msg):
+                log_collector.warning(f"Failed to send alert: {error_msg}")
+                logger.warning(detail)
+            else:
+                log_collector.error(
+                    f"Failed to send alert: {error_msg}",
+                    exception=result.get("response"),
+                )
+                logger.error(detail)
 
         task_result = {
             "success": result["success"],

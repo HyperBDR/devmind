@@ -223,6 +223,8 @@ class FeishuUserListView(APIView):
     def get(self, request):
         from ..services.recharge_approval import list_feishu_users
 
-        users = list_feishu_users()
+        force_refresh = str(request.query_params.get("refresh") or "").lower()
+        users = list_feishu_users(
+            force_refresh=force_refresh in {"1", "true", "yes"}
+        )
         return Response({"users": users})
-

@@ -291,6 +291,9 @@ class TestCheckAlertForProvider:
         assert record.current_balance == Decimal("520.00")
         assert record.balance_threshold == Decimal("550.00")
         assert "remaining balance" in record.alert_message.lower()
+        assert "recharge approval workflow has been triggered" in (
+            record.alert_message.lower()
+        )
         mock_send_alert.assert_called_once_with(record.id)
         mock_submit_recharge_approval.assert_called_once_with(
             cloud_provider.id,
@@ -823,6 +826,31 @@ class TestSendAlertNotification:
         assert result["success"] is False
         alert_record.refresh_from_db()
         assert alert_record.webhook_status == "failed"
+
+    @patch("cloud_billing.tasks.logger")
+    @patch("cloud_billing.tasks.CloudBillingNotificationService")
+    def test_channel_config_error_logs_warning_not_error(
+        self,
+        mock_service_class,
+        mock_logger,
+        alert_record,
+    ):
+        """
+        Channel configuration failures should not be reported to Sentry as
+        application errors.
+        """
+        mock_service = MagicMock()
+        mock_service.send_alert.return_value = {
+            "success": False,
+            "error": "Channel not found or inactive for channel_uuid",
+        }
+        mock_service_class.return_value = mock_service
+
+        result = send_alert_notification(alert_record.id)
+
+        assert result["success"] is False
+        mock_logger.warning.assert_called()
+        mock_logger.error.assert_not_called()
 
 
 @pytest.mark.django_db

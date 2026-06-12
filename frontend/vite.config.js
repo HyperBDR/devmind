@@ -18,16 +18,19 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Vendor chunks
-          'vue-vendor': ['vue', 'vue-router', 'pinia', 'vue-i18n'],
-          // UI components chunk
-          'ui-components': [
-            '@/components/ui/BaseButton.vue',
-            '@/components/ui/BaseInput.vue',
-            '@/components/ui/BaseLoading.vue',
-            '@/components/ui/StatusBadge.vue'
-          ]
+        manualChunks(id) {
+          if (
+            id.includes('/node_modules/vue') ||
+            id.includes('/node_modules/vue-router') ||
+            id.includes('/node_modules/pinia') ||
+            id.includes('/node_modules/vue-i18n')
+          ) {
+            return 'vue-vendor'
+          }
+          if (id.includes('/src/components/ui/')) {
+            return 'ui-components'
+          }
+          return undefined
         },
         // Optimize chunk file names
         chunkFileNames: 'assets/js/[name]-[hash].js',
@@ -39,8 +42,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     // Enable source maps for production debugging (optional)
     sourcemap: false,
-    // Optimize for production (use esbuild minifier by default, faster than terser)
-    minify: 'esbuild'
+    // Use the Vite/Rolldown default minifier for the installed toolchain.
+    minify: true
   },
   server: {
     // Listen on all interfaces for Docker / remote access

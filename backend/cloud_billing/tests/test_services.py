@@ -581,6 +581,24 @@ class TestCloudBillingNotificationService:
         # WeChat messages don't include tags in the payload
         assert payload["msgtype"] == "markdown"
 
+    def test_generate_wechat_payload_includes_recharge_approval_notice(
+        self, alert_record
+    ):
+        alert_record.alert_message = (
+            "告警类型：余额阈值告警\n"
+            "充值审批："
+            "已自动触发充值审批，请关注审批进度"
+        )
+        alert_record.current_balance = Decimal("480.00")
+        alert_record.balance_threshold = Decimal("500.00")
+
+        service = CloudBillingNotificationService()
+        payload = service._generate_wechat_payload(alert_record, "zh-hans")
+
+        content = payload["markdown"]["content"]
+        assert "充值审批" in content
+        assert "已自动触发充值审批，请关注审批进度" in content
+
     @patch(
         "cloud_billing.services.notification_service."
         "get_webhook_channel_by_uuid"

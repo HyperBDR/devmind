@@ -381,6 +381,23 @@ def api_request(
         headers=headers,
         method=method,
     )
+    safe_headers = {
+        k: ("***REDACTED***" if k.lower() == "authorization" else v)
+        for k, v in (headers or {}).items()
+    }
+    # NOTE: We deliberately do NOT log the request payload here. Even with
+    # sanitize_payload() applied, the form values (customer names, payment
+    # amount, recharge account, payee details, remarks) are sensitive and
+    # ``tools.py`` persists this stderr into LLMUsage.stderr on every
+    # approval submission. The service layer already records structured
+    # Feishu request/response bodies with proper redaction.
+    debug(
+        "Feishu API Request\n"
+        f"endpoint={endpoint_name}\n"
+        f"method={method}\n"
+        f"url={url}\n"
+        f"headers={json.dumps(safe_headers, ensure_ascii=False)}"
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             http_status = getattr(response, "status", None) or getattr(response, "code", None)
@@ -400,6 +417,14 @@ def api_request(
             response={"error": body},
             error=f"HTTP {exc.code}: {body}",
         )
+        debug(
+            "Feishu API HTTP Error\n"
+            f"endpoint={endpoint_name}\n"
+            f"method={method}\n"
+            f"url={url}\n"
+            f"http_status={exc.code}\n"
+            f"body={redact_text(body)}"
+        )
         raise ApprovalError(f"HTTP {exc.code} for {url}: {body}") from exc
     except urllib.error.URLError as exc:
         record_http_trace(
@@ -414,6 +439,13 @@ def api_request(
             http_status=http_status,
             response={"error": str(exc.reason)},
             error=f"Network error: {exc.reason}",
+        )
+        debug(
+            "Feishu API Network Error\n"
+            f"endpoint={endpoint_name}\n"
+            f"method={method}\n"
+            f"url={url}\n"
+            f"error={exc.reason}"
         )
         raise ApprovalError(f"Network error for {url}: {exc.reason}") from exc
 
@@ -433,6 +465,14 @@ def api_request(
             response={"raw_body": body},
             error=f"Invalid JSON response: {body}",
         )
+        debug(
+            "Feishu API Invalid JSON Response\n"
+            f"endpoint={endpoint_name}\n"
+            f"method={method}\n"
+            f"url={url}\n"
+            f"http_status={http_status}\n"
+            f"body={redact_text(body)}"
+        )
         raise ApprovalError(
             f"Invalid JSON response from {url}: {body}") from exc
 
@@ -450,6 +490,16 @@ def api_request(
         http_status=http_status,
         response=data,
         error="" if success else f"Feishu API error {code}: {data.get('msg', '')}",
+    )
+    debug(
+        "Feishu API Response\n"
+        f"endpoint={endpoint_name}\n"
+        f"method={method}\n"
+        f"url={url}\n"
+        f"http_status={http_status}\n"
+        f"feishu_code={data.get('code')}\n"
+        f"feishu_msg={data.get('msg', '')}\n"
+        f"body={json.dumps(sanitize_payload(data), ensure_ascii=False)}"
     )
     if code not in (0, None):
         raise ApprovalError(
