@@ -39,10 +39,29 @@
           <span class="text-red-500">*</span>
           {{ t('cloudBilling.providers.submitterIdentifier') }}
         </label>
-        <BaseInput
-          v-model="form.submitter_identifier"
-          :placeholder="t('cloudBilling.providers.submitterIdentifierPlaceholder')"
-        />
+        <div class="flex gap-2">
+          <BaseSearchableSelect
+            v-model="form.submitter_user_id"
+            :options="feishuUserOptions"
+            :loading="loadingFeishuUsers"
+            :disabled="loadingFeishuUsers"
+            allow-custom
+            class="min-w-0 flex-1"
+            :placeholder="t('cloudBilling.providers.selectUserPlaceholder')"
+            :loading-text="t('cloudBilling.providers.loadingUsers')"
+            :empty-text="t('cloudBilling.providers.noMatchingUsers')"
+            @change="handleSubmitterUserChange"
+          />
+          <BaseButton
+            variant="outline"
+            size="sm"
+            class="shrink-0"
+            :loading="loadingFeishuUsers"
+            @click="refreshFeishuUsers"
+          >
+            {{ t('common.refresh') }}
+          </BaseButton>
+        </div>
         <p class="text-xs text-gray-500">
           {{ t('cloudBilling.providers.submitterIdentifierRequiredHint') }}
         </p>
@@ -138,7 +157,11 @@
                 <span class="font-medium text-gray-700">
                   {{ t('cloudBilling.providers.submitterIdentifier') }}:
                 </span>
-                {{ item.submitter_identifier || '-' }}
+                {{
+                  item.submitter_user_label ||
+                  item.resolved_submitter_user_id ||
+                  '-'
+                }}
               </div>
               <div>
                 <span class="font-medium text-gray-700">
@@ -253,14 +276,18 @@ import { computed, reactive, ref, watch } from 'vue'
 import { format } from 'date-fns'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
-import { extractErrorMessage, extractResponseData } from '@/utils/api'
-import { getRechargeApprovalSubmitErrorContext, getRechargeInfoSaveErrorContext } from './rechargeApprovalErrors'
+import { extractResponseData } from '@/utils/api'
+import {
+  getRechargeApprovalSubmitErrorContext,
+  getRechargeInfoSaveErrorContext
+} from './rechargeApprovalErrors'
 import { cloudBillingApi } from '@/api/cloudBilling'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { getLocalizedProviderDisplayName } from '@/utils/providerDisplay'
+import BaseSearchableSelect from '@/components/ui/BaseSearchableSelect.vue'
 
 const props = defineProps({
   show: {
@@ -281,11 +308,15 @@ const { showSuccess, showError, showWarning } = useToast()
 const saving = ref(false)
 const submitting = ref(false)
 const loadingRecords = ref(false)
+const loadingFeishuUsers = ref(false)
 const showSubmitDialog = ref(false)
 const approvals = ref([])
+const feishuUsers = ref([])
 const form = reactive({
   recharge_info: '',
-  submitter_identifier: ''
+  submitter_identifier: '',
+  submitter_user_id: '',
+  submitter_user_label: ''
 })
 const submitApprovalForm = reactive({
   amount: '',
@@ -394,8 +425,43 @@ const providerDisplayName = computed(() =>
 const canOpenSubmitApprovalDialog = computed(() => {
   return (
     Boolean(String(form.recharge_info || '').trim()) &&
-    Boolean(String(form.submitter_identifier || '').trim())
+    Boolean(String(form.submitter_user_id || '').trim())
   )
+})
+
+const selectedSubmitterUser = computed(() => {
+  const selectedId = String(form.submitter_user_id || '').trim()
+  if (!selectedId) return null
+  return (
+    feishuUsers.value.find((user) => {
+      return getFeishuUserOptionValue(user) === selectedId
+    }) || null
+  )
+})
+
+const feishuUserOptions = computed(() => {
+  return feishuUsers.value
+    .map((user) => {
+      const value = getFeishuUserOptionValue(user)
+      if (!value) return null
+      const label = formatFeishuUserOption(user) || value
+      return {
+        value,
+        label,
+        description: '',
+        searchText: [
+          label,
+          user?.display_name,
+          user?.name,
+          user?.email,
+          user?.mobile,
+          user?.user_id
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
+    })
+    .filter(Boolean)
 })
 
 const formatDate = (value) => {
@@ -447,7 +513,158 @@ function formatRechargeInfoValue(value) {
 }
 
 function getSubmitterIdentifier() {
-  return String(form.submitter_identifier || '').trim()
+  return String(form.submitter_user_id || '').trim()
+}
+
+function looksLikeLegacySubmitterIdentifier(value) {
+  const text = String(value || '').trim()
+  return text.includes('@') || /^\+?\d[\d\s-]{5,}$/.test(text)
+}
+
+function getFeishuUserOptionValue(user) {
+  return String(
+    user?.user_id || user?.open_id || user?.union_id || user?.email ||
+      user?.mobile || ''
+  ).trim()
+}
+
+function getFeishuUserLabel(user) {
+  return String(user?.display_name || user?.name || user?.user_id || '').trim()
+}
+
+function formatFeishuUserOption(user) {
+  const label = getFeishuUserLabel(user) || getFeishuUserOptionValue(user)
+  return label
+}
+
+function applySubmitterUser(user) {
+  if (!user) return
+  form.submitter_user_id = getFeishuUserOptionValue(user)
+  form.submitter_identifier = ''
+  form.submitter_user_label = getFeishuUserLabel(user)
+}
+
+function buildRechargeInfoSaveErrorMessage(errorContext) {
+  const baseKey = 'cloudBilling.providers.rechargeInfoSaveError'
+  const status = Number(errorContext?.status) || 0
+  const reason = String(errorContext?.reason || '').toLowerCase()
+  const missingFields = Array.isArray(errorContext?.missingFields)
+    ? errorContext.missingFields
+    : []
+  const rawMessage = String(errorContext?.rawMessage || '').trim()
+  const code = String(errorContext?.code || '').trim()
+
+  if (missingFields.length > 0) {
+    const fieldLabels = missingFields
+      .map((f) => RECHARGE_INFO_FIELD_LABELS[f] || f)
+      .filter(Boolean)
+      .join('、')
+    if (fieldLabels) {
+      return (
+        t(baseKey) +
+        '，缺少以下必填字段：' +
+        fieldLabels
+      )
+    }
+  }
+
+  const reasonKey = `cloudBilling.providers.rechargeInfoSaveErrorReason.${reason}`
+  let reasonText = t(reasonKey, { status, code }, '')
+  if (!reasonText) {
+    if (reason === 'validation' && rawMessage) {
+      reasonText = t(
+        'cloudBilling.providers.rechargeInfoSaveErrorReason.validationWithDetail',
+        { detail: rawMessage },
+        ''
+      )
+    } else if (reason === 'server' && rawMessage) {
+      reasonText = t(
+        'cloudBilling.providers.rechargeInfoSaveErrorReason.serverWithDetail',
+        { detail: rawMessage },
+        ''
+      )
+    } else if (rawMessage) {
+      reasonText = rawMessage
+    }
+  }
+
+  if (reasonText) {
+    return `${t(baseKey)}：${reasonText}`
+  }
+  return t(baseKey)
+}
+
+function handleSubmitterUserChange(value) {
+  const selectedId = String(value || form.submitter_user_id || '').trim()
+  const user =
+    feishuUsers.value.find((item) => {
+      return getFeishuUserOptionValue(item) === selectedId
+    }) || null
+  if (!user) {
+    form.submitter_identifier = ''
+    form.submitter_user_label = ''
+    return
+  }
+  applySubmitterUser(user)
+}
+
+function applySubmitterUserId(userId) {
+  const text = String(userId || '').trim()
+  if (!text) {
+    form.submitter_identifier = ''
+    form.submitter_user_id = ''
+    form.submitter_user_label = ''
+    return
+  }
+  const user = feishuUsers.value.find((item) => {
+    return getFeishuUserOptionValue(item) === text
+  })
+  if (user) {
+    applySubmitterUser(user)
+    return
+  }
+  // Accept the legacy email/手机号 form so historical configs still hydrate.
+  // Anything else is treated as a stale free-text value (e.g. a typed name
+  // during search) and is cleared to avoid leaking arbitrary strings into
+  // the submitter_user_id field.
+  if (looksLikeLegacySubmitterIdentifier(text)) {
+    form.submitter_identifier = text
+    form.submitter_user_id = text
+    form.submitter_user_label = ''
+    return
+  }
+  form.submitter_identifier = ''
+  form.submitter_user_id = ''
+  form.submitter_user_label = ''
+}
+
+function getSubmitterPayload() {
+  const user = selectedSubmitterUser.value
+  if (user) {
+    return {
+      submitter_user_id: getFeishuUserOptionValue(user),
+      submitter_user_label: getFeishuUserLabel(user)
+    }
+  }
+  const value = getSubmitterIdentifier()
+  if (looksLikeLegacySubmitterIdentifier(value)) {
+    return {
+      submitter_identifier: value,
+      submitter_user_id: '',
+      submitter_user_label: String(form.submitter_user_label || '').trim()
+    }
+  }
+  return {
+    submitter_user_id: value,
+    submitter_user_label: String(form.submitter_user_label || '').trim()
+  }
+}
+
+function hasSubmitterPayload(payload) {
+  return Boolean(
+    String(payload?.submitter_user_id || payload?.submitter_identifier || '')
+      .trim()
+  )
 }
 
 function validateRechargeInfoBeforeSave() {
@@ -456,7 +673,7 @@ function validateRechargeInfoBeforeSave() {
     return false
   }
 
-  if (!getSubmitterIdentifier()) {
+  if (!hasSubmitterPayload(getSubmitterPayload())) {
     showWarning(t('cloudBilling.providers.submitterIdentifierRequiredWarning'))
     return false
   }
@@ -473,6 +690,37 @@ function validateRechargeInfoBeforeSave() {
   }
 
   return true
+}
+
+function formatRechargeInfoSaveError(errorContext) {
+  if (errorContext.missingFields.length > 0) {
+    const fieldLabels = errorContext.missingFields
+      .map((field) => RECHARGE_INFO_FIELD_LABELS[field] || field)
+      .filter(Boolean)
+      .join('、')
+    if (fieldLabels) {
+      return t('cloudBilling.providers.rechargeInfoSaveErrorMissingFields', {
+        fields: fieldLabels
+      })
+    }
+  }
+
+  const reason = String(errorContext.reason || '').trim()
+  if (reason) {
+    return t('cloudBilling.providers.rechargeInfoSaveErrorWithReason', {
+      reason
+    })
+  }
+
+  if (errorContext.status) {
+    return t('cloudBilling.providers.rechargeInfoSaveErrorWithReason', {
+      reason: `HTTP ${errorContext.status}`
+    })
+  }
+
+  return t('cloudBilling.providers.rechargeInfoSaveErrorWithReason', {
+    reason: t('cloudBilling.providers.rechargeInfoSaveErrorUnknownReason')
+  })
 }
 
 function parseRechargeInfoObject(source) {
@@ -618,10 +866,13 @@ function buildRechargeInfoStorageObject(source) {
 function extractRechargeApprovalFromSource(source) {
   const approval = extractRechargeApprovalObjectFromSource(source)
   return {
-    submitter_identifier: formatRechargeInfoValue(
-      approval.submitter_identifier ||
-        approval.submitter_user_id ||
-        approval.resolved_submitter_user_id
+    submitter_user_id: formatRechargeInfoValue(
+      approval.submitter_user_id ||
+        approval.resolved_submitter_user_id ||
+        approval.submitter_identifier ||
+        approval.submitter_email ||
+        approval.submitter_mobile ||
+        approval.submitter_contact
     )
   }
 }
@@ -632,20 +883,16 @@ function extractRechargeApprovalObjectFromSource(source) {
     payload && typeof payload.recharge_approval === 'object'
       ? { ...payload.recharge_approval }
       : {}
-  const legacySubmitterIdentifier = formatRechargeInfoValue(
-    approval.submitter_identifier ||
-      approval.submitter_user_id ||
-      approval.resolved_submitter_user_id ||
-      payload.submitter_identifier ||
-      payload.审批发起人 ||
-      payload.提交名义 ||
-      payload['发起人邮箱或手机号']
-  )
-  if (legacySubmitterIdentifier && !approval.submitter_identifier) {
-    approval.submitter_identifier = legacySubmitterIdentifier
-  }
   const legacySubmitterUserId = formatRechargeInfoValue(
-    approval.submitter_user_id || payload.submitter_user_id
+    approval.submitter_user_id ||
+      payload.submitter_user_id ||
+      payload.submitter_identifier ||
+      payload.submitter_email ||
+      payload.submitter_mobile ||
+      payload.submitter_contact ||
+      payload['审批发起人'] ||
+      payload['提交名义'] ||
+      payload['发起人邮箱或手机号']
   )
   if (legacySubmitterUserId && !approval.submitter_user_id) {
     approval.submitter_user_id = legacySubmitterUserId
@@ -727,10 +974,11 @@ const syncForm = () => {
   const approvalConfig = extractRechargeApprovalFromSource(
     props.provider?.recharge_info || props.provider?.config || {}
   )
-  form.submitter_identifier =
-    approvalConfig.submitter_identifier ||
-    props.provider?.config?.recharge_approval?.submitter_identifier ||
-    ''
+  applySubmitterUserId(
+    approvalConfig.submitter_user_id ||
+      props.provider?.config?.recharge_approval?.submitter_user_id ||
+      ''
+  )
 }
 
 function addDaysToDateString(dateString, days) {
@@ -784,13 +1032,51 @@ const hydrateProviderDetail = async () => {
     const approvalConfig = extractRechargeApprovalFromSource(
       provider?.recharge_info || provider?.config || {}
     )
-    form.submitter_identifier =
-      approvalConfig.submitter_identifier ||
-      provider?.config?.recharge_approval?.submitter_identifier ||
-      ''
+    applySubmitterUserId(
+      approvalConfig.submitter_user_id ||
+        provider?.config?.recharge_approval?.submitter_user_id ||
+        ''
+    )
   } catch (error) {
     console.error('Failed to load provider detail for recharge modal:', error)
     syncForm()
+  }
+}
+
+const loadFeishuUsers = async () => {
+  if (feishuUsers.value.length > 0 || loadingFeishuUsers.value) return
+  loadingFeishuUsers.value = true
+  try {
+    const response = await cloudBillingApi.getFeishuUsers()
+    const data = extractResponseData(response)
+    feishuUsers.value = Array.isArray(data?.users) ? data.users : []
+    if (form.submitter_user_id) {
+      applySubmitterUserId(form.submitter_user_id)
+    }
+  } catch (error) {
+    console.error('Failed to load Feishu users:', error)
+    feishuUsers.value = []
+    showError(t('cloudBilling.providers.loadFeishuUsersError'))
+  } finally {
+    loadingFeishuUsers.value = false
+  }
+}
+
+const refreshFeishuUsers = async () => {
+  if (loadingFeishuUsers.value) return
+  loadingFeishuUsers.value = true
+  try {
+    const response = await cloudBillingApi.refreshFeishuUsers()
+    const data = extractResponseData(response)
+    feishuUsers.value = Array.isArray(data?.users) ? data.users : []
+    if (form.submitter_user_id) {
+      applySubmitterUserId(form.submitter_user_id)
+    }
+  } catch (error) {
+    console.error('Failed to refresh Feishu users:', error)
+    showError(t('cloudBilling.providers.loadFeishuUsersError'))
+  } finally {
+    loadingFeishuUsers.value = false
   }
 }
 
@@ -809,9 +1095,16 @@ const handleSave = async ({ emitSaved = true } = {}) => {
     const existingApproval = extractRechargeApprovalObjectFromSource(
       props.provider?.recharge_info || props.provider?.config || {}
     )
-    const approvalPayload = { ...existingApproval }
-    if (form.submitter_identifier) {
-      approvalPayload.submitter_identifier = getSubmitterIdentifier()
+    const approvalPayload = {
+      ...existingApproval
+    }
+    delete approvalPayload.submitter_identifier
+    delete approvalPayload.submitter_email
+    delete approvalPayload.submitter_mobile
+    delete approvalPayload.submitter_contact
+    Object.assign(approvalPayload, getSubmitterPayload())
+    if (!approvalPayload.submitter_user_label) {
+      delete approvalPayload.submitter_user_label
     }
     if (
       Object.values(approvalPayload).some((value) => String(value || '').trim())
@@ -833,18 +1126,7 @@ const handleSave = async ({ emitSaved = true } = {}) => {
   } catch (error) {
     console.error('Failed to save recharge info:', error)
     const errorContext = getRechargeInfoSaveErrorContext(error)
-    if (errorContext.missingFields.length > 0) {
-      const fieldLabels = errorContext.missingFields
-        .map((f) => RECHARGE_INFO_FIELD_LABELS[f] || f)
-        .join('、')
-      if (fieldLabels) {
-        showError(t('cloudBilling.providers.rechargeInfoSaveError') + '，缺少以下必填字段：' + fieldLabels)
-      } else {
-        showError(t('cloudBilling.providers.rechargeInfoSaveError'))
-      }
-    } else {
-      showError(t('cloudBilling.providers.rechargeInfoSaveError'))
-    }
+    showError(buildRechargeInfoSaveErrorMessage(errorContext))
     return false
   } finally {
     saving.value = false
@@ -856,7 +1138,7 @@ const openSubmitApprovalDialog = () => {
     showWarning(t('cloudBilling.providers.rechargeInfoEmpty'))
     return
   }
-  if (!String(form.submitter_identifier || '').trim()) {
+  if (!String(form.submitter_user_id || '').trim()) {
     showWarning(t('cloudBilling.providers.submitterIdentifierRequiredWarning'))
     return
   }
@@ -877,10 +1159,10 @@ const closeSubmitApprovalDialog = () => {
 
 const submitApprovalFromDialog = async () => {
   if (!props.provider?.id) return
-  const submitterIdentifier = String(form.submitter_identifier || '').trim()
+  const submitterPayload = getSubmitterPayload()
   const amount = String(submitApprovalForm.amount || '').trim()
   const expectedDate = String(submitApprovalForm.expected_date || '').trim()
-  if (!submitterIdentifier) {
+  if (!hasSubmitterPayload(submitterPayload)) {
     showWarning(t('cloudBilling.providers.submitterIdentifierRequiredWarning'))
     return
   }
@@ -896,7 +1178,7 @@ const submitApprovalFromDialog = async () => {
     const response = await cloudBillingApi.submitProviderRechargeApproval(
       props.provider.id,
       {
-        submitter_identifier: submitterIdentifier,
+        ...submitterPayload,
         amount,
         expected_date: expectedDate
       }
@@ -939,6 +1221,7 @@ watch(
       return
     }
     syncForm()
+    loadFeishuUsers()
     hydrateProviderDetail()
     loadApprovals()
   },

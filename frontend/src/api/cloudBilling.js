@@ -1,5 +1,56 @@
 import apiClient from './index'
 
+let feishuUsersResponseCache = null
+let feishuUsersRequestPromise = null
+const FEISHU_USERS_STORAGE_KEY = 'devmind.cloudBilling.feishuUsers.v2'
+const FEISHU_USERS_STORAGE_TTL_MS = 12 * 60 * 60 * 1000
+
+function getCachedFeishuUsersResponse() {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(FEISHU_USERS_STORAGE_KEY)
+    if (!raw) return null
+    const cached = JSON.parse(raw)
+    if (!cached?.savedAt || !cached?.data) return null
+    const users = cached.data?.users
+    if (Array.isArray(users) && users.length === 1) {
+      window.localStorage.removeItem(FEISHU_USERS_STORAGE_KEY)
+      return null
+    }
+    if (Date.now() - cached.savedAt > FEISHU_USERS_STORAGE_TTL_MS) {
+      window.localStorage.removeItem(FEISHU_USERS_STORAGE_KEY)
+      return null
+    }
+    return { data: cached.data }
+  } catch {
+    return null
+  }
+}
+
+function setCachedFeishuUsersResponse(response) {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(
+      FEISHU_USERS_STORAGE_KEY,
+      JSON.stringify({
+        savedAt: Date.now(),
+        data: response?.data || response
+      })
+    )
+  } catch {
+    // Ignore storage quota or privacy-mode failures.
+  }
+}
+
+function clearCachedFeishuUsersResponse() {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(FEISHU_USERS_STORAGE_KEY)
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
 export const cloudBillingApi = {
   // Cloud Provider APIs
   async getProviders(params = {}) {
@@ -73,7 +124,46 @@ export const cloudBillingApi = {
     return response
   },
 
-  async getFeishuUsers() {
+  async getFeishuUsers({ forceRefresh = false } = {}) {
+    if (!forceRefresh && feishuUsersResponseCache) {
+      return feishuUsersResponseCache
+    }
+    if (!forceRefresh) {
+      const persistedResponse = getCachedFeishuUsersResponse()
+      if (persistedResponse) {
+        feishuUsersResponseCache = persistedResponse
+        return persistedResponse
+      }
+    }
+    if (!forceRefresh && feishuUsersRequestPromise) {
+      return feishuUsersRequestPromise
+    }
+    feishuUsersRequestPromise = apiClient
+      .get('/v1/cloud-billing/feishu-users/', {
+        params: forceRefresh ? { refresh: 1 } : {}
+      })
+      .then((response) => {
+        feishuUsersResponseCache = response
+        setCachedFeishuUsersResponse(response)
+        return response
+      })
+      .finally(() => {
+        feishuUsersRequestPromise = null
+      })
+    return feishuUsersRequestPromise
+  },
+
+  clearFeishuUsersCache() {
+    feishuUsersResponseCache = null
+    feishuUsersRequestPromise = null
+    clearCachedFeishuUsersResponse()
+  },
+
+  async refreshFeishuUsers() {
+    return this.getFeishuUsers({ forceRefresh: true })
+  },
+
+  async getFeishuUsersUncached() {
     const response = await apiClient.get('/v1/cloud-billing/feishu-users/')
     return response
   },
