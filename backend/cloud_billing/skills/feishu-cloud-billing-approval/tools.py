@@ -961,23 +961,9 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
                     parsed_payload["remark"] = payee_remark
                 parsed_payload.pop("payee", None)
 
-            submitter_ident = submitter_identifier or ctx.submitter_identifier
             resolved_user_id = ctx.resolved_submitter_user_id
-            if not resolved_user_id and submitter_ident:
-                ctx.create_event(
-                    event_type="workflow_step_resolve_started",
-                    stage="skill_workflow",
-                    source=source,
-                    message=f"Resolving submitter: {submitter_ident}",
-                )
-                resolved_user_id = _resolve_user_id(submitter_ident)
-                ctx.create_event(
-                    event_type="workflow_step_resolve_completed",
-                    stage="skill_workflow",
-                    source=source,
-                    message=f"Resolved user_id={resolved_user_id[:8]}***",
-                    payload={"user_id": resolved_user_id, "identifier": submitter_ident},
-                )
+            if not resolved_user_id:
+                raise RuntimeError("Feishu submitter user_id is required.")
 
             request_file = _request_file_for_payload(ctx, parsed_payload)
             request_file.parent.mkdir(parents=True, exist_ok=True)
@@ -993,7 +979,7 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
                 request_file=str(request_file),
                 request_file_name=request_file.name,
                 request_payload=parsed_payload,
-                submitter_identifier=submitter_ident,
+                submitter_identifier="",
                 resolved_submitter_user_id=resolved_user_id,
                 summary=f"Request JSON generated at {request_file.name}",
             )
@@ -1070,10 +1056,9 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
             if not isinstance(parsed_payload, dict):
                 raise RuntimeError(f"Request JSON must contain an object: {request_path}")
 
-            submitter_ident = submitter_identifier or ctx.submitter_identifier
             resolved_user_id = resolved_submitter_user_id or ctx.resolved_submitter_user_id
-            if not resolved_user_id and submitter_ident:
-                resolved_user_id = _resolve_user_id(submitter_ident)
+            if not resolved_user_id:
+                raise RuntimeError("Feishu submitter user_id is required.")
 
             script_path = (
                 ctx.workspace_root()
@@ -1097,8 +1082,6 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
             ]
             if resolved_user_id:
                 cmd.extend(["--user-id", resolved_user_id])
-            elif submitter_ident:
-                cmd.extend(["--user-identifier", submitter_ident])
 
             ctx.create_event(
                 event_type="workflow_step_script_started",
@@ -1235,7 +1218,11 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
                 trigger_source=getattr(ctx.record, "trigger_source", "manual") or "manual",
                 trigger_reason=getattr(ctx.record, "trigger_reason", "") or "",
                 trigger_user_label=trigger_user_label,
-                submitter_label=ctx.submitter_user_label or ctx.submitter_identifier or "",
+                submitter_label=(
+                    ctx.submitter_user_label
+                    or ctx.resolved_submitter_user_id
+                    or ""
+                ),
                 provider_name=(
                     getattr(getattr(ctx.record, "provider", None), "display_name", None)
                     or ""

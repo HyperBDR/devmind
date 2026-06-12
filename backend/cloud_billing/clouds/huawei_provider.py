@@ -31,6 +31,38 @@ from .provider import BaseCloudProvider, BaseCloudConfig
 logger = logging.getLogger(__name__)
 
 
+def _is_huawei_auth_or_permission_error(
+    error_code: str,
+    error_msg: str,
+    status_code: object,
+) -> Tuple[bool, bool]:
+    """Classify Huawei SDK auth failures caused by account configuration."""
+    error_lower = str(error_msg or "").lower()
+    code_lower = str(error_code or "").lower()
+    status_text = str(status_code or "")
+    is_config_error = (
+        status_text == "401"
+        or "unauthorized" in error_lower
+        or "authentication" in error_lower
+        or "incorrect iam" in error_lower
+        or code_lower == "apigw.0301"
+    )
+    is_permission_error = (
+        status_text == "403"
+        or "access denied" in error_lower
+        or (
+            "permission" in error_lower
+            and (
+                "access" in error_lower
+                or "denied" in error_lower
+                or "required" in error_lower
+            )
+        )
+        or code_lower == "cbc.0151"
+    )
+    return is_config_error, is_permission_error
+
+
 @dataclass
 class HuaweiConfig(BaseCloudConfig):
     """Huawei cloud provider configuration.
@@ -410,17 +442,10 @@ class HuaweiCloud(BaseCloudProvider):
             status_code = getattr(e, 'status_code', 'Unknown')
             request_id = getattr(e, 'request_id', 'Unknown')
 
-            # Check if this is a permission/authorization error
-            error_lower = error_msg.lower()
-            is_permission_error = (
-                status_code in (403, '403')
-                or 'access denied' in error_lower
-                or ('permission' in error_lower and (
-                    'access' in error_lower
-                    or 'denied' in error_lower
-                    or 'required' in error_lower
-                ))
-                or error_code == 'CBC.0151'
+            is_config_error, is_permission_error = (
+                _is_huawei_auth_or_permission_error(
+                    error_code, error_msg, status_code
+                )
             )
 
             error_message = (
@@ -429,7 +454,7 @@ class HuaweiCloud(BaseCloudProvider):
                 f"Request ID: {request_id}\n"
                 f"Region: {self.config.region}"
             )
-            if is_permission_error:
+            if is_config_error or is_permission_error:
                 logger.warning(f"{error_message}")
             else:
                 logger.error(f"{error_message}")
@@ -438,16 +463,29 @@ class HuaweiCloud(BaseCloudProvider):
                 "status": "error",
                 "data": None,
                 "error": error_message,
+                "is_config_error": is_config_error,
                 "is_permission_error": is_permission_error,
             }
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Unexpected error in Huawei billing: {error_msg}")
-            logger.exception(e)
+            is_config_error, is_permission_error = (
+                _is_huawei_auth_or_permission_error(
+                    type(e).__name__, error_msg, "Unknown"
+                )
+            )
+            if is_config_error or is_permission_error:
+                logger.warning(f"Huawei billing auth error: {error_msg}")
+            else:
+                logger.error(
+                    f"Unexpected error in Huawei billing: {error_msg}"
+                )
+                logger.exception(e)
             return {
                 "status": "error",
                 "data": None,
-                "error": error_msg
+                "error": error_msg,
+                "is_config_error": is_config_error,
+                "is_permission_error": is_permission_error,
             }
 
     def get_account_id(self) -> str:

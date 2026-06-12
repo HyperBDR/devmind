@@ -369,6 +369,19 @@ class CloudBillingNotificationService:
                 },
             })
 
+        approval_notice = sections.get("recharge_approval_notice")
+        if approval_notice:
+            elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**{L['recharge_approval']}**{sep}"
+                        f"{approval_notice}"
+                    ),
+                },
+            })
+
         # ── 7. Footer note + @all ──
         elements.append({
             "tag": "note",
@@ -482,6 +495,13 @@ class CloudBillingNotificationService:
                 f"{balance_info['value']:.2f} {balance_info['currency']}"
             )
 
+        approval_notice = sections.get("recharge_approval_notice")
+        if approval_notice:
+            rows.append("")
+            rows.append(
+                f"**{L['recharge_approval']}**{sep}{approval_notice}"
+            )
+
         rows.append("")
         rows.append("<@all>")
 
@@ -577,6 +597,13 @@ class CloudBillingNotificationService:
             rows.append(
                 f"**{L['current_balance']}**{sep}"
                 f"{balance_info['value']:.2f} {balance_info['currency']}"
+            )
+
+        approval_notice = sections.get("recharge_approval_notice")
+        if approval_notice:
+            rows.append("")
+            rows.append(
+                f"**{L['recharge_approval']}**{sep}{approval_notice}"
             )
 
         body = (
@@ -809,8 +836,8 @@ class RechargeApprovalNotificationService:
     def _build_submitter_label(self, record: RechargeApprovalRecord) -> str:
         parts = []
         label = str(record.submitter_user_label or "").strip()
-        identifier = str(record.submitter_identifier or "").strip()
-        for value in (label, identifier):
+        user_id = str(record.resolved_submitter_user_id or "").strip()
+        for value in (label, user_id):
             if value and value not in parts:
                 parts.append(value)
         if parts:

@@ -24,14 +24,7 @@ export default defineConfig({
           ) {
             return 'vue-vendor'
           }
-          if (
-            [
-              '/src/components/ui/BaseButton.vue',
-              '/src/components/ui/BaseInput.vue',
-              '/src/components/ui/BaseLoading.vue',
-              '/src/components/ui/StatusBadge.vue'
-            ].some((path) => id.includes(path))
-          ) {
+          if (id.includes('/src/components/ui/')) {
             return 'ui-components'
           }
           return undefined
@@ -46,8 +39,8 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     // Enable source maps for production debugging (optional)
     sourcemap: false,
-    // Optimize for production with the minifier bundled by current Vite.
-    minify: 'oxc'
+    // Use the Vite/Rolldown default minifier for the installed toolchain.
+    minify: true
   },
   server: {
     // Listen on all interfaces for Docker / remote access

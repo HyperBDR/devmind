@@ -39,6 +39,19 @@ def get_request_language(request) -> str:
     return "zh-hans" if is_chinese_language(header) else "en"
 
 
+def _looks_like_legacy_submitter_identifier(value: str) -> bool:
+    """Backward-compat alias for the service-layer helper.
+
+    Prefer importing ``_looks_like_legacy_submitter_identifier`` from
+    ``cloud_billing.services.recharge_approval``; this shim is kept only
+    so older imports continue to resolve.
+    """
+    from ..services.recharge_approval import (
+        _looks_like_legacy_submitter_identifier as _impl,
+    )
+    return _impl(value)
+
+
 PROVIDER_CONFIG_SCHEMAS = {
     "aws": {
         "provider_type": "aws",
@@ -680,11 +693,18 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
     def submit_recharge_approval(self, request, pk=None):
         provider = self.get_object()
 
-        submitter_identifier = str(
-            request.data.get("submitter_identifier")
-            or request.data.get("submitter_user_id")
-            or ""
+        submitter_user_id = str(
+            request.data.get("submitter_user_id") or ""
         ).strip()
+        submitter_identifier = str(
+            request.data.get("submitter_identifier") or ""
+        ).strip()
+        if (
+            not submitter_identifier
+            and _looks_like_legacy_submitter_identifier(submitter_user_id)
+        ):
+            submitter_identifier = submitter_user_id
+            submitter_user_id = ""
         submitter_user_label = str(
             request.data.get("submitter_user_label") or ""
         ).strip()
@@ -709,7 +729,8 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
             provider.id,
             trigger_source="manual",
             user_id=request.user.id if request.user.is_authenticated else None,
-            submitter_user_id=submitter_identifier,
+            submitter_identifier=submitter_identifier,
+            submitter_user_id=submitter_user_id,
             submitter_user_label=submitter_user_label,
             trigger_reason=trigger_reason,
             recharge_info_override=recharge_info_override,
@@ -724,7 +745,8 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
                 "provider_id": provider.id,
                 "trigger_source": "manual",
                 "user_id": user.id if user else None,
-                "submitter_user_id": submitter_identifier,
+                "submitter_identifier": submitter_identifier,
+                "submitter_user_id": submitter_user_id,
                 "submitter_user_label": submitter_user_label,
                 "trigger_reason": trigger_reason,
                 "account_id": account_id,

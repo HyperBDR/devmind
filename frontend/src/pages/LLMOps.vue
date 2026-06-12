@@ -477,6 +477,7 @@
               :exchange-rate="exchangeRate"
               @refresh="refreshLight"
               @action="openListingActionDrawer"
+              @open-workspace="openResalePublishingWorkspace"
             />
 
             <ProviderManagement
@@ -535,6 +536,22 @@
       :exchange-rate="exchangeRate"
       @saved="handleListingDrawerSaved"
     />
+    <ResalePublishingDrawer
+      v-model:open="resalePublishingDrawerOpen"
+      :agione-platform="agionePlatform"
+      :platforms="activeResalePlatforms"
+      :providers="providers"
+      :models="models"
+      :channels="channels"
+      :procurement-rows="procurementRows"
+      :price-items="modelPriceItems"
+      :listings="listings"
+      :point-conversion="pointConversion"
+      :display-currency="displayCurrency"
+      :exchange-rate="exchangeRate"
+      @saved="handleResaleWorkspacePublished"
+      @draft="handleResaleWorkspaceDraft"
+    />
   </AppLayout>
 </template>
 
@@ -548,6 +565,7 @@ import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
 import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
 import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
 import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
+import ResalePublishingDrawer from '@/components/llm-ops/ResalePublishingDrawer.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { llmOpsApi } from '@/api/llmOps'
@@ -588,7 +606,8 @@ const showPlatformModal = ref(false)
 const editingPlatform = ref(null)
 const listingDrawerOpen = ref(false)
 const listingDrawerModelId = ref(null)
-const { showSuccess, showError } = useToast()
+const resalePublishingDrawerOpen = ref(false)
+const { showSuccess, showError, showInfo } = useToast()
 
 const simulation = ref({
   channel: '',
@@ -1327,6 +1346,60 @@ function openListingActionDrawer({ modelId, kind }) {
   if (!['create', 'view', 'edit'].includes(kind)) return
   listingDrawerModelId.value = kind === 'create' ? null : modelId
   listingDrawerOpen.value = true
+}
+
+function openResalePublishingWorkspace() {
+  resalePublishingDrawerOpen.value = true
+}
+
+function mapWorkspaceListingToPayload(item) {
+  const inApi = Number(item.priceIn) || 0
+  const outApi = Number(item.priceOut) || 0
+  return {
+    platform: agionePlatform.value?.id,
+    model: item.modelId,
+    channel: item.channelId,
+    currency: 'USD',
+    retail_input_price_per_million: inApi.toFixed(6),
+    retail_output_price_per_million: outApi.toFixed(6),
+    is_active: true
+  }
+}
+
+async function handleResaleWorkspacePublished(payload) {
+  if (!payload || !payload.listings || !payload.listings.length) {
+    showInfo('没有需要上架的链路')
+    return
+  }
+  const items = payload.listings
+    .filter(
+      (item) =>
+        item.upstreamAccount &&
+        Number(item.priceIn) > 0 &&
+        Number(item.priceOut) > 0
+    )
+    .map(mapWorkspaceListingToPayload)
+  if (!items.length) {
+    showError('请补齐所有链路的账号和售价后再发布')
+    return
+  }
+  try {
+    await llmOpsApi.bulkUpsertResaleListings(items)
+    showSuccess(`已上架 ${items.length} 条链路`)
+    refreshLight()
+  } catch (error) {
+    const message =
+      error?.response?.data?.detail ||
+      error?.response?.data?.message ||
+      error?.message ||
+      ''
+    showError(message || '上架失败')
+  }
+}
+
+function handleResaleWorkspaceDraft() {
+  // Drafts are held in the workspace component for now.
+  // Reserved for future localStorage draft persistence.
 }
 
 function handleListingDrawerSaved() {

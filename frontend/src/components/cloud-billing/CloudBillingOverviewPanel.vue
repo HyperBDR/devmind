@@ -1433,14 +1433,31 @@
             <label class="block text-sm font-medium text-gray-700">
               {{ t('cloudBilling.billing.rechargeApprovalSubmitter') }}
             </label>
-            <input
-              v-model="rechargeSubmitForm.submitter_identifier"
-              type="text"
-              :placeholder="
-                t('cloudBilling.billing.rechargeApprovalSubmitterPlaceholder')
-              "
-              class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+            <div class="flex gap-2">
+              <BaseSearchableSelect
+                v-model="rechargeSubmitForm.submitter_user_id"
+                :options="feishuUserOptions"
+                :loading="loadingFeishuUsers"
+                :disabled="loadingFeishuUsers"
+                allow-custom
+                class="min-w-0 flex-1"
+                :placeholder="
+                  t('cloudBilling.billing.rechargeApprovalSubmitterPlaceholder')
+                "
+                :loading-text="t('cloudBilling.providers.loadingUsers')"
+                :empty-text="t('cloudBilling.providers.noMatchingUsers')"
+                @change="handleRechargeSubmitterChange"
+              />
+              <BaseButton
+                variant="outline"
+                size="sm"
+                class="shrink-0"
+                :loading="loadingFeishuUsers"
+                @click="refreshFeishuUsers"
+              >
+                {{ t('common.refresh') }}
+              </BaseButton>
+            </div>
             <p class="text-xs text-gray-500">
               {{ t('cloudBilling.billing.rechargeApprovalSubmitterHint') }}
             </p>
@@ -1553,6 +1570,7 @@ import zhipuIcon from '@/assets/provider-icons/lobehub/zhipu.svg'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import BaseSearchableSelect from '@/components/ui/BaseSearchableSelect.vue'
 import {
   OPERATIONS_CURRENCIES,
   OPERATIONS_DEFAULT_TIMEZONE,
@@ -1644,9 +1662,13 @@ const selectedAccount = ref(null)
 const showRechargeSubmitDialog = ref(false)
 const rechargeSubmitTarget = ref(null)
 const submittingRechargeKey = ref('')
+const loadingFeishuUsers = ref(false)
+const feishuUsers = ref([])
 const rechargeSubmitForm = ref({
   recharge_info_text: '',
   submitter_identifier: '',
+  submitter_user_id: '',
+  submitter_user_label: '',
   payment_note: '',
   recharge_account: '',
   recharge_customer_name: '',
@@ -1658,6 +1680,31 @@ const rechargeSubmitForm = ref({
   expected_date: ''
 })
 const accountCardInitialLimit = 4
+
+const feishuUserOptions = computed(() => {
+  return feishuUsers.value
+    .map((user) => {
+      const value = getFeishuUserOptionValue(user)
+      if (!value) return null
+      const label = formatFeishuUserOption(user) || value
+      return {
+        value,
+        label,
+        description: '',
+        searchText: [
+          label,
+          user?.display_name,
+          user?.name,
+          user?.email,
+          user?.mobile,
+          user?.user_id
+        ]
+          .filter(Boolean)
+          .join(' ')
+      }
+    })
+    .filter(Boolean)
+})
 
 const selectedCurrency = computed({
   get: () => props.currency || defaultCurrency.value,
@@ -2908,6 +2955,7 @@ function parseRechargeInfo(text) {
     payment_type: '',
     remit_method: '',
     submitter_identifier: '',
+    submitter_user_id: '',
     payment_note: ''
   }
   if (!text) return result
@@ -2928,9 +2976,14 @@ function parseRechargeInfo(text) {
       result.payment_type = parsed.payment_type || parsed.付款类型 || ''
       result.remit_method = parsed.remit_method || parsed.付款方式 || ''
       result.payment_note = parsed.payment_note || parsed.付款说明 || ''
-      result.submitter_identifier =
-        parsed.recharge_approval?.submitter_identifier ||
+      result.submitter_user_id =
         parsed.recharge_approval?.submitter_user_id ||
+        parsed.recharge_approval?.resolved_submitter_user_id ||
+        parsed.recharge_approval?.submitter_identifier ||
+        parsed.recharge_approval?.submitter_email ||
+        parsed.recharge_approval?.submitter_mobile ||
+        parsed.recharge_approval?.submitter_contact ||
+        parsed.submitter_user_id ||
         parsed.submitter_identifier ||
         parsed.审批发起人 ||
         parsed.提交名义 ||
@@ -2972,11 +3025,12 @@ function parseRechargeInfo(text) {
       付款方式: 'remit_method',
       payment_note: 'payment_note',
       付款说明: 'payment_note',
-      submitter_identifier: 'submitter_identifier',
-      充值发起人: 'submitter_identifier',
-      审批发起人: 'submitter_identifier',
-      提交名义: 'submitter_identifier',
-      发起人邮箱或手机号: 'submitter_identifier'
+      submitter_user_id: 'submitter_user_id',
+      submitter_identifier: 'submitter_user_id',
+      充值发起人: 'submitter_user_id',
+      审批发起人: 'submitter_user_id',
+      提交名义: 'submitter_user_id',
+      发起人邮箱或手机号: 'submitter_user_id'
     }
     const fieldKey = keyMap[key]
     if (fieldKey) {
@@ -3059,6 +3113,7 @@ function formatRechargeInfoText(source) {
 function extractRechargeApprovalInfo(source) {
   const result = {
     submitter_identifier: '',
+    submitter_user_id: '',
     payment_note: ''
   }
   if (!source) return result
@@ -3069,9 +3124,14 @@ function extractRechargeApprovalInfo(source) {
     try {
       const parsed = JSON.parse(trimmed)
       if (parsed && typeof parsed === 'object') {
-        result.submitter_identifier =
-          parsed.recharge_approval?.submitter_identifier ||
+        result.submitter_user_id =
           parsed.recharge_approval?.submitter_user_id ||
+          parsed.recharge_approval?.resolved_submitter_user_id ||
+          parsed.recharge_approval?.submitter_identifier ||
+          parsed.recharge_approval?.submitter_email ||
+          parsed.recharge_approval?.submitter_mobile ||
+          parsed.recharge_approval?.submitter_contact ||
+          parsed.submitter_user_id ||
           parsed.submitter_identifier ||
           parsed.审批发起人 ||
           parsed.提交名义 ||
@@ -3080,16 +3140,21 @@ function extractRechargeApprovalInfo(source) {
       }
     } catch {
       const parsedText = parseRechargeInfo(trimmed)
-      result.submitter_identifier = parsedText.submitter_identifier || ''
+      result.submitter_user_id = parsedText.submitter_user_id || ''
       result.payment_note = parsedText.payment_note || ''
     }
     return result
   }
 
   if (typeof source === 'object') {
-    result.submitter_identifier =
-      source.recharge_approval?.submitter_identifier ||
+    result.submitter_user_id =
       source.recharge_approval?.submitter_user_id ||
+      source.recharge_approval?.resolved_submitter_user_id ||
+      source.recharge_approval?.submitter_identifier ||
+      source.recharge_approval?.submitter_email ||
+      source.recharge_approval?.submitter_mobile ||
+      source.recharge_approval?.submitter_contact ||
+      source.submitter_user_id ||
       source.submitter_identifier ||
       source.审批发起人 ||
       source.提交名义 ||
@@ -3213,7 +3278,152 @@ function renderRechargeInfoObject(source, prefix = '') {
 
 const ALERT_RECHARGE_APPROVAL_EXPECTED_DAYS = 3
 
+function getFeishuUserOptionValue(user) {
+  return String(
+    user?.user_id || user?.open_id || user?.union_id || user?.email ||
+      user?.mobile || ''
+  ).trim()
+}
+
+function looksLikeLegacySubmitterIdentifier(value) {
+  const text = String(value || '').trim()
+  return text.includes('@') || /^\+?\d[\d\s-]{5,}$/.test(text)
+}
+
+function getFeishuUserLabel(user) {
+  return String(user?.display_name || user?.name || user?.user_id || '').trim()
+}
+
+function formatFeishuUserOption(user) {
+  const label = getFeishuUserLabel(user) || getFeishuUserOptionValue(user)
+  return label
+}
+
+function applyRechargeSubmitterUser(user) {
+  if (!user) return
+  rechargeSubmitForm.value.submitter_user_id = getFeishuUserOptionValue(user)
+  rechargeSubmitForm.value.submitter_identifier = ''
+  rechargeSubmitForm.value.submitter_user_label = getFeishuUserLabel(user)
+}
+
+function applyRechargeSubmitterUserId(userId) {
+  const text = String(userId || '').trim()
+  if (!text) {
+    rechargeSubmitForm.value.submitter_identifier = ''
+    rechargeSubmitForm.value.submitter_user_id = ''
+    rechargeSubmitForm.value.submitter_user_label = ''
+    return
+  }
+  const user = feishuUsers.value.find((item) => {
+    return getFeishuUserOptionValue(item) === text
+  })
+  if (user) {
+    applyRechargeSubmitterUser(user)
+    return
+  }
+  // Accept legacy email/手机号; everything else is cleared.
+  if (looksLikeLegacySubmitterIdentifier(text)) {
+    rechargeSubmitForm.value.submitter_identifier = text
+    rechargeSubmitForm.value.submitter_user_id = text
+    rechargeSubmitForm.value.submitter_user_label = ''
+    return
+  }
+  rechargeSubmitForm.value.submitter_identifier = ''
+  rechargeSubmitForm.value.submitter_user_id = ''
+  rechargeSubmitForm.value.submitter_user_label = ''
+}
+
+function handleRechargeSubmitterChange(value) {
+  const selectedId = String(
+    value || rechargeSubmitForm.value.submitter_user_id || ''
+  ).trim()
+  const user =
+    feishuUsers.value.find((item) => {
+      return getFeishuUserOptionValue(item) === selectedId
+    }) || null
+  if (!user) {
+    rechargeSubmitForm.value.submitter_identifier = ''
+    rechargeSubmitForm.value.submitter_user_label = ''
+    return
+  }
+  applyRechargeSubmitterUser(user)
+}
+
+function getRechargeSubmitterPayload() {
+  const selectedId = String(
+    rechargeSubmitForm.value.submitter_user_id || ''
+  ).trim()
+  const user = feishuUsers.value.find((item) => {
+    return getFeishuUserOptionValue(item) === selectedId
+  })
+  if (user) {
+    return {
+      submitter_user_id: getFeishuUserOptionValue(user),
+      submitter_user_label: getFeishuUserLabel(user)
+    }
+  }
+  if (looksLikeLegacySubmitterIdentifier(selectedId)) {
+    return {
+      submitter_identifier: selectedId,
+      submitter_user_id: '',
+      submitter_user_label: String(
+        rechargeSubmitForm.value.submitter_user_label || ''
+      ).trim()
+    }
+  }
+  return {
+    submitter_user_id: selectedId,
+    submitter_user_label: String(
+      rechargeSubmitForm.value.submitter_user_label || ''
+    ).trim()
+  }
+}
+
+function hasRechargeSubmitterPayload(payload) {
+  return Boolean(
+    String(payload?.submitter_user_id || payload?.submitter_identifier || '')
+      .trim()
+  )
+}
+
+async function loadFeishuUsers() {
+  if (feishuUsers.value.length > 0 || loadingFeishuUsers.value) return
+  loadingFeishuUsers.value = true
+  try {
+    const response = await cloudBillingApi.getFeishuUsers()
+    const data = extractResponseData(response)
+    feishuUsers.value = Array.isArray(data?.users) ? data.users : []
+  } catch (error) {
+    console.error('Failed to load Feishu users:', error)
+    feishuUsers.value = []
+    showError(t('cloudBilling.providers.loadFeishuUsersError'))
+  } finally {
+    loadingFeishuUsers.value = false
+  }
+}
+
+async function refreshFeishuUsers() {
+  if (loadingFeishuUsers.value) return
+  loadingFeishuUsers.value = true
+  try {
+    const response = await cloudBillingApi.refreshFeishuUsers()
+    const data = extractResponseData(response)
+    feishuUsers.value = Array.isArray(data?.users) ? data.users : []
+    if (rechargeSubmitForm.value.submitter_user_id) {
+      applyRechargeSubmitterUserId(
+        rechargeSubmitForm.value.submitter_user_id
+      )
+    }
+  } catch (error) {
+    console.error('Failed to refresh Feishu users:', error)
+    showError(t('cloudBilling.providers.loadFeishuUsersError'))
+  } finally {
+    loadingFeishuUsers.value = false
+  }
+}
+
 async function openRechargeSubmitDialog(item) {
+  await loadFeishuUsers()
   const today = getTodayDateString(selectedTimezone.value)
   let rechargeApprovalSource = item.recharge_info || ''
   let parsed =
@@ -3249,10 +3459,13 @@ async function openRechargeSubmitDialog(item) {
   }
 
   rechargeSubmitTarget.value = item
+  const submitterUserId =
+    approval.submitter_user_id || parsed.submitter_user_id || ''
   rechargeSubmitForm.value = {
     recharge_info_text: rechargeInfoText,
-    submitter_identifier:
-      approval.submitter_identifier || parsed.submitter_identifier || '',
+    submitter_identifier: '',
+    submitter_user_id: submitterUserId,
+    submitter_user_label: '',
     payment_note: parsed.payment_note || approval.payment_note || '',
     recharge_account: parsed.recharge_account || item.account_id || '',
     recharge_customer_name: parsed.recharge_customer_name || '',
@@ -3266,6 +3479,7 @@ async function openRechargeSubmitDialog(item) {
       ALERT_RECHARGE_APPROVAL_EXPECTED_DAYS
     )
   }
+  applyRechargeSubmitterUserId(submitterUserId)
   showRechargeSubmitDialog.value = true
 }
 
@@ -3276,6 +3490,8 @@ function closeRechargeSubmitDialog() {
   rechargeSubmitForm.value = {
     recharge_info_text: '',
     submitter_identifier: '',
+    submitter_user_id: '',
+    submitter_user_label: '',
     payment_note: '',
     recharge_account: '',
     recharge_customer_name: '',
@@ -3295,11 +3511,9 @@ async function submitRechargeApprovalFromDialog() {
   const expectedDate = String(
     rechargeSubmitForm.value.expected_date || ''
   ).trim()
-  const submitterIdentifier = String(
-    rechargeSubmitForm.value.submitter_identifier || ''
-  ).trim()
+  const submitterPayload = getRechargeSubmitterPayload()
   const paymentNote = String(rechargeSubmitForm.value.payment_note || '').trim()
-  if (!submitterIdentifier) {
+  if (!hasRechargeSubmitterPayload(submitterPayload)) {
     showWarning(
       t('cloudBilling.billing.rechargeApprovalSubmitterRequiredWarning')
     )
@@ -3317,7 +3531,7 @@ async function submitRechargeApprovalFromDialog() {
       item.provider_id,
       {
         account_id: item.account_id,
-        submitter_identifier: submitterIdentifier,
+        ...submitterPayload,
         recharge_account: rechargeSubmitForm.value.recharge_account,
         recharge_customer_name: rechargeSubmitForm.value.recharge_customer_name,
         payment_company: rechargeSubmitForm.value.payment_company,

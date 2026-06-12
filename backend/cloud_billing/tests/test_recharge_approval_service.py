@@ -23,6 +23,8 @@ from cloud_billing.services.recharge_approval import (
     RechargeApprovalAgentCallbackHandler,
     build_notification_message_from_payload,
     _get_feishu_access_token,
+    _redact_feishu_body_for_log,
+    _redact_feishu_payload_for_log,
     _skill_root_path,
     _resolve_user_id_by_email_or_mobile,
     resolve_submitter_identity,
@@ -61,6 +63,54 @@ def test_agent_runner_package_exports_core_symbols():
     assert agent_runner.SkillSpec is BaseSkillSpec
     assert agent_runner.LangfuseAgentCallbackHandler is BaseLangfuseAgentCallbackHandler
     assert callable(agent_runner.create_deep_agent)
+
+
+def test_feishu_log_redaction_handles_nested_form_json_strings():
+    form_payload = [
+        {"id": "cloud", "type": "input", "value": "智谱"},
+        {"id": "account", "type": "input", "value": "18017606559"},
+        {"id": "amount", "type": "amount", "value": 200},
+        {"id": "remark", "type": "textarea", "value": "账号：1109385104"},
+    ]
+    payload = {
+        "approval_code": "approval",
+        "user_id": "ou_123",
+        "form": json.dumps(form_payload, ensure_ascii=False),
+    }
+
+    redacted_payload = _redact_feishu_payload_for_log(payload)
+    redacted_text = json.dumps(redacted_payload, ensure_ascii=False)
+
+    assert "18017606559" not in redacted_text
+    assert "1109385104" not in redacted_text
+    assert '"value": "***REDACTED***"' in redacted_text
+    assert redacted_payload["form"][0]["id"] == "cloud"
+
+
+def test_feishu_body_redaction_handles_nested_response_form_json_strings():
+    body = json.dumps(
+        {
+            "code": 0,
+            "data": {
+                "form": json.dumps(
+                    [
+                        {
+                            "id": "recharge_account",
+                            "type": "input",
+                            "value": "secret-account",
+                        }
+                    ],
+                    ensure_ascii=False,
+                )
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    redacted_body = _redact_feishu_body_for_log(body)
+
+    assert "secret-account" not in redacted_body
+    assert '"value": "***REDACTED***"' in redacted_body
 
 
 @pytest.mark.django_db
