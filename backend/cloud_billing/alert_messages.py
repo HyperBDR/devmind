@@ -148,6 +148,37 @@ def format_provider_tags(tags: list[str], language: str) -> str:
     return separator.join(normalized_tags)
 
 
+def build_recharge_approval_notice(language: str) -> str:
+    """Return the localized auto recharge approval notice."""
+    return localized_text(
+        language,
+        (
+            "The recharge approval workflow has been triggered "
+            "automatically. Please track the approval progress."
+        ),
+        "已自动触发充值审批，请关注审批进度",
+    )
+
+
+def extract_recharge_approval_notice(message: str) -> str:
+    """Extract persisted auto recharge approval notice from alert text."""
+    for raw_line in str(message or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        has_notice = (
+            "自动触发充值审批" in line
+            or "recharge approval workflow has been triggered" in line.lower()
+        )
+        if not has_notice:
+            continue
+        for separator in ("：", ": "):
+            if separator in line:
+                return line.split(separator, 1)[1].strip()
+        return line
+    return ""
+
+
 def extract_account_id_from_message(message: str) -> str:
     for raw_line in str(message or "").splitlines():
         line = raw_line.strip()
@@ -178,6 +209,8 @@ def build_alert_message(
     alert_type: Optional[str] = None,
     resource_cost_items: Optional[list] = None,
     cost_period: str = "today",
+    auto_recharge_approval_triggered: bool = False,
+    recharge_approval_notice: Optional[str] = None,
 ) -> str:
     raw_language = str(language or DEFAULT_LANGUAGE).strip()
     normalized_language = (
@@ -224,6 +257,25 @@ def build_alert_message(
             )
 
         effective_alert_type = str(alert_type or "").strip().lower()
+        approval_notice = recharge_approval_notice or (
+            build_recharge_approval_notice(normalized_language)
+            if auto_recharge_approval_triggered
+            else ""
+        )
+
+        def append_recharge_approval_notice():
+            if approval_notice:
+                lines.append(
+                    format_alert_line(
+                        localized_text(
+                            normalized_language,
+                            "Recharge approval",
+                            "充值审批",
+                        ),
+                        approval_notice,
+                        language=normalized_language,
+                    )
+                )
 
         if (
             effective_alert_type == "balance"
@@ -275,6 +327,7 @@ def build_alert_message(
                     language=normalized_language,
                 )
             )
+            append_recharge_approval_notice()
             if resource_cost_items:
                 lines.extend(_format_resource_cost_lines(
                     resource_cost_items, currency, normalized_language,
@@ -343,6 +396,7 @@ def build_alert_message(
                     language=normalized_language,
                 )
             )
+            append_recharge_approval_notice()
             if resource_cost_items:
                 lines.extend(_format_resource_cost_lines(
                     resource_cost_items, currency, normalized_language,
@@ -509,6 +563,8 @@ def build_alert_sections(
     alert_type: Optional[str] = None,
     resource_cost_items: Optional[list] = None,
     cost_period: str = "today",
+    auto_recharge_approval_triggered: bool = False,
+    recharge_approval_notice: Optional[str] = None,
 ) -> dict:
     """Return structured alert data for rich rendering.
 
@@ -547,6 +603,10 @@ def build_alert_sections(
             resource_cost_items=resource_cost_items,
             normalized_language=normalized_language,
             cost_period=cost_period,
+            auto_recharge_approval_triggered=(
+                auto_recharge_approval_triggered
+            ),
+            recharge_approval_notice=recharge_approval_notice,
         )
 
 
@@ -571,6 +631,8 @@ def _build_alert_sections_inner(
     resource_cost_items=None,
     normalized_language="en",
     cost_period: str = "today",
+    auto_recharge_approval_triggered: bool = False,
+    recharge_approval_notice: Optional[str] = None,
 ) -> dict:
     """Inner builder — all ``_()`` calls resolve under the active language."""
 
@@ -663,6 +725,11 @@ def _build_alert_sections_inner(
         "growth_percentage_threshold":  _("Growth Percentage Threshold"),
         "amount_threshold":        _("Amount Threshold"),
         "cost_threshold":          _("Cost Threshold"),
+        "recharge_approval":       localized_text(
+            normalized_language,
+            "Recharge Approval",
+            "充值审批",
+        ),
     }
 
     # ── Build sections ──
@@ -680,6 +747,14 @@ def _build_alert_sections_inner(
         "thresholds": [],
         "resource_costs": resource_cost_items or [],
         "balance": None,
+        "recharge_approval_notice": (
+            recharge_approval_notice
+            or (
+                build_recharge_approval_notice(normalized_language)
+                if auto_recharge_approval_triggered
+                else ""
+            )
+        ),
     }
 
     # ── Key metrics ──
@@ -800,6 +875,9 @@ def build_alert_sections_from_record(
         alert_record, "days_remaining_threshold", None,
     )
     current_cost = getattr(alert_record, "current_cost", 0)
+    recharge_approval_notice = extract_recharge_approval_notice(
+        getattr(alert_record, "alert_message", "")
+    )
 
     balance_threshold_triggered = (
         alert_type == "balance"
@@ -854,6 +932,7 @@ def build_alert_sections_from_record(
         language=language,
         resource_cost_items=resource_cost_items,
         cost_period=cost_period,
+        recharge_approval_notice=recharge_approval_notice,
     )
 
 
@@ -883,6 +962,9 @@ def build_alert_message_from_record(
         None,
     )
     current_cost = getattr(alert_record, "current_cost", 0)
+    recharge_approval_notice = extract_recharge_approval_notice(
+        getattr(alert_record, "alert_message", "")
+    )
 
     balance_threshold_triggered = (
         alert_type == "balance"
@@ -935,4 +1017,5 @@ def build_alert_message_from_record(
         language=language,
         resource_cost_items=resource_cost_items,
         cost_period=cost_period,
+        recharge_approval_notice=recharge_approval_notice,
     )
