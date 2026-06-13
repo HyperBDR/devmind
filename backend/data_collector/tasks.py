@@ -5,10 +5,13 @@ All use agentcore-task TaskTracker and report progress/counts in metadata.
 import hashlib
 import logging
 import os
+import random
 import uuid as uuid_module
 from datetime import timedelta
 
+import requests
 from django.conf import settings
+from django.db import InterfaceError, OperationalError
 from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
@@ -36,6 +39,106 @@ from .services.storage import (
 logger = logging.getLogger(__name__)
 
 MODULE_NAME = "data_collector"
+RUN_COLLECT_MAX_RETRIES = 3
+RUN_COLLECT_RETRY_BASE_DELAY_SECONDS = 60
+RUN_COLLECT_RETRY_MAX_DELAY_SECONDS = 300
+
+
+def _is_transient_collect_error(exc: Exception) -> bool:
+    """
+    Return whether a collection failure should be retried by Celery.
+    """
+    if isinstance(
+        exc,
+        (
+            InterfaceError,
+            OperationalError,
+            requests.ConnectionError,
+            requests.Timeout,
+        ),
+    ):
+        return True
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        status_code = response.status_code if response is not None else None
+        return status_code in {429, 500, 502, 503, 504}
+
+    detail = str(exc).lower()
+    return any(
+        token in detail
+        for token in (
+            "connection error",
+            "connection reset",
+            "temporary failure",
+            "temporarily unavailable",
+            "timed out",
+            "timeout",
+            "could not translate host name",
+            "name resolution",
+            "rate limit",
+            "too many requests",
+            "502",
+            "503",
+            "504",
+        )
+    )
+
+
+def _retry_collect_if_transient(
+    *,
+    exc: Exception,
+    task_id: str | None,
+    config_uuid: str,
+    config_platform: str,
+    config_key: str,
+) -> bool:
+    """
+    Schedule a retry for transient collection failures when running in Celery.
+    """
+    task = current_task
+    request = getattr(task, "request", None) if task else None
+    retry = getattr(task, "retry", None) if task else None
+    if not request or not callable(retry):
+        return False
+    if not _is_transient_collect_error(exc):
+        return False
+
+    retries = int(getattr(request, "retries", 0) or 0)
+    if retries >= RUN_COLLECT_MAX_RETRIES:
+        return False
+
+    countdown = min(
+        RUN_COLLECT_RETRY_BASE_DELAY_SECONDS * (2 ** retries),
+        RUN_COLLECT_RETRY_MAX_DELAY_SECONDS,
+    )
+    countdown = min(
+        countdown + random.uniform(0, min(30, countdown * 0.2)),
+        RUN_COLLECT_RETRY_MAX_DELAY_SECONDS,
+    )
+    metadata = {
+        "config_uuid": config_uuid,
+        "config_platform": config_platform,
+        "config_key": config_key,
+        "progress_percent": 10,
+        "progress_step": "retry",
+        "retry_count": retries + 1,
+        "max_retries": RUN_COLLECT_MAX_RETRIES,
+        "retry_countdown_seconds": countdown,
+    }
+    if task_id:
+        TaskTracker.update_task_status(
+            task_id,
+            TaskStatus.RETRY,
+            error=str(exc),
+            metadata=metadata,
+        )
+    logger.warning(
+        f"[data_collector] run_collect transient failure, scheduling retry "
+        f"config_uuid={config_uuid}, retry={retries + 1}/"
+        f"{RUN_COLLECT_MAX_RETRIES}, countdown={countdown}s, error={exc}"
+    )
+    retry(exc=exc, countdown=countdown, max_retries=RUN_COLLECT_MAX_RETRIES)
+    return True
 
 
 def _sync_attachments_for_record(provider, auth_config, raw_record):
@@ -212,7 +315,10 @@ def _register_and_start(
         )
 
 
-@shared_task(name="data_collector.tasks.run_collect")
+@shared_task(
+    name="data_collector.tasks.run_collect",
+    max_retries=RUN_COLLECT_MAX_RETRIES,
+)
 @prevent_duplicate_task(
     "data_collector_run_collect", lock_param="config_uuid", timeout=3600
 )
@@ -396,6 +502,14 @@ def run_collect(
                 task_id=task_id,
             )
         except Exception as e:
+            if _retry_collect_if_transient(
+                exc=e,
+                task_id=task_id,
+                config_uuid=config_uuid,
+                config_platform=config.platform,
+                config_key=config.key,
+            ):
+                return {"success": False, "status": "retrying"}
             logger.exception(
                 f"[data_collector] run_collect provider.collect failed: {e}"
             )

@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from ai_pricehub.services import AIPriceHubService
 
@@ -77,6 +78,43 @@ def test_fetch_primary_vendor_models_supports_new_agione_square_list_payload(mon
             "is_aggregate": False,
         }
     ]
+
+
+def test_fetch_primary_vendor_models_retries_transient_http_error(monkeypatch):
+    service = AIPriceHubService()
+    vendor = {
+        "slug": "agione",
+        "name": "AGIOne",
+        "platform_slug": "agione",
+        "currency": "CNY",
+        "points_per_currency_unit": 10.0,
+        "models_source": {
+            "url": "https://agione.cc/hyperone/xapi/models/square/list"
+        },
+    }
+    calls = {"count": 0}
+    payload = {"status": 200, "result": []}
+
+    class DummyResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return payload
+
+    def fake_get(url, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise requests.ConnectionError("temporary failure")
+        return DummyResponse()
+
+    monkeypatch.setattr("ai_pricehub.services.time.sleep", lambda delay: None)
+    monkeypatch.setattr("ai_pricehub.services.requests.get", fake_get)
+
+    catalog = service._fetch_primary_vendor_models(vendor)  # noqa: SLF001
+
+    assert catalog["raw_payload"]["record_count"] == 0
+    assert calls["count"] == 2
 
 
 def test_fetch_primary_vendor_models_maps_qwen_to_aliyun_source_vendor(monkeypatch):

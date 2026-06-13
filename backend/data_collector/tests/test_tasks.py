@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 import pytest
+import requests
 from django.utils import timezone
 
 from data_collector.models import CollectorConfig, RawDataRecord
@@ -23,6 +24,52 @@ class TestRunCollect:
         assert result["success"] is False
         assert "not found" in result.get("error", "").lower() or "Config" in result.get("error", "")
         mock_get_provider.assert_not_called()
+
+    @patch("data_collector.tasks.TaskTracker.update_task_status")
+    @patch("data_collector.tasks.TaskTracker.register_task")
+    @patch("data_collector.tasks.get_provider")
+    def test_run_collect_retries_transient_provider_failure(
+        self,
+        mock_get_provider,
+        mock_register_task,
+        mock_update_task_status,
+        collector_config,
+        monkeypatch,
+    ):
+        class RetryScheduled(Exception):
+            pass
+
+        retry_kwargs = {}
+
+        def fake_retry(**kwargs):
+            retry_kwargs.update(kwargs)
+            raise RetryScheduled()
+
+        mock_provider = MagicMock()
+        mock_provider.collect.side_effect = requests.ConnectionError(
+            "temporary failure"
+        )
+        mock_get_provider.return_value = MagicMock(return_value=mock_provider)
+        monkeypatch.setattr(
+            "data_collector.tasks.current_task",
+            SimpleNamespace(
+                request=SimpleNamespace(id="task-retry", retries=0),
+                retry=fake_retry,
+            ),
+        )
+        monkeypatch.setattr(
+            "data_collector.tasks.random.uniform",
+            lambda lower, upper: 0,
+        )
+
+        with pytest.raises(RetryScheduled):
+            run_collect(str(collector_config.uuid))
+
+        assert retry_kwargs["countdown"] == 60
+        assert retry_kwargs["max_retries"] == 3
+        assert isinstance(retry_kwargs["exc"], requests.ConnectionError)
+        mock_register_task.assert_called_once()
+        assert mock_update_task_status.call_args_list[-1].args[1] == "RETRY"
 
     @patch("data_collector.tasks.get_provider")
     def test_run_collect_invalid_time_format_returns_error(
