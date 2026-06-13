@@ -4,6 +4,7 @@ import json
 import logging
 import mimetypes
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,52 @@ logger = logging.getLogger(__name__)
 
 RESOURCE_TEXT_CHAR_LIMIT = 18000
 RESOURCE_URL_LIMIT = 5
+HTTP_RETRY_ATTEMPTS = 3
+HTTP_RETRY_BASE_DELAY_SECONDS = 1
+
+
+def _is_transient_http_error(exc: Exception) -> bool:
+    """Return whether an HTTP fetch failure is worth retrying."""
+    if isinstance(exc, requests.HTTPError):
+        response = exc.response
+        status_code = response.status_code if response is not None else None
+        return status_code in {429, 500, 502, 503, 504}
+    return isinstance(
+        exc,
+        (
+            requests.ConnectionError,
+            requests.Timeout,
+        ),
+    )
+
+
+def _get_with_retry(url: str, *, timeout: int) -> requests.Response:
+    """Fetch a URL with short exponential retry for transient failures."""
+    last_error = None
+    for attempt_idx in range(HTTP_RETRY_ATTEMPTS):
+        try:
+            response = requests.get(url, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as exc:
+            last_error = exc
+            if (
+                attempt_idx >= HTTP_RETRY_ATTEMPTS - 1
+                or not _is_transient_http_error(exc)
+            ):
+                raise
+            delay = HTTP_RETRY_BASE_DELAY_SECONDS * (2 ** attempt_idx)
+            logger.warning(
+                "ai_pricehub parser transient fetch error "
+                "url=%s attempt=%s/%s error=%s retrying_in=%.1fs",
+                url,
+                attempt_idx + 1,
+                HTTP_RETRY_ATTEMPTS,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
+    raise last_error
 
 
 class ParserAgentService:
@@ -124,8 +171,7 @@ class ParserAgentService:
         return evidence
 
     def _fetch_resource(self, url: str, *, job_dir: Path) -> dict[str, Any]:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
+        response = _get_with_retry(url, timeout=30)
         content_type = response.headers.get("content-type", "").lower()
         text = response.text
         suffix = self._guess_suffix(url=url, content_type=content_type)

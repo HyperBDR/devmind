@@ -48,7 +48,13 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {
     'visibility_timeout': 43200,
     'fanout_prefix': True,
     'fanout_patterns': True,
+    'retry_on_timeout': True,
 }
+
+# Keep workers alive across transient Redis DNS or connection failures.
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_BROKER_CONNECTION_RETRY = True
+CELERY_BROKER_CONNECTION_MAX_RETRIES = None
 
 # Task execution time limits
 # CELERY_TASK_TIME_LIMIT: Hard limit (s); worker killed if exceeded.

@@ -23,6 +23,7 @@ CELERY_LOG="/var/log/celery/celery.log"
 WORKERS=${WORKERS:-1}
 THREADS=${THREADS:-1}
 REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+REDIS_HEALTHCHECK_URL=${REDIS_HEALTHCHECK_URL:-${CELERY_BROKER_URL:-$REDIS_URL}}
 DB_ENGINE=${DB_ENGINE:-sqlite}
 
 # --- Ensure log directories exist ---
@@ -64,6 +65,25 @@ wait_for_db() {
             log "Using SQLite (no health check required)."
             ;;
     esac
+}
+
+wait_for_redis() {
+    log "Waiting for Redis..."
+    until python - <<PY
+import os
+import redis
+
+client = redis.from_url(
+    os.environ.get("REDIS_HEALTHCHECK_URL", "redis://redis:6379/0"),
+    socket_connect_timeout=2,
+    socket_timeout=2,
+)
+client.ping()
+PY
+    do
+        sleep 2
+    done
+    log "Redis is ready!"
 }
 
 # --- Django Management Tasks ---
@@ -181,13 +201,16 @@ case "$1" in
         ;;
     celery)
         wait_for_db
+        wait_for_redis
         start_celery_worker
         ;;
     celery-beat)
         wait_for_db
+        wait_for_redis
         start_celery_beat
         ;;
     flower)
+        wait_for_redis
         start_flower
         ;;
     development)
