@@ -152,13 +152,87 @@ class TaskRegistry:
         PeriodicTasks.update_changed()
         return True
 
+    @staticmethod
+    def _ensure_task_module_loaded(task_name):
+        """
+        Best-effort import of the module that *should* register a Celery
+        task named ``task_name``.
+
+        Celery resolves its ``imports`` config only inside the worker
+        process. The ``register_periodic_tasks`` management command runs
+        in a separate process where those modules may not yet be loaded,
+        so we try to import the dotted module path prefix of ``task_name``
+        (``a.b.c.task_name`` -> ``a.b.c``) and then re-check whether the
+        task landed in ``app.tasks``.
+        """
+        try:
+            from celery import current_app
+        except Exception:  # pragma: no cover - celery not importable
+            return True
+        if task_name in current_app.tasks:
+            return True
+        module_name = task_name.rsplit(".", 1)[0] if "." in task_name else ""
+        if not module_name:
+            return task_name in current_app.tasks
+        try:
+            __import__(module_name)
+        except Exception:
+            return task_name in current_app.tasks
+        return task_name in current_app.tasks
+
+    @staticmethod
+    def _is_task_registered(task_name):
+        """
+        Return whether ``task_name`` is currently known to the active Celery
+        app. Used to surface missing task names instead of letting celery
+        beat fail with a generic KeyError at dispatch time.
+        """
+        try:
+            from celery import current_app
+        except Exception:  # pragma: no cover - celery not importable
+            return True
+        try:
+            if task_name in current_app.tasks:
+                return True
+            # Celery worker resolves ``imports`` lazily; the management
+            # command path runs in a process where those modules may not
+            # have been imported yet. Attempt a best-effort import and
+            # re-check before declaring the task missing.
+            module_name = task_name.rsplit(".", 1)[0] if "." in task_name else ""
+            if module_name:
+                try:
+                    __import__(module_name)
+                except Exception:
+                    pass
+            return task_name in current_app.tasks
+        except Exception:
+            # If anything goes wrong, don't block registration: the worst
+            # case is the same KeyError that motivated this check.
+            return True
+
     def apply(self):
         """
         Write all registered entries to django_celery_beat.
 
         Existing rows are skipped so database-side edits are preserved.
+        Entries that reference a task name not yet known to the Celery
+        app are logged at ERROR level so that missing-task regressions
+        show up loudly during ``manage.py register_periodic_tasks``
+        rather than only at runtime dispatch.
         """
         for name, entry in self._entries.items():
+            task_name = entry.get("task")
+            if task_name and not self._is_task_registered(task_name):
+                logger.error(
+                    "Periodic task '%s' references task '%s' which is not "
+                    "registered in the Celery app. Skipping. This usually "
+                    "means the task module is missing from "
+                    "core.celery 'imports' or its package __init__ does "
+                    "not re-export the @shared_task.",
+                    name,
+                    task_name,
+                )
+                continue
             try:
                 created = self._apply_one(name, entry)
                 if created:
