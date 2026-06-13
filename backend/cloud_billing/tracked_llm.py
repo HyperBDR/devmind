@@ -10,7 +10,7 @@ from agentcore_metering.adapters.django.trackers.llm import (
     _repair_json_obj,
 )
 
-from ai_pricehub.llm_config import resolve_parser_llm_settings
+from cloud_billing.services.parser_llm_config import resolve_parser_llm_settings
 
 SchemaT = TypeVar("SchemaT")
 

@@ -18,12 +18,6 @@ export const FEATURE_DEFINITIONS = [
     matchers: ['/hyperbdr-dashboard']
   },
   {
-    key: 'ai_pricehub',
-    labelKey: 'platforms.aiPriceHub',
-    defaultPath: '/ai-pricehub',
-    matchers: ['/ai-pricehub']
-  },
-  {
     key: 'sales_work_orders',
     labelKey: 'platforms.salesWorkOrders',
     defaultPath: '/sals/dashboard',
@@ -47,7 +41,6 @@ const FEATURE_ALIASES = {
   cloud_billing: 'operations_console',
   data_collector: 'operations_console',
   sals: 'sales_work_orders',
-  ai_model_pricing: 'ai_pricehub',
   llm_console: 'admin_console',
   task_management_console: 'admin_console',
   notification_console: 'admin_console'

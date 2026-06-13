@@ -100,16 +100,6 @@ const routes = [
     meta: { requiresAuth: true, requiredFeature: 'operations_console' }
   },
   {
-    path: '/cloud-billing/ai-pricing',
-    redirect: '/ai-pricehub'
-  },
-  {
-    path: '/ai-pricehub',
-    name: 'AIPriceHub',
-    component: () => import('@/pages/AIPriceHub.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'ai_pricehub' }
-  },
-  {
     path: '/cloud-billing/tasks',
     name: 'CloudBillingTasks',
     component: () => import('@/pages/CloudBilling/Tasks.vue'),

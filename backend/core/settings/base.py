@@ -166,7 +166,6 @@ INSTALLED_APPS = [
 INSTALLED_APPS += [
     'core',
     'accounts',
-    'ai_pricehub',
     'cloud_billing',
     'data_collector',
     'hyperbdr_dashboard',

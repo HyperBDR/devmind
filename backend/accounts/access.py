@@ -23,11 +23,6 @@ FEATURE_DEFINITIONS = (
         'default_path': '/hyperbdr-dashboard',
     },
     {
-        'key': 'ai_pricehub',
-        'label': 'LLM Pricing Comparison',
-        'default_path': '/ai-pricehub',
-    },
-    {
         'key': 'admin_console',
         'label': 'Admin Console',
         'default_path': '/management/users',
@@ -57,7 +52,6 @@ FEATURE_ALIASES = {
     'cloud_billing': 'operations_console',
     'data_collector': 'operations_console',
     'sals': 'sales_work_orders',
-    'ai_model_pricing': 'ai_pricehub',
     'llm_console': 'admin_console',
     'task_management_console': 'admin_console',
     'notification_console': 'admin_console',

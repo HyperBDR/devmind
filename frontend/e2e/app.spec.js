@@ -73,20 +73,6 @@ test.describe('Operations Dashboard', () => {
   })
 })
 
-test.describe('AI PriceHub', () => {
-  test.beforeEach(async ({ page }) => {
-    const loggedIn = await tryLogin(page)
-    if (!loggedIn) test.skip()
-  })
-
-  test('AI PriceHub page loads', async ({ page }) => {
-    await page.goto('/ai-pricehub')
-    await page.waitForLoadState('networkidle')
-    const url = page.url()
-    expect(url).toMatch(/\/(ai-pricehub|dashboard|login)/)
-  })
-})
-
 test.describe('HyperBDR Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     const loggedIn = await tryLogin(page)
