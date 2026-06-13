@@ -122,58 +122,6 @@ def _queue_hyperbdr_collect(config: CollectorConfig):
     return task, celery_task
 
 
-def _sync_ai_pricehub_collect_config(config: CollectorConfig) -> None:
-    if config.platform != "ai_pricehub":
-        return
-    try:
-        from ai_pricehub.source_config_store import (
-            list_primary_source_configs,
-            set_primary_source_configs,
-        )
-    except Exception as exc:
-        raise ValidationError(
-            {
-                "value": (
-                    "AI PriceHub source config store is unavailable: "
-                    f"{exc}"
-                )
-            }
-        ) from exc
-
-    value = config.value or {}
-    value["project_keys"] = value.get("project_keys") or ["sync"]
-    incoming_sources = value.get("primary_sources")
-    if isinstance(incoming_sources, list) and incoming_sources:
-        try:
-            value["primary_sources"] = set_primary_source_configs(
-                incoming_sources,
-                owner_user=config.user,
-            )
-        except Exception as exc:
-            raise ValidationError(
-                {
-                    "value": (
-                        "Failed to persist AI PriceHub primary sources: "
-                        f"{exc}"
-                    )
-                }
-            ) from exc
-    else:
-        try:
-            value["primary_sources"] = list_primary_source_configs()
-        except Exception as exc:
-            raise ValidationError(
-                {
-                    "value": (
-                        "Failed to load AI PriceHub primary sources: "
-                        f"{exc}"
-                    )
-                }
-            ) from exc
-    config.value = value
-    config.save(update_fields=["value", "updated_at"])
-
-
 @extend_schema_view(
     list=extend_schema(
         tags=["data-collector"],
@@ -229,7 +177,6 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 serializer.save(user=self.request.user)
                 config = serializer.instance
-                _sync_ai_pricehub_collect_config(config)
                 sync_config_to_beat(config)
                 _sync_hyperbdr_data_source(config)
         except IntegrityError as e:
@@ -252,7 +199,6 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
             previous_config = CollectorConfig.objects.get(pk=serializer.instance.pk)
             serializer.save()
             config = serializer.instance
-            _sync_ai_pricehub_collect_config(config)
             sync_config_to_beat(config)
             _sync_hyperbdr_data_source(config, previous_config=previous_config)
 

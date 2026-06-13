@@ -2,7 +2,6 @@
 Platform providers for data collection. Use get_provider(platform) to resolve.
 """
 from .after_sales_incident import AfterSalesIncidentProvider
-from .ai_pricehub import AIPriceHubProvider
 from .base import BaseProvider
 from .feishu import FeishuProvider
 from .hyperbdr import HyperBDRProvider
@@ -11,7 +10,6 @@ from .license import LicenseProvider
 
 PROVIDER_MAPPING = {
     "after_sales_incident": AfterSalesIncidentProvider,
-    "ai_pricehub": AIPriceHubProvider,
     "feishu": FeishuProvider,
     "hyperbdr": HyperBDRProvider,
     "jira": JiraProvider,

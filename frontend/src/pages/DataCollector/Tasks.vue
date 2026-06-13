@@ -69,9 +69,6 @@
                   <option value="hyperbdr">
                     {{ t('dataCollector.platforms.hyperbdr') }}
                   </option>
-                  <option value="ai_pricehub">
-                    {{ t('dataCollector.platforms.ai_pricehub') }}
-                  </option>
                 </select>
               </span>
 
@@ -328,9 +325,7 @@ function getPlatformLabel(platform) {
   if (platform === 'feishu') return t('dataCollector.platforms.feishu')
   if (platform === 'license') return t('dataCollector.platforms.license')
   if (platform === 'hyperbdr') return t('dataCollector.platforms.hyperbdr')
-  if (platform === 'ai_pricehub')
-    return t('dataCollector.platforms.ai_pricehub')
-  return platformLabels[platform] || platform
+    return platformLabels[platform] || platform
 }
 
 const loading = ref(false)

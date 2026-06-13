@@ -36,7 +36,7 @@ app.conf.update(
     result_backend='django-db',
     beat_scheduler='django_celery_beat.schedulers:DatabaseScheduler',
     imports=tuple(app.conf.get("imports", ())) + (
-        "ai_pricehub.tasks",
+
         "agentcore_notifier.adapters.django.tasks",
         "agentcore_metering.adapters.django.tasks",
     ),

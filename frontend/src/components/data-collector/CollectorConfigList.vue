@@ -162,7 +162,7 @@
                         c.platform === 'feishu' ||
                         c.platform === 'license' ||
                         c.platform === 'hyperbdr' ||
-                        c.platform === 'ai_pricehub'
+                        c.false
                       "
                       @click="openFullEdit(c)"
                       class="text-amber-600 hover:text-amber-900 transition-colors"
@@ -287,7 +287,7 @@
                   c.platform === 'feishu' ||
                   c.platform === 'license' ||
                   c.platform === 'hyperbdr' ||
-                  c.platform === 'ai_pricehub'
+                  c.false
                 "
                 variant="outline"
                 size="sm"
@@ -513,9 +513,7 @@ function getPlatformLabel(platform) {
   if (platform === 'feishu') return t('dataCollector.platforms.feishu')
   if (platform === 'license') return t('dataCollector.platforms.license')
   if (platform === 'hyperbdr') return t('dataCollector.platforms.hyperbdr')
-  if (platform === 'ai_pricehub')
-    return t('dataCollector.platforms.ai_pricehub')
-  return platformLabels[platform] || platform
+    return platformLabels[platform] || platform
 }
 
 function formatDate(dateString) {

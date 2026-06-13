@@ -36,7 +36,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from agentcore_metering.adapters.django.models import LLMUsage
-from ai_pricehub.llm_config import resolve_parser_llm_settings
+from cloud_billing.services.parser_llm_config import resolve_parser_llm_settings
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.db.models import Q
