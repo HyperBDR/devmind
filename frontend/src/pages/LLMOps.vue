@@ -7,7 +7,7 @@
         >
           <div class="border-b border-slate-800 px-5 py-5">
             <p
-              class="text-[11px] font-bold uppercase tracking-[0.18em] text-indigo-300"
+              class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-300"
             >
               LLM OPS
             </p>
@@ -25,7 +25,7 @@
               class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition"
               :class="
                 activeSection === item.key
-                  ? 'bg-indigo-600 text-white shadow-sm'
+                  ? 'bg-agione-600 text-white shadow-sm'
                   : 'text-slate-400 hover:bg-slate-900 hover:text-white'
               "
               @click="activeSection = item.key"
@@ -45,7 +45,9 @@
             class="border-t border-slate-800 px-5 py-4 text-xs text-slate-500"
           >
             <p>默认平台：Agione</p>
-            <p class="mt-1">模型价格源：{{ providerCollectionSources.length }}</p>
+            <p class="mt-1">
+              模型价格源：{{ providerCollectionSources.length }}
+            </p>
           </div>
         </aside>
 
@@ -65,7 +67,7 @@
                     class="rounded-lg px-3 py-2 text-xs font-semibold"
                     :class="
                       activeSection === item.key
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-agione-600 text-white'
                         : 'bg-slate-100 text-slate-600'
                     "
                     @click="activeSection = item.key"
@@ -74,7 +76,7 @@
                   </button>
                 </div>
                 <p
-                  class="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600 lg:mt-0"
+                  class="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-agione-600 lg:mt-0"
                 >
                   {{ activeNav.eyebrow }}
                 </p>
@@ -122,7 +124,7 @@
                 </div>
                 <span
                   v-if="exchangeRateLabel"
-                  class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500"
+                  class="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500"
                 >
                   {{ exchangeRateLabel }}
                 </span>
@@ -183,7 +185,7 @@
                   <div class="flex items-center justify-between gap-3">
                     <div>
                       <p
-                        class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
+                        class="text-xs font-semibold uppercase tracking-[0.18em] text-agione-600"
                       >
                         Action Queue
                       </p>
@@ -231,7 +233,7 @@
                   >
                     <div>
                       <p
-                        class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
+                        class="text-xs font-semibold uppercase tracking-[0.18em] text-agione-600"
                       >
                         Channel Coverage
                       </p>
@@ -269,7 +271,7 @@
                         class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100"
                       >
                         <div
-                          class="h-full rounded-full bg-indigo-500"
+                          class="h-full rounded-full bg-agione-500"
                           :style="{ width: `${channel.coverage_rate}%` }"
                         />
                       </div>
@@ -290,7 +292,7 @@
                 >
                   <div>
                     <p
-                      class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
+                      class="text-xs font-semibold uppercase tracking-[0.18em] text-agione-600"
                     >
                       Provider Matrix
                     </p>
@@ -596,9 +598,9 @@ const listingExclusions = ref([])
 const records = ref([])
 const summary = ref({})
 const supportedDisplayCurrencies = new Set(['CNY', 'USD'])
-const displayCurrency = ref(normalizeDisplayCurrency(
-  localStorage.getItem('llm_ops_display_currency')
-))
+const displayCurrency = ref(
+  normalizeDisplayCurrency(localStorage.getItem('llm_ops_display_currency'))
+)
 const selectedResalePlatformId = ref(
   localStorage.getItem('llm_ops_resale_platform') || ''
 )
@@ -705,8 +707,8 @@ const agionePlatform = computed(
     null
 )
 
-const showPlatformControl = computed(
-  () => ['monitor', 'reseller'].includes(activeSection.value)
+const showPlatformControl = computed(() =>
+  ['monitor', 'reseller'].includes(activeSection.value)
 )
 
 const providerCollectionSources = computed(() =>
@@ -717,8 +719,8 @@ const procurementRows = computed(() => summary.value.procurement || [])
 const agioneDiagnostics = computed(
   () => summary.value.agione?.diagnostics || []
 )
-const exchangeRate = computed(
-  () => Number(summary.value.currency?.usd_to_cny_rate || 7.15)
+const exchangeRate = computed(() =>
+  Number(summary.value.currency?.usd_to_cny_rate || 7.15)
 )
 const exchangeRateLabel = computed(() => {
   const currency = summary.value.currency
@@ -727,9 +729,7 @@ const exchangeRateLabel = computed(() => {
   const source = currency.rate_source_label || '汇率'
   return `1 USD = ${rate} CNY · ${source}`
 })
-const pointConversion = computed(
-  () => summary.value.point_conversion || null
-)
+const pointConversion = computed(() => summary.value.point_conversion || null)
 
 const activeModels = computed(() =>
   models.value.filter((model) => model.is_active !== false)
@@ -781,9 +781,7 @@ const enrichedProcurementRows = computed(() =>
         coverage_count: row.coverage_count ?? (row.options || []).length,
         is_agione_listed: Boolean(row.is_agione_listed),
         has_lowest_listing: Boolean(row.has_lowest_listing),
-        requires_currency_conversion: Boolean(
-          row.requires_currency_conversion
-        ),
+        requires_currency_conversion: Boolean(row.requires_currency_conversion),
         status_priority: row.status_priority || 5,
         status_label: row.status_label || '就绪',
         status_tone: monitorStatusTone(row.status)
@@ -868,7 +866,7 @@ const kpiCards = computed(() => {
       hint: `${missingChannelRows.value.length} 个缺渠道价 · ${currencyMismatchRows.value.length} 个需要汇率`,
       progress: procurementRate,
       tone: procurementRate >= 80 ? 'good' : 'warn',
-      barClass: 'bg-indigo-500'
+      barClass: 'bg-agione-500'
     },
     {
       label: '平台挂售',
@@ -1293,7 +1291,8 @@ watch(
       return
     }
     const exists = platforms.some(
-      (platform) => String(platform.id) === String(selectedResalePlatformId.value)
+      (platform) =>
+        String(platform.id) === String(selectedResalePlatformId.value)
     )
     if (!exists) {
       const fallback =
@@ -1305,7 +1304,9 @@ watch(
 )
 
 function normalizeDisplayCurrency(value) {
-  const currency = String(value || '').trim().toUpperCase()
+  const currency = String(value || '')
+    .trim()
+    .toUpperCase()
   return supportedDisplayCurrencies.has(currency) ? currency : 'CNY'
 }
 
@@ -1372,15 +1373,10 @@ async function handleResaleWorkspacePublished(payload) {
     return
   }
   const items = payload.listings
-    .filter(
-      (item) =>
-        item.upstreamAccount &&
-        Number(item.priceIn) > 0 &&
-        Number(item.priceOut) > 0
-    )
+    .filter((item) => Number(item.priceIn) > 0 && Number(item.priceOut) > 0)
     .map(mapWorkspaceListingToPayload)
   if (!items.length) {
-    showError('请补齐所有链路的账号和售价后再发布')
+    showError('请为每条链路填写有效的 In/Out 售价后再发布')
     return
   }
   try {
@@ -1423,144 +1419,688 @@ onMounted(refreshAll)
 </script>
 
 <style scoped>
+/* === Base utility classes (hardcoded, Tailwind fallback) === */
+.bg-white {
+  background-color: #ffffff;
+}
+.bg-slate-50 {
+  background-color: #f8fafc;
+}
+.bg-slate-100 {
+  background-color: #f1f5f9;
+}
+.bg-slate-200 {
+  background-color: #e2e8f0;
+}
+.bg-slate-950 {
+  background-color: #020617;
+}
+.bg-transparent {
+  background-color: transparent;
+}
+.bg-emerald-50 {
+  background-color: #ecfdf5;
+}
+.bg-emerald-500 {
+  background-color: #10b981;
+}
+.bg-amber-50 {
+  background-color: #fffbeb;
+}
+.bg-amber-500 {
+  background-color: #f59e0b;
+}
+.bg-rose-50 {
+  background-color: #fff1f2;
+}
+.bg-rose-500 {
+  background-color: #f43f5e;
+}
+.bg-violet-500 {
+  background-color: #8b5cf6;
+}
+.bg-sky-500 {
+  background-color: #0ea5e9;
+}
+.bg-indigo-50 {
+  background-color: #eef2ff;
+}
+.bg-indigo-100 {
+  background-color: #e0e7ff;
+}
+.bg-agione-50 {
+  background-color: #ece9f9;
+}
+.bg-agione-100 {
+  background-color: #d8d2f0;
+}
+.bg-agione-200 {
+  background-color: #b3a8e2;
+}
+.bg-agione-300 {
+  background-color: #8b7dd1;
+}
+.bg-agione-400 {
+  background-color: #7a6ac4;
+}
+.bg-agione-500 {
+  background-color: #6a5ac7;
+}
+.bg-agione-600 {
+  background-color: #5f4ecf;
+}
+.bg-agione-700 {
+  background-color: #4a3eb0;
+}
+.bg-agione-800 {
+  background-color: #3d3399;
+}
+.bg-agione-900 {
+  background-color: #312870;
+}
+.text-white {
+  color: #ffffff;
+}
+.text-slate-500 {
+  color: #64748b;
+}
+.text-slate-600 {
+  color: #475569;
+}
+.text-slate-700 {
+  color: #334155;
+}
+.text-slate-900 {
+  color: #0f172a;
+}
+.text-emerald-600 {
+  color: #059669;
+}
+.text-emerald-700 {
+  color: #047857;
+}
+.text-amber-600 {
+  color: #d97706;
+}
+.text-amber-700 {
+  color: #b45309;
+}
+.text-rose-500 {
+  color: #f43f5e;
+}
+.text-rose-600 {
+  color: #e11d48;
+}
+.text-rose-700 {
+  color: #be123c;
+}
+.text-agione-50 {
+  color: #ece9f9;
+}
+.text-agione-100 {
+  color: #d8d2f0;
+}
+.text-agione-300 {
+  color: #8b7dd1;
+}
+.text-agione-500 {
+  color: #6a5ac7;
+}
+.text-agione-600 {
+  color: #5f4ecf;
+}
+.text-agione-700 {
+  color: #4a3eb0;
+}
+.text-agione-800 {
+  color: #3d3399;
+}
+.border-slate-200 {
+  border-color: #e2e8f0;
+}
+.border-slate-300 {
+  border-color: #cbd5e1;
+}
+.border-emerald-100 {
+  border-color: #d1fae5;
+}
+.border-emerald-200 {
+  border-color: #a7f3d0;
+}
+.border-amber-100 {
+  border-color: #fef3c7;
+}
+.border-amber-200 {
+  border-color: #fde68a;
+}
+.border-rose-100 {
+  border-color: #ffe4e6;
+}
+.border-rose-200 {
+  border-color: #fecdd3;
+}
+.border-agione-100 {
+  border-color: #d8d2f0;
+}
+.border-agione-200 {
+  border-color: #b3a8e2;
+}
+.border-agione-300 {
+  border-color: #8b7dd1;
+}
+.border-agione-400 {
+  border-color: #7a6ac4;
+}
+.border-agione-500 {
+  border-color: #6a5ac7;
+}
+.focus\:border-agione-300:focus {
+  border-color: #8b7dd1;
+}
+.focus\:border-agione-400:focus {
+  border-color: #7a6ac4;
+}
+.focus\:ring-2:focus {
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+.focus\:ring-4:focus {
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3);
+}
+.focus\:ring-agione-100:focus {
+  box-shadow: 0 0 0 2px #d8d2f0;
+}
+.focus\:ring-agione-200:focus {
+  box-shadow: 0 0 0 2px #b3a8e2;
+}
+.hover\:bg-slate-50:hover {
+  background-color: #f8fafc;
+}
+.hover\:bg-agione-600:hover {
+  background-color: #5f4ecf;
+}
+.hover\:bg-agione-700:hover {
+  background-color: #4a3eb0;
+}
+.hover\:border-slate-300:hover {
+  border-color: #cbd5e1;
+}
+.hover\:text-agione-700:hover {
+  color: #4a3eb0;
+}
+.hover\:text-slate-500:hover {
+  color: #64748b;
+}
+.disabled\:cursor-not-allowed:disabled {
+  cursor: not-allowed;
+}
+.disabled\:opacity-50:disabled {
+  opacity: 0.5;
+}
+.disabled\:opacity-60:disabled {
+  opacity: 0.6;
+}
+.text-xs {
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+.text-sm {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+.text-base {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.text-lg {
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+.text-xl {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+}
+.text-2xl {
+  font-size: 1.5rem;
+  line-height: 2rem;
+}
+.text-3xl {
+  font-size: 1.875rem;
+  line-height: 2.25rem;
+}
+.text-4xl {
+  font-size: 2.25rem;
+  line-height: 2.5rem;
+}
+.text-\[10px\] {
+  font-size: 10px;
+}
+.text-\[11px\] {
+  font-size: 11px;
+}
+.text-\[12px\] {
+  font-size: 12px;
+}
+.text-\[13px\] {
+  font-size: 13px;
+}
+.text-\[14px\] {
+  font-size: 14px;
+}
+.text-\[15px\] {
+  font-size: 15px;
+}
+.text-\[18px\] {
+  font-size: 18px;
+}
+.text-\[24px\] {
+  font-size: 24px;
+}
+.top-0 {
+  top: 0;
+}
+.z-10 {
+  z-index: 10;
+}
+.z-20 {
+  z-index: 20;
+}
+.z-50 {
+  z-index: 50;
+}
+.max-w-\[20rem\] {
+  max-width: 20rem;
+}
+.w-60 {
+  width: 15rem;
+}
+.w-72 {
+  width: 18rem;
+}
+.w-80 {
+  width: 20rem;
+}
+.w-36 {
+  width: 9rem;
+}
+.w-32 {
+  width: 8rem;
+}
+.h-9 {
+  height: 2.25rem;
+}
+.h-7 {
+  height: 1.75rem;
+}
+.h-8 {
+  height: 2rem;
+}
+.text-left {
+  text-align: left;
+}
+.text-right {
+  text-align: right;
+}
+.text-center {
+  text-align: center;
+}
+.border {
+  border-width: 1px;
+}
+.bg-indigo-50 {
+  background-color: #eef2ff;
+}
+.bg-indigo-100 {
+  background-color: #e0e7ff;
+}
+.bg-indigo-500 {
+  background-color: #6366f1;
+}
+.bg-indigo-600 {
+  background-color: #4f46e5;
+}
+.bg-indigo-700 {
+  background-color: #4338ca;
+}
+.text-indigo-300 {
+  color: #a5b4fc;
+}
+.text-indigo-500 {
+  color: #6366f1;
+}
+.text-indigo-600 {
+  color: #4f46e5;
+}
+.text-indigo-700 {
+  color: #4338ca;
+}
+.border-indigo-200 {
+  border-color: #c7d2fe;
+}
+.border-indigo-300 {
+  border-color: #a5b4fc;
+}
+.border-indigo-400 {
+  border-color: #818cf8;
+}
+.focus\:border-indigo-300:focus {
+  border-color: #a5b4fc;
+}
+.focus\:ring-indigo-100:focus {
+  box-shadow: 0 0 0 2px #e0e7ff;
+}
+
 .panel {
-  @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  padding: 1rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
 }
 
 .kpi-card {
-  @apply rounded-lg border border-slate-200 bg-slate-50 px-4 py-3;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  background-color: #f8fafc;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
 }
 
 .kpi-tone {
-  @apply rounded-full px-2 py-1 text-xs font-medium;
+  border-radius: 9999px;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-weight: 500;
 }
 
 .kpi-tone.good {
-  @apply bg-emerald-50 text-emerald-700;
+  background-color: #ecfdf5;
+  color: #047857;
 }
 
 .kpi-tone.warn {
-  @apply bg-amber-50 text-amber-700;
+  background-color: #fffbeb;
+  color: #b45309;
 }
 
 .kpi-tone.danger {
-  @apply bg-rose-50 text-rose-700;
+  background-color: #fff1f2;
+  color: #be123c;
 }
 
 .panel-title {
-  @apply text-sm font-semibold text-slate-900;
+  font-weight: 600;
+  color: #0f172a;
 }
 
 .table-toolbar {
-  @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-bottom-width: 1px;
+  border-color: #e2e8f0;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .field-sm {
-  @apply rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  color: #334155;
+  outline: none;
+  border-color: #8b7dd1;
+  box-shadow: 0 0 0 2px #ece9f955;
 }
 
 .currency-control {
-  @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-weight: 500;
+  color: #64748b;
 }
 
 .currency-control select {
-  @apply bg-transparent font-mono text-sm font-semibold text-slate-800 outline-none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  color: #1e293b;
+  outline: none;
 }
 
 .action-row {
-  @apply flex w-full items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-left transition hover:border-indigo-200 hover:bg-indigo-50;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.75rem;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  background-color: #f8fafc;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  border-color: #b3a8e2;
+  background-color: #ece9f9;
 }
 
 .action-dot {
-  @apply h-2.5 w-2.5 shrink-0 rounded-full;
+  height: 0.625rem;
+  width: 0.625rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
 }
 
 .action-dot.good {
-  @apply bg-emerald-500;
+  background-color: #10b981;
 }
 
 .action-dot.warn {
-  @apply bg-amber-500;
+  background-color: #f59e0b;
 }
 
 .action-dot.danger {
-  @apply bg-rose-500;
+  background-color: #f43f5e;
 }
 
 .coverage-row,
 .provider-card {
-  @apply rounded-lg border border-slate-200 bg-slate-50 px-4 py-3;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  background-color: #f8fafc;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
 }
 
 .metric-line {
-  @apply flex items-center justify-between text-xs text-slate-500;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #64748b;
 }
 
 .metric-line strong {
-  @apply font-mono text-sm font-semibold text-slate-900;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  color: #0f172a;
 }
 
 .nav-icon {
-  @apply flex h-5 w-5 shrink-0 items-center justify-center rounded bg-slate-800 text-[10px] font-bold text-slate-300;
+  display: flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background-color: #1e293b;
+  font-size: 10px;
+  font-weight: 700;
+  color: #cbd5e1;
 }
 
 .icon-mark {
-  @apply inline-block h-3.5 w-3.5 shrink-0 rounded-sm bg-current;
+  display: inline-block;
+  height: 0.875rem;
+  width: 0.875rem;
+  flex-shrink: 0;
+  border-radius: 2px;
 }
 
 .data-table {
-  @apply min-w-full divide-y divide-slate-200;
+  --tw-divide-y-reverse: 0;
+  border-top-width: calc(1px * calc(1 - var(--tw-divide-y-reverse)));
+  border-bottom-width: calc(1px * var(--tw-divide-y-reverse));
+  --tw-divide-opacity: 1;
+  border-color: rgb(226 232 240 / var(--tw-divide-opacity));
 }
 
 .data-table tbody {
-  @apply divide-y divide-slate-100 bg-white;
+  --tw-divide-y-reverse: 0;
+  border-top-width: calc(1px * calc(1 - var(--tw-divide-y-reverse)));
+  border-bottom-width: calc(1px * var(--tw-divide-y-reverse));
+  --tw-divide-opacity: 1;
+  border-color: rgb(241 245 249 / var(--tw-divide-opacity));
 }
 
 .data-table tr {
-  @apply hover:bg-slate-50;
+  background-color: #f8fafc;
 }
 
 .table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  white-space: nowrap;
+  background-color: #f8fafc;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  color: #64748b;
 }
 
 .table-cell {
-  @apply whitespace-nowrap px-4 py-3 text-sm text-slate-600;
+  white-space: nowrap;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+  color: #475569;
 }
 
 .btn-primary {
-  @apply inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 8px;
+  background-color: #5f4ecf;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-weight: 500;
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  background-color: #4a3eb0;
 }
 
 .btn-secondary {
-  @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 12px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  font-weight: 500;
+  color: #334155;
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  background-color: #f8fafc;
 }
 
 .badge-ok {
-  @apply rounded-full border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700;
+  border-radius: 9999px;
+  border-width: 1px;
+  border-color: #d1fae5;
+  background-color: #ecfdf5;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-weight: 500;
+  color: #047857;
 }
 
 .badge-muted {
-  @apply rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600;
+  border-radius: 9999px;
+  border-width: 1px;
+  border-color: #e2e8f0;
+  background-color: #f1f5f9;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-weight: 500;
+  color: #475569;
 }
 
 .status-pill {
-  @apply rounded-full px-2.5 py-1 text-xs font-medium;
+  border-radius: 9999px;
+  padding-left: 0.625rem;
+  padding-right: 0.625rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  font-weight: 500;
 }
 
 .status-pill.success {
-  @apply bg-emerald-50 text-emerald-700;
+  background-color: #ecfdf5;
+  color: #047857;
 }
 
 .status-pill.info {
-  @apply bg-sky-50 text-sky-700;
+  background-color: #000;
+  color: #000;
 }
 
 .status-pill.warn {
-  @apply bg-amber-50 text-amber-700;
+  background-color: #fffbeb;
+  color: #b45309;
 }
 
 .status-pill.danger {
-  @apply bg-rose-50 text-rose-700;
+  background-color: #fff1f2;
+  color: #be123c;
 }
 </style>

@@ -101,7 +101,10 @@ export function hasFeature(user, featureKey) {
 export function getAvailablePlatforms(user, t) {
   const accessProfile = getAccessProfile(user)
   const platformMap = new Map(
-    (accessProfile.available_platforms || []).map((item) => [item.key, item])
+    (accessProfile.available_platforms || []).map((item) => [
+      FEATURE_ALIASES[item.key] || item.key,
+      item
+    ])
   )
 
   return FEATURE_DEFINITIONS.filter((item) => platformMap.has(item.key)).map(

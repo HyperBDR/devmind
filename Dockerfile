@@ -21,10 +21,10 @@ RUN set -eux; \
         # Backup original sources
         cp /etc/apt/sources.list /etc/apt/sources.list.backup; \
         # Replace with Chinese mirrors
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ noble main restricted universe multiverse" > /etc/apt/sources.list; \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ noble-updates main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ noble-backports main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "deb https://mirrors.tuna.tsinghua.edu.cn/ubuntu/ noble-security main restricted universe multiverse" >> /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse" > /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse" >> /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse" >> /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse" >> /etc/apt/sources.list; \
         echo "✓ Chinese mirrors configured for Ubuntu 24.04 LTS (Noble Numbat)"; \
         echo "Current sources.list content:"; \
         cat /etc/apt/sources.list; \
@@ -73,7 +73,7 @@ RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
 RUN set -eux; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Installing uv with Chinese PyPI mirror"; \
-        pip install --index-url https://pypi.tuna.tsinghua.edu.cn/simple --trusted-host pypi.tuna.tsinghua.edu.cn uv; \
+        pip install --index-url https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com uv; \
     else \
         echo "Installing uv with default PyPI"; \
         pip install uv; \
@@ -93,8 +93,8 @@ RUN set -eux; \
     export PATH="/root/.local/bin:$PATH"; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Using Chinese PyPI mirror for dependencies"; \
-        uv pip compile pyproject.toml -o requirements.txt --index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
-        uv pip install --system -r requirements.txt --index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
+        uv pip compile pyproject.toml -o requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple; \
+        uv pip install --system -r requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple; \
     else \
         echo "Using default PyPI for dependencies"; \
         uv pip compile pyproject.toml -o requirements.txt; \

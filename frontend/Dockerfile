@@ -13,8 +13,10 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production=false
+# Use the npmmirror registry to avoid slow downloads from the default
+# registry; CI/builds from CN networks see 10x+ speedups here.
+RUN npm config set registry https://registry.npmmirror.com \
+ && npm ci --only=production=false
 
 # Copy source code
 COPY . .

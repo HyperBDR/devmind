@@ -7,8 +7,10 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (in case node_modules volume is not available)
-RUN npm install
+# Use the npmmirror registry to avoid slow downloads from the default
+# registry. This only runs if the host has not pre-populated node_modules.
+RUN npm config set registry https://registry.npmmirror.com \
+ && npm install
 
 # Note: node_modules, src, and config files will be mounted from host
 # Make sure to run 'npm install' on the host first
