@@ -1,4 +1,5 @@
 import { computed, unref } from 'vue'
+import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
 
 /**
  * Centralized derived state for the Agione resale listing workbench.
@@ -17,9 +18,7 @@ export function useAgioneListingRows({
   agionePlatformRef,
   providersRef,
   modelsRef,
-  priceItemsRef,
   listingsRef,
-  listingExclusionsRef,
   summaryRef,
   displayCurrencyRef,
   exchangeRateRef,
@@ -28,21 +27,6 @@ export function useAgioneListingRows({
   trendProfitRateRef,
   pointConversionRef
 }) {
-  const excludedListingModelIds = computed(() => {
-    const modelIds = new Set()
-    const exclusions = unref(listingExclusionsRef) || []
-    const platform = unref(agionePlatformRef)
-    exclusions
-      .filter(
-        (item) =>
-          !platform || String(item.platform) === String(platform.id)
-      )
-      .forEach((item) => {
-        modelIds.add(String(item.model))
-      })
-    return modelIds
-  })
-
   const listingRows = computed(() => {
     const procurementByModel = new Map(
       ((unref(summaryRef)?.procurement) || []).map((row) => [
@@ -66,43 +50,65 @@ export function useAgioneListingRows({
         listingsByModel.set(key, rows)
       })
 
-    return (unref(modelsRef) || []).map((model) => {
-      const procurement = procurementByModel.get(String(model.id)) || {}
+    return (unref(modelsRef) || []).flatMap((model) => {
+      const modelId = String(model.id)
+      const procurement = procurementByModel.get(modelId) || {}
       const options = procurement.options || []
       const lowestOption = procurement.best_channel || null
-      const modelListings = listingsByModel.get(String(model.id)) || []
-      const activeListings = modelListings.filter((listing) => listing.is_active)
-      const activeOptions = activeListings
-        .map((listing) => listingOption(listing, lowestOption, options))
-        .filter(Boolean)
-      const cheapestActiveOption =
-        activeOptions
-          .slice()
-          .sort(
-            (left, right) =>
-              Number(left.estimated_cost || 0) -
-              Number(right.estimated_cost || 0)
-          )[0] || null
-      const hasLowestListing = activeOptions.some(
-        (option) =>
-          lowestOption &&
-          String(option.channel_id) === String(lowestOption.channel_id)
-      )
+      const modelListings = listingsByModel.get(modelId) || []
+      if (!options.length && !modelListings.length) return []
 
-      return {
-        model,
-        procurement,
-        options,
-        listings: modelListings,
-        active_listings: activeListings,
-        is_listed: activeListings.length > 0,
-        is_removed: excludedListingModelIds.value.has(String(model.id)),
-        lowest_option: lowestOption,
-        requires_currency_conversion:
-          procurement.requires_currency_conversion || false,
-        has_lowest_listing: hasLowestListing,
-        price_gap: listingPriceGap(cheapestActiveOption, lowestOption)
-      }
+      const rows = modelListings.length
+        ? modelListings.map((listing) => {
+            const isActive = listing.publish_status === 'online'
+            const listingOptionData = listingOption(
+              { ...listing, model, listings: [listing] },
+              lowestOption,
+              options
+            )
+            const cheapestActiveOption = isActive && listingOptionData
+              ? listingOptionData
+              : null
+            return {
+              model,
+              procurement,
+              options,
+              listings: [listing],
+              status_listing: listing,
+              active_listings: isActive ? [listing] : [],
+              publish_status: listing.publish_status,
+              workflow_status: listing.workflow_status,
+              is_listed: isActive,
+              is_removed: false,
+              lowest_option: lowestOption,
+              requires_currency_conversion:
+                procurement.requires_currency_conversion || false,
+              has_lowest_listing:
+                isActive &&
+                lowestOption &&
+                String(listing.channel) === String(lowestOption.channel_id),
+              price_gap: listingPriceGap(cheapestActiveOption, lowestOption),
+            }
+          })
+        : [{
+            model,
+            procurement,
+            options,
+            listings: [],
+            status_listing: null,
+            active_listings: [],
+            publish_status: 'none',
+            workflow_status: 'draft',
+            is_listed: false,
+            is_removed: false,
+            lowest_option: lowestOption,
+            requires_currency_conversion:
+              procurement.requires_currency_conversion || false,
+            has_lowest_listing: false,
+            price_gap: null,
+          }]
+
+      return rows
     })
   })
 
@@ -365,6 +371,9 @@ export function useAgioneListingRows({
         channel_name: option.channel_name || '未命名渠道',
         cost_value: costValue,
         cost_summary: metricPriceSummary(option.metric_values),
+        cost_breakdown_summary: metricCostBreakdownSummary(
+          option.metric_values
+        ),
         proposed_value: proposedValue,
         proposed_summary: metricPriceSummary(proposedValues),
         is_lowest:
@@ -473,42 +482,6 @@ export function useAgioneListingRows({
       .toLowerCase()
   }
 
-  function normalizeModelIdentity(model) {
-    return String(model?.meta_model_code || model?.code || model?.name || '')
-      .trim()
-      .toLowerCase()
-      .replace(/[\s_]+/g, '-')
-  }
-
-  function priceItemMetricKey(item) {
-    const dimension = item?.dimension || ''
-    const mapping = {
-      text_input: 'input',
-      text_output: 'output',
-      cache_input: 'input',
-      image_input: 'input',
-      image_output: 'image_output',
-      audio_input: 'audio_input',
-      audio_output: 'audio_output',
-      video_input: 'video_input',
-      video_output: 'video_output'
-    }
-    return mapping[dimension] || ''
-  }
-
-  function priceItemsForModel(model) {
-    const items = unref(priceItemsRef) || []
-    return items.filter(
-      (item) =>
-        String(item.model) === String(model.id) ||
-        (normalizeModelIdentity({
-          code: item.model_code,
-          name: item.model_name
-        }) === normalizeModelIdentity(model) &&
-          String(item.provider) === String(model.provider))
-    )
-  }
-
   function uniqueTrendOptions(options) {
     const byChannel = new Map()
     options.forEach((option) => {
@@ -531,6 +504,31 @@ export function useAgioneListingRows({
       0,
       Number(activeOption.estimated_cost || 0) -
         Number(lowestOption.estimated_cost || 0)
+    )
+  }
+
+  function primaryStatusListing(modelListings, activeListings) {
+    const pendingListing = modelListings.find((listing) =>
+      [
+        'draft',
+        'pending_publish',
+        'update_draft',
+        'pending_update',
+        'pending_offline',
+        'offline_exception',
+        'offline',
+      ].includes(listing.workflow_status)
+    )
+    if (pendingListing) return pendingListing
+    if (activeListings.length) return activeListings[0]
+    return (
+      modelListings
+        .slice()
+        .sort((left, right) => {
+          const leftTime = new Date(left.updated_at || left.created_at || 0)
+          const rightTime = new Date(right.updated_at || right.created_at || 0)
+          return rightTime.getTime() - leftTime.getTime()
+        })[0] || null
     )
   }
 
@@ -561,6 +559,7 @@ export function useAgioneListingRows({
   function tokenMetricOptions() {
     return [
       { key: 'input', label: '输入价' },
+      { key: 'cache_input', label: '缓存输入价' },
       { key: 'output', label: '输出价' }
     ]
   }
@@ -568,6 +567,7 @@ export function useAgioneListingRows({
   function channelMetricFields() {
     return {
       input: 'input_price_per_million',
+      cache_input: 'cache_input_price_per_million',
       output: 'output_price_per_million',
       image_output: 'image_output_price_per_image',
       audio_input: 'audio_input_price_per_second',
@@ -580,6 +580,7 @@ export function useAgioneListingRows({
   function resaleListingMetricFields() {
     return {
       input: 'retail_input_price_per_million',
+      cache_input: 'retail_cache_input_price_per_million',
       output: 'retail_output_price_per_million',
       image_output: 'retail_image_output_price_per_image',
       audio_input: 'retail_audio_input_price_per_second',
@@ -597,13 +598,23 @@ export function useAgioneListingRows({
   function metricValuesForRow(row, fields, currency) {
     return priceMetricOptions.value
       .map((option) => {
+        const field = fields[option.key]
         const value = convertCurrencyAmount(
           metricValue(row, fields, option.key),
           currency
         )
+        const baseValue = convertCurrencyAmount(
+          field ? numeric(row?.[`base_${field}`]) : null,
+          currency
+        )
+        const discountRatio = field
+          ? numeric(row?.[`${field}_settlement_ratio`])
+          : null
         return {
           ...option,
-          value
+          value,
+          base_value: baseValue,
+          discount_ratio: discountRatio
         }
       })
       .filter((item) => item.value !== null)
@@ -651,6 +662,31 @@ export function useAgioneListingRows({
     return items
       .map((item) => `${item.label} ${money(item.value, selectedTrendCurrency.value)}`)
       .join(' / ')
+  }
+
+  function metricCostBreakdownSummary(items, emptyLabel = '-') {
+    if (!items?.length) return emptyLabel
+    return items
+      .map((item) => {
+        const baseValue = Number.isFinite(item.base_value)
+          ? item.base_value
+          : item.value
+        const ratio = Number.isFinite(item.discount_ratio)
+          ? item.discount_ratio
+          : 1
+        return [
+          item.label,
+          `${money(baseValue, selectedTrendCurrency.value)} × ${ratioLabel(ratio)}`,
+          `= ${money(item.value, selectedTrendCurrency.value)}`
+        ].join(' ')
+      })
+      .join(' / ')
+  }
+
+  function ratioLabel(value) {
+    const numberValue = Number(value)
+    if (!Number.isFinite(numberValue)) return '1.0000'
+    return numberValue.toFixed(4)
   }
 
   function activeListingChannels(row) {
@@ -708,7 +744,19 @@ export function useAgioneListingRows({
   function listingModelSubtitle(row) {
     const model = row?.model || {}
     const code = modelCodeDescription(model)
-    return [model.provider_name, code].filter(Boolean).join(' / ')
+    const vendorName = metaVendorName(model)
+    return [
+      vendorName,
+      code,
+      row.source_count ? `${row.source_count} 个价格源` : ''
+    ]
+      .filter(Boolean)
+      .join(' / ')
+  }
+
+  function metaVendorName(model) {
+    const vendor = resolveCanonicalMetaVendor(model, unref(providersRef) || [])
+    return vendor.name || ''
   }
 
   function trendModelOption(row) {
@@ -717,7 +765,6 @@ export function useAgioneListingRows({
       value: row.key,
       description: [
         modelCodeDescription(row.model),
-        row.model.provider_name,
         row.source_count > 1 ? `${row.source_count} 个价格源` : '',
         row.options.length ? `${row.options.length} 个采购渠道` : '暂无采购渠道'
       ]
@@ -725,10 +772,16 @@ export function useAgioneListingRows({
         .join(' · '),
       badge: row.is_listed
         ? row.has_lowest_listing
-          ? '已最低'
-          : '可优化'
+          ? '已上架'
+          : '待处理'
         : '未上架',
-      searchText: `${modelDisplayName(row.model)} ${row.model.code} ${row.model.provider_name || ''}`
+      searchText: [
+        modelDisplayName(row.model),
+        row.model.code,
+        metaVendorName(row.model)
+      ]
+        .filter(Boolean)
+        .join(' ')
     }
   }
 
@@ -856,6 +909,7 @@ export function useAgioneListingRows({
     buildTrendListingPayload,
     money,
     metricPriceSummary,
+    metricCostBreakdownSummary,
     convertCurrencyAmount,
     listingRetailPrice,
     listingPriceGap

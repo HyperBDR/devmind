@@ -68,6 +68,7 @@ class UnitPrices:
 
     input_per_million: Decimal
     output_per_million: Decimal
+    cache_input_per_million: Decimal
     image_output_per_image: Decimal
     audio_input_per_second: Decimal
     audio_output_per_second: Decimal
@@ -100,12 +101,28 @@ def ensure_meta_model(
     context_window: int = 0,
     max_output_tokens: int = 0,
 ) -> MetaModel:
-    """Create or update canonical model identity for a source model."""
+    """Create or update canonical model identity for a source model.
+
+    The ``vendor`` argument is treated as a price-sheet hint. The
+    canonical vendor is resolved from the model code, and a
+    supplier alias is never written as the meta model vendor.
+    """
     canonical_code = str(code or name or "").strip()
     canonical_name = str(name or canonical_code).strip() or canonical_code
+    from .constants import (
+        canonical_vendor_for_model_code,
+        ensure_canonical_vendor_row,
+        is_canonical_vendor_code,
+    )
+    spec = canonical_vendor_for_model_code(canonical_code)
+    canonical_vendor = None
+    if spec:
+        canonical_vendor = ensure_canonical_vendor_row(spec)
+    elif provider and is_canonical_vendor_code(provider.code):
+        canonical_vendor = provider
     defaults = {
         "name": canonical_name,
-        "vendor": provider,
+        "vendor": canonical_vendor,
         "modality": modality or MetaModel.MODALITY_TEXT,
         "context_window": context_window or 0,
         "max_output_tokens": max_output_tokens or 0,
@@ -122,8 +139,13 @@ def ensure_meta_model(
     if canonical_name and meta_model.name in {"", meta_model.code}:
         meta_model.name = canonical_name
         changed_fields.append("name")
-    if provider and not meta_model.vendor_id:
-        meta_model.vendor = provider
+    if canonical_vendor and (
+        not meta_model.vendor_id
+        or not is_canonical_vendor_code(
+            meta_model.vendor.code if meta_model.vendor_id else ""
+        )
+    ):
+        meta_model.vendor = canonical_vendor
         changed_fields.append("vendor")
     if modality and meta_model.modality == MetaModel.MODALITY_TEXT:
         if modality != MetaModel.MODALITY_TEXT:
@@ -506,6 +528,9 @@ def resolve_channel_model_price(
 
     input_price = decimal_or_zero(model.input_price_per_million) * ratio
     output_price = decimal_or_zero(model.output_price_per_million) * ratio
+    cache_input_price = (
+        decimal_or_zero(model.cache_input_price_per_million) * ratio
+    )
     image_output_price = (
         decimal_or_zero(model.image_output_price_per_image) * ratio
     )
@@ -530,6 +555,9 @@ def resolve_channel_model_price(
     if source_unit_prices:
         input_price = source_unit_prices.input_per_million * ratio
         output_price = source_unit_prices.output_per_million * ratio
+        cache_input_price = (
+            source_unit_prices.cache_input_per_million * ratio
+        )
         image_output_price = source_unit_prices.image_output_per_image * ratio
         audio_input_price = source_unit_prices.audio_input_per_second * ratio
         audio_output_price = source_unit_prices.audio_output_per_second * ratio
@@ -589,6 +617,7 @@ def resolve_channel_model_price(
     return UnitPrices(
         input_per_million=input_price,
         output_per_million=output_price,
+        cache_input_per_million=cache_input_price,
         image_output_per_image=image_output_price,
         audio_input_per_second=audio_input_price,
         audio_output_per_second=audio_output_price,
@@ -635,6 +664,10 @@ def source_unit_prices_for_channel_model(
         ),
         output_per_million=values.get(
             ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            ZERO,
+        ),
+        cache_input_per_million=values.get(
+            ModelPriceItem.DIMENSION_CACHE_INPUT,
             ZERO,
         ),
         image_output_per_image=values.get(
@@ -1186,6 +1219,9 @@ def record_resale_listing_price_history(
         "retail_output_price_per_million": decimal_to_string(
             listing.retail_output_price_per_million
         ),
+        "retail_cache_input_price_per_million": decimal_to_string(
+            listing.retail_cache_input_price_per_million
+        ),
         "retail_image_output_price_per_image": decimal_to_string(
             listing.retail_image_output_price_per_image
         ),
@@ -1242,6 +1278,9 @@ def record_resale_listing_price_history(
         ),
         retail_output_price_per_million=(
             listing.retail_output_price_per_million
+        ),
+        retail_cache_input_price_per_million=(
+            listing.retail_cache_input_price_per_million
         ),
         retail_image_output_price_per_image=(
             listing.retail_image_output_price_per_image

@@ -96,7 +96,7 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th class="table-head">模型</th>
+                  <th class="table-head">元模型</th>
                   <th class="table-head">计价维度</th>
                   <th class="table-head text-right">价格</th>
                   <th class="table-head">原始币种</th>
@@ -108,10 +108,10 @@
                 <tr v-for="row in sourceRows" :key="row.key">
                   <td class="table-cell">
                     <p class="truncate font-medium text-slate-900">
-                      {{ row.model_name }}
+                      {{ row.meta_model_name }}
                     </p>
                     <p class="mt-1 truncate font-mono text-xs text-slate-400">
-                      {{ row.model_code }} · {{ row.provider_name }}
+                      {{ row.meta_model_code }} · {{ row.source_label }}
                     </p>
                   </td>
                   <td class="table-cell">
@@ -185,7 +185,7 @@
               编辑模型价格
             </h3>
             <p class="mt-1 text-xs text-slate-500">
-              {{ editingRow.model_name }} · {{ editingRow.dimension_label }}
+              {{ editingRow.meta_model_name }} · {{ editingRow.dimension_label }}
             </p>
           </div>
           <button type="button" class="btn-secondary" @click="closeEdit">
@@ -387,9 +387,11 @@ const sourceRows = computed(() =>
         key: `source-price-${item.id}`,
         id: item.id,
         raw: item,
-        model_name: item.model_name || model.name || '未知模型',
-        model_code: item.model_code || model.code || '-',
+        meta_model_name:
+          item.meta_model_name || model.meta_model_name || '未知元模型',
+        meta_model_code: item.meta_model_code || model.meta_model_code || '-',
         provider_name: item.provider_name || model.provider_name || '-',
+        source_label: sourceLabel(item, model),
         dimension_label: `${dimensionLabel(item.dimension)} ${billingUnitLabel(item.billing_unit)}`,
         spec_label: specLabel(item.spec || {}),
         tier_label: tierLabel(item),
@@ -408,7 +410,7 @@ const sourceRows = computed(() =>
 )
 
 const coveredModelCount = computed(() => {
-  const ids = new Set(sourceRows.value.map((row) => row.model_code))
+  const ids = new Set(sourceRows.value.map((row) => row.meta_model_code))
   return ids.size
 })
 
@@ -420,7 +422,17 @@ const relationName = computed(() => {
 
 function modelName(item) {
   const model = modelMap.value.get(String(item.model)) || {}
-  return item.model_name || model.name || ''
+  return item.meta_model_name || model.meta_model_name || item.model_name || ''
+}
+
+function sourceLabel(item, model) {
+  return (
+    item.source_name ||
+    model.source_name ||
+    item.provider_name ||
+    model.provider_name ||
+    '-'
+  )
 }
 
 function convertCurrencyAmount(value, sourceCurrency = 'USD') {
@@ -537,7 +549,7 @@ async function savePriceItem() {
 async function deletePriceItem(row) {
   if (!row?.id) return
   const confirmed = window.confirm(
-    `确认删除「${row.model_name} / ${row.dimension_label}」这条价格吗？`
+    `确认删除「${row.meta_model_name} / ${row.dimension_label}」这条价格吗？`
   )
   if (!confirmed) return
   deletingItemId.value = row.id

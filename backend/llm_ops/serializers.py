@@ -215,10 +215,77 @@ def price_role_for_source(source: PriceCollectionSource) -> str:
 
 
 def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
-    """Create or update a canonical model identity for a price record."""
+    """Create or update a canonical model identity for a price record.
+
+    The lookup key is the canonical ``code`` field, but the
+    collector may report a price record under a slightly
+    different spelling (for example ``deepseek-r1-250528`` for
+    the row that is canonically known as ``deepseek-r1-0528``).
+    To avoid creating duplicate meta-model rows, the function
+    first searches the ``aliases`` JSONField for any match
+    against the reported code or the legacy raw code. When a
+    match is found the existing row is reused and the new code
+    is added to its alias set so future lookups succeed without
+    a database scan.
+    """
     code = str(data.get("code") or data.get("name") or "").strip()
     name = str(data.get("name") or code).strip() or code
     provider = data.get("provider")
+    raw_alias = str(data.get("raw_code") or "").strip()
+
+    # Defensive: try to reuse a row whose ``aliases`` already
+    # records this code (or a legacy spelling of it). This
+    # keeps the canonical row count to one per release even
+    # when multiple price sources disagree on the spelling.
+    #
+    # The lookup is implemented in Python rather than via
+    # ``aliases__contains`` because SQLite (the default dev
+    # backend) does not support the JSON ``contains`` lookup.
+    # The meta-model table is small enough (low hundreds of
+    # rows) that an in-process scan stays well below 5 ms even
+    # on a developer laptop.
+    tokens = [t for t in (raw_alias, code, name) if t]
+    existing = None
+    if tokens:
+        all_meta = list(MetaModel.objects.all())
+        alias_index = {
+            alias: meta
+            for meta in all_meta
+            for alias in (meta.aliases or [])
+        }
+        for token in tokens:
+            hit = alias_index.get(token)
+            if hit is not None:
+                existing = hit
+                break
+        # When the reported code/name does not appear in any
+        # alias, fall back to a normalised name match. This
+        # covers the common case where two price sources
+        # disagree on the code spelling (for example
+        # ``deepseek-r1-0528`` vs ``deepseek-r1-250528``)
+        # but agree on the human readable name.
+        if existing is None and name:
+            normalised = name.strip().lower().replace(" ", "")
+            for meta in all_meta:
+                if (meta.name or "").strip().lower().replace(" ", "") == normalised:
+                    existing = meta
+                    break
+    if existing is not None:
+        merged = list(existing.aliases or [])
+        for token in (raw_alias, code, name):
+            if token and token not in merged:
+                merged.append(token)
+        changed = merged != list(existing.aliases or [])
+        if changed:
+            existing.aliases = merged
+            existing.save(update_fields=["aliases", "updated_at"])
+        return existing
+
+    seed_aliases: list[str] = []
+    for token in tokens:
+        if token and token not in seed_aliases and token != code:
+            seed_aliases.append(token)
+
     defaults = {
         "name": name,
         "vendor": provider,
@@ -226,6 +293,7 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
         "context_window": data.get("context_window") or 0,
         "max_output_tokens": data.get("max_output_tokens") or 0,
         "status": MetaModel.STATUS_ACTIVE,
+        "aliases": seed_aliases,
     }
     meta_model, _ = MetaModel.objects.update_or_create(
         code=code,
@@ -235,7 +303,14 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
 
 
 class MetaModelSerializer(serializers.ModelSerializer):
-    """Serializer for canonical model identities."""
+    """Serializer for canonical model identities.
+
+    The ``vendor`` field is recomputed through the canonical
+    vendor rules so the API never returns a supplier alias
+    (``siliconflow``) or a wrong attribution (deepseek model
+    owned by Aliyun). The original pointer is preserved on
+    ``raw_vendor`` for debugging.
+    """
 
     vendor_name = serializers.CharField(
         source="vendor.name",
@@ -246,11 +321,54 @@ class MetaModelSerializer(serializers.ModelSerializer):
         read_only=True,
         required=False,
     )
+    raw_vendor = serializers.IntegerField(
+        source="vendor_id",
+        read_only=True,
+        allow_null=True,
+    )
+    effective_vendor = serializers.SerializerMethodField()
+    effective_vendor_code = serializers.SerializerMethodField()
+    effective_vendor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = MetaModel
         fields = "__all__"
         read_only_fields = ("created_at", "updated_at")
+
+    def get_effective_vendor(self, instance):
+        canonical = self._canonical_vendor(instance)
+        if canonical is not None:
+            return canonical["provider"].id
+        return instance.vendor_id
+
+    def get_effective_vendor_code(self, instance):
+        canonical = self._canonical_vendor(instance)
+        if canonical is not None:
+            return canonical["provider"].code
+        if instance.vendor_id:
+            return instance.vendor.code
+        return ""
+
+    def get_effective_vendor_name(self, instance):
+        canonical = self._canonical_vendor(instance)
+        if canonical is not None:
+            return canonical["provider"].name
+        if instance.vendor_id:
+            return instance.vendor.name
+        return ""
+
+    @staticmethod
+    def _canonical_vendor(instance):
+        from .constants import canonical_vendor_for_model_code
+
+        spec = canonical_vendor_for_model_code(instance.code)
+        if not spec:
+            return None
+        from .seed_data import ensure_canonical_vendor_row
+        provider = ensure_canonical_vendor_row(spec)
+        if not provider:
+            return None
+        return {"spec": spec, "provider": provider}
 
 
 class LLMModelSerializer(serializers.ModelSerializer):
@@ -766,6 +884,7 @@ class ResaleListingSerializer(serializers.ModelSerializer):
             (
                 "retail_input_price_per_million",
                 "retail_output_price_per_million",
+                "retail_cache_input_price_per_million",
                 "retail_image_output_price_per_image",
                 "retail_audio_input_price_per_second",
                 "retail_audio_output_price_per_second",

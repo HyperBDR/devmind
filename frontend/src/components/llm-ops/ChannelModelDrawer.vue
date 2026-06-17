@@ -52,7 +52,7 @@
                 添加渠道模型
               </h4>
               <p class="mt-1 text-xs leading-5 text-slate-500">
-                先选择模型，再指定该渠道实际使用的上游供货源。
+                先选择元模型，再指定该渠道实际使用的上游供货源。
                 添加后可在下方设置渠道状态、成本规则和固定成本价。
               </p>
             </div>
@@ -71,7 +71,7 @@
 
           <div class="add-grid">
             <div class="form-field model-select-field">
-              <label class="field-label">选择模型</label>
+              <label class="field-label">选择元模型</label>
               <div ref="modelDropdownRef" class="searchable-select">
                 <button
                   class="searchable-trigger"
@@ -86,7 +86,7 @@
                       {{ selectedModelOption.name }}
                     </span>
                     <span v-else class="block truncate text-slate-400">
-                      搜索并选择模型
+                      搜索并选择元模型
                     </span>
                   </span>
                   <span class="dropdown-caret">⌄</span>
@@ -101,7 +101,7 @@
                     @keydown.escape="closeModelDropdown"
                   />
                   <div class="searchable-meta">
-                    <span>{{ availableModelGroups.length }} 个可添加模型</span>
+                    <span>{{ availableModelGroups.length }} 个可添加元模型</span>
                     <span v-if="!modelSearch">默认展示前 24 个</span>
                     <span v-else>已按关键词筛选</span>
                   </div>
@@ -156,11 +156,11 @@
               />
               <div v-else class="readonly-field">
                 <span class="truncate">
-                  先选择模型
+                  先选择元模型
                 </span>
               </div>
               <p v-if="!selectedModelKey" class="field-helper">
-                选择模型后会显示该模型可用的原厂、供货商或人工价格源。
+                选择元模型后会显示可用的原厂、供货商或人工价格源。
               </p>
             </div>
 
@@ -318,7 +318,7 @@
           <input
             v-model="search"
             class="field compact-field"
-            placeholder="搜索已配置模型名称、code 或厂商"
+            placeholder="搜索已配置元模型、code 或上游来源"
           />
           <CompactSelect
             v-model="statusFilter"
@@ -330,7 +330,7 @@
           <div class="table-toolbar">
             <div class="min-w-0">
               <h3 class="panel-title">
-                已配置模型（{{ filteredRows.length }}）
+                已配置元模型（{{ filteredRows.length }}）
               </h3>
               <div
                 v-if="changeSummaryLabels.length"
@@ -826,7 +826,6 @@ const saveButtonLabel = computed(() =>
 
 const baseAvailableModels = computed(() =>
   props.models.filter((model) => {
-    const draft = drafts.value[model.id]
     return !configuredIdentityKeys.value.has(modelIdentityKey(model))
   })
 )

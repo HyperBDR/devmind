@@ -1059,6 +1059,40 @@ class ResalePlatform(models.Model):
 class ResaleListing(models.Model):
     """Downstream listing price for a model routed through a channel."""
 
+    PUBLISH_NONE = "none"
+    PUBLISH_ONLINE = "online"
+    PUBLISH_OFFLINE = "offline"
+    PUBLISH_DELETED = "deleted"
+
+    PUBLISH_STATUS_CHOICES = (
+        (PUBLISH_NONE, "Not Published"),
+        (PUBLISH_ONLINE, "Published"),
+        (PUBLISH_OFFLINE, "Offline"),
+        (PUBLISH_DELETED, "Deleted"),
+    )
+
+    WORKFLOW_DRAFT = "draft"
+    WORKFLOW_PENDING_PUBLISH = "pending_publish"
+    WORKFLOW_ONLINE = "online"
+    WORKFLOW_UPDATE_DRAFT = "update_draft"
+    WORKFLOW_PENDING_UPDATE = "pending_update"
+    WORKFLOW_PENDING_OFFLINE = "pending_offline"
+    WORKFLOW_OFFLINE_EXCEPTION = "offline_exception"
+    WORKFLOW_OFFLINE = "offline"
+    WORKFLOW_DELETED = "deleted"
+
+    WORKFLOW_STATUS_CHOICES = (
+        (WORKFLOW_DRAFT, "Draft"),
+        (WORKFLOW_PENDING_PUBLISH, "Pending Publish"),
+        (WORKFLOW_ONLINE, "Online"),
+        (WORKFLOW_UPDATE_DRAFT, "Update Draft"),
+        (WORKFLOW_PENDING_UPDATE, "Pending Update"),
+        (WORKFLOW_PENDING_OFFLINE, "Pending Offline"),
+        (WORKFLOW_OFFLINE_EXCEPTION, "Offline Exception"),
+        (WORKFLOW_OFFLINE, "Offline"),
+        (WORKFLOW_DELETED, "Deleted"),
+    )
+
     platform = models.ForeignKey(
         ResalePlatform,
         related_name="listings",
@@ -1093,6 +1127,12 @@ class ResaleListing(models.Model):
         decimal_places=6,
         default=0,
     )
+    retail_cache_input_price_per_million = models.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        blank=True,
+        null=True,
+    )
     retail_image_output_price_per_image = models.DecimalField(
         max_digits=14,
         decimal_places=6,
@@ -1124,7 +1164,19 @@ class ResaleListing(models.Model):
         null=True,
     )
     volume_label = models.CharField(max_length=50, blank=True, default="")
-    is_active = models.BooleanField(default=True)
+    publish_status = models.CharField(
+        max_length=30,
+        choices=PUBLISH_STATUS_CHOICES,
+        default=PUBLISH_NONE,
+        db_index=True,
+    )
+    workflow_status = models.CharField(
+        max_length=30,
+        choices=WORKFLOW_STATUS_CHOICES,
+        default=WORKFLOW_DRAFT,
+        db_index=True,
+    )
+    is_active = models.BooleanField(default=False)
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1233,6 +1285,12 @@ class ResaleListingPriceHistory(models.Model):
         max_digits=14,
         decimal_places=6,
         default=0,
+    )
+    retail_cache_input_price_per_million = models.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        blank=True,
+        null=True,
     )
     retail_image_output_price_per_image = models.DecimalField(
         max_digits=14,

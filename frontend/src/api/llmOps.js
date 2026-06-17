@@ -81,6 +81,22 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/meta-models/`, paramsOrEmpty(params))
   },
 
+  syncMetaModels() {
+    return apiClient.post(`${base}/meta-models/sync/`)
+  },
+
+  createMetaModel(payload) {
+    return apiClient.post(`${base}/meta-models/`, payload)
+  },
+
+  updateMetaModel(id, payload) {
+    return apiClient.patch(`${base}/meta-models/${id}/`, payload)
+  },
+
+  deleteMetaModel(id) {
+    return apiClient.delete(`${base}/meta-models/${id}/`)
+  },
+
   listModelPriceItems(params) {
     return apiClient.get(`${base}/model-price-items/`, paramsOrEmpty(params))
   },
@@ -199,12 +215,23 @@ export const llmOpsApi = {
     return apiClient.post(`${base}/resale-listings/bulk-upsert/`, { items })
   },
 
+  bulkDraftResaleListings(items) {
+    return apiClient.post(`${base}/resale-listings/bulk-draft/`, { items })
+  },
+
   bulkReplaceResaleListings(items) {
     return apiClient.post(`${base}/resale-listings/bulk-replace/`, { items })
   },
 
   bulkOfflineResaleListings(payload) {
     return apiClient.post(`${base}/resale-listings/bulk-offline/`, payload)
+  },
+
+  bulkTransitionResaleListings(payload) {
+    return apiClient.post(
+      `${base}/resale-listings/bulk-transition/`,
+      payload
+    )
   },
 
   bulkRemoveResaleListingModels(payload) {

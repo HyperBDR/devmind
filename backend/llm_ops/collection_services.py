@@ -10,8 +10,11 @@ from django.utils import timezone
 
 from .collectors import CollectedModelPricing, CollectedPricingCatalog
 from .collectors.official import (
+    MODELS_DEV_API_URL,
     OFFICIAL_PROVIDER_CONFIGS,
     collect_official_pricing_catalog,
+    fetch_source_payload,
+    normalize_model_code,
 )
 from .collectors.yunce import DEFAULT_YUNCE_BASE_URL, YuncePricingClient
 from .models import (
@@ -347,6 +350,239 @@ def sync_configured_official_model_prices(
             verify_source=verify_source,
         )
     return results
+
+
+def sync_meta_models_from_models_dev(
+    *,
+    source_url: str = MODELS_DEV_API_URL,
+    timeout: int = 20,
+) -> dict[str, int]:
+    """Fetch models.dev and upsert canonical meta-model identities."""
+    from .constants import (
+        canonical_vendor_for_model_code,
+        ensure_canonical_vendor_row,
+    )
+
+    payload = fetch_source_payload(source_url, timeout)
+    source_json = payload.get("json")
+    if not isinstance(source_json, dict):
+        raise ValueError("models.dev source did not return JSON.")
+
+    stats = {"models": 0, "created": 0, "updated": 0, "skipped": 0}
+    seen_codes = set()
+    with transaction.atomic():
+        for provider_payload in source_json.values():
+            if not isinstance(provider_payload, dict):
+                continue
+            models = provider_payload.get("models", {})
+            if not isinstance(models, dict):
+                continue
+            for model_payload in models.values():
+                if not isinstance(model_payload, dict):
+                    stats["skipped"] += 1
+                    continue
+                code = models_dev_meta_code(model_payload)
+                if not code or code in seen_codes:
+                    stats["skipped"] += 1
+                    continue
+                spec = canonical_vendor_for_model_code(code)
+                if spec is None:
+                    stats["skipped"] += 1
+                    continue
+                seen_codes.add(code)
+                vendor = ensure_canonical_vendor_row(spec)
+                if vendor is None:
+                    stats["skipped"] += 1
+                    continue
+                _, created, changed = upsert_models_dev_meta_model(
+                    model_payload,
+                    code=code,
+                    vendor=vendor,
+                    source_url=source_url,
+                )
+                stats["models"] += 1
+                stats["created" if created else "updated"] += int(changed)
+    return stats
+
+
+def models_dev_meta_code(model_payload: dict) -> str:
+    """Normalize a models.dev model id into one canonical meta-model code."""
+    raw_code = str(model_payload.get("id") or "").strip()
+    if raw_code.startswith("hf:"):
+        raw_code = raw_code[3:]
+    if "/" in raw_code:
+        raw_code = raw_code.rsplit("/", 1)[-1]
+    return normalize_model_code(raw_code)
+
+
+def upsert_models_dev_meta_model(
+    model_payload: dict,
+    *,
+    code: str,
+    vendor: LLMProvider,
+    source_url: str,
+) -> tuple[MetaModel, bool, bool]:
+    """Upsert one models.dev row without overwriting operator fields."""
+    name = str(model_payload.get("name") or code).strip() or code
+    defaults = {
+        "name": name,
+        "vendor": vendor,
+        "family": str(model_payload.get("family") or "").strip(),
+        "modality": models_dev_modality(model_payload),
+        "aliases": models_dev_meta_aliases(model_payload, code),
+        "capabilities": models_dev_capabilities(model_payload),
+        "context_window": models_dev_limit(model_payload, "context"),
+        "max_output_tokens": models_dev_limit(model_payload, "output"),
+        "status": MetaModel.STATUS_ACTIVE,
+        "metadata": models_dev_metadata(model_payload, source_url),
+    }
+    meta_model, created = MetaModel.objects.get_or_create(
+        code=code,
+        defaults=defaults,
+    )
+    if created:
+        return meta_model, True, True
+
+    changed_fields = []
+    if meta_model.name in {"", meta_model.code} and name:
+        meta_model.name = name
+        changed_fields.append("name")
+    if not meta_model.vendor_id or meta_model.vendor_id != vendor.id:
+        meta_model.vendor = vendor
+        changed_fields.append("vendor")
+    if not meta_model.family and defaults["family"]:
+        meta_model.family = defaults["family"]
+        changed_fields.append("family")
+    if (
+        meta_model.modality == MetaModel.MODALITY_TEXT
+        and defaults["modality"] != MetaModel.MODALITY_TEXT
+    ):
+        meta_model.modality = defaults["modality"]
+        changed_fields.append("modality")
+    changed_fields += update_meta_model_numbers(meta_model, defaults)
+    changed_fields += merge_meta_model_json(meta_model, defaults)
+    if meta_model.status == MetaModel.STATUS_UNKNOWN:
+        meta_model.status = MetaModel.STATUS_ACTIVE
+        changed_fields.append("status")
+    if changed_fields:
+        changed_fields.append("updated_at")
+        meta_model.save(update_fields=changed_fields)
+    return meta_model, False, bool(changed_fields)
+
+
+def update_meta_model_numbers(
+    meta_model: MetaModel,
+    defaults: dict,
+) -> list[str]:
+    """Raise token limits when the online source has a larger value."""
+    changed_fields = []
+    context_window = defaults["context_window"]
+    if context_window and context_window > meta_model.context_window:
+        meta_model.context_window = context_window
+        changed_fields.append("context_window")
+    max_output = defaults["max_output_tokens"]
+    if max_output and max_output > meta_model.max_output_tokens:
+        meta_model.max_output_tokens = max_output
+        changed_fields.append("max_output_tokens")
+    return changed_fields
+
+
+def merge_meta_model_json(meta_model: MetaModel, defaults: dict) -> list[str]:
+    """Merge aliases, capabilities and source metadata."""
+    changed_fields = []
+    aliases = list(dict.fromkeys(
+        list(meta_model.aliases or []) + list(defaults["aliases"])
+    ))
+    if aliases != (meta_model.aliases or []):
+        meta_model.aliases = aliases
+        changed_fields.append("aliases")
+
+    capabilities = dict(meta_model.capabilities or {})
+    existing_features = capabilities.get("features") or []
+    new_features = defaults["capabilities"].get("features") or []
+    features = list(dict.fromkeys(existing_features + new_features))
+    if features != existing_features:
+        capabilities["features"] = features
+        meta_model.capabilities = capabilities
+        changed_fields.append("capabilities")
+
+    metadata = dict(meta_model.metadata or {})
+    if metadata.get("models_dev") != defaults["metadata"]["models_dev"]:
+        metadata["models_dev"] = defaults["metadata"]["models_dev"]
+        meta_model.metadata = metadata
+        changed_fields.append("metadata")
+    return changed_fields
+
+
+def models_dev_meta_aliases(model_payload: dict, code: str) -> list[str]:
+    """Return stable aliases from models.dev identity fields."""
+    values = [
+        model_payload.get("id"),
+        model_payload.get("name"),
+        model_payload.get("family"),
+        code,
+    ]
+    aliases = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        aliases.append(text)
+    return aliases
+
+
+def models_dev_modality(model_payload: dict) -> str:
+    """Map models.dev modalities to the local meta-model modality."""
+    modalities = model_payload.get("modalities") or {}
+    inputs = set(modalities.get("input") or [])
+    outputs = set(modalities.get("output") or [])
+    if "video" in outputs:
+        return MetaModel.MODALITY_VIDEO
+    if "audio" in outputs:
+        return MetaModel.MODALITY_AUDIO
+    if (inputs | outputs) - {"text"}:
+        return MetaModel.MODALITY_MULTIMODAL
+    return MetaModel.MODALITY_TEXT
+
+
+def models_dev_limit(model_payload: dict, key: str) -> int:
+    """Return an integer token limit from models.dev."""
+    try:
+        return int((model_payload.get("limit") or {}).get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def models_dev_capabilities(model_payload: dict) -> dict:
+    """Return local feature labels from models.dev boolean flags."""
+    feature_map = {
+        "attachment": "attachment",
+        "reasoning": "reasoning",
+        "structured_output": "structured_output",
+        "tool_call": "tool_calling",
+        "open_weights": "open_weights",
+    }
+    features = [
+        label
+        for field, label in feature_map.items()
+        if model_payload.get(field) is True
+    ]
+    return {"features": features}
+
+
+def models_dev_metadata(model_payload: dict, source_url: str) -> dict:
+    """Return source metadata stored under the models_dev key."""
+    return {
+        "models_dev": {
+            "id": model_payload.get("id") or "",
+            "source_url": source_url,
+            "release_date": model_payload.get("release_date") or "",
+            "last_updated": model_payload.get("last_updated") or "",
+            "knowledge": model_payload.get("knowledge") or "",
+        },
+    }
 
 
 def official_source_url(

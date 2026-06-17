@@ -6,12 +6,14 @@ from django.test import TestCase
 from llm_ops.collection_services import (
     ensure_official_source,
     sync_configured_official_model_prices,
+    sync_meta_models_from_models_dev,
     sync_official_provider_model_prices,
 )
 from llm_ops.models import (
     CollectedModelPriceSnapshot,
     LLMModel,
     LLMProvider,
+    MetaModel,
     ModelPriceItem,
     PriceCollectionRun,
     PriceCollectionSource,
@@ -238,6 +240,114 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(model.input_price_per_million, Decimal("0.115000"))
         self.assertEqual(model.output_price_per_million, Decimal("0.287000"))
 
+    @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_meta_models_from_models_dev_is_idempotent(self, mock_get):
+        mock_get.return_value = MockPricingResponse(
+            """
+            {
+              "openai": {
+                "id": "openai",
+                "name": "OpenAI",
+                "models": {
+                  "openai/gpt-real-test": {
+                    "id": "openai/gpt-real-test",
+                    "name": "GPT Real Test",
+                    "family": "gpt-mini",
+                    "reasoning": false,
+                    "tool_call": true,
+                    "structured_output": true,
+                    "release_date": "2024-07-18",
+                    "last_updated": "2024-07-18",
+                    "modalities": {
+                      "input": ["text", "image"],
+                      "output": ["text"]
+                    },
+                    "limit": {"context": 128000, "output": 16384}
+                  }
+                }
+              },
+              "supplier": {
+                "id": "supplier",
+                "name": "Supplier",
+                "models": {
+                  "openai/gpt-real-test": {
+                    "id": "openai/gpt-real-test",
+                    "name": "GPT Real Test"
+                  }
+                }
+              }
+            }
+            """,
+            content_type="application/json",
+        )
+
+        stats = sync_meta_models_from_models_dev()
+        second_stats = sync_meta_models_from_models_dev()
+
+        meta = MetaModel.objects.get(code="gpt-real-test")
+        self.assertEqual(stats["models"], 1)
+        self.assertEqual(second_stats["created"], 0)
+        self.assertEqual(
+            MetaModel.objects.filter(code="gpt-real-test").count(),
+            1,
+        )
+        self.assertEqual(meta.vendor.code, "openai")
+        self.assertEqual(meta.family, "gpt-mini")
+        self.assertEqual(meta.modality, MetaModel.MODALITY_MULTIMODAL)
+        self.assertEqual(meta.context_window, 128000)
+        self.assertIn("tool_calling", meta.capabilities["features"])
+        self.assertEqual(
+            meta.metadata["models_dev"]["source_url"],
+            "https://models.dev/api.json",
+        )
+
+    @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_meta_models_from_models_dev_preserves_manual_data(
+        self,
+        mock_get,
+    ):
+        openai = LLMProvider.objects.get(code="openai")
+        MetaModel.objects.update_or_create(
+            code="gpt-4o-mini",
+            defaults={
+                "name": "Manual GPT",
+                "vendor": openai,
+                "family": "Manual Family",
+                "aliases": ["manual-alias"],
+                "context_window": 256000,
+            },
+        )
+        mock_get.return_value = MockPricingResponse(
+            """
+            {
+              "openai": {
+                "models": {
+                  "openai/gpt-4o-mini": {
+                    "id": "openai/gpt-4o-mini",
+                    "name": "GPT-4o Mini",
+                    "family": "gpt-mini",
+                    "modalities": {
+                      "input": ["text"],
+                      "output": ["text"]
+                    },
+                    "limit": {"context": 128000, "output": 16384}
+                  }
+                }
+              }
+            }
+            """,
+            content_type="application/json",
+        )
+
+        sync_meta_models_from_models_dev()
+
+        meta = MetaModel.objects.get(code="gpt-4o-mini")
+        self.assertEqual(meta.name, "Manual GPT")
+        self.assertEqual(meta.family, "Manual Family")
+        self.assertEqual(meta.context_window, 256000)
+        self.assertIn("manual-alias", meta.aliases)
+        self.assertIn("openai/gpt-4o-mini", meta.aliases)
+
     def test_sync_aliyun_official_prices_keeps_cny_currency(self):
         provider = LLMProvider.objects.get(code="aliyun")
 
@@ -294,7 +404,11 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(stats["models"], 1)
         self.assertEqual(stats["skipped"], 11)
         self.assertEqual(model.currency, "CNY")
-        self.assertEqual(model.name, "DeepSeek R1 250528")
+        # Volcengine labels the same release as "250528" while
+        # aliyun uses "0528". They are the same model and the
+        # collector now unifies the display name on the
+        # canonical "DeepSeek R1 0528" spelling.
+        self.assertEqual(model.name, "DeepSeek R1 0528")
         self.assertEqual(model.input_price_per_million, Decimal("4.000000"))
         self.assertEqual(model.output_price_per_million, Decimal("16.000000"))
 

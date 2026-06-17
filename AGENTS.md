@@ -77,6 +77,37 @@ npm run test:e2e     # Playwright
 
 每个 app **自包含**：`models.py` + `serializers.py` + `services.py` + `views/` 或 `views.py` + `tasks.py` + `periodic_tasks.py`（可选）+ `tests/` + `migrations/`。跨 app 回归测试在 `backend/tests/`。
 
+
+### `llm_ops` 部署链路
+
+`llm_ops` 是少数需要在 `migrate` 之后**自动**写数据的 app（其它 app 只在 explicit management command 或后台任务时写数据）。它有三层保障，避免 fresh deploy 出现“`/api/v1/llm-ops/` 返回空”或“周期性任务根本没跑”：
+
+- **业务边界**：`LLMProvider` 只表示**拥有自研/自有大模型产品的元模型厂商**，例如 OpenAI、Anthropic、Google、阿里巴巴、MiniMax、Kimi（月之暗面）、DeepSeek。硅基流动、OpenRouter 等聚合/中转平台不是元模型厂商，只能作为 `PriceCollectionSource`（`source_category=supplier` 或 `manual`）存在；它们提供的模型价格必须绑定到真实元模型厂商。
+- **自动 seed**：`llm_ops/apps.py:ready()` 注册 `post_migrate` 信号 → `llm_ops.signals.auto_seed_initial_price_sheet`；当 `LLMProvider`/`LLMModel`/`ProcurementChannel(REAL_RESOURCE_CHANNEL_CODE)` 任一非空时跳过；全部为空时调用 `seed_initial_price_sheet_safely()` 写入 7 个 provider + 113 个模型 + 渠道价 + 演示价格。该 handler 是幂等的（get_or_create）、保留人工 `custom_*` / `is_active` / `is_enabled`，且异常被 `try/except` 吞掉（auto-seed 失败不会阻塞部署）。
+- **价格采集 task**：`llm_ops/tasks.py::collect_official_model_prices`（`@shared_task`，`acks_late=True`，`max_retries=2`）包装 `sync_configured_official_model_prices`，被 `core/celery._lazy_autodiscover` 自动发现。
+- **定时注册**：`llm_ops/periodic_tasks.py::register_periodic_tasks` 注册 `llm_ops_official_collect`（默认 `15 1,7,13,19 * * *`）到 `core/periodic_registry.TASK_REGISTRY`，由 `manage.py register_periodic_tasks` 写入 `django_celery_beat`。**已存在的 `PeriodicTask` 不会被覆盖**——运维从 admin 调整的 cron 表达式 / `enabled` 标志在重新部署时保留。
+
+环境变量：
+
+| 变量 | 默认 | 用途 |
+|---|---|---|
+| `LLM_OPS_DISABLE_AUTO_SEED` | （未设） | 设为 `1` 关闭 `post_migrate` 钩子（只读副本、灾备演练等） |
+| `LLM_OPS_AUTO_SEED_IN_TESTS` | （未设） | 测试套件内允许 auto-seed；默认跳过以免破坏 fixture |
+| `LLM_OPS_OFFICIAL_COLLECT_HOURS` | `1,7,13,19` | 官方价格采集触发的小时（24h 制，逗号分隔） |
+| `LLM_OPS_OFFICIAL_COLLECT_MINUTE` | `15` | 触发分钟 |
+
+运维命令：
+
+```bash
+# 默认（overwrite）：重写 seed-managed 字段、保留 operator-managed 字段（custom_* / is_active / is_enabled）
+python manage.py seed_llm_ops_price_sheet
+
+# --safe 模式：只补缺、绝不触碰任何已存在行
+python manage.py seed_llm_ops_price_sheet --safe
+```
+
+设计原则：自动启动只走 safe 路径；显式重置走默认路径。
+
 主要 app（按 `backend/core/urls.py` 路由顺序）：
 
 | App | 路由前缀 | 关键能力 |

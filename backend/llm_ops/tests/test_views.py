@@ -33,6 +33,15 @@ class LLMOpsViewTests(TestCase):
         )
         self.client.force_authenticate(self.user)
 
+    def _create_online_listing(self, **kwargs):
+        defaults = {
+            "publish_status": ResaleListing.PUBLISH_ONLINE,
+            "workflow_status": ResaleListing.WORKFLOW_ONLINE,
+            "is_active": True,
+        }
+        defaults.update(kwargs)
+        return ResaleListing.objects.create(**defaults)
+
     @patch("llm_ops.views.sync_yunce_model_prices")
     def test_yunce_collection_endpoint_returns_sync_stats(self, mock_sync):
         mock_sync.return_value = {
@@ -308,13 +317,19 @@ class LLMOpsViewTests(TestCase):
             provider=provider,
             name="GPT-5",
             code="gpt-5",
+            input_price_per_million="2.5",
+            output_price_per_million="5",
         )
         channel = ProcurementChannel.objects.create(
             name="Real Resource",
             code="real-resource",
+            settlement_ratio="0.8",
         )
 
-        response = self.client.get(reverse("llm-ops-summary"))
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"display_currency": "USD"},
+        )
 
         self.assertEqual(response.status_code, 200)
         row = response.data["procurement"][0]
@@ -323,11 +338,29 @@ class LLMOpsViewTests(TestCase):
 
         ChannelModelPrice.objects.create(channel=channel, model=model)
 
-        response = self.client.get(reverse("llm-ops-summary"))
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"display_currency": "USD"},
+        )
 
         row = response.data["procurement"][0]
+        self.assertEqual(row["meta_model_id"], model.meta_model_id)
+        self.assertEqual(row["meta_model_name"], "GPT-5")
+        self.assertEqual(row["meta_model_code"], "gpt-5")
         self.assertEqual(row["best_channel"]["channel_name"], "Real Resource")
         self.assertEqual(row["best_channel"]["original_currency"], "USD")
+        self.assertEqual(row["best_channel"]["settlement_ratio"], 0.8)
+        self.assertEqual(
+            row["best_channel"]["base_input_price_per_million"],
+            2.5,
+        )
+        self.assertEqual(
+            row["best_channel"][
+                "input_price_per_million_settlement_ratio"
+            ],
+            0.8,
+        )
+        self.assertEqual(row["best_channel"]["input_price_per_million"], 2.0)
 
     def test_channel_model_price_bulk_upsert_updates_existing_rows(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -505,7 +538,7 @@ class LLMOpsViewTests(TestCase):
             code="agione",
             defaults={"name": "Agione"},
         )
-        ResaleListing.objects.create(
+        self._create_online_listing(
             platform=platform,
             model=model,
             channel=old_channel,
@@ -535,7 +568,23 @@ class LLMOpsViewTests(TestCase):
         old_listing = ResaleListing.objects.get(channel=old_channel)
         new_listing = ResaleListing.objects.get(channel=best_channel)
         self.assertFalse(old_listing.is_active)
-        self.assertTrue(new_listing.is_active)
+        self.assertEqual(
+            old_listing.publish_status,
+            ResaleListing.PUBLISH_OFFLINE,
+        )
+        self.assertEqual(
+            old_listing.workflow_status,
+            ResaleListing.WORKFLOW_OFFLINE,
+        )
+        self.assertFalse(new_listing.is_active)
+        self.assertEqual(
+            new_listing.publish_status,
+            ResaleListing.PUBLISH_NONE,
+        )
+        self.assertEqual(
+            new_listing.workflow_status,
+            ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        )
         self.assertEqual(ResaleListingPriceHistory.objects.count(), 2)
 
     def test_resale_listing_bulk_upsert_keeps_previous_listings_active(self):
@@ -557,7 +606,7 @@ class LLMOpsViewTests(TestCase):
             code="agione",
             defaults={"name": "Agione"},
         )
-        ResaleListing.objects.create(
+        self._create_online_listing(
             platform=platform,
             model=model,
             channel=old_channel,
@@ -587,7 +636,15 @@ class LLMOpsViewTests(TestCase):
         old_listing = ResaleListing.objects.get(channel=old_channel)
         new_listing = ResaleListing.objects.get(channel=best_channel)
         self.assertTrue(old_listing.is_active)
-        self.assertTrue(new_listing.is_active)
+        self.assertFalse(new_listing.is_active)
+        self.assertEqual(
+            new_listing.publish_status,
+            ResaleListing.PUBLISH_NONE,
+        )
+        self.assertEqual(
+            new_listing.workflow_status,
+            ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        )
         self.assertEqual(ResaleListingPriceHistory.objects.count(), 1)
 
     def test_resale_listing_bulk_upsert_allows_channel_after_auto_listing(self):
@@ -633,12 +690,65 @@ class LLMOpsViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            ResaleListing.objects.get(
-                platform=platform,
-                model=model,
-                channel=channel,
-            ).is_active
+        listing = ResaleListing.objects.get(
+            platform=platform,
+            model=model,
+            channel=channel,
+        )
+        self.assertFalse(listing.is_active)
+        self.assertEqual(
+            listing.publish_status,
+            ResaleListing.PUBLISH_NONE,
+        )
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        )
+
+    def test_resale_listing_bulk_draft_saves_draft_state(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Best Channel",
+            code="best-channel",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-draft"),
+            {
+                "items": [
+                    {
+                        "platform": platform.id,
+                        "model": model.id,
+                        "channel": channel.id,
+                        "display_name": "GPT-5",
+                        "retail_input_price_per_million": "1.2",
+                        "retail_output_price_per_million": "2.4",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        listing = ResaleListing.objects.get(
+            platform=platform,
+            model=model,
+            channel=channel,
+        )
+        self.assertFalse(listing.is_active)
+        self.assertEqual(listing.publish_status, ResaleListing.PUBLISH_NONE)
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_DRAFT,
         )
 
     def test_resale_listing_bulk_upsert_restores_removed_model(self):
@@ -731,12 +841,19 @@ class LLMOpsViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            ResaleListing.objects.get(
-                platform=platform,
-                model=model,
-                channel=channel,
-            ).is_active
+        listing = ResaleListing.objects.get(
+            platform=platform,
+            model=model,
+            channel=channel,
+        )
+        self.assertFalse(listing.is_active)
+        self.assertEqual(
+            listing.publish_status,
+            ResaleListing.PUBLISH_NONE,
+        )
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_PENDING_PUBLISH,
         )
 
     def test_resale_listing_exclusion_bulk_upsert_and_restore(self):
@@ -811,21 +928,21 @@ class LLMOpsViewTests(TestCase):
             name="Agione Backup",
             code="agione-backup",
         )
-        selected_listing = ResaleListing.objects.create(
+        selected_listing = self._create_online_listing(
             platform=platform,
             model=selected_model,
             channel=channel,
             retail_input_price_per_million="1.2",
             retail_output_price_per_million="2.4",
         )
-        untouched_listing = ResaleListing.objects.create(
+        untouched_listing = self._create_online_listing(
             platform=platform,
             model=untouched_model,
             channel=channel,
             retail_input_price_per_million="1.2",
             retail_output_price_per_million="2.4",
         )
-        other_platform_listing = ResaleListing.objects.create(
+        other_platform_listing = self._create_online_listing(
             platform=other_platform,
             model=selected_model,
             channel=channel,
@@ -847,9 +964,235 @@ class LLMOpsViewTests(TestCase):
         untouched_listing.refresh_from_db()
         other_platform_listing.refresh_from_db()
         self.assertFalse(selected_listing.is_active)
+        self.assertEqual(
+            selected_listing.publish_status,
+            ResaleListing.PUBLISH_OFFLINE,
+        )
+        self.assertEqual(
+            selected_listing.workflow_status,
+            ResaleListing.WORKFLOW_OFFLINE,
+        )
         self.assertTrue(untouched_listing.is_active)
         self.assertTrue(other_platform_listing.is_active)
         self.assertEqual(ResaleListingPriceHistory.objects.count(), 1)
+
+    def test_resale_listing_create_starts_as_draft(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Best Channel",
+            code="best-channel",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-list"),
+            {
+                "platform": platform.id,
+                "model": model.id,
+                "channel": channel.id,
+                "retail_input_price_per_million": "1.2",
+                "retail_output_price_per_million": "2.4",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        listing = ResaleListing.objects.get(id=response.data["id"])
+        self.assertFalse(listing.is_active)
+        self.assertEqual(listing.publish_status, ResaleListing.PUBLISH_NONE)
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_DRAFT,
+        )
+
+    def test_resale_listing_bulk_transition_publish_and_offline(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Best Channel",
+            code="best-channel",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=channel,
+            publish_status=ResaleListing.PUBLISH_NONE,
+            workflow_status=ResaleListing.WORKFLOW_PENDING_PUBLISH,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+
+        publish_response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "models": [model.id],
+                "action": "confirm_publish",
+            },
+            format="json",
+        )
+
+        self.assertEqual(publish_response.status_code, 200)
+        listing.refresh_from_db()
+        self.assertTrue(listing.is_active)
+        self.assertEqual(
+            listing.publish_status,
+            ResaleListing.PUBLISH_ONLINE,
+        )
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_ONLINE,
+        )
+
+        request_response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "models": [model.id],
+                "action": "request_offline",
+            },
+            format="json",
+        )
+
+        self.assertEqual(request_response.status_code, 200)
+        listing.refresh_from_db()
+        self.assertTrue(listing.is_active)
+        self.assertEqual(
+            listing.publish_status,
+            ResaleListing.PUBLISH_ONLINE,
+        )
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_PENDING_OFFLINE,
+        )
+
+        offline_response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "models": [model.id],
+                "action": "confirm_offline",
+            },
+            format="json",
+        )
+
+        self.assertEqual(offline_response.status_code, 200)
+        listing.refresh_from_db()
+        self.assertFalse(listing.is_active)
+        self.assertEqual(
+            listing.publish_status,
+            ResaleListing.PUBLISH_OFFLINE,
+        )
+        self.assertEqual(
+            listing.workflow_status,
+            ResaleListing.WORKFLOW_OFFLINE,
+        )
+
+    def test_resale_listing_bulk_transition_rejects_invalid_action(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Best Channel",
+            code="best-channel",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "models": [model.id],
+                "action": "confirm_publish",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_resale_listing_bulk_transition_prefers_actionable_listing(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        pending_channel = ProcurementChannel.objects.create(
+            name="Pending Channel",
+            code="pending-channel",
+        )
+        online_channel = ProcurementChannel.objects.create(
+            name="Online Channel",
+            code="online-channel",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        pending_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=pending_channel,
+            publish_status=ResaleListing.PUBLISH_ONLINE,
+            workflow_status=ResaleListing.WORKFLOW_PENDING_UPDATE,
+            is_active=True,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=online_channel,
+            retail_input_price_per_million="1.3",
+            retail_output_price_per_million="2.6",
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "models": [model.id],
+                "action": "confirm_update",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["id"], pending_listing.id)
+        pending_listing.refresh_from_db()
+        self.assertEqual(
+            pending_listing.workflow_status,
+            ResaleListing.WORKFLOW_ONLINE,
+        )
 
     def test_summary_returns_agione_diagnostics(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -871,7 +1214,7 @@ class LLMOpsViewTests(TestCase):
             model=model,
             is_listed=True,
         )
-        ResaleListing.objects.create(
+        self._create_online_listing(
             platform=platform,
             model=model,
             channel=channel,
@@ -916,7 +1259,7 @@ class LLMOpsViewTests(TestCase):
             model=model,
             is_listed=True,
         )
-        ResaleListing.objects.create(
+        self._create_online_listing(
             platform=default_platform,
             model=model,
             channel=channel,
@@ -1020,7 +1363,7 @@ class LLMOpsViewTests(TestCase):
             model=model,
             is_listed=False,
         )
-        ResaleListing.objects.create(
+        self._create_online_listing(
             platform=platform,
             model=model,
             channel=channel,

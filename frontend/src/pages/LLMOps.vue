@@ -471,13 +471,13 @@
               :models="models"
               :price-items="modelPriceItems"
               :listings="listings"
-              :listing-exclusions="listingExclusions"
               :summary="summary"
               :platform-count="activeResalePlatforms.length"
               :point-conversion="pointConversion"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
               @refresh="refreshLight"
+              @listings-updated="mergeResaleListings"
               @action="openListingActionDrawer"
               @open-workspace="openResalePublishingWorkspace"
             />
@@ -491,6 +491,15 @@
               :price-items="modelPriceItems"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
+              @refresh="refreshAll"
+            />
+
+            <MetaModelManagement
+              v-else-if="activeSection === 'metaModels'"
+              :meta-models="metaModels"
+              :providers="providers"
+              :models="models"
+              :price-items="modelPriceItems"
               @refresh="refreshAll"
             />
 
@@ -523,26 +532,13 @@
       @close="closePlatformModal"
       @saved="handlePlatformSaved"
     />
-    <AgioneListingActionDrawer
-      v-model:open="listingDrawerOpen"
-      :model-id="listingDrawerModelId"
-      :agione-platform="agionePlatform"
-      :providers="providers"
-      :models="models"
-      :price-items="modelPriceItems"
-      :listings="listings"
-      :listing-exclusions="listingExclusions"
-      :summary="summary"
-      :point-conversion="pointConversion"
-      :display-currency="displayCurrency"
-      :exchange-rate="exchangeRate"
-      @saved="handleListingDrawerSaved"
-    />
     <ResalePublishingDrawer
       v-model:open="resalePublishingDrawerOpen"
+      :initial-model-id="resalePublishingInitialModelId"
       :agione-platform="agionePlatform"
       :platforms="activeResalePlatforms"
       :providers="providers"
+      :meta-models="metaModels"
       :models="models"
       :channels="channels"
       :procurement-rows="procurementRows"
@@ -562,8 +558,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
-import AgioneListingActionDrawer from '@/components/llm-ops/AgioneListingActionDrawer.vue'
 import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
+import MetaModelManagement from '@/components/llm-ops/MetaModelManagement.vue'
 import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
 import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
 import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
@@ -575,6 +571,7 @@ import { llmOpsApi } from '@/api/llmOps'
 const FULL_LIST_PARAMS = { page_size: 10000 }
 const sectionKeys = new Set([
   'monitor',
+  'metaModels',
   'providers',
   'channels',
   'reseller',
@@ -594,7 +591,6 @@ const channelPriceItems = ref([])
 const modelPriceItems = ref([])
 const resalePlatforms = ref([])
 const listings = ref([])
-const listingExclusions = ref([])
 const records = ref([])
 const summary = ref({})
 const supportedDisplayCurrencies = new Set(['CNY', 'USD'])
@@ -606,9 +602,8 @@ const selectedResalePlatformId = ref(
 )
 const showPlatformModal = ref(false)
 const editingPlatform = ref(null)
-const listingDrawerOpen = ref(false)
-const listingDrawerModelId = ref(null)
 const resalePublishingDrawerOpen = ref(false)
+const resalePublishingInitialModelId = ref(null)
 const { showSuccess, showError, showInfo } = useToast()
 
 const simulation = ref({
@@ -627,7 +622,6 @@ const simulationStatusOptions = [
   { label: '需要汇率', value: 'currency_mismatch' },
   { label: '缺渠道价', value: 'missing_channel' },
   { label: '未挂售', value: 'unlisted' },
-  { label: '非最低价', value: 'not_lowest' },
   { label: '已就绪', value: 'ready' }
 ]
 
@@ -638,6 +632,14 @@ const navItems = computed(() => [
     eyebrow: 'Monitor',
     description: '汇总模型价格、渠道覆盖、采购路径和关键运营指标。',
     icon: 'M'
+  },
+  {
+    key: 'metaModels',
+    label: '元模型库',
+    eyebrow: 'Meta Models',
+    description: '管理厂商、模型家族、能力标签和采集归一化后的元模型身份。',
+    icon: 'M',
+    badge: metaModels.value.length
   },
   {
     key: 'providers',
@@ -1049,9 +1051,6 @@ const monitorTableRows = computed(() => {
     }
     if (simulation.value.status === 'missing_channel') return !row.best_channel
     if (simulation.value.status === 'unlisted') return !row.is_agione_listed
-    if (simulation.value.status === 'not_lowest') {
-      return row.is_agione_listed && !row.has_lowest_listing
-    }
     if (simulation.value.status === 'ready') {
       return row.best_channel && row.is_agione_listed && row.has_lowest_listing
     }
@@ -1097,7 +1096,6 @@ async function refreshAll() {
       priceItemRes,
       platformRes,
       listingRes,
-      exclusionRes,
       recordRes,
       summaryRes
     ] = await Promise.all([
@@ -1118,7 +1116,6 @@ async function refreshAll() {
       }),
       llmOpsApi.listResalePlatforms(FULL_LIST_PARAMS),
       llmOpsApi.listResaleListings(FULL_LIST_PARAMS),
-      llmOpsApi.listResaleListingExclusions(FULL_LIST_PARAMS),
       llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS),
       llmOpsApi.getSummary(summaryParams())
     ])
@@ -1133,7 +1130,6 @@ async function refreshAll() {
     modelPriceItems.value = extract(priceItemRes)
     resalePlatforms.value = extract(platformRes)
     listings.value = extract(listingRes)
-    listingExclusions.value = extract(exclusionRes)
     records.value = extract(recordRes)
     summary.value = extract(summaryRes)
   } finally {
@@ -1146,7 +1142,6 @@ async function refreshLight() {
     priceRes,
     channelPriceItemRes,
     listingRes,
-    exclusionRes,
     recordRes,
     summaryRes
   ] = await Promise.all([
@@ -1156,14 +1151,12 @@ async function refreshLight() {
       is_current: 'true'
     }),
     llmOpsApi.listResaleListings(FULL_LIST_PARAMS),
-    llmOpsApi.listResaleListingExclusions(FULL_LIST_PARAMS),
     llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS),
     llmOpsApi.getSummary(summaryParams())
   ])
   channelPrices.value = extract(priceRes)
   channelPriceItems.value = extract(channelPriceItemRes)
   listings.value = extract(listingRes)
-  listingExclusions.value = extract(exclusionRes)
   records.value = extract(recordRes)
   summary.value = extract(summaryRes)
 }
@@ -1236,7 +1229,6 @@ function monitorStatusTone(status) {
     currency_mismatch: 'info',
     missing_channel: 'danger',
     unlisted: 'warn',
-    not_lowest: 'warn',
     low_coverage: 'info',
     ready: 'success'
   }
@@ -1332,6 +1324,15 @@ function handlePlatformSaved() {
   refreshAll()
 }
 
+function mergeResaleListings(updatedItems) {
+  if (!Array.isArray(updatedItems) || !updatedItems.length) return
+  const byId = new Map(listings.value.map((item) => [String(item.id), item]))
+  updatedItems.forEach((item) => {
+    if (item?.id) byId.set(String(item.id), item)
+  })
+  listings.value = Array.from(byId.values())
+}
+
 function openListingActionDrawer({ modelId, kind }) {
   if (kind === 'configure-channel') {
     activeSection.value = 'channels'
@@ -1343,13 +1344,14 @@ function openListingActionDrawer({ modelId, kind }) {
     return
   }
   // Direct row actions (remove / restore / offline) are handled by
-  // StatusBoard itself. Create / view / edit flows open the drawer.
+  // StatusBoard itself. Create / view / edit flows open the workspace.
   if (!['create', 'view', 'edit'].includes(kind)) return
-  listingDrawerModelId.value = kind === 'create' ? null : modelId
-  listingDrawerOpen.value = true
+  resalePublishingInitialModelId.value = modelId || null
+  resalePublishingDrawerOpen.value = true
 }
 
-function openResalePublishingWorkspace() {
+function openResalePublishingWorkspace(payload = {}) {
+  resalePublishingInitialModelId.value = payload?.modelId || null
   resalePublishingDrawerOpen.value = true
 }
 
@@ -1360,9 +1362,13 @@ function mapWorkspaceListingToPayload(item) {
     platform: agionePlatform.value?.id,
     model: item.modelId,
     channel: item.channelId,
-    currency: 'USD',
+    currency: displayCurrency.value,
     retail_input_price_per_million: inApi.toFixed(6),
     retail_output_price_per_million: outApi.toFixed(6),
+    retail_cache_input_price_per_million:
+      item.priceCacheIn === null || item.priceCacheIn === undefined
+        ? null
+        : (Number(item.priceCacheIn) || 0).toFixed(6),
     is_active: true
   }
 }
@@ -1381,7 +1387,8 @@ async function handleResaleWorkspacePublished(payload) {
   }
   try {
     await llmOpsApi.bulkUpsertResaleListings(items)
-    showSuccess(`已上架 ${items.length} 条链路`)
+    showSuccess(`已提交 ${items.length} 条发布申请`)
+    resalePublishingDrawerOpen.value = false
     refreshLight()
   } catch (error) {
     const message =
@@ -1389,18 +1396,29 @@ async function handleResaleWorkspacePublished(payload) {
       error?.response?.data?.message ||
       error?.message ||
       ''
-    showError(message || '上架失败')
+    showError(message || '提交失败')
   }
 }
 
-function handleResaleWorkspaceDraft() {
-  // Drafts are held in the workspace component for now.
-  // Reserved for future localStorage draft persistence.
-}
-
-function handleListingDrawerSaved() {
-  listingDrawerOpen.value = false
-  refreshLight()
+async function handleResaleWorkspaceDraft(payload) {
+  if (!payload || !payload.listings || !payload.listings.length) {
+    showInfo('没有需要保存的草稿')
+    return
+  }
+  const items = payload.listings.map(mapWorkspaceListingToPayload)
+  try {
+    await llmOpsApi.bulkDraftResaleListings(items)
+    showSuccess(`已保存 ${items.length} 条草稿`)
+    resalePublishingDrawerOpen.value = false
+    refreshLight()
+  } catch (error) {
+    const message =
+      error?.response?.data?.detail ||
+      error?.response?.data?.message ||
+      error?.message ||
+      ''
+    showError(message || '保存失败')
+  }
 }
 
 function initialActiveSection() {

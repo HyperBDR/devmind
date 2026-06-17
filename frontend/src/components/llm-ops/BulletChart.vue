@@ -4,17 +4,34 @@
   marker, matching the visual style of demo.html (Section 3 / pricing).
 -->
 <template>
-  <div class="range-bar-wrapper">
+  <div
+    ref="rangeRef"
+    class="range-bar-wrapper"
+    :class="{ 'is-dragging': isDragging }"
+    @pointerdown="onTrackPointerDown"
+  >
+    <div class="range-bar-zone" :style="{ left: '10%', width: '80%' }" />
     <div
-      v-if="hasRange"
-      class="range-bar-zone"
-      :style="{ left: '10%', width: '80%' }"
+      class="range-boundary-marker range-boundary-min"
+      style="left: 10%"
     />
-    <div v-if="hasRange" class="range-bar-label" style="left: 10%">
-      市场下限<br />{{ currencySymbol }}{{ formatNumber(min) }}
+    <div
+      class="range-boundary-marker range-boundary-max"
+      style="left: 90%"
+    />
+    <div class="range-bar-label" style="left: 10%">
+      {{ boundaryLabel }}下限<br />{{ currencySymbol }}{{ formatNumber(axisMin) }}
     </div>
-    <div v-if="hasRange" class="range-bar-label" style="left: 90%">
-      市场上限<br />{{ currencySymbol }}{{ formatNumber(max) }}
+    <div class="range-bar-label" style="left: 90%">
+      {{ boundaryLabel }}上限<br />{{ currencySymbol }}{{ formatNumber(axisMax) }}
+    </div>
+    <div
+      v-for="tick in axisTicks"
+      :key="tick.percent"
+      class="range-axis-tick"
+      :style="{ left: tick.percent + '%' }"
+    >
+      <span>{{ currencySymbol }}{{ formatNumber(tick.value) }}</span>
     </div>
 
     <template v-for="(ref, i) in refs" :key="`ref-${i}`">
@@ -33,20 +50,24 @@
     </template>
 
     <div
-      v-if="hasRange"
       class="range-bar-marker"
+      role="slider"
+      tabindex="0"
+      :aria-label="label || '我方售价'"
+      :aria-valuemin="axisMin"
+      :aria-valuemax="axisMax"
+      :aria-valuenow="Number(value) || 0"
       :style="{
         left: getMarkerPos(Number(value) || 0) + '%',
         backgroundColor: getMarkerColor(Number(value) || 0)
       }"
+      @keydown="onMarkerKeydown"
+      @pointerdown.stop="startValueDrag"
     />
     <div
-      v-if="hasRange"
       class="range-bar-value"
-      :style="{
-        left: getMarkerPos(Number(value) || 0) + '%',
-        color: getMarkerColor(Number(value) || 0)
-      }"
+      :style="getValueLabelStyle(Number(value) || 0)"
+      @pointerdown.stop="startValueDrag"
     >
       {{ label }}
     </div>
@@ -54,7 +75,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 
 const props = defineProps({
   min: {
@@ -83,29 +104,153 @@ const props = defineProps({
   }
 })
 
-const hasRange = computed(() => props.max > props.min)
+const emit = defineEmits(['change', 'update:value'])
+
+const rangeRef = ref(null)
+const isDragging = ref(false)
+const fallbackCenter = ref(0)
+
+const AXIS_START_PERCENT = 10
+const AXIS_END_PERCENT = 90
+const AXIS_WIDTH_PERCENT = AXIS_END_PERCENT - AXIS_START_PERCENT
+
+const marketHasRange = computed(() => props.max > props.min)
+
+const axisRange = computed(() => {
+  if (marketHasRange.value) {
+    return { min: Number(props.min), max: Number(props.max) }
+  }
+
+  const value = Number(props.value)
+  if (!fallbackCenter.value && Number.isFinite(value) && value > 0) {
+    fallbackCenter.value = value
+  }
+  const center = fallbackCenter.value || 1
+  const padding = Math.max(center * 0.5, 0.0001)
+  return {
+    min: Math.max(0, center - padding),
+    max: center + padding
+  }
+})
+
+const axisMin = computed(() => axisRange.value.min)
+const axisMax = computed(() => axisRange.value.max)
+const boundaryLabel = computed(() =>
+  marketHasRange.value ? '市场' : '参考'
+)
+
+const axisTicks = computed(() => {
+  return [25, 50, 75].map((percent) => ({
+    percent: AXIS_START_PERCENT + (percent / 100) * AXIS_WIDTH_PERCENT,
+    value: axisMin.value + (percent / 100) * (axisMax.value - axisMin.value)
+  }))
+})
 
 function getMarkerPos(price) {
-  if (!hasRange.value) return 50
   const p = Number(price)
-  const min = Number(props.min)
-  const max = Number(props.max)
+  const min = axisMin.value
+  const max = axisMax.value
   if (!Number.isFinite(p) || max === min) return 50
-  const pos = ((p - min) / (max - min)) * 90 + 5
+  const pos =
+    ((p - min) / (max - min)) * AXIS_WIDTH_PERCENT + AXIS_START_PERCENT
   return Math.max(0, Math.min(pos, 100))
 }
 
 function getMarkerColor(price) {
-  if (!hasRange.value) return '#94a3b8'
   const p = Number(price)
-  const min = Number(props.min)
-  const max = Number(props.max)
+  const min = axisMin.value
+  const max = axisMax.value
   if (!Number.isFinite(p)) return '#94a3b8'
   const avg = (min + max) / 2
   if (p <= avg) return '#10b981'
   if (p > max * 0.8) return '#f59e0b'
   return '#6366f1'
 }
+
+function getValueLabelStyle(price) {
+  const pos = getMarkerPos(price)
+  const color = getMarkerColor(price)
+  if (pos < 12) {
+    return {
+      left: '0%',
+      color,
+      transform: 'translateX(0)'
+    }
+  }
+  if (pos > 88) {
+    return {
+      left: '100%',
+      color,
+      transform: 'translateX(-100%)'
+    }
+  }
+  return {
+    left: `${pos}%`,
+    color,
+    transform: 'translateX(-50%)'
+  }
+}
+
+function getPriceFromPointer(event) {
+  const el = rangeRef.value
+  if (!el) return null
+  const rect = el.getBoundingClientRect()
+  const percent = ((event.clientX - rect.left) / rect.width) * 100
+  const clamped = Math.max(
+    AXIS_START_PERCENT,
+    Math.min(percent, AXIS_END_PERCENT)
+  )
+  const ratio = (clamped - AXIS_START_PERCENT) / AXIS_WIDTH_PERCENT
+  const price =
+    axisMin.value + ratio * (axisMax.value - axisMin.value)
+  return Number(price.toFixed(4))
+}
+
+function emitPrice(price) {
+  if (!Number.isFinite(price)) return
+  emit('update:value', price)
+  emit('change', price)
+}
+
+function handleValueDrag(event) {
+  const price = getPriceFromPointer(event)
+  if (price !== null) emitPrice(price)
+}
+
+function stopValueDrag() {
+  if (!isDragging.value) return
+  isDragging.value = false
+  document.removeEventListener('pointermove', handleValueDrag)
+  document.removeEventListener('pointerup', stopValueDrag)
+}
+
+function startValueDrag(event) {
+  if (event?.button > 0) return
+  event.preventDefault()
+  isDragging.value = true
+  handleValueDrag(event)
+  document.addEventListener('pointermove', handleValueDrag)
+  document.addEventListener('pointerup', stopValueDrag)
+}
+
+function onTrackPointerDown(event) {
+  if (event.target?.closest('.range-ref-marker, .range-bar-label')) return
+  startValueDrag(event)
+}
+
+function onMarkerKeydown(event) {
+  const step = Math.max((axisMax.value - axisMin.value) / 100, 0.0001)
+  if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return
+  event.preventDefault()
+  const direction = event.key === 'ArrowRight' ? 1 : -1
+  const next = Number(props.value || 0) + step * direction
+  const clamped = Math.max(axisMin.value, Math.min(next, axisMax.value))
+  emitPrice(Number(clamped.toFixed(4)))
+}
+
+onBeforeUnmount(() => {
+  stopValueDrag()
+})
 
 function formatNumber(value) {
   const num = Number(value)
@@ -490,30 +635,87 @@ function formatNumber(value) {
 .range-bar-wrapper {
   position: relative;
   width: 100%;
-  height: 6px;
-  background: #e2e8f0;
+  height: 8px;
+  background: #cbd5e1;
   border-radius: 9999px;
-  margin-top: 40px;
-  margin-bottom: 28px;
+  cursor: pointer;
+  margin-top: 44px;
+  margin-bottom: 112px;
+  box-shadow: inset 0 0 0 1px rgba(100, 116, 139, 0.2);
+}
+
+.range-bar-wrapper.is-dragging {
+  cursor: ew-resize;
+  user-select: none;
 }
 
 .range-bar-zone {
   position: absolute;
   height: 100%;
-  background: #6366f1;
-  opacity: 0.1;
+  background: linear-gradient(90deg, #d8d2f0 0%, #8b7dd1 100%);
+  opacity: 0.42;
   border-radius: 9999px;
 }
 
 .range-bar-label {
   position: absolute;
   font-size: 10px;
-  color: #64748b;
-  bottom: -20px;
+  font-weight: 700;
+  color: #334155;
+  top: 34px;
   transform: translateX(-50%);
   white-space: nowrap;
   line-height: 1.2;
   text-align: center;
+}
+
+.range-boundary-marker {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #ffffff;
+  border-radius: 9999px;
+  background-color: #4a3eb0;
+  box-shadow: 0 0 0 2px rgba(74, 62, 176, 0.22),
+    0 2px 6px rgba(15, 23, 42, 0.2);
+  transform: translate(-50%, -50%);
+  z-index: 7;
+}
+
+.range-axis-tick {
+  position: absolute;
+  top: 50%;
+  width: 1px;
+  height: 12px;
+  background-color: #64748b;
+  opacity: 0.55;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+}
+
+.range-axis-tick span {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 600;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.range-boundary-min {
+  background-color: #059669;
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.22),
+    0 2px 6px rgba(15, 23, 42, 0.2);
+}
+
+.range-boundary-max {
+  background-color: #d97706;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.24),
+    0 2px 6px rgba(15, 23, 42, 0.2);
 }
 
 .range-bar-marker {
@@ -524,8 +726,15 @@ function formatNumber(value) {
   height: 14px;
   border-radius: 50%;
   border: 2px solid #fff;
+  cursor: ew-resize;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.15);
   z-index: 10;
+}
+
+.range-bar-marker:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(139, 125, 209, 0.34),
+    0 2px 8px rgba(15, 23, 42, 0.18);
 }
 
 .range-ref-marker {
@@ -561,8 +770,12 @@ function formatNumber(value) {
   position: absolute;
   font-size: 11px;
   font-weight: 700;
-  bottom: -24px;
-  transform: translateX(-50%);
+  top: 16px;
+  cursor: ew-resize;
+  max-width: min(220px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  z-index: 12;
 }
 </style>

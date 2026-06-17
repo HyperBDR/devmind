@@ -320,7 +320,10 @@ class LLMOpsPriceSheetSeedTests(TestCase):
     def test_seed_initial_price_sheet_imports_models_and_discounts(self):
         stats = seed_initial_price_sheet()
 
-        self.assertEqual(stats["providers"], 7)
+        # Only the price-sheet providers are counted as created.
+        # DeepSeek is created indirectly through the meta model
+        # canonical vendor lookup and does not bump this counter.
+        self.assertEqual(stats["providers"], 6)
         self.assertEqual(stats["models"], 113)
         openai = LLMProvider.objects.get(code="openai")
         model = LLMModel.objects.get(provider=openai, code="gpt-5.4-pro")
@@ -344,6 +347,12 @@ class LLMOpsPriceSheetSeedTests(TestCase):
         self.assertEqual(gpt_meta.family, "GPT-4o")
         self.assertEqual(gpt_meta.context_window, 128000)
         self.assertIn("vision", gpt_meta.capabilities["features"])
+        self.assertFalse(
+            LLMProvider.objects.filter(code="siliconflow").exists(),
+        )
+        deepseek = LLMProvider.objects.get(code="deepseek")
+        deepseek_meta = MetaModel.objects.get(code="deepseek-v3")
+        self.assertEqual(deepseek_meta.vendor, deepseek)
         self.assertEqual(
             ChannelModelPrice.objects.get(
                 channel__code="real-resource-platform",
@@ -354,23 +363,15 @@ class LLMOpsPriceSheetSeedTests(TestCase):
         source = qwen.source
         self.assertEqual(source.source_category, "supplier")
         self.assertEqual(source.channel.code, "real-resource-platform")
-        yunce_source = PriceCollectionSource.objects.get(
-            slug="yunce-aliyun-qwen-plus",
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(
+                slug="yunce-aliyun-qwen-plus",
+            ).exists(),
         )
-        yunce_price = ChannelModelPrice.objects.get(
-            channel__code="yunce-supplier-platform",
-            model=qwen,
-        )
-        self.assertEqual(yunce_source.channel.code, "yunce-supplier-platform")
-        self.assertEqual(yunce_source.source_type, "yunce")
-        self.assertEqual(yunce_price.price_source, yunce_source)
-        self.assertEqual(
-            ModelPriceItem.objects.filter(
-                model=qwen,
-                source=yunce_source,
-                is_current=True,
-            ).count(),
-            2,
+        self.assertFalse(
+            ChannelModelPrice.objects.filter(
+                channel__code="yunce-supplier-platform",
+            ).exists(),
         )
         deepseek_v3_sources = LLMModel.objects.filter(
             code="deepseek-v3",
@@ -379,6 +380,11 @@ class LLMOpsPriceSheetSeedTests(TestCase):
         self.assertIn("阿里云 表格价格目录", deepseek_v3_sources)
         self.assertIn("火山 表格价格目录", deepseek_v3_sources)
         self.assertIn("硅基流动 表格价格目录", deepseek_v3_sources)
+        siliconflow_source = PriceCollectionSource.objects.get(
+            slug="siliconflow-sheet",
+        )
+        self.assertEqual(siliconflow_source.provider, deepseek)
+        self.assertEqual(siliconflow_source.source_category, "supplier")
 
     def test_seed_initial_price_sheet_is_idempotent(self):
         seed_initial_price_sheet()
@@ -391,3 +397,40 @@ class LLMOpsPriceSheetSeedTests(TestCase):
         self.assertEqual(stats["yunce_supplier_prices"], 0)
         self.assertEqual(stats["yunce_supplier_price_items"], 0)
         self.assertEqual(LLMModel.objects.count(), 113)
+
+    def test_seed_rehomes_legacy_supplier_provider_rows(self):
+        siliconflow = LLMProvider.objects.create(
+            name="硅基流动",
+            code="siliconflow",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="硅基流动 表格价格目录",
+            slug="siliconflow-sheet",
+            provider=siliconflow,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        meta = MetaModel.objects.create(
+            name="DeepSeek V3",
+            code="deepseek-v3",
+            vendor=siliconflow,
+        )
+        legacy_model = LLMModel.objects.create(
+            provider=siliconflow,
+            source=source,
+            meta_model=meta,
+            name="DeepSeek V3",
+            code="deepseek-v3",
+        )
+
+        seed_initial_price_sheet()
+
+        self.assertFalse(
+            LLMProvider.objects.filter(code="siliconflow").exists(),
+        )
+        deepseek = LLMProvider.objects.get(code="deepseek")
+        source.refresh_from_db()
+        meta.refresh_from_db()
+        legacy_model.refresh_from_db()
+        self.assertEqual(source.provider, deepseek)
+        self.assertEqual(meta.vendor, deepseek)
+        self.assertEqual(legacy_model.provider, deepseek)

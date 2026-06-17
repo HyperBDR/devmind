@@ -53,7 +53,7 @@
           </div>
           <span class="text-sm text-slate-500">
             {{ filteredListingRows.length }} /
-            {{ rows.listingRows.value.length }}
+            {{ visibleListingRows.length }}
           </span>
           <button
             type="button"
@@ -90,6 +90,14 @@
             <button
               type="button"
               class="batch-action"
+              :disabled="!batchConfirmAction || savingListings"
+              @click="handleBatchAction('confirm')"
+            >
+              {{ batchConfirmLabel }}
+            </button>
+            <button
+              type="button"
+              class="batch-action"
               :disabled="!selectedOfflineRows.length || savingListings"
               @click="handleBatchAction('offline')"
             >
@@ -102,14 +110,6 @@
               @click="handleBatchAction('price')"
             >
               批量改价
-            </button>
-            <button
-              type="button"
-              class="batch-action batch-action-danger"
-              :disabled="!selectedRemoveRows.length || savingListings"
-              @click="handleBatchAction('remove')"
-            >
-              批量移除
             </button>
           </div>
         </div>
@@ -139,7 +139,7 @@
           <tbody>
             <tr
               v-for="row in filteredListingRows"
-              :key="row.model.id"
+              :key="row.status_listing?.id || 'model-' + row.model.id"
               class="cursor-default"
             >
               <td class="table-cell">
@@ -172,37 +172,35 @@
                   {{ row.provider_name || '—' }}
                 </p>
                 <p class="mt-0.5 text-[11px] text-slate-500">
-                  {{ row.lowest_option?.channel_name || '暂无供应' }}
+                  {{ row.status_listing?.channel_name || '未指定渠道' }}
                 </p>
               </td>
               <td class="table-cell">
-                <div class="flex flex-col gap-1 text-[12px] font-mono">
-                  <div
-                    class="flex justify-between rounded bg-emerald-50 px-2 py-1"
-                  >
-                    <span class="font-bold text-emerald-700">售价</span>
-                    <span class="text-emerald-700">
+                <div class="price-stack">
+                  <div class="price-line price-line-sale">
+                    <span class="price-label">售价</span>
+                    <span class="price-value">
                       In:
                       {{
                         rows.money(
-                          row.active_listings?.[0]
+                          row.status_listing
                             ?.retail_input_price_per_million,
-                          row.active_listings?.[0]?.currency
+                          row.status_listing?.currency
                         )
                       }}
                       · Out:
                       {{
                         rows.money(
-                          row.active_listings?.[0]
+                          row.status_listing
                             ?.retail_output_price_per_million,
-                          row.active_listings?.[0]?.currency
+                          row.status_listing?.currency
                         )
                       }}
                     </span>
                   </div>
-                  <div class="flex justify-between px-2 text-slate-500">
-                    <span>成本</span>
-                    <span>
+                  <div class="price-line price-line-cost">
+                    <span class="price-label">成本</span>
+                    <span class="price-value">
                       In:
                       {{
                         rows.money(
@@ -219,6 +217,33 @@
                       }}
                     </span>
                   </div>
+                  <div
+                    v-if="
+                      row.status_listing
+                        ?.retail_cache_input_price_per_million ||
+                      row.lowest_option?.cache_input_price_per_million
+                    "
+                    class="price-line price-line-cache"
+                  >
+                    <span class="price-label">Cache</span>
+                    <span class="price-value">
+                      售:
+                      {{
+                        rows.money(
+                          row.status_listing
+                            ?.retail_cache_input_price_per_million,
+                          row.status_listing?.currency
+                        )
+                      }}
+                      · 成:
+                      {{
+                        rows.money(
+                          row.lowest_option?.cache_input_price_per_million,
+                          row.lowest_option?.currency
+                        )
+                      }}
+                    </span>
+                  </div>
                 </div>
               </td>
               <td class="table-cell">
@@ -227,50 +252,17 @@
                 </span>
               </td>
               <td class="table-cell text-right">
-                <div class="inline-flex gap-2">
+                <div class="row-actions">
                   <button
-                    v-if="row.is_listed && !row.is_removed"
+                    v-for="action in rowStateActions(row)"
+                    :key="action.kind"
                     type="button"
                     class="row-link"
-                    @click="openWorkspace(row.model.id, 'edit')"
-                  >
-                    编辑挂售
-                  </button>
-                  <button
-                    v-else-if="!row.is_removed"
-                    type="button"
-                    class="row-link"
-                    @click="openWorkspace(row.model.id, 'create')"
-                  >
-                    去挂售
-                  </button>
-                  <button
-                    v-if="row.is_listed && !row.is_removed"
-                    type="button"
-                    class="row-link row-link-danger"
+                    :class="{ 'row-link-danger': action.danger }"
                     :disabled="savingListings"
-                    @click="emitAction(row.model.id, 'offline')"
+                    @click="emitAction(row.model.id, action.kind)"
                   >
-                    下架
-                  </button>
-                  <button
-                    v-if="row.is_removed"
-                    type="button"
-                    class="row-link"
-                    :disabled="savingListings"
-                    @click="emitAction(row.model.id, 'restore')"
-                  >
-                    恢复
-                  </button>
-                  <button
-                    v-else-if="!row.is_listed"
-                    type="button"
-                    class="row-link row-link-danger"
-                    :disabled="savingListings || row.is_listed"
-                    :title="row.is_listed ? '请先下架后再移除' : ''"
-                    @click="emitAction(row.model.id, 'remove')"
-                  >
-                    移除
+                    {{ action.label }}
                   </button>
                 </div>
               </td>
@@ -314,10 +306,6 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  listingExclusions: {
-    type: Array,
-    default: () => []
-  },
   summary: {
     type: Object,
     required: true
@@ -340,7 +328,12 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['refresh', 'action', 'open-workspace'])
+const emit = defineEmits([
+  'refresh',
+  'action',
+  'open-workspace',
+  'listings-updated'
+])
 const { showSuccess, showError } = useToast()
 
 const listingStatusFilter = ref('actionable')
@@ -352,9 +345,7 @@ const listingStatusOptions = [
   { label: '待处理', value: 'actionable' },
   { label: '全部', value: 'all' },
   { label: '已上架', value: 'listed' },
-  { label: '未上架', value: 'unlisted' },
-  { label: '可优化', value: 'not_lowest' },
-  { label: '已移除', value: 'removed' }
+  { label: '未上架', value: 'unlisted' }
 ]
 
 const unusedModelId = ref('')
@@ -367,7 +358,6 @@ const rows = useAgioneListingRows({
   modelsRef: toRef(props, 'models'),
   priceItemsRef: toRef(props, 'priceItems'),
   listingsRef: toRef(props, 'listings'),
-  listingExclusionsRef: toRef(props, 'listingExclusions'),
   summaryRef: toRef(props, 'summary'),
   displayCurrencyRef: toRef(props, 'displayCurrency'),
   exchangeRateRef: toRef(props, 'exchangeRate'),
@@ -379,31 +369,24 @@ const rows = useAgioneListingRows({
 
 const platformLabel = computed(() => props.agionePlatform?.name || '挂售平台')
 
+const visibleListingRows = computed(() =>
+  rows.listingRows.value.filter((row) => !isHiddenRow(row))
+)
+
 const filteredListingRows = computed(() => {
-  const all = rows.listingRows.value
+  const all = visibleListingRows.value
   const query = String(searchQuery.value || '')
     .trim()
     .toLowerCase()
   return all.filter((row) => {
     if (listingStatusFilter.value === 'actionable') {
-      if (
-        row.is_removed ||
-        (row.is_listed &&
-          (row.lowest_option || row.is_listed) &&
-          row.has_lowest_listing)
-      )
-        return false
+      if (!isActionableRow(row)) return false
     } else if (listingStatusFilter.value === 'listed') {
-      if (!row.is_listed || row.is_removed) return false
+      if (!row.is_listed) return false
     } else if (listingStatusFilter.value === 'unlisted') {
-      if (row.is_listed || row.is_removed) return false
-    } else if (listingStatusFilter.value === 'not_lowest') {
-      if (!row.is_listed || row.has_lowest_listing || row.is_removed)
-        return false
-    } else if (listingStatusFilter.value === 'removed') {
-      if (!row.is_removed) return false
+      if (row.is_listed) return false
     } else if (listingStatusFilter.value === 'all') {
-      // pass through
+      // visible rows only
     } else {
       return false
     }
@@ -411,6 +394,11 @@ const filteredListingRows = computed(() => {
     const name = String(rows.modelDisplayName(row.model) || '').toLowerCase()
     const code = String(row.model?.code || '').toLowerCase()
     return name.includes(query) || code.includes(query)
+  }).sort((left, right) => {
+    if (listingStatusFilter.value !== 'all') return 0
+    return String(left.model?.name || '').localeCompare(
+      String(right.model?.name || '')
+    )
   })
 })
 
@@ -425,12 +413,34 @@ const selectedRows = computed(() =>
 )
 
 const selectedOfflineRows = computed(() =>
-  selectedRows.value.filter((row) => row.is_listed && !row.is_removed)
+  selectedRows.value.filter(
+    (row) => row.workflow_status === 'online' && !isHiddenRow(row)
+  )
 )
 
-const selectedRemoveRows = computed(() =>
-  selectedRows.value.filter((row) => !row.is_listed && !row.is_removed)
-)
+const batchConfirmAction = computed(() => {
+  if (!selectedRows.value.length) return ''
+  const statuses = new Set(selectedRows.value.map((row) => row.workflow_status))
+  if (statuses.size !== 1) return ''
+  const status = Array.from(statuses)[0]
+  return (
+    {
+      pending_publish: 'confirm_publish',
+      pending_update: 'confirm_update',
+      pending_offline: 'confirm_offline'
+    }[status] || ''
+  )
+})
+
+const batchConfirmLabel = computed(() => {
+  return (
+    {
+      confirm_publish: '批量确认上架',
+      confirm_update: '批量确认更新',
+      confirm_offline: '批量确认下架'
+    }[batchConfirmAction.value] || '批量确认'
+  )
+})
 
 const allVisibleSelected = computed(
   () =>
@@ -441,11 +451,10 @@ const allVisibleSelected = computed(
 )
 
 const listingKpis = computed(() => {
-  const visibleRows = rows.listingRows.value.filter((row) => !row.is_removed)
+  const visibleRows = visibleListingRows.value
   const listedRows = visibleRows.filter((row) => row.is_listed)
-  const optimizedRows = listedRows.filter((row) => row.has_lowest_listing)
   const totalMargin = listedRows.reduce((sum, row) => {
-    const listing = row.active_listings?.[0]
+    const listing = row.status_listing
     if (!listing) return sum
     const inP = Number(listing.retail_input_price_per_million) || 0
     const inC = Number(row.lowest_option?.input_price_per_million) || 0
@@ -475,7 +484,7 @@ const listingKpis = computed(() => {
     {
       label: '已上架',
       value: listedRows.length,
-      hint: `${optimizedRows.length} 个处于最低价`,
+      hint: '外部平台当前在线',
       delta: listedRows.length > 0 ? '+ 上架中' : '待上架',
       deltaTone: listedRows.length > 0 ? 'text-emerald-600' : 'text-amber-600'
     },
@@ -489,7 +498,7 @@ const listingKpis = computed(() => {
     {
       label: '整体平均利润率',
       value: listedRows.length ? `${avgMargin}%` : '—',
-      hint: `${listedRows.length - optimizedRows.length} 个非最低价`,
+      hint: '按当前上架链路估算',
       delta: '参考',
       deltaTone: 'text-slate-400'
     }
@@ -505,28 +514,121 @@ const listingEmptyText = computed(() => {
     return '暂无需要处理的挂售模型。'
   if (listingStatusFilter.value === 'listed') return '当前没有已上架的模型。'
   if (listingStatusFilter.value === 'unlisted') return '当前没有可上架的模型。'
-  if (listingStatusFilter.value === 'not_lowest')
-    return '暂无需要优化的上架模型。'
-  if (listingStatusFilter.value === 'removed') return '暂无已移除模型。'
   return '没有符合筛选条件的模型。'
 })
 
+function isHiddenRow(row) {
+  return (
+    row.is_removed ||
+    row.workflow_status === 'deleted' ||
+    row.publish_status === 'deleted'
+  )
+}
+
+function isActionableRow(row) {
+  if (isHiddenRow(row)) return false
+  if (
+    [
+      'draft',
+      'pending_publish',
+      'update_draft',
+      'pending_update',
+      'pending_offline',
+      'offline_exception',
+      'offline',
+    ].includes(row.workflow_status)
+  ) {
+    return true
+  }
+  return false
+}
+
+function activeListingChannelLabel(row) {
+  const activeListings = row.active_listings || []
+  if (activeListings.length > 1) {
+    return `${activeListings.length} 条上架链路`
+  }
+  return row.lowest_option?.channel_name || '暂无供应'
+}
+
 function statusPillLabel(row) {
-  if (row.is_removed) return '已移除'
-  if (!row.is_listed) return '未上架'
-  if (row.has_lowest_listing) return '在售 · 最低'
-  return '可优化'
+  const labels = {
+    draft: '草稿',
+    pending_publish: '待发布',
+    online: '已上架',
+    update_draft: '更新草稿',
+    pending_update: '待更新',
+    pending_offline: '待下架',
+    offline_exception: '下架异常',
+    offline: '已下架',
+    deleted: '已失效'
+  }
+  return labels[row.workflow_status] || '未上架'
 }
 
 function statusPillTone(row) {
-  if (row.is_removed) return 'tone-muted'
-  if (!row.is_listed) return 'tone-neutral'
-  if (row.has_lowest_listing) return 'tone-success'
+  if (isHiddenRow(row)) return 'tone-muted'
+  if (row.workflow_status === 'online') {
+    return 'tone-success'
+  }
+  if (
+    ['pending_publish', 'pending_update', 'pending_offline'].includes(
+      row.workflow_status
+    )
+  )
+    return 'tone-warn'
+  if (row.workflow_status === 'offline_exception') return 'tone-danger'
+  if (['offline', 'deleted'].includes(row.workflow_status))
+    return 'tone-muted'
   return 'tone-warn'
 }
 
+function rowStateActions(row) {
+  const status = row.workflow_status || 'draft'
+  const actions = {
+    draft: [
+      { label: '继续编辑', kind: 'edit' },
+      { label: '确认提交', kind: 'submit' },
+      { label: '删除数据', kind: 'delete', danger: true }
+    ],
+    pending_publish: [
+      { label: '撤回申请', kind: 'withdraw' },
+      { label: '确认上架', kind: 'confirm_publish' }
+    ],
+    online: [
+      { label: '发起编辑', kind: 'start_edit' },
+      { label: '发起下架', kind: 'request_offline', danger: true },
+      { label: '直接下架', kind: 'direct_offline', danger: true }
+    ],
+    update_draft: [
+      { label: '继续编辑', kind: 'edit' },
+      { label: '确认提交', kind: 'submit' },
+      { label: '放弃修改', kind: 'abandon_update' }
+    ],
+    pending_update: [
+      { label: '撤回修改', kind: 'withdraw' },
+      { label: '确认更新', kind: 'confirm_update' }
+    ],
+    pending_offline: [
+      { label: '撤回下架', kind: 'withdraw' },
+      { label: '确认下架', kind: 'confirm_offline', danger: true },
+      { label: '驳回下架', kind: 'reject_offline' },
+      { label: '标记异常', kind: 'mark_offline_exception', danger: true }
+    ],
+    offline_exception: [
+      { label: '确认下架', kind: 'confirm_offline', danger: true }
+    ],
+    offline: [
+      { label: '重新发布', kind: 'republish' },
+      { label: '删除数据', kind: 'delete', danger: true }
+    ],
+    deleted: []
+  }
+  return actions[status] || [{ label: '去挂售', kind: 'create' }]
+}
+
 function isSelectable(row) {
-  return !row.is_removed
+  return !isHiddenRow(row)
 }
 
 function setSelectedModelIds(ids) {
@@ -552,11 +654,31 @@ function toggleAllVisible(event) {
 }
 
 function emitAction(modelId, kind) {
-  if (kind === 'remove' || kind === 'restore' || kind === 'offline') {
+  if (
+    kind === 'direct_offline' ||
+    isWorkflowTransition(kind)
+  ) {
     handleDirectAction(modelId, kind)
     return
   }
   emit('action', { modelId, kind })
+}
+
+function isWorkflowTransition(kind) {
+  return [
+    'submit',
+    'withdraw',
+    'confirm_publish',
+    'start_edit',
+    'abandon_update',
+    'confirm_update',
+    'request_offline',
+    'confirm_offline',
+    'reject_offline',
+    'mark_offline_exception',
+    'republish',
+    'delete'
+  ].includes(kind)
 }
 
 function openWorkspace(modelId, kind) {
@@ -596,32 +718,27 @@ async function handleDirectAction(modelId, kind) {
   if (!props.agionePlatform) return
   savingListings.value = true
   try {
-    if (kind === 'remove') {
-      if (
-        !confirm(
-          '确认从当前挂售平台列表移除该模型？\n\n不会删除模型、渠道价格或历史记录，仅在该挂售平台上不展示。'
-        )
-      )
-        return
-      await llmOpsApi.bulkRemoveResaleListingModels({
-        platform: props.agionePlatform.id,
-        models: [modelId],
-        reason: 'Removed from listing workbench'
-      })
-      showSuccess('已移除')
-    } else if (kind === 'offline') {
-      if (!confirm('确认下架该模型在当前平台的所有活跃挂售渠道？')) return
+    if (kind === 'direct_offline') {
+      if (!confirm(workflowConfirmText(kind))) return
       await llmOpsApi.bulkOfflineResaleListings({
         platform: props.agionePlatform.id,
         models: [modelId]
       })
-      showSuccess('已下架')
-    } else if (kind === 'restore') {
-      await llmOpsApi.bulkRestoreResaleListingModels({
+      showSuccess(workflowSuccessText(kind))
+    } else if (isWorkflowTransition(kind)) {
+      if (['request_offline', 'confirm_offline', 'delete'].includes(kind)) {
+        if (!confirm(workflowConfirmText(kind))) return
+      }
+      const response = await llmOpsApi.bulkTransitionResaleListings({
         platform: props.agionePlatform.id,
-        models: [modelId]
+        models: [modelId],
+        action: kind
       })
-      showSuccess('已恢复')
+      emitUpdatedListings(response)
+      showSuccess(workflowSuccessText(kind))
+      if (kind === 'start_edit') {
+        emit('action', { modelId, kind: 'edit' })
+      }
     }
     emit('refresh')
   } catch (error) {
@@ -640,15 +757,17 @@ async function handleBatchAction(kind) {
   if (!props.agionePlatform || savingListings.value) return
   let targetRows = []
   if (kind === 'offline') targetRows = selectedOfflineRows.value
-  else if (kind === 'remove') targetRows = selectedRemoveRows.value
   else if (kind === 'price') targetRows = selectedRows.value
+  else if (kind === 'confirm' && batchConfirmAction.value) {
+    targetRows = selectedRows.value
+  }
   if (!targetRows.length) return
   const modelIds = targetRows.map((row) => row.model.id)
   const confirmMessage =
     kind === 'offline'
-      ? `确认批量下架 ${modelIds.length} 个模型？`
-      : kind === 'remove'
-        ? `确认批量移除 ${modelIds.length} 个未上架模型？`
+      ? `确认批量发起下架 ${modelIds.length} 个模型？`
+      : kind === 'confirm'
+        ? `${batchConfirmLabel.value} ${modelIds.length} 个模型？`
         : `确认对 ${modelIds.length} 个模型进入批量改价工作台？`
   if (!confirm(confirmMessage)) return
   if (kind === 'price') {
@@ -658,18 +777,21 @@ async function handleBatchAction(kind) {
   savingListings.value = true
   try {
     if (kind === 'offline') {
-      await llmOpsApi.bulkOfflineResaleListings({
-        platform: props.agionePlatform.id,
-        models: modelIds
-      })
-      showSuccess('已批量下架')
-    } else {
-      await llmOpsApi.bulkRemoveResaleListingModels({
+      const response = await llmOpsApi.bulkTransitionResaleListings({
         platform: props.agionePlatform.id,
         models: modelIds,
-        reason: 'Batch removed from listing workbench'
+        action: 'request_offline'
       })
-      showSuccess('已批量移除')
+      emitUpdatedListings(response)
+      showSuccess('已批量发起下架')
+    } else if (kind === 'confirm') {
+      const response = await llmOpsApi.bulkTransitionResaleListings({
+        platform: props.agionePlatform.id,
+        models: modelIds,
+        action: batchConfirmAction.value
+      })
+      emitUpdatedListings(response)
+      showSuccess(batchConfirmLabel.value.replace('批量', '已批量'))
     }
     setSelectedModelIds(
       Array.from(selectedModelIds.value).filter(
@@ -689,10 +811,44 @@ async function handleBatchAction(kind) {
   }
 }
 
+function emitUpdatedListings(response) {
+  const data = response?.data?.data || response?.data || []
+  emit('listings-updated', Array.isArray(data.results) ? data.results : data)
+}
+
 function actionErrorLabel(kind) {
-  if (kind === 'remove') return '移除失败'
-  if (kind === 'offline') return '下架失败'
-  return '恢复失败'
+  if (kind === 'direct_offline') return '直接下架失败'
+  if (isWorkflowTransition(kind)) return '状态流转失败'
+  return '操作失败'
+}
+
+function workflowConfirmText(kind) {
+  const messages = {
+    request_offline: '确认发起下架申请？外部平台仍保持已上架，等待确认下架。',
+    confirm_offline: '确认外部平台已完成下架？该模型将进入已下架状态。',
+    direct_offline: '确认直接下架？该操作表示外部平台已同步下线。',
+    delete: '确认删除该挂售数据？删除后将从常规业务列表隐藏。'
+  }
+  return messages[kind] || '确认执行该状态操作？'
+}
+
+function workflowSuccessText(kind) {
+  const messages = {
+    submit: '已提交',
+    withdraw: '已撤回',
+    confirm_publish: '已确认上架',
+    start_edit: '已进入更新草稿',
+    abandon_update: '已放弃修改',
+    confirm_update: '已确认更新',
+    request_offline: '已发起下架',
+    confirm_offline: '已确认下架',
+    direct_offline: '已直接下架',
+    reject_offline: '已驳回下架',
+    mark_offline_exception: '已标记异常',
+    republish: '已重新提交发布',
+    delete: '已删除'
+  }
+  return messages[kind] || '状态已更新'
 }
 </script>
 
@@ -1082,7 +1238,7 @@ function actionErrorLabel(kind) {
 
 .table-toolbar {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 0.75rem;
   border-bottom-width: 1px;
   border-color: #e2e8f0;
@@ -1090,12 +1246,12 @@ function actionErrorLabel(kind) {
   padding-right: 1rem;
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
-  flex-direction: row;
   align-items: center;
   justify-content: space-between;
 }
 
 .data-table {
+  width: 100%;
   --tw-divide-y-reverse: 0;
   border-top-width: calc(1px * calc(1 - var(--tw-divide-y-reverse)));
   border-bottom-width: calc(1px * var(--tw-divide-y-reverse));
@@ -1137,6 +1293,47 @@ function actionErrorLabel(kind) {
   color: #475569;
 }
 
+.price-stack {
+  display: grid;
+  gap: 0.375rem;
+  min-width: 18rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+
+.price-line {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(13rem, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 1.75rem;
+  padding: 0.25rem 0.625rem;
+}
+
+.price-line-sale {
+  border-radius: 9999px;
+  background-color: #ecfdf5;
+  color: #047857;
+}
+
+.price-line-cost {
+  color: #64748b;
+}
+
+.price-line-cache {
+  color: #7c3aed;
+}
+
+.price-label {
+  font-weight: 700;
+}
+
+.price-value {
+  text-align: right;
+  font-weight: 600;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -1168,7 +1365,16 @@ function actionErrorLabel(kind) {
   color: #475569;
 }
 
+.status-pill.tone-danger {
+  background-color: #fff1f2;
+  color: #be123c;
+}
+
 .status-filter-chip {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: center;
   border-radius: 9999px;
   border-width: 1px;
   border-color: #e2e8f0;
@@ -1177,6 +1383,9 @@ function actionErrorLabel(kind) {
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
   font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
   color: #475569;
   transition-property: color, background-color, border-color, box-shadow;
   transition-duration: 150ms;
@@ -1194,11 +1403,16 @@ function actionErrorLabel(kind) {
   display: inline-flex;
   height: 2.25rem;
   align-items: center;
+  justify-content: center;
+  min-width: 6.25rem;
   border-radius: 8px;
   background-color: #5f4ecf;
   padding-left: 0.75rem;
   padding-right: 0.75rem;
   font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
   transition-property: color, background-color, border-color, box-shadow;
   transition-duration: 150ms;
@@ -1209,12 +1423,17 @@ function actionErrorLabel(kind) {
   display: inline-flex;
   height: 2rem;
   align-items: center;
+  justify-content: center;
+  min-width: 4.75rem;
   border-radius: 6px;
   border-width: 1px;
   border-color: #e2e8f0;
   padding-left: 0.75rem;
   padding-right: 0.75rem;
   font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
   color: #475569;
   transition-property: color, background-color, border-color, box-shadow;
   transition-duration: 150ms;
@@ -1242,12 +1461,17 @@ function actionErrorLabel(kind) {
   display: inline-flex;
   height: 1.75rem;
   align-items: center;
+  justify-content: center;
+  min-width: 3.75rem;
   border-radius: 6px;
   border-width: 1px;
   border-color: #e2e8f0;
   padding-left: 0.625rem;
   padding-right: 0.625rem;
   font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
   color: #475569;
   transition-property: color, background-color, border-color, box-shadow;
   transition-duration: 150ms;
@@ -1260,5 +1484,13 @@ function actionErrorLabel(kind) {
   color: #e11d48;
   border-color: #fecdd3;
   background-color: #fff1f2;
+}
+
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  min-width: 10rem;
 }
 </style>

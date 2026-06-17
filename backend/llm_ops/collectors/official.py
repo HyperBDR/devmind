@@ -564,12 +564,21 @@ OFFICIAL_PROVIDER_CONFIGS = {
         source_url="https://www.volcengine.com/docs/82379/1099320",
         currency="CNY",
         models=(
+            # The volcengine catalog labels the R1 0528 release
+            # as "DeepSeek-R1 250528" while the aliyun catalog
+            # uses "deepseek-r1-0528". They describe the same
+            # model and share the same price, so the display
+            # name is unified on the canonical "DeepSeek R1
+            # 0528" spelling. ``ensure_meta_model_for_price_data``
+            # in turn reuses the existing canonical row for
+            # ``deepseek-r1-0528`` (matched by name) rather
+            # than spawning a parallel row.
             OfficialPriceSpec(
                 model_id="deepseek-r1-250528",
-                aliases=("deepseek-r1-250528",),
+                aliases=("deepseek-r1-250528", "deepseek-r1-0528"),
                 input_per_million=Decimal("4"),
                 output_per_million=Decimal("16"),
-                display_name="DeepSeek R1 250528",
+                display_name="DeepSeek R1 0528",
             ),
         ),
     ),

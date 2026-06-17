@@ -47,7 +47,7 @@
           <thead>
             <tr>
               <th class="table-head">价格源</th>
-              <th class="table-head">关联对象</th>
+              <th class="table-head">来源归属</th>
               <th class="table-head">获取方式</th>
               <th class="table-head">状态</th>
               <th class="table-head">最近采集</th>
@@ -625,18 +625,18 @@ function sourceRelation(source) {
   if (source.provider_name) {
     return {
       name: source.provider_name,
-      hint: '模型厂商'
+      hint: '元模型厂商 / 原厂来源'
     }
   }
   if (source.channel_name) {
     return {
       name: source.channel_name,
-      hint: '转发渠道 / 供应商'
+      hint: '转发渠道 / 供货来源'
     }
   }
   return {
     name: '未绑定',
-    hint: '需要确认归属或渠道'
+    hint: '需要确认来源归属'
   }
 }
 

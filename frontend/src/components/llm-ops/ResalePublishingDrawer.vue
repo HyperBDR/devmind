@@ -59,10 +59,10 @@
                 <button
                   type="button"
                   class="btn-secondary"
-                  :disabled="saving"
+                  :disabled="!canDraft || saving"
                   @click="handleSaveDraft"
                 >
-                  暂存草稿
+                  保存草稿
                 </button>
                 <button
                   type="button"
@@ -70,17 +70,20 @@
                   :disabled="!canPublish || saving"
                   @click="handlePublish"
                 >
-                  {{ saving ? '发布中…' : '确认并发布上架' }}
+                  {{ saving ? '提交中…' : '提交发布申请' }}
                 </button>
               </div>
             </header>
 
             <div class="flex-1 overflow-y-auto px-5 py-5">
               <ResalePublishingWorkspace
+                :key="workspaceKey"
                 ref="workspaceRef"
+                :initial-model-id="initialModelId"
                 :agione-platform="agionePlatform"
                 :platforms="platforms"
                 :providers="providers"
+                :meta-models="metaModels"
                 :models="models"
                 :channels="channels"
                 :procurement-rows="procurementRows"
@@ -109,6 +112,10 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  initialModelId: {
+    type: [String, Number],
+    default: null
+  },
   agionePlatform: {
     type: Object,
     default: null
@@ -118,6 +125,10 @@ const props = defineProps({
     required: true
   },
   providers: {
+    type: Array,
+    required: true
+  },
+  metaModels: {
     type: Array,
     required: true
   },
@@ -156,11 +167,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:open', 'saved', 'draft'])
-const { showSuccess, showError, showInfo } = useToast()
+const { showError } = useToast()
 
 const workspaceRef = ref(null)
 const saving = ref(false)
 const latestPayload = ref(null)
+const workspaceKey = computed(() =>
+  props.open ? `open-${props.initialModelId || 'new'}` : 'closed'
+)
 
 const canPublish = computed(() => {
   if (!latestPayload.value) return false
@@ -176,6 +190,10 @@ const canPublish = computed(() => {
   )
 })
 
+const canDraft = computed(() => {
+  return Boolean(latestPayload.value?.platformId && latestPayload.value?.listings?.length)
+})
+
 function onWorkspaceChange(payload) {
   latestPayload.value = payload
 }
@@ -184,14 +202,17 @@ function tryClose() {
   emit('update:open', false)
 }
 
-function handleSaveDraft() {
-  if (!latestPayload.value?.listings?.length) {
-    showInfo('当前没有可暂存的选择')
-    return
+async function handleSaveDraft() {
+  if (!canDraft.value) return
+  saving.value = true
+  try {
+    emit('draft', latestPayload.value)
+    tryClose()
+  } catch (error) {
+    showError(error?.message || '保存失败')
+  } finally {
+    saving.value = false
   }
-  emit('draft', latestPayload.value)
-  showSuccess('已暂存草稿，可稍后继续')
-  tryClose()
 }
 
 async function handlePublish() {
@@ -199,10 +220,9 @@ async function handlePublish() {
   saving.value = true
   try {
     emit('saved', latestPayload.value)
-    showSuccess('上架请求已提交，正在同步到挂售平台')
     tryClose()
   } catch (error) {
-    showError(error?.message || '发布失败')
+    showError(error?.message || '提交失败')
   } finally {
     saving.value = false
   }
@@ -604,12 +624,12 @@ watch(
 }
 
 .publishing-drawer-panel {
-  width: min(100vw, 960px);
+  width: min(100vw, 1240px);
 }
 
 @media (min-width: 1280px) {
   .publishing-drawer-panel {
-    width: min(80vw, 1200px);
+    width: min(96vw, 1560px);
   }
 }
 

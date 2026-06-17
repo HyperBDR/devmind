@@ -11,9 +11,11 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .collection_services import (
+    sync_meta_models_from_models_dev,
     sync_official_provider_model_prices,
     sync_yunce_model_prices,
 )
+from .constants import SUPPLIER_SOURCE_VENDOR_ALIASES
 from .models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
@@ -74,12 +76,56 @@ DEFAULT_OUTPUT_TOKENS = 15_000_000
 DISPLAY_PRICE_FIELDS = (
     "input_price_per_million",
     "output_price_per_million",
+    "cache_input_price_per_million",
     "image_output_price_per_image",
     "audio_input_price_per_second",
     "audio_output_price_per_second",
     "video_input_price_per_second",
     "video_output_price_per_second",
+    "base_input_price_per_million",
+    "base_output_price_per_million",
+    "base_cache_input_price_per_million",
+    "base_image_output_price_per_image",
+    "base_audio_input_price_per_second",
+    "base_audio_output_price_per_second",
+    "base_video_input_price_per_second",
+    "base_video_output_price_per_second",
     "estimated_cost",
+)
+
+COST_BASIS_FIELDS = (
+    (
+        "input_price_per_million",
+        "input_per_million",
+        "custom_input_price_per_million",
+    ),
+    (
+        "output_price_per_million",
+        "output_per_million",
+        "custom_output_price_per_million",
+    ),
+    ("cache_input_price_per_million", "cache_input_per_million", None),
+    ("image_output_price_per_image", "image_output_per_image", None),
+    (
+        "audio_input_price_per_second",
+        "audio_input_per_second",
+        "custom_audio_input_price_per_second",
+    ),
+    (
+        "audio_output_price_per_second",
+        "audio_output_per_second",
+        "custom_audio_output_price_per_second",
+    ),
+    (
+        "video_input_price_per_second",
+        "video_input_per_second",
+        "custom_video_input_price_per_second",
+    ),
+    (
+        "video_output_price_per_second",
+        "video_output_per_second",
+        "custom_video_output_price_per_second",
+    ),
 )
 
 
@@ -228,22 +274,50 @@ class LLMProviderViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         return LLMProvider.objects.annotate(
             model_count=Count("models"),
+        ).exclude(
+            code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
         ).order_by("name", "id")
 
 
 class MetaModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
-    """CRUD API for canonical model identities."""
+    """CRUD API for canonical model identities.
+
+    Every meta model must belong to a real model vendor. The
+    list and detail entry points backfill orphan rows by
+    resolving the canonical vendor from the model code, so the
+    API never exposes an "unbound" meta model.
+    """
 
     serializer_class = MetaModelSerializer
 
     def get_queryset(self):
         queryset = MetaModel.objects.select_related("vendor").annotate(
             provider_price_count=Count("provider_prices"),
+        ).exclude(
+            vendor__code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
         )
         vendor = self.request.query_params.get("vendor")
         if vendor:
             queryset = queryset.filter(vendor_id=vendor)
         return queryset.order_by("name", "id")
+
+    def list(self, request, *args, **kwargs):
+        from .seed_data import resolve_orphan_meta_models
+
+        resolve_orphan_meta_models()
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        from .seed_data import resolve_orphan_meta_models
+
+        resolve_orphan_meta_models()
+        return super().retrieve(request, *args, **kwargs)
+
+    @action(detail=False, methods=["post"], url_path="sync")
+    def sync(self, request):
+        """Refresh meta models from the public models.dev API."""
+        stats = sync_meta_models_from_models_dev()
+        return Response(stats, status=status.HTTP_200_OK)
 
 
 class LLMModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
@@ -552,11 +626,16 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
         return queryset.order_by("platform__name", "model__name", "id")
 
     def perform_create(self, serializer):
-        listing = serializer.save()
+        listing = serializer.save(
+            publish_status=ResaleListing.PUBLISH_NONE,
+            workflow_status=ResaleListing.WORKFLOW_DRAFT,
+            is_active=False,
+        )
         record_resale_listing_price_history(listing)
 
     def perform_update(self, serializer):
-        listing = serializer.save()
+        status_defaults = _listing_draft_status(serializer.instance)
+        listing = serializer.save(**status_defaults)
         record_resale_listing_price_history(listing)
 
     @action(detail=False, methods=["post"], url_path="bulk-upsert")
@@ -597,6 +676,60 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     if key not in {"platform", "model", "channel"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
+                defaults.update(_listing_submit_status(existing))
+                listing, _ = ResaleListing.objects.update_or_create(
+                    **lookup,
+                    defaults=defaults,
+                )
+                ResaleListingExclusion.objects.filter(
+                    platform=data["platform"],
+                    model=data["model"],
+                ).delete()
+                record_resale_listing_price_history(listing)
+                listings.append(listing)
+
+        output = self.get_serializer(listings, many=True)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="bulk-draft")
+    def bulk_draft(self, request):
+        """Save resale listing drafts in bulk."""
+
+        items = request.data.get("items", [])
+        if not isinstance(items, list):
+            return Response(
+                {"detail": "items must be a list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        listings = []
+        with transaction.atomic():
+            for item in items:
+                channel_id = item.get("channel") or None
+                existing = ResaleListing.objects.filter(
+                    platform_id=item.get("platform"),
+                    model_id=item.get("model"),
+                    channel_id=channel_id,
+                ).first()
+                serializer = self.get_serializer(
+                    existing,
+                    data=item,
+                    partial=existing is not None,
+                )
+                serializer.is_valid(raise_exception=True)
+                data = serializer.validated_data
+                lookup = {
+                    "platform": data["platform"],
+                    "model": data["model"],
+                    "channel": data.get("channel"),
+                }
+                defaults = {
+                    key: value
+                    for key, value in data.items()
+                    if key not in {"platform", "model", "channel"}
+                }
+                defaults["meta_model"] = data["model"].meta_model
+                defaults.update(_listing_draft_status(existing))
                 listing, _ = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
@@ -649,9 +782,18 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     platform=data["platform"],
                     model=data["model"],
                     is_active=True,
-                ).update(is_active=False)
+                ).update(
+                    is_active=False,
+                    publish_status=ResaleListing.PUBLISH_OFFLINE,
+                    workflow_status=ResaleListing.WORKFLOW_OFFLINE,
+                )
                 for active_listing in active_listings:
-                    active_listing.is_active = False
+                    _set_listing_state(
+                        active_listing,
+                        publish_status=ResaleListing.PUBLISH_OFFLINE,
+                        workflow_status=ResaleListing.WORKFLOW_OFFLINE,
+                        is_active=False,
+                    )
                     record_resale_listing_price_history(active_listing)
                 lookup = {
                     "platform": data["platform"],
@@ -664,6 +806,7 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     if key not in {"platform", "model", "channel"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
+                defaults.update(_listing_submit_status(existing))
                 listing, _ = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
@@ -672,6 +815,63 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     platform=data["platform"],
                     model=data["model"],
                 ).delete()
+                record_resale_listing_price_history(listing)
+                listings.append(listing)
+
+        output = self.get_serializer(listings, many=True)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="bulk-transition")
+    def bulk_transition(self, request):
+        """Apply workflow transitions for selected platform/model pairs."""
+
+        platform_id = request.data.get("platform")
+        model_ids = request.data.get("models", [])
+        action_name = request.data.get("action")
+        if not platform_id:
+            return Response(
+                {"detail": "platform is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not isinstance(model_ids, list) or not model_ids:
+            return Response(
+                {"detail": "models must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not action_name:
+            return Response(
+                {"detail": "action is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        listings = []
+        with transaction.atomic():
+            queryset = ResaleListing.objects.filter(
+                platform_id=platform_id,
+                model_id__in=model_ids,
+            ).order_by("model_id", "-is_active", "-updated_at", "-id")
+            seen = set()
+            for listing in queryset:
+                if listing.model_id in seen:
+                    continue
+                if not _is_transition_candidate(listing, action_name):
+                    candidate = queryset.filter(
+                        model_id=listing.model_id,
+                        workflow_status__in=_transition_source_workflows(
+                            action_name
+                        ),
+                    ).first()
+                    if candidate:
+                        listing = candidate
+                seen.add(listing.model_id)
+                try:
+                    _apply_resale_listing_transition(listing, action_name)
+                except ValueError as exc:
+                    return Response(
+                        {"detail": str(exc)},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                listing.save()
                 record_resale_listing_price_history(listing)
                 listings.append(listing)
 
@@ -707,9 +907,18 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                 platform_id=platform_id,
                 model_id__in=model_ids,
                 is_active=True,
-            ).update(is_active=False)
+            ).update(
+                is_active=False,
+                publish_status=ResaleListing.PUBLISH_OFFLINE,
+                workflow_status=ResaleListing.WORKFLOW_OFFLINE,
+            )
             for listing in listings:
-                listing.is_active = False
+                _set_listing_state(
+                    listing,
+                    publish_status=ResaleListing.PUBLISH_OFFLINE,
+                    workflow_status=ResaleListing.WORKFLOW_OFFLINE,
+                    is_active=False,
+                )
                 record_resale_listing_price_history(listing)
 
         output = self.get_serializer(listings, many=True)
@@ -854,6 +1063,304 @@ class UsageReconciliationRecordViewSet(
 
 def _as_float(value) -> float:
     return float(value or Decimal("0"))
+
+
+def _listing_submit_status(existing: ResaleListing | None) -> dict:
+    """Return dual-state defaults for a business submit action."""
+
+    if existing is None:
+        return {
+            "publish_status": ResaleListing.PUBLISH_NONE,
+            "workflow_status": ResaleListing.WORKFLOW_PENDING_PUBLISH,
+            "is_active": False,
+        }
+
+    _allowed_submit_workflows = {
+        ResaleListing.WORKFLOW_DRAFT,
+        ResaleListing.WORKFLOW_ONLINE,
+        ResaleListing.WORKFLOW_UPDATE_DRAFT,
+    }
+    if existing.workflow_status not in _allowed_submit_workflows:
+        raise ValueError(
+            f"Cannot submit from {existing.workflow_status}."
+        )
+
+    if existing.publish_status == ResaleListing.PUBLISH_ONLINE:
+        return {
+            "publish_status": ResaleListing.PUBLISH_ONLINE,
+            "workflow_status": ResaleListing.WORKFLOW_PENDING_UPDATE,
+            "is_active": True,
+        }
+    return {
+        "publish_status": ResaleListing.PUBLISH_NONE,
+        "workflow_status": ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        "is_active": False,
+    }
+
+
+def _listing_draft_status(existing: ResaleListing | None) -> dict:
+    """Return dual-state defaults for a business draft save."""
+
+    if existing is None:
+        return {
+            "publish_status": ResaleListing.PUBLISH_NONE,
+            "workflow_status": ResaleListing.WORKFLOW_DRAFT,
+            "is_active": False,
+        }
+
+    _allowed_draft_workflows = {
+        ResaleListing.WORKFLOW_DRAFT,
+        ResaleListing.WORKFLOW_ONLINE,
+        ResaleListing.WORKFLOW_UPDATE_DRAFT,
+    }
+    if existing.workflow_status not in _allowed_draft_workflows:
+        raise ValueError(
+            f"Cannot save draft from {existing.workflow_status}."
+        )
+
+    if existing.publish_status == ResaleListing.PUBLISH_ONLINE:
+        return {
+            "publish_status": ResaleListing.PUBLISH_ONLINE,
+            "workflow_status": ResaleListing.WORKFLOW_UPDATE_DRAFT,
+            "is_active": True,
+        }
+    return {
+        "publish_status": ResaleListing.PUBLISH_NONE,
+        "workflow_status": ResaleListing.WORKFLOW_DRAFT,
+        "is_active": False,
+    }
+
+
+def _set_listing_state(
+    listing: ResaleListing,
+    *,
+    publish_status: str,
+    workflow_status: str,
+    is_active: bool,
+) -> None:
+    listing.publish_status = publish_status
+    listing.workflow_status = workflow_status
+    listing.is_active = is_active
+
+
+def _invalid_transition(action_name: str, listing: ResaleListing):
+    return (
+        f"Cannot apply {action_name} from "
+        f"{listing.workflow_status}/{listing.publish_status}."
+    )
+
+
+def _transition_source_workflows(action_name: str) -> tuple[str, ...]:
+    """Return workflow states accepted by a transition action."""
+    workflows = {
+        "withdraw": (
+            ResaleListing.WORKFLOW_PENDING_PUBLISH,
+            ResaleListing.WORKFLOW_PENDING_UPDATE,
+            ResaleListing.WORKFLOW_PENDING_OFFLINE,
+        ),
+        "submit": (
+            ResaleListing.WORKFLOW_DRAFT,
+            ResaleListing.WORKFLOW_UPDATE_DRAFT,
+        ),
+        "confirm_publish": (ResaleListing.WORKFLOW_PENDING_PUBLISH,),
+        "start_edit": (ResaleListing.WORKFLOW_ONLINE,),
+        "abandon_update": (ResaleListing.WORKFLOW_UPDATE_DRAFT,),
+        "confirm_update": (ResaleListing.WORKFLOW_PENDING_UPDATE,),
+        "request_offline": (ResaleListing.WORKFLOW_ONLINE,),
+        "confirm_offline": (
+            ResaleListing.WORKFLOW_PENDING_OFFLINE,
+            ResaleListing.WORKFLOW_OFFLINE_EXCEPTION,
+        ),
+        "reject_offline": (ResaleListing.WORKFLOW_PENDING_OFFLINE,),
+        "mark_offline_exception": (ResaleListing.WORKFLOW_PENDING_OFFLINE,),
+        "republish": (ResaleListing.WORKFLOW_OFFLINE,),
+        "delete": (
+            ResaleListing.WORKFLOW_DRAFT,
+            ResaleListing.WORKFLOW_OFFLINE,
+        ),
+    }
+    return workflows.get(action_name, ())
+
+
+def _is_transition_candidate(
+    listing: ResaleListing,
+    action_name: str,
+) -> bool:
+    return listing.workflow_status in _transition_source_workflows(action_name)
+
+
+def _apply_resale_listing_transition(
+    listing: ResaleListing,
+    action_name: str,
+) -> None:
+    """Apply the dual-state transition matrix from state.html."""
+    publish = listing.publish_status
+    workflow = listing.workflow_status
+    if action_name == "withdraw":
+        if workflow == ResaleListing.WORKFLOW_PENDING_PUBLISH:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_NONE,
+                workflow_status=ResaleListing.WORKFLOW_DRAFT,
+                is_active=False,
+            )
+            return
+        if workflow == ResaleListing.WORKFLOW_PENDING_UPDATE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_UPDATE_DRAFT,
+                is_active=True,
+            )
+            return
+        if workflow == ResaleListing.WORKFLOW_PENDING_OFFLINE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_ONLINE,
+                is_active=True,
+            )
+            return
+    elif action_name == "submit":
+        if workflow == ResaleListing.WORKFLOW_DRAFT:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_NONE,
+                workflow_status=ResaleListing.WORKFLOW_PENDING_PUBLISH,
+                is_active=False,
+            )
+            return
+        if workflow == ResaleListing.WORKFLOW_UPDATE_DRAFT:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_PENDING_UPDATE,
+                is_active=True,
+            )
+            return
+    elif action_name == "confirm_publish":
+        if workflow == ResaleListing.WORKFLOW_PENDING_PUBLISH:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_ONLINE,
+                is_active=True,
+            )
+            return
+    elif action_name == "start_edit":
+        if workflow == ResaleListing.WORKFLOW_ONLINE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_UPDATE_DRAFT,
+                is_active=True,
+            )
+            return
+    elif action_name == "abandon_update":
+        if workflow == ResaleListing.WORKFLOW_UPDATE_DRAFT:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_ONLINE,
+                is_active=True,
+            )
+            return
+    elif action_name == "confirm_update":
+        if workflow == ResaleListing.WORKFLOW_PENDING_UPDATE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_ONLINE,
+                is_active=True,
+            )
+            return
+    elif action_name == "request_offline":
+        if workflow == ResaleListing.WORKFLOW_ONLINE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_PENDING_OFFLINE,
+                is_active=True,
+            )
+            return
+    elif action_name == "confirm_offline":
+        if workflow in {
+            ResaleListing.WORKFLOW_PENDING_OFFLINE,
+            ResaleListing.WORKFLOW_OFFLINE_EXCEPTION,
+        }:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_OFFLINE,
+                workflow_status=ResaleListing.WORKFLOW_OFFLINE,
+                is_active=False,
+            )
+            return
+    elif action_name == "reject_offline":
+        if workflow == ResaleListing.WORKFLOW_PENDING_OFFLINE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_ONLINE,
+                is_active=True,
+            )
+            return
+    elif action_name == "mark_offline_exception":
+        if workflow == ResaleListing.WORKFLOW_PENDING_OFFLINE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_ONLINE,
+                workflow_status=ResaleListing.WORKFLOW_OFFLINE_EXCEPTION,
+                is_active=True,
+            )
+            return
+    elif action_name == "republish":
+        if publish == ResaleListing.PUBLISH_OFFLINE:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_NONE,
+                workflow_status=ResaleListing.WORKFLOW_PENDING_PUBLISH,
+                is_active=False,
+            )
+            return
+    elif action_name == "delete":
+        if workflow in {
+            ResaleListing.WORKFLOW_DRAFT,
+            ResaleListing.WORKFLOW_OFFLINE,
+        }:
+            _set_listing_state(
+                listing,
+                publish_status=ResaleListing.PUBLISH_DELETED,
+                workflow_status=ResaleListing.WORKFLOW_DELETED,
+                is_active=False,
+            )
+            return
+    raise ValueError(_invalid_transition(action_name, listing))
+
+
+def _effective_settlement_ratio(channel, override) -> Decimal:
+    ratio = channel.settlement_ratio
+    if override and override.settlement_ratio is not None:
+        ratio = override.settlement_ratio
+    return Decimal(str(ratio or Decimal("1")))
+
+
+def _cost_basis_payload(channel, override, unit_prices) -> dict:
+    ratio = _effective_settlement_ratio(channel, override)
+    payload = {"settlement_ratio": _as_float(ratio)}
+    for api_field, unit_attr, custom_field in COST_BASIS_FIELDS:
+        final_value = Decimal(str(getattr(unit_prices, unit_attr) or "0"))
+        custom_value = (
+            getattr(override, custom_field)
+            if override and custom_field
+            else None
+        )
+        field_ratio = Decimal("1") if custom_value is not None else ratio
+        base_value = final_value
+        if field_ratio:
+            base_value = final_value / field_ratio
+        payload[f"base_{api_field}"] = _as_float(base_value)
+        payload[f"{api_field}_settlement_ratio"] = _as_float(field_ratio)
+    return payload
 
 
 def _converted_amount(value, source_currency: str, currency_context):
@@ -1071,7 +1578,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
 
         models = list(
             LLMModel.objects.filter(is_active=True)
-            .select_related("provider")
+            .select_related("meta_model", "provider")
             .order_by("provider__name", "name", "id")
         )
         channels = list(
@@ -1121,6 +1628,9 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "output_price_per_million": _as_float(
                         unit_prices.output_per_million
                     ),
+                    "cache_input_price_per_million": _as_float(
+                        unit_prices.cache_input_per_million
+                    ),
                     "image_output_price_per_image": _as_float(
                         unit_prices.image_output_per_image
                     ),
@@ -1137,6 +1647,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         unit_prices.video_output_per_second
                     ),
                     "estimated_cost": _as_float(estimated_cost),
+                    **_cost_basis_payload(channel, override, unit_prices),
                 }
                 options.append(
                     _apply_display_currency(
@@ -1162,6 +1673,9 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "model_id": model.id,
                     "model_name": model.name,
                     "model_code": model.code,
+                    "meta_model_id": model.meta_model_id,
+                    "meta_model_name": model.meta_model.name,
+                    "meta_model_code": model.meta_model.code,
                     "provider_name": model.provider.name,
                     "currency": model.currency,
                     "requires_currency_conversion": (
@@ -1203,6 +1717,15 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 cost_output = Decimal(
                     str(best_row["original_output_price_per_million"])
                 )
+                cost_cache_input = Decimal(
+                    str(
+                        best_row.get(
+                            "original_cache_input_price_per_million",
+                            "0",
+                        )
+                        or "0"
+                    )
+                )
                 cost_currency = (
                     best_row.get("original_currency") or listing.model.currency
                 )
@@ -1222,6 +1745,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 )
                 cost_input = unit_prices.input_per_million
                 cost_output = unit_prices.output_per_million
+                cost_cache_input = unit_prices.cache_input_per_million
                 cost_currency = resolve_channel_model_currency(
                     channel,
                     listing.model,
@@ -1231,6 +1755,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
 
             retail_input = listing.retail_input_price_per_million
             retail_output = listing.retail_output_price_per_million
+            retail_cache_input = listing.retail_cache_input_price_per_million
             retail_currency = resolve_resale_listing_currency(listing)
             fee_rate = listing.platform.fee_rate or Decimal("0")
             cost_input_display = _converted_amount(
@@ -1240,6 +1765,11 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             )
             cost_output_display = _converted_amount(
                 cost_output,
+                cost_currency,
+                currency_context,
+            )
+            cost_cache_input_display = _converted_amount(
+                cost_cache_input,
                 cost_currency,
                 currency_context,
             )
@@ -1253,13 +1783,20 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 retail_currency,
                 currency_context,
             )
+            retail_cache_input_display = _converted_amount(
+                retail_cache_input,
+                retail_currency,
+                currency_context,
+            )
             requires_currency_conversion = any(
                 value is None
                 for value in (
                     cost_input_display,
                     cost_output_display,
+                    cost_cache_input_display,
                     retail_input_display,
                     retail_output_display,
+                    retail_cache_input_display,
                 )
             )
             if requires_currency_conversion:
@@ -1317,11 +1854,19 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         if retail_output_display is not None
                         else retail_output
                     ),
+                    "retail_cache_input_price_per_million": _as_float(
+                        retail_cache_input_display
+                        if retail_cache_input_display is not None
+                        else retail_cache_input
+                    ),
                     "original_retail_input_price_per_million": (
                         _as_float(retail_input)
                     ),
                     "original_retail_output_price_per_million": (
                         _as_float(retail_output)
+                    ),
+                    "original_retail_cache_input_price_per_million": (
+                        _as_float(retail_cache_input)
                     ),
                     "cost_input_price_per_million": _as_float(
                         cost_input_display
@@ -1333,11 +1878,19 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         if cost_output_display is not None
                         else cost_output
                     ),
+                    "cost_cache_input_price_per_million": _as_float(
+                        cost_cache_input_display
+                        if cost_cache_input_display is not None
+                        else cost_cache_input
+                    ),
                     "original_cost_input_price_per_million": (
                         _as_float(cost_input)
                     ),
                     "original_cost_output_price_per_million": (
                         _as_float(cost_output)
+                    ),
+                    "original_cost_cache_input_price_per_million": (
+                        _as_float(cost_cache_input)
                     ),
                     "input_margin": input_margin,
                     "output_margin": output_margin,
