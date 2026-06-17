@@ -50,7 +50,7 @@ services:
       postgresql:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: celery
 
   backend-scheduler:
@@ -70,7 +70,7 @@ services:
       postgresql:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: celery-beat
 
   frontend:
@@ -165,6 +165,12 @@ services:
       - ./data/logs/redis:/var/log/redis
     networks:
       - backend_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 networks:
   backend_network:

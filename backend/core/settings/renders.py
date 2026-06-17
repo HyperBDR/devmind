@@ -2,12 +2,49 @@
 This module provides custom renderers for standardizing API response formats.
 It includes a CustomJSONRenderer that ensures all API responses follow a
 consistent structure with code, message and data fields.
+
+The renderer also extends the standard JSON encoder so common non-native
+types (``Decimal``, ``datetime``, ``date``, ``UUID``, ``bytes``) are
+serialized automatically. Without this, DRF raises
+``TypeError: Object of type Decimal is not JSON serializable`` whenever a
+view returns ORM data containing money columns (see Sentry TOWER-39).
 """
+
+import datetime
+import decimal
+import uuid
+from json import JSONEncoder
 
 from rest_framework.renderers import JSONRenderer
 from rest_framework import status
+from rest_framework.settings import api_settings
+from rest_framework.utils import json
 
 from .constants import SUCCESS_MESSAGE, FAILED_MESSAGE, SUCCESS_CODE
+
+
+class StandardJSONEncoder(JSONEncoder):
+    """
+    JSON encoder that gracefully handles common non-native scalar types
+    produced by Django/DRF views (Decimal prices, UUID PKs, date/datetime
+    fields, raw bytes from binary fields).
+    """
+
+    def default(self, obj):  # noqa: D401 - JSONEncoder API
+        if isinstance(obj, decimal.Decimal):
+            # Quantize-less str() preserves precision; callers that need
+            # numeric output can pre-cast in their serializer.
+            return str(obj)
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+        if isinstance(obj, (bytes, bytearray)):
+            try:
+                return obj.decode("utf-8")
+            except UnicodeDecodeError:
+                return obj.hex()
+        return super().default(obj)
 
 
 class CustomJSONRenderer(JSONRenderer):
@@ -83,6 +120,9 @@ class CustomJSONRenderer(JSONRenderer):
             'data': data.get('data', data)
         }
 
-        return super().render(formatted_data,
-                              accepted_media_type,
-                              renderer_context)
+        return json.dumps(
+            formatted_data,
+            cls=StandardJSONEncoder,
+            ensure_ascii=not api_settings.UNICODE_JSON,
+            allow_nan=not api_settings.STRICT_JSON,
+        ).encode()

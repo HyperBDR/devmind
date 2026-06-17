@@ -36,9 +36,16 @@ app.conf.update(
     result_backend='django-db',
     beat_scheduler='django_celery_beat.schedulers:DatabaseScheduler',
     imports=tuple(app.conf.get("imports", ())) + (
-        "ai_pricehub.tasks",
+        # Each entry must be a fully-qualified module that exposes its
+        # ``@shared_task`` definitions at import time. Listing only the
+        # package name is not enough: submodules of that package need to
+        # be imported explicitly so their task names land in
+        # ``app.tasks`` before celery beat starts dispatching.
         "agentcore_notifier.adapters.django.tasks",
+        "agentcore_notifier.adapters.django.tasks.cleanup",
         "agentcore_metering.adapters.django.tasks",
+        "agentcore_metering.adapters.django.tasks.cleanup",
+        "agentcore_metering.adapters.django.tasks.aggregate",
     ),
 )
 

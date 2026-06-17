@@ -111,9 +111,7 @@
                   <option value="hyperbdr">
                     {{ t('dataCollector.platforms.hyperbdr') }}
                   </option>
-                  <option value="ai_pricehub">
-                    {{ t('dataCollector.platforms.ai_pricehub') }}
-                  </option>
+
                   <option value="after_sales_incident">
                     {{ t('dataCollector.platforms.after_sales_incident') }}
                   </option>
@@ -538,148 +536,7 @@
           </template>
 
           <!-- AI Price Hub: 配置主平台信息 -->
-          <template v-else-if="formData.platform === 'ai_pricehub'">
-            <div class="space-y-3 border-b border-gray-200 pb-4">
-              <h4 class="text-sm font-semibold text-gray-900">
-                {{ t('dataCollector.aiPriceHub.primarySourceTitle') }}
-              </h4>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.platformSlug') }}
-                  </label>
-                  <p class="text-xs text-gray-500 mb-2 md:mb-0">
-                    {{ t('dataCollector.aiPriceHub.platformSlugDesc') }}
-                  </p>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    v-model="formData.ai_pricehub_platform_slug"
-                    type="text"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.vendorName') }}
-                  </label>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    v-model="formData.ai_pricehub_vendor_name"
-                    type="text"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.endpointUrl') }}
-                  </label>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    v-model="formData.ai_pricehub_endpoint_url"
-                    type="url"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.region') }}
-                  </label>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    v-model="formData.ai_pricehub_region"
-                    type="text"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.currency') }}
-                  </label>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    v-model="formData.ai_pricehub_currency"
-                    type="text"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.pointsPerCurrencyUnit') }}
-                  </label>
-                </div>
-                <div class="md:col-span-2">
-                  <BaseInput
-                    v-model.number="
-                      formData.ai_pricehub_points_per_currency_unit
-                    "
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    class="w-full"
-                  />
-                </div>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
-                <div class="md:col-span-1">
-                  <label class="block text-sm font-medium text-gray-700 mb-1">
-                    {{ t('dataCollector.aiPriceHub.parserLlmConfigUuid') }}
-                  </label>
-                </div>
-                <div class="md:col-span-2">
-                  <select
-                    v-model="formData.ai_pricehub_parser_llm_config_uuid"
-                    class="block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100 disabled:text-gray-500"
-                    :disabled="aiPriceHubLlmOptionsLoading"
-                  >
-                    <option value="">
-                      {{
-                        aiPriceHubLlmOptionsLoading
-                          ? t('dataCollector.aiPriceHub.parserLlmLoading')
-                          : t('dataCollector.aiPriceHub.parserLlmPlaceholder')
-                      }}
-                    </option>
-                    <option
-                      v-for="option in aiPriceHubLlmSelectOptions"
-                      :key="option.uuid"
-                      :value="option.uuid"
-                    >
-                      {{ option.label }}
-                    </option>
-                  </select>
-                  <p
-                    v-if="aiPriceHubLlmLoadError"
-                    class="mt-1 text-xs text-red-600"
-                  >
-                    {{ aiPriceHubLlmLoadError }}
-                  </p>
-                  <p
-                    v-else-if="
-                      !aiPriceHubLlmOptionsLoading &&
-                      aiPriceHubLlmSelectOptions.length === 0
-                    "
-                    class="mt-1 text-xs text-gray-500"
-                  >
-                    {{ t('dataCollector.aiPriceHub.parserLlmEmpty') }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </template>
+          
 
           <!-- After-Sales Incident: base_url + username/password -->
           <template v-else-if="formData.platform === 'after_sales_incident'">
@@ -769,7 +626,7 @@
               formData.platform === 'feishu' ||
               formData.platform === 'license' ||
               formData.platform === 'hyperbdr' ||
-              formData.platform === 'ai_pricehub' ||
+              false ||
               formData.platform === 'after_sales_incident'
             "
             class="space-y-1 pt-2"
@@ -886,50 +743,7 @@
           </template>
 
           <!-- AI Price Hub: 选择比价采集类型 -->
-          <template v-else-if="formData.platform === 'ai_pricehub'">
-            <p class="text-sm text-gray-600">
-              {{ t('dataCollector.aiPriceHub.step2Desc') }}
-            </p>
-            <div
-              v-if="projectsLoading"
-              class="py-8 text-center text-sm text-gray-500"
-            >
-              {{ t('dataCollector.settings.loadingProjects') }}
-            </div>
-            <div
-              v-else-if="projectsError"
-              class="rounded-md p-3 text-sm bg-red-50 text-red-800"
-            >
-              {{ projectsError }}
-            </div>
-            <div
-              v-else-if="projects.length === 0"
-              class="py-8 text-center text-sm text-gray-500"
-            >
-              {{ t('dataCollector.settings.noProjects') }}
-            </div>
-            <div
-              v-else
-              class="max-h-64 overflow-y-auto rounded border border-gray-200 divide-y divide-gray-200"
-            >
-              <label
-                v-for="proj in projects"
-                :key="proj.key"
-                class="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 cursor-pointer"
-              >
-                <input
-                  v-model="formData.selected_project_keys"
-                  type="checkbox"
-                  :value="proj.key"
-                  class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <span class="font-medium text-gray-900">{{
-                  proj.name || proj.key
-                }}</span>
-                <span class="text-sm text-gray-500">{{ proj.key }}</span>
-              </label>
-            </div>
-          </template>
+          
 
           <template v-else-if="formData.platform === 'hyperbdr'">
             <p class="text-sm text-gray-600">
@@ -1418,9 +1232,6 @@ const projectsError = ref('')
 const step1AuthVerified = ref(false)
 const authVerifying = ref(false)
 const authError = ref('')
-const aiPriceHubLlmOptions = ref([])
-const aiPriceHubLlmOptionsLoading = ref(false)
-const aiPriceHubLlmLoadError = ref('')
 
 const formData = reactive({
   platform: 'jira',
@@ -1446,13 +1257,6 @@ const formData = reactive({
   hyperbdr_username: '',
   hyperbdr_password: '',
   // AI Price Hub-specific fields
-  ai_pricehub_platform_slug: 'agione',
-  ai_pricehub_vendor_name: 'AGIOne',
-  ai_pricehub_region: '',
-  ai_pricehub_endpoint_url: '',
-  ai_pricehub_currency: 'CNY',
-  ai_pricehub_points_per_currency_unit: 10.0,
-  ai_pricehub_parser_llm_config_uuid: '',
   // After-Sales Incident-specific fields
   asi_base_url: '',
   asi_username: '',
@@ -1471,19 +1275,7 @@ const isSectionEditMode = computed(
 const isFullEditMode = computed(
   () => !!props.config && props.editSection === 'full'
 )
-const aiPriceHubLlmSelectOptions = computed(() => {
-  const base = Array.isArray(aiPriceHubLlmOptions.value)
-    ? [...aiPriceHubLlmOptions.value]
-    : []
-  const selected = (formData.ai_pricehub_parser_llm_config_uuid || '').trim()
-  if (selected && !base.find((item) => item.uuid === selected)) {
-    base.unshift({
-      uuid: selected,
-      label: `${selected} (${t('dataCollector.aiPriceHub.currentSelected')})`
-    })
-  }
-  return base
-})
+
 
 const modalTitle = computed(() => {
   if (!props.config) return t('dataCollector.settings.addConfig')
@@ -1534,17 +1326,7 @@ const step1AuthFieldsFilled = computed(() => {
       (!!(formData.hyperbdr_password || '').trim() || !!props.config)
     )
   }
-  if (formData.platform === 'ai_pricehub') {
-    return (
-      !!(formData.ai_pricehub_platform_slug || '').trim() &&
-      !!(formData.ai_pricehub_vendor_name || '').trim() &&
-      !!(formData.ai_pricehub_endpoint_url || '').trim() &&
-      !!(formData.ai_pricehub_currency || '').trim() &&
-      Number(formData.ai_pricehub_points_per_currency_unit) > 0 &&
-      !!(formData.ai_pricehub_parser_llm_config_uuid || '').trim()
-    )
-  }
-  if (formData.platform === 'after_sales_incident') {
+    if (formData.platform === 'after_sales_incident') {
     const base = (formData.asi_base_url || '').trim()
     const user = (formData.asi_username || '').trim()
     const pass = (formData.asi_password || '').trim()
@@ -1559,7 +1341,7 @@ const canGoNextFromStep2 = computed(() => {
   if (
     formData.platform === 'jira' ||
     formData.platform === 'license' ||
-    formData.platform === 'ai_pricehub'
+    false
   ) {
     return (
       Array.isArray(formData.selected_project_keys) &&
@@ -1656,28 +1438,6 @@ function buildAuthValue() {
       }
     }
   }
-  if (formData.platform === 'ai_pricehub') {
-    return {
-      primary_sources: [
-        {
-          id: 1,
-          vendor_slug: 'agione',
-          platform_slug: (formData.ai_pricehub_platform_slug || '').trim(),
-          vendor_name: (formData.ai_pricehub_vendor_name || '').trim(),
-          region: (formData.ai_pricehub_region || '').trim(),
-          endpoint_url: (formData.ai_pricehub_endpoint_url || '').trim(),
-          parser_llm_config_uuid: (
-            formData.ai_pricehub_parser_llm_config_uuid || ''
-          ).trim(),
-          currency: (formData.ai_pricehub_currency || '').trim() || 'CNY',
-          points_per_currency_unit:
-            Number(formData.ai_pricehub_points_per_currency_unit) || 10.0,
-          is_enabled: true,
-          notes: ''
-        }
-      ]
-    }
-  }
   if (formData.platform === 'after_sales_incident') {
     return {
       base_url: (formData.asi_base_url || '').trim(),
@@ -1700,28 +1460,6 @@ function buildAuthValueForPatch() {
         username: formData.hyperbdr_username,
         password: formData.hyperbdr_password
       }
-    }
-  }
-  if (formData.platform === 'ai_pricehub') {
-    return {
-      primary_sources: [
-        {
-          id: 1,
-          vendor_slug: 'agione',
-          platform_slug: (formData.ai_pricehub_platform_slug || '').trim(),
-          vendor_name: (formData.ai_pricehub_vendor_name || '').trim(),
-          region: (formData.ai_pricehub_region || '').trim(),
-          endpoint_url: (formData.ai_pricehub_endpoint_url || '').trim(),
-          parser_llm_config_uuid: (
-            formData.ai_pricehub_parser_llm_config_uuid || ''
-          ).trim(),
-          currency: (formData.ai_pricehub_currency || '').trim() || 'CNY',
-          points_per_currency_unit:
-            Number(formData.ai_pricehub_points_per_currency_unit) || 10.0,
-          is_enabled: true,
-          notes: ''
-        }
-      ]
     }
   }
   if (formData.platform === 'license') {
@@ -1845,28 +1583,6 @@ function buildValue() {
       username: formData.hyperbdr_username,
       password: formData.hyperbdr_password
     }
-  } else if (formData.platform === 'ai_pricehub') {
-    value.primary_sources = [
-      {
-        id: 1,
-        vendor_slug: 'agione',
-        platform_slug: (formData.ai_pricehub_platform_slug || '').trim(),
-        vendor_name: (formData.ai_pricehub_vendor_name || '').trim(),
-        region: (formData.ai_pricehub_region || '').trim(),
-        endpoint_url: (formData.ai_pricehub_endpoint_url || '').trim(),
-        parser_llm_config_uuid: (
-          formData.ai_pricehub_parser_llm_config_uuid || ''
-        ).trim(),
-        currency: (formData.ai_pricehub_currency || '').trim() || 'CNY',
-        points_per_currency_unit:
-          Number(formData.ai_pricehub_points_per_currency_unit) || 10.0,
-        is_enabled: true,
-        notes: ''
-      }
-    ]
-    value.project_keys = Array.isArray(formData.selected_project_keys)
-      ? formData.selected_project_keys
-      : ['sync']
   } else if (formData.platform === 'after_sales_incident') {
     value.base_url = (formData.asi_base_url || '').trim()
     value.auth = {
@@ -1910,22 +1626,7 @@ function applyConfig(c) {
     ? [...v.project_keys]
     : formData.platform === 'feishu'
       ? formData.feishu_definitions.map((d) => d.id).filter((x) => x)
-      : formData.platform === 'ai_pricehub'
-        ? ['sync']
-        : []
-  const primarySource =
-    Array.isArray(v.primary_sources) && v.primary_sources.length > 0
-      ? v.primary_sources[0]
-      : null
-  formData.ai_pricehub_platform_slug = primarySource?.platform_slug || 'agione'
-  formData.ai_pricehub_vendor_name = primarySource?.vendor_name || 'AGIOne'
-  formData.ai_pricehub_region = primarySource?.region || ''
-  formData.ai_pricehub_endpoint_url = primarySource?.endpoint_url || ''
-  formData.ai_pricehub_currency = primarySource?.currency || 'CNY'
-  formData.ai_pricehub_points_per_currency_unit =
-    Number(primarySource?.points_per_currency_unit) || 10.0
-  formData.ai_pricehub_parser_llm_config_uuid =
-    primarySource?.parser_llm_config_uuid || ''
+    : []
   // After-Sales Incident
   formData.asi_base_url = v.base_url || auth.base_url || ''
   formData.asi_username = auth.username || ''
@@ -1940,20 +1641,15 @@ watch(
   () => props.config,
   (c) => {
     applyConfig(c)
-    if ((c?.platform || formData.platform) === 'ai_pricehub') {
-      loadAiPriceHubLlmOptions()
-    }
     const v = c?.value || {}
     const hasBaseUrl = !!(v.base_url || v.auth?.base_url)
     const needProjects =
-      (props.editSection === 'full' || props.editSection === 'sync') &&
-      (formData.platform === 'jira' ||
-        formData.platform === 'license' ||
-        formData.platform === 'ai_pricehub')
+      (props.editSection === 'full') &&
+      (formData.platform === 'jira' || formData.platform === 'license')
     const canLoadProjects =
       (formData.platform === 'jira' && hasBaseUrl) ||
       (formData.platform === 'license' && hasBaseUrl) ||
-      formData.platform === 'ai_pricehub'
+      false
     if (needProjects && canLoadProjects) {
       nextTick(loadProjectsIfNeeded)
     }
@@ -1992,13 +1688,6 @@ watch(
         formData.hyperbdr_base_url = ''
         formData.hyperbdr_username = ''
         formData.hyperbdr_password = ''
-        formData.ai_pricehub_platform_slug = 'agione'
-        formData.ai_pricehub_vendor_name = 'AGIOne'
-        formData.ai_pricehub_region = ''
-        formData.ai_pricehub_endpoint_url = ''
-        formData.ai_pricehub_currency = 'CNY'
-        formData.ai_pricehub_points_per_currency_unit = 10.0
-        formData.ai_pricehub_parser_llm_config_uuid = ''
         formData.asi_base_url = ''
         formData.asi_username = ''
         formData.asi_password = ''
@@ -2011,10 +1700,7 @@ watch(
         projects.value = []
         projectsError.value = ''
       }
-      if (formData.platform === 'ai_pricehub') {
-        loadAiPriceHubLlmOptions()
-      }
-    }
+          }
   }
 )
 
@@ -2057,15 +1743,6 @@ watch(
     hyperbdr_base_url: formData.hyperbdr_base_url,
     hyperbdr_username: formData.hyperbdr_username,
     hyperbdr_password: formData.hyperbdr_password,
-    ai_pricehub_platform_slug: formData.ai_pricehub_platform_slug,
-    ai_pricehub_vendor_name: formData.ai_pricehub_vendor_name,
-    ai_pricehub_region: formData.ai_pricehub_region,
-    ai_pricehub_endpoint_url: formData.ai_pricehub_endpoint_url,
-    ai_pricehub_currency: formData.ai_pricehub_currency,
-    ai_pricehub_points_per_currency_unit:
-      formData.ai_pricehub_points_per_currency_unit,
-    ai_pricehub_parser_llm_config_uuid:
-      formData.ai_pricehub_parser_llm_config_uuid,
     asi_base_url: formData.asi_base_url,
     asi_username: formData.asi_username,
     asi_password: formData.asi_password,
@@ -2108,73 +1785,18 @@ watch(
         formData.initial_range = '1m'
       }
     }
-    if (plat === 'ai_pricehub') {
-      loadAiPriceHubLlmOptions()
-    }
-  }
+      }
 )
 
-async function loadAiPriceHubLlmOptions() {
-  if (aiPriceHubLlmOptionsLoading.value) return
-  if (aiPriceHubLlmOptions.value.length > 0) return
-  aiPriceHubLlmOptionsLoading.value = true
-  aiPriceHubLlmLoadError.value = ''
-  try {
-    const res = await dataCollectorApi.getLlmOptions()
-    const payload = extractResponseData(res)
-    const rows = Array.isArray(payload?.options)
-      ? payload.options
-      : Array.isArray(payload)
-        ? payload
-        : []
-    aiPriceHubLlmOptions.value = rows
-      .map((item) => {
-        const uuid = String(item?.uuid || '').trim()
-        if (!uuid) return null
-        const model = item?.config?.model || item?.provider || uuid
-        const provider = item?.provider || ''
-        const label = provider ? `${model} (${provider})` : model
-        return { uuid, label }
-      })
-      .filter(Boolean)
-  } catch (e) {
-    aiPriceHubLlmLoadError.value = extractErrorMessage(
-      e,
-      t('dataCollector.aiPriceHub.parserLlmLoadError')
-    )
-    aiPriceHubLlmOptions.value = []
-  } finally {
-    aiPriceHubLlmOptionsLoading.value = false
-  }
-}
 
 async function loadProjectsIfNeeded() {
-  if (
-    formData.platform !== 'jira' &&
-    formData.platform !== 'license' &&
-    formData.platform !== 'ai_pricehub'
-  )
+  if (formData.platform !== 'jira' && formData.platform !== 'license') {
     return
+  }
   if (projects.value.length > 0) return
   projectsLoading.value = true
   projectsError.value = ''
   try {
-    if (formData.platform === 'ai_pricehub') {
-      projects.value = [
-        {
-          key: 'sync',
-          id: 'sync',
-          name: t('dataCollector.aiPriceHub.syncCollection')
-        }
-      ]
-      if (
-        !Array.isArray(formData.selected_project_keys) ||
-        formData.selected_project_keys.length === 0
-      ) {
-        formData.selected_project_keys = ['sync']
-      }
-      return
-    }
     const configUuid = props.config?.uuid ?? null
     const value = buildAuthValue()
     const res = await dataCollectorApi.fetchProjects(
@@ -2215,7 +1837,7 @@ watch(
       (section === 'full' || section === 'sync') &&
       ((formData.platform === 'jira' && formData.jira_base_url) ||
         (formData.platform === 'license' && formData.license_base_url) ||
-        formData.platform === 'ai_pricehub')
+        false)
     if (needLoad) {
       loadProjectsIfNeeded()
     }

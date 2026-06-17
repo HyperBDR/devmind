@@ -37,8 +37,6 @@ urlpatterns = [
     # Includes cloud billing management endpoints
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),
 
-    # AI Price Hub routes
-    path('api/v1/ai-pricehub/', include('ai_pricehub.urls')),
 
     # LLM operations management routes
     path('api/v1/llm-ops/', include('llm_ops.urls')),

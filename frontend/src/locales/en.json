@@ -693,7 +693,6 @@
     "switchPlatform": "Switch view",
     "workspace": "Workspace",
     "operationsConsole": "Operations Console",
-    "aiPriceHub": "LLM Pricing Comparison",
     "llmOps": "LLM Operations",
     "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard",
     "adminConsole": "Admin Console",
@@ -1692,104 +1691,6 @@
       }
     }
   },
-  "aiPriceHub": {
-    "navTitle": "LLM Pricing Comparison",
-    "eyebrow": "LLM Pricing Comparison",
-    "title": "LLM Pricing Comparison",
-    "subtitle": "Compare pricing by platform and quickly see how much each vendor differs on input and output costs.",
-    "sync": "Sync Pricing",
-    "syncing": "Syncing...",
-    "unit": "per 1M tokens",
-    "search": {
-      "placeholder": "Search vendor or model"
-    },
-    "selector": {
-      "title": "Choose Primary Model",
-      "description": "Choose an AGIOne platform first, then a synced primary model from that platform. DevMind matches comparable vendor pricing automatically.",
-      "platformLabel": "AGIOne Platform",
-      "label": "Primary Model"
-    },
-    "stats": {
-      "models": "Models",
-      "platform": "Current Platform",
-      "platformHint": "Pricing reflects the selected AGIOne environment",
-      "vendors": "Comparable Vendors",
-      "vendorsHint": "Vendors still shown after filtering",
-      "bestInput": "Best Input Savings",
-      "bestInputHint": "Vendor with the strongest input discount",
-      "bestOutput": "Best Output Savings",
-      "bestOutputHint": "Vendor with the strongest output discount",
-      "bestValueSummary": "{vendor} · saves {amount} · {ratio} lower",
-      "noSavings": "No clear savings yet"
-    },
-    "summary": {
-      "currentModel": "Current Primary Model",
-      "inputPrice": "Input Price",
-      "outputPrice": "Output Price",
-      "sources": "Source Vendors",
-      "aggregateSources": "Aggregate Sources",
-      "compareCount": "{count} comparable vendors",
-      "description": "The selected model costs {input} for input and {output} for output. The table below shows how much it saves versus each comparable vendor, or where it is higher."
-    },
-    "comparison": {
-      "title": "Vendor Comparison",
-      "subtitle": "Matches use the same model name and currency, then calculate savings and discount rate relative to each vendor."
-    },
-    "matrix": {
-      "title": "Pricing Matrix",
-      "subtitle": "Compare input and output pricing for each vendor side by side against the selected primary model.",
-      "metric": "Metric",
-      "inputPrice": "Input Price",
-      "inputComparison": "Input Comparison",
-      "outputPrice": "Output Price",
-      "outputComparison": "Output Comparison",
-      "comparisonHint": "Relative to the primary model",
-      "reference": "Current baseline"
-    },
-    "table": {
-      "vendor": "Vendor",
-      "model": "Model",
-      "input": "Input Price",
-      "inputAdvantage": "Input Savings",
-      "output": "Output Price",
-      "outputAdvantage": "Output Savings"
-    },
-    "vendors": {
-      "agione": "AGIOne",
-      "aliyun": "Aliyun",
-      "baidu": "Baidu Qianfan",
-      "deepseek": "DeepSeek",
-      "volcengine": "VolcEngine",
-      "zhipu": "Zhipu AI"
-    },
-    "advantage": {
-      "saving": "Saves {amount} · {ratio} lower",
-      "compactSaving": "{ratio} lower",
-      "premium": "Costs {amount} more · {ratio} higher",
-      "compactPremium": "{ratio} higher",
-      "same": "Similar price",
-      "unavailable": "No comparable result"
-    },
-    "badge": {
-      "betterValue": "Better value",
-      "higherPrice": "Higher price",
-      "mixed": "Mixed input/output",
-      "similar": "Similar"
-    },
-    "empty": {
-      "title": "No comparable pricing yet",
-      "description": "There is no comparable vendor pricing for this model yet, or pricing has not been synced."
-    },
-    "messages": {
-      "syncSuccess": "Pricing sync completed"
-    },
-    "errors": {
-      "loadPlatforms": "Failed to load platform configs",
-      "loadOverview": "Failed to load model list",
-      "loadComparison": "Failed to load price comparison",
-      "sync": "Failed to sync pricing"
-    }
-  },
   "dataCollector": {
     "menuTitle": "Data Collector",
     "stats": {
@@ -1807,7 +1708,6 @@
       "jira": "Jira",
       "license": "License",
       "hyperbdr": "HyperBDR",
-      "ai_pricehub": "AI Pricing",
       "llm_ops": "LLM Operations",
       "after_sales_incident": "After-Sales Work Order"
     },
@@ -2039,24 +1939,6 @@
       "passwordPlaceholderEdit": "Leave blank to keep current",
       "step2Desc": "No additional sync targets are required for HyperBDR. Continue to schedule settings."
     },
-    "aiPriceHub": {
-      "primarySourceTitle": "Primary model pricing source",
-      "platformSlug": "Platform slug",
-      "platformSlugDesc": "Unique platform key used for pricing comparison, e.g. agione",
-      "vendorName": "Platform name",
-      "endpointUrl": "Model source endpoint",
-      "region": "Region (optional)",
-      "currency": "Currency",
-      "pointsPerCurrencyUnit": "Points rate (points per 1 currency unit)",
-      "parserLlmConfigUuid": "LLM config in use (UUID)",
-      "parserLlmPlaceholder": "Select an LLM config",
-      "parserLlmLoading": "Loading LLM configs...",
-      "parserLlmEmpty": "No active global LLM config found. Enable one in model config first.",
-      "parserLlmLoadError": "Failed to load LLM configs",
-      "currentSelected": "currently selected",
-      "step2Desc": "Select pricing collection targets to sync",
-      "syncCollection": "Pricing sync collection"
-    },
     "afterSalesIncident": {
       "baseUrl": "API URL",
       "baseUrlDesc": "OneProCloud platform URL, e.g. https://support.oneprocloud.com",
@@ -2276,7 +2158,6 @@
       "dateRange": "Date range",
       "taskTypeAll": "All",
       "taskTypeCloudBilling": "Cloud billing",
-      "taskTypeAiPriceHub": "AI Price Hub",
       "taskTypeNotifier": "Notifier",
       "taskTypeTask": "Task module",
       "taskId": "Task ID",

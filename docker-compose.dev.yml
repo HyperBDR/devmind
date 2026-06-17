@@ -22,7 +22,8 @@ services:
     networks:
       - backend_network
     depends_on:
-      - postgresql
+      postgresql:
+        condition: service_healthy
     command: development
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
@@ -47,9 +48,12 @@ services:
     networks:
       - backend_network
     depends_on:
-      - backend-api
-      - postgresql
-      - redis
+      backend-api:
+        condition: service_started
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     command: celery
 
   backend-scheduler:
@@ -67,9 +71,9 @@ services:
       backend-api:
         condition: service_started
       postgresql:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: celery-beat
 
   postgresql:
@@ -116,6 +120,12 @@ services:
       - ./data.dev/logs/redis:/var/log/redis
     networks:
       - backend_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   flower:
     image: devmind-backend:dev
@@ -129,7 +139,7 @@ services:
       backend-api:
         condition: service_started
       redis:
-        condition: service_started
+        condition: service_healthy
     command: flower
     networks:
       - backend_network
