@@ -31,6 +31,9 @@ API_BASE_URL = os.getenv("ONEPRO_API_BASE_URL", "https://support.oneprocloud.com
 API_USERNAME = os.getenv("ONEPRO_USERNAME", "")
 API_PASSWORD = os.getenv("ONEPRO_PASSWORD", "")
 API_SYNC_LIMIT = int(os.getenv("API_SYNC_LIMIT", "500"))
+API_REQUEST_MAX_ATTEMPTS = int(
+    os.getenv("ONEPRO_API_MAX_ATTEMPTS", "3")
+)
 
 _STATE_MAP = {
     1: "New",
@@ -196,6 +199,73 @@ def _build_headers(token: str) -> Dict[str, str]:
     }
 
 
+def _is_transient_request_error(exc: Exception) -> bool:
+    """Return whether a request failure looks transient."""
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return True
+
+    detail = str(exc).lower()
+    return any(
+        token in detail
+        for token in (
+            "connection aborted",
+            "connection error",
+            "connection reset",
+            "max retries exceeded",
+            "name resolution",
+            "temporary failure",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
+def _request_with_retry(
+    *,
+    url: str,
+    headers: Dict[str, str],
+    params: Dict[str, Any],
+    context: str,
+    partial_ok: bool,
+) -> Optional[requests.Response]:
+    """Issue a GET request with retry for transient failures."""
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, API_REQUEST_MAX_ATTEMPTS + 1):
+        try:
+            return requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=60,
+                verify=False,
+            )
+        except Exception as exc:
+            last_error = exc
+            is_transient = _is_transient_request_error(exc)
+            is_last_attempt = attempt == API_REQUEST_MAX_ATTEMPTS
+
+            if not is_transient or is_last_attempt:
+                if partial_ok and is_transient:
+                    log = logger.warning
+                else:
+                    log = logger.error
+                log("%s: %s", context, exc)
+                return None
+
+            logger.warning(
+                "%s (attempt %s/%s): %s",
+                context,
+                attempt,
+                API_REQUEST_MAX_ATTEMPTS,
+                exc,
+            )
+
+    if last_error is not None:
+        logger.error("%s: %s", context, last_error)
+    return None
+
+
 def _parse_raw_incident(raw: dict) -> Optional[dict]:
     """Extract structured fields from a single API record."""
     if not isinstance(raw, dict):
@@ -293,11 +363,15 @@ def fetch_users_from_api(token: str, limit: int = 500) -> List[Dict[str, Any]]:
             "sysparm_limit": min(200, limit - len(all_records)),
             "sysparm_offset": offset,
         }
-        url = "https://support.oneprocloud.com/api/hyper/table/sys_user"
-        try:
-            resp = requests.get(url, headers=headers, params=params, timeout=60, verify=False)
-        except Exception as e:
-            logger.error("User API request exception at offset %s: %s", offset, e)
+        url = f"{API_BASE_URL}/api/hyper/table/sys_user"
+        resp = _request_with_retry(
+            url=url,
+            headers=headers,
+            params=params,
+            context=f"User API request exception at offset {offset}",
+            partial_ok=bool(all_records),
+        )
+        if resp is None:
             break
 
         if resp.status_code != 200:
@@ -329,7 +403,7 @@ def fetch_users_from_api(token: str, limit: int = 500) -> List[Dict[str, Any]]:
             })
 
         logger.info("Fetched %s user records (offset=%s)", len(all_records), offset)
-        offset += batch_size
+        offset += len(records)
         if len(records) < batch_size:
             break
         if len(all_records) >= limit:
