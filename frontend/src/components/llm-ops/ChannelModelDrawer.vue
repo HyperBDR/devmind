@@ -53,7 +53,7 @@
               </h4>
               <p class="mt-1 text-xs leading-5 text-slate-500">
                 先选择元模型，再指定该渠道实际使用的上游供货源。
-                添加后可在下方设置渠道状态、成本规则和固定成本价。
+                添加后默认启用，可在下方设置成本规则和固定成本价。
               </p>
             </div>
             <div class="flex flex-wrap gap-2 text-xs text-slate-500">
@@ -70,177 +70,246 @@
           </div>
 
           <div class="add-model-layout">
-            <div class="add-grid">
-              <div class="form-field">
-                <label class="field-label">元模型厂商</label>
-                <CompactSelect
-                  v-model="selectedVendorKey"
-                  :options="vendorOptions"
-                  placeholder="先选择元模型厂商"
-                  searchable
-                  search-placeholder="搜索厂商"
-                  @change="handleVendorChange"
-                />
-              </div>
+            <div class="add-model-main">
+              <div class="add-grid">
+                <div class="form-field">
+                  <label class="field-label">元模型厂商</label>
+                  <CompactSelect
+                    v-model="selectedVendorKey"
+                    :options="vendorOptions"
+                    placeholder="先选择元模型厂商"
+                    searchable
+                    search-placeholder="搜索厂商"
+                    @change="handleVendorChange"
+                  />
+                </div>
 
-              <div class="form-field model-select-field">
-                <label class="field-label">选择元模型</label>
-                <div ref="modelDropdownRef" class="searchable-select">
-                  <button
-                    class="searchable-trigger"
-                    :disabled="!selectedVendorKey"
-                    type="button"
-                    @click="toggleModelDropdown"
-                  >
-                    <span class="min-w-0 flex-1">
-                      <span
-                        v-if="selectedModelOption"
-                        class="block truncate font-medium text-slate-800"
-                      >
-                        {{ selectedModelOption.name }}
+                <div class="form-field model-select-field">
+                  <label class="field-label">选择元模型</label>
+                  <div ref="modelDropdownRef" class="searchable-select">
+                    <button
+                      class="searchable-trigger"
+                      :disabled="!selectedVendorKey"
+                      type="button"
+                      @click="toggleModelDropdown"
+                    >
+                      <span class="min-w-0 flex-1">
+                        <span
+                          v-if="selectedModelCount"
+                          class="block truncate font-medium text-slate-800"
+                        >
+                          已选 {{ selectedModelCount }} 个元模型
+                        </span>
+                        <span
+                          v-else-if="!selectedVendorKey"
+                          class="block truncate text-slate-400"
+                        >
+                          先选择元模型厂商
+                        </span>
+                        <span v-else class="block truncate text-slate-400">
+                          搜索并选择元模型
+                        </span>
                       </span>
-                      <span
-                        v-else-if="!selectedVendorKey"
-                        class="block truncate text-slate-400"
-                      >
-                        先选择元模型厂商
-                      </span>
-                      <span v-else class="block truncate text-slate-400">
-                        搜索并选择元模型
-                      </span>
-                    </span>
-                    <span class="dropdown-caret">⌄</span>
-                  </button>
+                      <span class="dropdown-caret">⌄</span>
+                    </button>
 
-                  <div v-if="modelDropdownOpen" class="searchable-menu">
-                    <input
-                      ref="modelSearchInput"
-                      v-model="modelSearch"
-                      class="searchable-input"
-                      placeholder="名称 / code / 上游供货源"
-                      @keydown.escape="closeModelDropdown"
-                    />
-                    <div class="searchable-meta">
-                      <span>{{ availableModelGroups.length }} 个可添加元模型</span>
-                      <span v-if="!modelSearch">默认展示前 24 个</span>
-                      <span v-else>已按关键词筛选</span>
-                    </div>
-                    <div class="searchable-list">
-                      <button
-                        v-for="model in availableModelOptions"
-                        :key="model.key"
-                        class="searchable-option"
-                        :class="
-                          selectedModelKey === model.key
+                    <div v-if="modelDropdownOpen" class="searchable-menu">
+                      <input
+                        ref="modelSearchInput"
+                        v-model="modelSearch"
+                        class="searchable-input"
+                        placeholder="名称 / code / 模态"
+                        @keydown.escape="closeModelDropdown"
+                      />
+                      <div class="searchable-meta">
+                        <span>
+                          {{ availableModelGroups.length }} 个可添加元模型
+                          <template v-if="selectedModelCount">
+                            · 已选 {{ selectedModelCount }}
+                          </template>
+                        </span>
+                        <span class="searchable-meta-actions">
+                          <button type="button" @click.stop="selectVisibleModels">
+                            全选当前结果
+                          </button>
+                          <button type="button" @click.stop="clearSelectedModels">
+                            清空
+                          </button>
+                        </span>
+                      </div>
+                      <div class="searchable-list">
+                        <button
+                          v-for="model in availableModelOptions"
+                          :key="model.key"
+                          class="searchable-option"
+                          :class="isModelSelected(model.key)
                             ? 'searchable-option-active'
-                            : ''
-                        "
-                        type="button"
-                        @click="selectModel(model)"
-                      >
-                        <span class="min-w-0 flex-1">
-                          <span class="block truncate text-sm font-medium">
-                            {{ model.name }}
-                          </span>
+                            : ''"
+                          :aria-checked="isModelSelected(model.key)"
+                          role="checkbox"
+                          type="button"
+                          @click="toggleModelSelection(model)"
+                        >
                           <span
-                            class="mt-0.5 block truncate font-mono text-[11px] text-slate-400"
+                            class="searchable-checkbox"
+                            :class="isModelSelected(model.key)
+                              ? 'searchable-checkbox-checked'
+                              : ''"
                           >
-                            {{ modelOptionMeta(model) }}
+                            <span v-if="isModelSelected(model.key)">✓</span>
                           </span>
-                        </span>
-                        <span class="option-provider">
-                          {{ model.modalitySummary || modalityLabel(model.modality) }}
-                        </span>
-                      </button>
-                      <div
-                        v-if="!availableModelOptions.length"
-                        class="searchable-empty"
-                      >
-                        没有匹配的可添加模型
+                          <span class="min-w-0 flex-1">
+                            <span class="block truncate text-sm font-medium">
+                              {{ model.name }}
+                            </span>
+                            <span
+                              class="mt-0.5 block truncate font-mono text-[11px] text-slate-400"
+                            >
+                              {{ modelOptionMeta(model) }}
+                            </span>
+                          </span>
+                          <span class="option-provider">
+                            {{ model.modalitySummary || modalityLabel(model.modality) }}
+                          </span>
+                        </button>
+                        <div
+                          v-if="!availableModelOptions.length"
+                          class="searchable-empty"
+                        >
+                          没有匹配的可添加模型
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div class="form-field">
-                <label class="field-label">渠道上游</label>
-                <CompactSelect
-                  v-if="selectedModelKey"
-                  v-model="newDraft.model"
-                  :options="providerModelOptions"
-                  placeholder="选择渠道上游"
-                  searchable
-                  search-placeholder="搜索上游供货源 / 币种 / 类型"
-                  @change="selectPriceSourceModel"
-                />
-                <div v-else class="readonly-field">
-                  <span class="truncate">
-                    先选择元模型
-                  </span>
-                </div>
-                <p v-if="!selectedModelKey" class="field-helper">
-                  选择元模型后会显示可用的原厂、供货商或人工价格源。
-                </p>
-              </div>
-
-              <div class="inline-cost-grid">
-                <div class="form-field">
-                  <label class="field-label">成本规则</label>
-                  <CompactSelect
-                    v-model="newDraft.price_mode"
-                    :options="priceModeOptions"
-                    @change="applyPriceMode(newDraft)"
-                  />
-                </div>
-
-                <div class="form-field">
-                  <label class="field-label">配置值</label>
-                  <div
-                    v-if="newDraft.price_mode === 'channel_default'"
-                    class="readonly-field cost-value-readonly"
-                  >
-                    <span class="truncate">渠道默认折扣</span>
-                    <strong>
-                      {{ ratioPercent(props.channel?.settlement_ratio, 1) }}
-                    </strong>
+                <div class="inline-cost-grid">
+                  <div class="form-field">
+                    <label class="field-label">成本规则</label>
+                    <CompactSelect
+                      v-model="newDraft.price_mode"
+                      :options="priceModeOptions"
+                      @change="applyPriceMode(newDraft)"
+                    />
                   </div>
-                  <input
-                    v-else-if="newDraft.price_mode === 'discount'"
-                    v-model="newDraft.settlement_ratio"
-                    class="field compact-field text-right"
-                    step="0.0001"
-                    type="number"
-                    placeholder="0.85"
-                  />
-                  <div
-                    v-else-if="newDraft.price_mode === 'fixed'"
-                    class="fixed-cost-value-grid"
-                  >
-                    <label
-                      v-for="field in customPriceFields(selectedModel)"
-                      :key="field.key"
-                      class="form-field fixed-add-field"
-                    >
-                      <span class="field-label">{{ field.label }}</span>
-                      <input
-                        v-model="newDraft[field.key]"
-                        class="field compact-field text-right"
-                        step="0.000001"
-                        type="number"
-                        placeholder="可选"
-                      />
-                    </label>
+
+                  <div class="form-field">
+                    <label class="field-label">配置值</label>
                     <div
-                      v-if="!customPriceFields(selectedModel).length"
-                      class="fixed-price-note"
+                      v-if="newDraft.price_mode === 'channel_default'"
+                      class="readonly-field cost-value-readonly"
                     >
-                      当前模型的图片等特殊计价维度暂不支持在渠道配置中手动覆盖，
-                      会使用上游价格或折扣后的渠道成本价。
+                      <span class="truncate">渠道默认折扣</span>
+                      <strong>
+                        {{ ratioPercent(props.channel?.settlement_ratio, 1) }}
+                      </strong>
+                    </div>
+                    <div
+                      v-else-if="newDraft.price_mode === 'discount'"
+                      class="percent-input-wrap"
+                    >
+                      <input
+                        v-model="newDraftSettlementPercent"
+                        class="field compact-field pr-8 text-right"
+                        min="0"
+                        step="0.01"
+                        type="number"
+                        placeholder="85"
+                      />
+                      <span>%</span>
+                    </div>
+                    <div
+                      v-else-if="newDraft.price_mode === 'fixed'"
+                      class="fixed-cost-value-grid"
+                    >
+                      <label
+                        v-for="field in customPriceFields(selectedCostModel)"
+                        :key="field.key"
+                        class="form-field fixed-add-field"
+                      >
+                        <span class="field-label">{{ field.label }}</span>
+                        <input
+                          v-model="newDraft[field.key]"
+                          class="field compact-field text-right"
+                          step="0.000001"
+                          type="number"
+                          placeholder="可选"
+                        />
+                      </label>
+                      <div
+                        v-if="
+                          selectedCostModel &&
+                          !customPriceFields(selectedCostModel).length
+                        "
+                        class="fixed-price-note"
+                      >
+                        当前模型的图片等特殊计价维度暂不支持在渠道配置中手动覆盖，
+                        会使用上游价格或折扣后的渠道成本价。
+                      </div>
+                      <div v-else-if="!selectedCostModel" class="fixed-price-note">
+                        先选择元模型，再配置固定成本价。
+                      </div>
+                    </div>
+                    <div v-else class="readonly-field">
+                      <span class="truncate">跟随成本规则</span>
                     </div>
                   </div>
-                  <div v-else class="readonly-field">
-                    <span class="truncate">跟随成本规则</span>
+                </div>
+              </div>
+
+              <div
+                v-if="selectedModelOptions.length"
+                class="batch-selection-panel"
+              >
+                <div class="batch-selection-head">
+                  <div>
+                    <p>已选模型</p>
+                    <span>为每个元模型指定实际使用的渠道上游。</span>
+                  </div>
+                  <button type="button" @click="clearSelectedModels">
+                    清空选择
+                  </button>
+                </div>
+                <div class="batch-selection-list">
+                  <div
+                    v-for="item in selectedResolvedModels"
+                    :key="item.group.key"
+                    class="batch-selection-row"
+                  >
+                    <div class="batch-model-main">
+                      <p>{{ item.group.name }}</p>
+                      <span>{{ modelOptionMeta(item.group) }}</span>
+                    </div>
+                    <CompactSelect
+                      v-if="item.options.length"
+                      :model-value="selectedProviderByModelKey[item.group.key] || ''"
+                      :options="item.options"
+                      placeholder="选择渠道上游"
+                      searchable
+                      search-placeholder="搜索上游 / 币种 / 类型"
+                      @change="
+                        (value) => selectBatchPriceSourceModel(
+                          item.group.key,
+                          value
+                        )
+                      "
+                    />
+                    <div v-else class="readonly-field">
+                      <span class="truncate">无可用上游</span>
+                    </div>
+                    <div
+                      v-if="item.model"
+                      class="batch-price-preview"
+                    >
+                      <span>上游 {{ upstreamPriceSummary(item.model) }}</span>
+                      <strong>
+                        成本 {{ pendingDraftPriceSummary(newDraft, item.model) }}
+                      </strong>
+                    </div>
+                    <div v-else class="batch-price-preview muted">
+                      <span>待选择渠道上游</span>
+                      <strong>选择后显示价格</strong>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -268,59 +337,39 @@
             </div>
           </div>
 
-          <div
-            v-if="selectedModelOption"
-            class="pending-association"
-          >
+          <div v-if="selectedModelOptions.length" class="pending-association">
             <div class="pending-main">
               <p class="truncate text-sm font-semibold text-slate-900">
-                {{ selectedModelOption.name }}
+                已选 {{ selectedModelCount }} 个元模型
               </p>
               <p class="mt-1 truncate text-xs text-slate-500">
-                {{
-                  selectedModel
-                    ? `${purchaseSourceLabel(selectedModel)} / ${modalityLabel(selectedModel.modality)}`
-                    : ''
-                }}
+                {{ selectedResolvedCount }} 个已指定上游
               </p>
             </div>
-            <div
-              v-if="selectedModel"
-              class="pending-price-compact"
-            >
-              <span>上游价格</span>
-              <strong>{{ upstreamPriceSummary(selectedModel) }}</strong>
+            <div class="pending-price-compact">
+              <span>成本规则</span>
+              <strong>{{ newDraftRuleSummary }}</strong>
             </div>
-            <div
-              v-if="
-                selectedModel &&
-                draftPricePreview(newDraft, selectedModel).length
-              "
-              class="pending-price-compact"
-            >
-              <span>渠道成本</span>
-              <strong>{{ pendingDraftPriceSummary(newDraft, selectedModel) }}</strong>
+            <div class="pending-price-compact">
+              <span>转发能力</span>
+              <strong>{{ newDraftPerformanceSummary }}</strong>
             </div>
             <button
               type="button"
               class="btn-primary btn-compact"
-              :disabled="!selectedModel"
-              @click="addSelectedModel"
+              :disabled="!canAddSelectedModels"
+              @click="addSelectedModels"
             >
-              添加
+              批量添加 {{ selectedModelCount }} 个模型
             </button>
           </div>
         </div>
 
-        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_10rem]">
+        <div class="grid gap-3">
           <input
             v-model="search"
             class="field compact-field"
             placeholder="搜索已配置元模型、code 或上游来源"
-          />
-          <CompactSelect
-            v-model="statusFilter"
-            :options="statusFilterOptions"
           />
         </div>
 
@@ -355,22 +404,6 @@
                     ? '收起'
                     : `显示全部 ${filteredRows.length}`
                 }}
-              </button>
-              <button
-                type="button"
-                class="btn-toolbar"
-                :disabled="!filteredRows.length || saving"
-                @click="setFilteredRowsListed(true)"
-              >
-                批量设为渠道可用
-              </button>
-              <button
-                type="button"
-                class="btn-toolbar"
-                :disabled="!filteredRows.length || saving"
-                @click="setFilteredRowsListed(false)"
-              >
-                批量设为不可用
               </button>
             </div>
           </div>
@@ -443,10 +476,6 @@
                     {{ item.value }}
                   </strong>
                 </div>
-                <div>
-                  <span>状态</span>
-                  <strong>{{ row.draft.is_listed ? '可用' : '不可用' }}</strong>
-                </div>
               </div>
 
               <details class="channel-model-detail">
@@ -489,21 +518,6 @@
                 </div>
 
                 <div class="mt-3 grid gap-2 sm:grid-cols-2">
-                  <label
-                    class="publish-status justify-center"
-                    :class="
-                      row.draft.is_listed
-                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                        : 'border-slate-200 bg-slate-50 text-slate-500'
-                    "
-                  >
-                    <input
-                      v-model="row.draft.is_listed"
-                      type="checkbox"
-                      class="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600"
-                    />
-                    {{ row.draft.is_listed ? '渠道可用' : '不可用' }}
-                  </label>
                   <CompactSelect
                     v-model="row.draft.price_mode"
                     :options="priceModeOptions"
@@ -516,14 +530,26 @@
                     size="sm"
                     :title="costCurrencyTitle(row.draft.currency)"
                   />
-                  <input
+                  <div
                     v-if="row.draft.price_mode === 'discount'"
-                    v-model="row.draft.settlement_ratio"
-                    class="field compact-field text-right"
-                    step="0.0001"
-                    type="number"
-                    placeholder="折扣比例，如 0.85"
-                  />
+                    class="percent-input-wrap"
+                  >
+                    <input
+                      :value="ratioToPercentInput(row.draft.settlement_ratio)"
+                      class="field compact-field pr-8 text-right"
+                      min="0"
+                      step="0.01"
+                      type="number"
+                      placeholder="85"
+                      @input="
+                        updateSettlementPercent(
+                          row.draft,
+                          $event.target.value
+                        )
+                      "
+                    />
+                    <span>%</span>
+                  </div>
                 </div>
 
                 <div
@@ -591,7 +617,6 @@
                 <col class="source-col" />
                 <col class="price-col" />
                 <col class="ability-col" />
-                <col class="status-col" />
                 <col class="action-col" />
               </colgroup>
               <thead>
@@ -600,8 +625,7 @@
                   <th class="table-head">上游</th>
                   <th class="table-head">价格</th>
                   <th class="table-head">能力</th>
-                  <th class="table-head">状态</th>
-                  <th class="table-head action-col text-right">操作</th>
+                  <th class="table-head action-col text-center">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -680,118 +704,8 @@
                       </label>
                     </div>
                   </td>
-                  <td class="table-cell text-center">
-                    <label
-                      class="publish-status mx-auto"
-                      :class="
-                        row.draft.is_listed
-                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                          : 'border-slate-200 bg-slate-50 text-slate-500'
-                      "
-                    >
-                      <input
-                        v-model="row.draft.is_listed"
-                        type="checkbox"
-                        class="h-3.5 w-3.5 rounded border-slate-300 text-indigo-600"
-                      />
-                      {{ row.draft.is_listed ? '可用' : '不可用' }}
-                    </label>
-                  </td>
-                  <td class="table-cell action-col text-right">
-                    <div class="flex items-center justify-end gap-2">
-                      <details class="table-row-detail text-left">
-                        <summary aria-label="配置" title="配置">
-                          <svg
-                            aria-hidden="true"
-                            class="operation-icon"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            viewBox="0 0 24 24"
-                          >
-                            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-                            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.07a2 2 0 1 1-2.83 2.83l-.07-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .3 1.7 1.7 0 0 0-.7 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-.7-1.5 1.7 1.7 0 0 0-1-.3 1.7 1.7 0 0 0-1.88.34l-.07.06a2 2 0 1 1-2.83-2.83l.06-.07A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.3-1 1.7 1.7 0 0 0-1.5-.7H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-.7 1.7 1.7 0 0 0 .3-1 1.7 1.7 0 0 0-.34-1.88l-.06-.07a2 2 0 1 1 2.83-2.83l.07.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.3 1.7 1.7 0 0 0 .7-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 .7 1.5 1.7 1.7 0 0 0 1 .3 1.7 1.7 0 0 0 1.88-.34l.07-.06a2 2 0 1 1 2.83 2.83l-.06.07A1.7 1.7 0 0 0 19.4 9c0 .36.1.7.3 1a1.7 1.7 0 0 0 1.5.7h.1a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5.7 1.7 1.7 0 0 0-.3 1Z" />
-                          </svg>
-                        </summary>
-                        <div class="table-row-detail-panel">
-                          <div class="detail-grid">
-                            <div class="detail-field">
-                              <span>成本规则</span>
-                              <CompactSelect
-                                v-model="row.draft.price_mode"
-                                :options="priceModeOptions"
-                                class-name="price-mode-select"
-                                size="sm"
-                                @change="applyPriceMode(row.draft)"
-                              />
-                            </div>
-                            <div class="detail-field">
-                              <span>成本币种</span>
-                              <CompactSelect
-                                v-model="row.draft.currency"
-                                :options="currencyOptions"
-                                class-name="currency-select"
-                                size="sm"
-                                :title="costCurrencyTitle(row.draft.currency)"
-                              />
-                            </div>
-                            <label
-                              v-if="row.draft.price_mode === 'discount'"
-                              class="detail-field"
-                            >
-                              <span>折扣比例</span>
-                              <input
-                                v-model="row.draft.settlement_ratio"
-                                class="field-sm channel-model-input text-right"
-                                step="0.0001"
-                                type="number"
-                                placeholder="0.85"
-                              />
-                            </label>
-                          </div>
-                          <div
-                            v-if="row.draft.price_mode === 'fixed'"
-                            class="fixed-price-grid mt-2"
-                          >
-                            <label
-                              v-for="field in customPriceFields(row.model)"
-                              :key="field.key"
-                              class="fixed-price-field"
-                              :title="field.label"
-                            >
-                              <span>{{ field.shortLabel }}</span>
-                              <input
-                                v-model="row.draft[field.key]"
-                                class="field-sm channel-model-input text-right"
-                                step="0.000001"
-                                type="number"
-                                placeholder="可选"
-                              />
-                            </label>
-                            <span
-                              v-if="!customPriceFields(row.model).length"
-                              class="text-xs text-slate-400"
-                            >
-                              暂不支持手动覆盖
-                            </span>
-                          </div>
-                          <div class="detail-actions">
-                            <span>
-                              {{ hasUnsavedChanges ? '有未保存变更' : '配置已同步' }}
-                            </span>
-                            <button
-                              type="button"
-                              class="detail-save-button"
-                              :disabled="saving || !hasUnsavedChanges"
-                              @click="save"
-                            >
-                              {{ saving ? '保存中' : hasUnsavedChanges ? '保存配置' : '暂无变更' }}
-                            </button>
-                          </div>
-                        </div>
-                      </details>
+                  <td class="table-cell action-col text-center">
+                    <div class="flex items-center justify-center">
                       <OperationIconButton
                         icon="remove"
                         label="移除"
@@ -802,7 +716,7 @@
                   </td>
                 </tr>
                 <tr v-if="hiddenConfiguredRowCount">
-                  <td class="table-cell text-center text-slate-500" colspan="6">
+                  <td class="table-cell text-center text-slate-500" colspan="5">
                     <button
                       type="button"
                       class="link-btn"
@@ -813,7 +727,7 @@
                   </td>
                 </tr>
                 <tr v-if="!filteredRows.length">
-                  <td class="table-cell text-slate-500" colspan="6">
+                  <td class="table-cell text-slate-500" colspan="5">
                     还没有配置模型，请先从上方添加。
                   </td>
                 </tr>
@@ -870,10 +784,10 @@ const props = defineProps({
 const emit = defineEmits(['close', 'refresh', 'saved'])
 
 const search = ref('')
-const statusFilter = ref('all')
 const selectedVendorKey = ref('')
 const modelSearch = ref('')
-const selectedModelKey = ref('')
+const selectedModelKeys = ref(new Set())
+const selectedProviderByModelKey = ref({})
 const modelDropdownOpen = ref(false)
 const modelDropdownRef = ref(null)
 const modelSearchInput = ref(null)
@@ -920,18 +834,6 @@ const performanceFields = [
 ]
 const performanceFieldKeys = performanceFields.map((field) => field.key)
 
-const selectedModel = computed(() =>
-  props.models.find(
-    (model) => String(model.id) === String(newDraft.value.model)
-  )
-)
-
-const selectedModelOption = computed(() =>
-  availableModelGroups.value.find(
-    (option) => option.key === selectedModelKey.value
-  )
-)
-
 const priceModeOptions = [
   { label: '默认折扣', value: 'channel_default' },
   { label: '折扣比例', value: 'discount' },
@@ -941,12 +843,6 @@ const priceModeOptions = [
 const channelCurrency = computed(() =>
   String(props.channel?.currency || 'USD').toUpperCase()
 )
-
-const statusFilterOptions = [
-  { label: '全部配置', value: 'all' },
-  { label: '渠道可用', value: 'listed' },
-  { label: '不可用', value: 'unlisted' }
-]
 
 const currencyOptions = computed(() => [
   {
@@ -1075,30 +971,66 @@ const availableModelOptions = computed(() => {
     .slice(0, limit)
 })
 
-const providerModelOptions = computed(() => {
-  if (!selectedModelKey.value) return []
-  const group = availableModelGroups.value.find(
-    (item) => item.key === selectedModelKey.value
+const selectedModelOptions = computed(() =>
+  availableModelGroups.value.filter((option) =>
+    selectedModelKeys.value.has(option.key)
   )
-  if (!group) return []
-  return group.models
-    .slice()
-    .sort((left, right) =>
-      purchaseSourceLabel(left).localeCompare(purchaseSourceLabel(right))
+)
+
+const selectedModelCount = computed(() => selectedModelOptions.value.length)
+
+const selectedResolvedModels = computed(() =>
+  selectedModelOptions.value.map((group) => {
+    const selectedProviderId = selectedProviderByModelKey.value[group.key] || ''
+    const model = group.models.find(
+      (item) => String(item.id) === String(selectedProviderId)
     )
-    .map((model) => ({
-      label: purchaseSourceLabel(model),
-      value: model.id,
-      description: providerModelDescription(model),
-      badge: sourceCategoryBadge(modelSourceCategory(model)),
-      searchText: [
-        model.provider_name,
-        model.provider_code,
-        model.source_name,
-        modelSourceCategory(model),
-        model.currency
-      ].join(' ')
-    }))
+    return {
+      group,
+      model: model || null,
+      options: providerOptionsForModelGroup(group)
+    }
+  })
+)
+
+const selectedResolvedCount = computed(
+  () => selectedResolvedModels.value.filter((item) => item.model).length
+)
+
+const selectedCostModel = computed(() => {
+  const selected = selectedResolvedModels.value.find((item) => item.model)
+  return selected?.model || selectedModelOptions.value[0]?.models?.[0] || null
+})
+
+const canAddSelectedModels = computed(
+  () =>
+    selectedModelCount.value > 0 &&
+    selectedResolvedCount.value === selectedModelCount.value
+)
+
+const newDraftRuleSummary = computed(() => {
+  if (newDraft.value.price_mode === 'discount') {
+    return `折扣 ${ratioPercent(newDraft.value.settlement_ratio)}`
+  }
+  if (newDraft.value.price_mode === 'fixed') return '固定成本价'
+  return `默认折扣 ${ratioPercent(props.channel?.settlement_ratio, 1)}`
+})
+
+const newDraftPerformanceSummary = computed(() => {
+  const parts = performanceFields.map((field) => {
+    const value = newDraft.value[field.key] || '-'
+    return `${field.shortLabel} ${value}`
+  })
+  return parts.join(' · ')
+})
+
+const newDraftSettlementPercent = computed({
+  get() {
+    return ratioToPercentInput(newDraft.value.settlement_ratio)
+  },
+  set(value) {
+    newDraft.value.settlement_ratio = percentInputToRatio(value)
+  }
 })
 
 const managedRows = computed(() => {
@@ -1121,7 +1053,6 @@ const filteredRows = computed(() => {
   return managedRows.value
     .filter((row) => {
       const currentModel = row.model
-      const draft = row.draft
       const haystack = [
         currentModel.name,
         currentModel.code,
@@ -1134,12 +1065,6 @@ const filteredRows = computed(() => {
         .join(' ')
         .toLowerCase()
       if (keyword && !haystack.includes(keyword)) {
-        return false
-      }
-      if (statusFilter.value === 'listed' && !draft?.is_listed) {
-        return false
-      }
-      if (statusFilter.value === 'unlisted' && draft?.is_listed) {
         return false
       }
       return true
@@ -1157,18 +1082,14 @@ const hiddenConfiguredRowCount = computed(() =>
 
 function channelPriceItemsForModel(model, draft) {
   if (!props.channel || !draft?.id) return []
-  return props.channelPriceItems
-    .filter(
+  return sortPriceItems(
+    props.channelPriceItems.filter(
       (item) =>
         String(item.channel) === String(props.channel.id) &&
         String(item.model) === String(model.id) &&
         item.is_current !== false
     )
-    .sort((left, right) => {
-      const leftKey = `${left.dimension}-${left.tier_start || ''}`
-      const rightKey = `${right.dimension}-${right.tier_start || ''}`
-      return leftKey.localeCompare(rightKey)
-    })
+  )
 }
 
 watch(
@@ -1205,10 +1126,9 @@ onBeforeUnmount(() => {
 
 function reset() {
   search.value = ''
-  statusFilter.value = 'all'
   selectedVendorKey.value = ''
   modelSearch.value = ''
-  selectedModelKey.value = ''
+  clearSelectedModels()
   modelDropdownOpen.value = false
   configuredRowsExpanded.value = false
   newDraft.value = emptyNewDraft()
@@ -1386,23 +1306,38 @@ function emptyNewDraft() {
   }
 }
 
-function addSelectedModel() {
-  const model = selectedModel.value
-  if (!model) return
-  drafts.value[model.id] = {
+function addSelectedModels() {
+  if (!canAddSelectedModels.value) return
+  const modelsToAdd = selectedResolvedModels.value
+    .map((item) => item.model)
+    .filter(Boolean)
+  modelsToAdd.forEach((model) => {
+    drafts.value[model.id] = buildDraftForModel(model)
+    applyPriceMode(drafts.value[model.id])
+  })
+  recentlyAddedModelId.value = modelsToAdd.at(-1)?.id || null
+  newDraft.value = emptyNewDraft()
+  modelSearch.value = ''
+  clearSelectedModels()
+  modelDropdownOpen.value = false
+  nextTick(() => {
+    const row = document.querySelector(
+      '.recently-added-row, .recently-added-card'
+    )
+    row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+}
+
+function buildDraftForModel(model) {
+  return {
     ...draftDefaults(model, null),
     is_configured: true,
-    is_listed: false,
+    is_listed: true,
     price_mode: newDraft.value.price_mode,
-    price_source: newDraft.value.price_source || model.source || '',
-    price_source_name:
-      newDraft.value.price_source_name || model.source_name || '',
-    price_source_category:
-      newDraft.value.price_source_category || modelSourceCategory(model) || '',
-    price_source_endpoint_url:
-      newDraft.value.price_source_endpoint_url ||
-      model.source_endpoint_url ||
-      '',
+    price_source: model.source || '',
+    price_source_name: model.source_name || '',
+    price_source_category: modelSourceCategory(model) || '',
+    price_source_endpoint_url: model.source_endpoint_url || '',
     currency: newDraft.value.currency,
     settlement_ratio:
       newDraft.value.price_mode === 'discount'
@@ -1436,18 +1371,6 @@ function addSelectedModel() {
     rpm_limit: newDraft.value.rpm_limit,
     latency_ms: newDraft.value.latency_ms
   }
-  applyPriceMode(drafts.value[model.id])
-  recentlyAddedModelId.value = model.id
-  newDraft.value = emptyNewDraft()
-  modelSearch.value = ''
-  selectedModelKey.value = ''
-  modelDropdownOpen.value = false
-  nextTick(() => {
-    const row = document.querySelector(
-      '.recently-added-row, .recently-added-card'
-    )
-    row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  })
 }
 
 function toggleModelDropdown() {
@@ -1472,30 +1395,80 @@ function closeModelDropdown() {
 }
 
 function handleVendorChange() {
-  selectedModelKey.value = ''
+  clearSelectedModels()
   modelSearch.value = ''
   modelDropdownOpen.value = false
-  newDraft.value.model = ''
-  selectPriceSourceModel('')
 }
 
-function selectModel(modelOption) {
-  selectedModelKey.value = modelOption.key
-  const providers = providerModelOptions.value.filter((option) => option.value)
-  newDraft.value.model = providers.length === 1 ? providers[0].value : ''
-  selectPriceSourceModel(newDraft.value.model)
-  modelSearch.value = ''
-  closeModelDropdown()
+function providerOptionsForModelGroup(group) {
+  if (!group) return []
+  return group.models
+    .slice()
+    .sort((left, right) =>
+      purchaseSourceLabel(left).localeCompare(purchaseSourceLabel(right))
+    )
+    .map((model) => ({
+      label: purchaseSourceLabel(model),
+      value: model.id,
+      description: providerModelDescription(model),
+      badge: sourceCategoryBadge(modelSourceCategory(model)),
+      searchText: [
+        model.provider_name,
+        model.provider_code,
+        model.source_name,
+        modelSourceCategory(model),
+        model.currency
+      ].join(' ')
+    }))
 }
 
-function selectPriceSourceModel(value) {
-  const model = props.models.find(
-    (item) => String(item.id) === String(value)
-  )
-  newDraft.value.price_source = model?.source || ''
-  newDraft.value.price_source_name = model?.source_name || ''
-  newDraft.value.price_source_category = modelSourceCategory(model)
-  newDraft.value.price_source_endpoint_url = model?.source_endpoint_url || ''
+function isModelSelected(key) {
+  return selectedModelKeys.value.has(key)
+}
+
+function toggleModelSelection(modelOption) {
+  const next = new Set(selectedModelKeys.value)
+  if (next.has(modelOption.key)) {
+    next.delete(modelOption.key)
+    removeSelectedProvider(modelOption.key)
+  } else {
+    next.add(modelOption.key)
+    ensureDefaultProvider(modelOption)
+  }
+  selectedModelKeys.value = next
+}
+
+function selectVisibleModels() {
+  const next = new Set(selectedModelKeys.value)
+  availableModelOptions.value.forEach((modelOption) => {
+    next.add(modelOption.key)
+    ensureDefaultProvider(modelOption)
+  })
+  selectedModelKeys.value = next
+}
+
+function clearSelectedModels() {
+  selectedModelKeys.value = new Set()
+  selectedProviderByModelKey.value = {}
+}
+
+function ensureDefaultProvider(group) {
+  if (selectedProviderByModelKey.value[group.key]) return
+  if (group.models.length !== 1) return
+  selectBatchPriceSourceModel(group.key, group.models[0].id)
+}
+
+function removeSelectedProvider(key) {
+  const next = { ...selectedProviderByModelKey.value }
+  delete next[key]
+  selectedProviderByModelKey.value = next
+}
+
+function selectBatchPriceSourceModel(key, value) {
+  selectedProviderByModelKey.value = {
+    ...selectedProviderByModelKey.value,
+    [key]: value
+  }
 }
 
 function handleModelDropdownOutside(event) {
@@ -1613,6 +1586,24 @@ function ratioPercent(value, fallback = null) {
   const ratio = Number(rawValue)
   if (!Number.isFinite(ratio)) return '-'
   return `${(ratio * 100).toFixed(1)}%`
+}
+
+function ratioToPercentInput(value) {
+  if (value === '' || value === null || value === undefined) return ''
+  const ratio = Number(value)
+  if (!Number.isFinite(ratio)) return ''
+  return Number((ratio * 100).toFixed(4)).toString()
+}
+
+function percentInputToRatio(value) {
+  if (value === '' || value === null || value === undefined) return ''
+  const percent = Number(value)
+  if (!Number.isFinite(percent)) return ''
+  return String(percent / 100)
+}
+
+function updateSettlementPercent(draft, value) {
+  draft.settlement_ratio = percentInputToRatio(value)
 }
 
 function priceRuleSummary(row) {
@@ -1810,12 +1801,6 @@ async function removeRow(row) {
   drafts.value[row.model.id] = draftDefaults(row.model, null)
 }
 
-function setFilteredRowsListed(value) {
-  filteredRows.value.forEach((row) => {
-    row.draft.is_listed = value
-  })
-}
-
 async function save() {
   if (!props.channel || !hasUnsavedChanges.value) return
   saving.value = true
@@ -1880,11 +1865,10 @@ function moneyOrStatus(value, currency = 'USD') {
 
 function compactCostSummary(row) {
   if (row?.priceItems?.length) {
-    return row.priceItems
-      .slice(0, 2)
+    return sortPriceItems(row.priceItems)
       .map(
         (item) =>
-          `${dimensionLabel(item.dimension)} ${moneyOrStatus(
+          `${priceItemDisplayLabel(item.dimension)} ${moneyOrStatus(
             item.unit_price,
             item.currency
           )}`
@@ -1894,10 +1878,9 @@ function compactCostSummary(row) {
   const previewItems = draftPricePreview(row?.draft, row?.model)
   if (!previewItems.length) return '成本待生成'
   return previewItems
-    .slice(0, 2)
     .map(
       (item) =>
-        `${String(item.label).replace('预估', '')} ${priceText(
+        `${previewPriceLabel(item.label)} ${priceText(
           item,
           row?.model
         )}`
@@ -1918,7 +1901,7 @@ function pendingDraftPriceSummary(draft, model) {
   if (!rows.length) return '-'
   return rows
     .map((item) =>
-      `${String(item.label).replace('预估', '')} ${priceText(item, model)}`
+      `${previewPriceLabel(item.label)} ${priceText(item, model)}`
     )
     .join(' · ')
 }
@@ -1985,26 +1968,26 @@ function providerPriceSummary(model) {
 
   if (model.modality === 'video') {
     return compactPriceRowsWithMissingReason(model, [
-      ['视频入', model.video_input_price_per_second, model.currency],
-      ['视频出', model.video_output_price_per_second, model.currency]
+      ['Video In', model.video_input_price_per_second, model.currency],
+      ['Video Out', model.video_output_price_per_second, model.currency]
     ])
   }
   if (model.modality === 'audio') {
     return compactPriceRowsWithMissingReason(model, [
-      ['音频入', model.audio_input_price_per_second, model.currency],
-      ['音频出', model.audio_output_price_per_second, model.currency]
+      ['Audio In', model.audio_input_price_per_second, model.currency],
+      ['Audio Out', model.audio_output_price_per_second, model.currency]
     ])
   }
   if (model.image_output_price_per_image) {
     return compactPriceRowsWithMissingReason(model, [
-      ['文本入', model.input_price_per_million, model.currency],
-      ['文本出', model.output_price_per_million, model.currency],
-      ['图片出', model.image_output_price_per_image, model.currency]
+      ['Input', model.input_price_per_million, model.currency],
+      ['Output', model.output_price_per_million, model.currency],
+      ['Image Out', model.image_output_price_per_image, model.currency]
     ])
   }
   return compactPriceRowsWithMissingReason(model, [
-    ['入', model.input_price_per_million, model.currency],
-    ['出', model.output_price_per_million, model.currency]
+    ['Input', model.input_price_per_million, model.currency],
+    ['Output', model.output_price_per_million, model.currency]
   ])
 }
 
@@ -2103,16 +2086,44 @@ function priceDimensionSortKey(item) {
 
 function providerPriceItemLabel(dimension) {
   const labels = {
-    text_input: '入',
-    text_output: '出',
-    cache_input: '缓存',
-    image_output: '图片出',
-    audio_input: '音频入',
-    audio_output: '音频出',
-    video_input: '视频入',
-    video_output: '视频出'
+    text_input: 'Input',
+    text_output: 'Output',
+    cache_input: 'Cache',
+    image_input: 'Image In',
+    image_output: 'Image Out',
+    audio_input: 'Audio In',
+    audio_output: 'Audio Out',
+    video_input: 'Video In',
+    video_output: 'Video Out'
   }
   return labels[dimension] || dimensionLabel(dimension)
+}
+
+function priceItemDisplayLabel(dimension) {
+  return providerPriceItemLabel(dimension)
+}
+
+function previewPriceLabel(label) {
+  const normalized = String(label || '').replace('预估', '')
+  const labels = {
+    文入: 'Input',
+    文出: 'Output',
+    缓存: 'Cache',
+    音入: 'Audio In',
+    音出: 'Audio Out',
+    视入: 'Video In',
+    视出: 'Video Out',
+    图入: 'Image In',
+    图出: 'Image Out',
+    文本入: 'Input',
+    文本出: 'Output',
+    图片出: 'Image Out',
+    音频入: 'Audio In',
+    音频出: 'Audio Out',
+    视频入: 'Video In',
+    视频出: 'Video Out'
+  }
+  return labels[normalized] || normalized || '-'
 }
 
 function compactPriceRowsWithMissingReason(model, rows) {
@@ -2195,15 +2206,15 @@ function compactPriceRows(rows) {
 
 function dimensionLabel(dimension) {
   const labels = {
-    text_input: '文入',
-    text_output: '文出',
-    cache_input: '缓存',
-    image_input: '图入',
-    image_output: '图出',
-    audio_input: '音入',
-    audio_output: '音出',
-    video_input: '视入',
-    video_output: '视出'
+    text_input: 'Input',
+    text_output: 'Output',
+    cache_input: 'Cache',
+    image_input: 'Image In',
+    image_output: 'Image Out',
+    audio_input: 'Audio In',
+    audio_output: 'Audio Out',
+    video_input: 'Video In',
+    video_output: 'Video Out'
   }
   return labels[dimension] || dimension || '-'
 }
@@ -2328,6 +2339,10 @@ function modalityLabel(modality) {
   @apply grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.42fr)] xl:items-start;
 }
 
+.add-model-main {
+  @apply grid min-w-0 gap-3;
+}
+
 .add-grid {
   @apply grid gap-3 md:grid-cols-2 xl:grid-cols-1;
 }
@@ -2370,6 +2385,68 @@ function modalityLabel(modality) {
 
 .fixed-add-field {
   @apply max-w-full;
+}
+
+.batch-selection-panel {
+  @apply rounded-lg border border-slate-200 bg-white;
+}
+
+.batch-selection-head {
+  @apply flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2;
+}
+
+.batch-selection-head p {
+  @apply text-xs font-semibold text-slate-700;
+}
+
+.batch-selection-head span {
+  @apply mt-0.5 block text-[11px] text-slate-400;
+}
+
+.batch-selection-head button {
+  @apply shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700;
+}
+
+.batch-selection-list {
+  @apply grid max-h-80 gap-0 overflow-y-auto divide-y divide-slate-100;
+}
+
+.batch-selection-row {
+  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(9rem,0.8fr)_minmax(11rem,0.9fr)_minmax(0,1.35fr)] xl:items-center;
+}
+
+.batch-model-main {
+  @apply min-w-0;
+}
+
+.batch-model-main p {
+  @apply truncate text-sm font-semibold text-slate-900;
+}
+
+.batch-model-main span {
+  @apply mt-0.5 block truncate font-mono text-[11px] text-slate-400;
+}
+
+.batch-price-preview {
+  @apply grid min-w-0 gap-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs;
+}
+
+.batch-price-preview span,
+.batch-price-preview strong {
+  @apply truncate font-mono text-xs leading-5;
+}
+
+.batch-price-preview span {
+  @apply text-slate-500;
+}
+
+.batch-price-preview strong {
+  @apply font-semibold text-slate-800;
+}
+
+.batch-price-preview.muted span,
+.batch-price-preview.muted strong {
+  @apply font-sans text-slate-400;
 }
 
 .pending-association {
@@ -2429,6 +2506,14 @@ function modalityLabel(modality) {
   @apply flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-1.5 text-[11px] font-medium text-slate-400;
 }
 
+.searchable-meta-actions {
+  @apply inline-flex shrink-0 items-center gap-2;
+}
+
+.searchable-meta-actions button {
+  @apply text-[11px] font-semibold text-indigo-600 transition hover:text-indigo-700;
+}
+
 .searchable-list {
   @apply max-h-72 overflow-y-auto border-t border-slate-100 p-1;
 }
@@ -2439,6 +2524,14 @@ function modalityLabel(modality) {
 
 .searchable-option-active {
   @apply bg-indigo-50 text-indigo-700;
+}
+
+.searchable-checkbox {
+  @apply flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-[10px] font-bold text-white;
+}
+
+.searchable-checkbox-checked {
+  @apply border-indigo-500 bg-indigo-600;
 }
 
 .option-provider {
@@ -2461,14 +2554,6 @@ function modalityLabel(modality) {
   @apply flex min-h-9 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-700;
 }
 
-.publish-toggle {
-  @apply flex min-h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-medium text-slate-700;
-}
-
-.publish-status {
-  @apply inline-flex min-w-20 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium transition;
-}
-
 .fixed-price-note {
   @apply flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500;
 }
@@ -2487,6 +2572,14 @@ function modalityLabel(modality) {
 
 .field-sm {
   @apply rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.percent-input-wrap {
+  @apply relative min-w-0;
+}
+
+.percent-input-wrap span {
+  @apply pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400;
 }
 
 .icon-mark {
@@ -2566,40 +2659,6 @@ function modalityLabel(modality) {
   @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-medium text-indigo-600 transition hover:border-indigo-200 hover:bg-indigo-50;
 }
 
-.table-row-detail {
-  @apply relative inline-block text-xs;
-}
-
-.table-row-detail summary {
-  @apply flex h-8 w-8 cursor-pointer select-none items-center justify-center rounded-lg text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-700;
-  list-style: none;
-}
-
-.table-row-detail summary::-webkit-details-marker {
-  display: none;
-}
-
-.table-row-detail-panel {
-  @apply absolute right-0 z-40 w-[28rem] rounded-lg border border-slate-200 bg-white p-3 shadow-xl;
-  bottom: calc(100% + 0.25rem);
-}
-
-.detail-grid {
-  @apply grid grid-cols-2 gap-2;
-}
-
-.detail-field {
-  @apply grid gap-1 text-xs font-medium text-slate-500;
-}
-
-.detail-actions {
-  @apply mt-3 flex items-center justify-between gap-3 border-t border-slate-100 pt-3 text-xs text-slate-400;
-}
-
-.detail-save-button {
-  @apply inline-flex min-h-8 items-center justify-center rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500;
-}
-
 .recently-added-card {
   @apply border-indigo-200 bg-indigo-50/40 ring-1 ring-inset ring-indigo-100;
 }
@@ -2637,19 +2696,15 @@ function modalityLabel(modality) {
 }
 
 .channel-model-table .price-col {
-  width: 34%;
+  width: 38%;
 }
 
 .channel-model-table .ability-col {
-  width: 17%;
-}
-
-.channel-model-table .status-col {
-  width: 7%;
+  width: 20%;
 }
 
 .channel-model-table .action-col {
-  width: 8%;
+  width: 6%;
 }
 
 .channel-model-table .model-cell {
@@ -2841,7 +2896,7 @@ function modalityLabel(modality) {
 }
 
 .action-col {
-  width: 5.75rem;
-  min-width: 5.75rem;
+  width: 4.5rem;
+  min-width: 4.5rem;
 }
 </style>

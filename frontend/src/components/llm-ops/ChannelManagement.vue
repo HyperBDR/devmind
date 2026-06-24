@@ -7,7 +7,7 @@
             转发渠道配置
           </h3>
           <p class="mt-1 text-xs text-slate-500">
-            维护渠道基础信息，并进入模型管理配置渠道上游、成本规则和批量状态。
+            维护渠道基础信息，并进入模型管理配置渠道上游、成本规则和转发能力。
           </p>
         </div>
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
