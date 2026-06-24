@@ -744,8 +744,7 @@ const exchangeRateLabel = computed(() => {
   const currency = summary.value.currency
   if (!currency) return ''
   const rate = Number(currency.usd_to_cny_rate || 0).toFixed(4)
-  const source = currency.rate_source_label || '汇率'
-  return `1 USD = ${rate} CNY · ${source}`
+  return `1 USD = ${rate} CNY`
 })
 const pointConversion = computed(() => summary.value.point_conversion || null)
 
