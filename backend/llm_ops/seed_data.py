@@ -11,6 +11,7 @@ from django.utils.text import slugify
 from .collection_services import ensure_official_source
 from .constants import (
     SUPPLIER_SOURCE_VENDOR_ALIASES,
+    canonical_meta_model_identity,
     canonical_vendor_for_model_code,
     ensure_canonical_vendor_row,
     is_canonical_vendor_code,
@@ -20,12 +21,18 @@ from .models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
     ChannelPriceItem,
+    CollectedModelPriceHistory,
+    CollectedModelPriceSnapshot,
     LLMModel,
     LLMProvider,
     MetaModel,
     ModelPriceItem,
     PriceCollectionSource,
     ProcurementChannel,
+    ResaleListing,
+    ResaleListingExclusion,
+    ResaleListingPriceHistory,
+    UsageReconciliationRecord,
 )
 from .services import (
     ensure_meta_model,
@@ -37,18 +44,37 @@ from .services import (
 SERVICE_ACCESS_URL = "https://llm.guohe-sh.com"
 REAL_RESOURCE_CHANNEL_CODE = "real-resource-platform"
 YUNCE_SUPPLIER_CHANNEL_CODE = "yunce-supplier-platform"
+DEMO_BASELINE_SUPPLIER_CHANNEL_CODE = "demo-baseline-supplier"
 MOCK_SUPPLIER_CHANNEL_CODES = (
     YUNCE_SUPPLIER_CHANNEL_CODE,
+    DEMO_BASELINE_SUPPLIER_CHANNEL_CODE,
     "demo-premium-supplier",
     "demo-backup-supplier",
 )
+LEGACY_TEST_SOURCE_SLUGS = (
+    "real-resource-platform-supplier",
+    "test-02-supplier",
+    "cc-supplier",
+)
+UNCONFIRMED_PRICE_SOURCE_SLUGS = (
+    "anthropic-sheet",
+    "google-sheet",
+    "openai-sheet",
+    "aliyun-wanx-sheet",
+)
+CONFIRMED_SUPPLIER_SHEET_SOURCE_CODES = (
+    "aliyun",
+    "volcengine",
+    "siliconflow",
+)
 TREND_DEMO_SOURCE_SLUGS = (
     f"{REAL_RESOURCE_CHANNEL_CODE}-trend-demo",
+    f"{DEMO_BASELINE_SUPPLIER_CHANNEL_CODE}-trend-demo",
     "demo-premium-supplier-trend-demo",
     "demo-backup-supplier-trend-demo",
 )
 TREND_DEMO_HISTORY_POINTS = {
-    REAL_RESOURCE_CHANNEL_CODE: (
+    DEMO_BASELINE_SUPPLIER_CHANNEL_CODE: (
         ("2026-01-01", Decimal("0.150000"), Decimal("0.600000")),
         ("2026-02-01", Decimal("0.145000"), Decimal("0.570000")),
         ("2026-03-01", Decimal("0.138000"), Decimal("0.540000")),
@@ -811,12 +837,16 @@ def apply_meta_model_seed_info(
         info,
         provider,
     )
+    identity = canonical_meta_model_identity(meta_model.code, info.name)
+    aliases = set(meta_model.aliases or [])
+    aliases.update(info.aliases)
+    aliases.update(identity["aliases"])
     updates = {
-        "name": info.name,
+        "name": identity["name"],
         "family": info.family,
         "vendor": canonical_vendor,
         "modality": info.modality,
-        "aliases": sorted(set(info.aliases + (meta_model.code,))),
+        "aliases": sorted(alias for alias in aliases if alias),
         "capabilities": capabilities,
         "metadata": metadata,
     }
@@ -984,6 +1014,7 @@ def _seed_initial_price_sheet_core(
         "providers": 0,
         "sources": 0,
         "models": 0,
+        "model_price_items": 0,
         "channel_model_prices": 0,
         "yunce_supplier_sources": 0,
         "yunce_supplier_prices": 0,
@@ -993,21 +1024,6 @@ def _seed_initial_price_sheet_core(
         "trend_listings": 0,
     }
     normalize_supplier_source_vendors()
-
-    channel, _ = ProcurementChannel.objects.update_or_create(
-        code=REAL_RESOURCE_CHANNEL_CODE,
-        defaults={
-            "name": "真实资源平台",
-            "api_endpoint": SERVICE_ACCESS_URL,
-            "currency": "USD",
-            "settlement_ratio": Decimal("1"),
-            "is_active": True,
-            "notes": (
-                "基础价格为真实资源平台列表价，"
-                "折扣有效期为合同存续期间。"
-            ),
-        },
-    )
 
     for entry in PRICE_SHEET_ENTRIES:
         source_code = entry.source_code or entry.provider_code
@@ -1025,50 +1041,51 @@ def _seed_initial_price_sheet_core(
         if provider_created:
             stats["providers"] += 1
 
-        ensure_seed_official_source(provider)
+        try:
+            ensure_official_source(provider=provider)
+        except KeyError:
+            pass
 
-        source_manager = PriceCollectionSource.objects
-        (
-            source,
-            source_created,
-        ) = source_manager.get_or_create(
-            slug=f"{source_code}-sheet",
-            defaults={
-                "provider": provider,
-                "channel": channel,
-                "name": f"{source_name} 表格价格目录",
-                "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
-                "source_category": (
-                    PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
-                ),
-                "endpoint_url": SERVICE_ACCESS_URL,
-                "currency": entry.currency,
-                "is_enabled": True,
-                "updates_model_prices": True,
-                "notes": (
-                    "供应方接入地址："
-                    f"{SERVICE_ACCESS_URL}; "
-                    f"价格源地址：{source_url}; "
-                    f"元模型厂商：{entry.provider_name}"
-                ),
-            },
-        )
-        if source_created:
-            stats["sources"] += 1
-        elif not preserve_manual_overrides:
-            _update_price_collection_source_defaults(
+        source = None
+        if should_seed_supplier_sheet_source(entry):
+            source_manager = PriceCollectionSource.objects
+            (
                 source,
-                provider=provider,
-                channel=channel,
-                name=f"{source_name} 表格价格目录",
-                currency=entry.currency,
-                notes=(
-                    "供应方接入地址："
-                    f"{SERVICE_ACCESS_URL}; "
-                    f"价格源地址：{source_url}; "
-                    f"元模型厂商：{entry.provider_name}"
-                ),
+                source_created,
+            ) = source_manager.get_or_create(
+                slug=f"{source_code}-sheet",
+                defaults={
+                    "provider": provider,
+                    "channel": None,
+                    "name": f"{source_name} 表格价格目录",
+                    "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                    "source_category": (
+                        PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+                    ),
+                    "endpoint_url": SERVICE_ACCESS_URL,
+                    "currency": entry.currency,
+                    "is_enabled": True,
+                    "updates_model_prices": True,
+                    "notes": (
+                        f"价格源地址：{source_url}; "
+                        f"元模型厂商：{entry.provider_name}"
+                    ),
+                },
             )
+            if source_created:
+                stats["sources"] += 1
+            elif not preserve_manual_overrides:
+                _update_price_collection_source_defaults(
+                    source,
+                    provider=provider,
+                    channel=None,
+                    name=f"{source_name} 表格价格目录",
+                    currency=entry.currency,
+                    notes=(
+                        f"价格源地址：{source_url}; "
+                        f"元模型厂商：{entry.provider_name}"
+                    ),
+                )
 
         for model_code in entry.models:
             input_price, output_price = MODEL_BASE_PRICES.get(
@@ -1099,8 +1116,8 @@ def _seed_initial_price_sheet_core(
                     "max_output_tokens": meta_info.max_output_tokens,
                     "currency": entry.currency,
                     "source": source,
-                    "source_url": SERVICE_ACCESS_URL,
-                    "price_role": price_role_for_source(source),
+                    "source_url": source.endpoint_url if source else "",
+                    "price_role": seed_model_price_role(source, meta_model),
                     "is_active": True,
                 },
             )
@@ -1116,65 +1133,35 @@ def _seed_initial_price_sheet_core(
                     context_window=meta_info.context_window,
                     max_output_tokens=meta_info.max_output_tokens,
                     currency=entry.currency,
-                    price_role=price_role_for_source(source),
+                    price_role=seed_model_price_role(source, meta_model),
+                )
+            if source is not None:
+                stats["model_price_items"] += seed_sheet_model_price_items(
+                    entry,
+                    provider,
+                    model,
+                    source,
+                    preserve_manual_overrides=preserve_manual_overrides,
                 )
 
-            if preserve_manual_overrides:
-                (
-                    channel_model_price,
-                    price_created,
-                ) = ChannelModelPrice.objects.get_or_create(
-                    channel=channel,
-                    model=model,
-                    defaults={
-                        "meta_model": model.meta_model,
-                        "price_source": source,
-                        "is_listed": True,
-                        "currency": entry.currency,
-                        "settlement_ratio": entry.discount,
-                        "notes": (
-                            "基础价格：真实资源平台列表价；"
-                            f"币种：{entry.currency}；"
-                            "折扣有效期：合同存续期间。"
-                        ),
-                    },
-                )
-            else:
-                (
-                    channel_model_price,
-                    price_created,
-                ) = ChannelModelPrice.objects.update_or_create(
-                    channel=channel,
-                    model=model,
-                    defaults={
-                        "meta_model": model.meta_model,
-                        "price_source": source,
-                        "is_listed": True,
-                        "currency": entry.currency,
-                        "settlement_ratio": entry.discount,
-                        "notes": (
-                            "基础价格：真实资源平台列表价；"
-                            f"币种：{entry.currency}；"
-                            "折扣有效期：合同存续期间。"
-                        ),
-                    },
-                )
-            if price_created:
-                stats["channel_model_prices"] += 1
-            elif not preserve_manual_overrides:
-                # The update_or_create path already applied defaults
-                # above. Nothing more to do.
-                pass
-
+    normalize_meta_model_catalog()
     return stats
 
 
-def ensure_seed_official_source(provider: LLMProvider) -> None:
-    """Create official source config when the provider is supported."""
-    try:
-        ensure_official_source(provider=provider)
-    except KeyError:
-        return
+def should_seed_supplier_sheet_source(entry: ProviderSheetEntry) -> bool:
+    """Return whether the price sheet entry has a confirmed supplier."""
+    source_code = entry.source_code or entry.provider_code
+    return source_code in CONFIRMED_SUPPLIER_SHEET_SOURCE_CODES
+
+
+def seed_model_price_role(
+    source: PriceCollectionSource | None,
+    meta_model: MetaModel,
+) -> str:
+    """Return the role for a seeded model without an unconfirmed source."""
+    if source is None:
+        return LLMModel.PRICE_ROLE_UNKNOWN
+    return price_role_for_source(source, meta_model=meta_model)
 
 
 def normalize_supplier_source_vendors() -> int:
@@ -1272,6 +1259,172 @@ def normalize_supplier_source_vendors() -> int:
         ):
             supplier.delete()
     return moved
+
+
+def seed_sheet_model_price_items(
+    entry: ProviderSheetEntry,
+    provider: LLMProvider,
+    model: LLMModel,
+    source: PriceCollectionSource,
+    *,
+    preserve_manual_overrides: bool = False,
+) -> int:
+    """Seed normalized current price items for one sheet-backed model."""
+    payloads = []
+    for dimension, billing_unit, unit_price in sheet_model_item_specs(model):
+        if unit_price is None:
+            continue
+        unit_value = Decimal(str(unit_price))
+        if unit_value <= 0:
+            continue
+        payload = {
+            "provider": provider,
+            "model": model,
+            "meta_model": model.meta_model,
+            "source": source,
+            "dimension": dimension,
+            "billing_unit": billing_unit,
+            "currency": entry.currency,
+            "unit_price": unit_value,
+            "tier_type": ModelPriceItem.TIER_FLAT,
+            "tier_start": None,
+            "tier_end": None,
+            "spec": {
+                "seed_source": "initial_price_sheet",
+                "source_code": entry.source_code or entry.provider_code,
+            },
+            "source_url": source.endpoint_url,
+            "raw_payload": {
+                "provider_code": entry.provider_code,
+                "model_code": model.code,
+                "source_url": entry.source_url or entry.upstream_url,
+            },
+            "is_current": True,
+            "effective_to": None,
+        }
+        payload["price_fingerprint"] = stable_fingerprint(
+            {
+                "source": source.id,
+                "dimension": dimension,
+                "billing_unit": billing_unit,
+                "currency": entry.currency,
+                "unit_price": str(unit_value),
+                "tier_type": ModelPriceItem.TIER_FLAT,
+                "tier_start": "",
+                "tier_end": "",
+                "spec": payload["spec"],
+            }
+        )
+        payloads.append(payload)
+
+    if not payloads:
+        return 0
+
+    if preserve_manual_overrides:
+        return create_missing_sheet_price_items(model, source, payloads)
+
+    now = timezone.now()
+    ModelPriceItem.objects.filter(
+        model=model,
+        source=source,
+        spec__seed_source="initial_price_sheet",
+        is_current=True,
+    ).exclude(
+        price_fingerprint__in=[
+            payload["price_fingerprint"] for payload in payloads
+        ],
+    ).update(is_current=False, effective_to=now)
+
+    created_count = 0
+    for payload in payloads:
+        price_item, created = ModelPriceItem.objects.update_or_create(
+            model=model,
+            source=source,
+            dimension=payload["dimension"],
+            billing_unit=payload["billing_unit"],
+            tier_type=payload["tier_type"],
+            tier_start=None,
+            tier_end=None,
+            defaults=payload,
+        )
+        if created:
+            created_count += 1
+        if not price_item.is_current or price_item.effective_to is not None:
+            price_item.is_current = True
+            price_item.effective_to = None
+            price_item.save(update_fields=["is_current", "effective_to"])
+    return created_count
+
+
+def create_missing_sheet_price_items(
+    model: LLMModel,
+    source: PriceCollectionSource,
+    payloads: list[dict],
+) -> int:
+    """Create missing sheet price dimensions without touching existing rows."""
+    created_count = 0
+    for payload in payloads:
+        exists = ModelPriceItem.objects.filter(
+            model=model,
+            source=source,
+            dimension=payload["dimension"],
+            billing_unit=payload["billing_unit"],
+            tier_type=payload["tier_type"],
+            tier_start=None,
+            tier_end=None,
+            is_current=True,
+        ).exists()
+        if exists:
+            continue
+        ModelPriceItem.objects.create(**payload)
+        created_count += 1
+    return created_count
+
+
+def sheet_model_item_specs(model: LLMModel) -> tuple[tuple[str, str, object], ...]:
+    """Return normalized price dimensions backed by LLMModel fields."""
+    return (
+        (
+            ModelPriceItem.DIMENSION_TEXT_INPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+            model.input_price_per_million,
+        ),
+        (
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+            model.output_price_per_million,
+        ),
+        (
+            ModelPriceItem.DIMENSION_CACHE_INPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+            model.cache_input_price_per_million,
+        ),
+        (
+            ModelPriceItem.DIMENSION_IMAGE_OUTPUT,
+            ModelPriceItem.UNIT_PER_IMAGE,
+            model.image_output_price_per_image,
+        ),
+        (
+            ModelPriceItem.DIMENSION_AUDIO_INPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            model.audio_input_price_per_second,
+        ),
+        (
+            ModelPriceItem.DIMENSION_AUDIO_OUTPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            model.audio_output_price_per_second,
+        ),
+        (
+            ModelPriceItem.DIMENSION_VIDEO_INPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            model.video_input_price_per_second,
+        ),
+        (
+            ModelPriceItem.DIMENSION_VIDEO_OUTPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            model.video_output_price_per_second,
+        ),
+    )
 
 
 def seed_yunce_supplier_price_demo(
@@ -1596,8 +1749,8 @@ def seed_agione_price_trend_demo(
 
     channels = [
         ensure_demo_channel(
-            code=REAL_RESOURCE_CHANNEL_CODE,
-            name="真实资源平台",
+            code=DEMO_BASELINE_SUPPLIER_CHANNEL_CODE,
+            name="基准演示供货源",
             currency="USD",
             ratio=Decimal("0.55"),
             stats=stats,
@@ -1791,6 +1944,7 @@ def clean_mock_llm_ops_seed_data() -> dict[str, int]:
     stats = {
         "model_price_items": 0,
         "channel_price_items": 0,
+        "channel_model_prices": 0,
         "channel_model_histories": 0,
         "sources": 0,
         "channels": 0,
@@ -1800,8 +1954,29 @@ def clean_mock_llm_ops_seed_data() -> dict[str, int]:
         PriceCollectionSource.objects.filter(
             Q(slug__startswith="yunce-")
             | Q(slug__in=TREND_DEMO_SOURCE_SLUGS)
+            | Q(slug__in=LEGACY_TEST_SOURCE_SLUGS)
+            | Q(slug__in=UNCONFIRMED_PRICE_SOURCE_SLUGS)
+            | Q(slug__startswith="test-")
+            | Q(name__startswith="测试")
         ).values_list("id", flat=True)
     )
+    real_resource_channel_filter = Q(code=REAL_RESOURCE_CHANNEL_CODE)
+    test_channel_filter = (
+        real_resource_channel_filter
+        |
+        Q(code__in=MOCK_SUPPLIER_CHANNEL_CODES)
+        | Q(code__startswith="test-")
+        | Q(name__startswith="测试")
+    )
+    test_channel_price_filter = (
+        Q(channel__code=REAL_RESOURCE_CHANNEL_CODE)
+        | Q(channel__code__in=MOCK_SUPPLIER_CHANNEL_CODES)
+        | Q(channel__code__startswith="test-")
+        | Q(channel__name__startswith="测试")
+    )
+    PriceCollectionSource.objects.filter(
+        channel__code=REAL_RESOURCE_CHANNEL_CODE,
+    ).update(channel=None)
     stats["model_price_items"] += _delete_count(
         ModelPriceItem.objects.filter(
             Q(source_id__in=source_ids)
@@ -1809,7 +1984,14 @@ def clean_mock_llm_ops_seed_data() -> dict[str, int]:
         )
     )
     stats["channel_price_items"] += _delete_count(
-        ChannelPriceItem.objects.filter(source_id__in=source_ids)
+        ChannelPriceItem.objects.filter(
+            Q(source_id__in=source_ids)
+            | Q(channel__code__startswith="test-")
+            | Q(channel__name__startswith="测试")
+        )
+    )
+    stats["channel_model_prices"] += _delete_count(
+        ChannelModelPrice.objects.filter(test_channel_price_filter)
     )
     stats["channel_model_histories"] += _delete_count(
         ChannelModelPriceHistory.objects.filter(
@@ -1821,7 +2003,9 @@ def clean_mock_llm_ops_seed_data() -> dict[str, int]:
     )
     stats["channels"] += _delete_count(
         ProcurementChannel.objects.filter(
-            code__in=MOCK_SUPPLIER_CHANNEL_CODES,
+            Q(code=REAL_RESOURCE_CHANNEL_CODE)
+            | Q(code__in=MOCK_SUPPLIER_CHANNEL_CODES)
+            | Q(code__startswith="test-")
         )
     )
     return stats
@@ -1854,6 +2038,121 @@ def resolve_orphan_meta_models() -> dict[str, int]:
         meta.save(update_fields=["vendor", "updated_at"])
         stats["resolved"] += 1
     return stats
+
+
+def normalize_meta_model_catalog() -> dict[str, int]:
+    """Merge release/date meta-model rows into family-level rows."""
+    stats = {
+        "normalized": 0,
+        "merged": 0,
+        "linked_records": 0,
+    }
+    for meta in list(MetaModel.objects.select_related("vendor").all()):
+        identity = canonical_meta_model_identity(meta.code, meta.name)
+        canonical_code = identity["code"]
+        canonical_name = identity["name"]
+        if meta.code == canonical_code:
+            aliases = merged_meta_aliases(meta, identity)
+            if aliases != list(meta.aliases or []):
+                meta.aliases = aliases
+                meta.save(update_fields=["aliases", "updated_at"])
+                stats["normalized"] += 1
+            continue
+        canonical = MetaModel.objects.filter(code=canonical_code).first()
+        if canonical is None:
+            meta.code = canonical_code
+            meta.name = canonical_name
+            meta.aliases = merged_meta_aliases(meta, identity)
+            spec = canonical_vendor_for_model_code(canonical_code)
+            if spec:
+                meta.vendor = ensure_canonical_vendor_row(spec)
+            meta.save(
+                update_fields=[
+                    "code",
+                    "name",
+                    "aliases",
+                    "vendor",
+                    "updated_at",
+                ],
+            )
+            stats["normalized"] += 1
+            continue
+        merge_meta_model_rows(canonical, meta, identity)
+        stats["merged"] += 1
+    stats["linked_records"] = normalize_model_linked_meta_models()
+    return stats
+
+
+def normalize_model_linked_meta_models() -> int:
+    """Align every model-linked row with its model's canonical meta model."""
+    total = 0
+    model_linked_types = (
+        ModelPriceItem,
+        ChannelModelPrice,
+        ChannelPriceItem,
+        ChannelModelPriceHistory,
+        CollectedModelPriceSnapshot,
+        CollectedModelPriceHistory,
+        ResaleListing,
+        ResaleListingExclusion,
+        ResaleListingPriceHistory,
+        UsageReconciliationRecord,
+    )
+    for model in LLMModel.objects.select_related("meta_model").all():
+        for model_type in model_linked_types:
+            total += model_type.objects.filter(
+                model=model,
+            ).exclude(
+                meta_model=model.meta_model,
+            ).update(
+                meta_model=model.meta_model,
+            )
+    return total
+
+
+def merged_meta_aliases(meta: MetaModel, identity: dict) -> list[str]:
+    """Return de-duplicated aliases for a normalized meta model."""
+    aliases = list(meta.aliases or [])
+    for token in (meta.code, meta.name, *identity["aliases"]):
+        if token and token not in {identity["code"], identity["name"]}:
+            if token not in aliases:
+                aliases.append(token)
+    return aliases
+
+
+def merge_meta_model_rows(
+    canonical: MetaModel,
+    duplicate: MetaModel,
+    identity: dict,
+) -> None:
+    """Move duplicate meta-model references onto the canonical row."""
+    aliases = merged_meta_aliases(canonical, identity)
+    for token in (duplicate.code, duplicate.name, *(duplicate.aliases or [])):
+        if token and token not in {canonical.code, canonical.name}:
+            if token not in aliases:
+                aliases.append(token)
+    changed_fields = []
+    if aliases != list(canonical.aliases or []):
+        canonical.aliases = aliases
+        changed_fields.append("aliases")
+    if duplicate.context_window > canonical.context_window:
+        canonical.context_window = duplicate.context_window
+        changed_fields.append("context_window")
+    if duplicate.max_output_tokens > canonical.max_output_tokens:
+        canonical.max_output_tokens = duplicate.max_output_tokens
+        changed_fields.append("max_output_tokens")
+    if not canonical.vendor_id and duplicate.vendor_id:
+        canonical.vendor = duplicate.vendor
+        changed_fields.append("vendor")
+    if changed_fields:
+        changed_fields.append("updated_at")
+        canonical.save(update_fields=changed_fields)
+    for relation in MetaModel._meta.related_objects:
+        field = relation.field
+        relation.related_model.objects.filter(
+            **{field.name: duplicate}
+        ).update(**{field.name: canonical})
+    duplicate.delete()
 
 
 def cleanup_orphan_meta_models() -> dict[str, int]:
@@ -1977,18 +2276,13 @@ def is_llm_ops_database_empty() -> bool:
 
     Used by the post_migrate handler to decide whether to run the
     initial price sheet bootstrap. Returns ``True`` only when every
-    canonical anchor (providers, models, the procurement channel we
-    depend on) is missing. Half-populated databases are treated as
-    "not empty" so the auto-seed never stomps on partial operator
-    imports.
+    canonical anchor (providers and models) is missing. Procurement
+    channels are operator-maintained resources and must not decide
+    whether the canonical model catalogue should be bootstrapped.
     """
     if LLMProvider.objects.exists():
         return False
     if LLMModel.objects.exists():
-        return False
-    if ProcurementChannel.objects.filter(
-        code=REAL_RESOURCE_CHANNEL_CODE,
-    ).exists():
         return False
     return True
 

@@ -1,11 +1,11 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="submit"
     >
       <div class="modal-header">
@@ -64,7 +64,7 @@
               type="button"
               @click="modelMode = 'custom'"
             >
-              新增自定义模型
+              新建自定义模型
             </button>
           </div>
 
@@ -176,18 +176,20 @@
       </div>
 
       <div class="modal-footer">
-        <button
-          class="btn-secondary"
-          type="button"
-          :disabled="saving"
-          @click="close"
-        >
-          取消
-        </button>
-        <button class="btn-primary" type="submit" :disabled="saving">
-          <span class="icon-mark" />
-          {{ saving ? '保存中' : '保存价格' }}
-        </button>
+        <div class="modal-footer-actions">
+          <button
+            class="btn-secondary"
+            type="button"
+            :disabled="saving"
+            @click="close"
+          >
+            取消
+          </button>
+          <button class="btn-primary" type="submit" :disabled="saving">
+            <span class="icon-mark" />
+            {{ saving ? '保存中' : '保存价格' }}
+          </button>
+        </div>
       </div>
     </form>
   </div>
@@ -315,7 +317,11 @@ const sourceCategoryLabel = computed(() => {
     manual: '人工',
     unknown: '其他'
   }
-  return labels[props.source?.source_category] || '其他'
+  const category =
+    props.source?.business_source_category ||
+    props.source?.source_category ||
+    'unknown'
+  return labels[category] || '其他'
 })
 
 const sourceCategoryTone = computed(() => {
@@ -324,7 +330,11 @@ const sourceCategoryTone = computed(() => {
     supplier: 'supplier',
     manual: 'manual'
   }
-  return tones[props.source?.source_category] || 'unknown'
+  const category =
+    props.source?.business_source_category ||
+    props.source?.source_category ||
+    'unknown'
+  return tones[category] || 'unknown'
 })
 
 const sourceRelationLabel = computed(() => {

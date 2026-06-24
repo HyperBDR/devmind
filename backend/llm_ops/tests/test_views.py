@@ -120,6 +120,54 @@ class LLMOpsViewTests(TestCase):
             PriceCollectionSource.objects.filter(id=source.id).exists()
         )
 
+    def test_channel_delete_removes_channel_listings_without_auto_conflict(
+        self,
+    ):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT Delete Test",
+            code="gpt-delete-test",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Delete Channel",
+            code="delete-channel",
+        )
+        platform = ResalePlatform.objects.create(
+            name="Delete Platform",
+            code="delete-platform",
+            currency="CNY",
+        )
+        auto_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=None,
+            retail_input_price_per_million="1.000000",
+            retail_output_price_per_million="2.000000",
+        )
+        channel_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="1.100000",
+            retail_output_price_per_million="2.200000",
+        )
+
+        response = self.client.delete(
+            reverse("channel-detail", args=[channel.id]),
+        )
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(
+            ProcurementChannel.objects.filter(id=channel.id).exists(),
+        )
+        self.assertTrue(
+            ResaleListing.objects.filter(id=auto_listing.id).exists(),
+        )
+        self.assertFalse(
+            ResaleListing.objects.filter(id=channel_listing.id).exists(),
+        )
+
     def test_model_price_item_can_be_updated(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
@@ -187,8 +235,8 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 204)
         self.assertFalse(ModelPriceItem.objects.filter(id=item.id).exists())
 
-    @patch("llm_ops.views.sync_official_provider_model_prices")
-    def test_collection_source_collects_official_provider(self, mock_sync):
+    @patch("llm_ops.views.collect_price_source_prices.delay")
+    def test_collection_source_collects_official_provider(self, mock_delay):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
             name="OpenAI Official",
@@ -202,14 +250,7 @@ class LLMOpsViewTests(TestCase):
             is_enabled=True,
             updates_model_prices=True,
         )
-        mock_sync.return_value = {
-            "models": 2,
-            "created": 0,
-            "updated": 2,
-            "skipped": 0,
-            "changed": 1,
-            "unchanged": 1,
-        }
+        mock_delay.return_value.id = "task-123"
 
         response = self.client.post(
             reverse("collection-source-collect", args=[source.id]),
@@ -217,18 +258,19 @@ class LLMOpsViewTests(TestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["models"], 2)
-        mock_sync.assert_called_once_with(
-            provider=provider,
-            source=source,
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["task_id"], "task-123")
+        self.assertEqual(response.data["provider_code"], "openai")
+        self.assertEqual(response.data["source_id"], source.id)
+        mock_delay.assert_called_once_with(
+            source_id=source.id,
             verify_source=True,
         )
 
-    @patch("llm_ops.views.sync_official_provider_model_prices")
+    @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_rejects_disabled_source(
         self,
-        mock_sync,
+        mock_delay,
     ):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
@@ -254,7 +296,74 @@ class LLMOpsViewTests(TestCase):
             response.data["detail"],
             "Price collection source is disabled.",
         )
-        mock_sync.assert_not_called()
+        mock_delay.assert_not_called()
+
+    @patch("llm_ops.views.collect_price_source_prices.delay")
+    def test_collection_source_collect_rejects_unsupported_source(
+        self,
+        mock_delay,
+    ):
+        provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
+        source = PriceCollectionSource.objects.create(
+            name="SiliconFlow Sheet",
+            slug="siliconflow-sheet",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://example.com/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        response = self.client.post(
+            reverse("collection-source-collect", args=[source.id]),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            (
+                "This source does not support direct collection yet. "
+                "Use manual import or a dedicated collector."
+            ),
+        )
+        mock_delay.assert_not_called()
+
+    @patch("llm_ops.views.source_supports_code_collection")
+    @patch("llm_ops.views.collect_price_source_prices.delay")
+    def test_collection_source_collect_does_not_require_provider(
+        self,
+        mock_delay,
+        mock_supports_collection,
+    ):
+        source = PriceCollectionSource.objects.create(
+            name="Supplier API",
+            slug="supplier-api",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://example.com/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        mock_supports_collection.return_value = True
+        mock_delay.return_value.id = "task-456"
+
+        response = self.client.post(
+            reverse("collection-source-collect", args=[source.id]),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["task_id"], "task-456")
+        self.assertEqual(response.data["provider_code"], "")
+        self.assertEqual(response.data["source_id"], source.id)
+        mock_delay.assert_called_once_with(
+            source_id=source.id,
+            verify_source=True,
+        )
 
     def test_collected_price_snapshot_list_returns_normalized_rows(self):
         source = PriceCollectionSource.objects.create(
@@ -362,6 +471,135 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertEqual(row["best_channel"]["input_price_per_million"], 2.0)
 
+    def test_summary_exposes_channel_model_performance_metrics(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+            input_price_per_million="2.5",
+            output_price_per_million="5",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Real Resource",
+            code="real-resource-perf",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            tpm_limit=1000000,
+            rpm_limit=3000,
+            latency_ms=180,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"display_currency": "USD"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.data["procurement"][0]
+        option = row["options"][0]
+        self.assertEqual(option["tpm_limit"], 1000000)
+        self.assertEqual(option["rpm_limit"], 3000)
+        self.assertEqual(option["latency_ms"], 180)
+        self.assertEqual(row["best_channel"]["tpm_limit"], 1000000)
+        self.assertEqual(row["best_channel"]["rpm_limit"], 3000)
+        self.assertEqual(row["best_channel"]["latency_ms"], 180)
+
+    def test_summary_uses_meta_model_price_items_for_zero_sku_price(self):
+        provider = LLMProvider.objects.create(name="Anthropic", code="anthropic")
+        official_model = LLMModel.objects.create(
+            provider=provider,
+            name="Claude Haiku 4.5",
+            code="claude-haiku-4-5-official",
+            input_price_per_million="1",
+            output_price_per_million="5",
+        )
+        channel_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=official_model.meta_model,
+            name="Claude Haiku 4.5",
+            code="claude-haiku-4-5-channel",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Anthropic Official",
+            slug="anthropic-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            source=source,
+            model=official_model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price="1",
+            price_fingerprint="official-input",
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            source=source,
+            model=official_model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price="5",
+            price_fingerprint="official-output",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Real Resource",
+            code="real-resource-zero-sku",
+            currency="USD",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=channel_model,
+            is_listed=True,
+            settlement_ratio="0.5",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"display_currency": "USD"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            item
+            for item in response.data["procurement"]
+            if item["model_id"] == channel_model.id
+        )
+        self.assertEqual(row["best_channel"]["input_price_per_million"], 0.5)
+        self.assertEqual(row["best_channel"]["output_price_per_million"], 2.5)
+
+    def test_summary_skips_channel_options_without_text_price(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5-no-price",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Empty Channel",
+            code="empty-channel",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+
+        response = self.client.get(reverse("llm-ops-summary"))
+
+        self.assertEqual(response.status_code, 200)
+        row = response.data["procurement"][0]
+        self.assertIsNone(row["best_channel"])
+        self.assertEqual(row["options"], [])
+
     def test_channel_model_price_bulk_upsert_updates_existing_rows(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(
@@ -395,6 +633,9 @@ class LLMOpsViewTests(TestCase):
                         "price_source": source.id,
                         "is_listed": True,
                         "settlement_ratio": "0.55",
+                        "tpm_limit": 1000000,
+                        "rpm_limit": 3000,
+                        "latency_ms": 220,
                     }
                 ]
             },
@@ -403,11 +644,18 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(ChannelModelPrice.objects.count(), 1)
+        price = ChannelModelPrice.objects.get()
         self.assertEqual(
-            str(ChannelModelPrice.objects.get().settlement_ratio),
+            str(price.settlement_ratio),
             "0.5500",
         )
-        self.assertEqual(ChannelModelPrice.objects.get().price_source, source)
+        self.assertEqual(price.price_source, source)
+        self.assertEqual(price.tpm_limit, 1000000)
+        self.assertEqual(price.rpm_limit, 3000)
+        self.assertEqual(price.latency_ms, 220)
+        self.assertEqual(response.data[0]["tpm_limit"], 1000000)
+        self.assertEqual(response.data[0]["rpm_limit"], 3000)
+        self.assertEqual(response.data[0]["latency_ms"], 220)
         self.assertEqual(ChannelModelPriceHistory.objects.count(), 1)
         history = ChannelModelPriceHistory.objects.get()
         self.assertEqual(history.price_source, source)
@@ -1194,12 +1442,195 @@ class LLMOpsViewTests(TestCase):
             ResaleListing.WORKFLOW_ONLINE,
         )
 
+    def test_resale_listing_bulk_transition_uses_listing_id(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        draft_channel = ProcurementChannel.objects.create(
+            name="Draft Channel",
+            code="draft-channel",
+        )
+        online_channel = ProcurementChannel.objects.create(
+            name="Online Channel",
+            code="online-channel-listing-id",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        draft_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=draft_channel,
+            publish_status=ResaleListing.PUBLISH_NONE,
+            workflow_status=ResaleListing.WORKFLOW_DRAFT,
+            is_active=False,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+        online_listing = self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=online_channel,
+            retail_input_price_per_million="1.3",
+            retail_output_price_per_million="2.6",
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "models": [model.id],
+                "listings": [draft_listing.id],
+                "action": "submit",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data[0]["id"], draft_listing.id)
+        draft_listing.refresh_from_db()
+        online_listing.refresh_from_db()
+        self.assertEqual(
+            draft_listing.workflow_status,
+            ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        )
+        self.assertEqual(
+            online_listing.workflow_status,
+            ResaleListing.WORKFLOW_ONLINE,
+        )
+
+    def test_resale_listing_bulk_transition_deletes_exact_listing(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        draft_channel = ProcurementChannel.objects.create(
+            name="Draft Channel",
+            code="draft-channel-delete",
+        )
+        online_channel = ProcurementChannel.objects.create(
+            name="Online Channel",
+            code="online-channel-delete",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        draft_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=draft_channel,
+            publish_status=ResaleListing.PUBLISH_NONE,
+            workflow_status=ResaleListing.WORKFLOW_DRAFT,
+            is_active=False,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+        online_listing = self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=online_channel,
+            retail_input_price_per_million="1.3",
+            retail_output_price_per_million="2.6",
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-transition"),
+            {
+                "platform": platform.id,
+                "listings": [draft_listing.id],
+                "action": "delete",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        draft_listing.refresh_from_db()
+        online_listing.refresh_from_db()
+        self.assertEqual(
+            draft_listing.workflow_status,
+            ResaleListing.WORKFLOW_DELETED,
+        )
+        self.assertEqual(
+            draft_listing.publish_status,
+            ResaleListing.PUBLISH_DELETED,
+        )
+        self.assertEqual(
+            online_listing.workflow_status,
+            ResaleListing.WORKFLOW_ONLINE,
+        )
+
+    def test_resale_listing_bulk_offline_uses_listing_id(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        first_channel = ProcurementChannel.objects.create(
+            name="First Channel",
+            code="first-channel-offline",
+        )
+        second_channel = ProcurementChannel.objects.create(
+            name="Second Channel",
+            code="second-channel-offline",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        first_listing = self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=first_channel,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+        second_listing = self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=second_channel,
+            retail_input_price_per_million="1.3",
+            retail_output_price_per_million="2.6",
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-offline"),
+            {
+                "platform": platform.id,
+                "listings": [first_listing.id],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        first_listing.refresh_from_db()
+        second_listing.refresh_from_db()
+        self.assertEqual(
+            first_listing.workflow_status,
+            ResaleListing.WORKFLOW_OFFLINE,
+        )
+        self.assertFalse(first_listing.is_active)
+        self.assertEqual(
+            second_listing.workflow_status,
+            ResaleListing.WORKFLOW_ONLINE,
+        )
+        self.assertTrue(second_listing.is_active)
+
     def test_summary_returns_agione_diagnostics(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(
             provider=provider,
             name="GPT-5",
             code="gpt-5",
+            input_price_per_million="1",
+            output_price_per_million="2",
         )
         channel = ProcurementChannel.objects.create(
             name="Best Channel",
@@ -1240,6 +1671,8 @@ class LLMOpsViewTests(TestCase):
             provider=provider,
             name="GPT-5",
             code="gpt-5",
+            input_price_per_million="1",
+            output_price_per_million="2",
         )
         channel = ProcurementChannel.objects.create(
             name="Best Channel",
@@ -1253,6 +1686,8 @@ class LLMOpsViewTests(TestCase):
             name="Agione Europe",
             code="agione-eu",
             points_per_currency_unit="50",
+            service_fee_rate="0.08",
+            auto_approve_max_margin_rate="18",
         )
         ChannelModelPrice.objects.create(
             channel=channel,
@@ -1280,6 +1715,16 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(
             response.data["point_conversion"]["points_per_currency_unit"],
             50.0,
+        )
+        self.assertEqual(
+            response.data["point_conversion"]["service_fee_rate"],
+            0.08,
+        )
+        self.assertEqual(
+            response.data["point_conversion"][
+                "auto_approve_max_margin_rate"
+            ],
+            18.0,
         )
         diagnostic = response.data["agione"]["diagnostics"][0]
         self.assertFalse(diagnostic["is_agione_listed"])

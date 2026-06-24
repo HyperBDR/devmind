@@ -89,6 +89,55 @@ def collect_official_model_prices(
 
 
 @shared_task(
+    name="llm_ops.tasks.collect_price_source_prices",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
+)
+def collect_price_source_prices(
+    self,
+    *,
+    source_id: int,
+    verify_source: bool = True,
+) -> dict[str, int | list[str]]:
+    """Run price collection for one configured price source."""
+    from .models import PriceCollectionSource
+    from .source_collectors import collect_price_source
+
+    source = PriceCollectionSource.objects.select_related("provider").get(
+        id=source_id,
+    )
+    log_extra = {
+        "source_id": source_id,
+        "source_slug": source.slug,
+        "verify_source": verify_source,
+    }
+    logger.info("llm_ops.collect_price_source_prices start", extra=log_extra)
+
+    try:
+        results = collect_price_source(
+            source,
+            verify_source=verify_source,
+        )
+    except Exception as exc:
+        logger.exception(
+            "llm_ops.collect_price_source_prices failed",
+            extra=log_extra,
+        )
+        if verify_source and self.request.retries < self.max_retries:
+            raise self.retry(exc=exc) from exc
+        raise
+
+    logger.info(
+        "llm_ops.collect_price_source_prices done: %s",
+        source.slug,
+        extra=log_extra,
+    )
+    return results
+
+
+@shared_task(
     name="llm_ops.tasks.sync_meta_models_from_models_dev",
     bind=True,
     max_retries=2,

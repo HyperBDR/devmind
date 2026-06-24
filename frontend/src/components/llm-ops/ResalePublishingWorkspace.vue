@@ -9,62 +9,48 @@
       <div class="workspace-filter-grid">
         <label class="filter-field">
           <span>发布平台</span>
-          <select v-model="form.platformId" class="field-select">
-            <option v-for="p in platforms" :key="p.id" :value="p.id">
-              {{ p.name }}
-            </option>
-          </select>
+          <CompactSelect
+            v-model="form.platformId"
+            :options="platformSelectOptions"
+            class-name="w-full workspace-select"
+            :menu-min-width="220"
+            size="sm"
+          />
         </label>
         <label class="filter-field">
           <span>元厂商</span>
-          <select
+          <CompactSelect
             v-model="form.metaVendorId"
-            class="field-select"
+            :options="metaVendorSelectOptions"
+            class-name="w-full workspace-select"
+            :menu-min-width="280"
+            searchable
+            size="sm"
             @change="onMetaVendorChange"
-          >
-            <option value="">全部</option>
-            <option
-              v-for="vendor in metaVendorOptions"
-              :key="vendor.id"
-              :value="String(vendor.id)"
-            >
-              {{ vendor.name }}
-            </option>
-          </select>
+          />
         </label>
         <label class="filter-field">
           <span>元模型</span>
-          <select
+          <CompactSelect
             v-model="form.modelId"
-            class="field-select"
+            :options="baseModelSelectOptions"
+            class-name="w-full workspace-select workspace-select-model"
+            :menu-min-width="380"
+            searchable
+            size="sm"
             @change="onModelChange"
-          >
-            <option value="">选择元模型</option>
-            <option
-              v-for="m in baseModelOptions"
-              :key="m.id"
-              :value="String(m.id)"
-            >
-              {{ m.name }}
-            </option>
-          </select>
+          />
         </label>
         <label class="filter-field">
           <span>供货渠道</span>
-          <select
+          <CompactSelect
             v-model="form.supplierId"
-            class="field-select"
             :disabled="!form.modelId"
-          >
-            <option value="">{{ form.modelId ? '全部支持渠道' : '先选择元模型' }}</option>
-            <option
-              v-for="s in supplierOptions"
-              :key="s.id"
-              :value="String(s.id)"
-            >
-              {{ s.name }}
-            </option>
-          </select>
+            :options="supplierSelectOptions"
+            class-name="w-full workspace-select"
+            :menu-min-width="280"
+            size="sm"
+          />
         </label>
       </div>
       <div class="pricing-context">
@@ -124,9 +110,9 @@
       <div v-show="isSupplyChainExpanded">
         <div class="supply-grid supply-grid-header">
           <div>商务及物理链路</div>
-          <div>链路成本 (In/Out)</div>
-          <div class="text-right">上架售价 (In/Out)</div>
-          <div class="text-right">最终 {{ pointUnitLabel }}</div>
+          <div>成本</div>
+          <div>售价</div>
+          <div>最终 {{ pointUnitLabel }}</div>
         </div>
 
         <div
@@ -189,44 +175,59 @@
                 </span>
               </label>
 
-              <div class="supply-cost-cell">
-                <div>
-                  <p class="text-[10px] uppercase tracking-wide text-slate-400">
-                    In
-                  </p>
-                  <p class="font-mono font-bold text-slate-900">
-                    {{ row.costIn }}
-                  </p>
-                </div>
-                <div>
-                  <p class="text-[10px] uppercase tracking-wide text-slate-400">
-                    Out
-                  </p>
-                  <p class="font-mono font-bold text-slate-900">
-                    {{ row.costOut }}
-                  </p>
+              <div class="supply-metric-column">
+                <div
+                  v-for="dim in priceDimensions(row)"
+                  :key="`cost-${row.uniqueId}-${dim.key}`"
+                  class="supply-metric-row"
+                >
+                  <span class="supply-metric-label">
+                    {{ dim.shortLabel }}
+                  </span>
+                  <span class="supply-metric-value text-slate-900">
+                    {{ dim.costText }}
+                  </span>
                 </div>
               </div>
 
-              <div class="supply-value-cell">
+              <div class="supply-metric-column">
                 <span class="text-slate-500 lg:hidden">售价</span>
-                <span class="font-mono font-bold text-emerald-600">
-                  <span v-if="row.selected"
-                    >{{ row.priceIn }} / {{ row.priceOut }}</span
+                <template v-if="row.selected">
+                  <div
+                    v-for="dim in priceDimensions(row)"
+                    :key="`price-${row.uniqueId}-${dim.key}`"
+                    class="supply-metric-row"
                   >
-                  <span v-else class="text-slate-400">-</span>
-                </span>
+                    <span class="supply-metric-label">
+                      {{ dim.shortLabel }}
+                    </span>
+                    <span class="supply-metric-value text-emerald-600">
+                      {{ dim.priceText || '-' }}
+                    </span>
+                  </div>
+                </template>
+                <span v-else class="supply-metric-empty">-</span>
               </div>
 
-              <div class="supply-value-cell">
-                <span class="text-slate-500 lg:hidden">Credit</span>
-                <span class="font-mono font-bold text-agione-600">
-                  <span v-if="row.selected"
-                    >{{ formatCredit(row.costInRaw, row.marginIn) }} /
-                    {{ formatCredit(row.costOutRaw, row.marginOut) }}</span
-                  >
-                  <span v-else class="text-slate-400">-</span>
+              <div class="supply-metric-column">
+                <span class="text-slate-500 lg:hidden">
+                  {{ pointUnitLabel }}
                 </span>
+                <template v-if="row.selected">
+                  <div
+                    v-for="dim in priceDimensions(row)"
+                    :key="`credit-${row.uniqueId}-${dim.key}`"
+                    class="supply-metric-row"
+                  >
+                    <span class="supply-metric-label">
+                      {{ dim.shortLabel }}
+                    </span>
+                    <span class="supply-metric-value text-agione-600">
+                      {{ formatCredit(dim.priceRaw) }}
+                    </span>
+                  </div>
+                </template>
+                <span v-else class="supply-metric-empty">-</span>
               </div>
             </div>
           </div>
@@ -259,7 +260,7 @@
             <div class="perf-metric-rows">
               <div
                 v-for="item in perfCompareRows"
-                :key="`${metric.key}-${item.name}`"
+                :key="`${metric.key}-${item.id}`"
                 class="perf-metric-row"
               >
                 <div
@@ -330,305 +331,163 @@
             >
           </header>
           <div class="space-y-6 p-5">
-            <div class="space-y-3 border-b border-dashed border-slate-200 pb-5">
-              <div class="pricing-editor-row">
-                <div class="pricing-dimension-cell">
-                  Input
-                </div>
-                <div class="cost-formula-cell">
-                  <p class="mb-1 text-[11px] text-slate-500">成本价</p>
-                  <p class="font-mono text-[13px] font-bold text-slate-900">
-                    {{ currencySymbol }}{{ row.costIn }}
+            <div class="unified-margin-row">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="text-[11px] font-semibold text-slate-500">
+                    统一利润期望
                   </p>
-                  <p
-                    class="cost-formula-text"
-                    :title="costFormulaTitle(row, 'In')"
+                  <span
+                    v-if="selectedPlatformAutoApproveLimit !== null"
+                    class="unified-margin-status"
+                    :class="
+                      autoApproveStatus(row.margin).ok
+                        ? 'text-emerald-600'
+                        : 'text-amber-600'
+                    "
                   >
-                    {{ costFormulaText(row, 'In') }}
-                  </p>
+                    {{ autoApproveStatus(row.margin).label }}
+                  </span>
                 </div>
-                <div class="profit-input-cell">
-                  <p class="mb-1 text-[11px] text-slate-500">利润期望 (%)</p>
-                  <div
-                    class="flex items-center rounded border border-slate-200 focus-within:border-agione-300 focus-within:ring-2 focus-within:ring-agione-100"
-                  >
-                    <input
-                      :value="row.marginIn"
-                      type="number"
-                      class="w-full bg-transparent px-2 py-1.5 text-right text-[12px] focus:outline-none"
-                      step="0.1"
-                      min="0"
-                      @input="onMarginInput(row, 'In', $event)"
-                    />
-                    <span
-                      class="border-l border-slate-200 px-2 text-[11px] text-slate-400"
-                      >%</span
-                    >
-                  </div>
-                </div>
-                <div class="terminal-price-group">
-                  <div class="terminal-price-input">
-                    <p class="mb-1 text-[11px] font-bold text-emerald-600">
-                      终端售卖价
-                    </p>
-                    <div
-                      class="flex items-center rounded border border-slate-200 focus-within:border-emerald-300 focus-within:ring-2 focus-within:ring-emerald-100"
-                    >
-                      <span
-                        class="border-r border-slate-200 px-2 text-[11px] text-slate-400"
-                        >{{ currencySymbol }}</span
-                      >
-                      <input
-                        :value="row.priceInRaw"
-                        type="number"
-                        class="w-full bg-transparent px-2 py-1.5 text-right font-mono text-[12px] focus:outline-none"
-                        step="0.0001"
-                        min="0"
-                        @input="onPriceInput(row, 'In', $event)"
-                      />
-                    </div>
-                  </div>
-                  <div class="market-average-group">
-                    <p class="mb-1 text-[11px] text-slate-500">市场均价</p>
-                    <div class="market-reconcile-card">
-                      <strong class="market-average-value">{{
-                        marketAverageText(marketAvg.in)
-                      }}</strong>
-                      <span
-                        class="market-diff-pill"
-                        :class="priceDiffClass(row.priceInRaw, marketAvg.in)"
-                      >
-                        {{ priceDiffText(row.priceInRaw, marketAvg.in) }}
-                      </span>
-                      <span
-                        v-if="priceDiffAmountText(row.priceInRaw, marketAvg.in)"
-                        class="market-diff-amount"
-                        :class="priceDiffClass(row.priceInRaw, marketAvg.in)"
-                      >
-                        {{ priceDiffAmountText(row.priceInRaw, marketAvg.in) }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div class="final-credit-cell">
-                  <div class="final-credit-card">
-                    <p class="text-[10px] text-agione-600">
-                      最终 {{ pointUnitLabel }}
-                    </p>
-                    <p class="font-mono text-[12px] font-bold text-agione-700">
-                      {{ formatCredit(row.costInRaw, row.marginIn) }}
-                    </p>
-                  </div>
-                </div>
+                <p class="mt-0.5 text-[11px] text-slate-400">
+                  Input / Output / Cache 按同一利润率推导各自售价。
+                </p>
               </div>
-              <div class="pricing-axis-block">
-                <BulletChart
-                  :min="bulletRange.in.min"
-                  :max="bulletRange.in.max"
-                  :value="row.priceInRaw"
-                  :refs="bulletRefsIn"
-                  :label="`我方售价 ${currencySymbol}${row.priceIn}`"
-                  :currency-symbol="currencySymbol"
-                  @change="applyPriceChange(row, 'In', $event)"
+              <div class="unified-margin-input">
+                <input
+                  :value="row.margin"
+                  type="number"
+                  aria-label="统一利润率"
+                  name="unified_margin_rate"
+                  step="0.1"
+                  min="0"
+                  @input="onMarginInput(row, $event)"
+                  @change="onMarginCommit(row, $event)"
                 />
+                <span>%</span>
               </div>
             </div>
 
-            <div v-if="row.hasCacheInput" class="space-y-3 border-b border-dashed border-slate-200 pb-5">
-              <div class="pricing-editor-row">
-                <div class="pricing-dimension-cell">
-                  Cache
+            <div class="pricing-matrix">
+              <div class="pricing-matrix-head pricing-matrix-label" />
+              <div class="pricing-matrix-head">成本</div>
+              <div class="pricing-matrix-head">售价</div>
+              <div class="pricing-matrix-head">{{ pointUnitLabel }}</div>
+              <template
+                v-for="dimension in priceDimensions(row)"
+                :key="`${row.uniqueId}-${dimension.key}`"
+              >
+                <div class="pricing-matrix-label">
+                  {{ dimension.label }}
                 </div>
-                <div class="cost-formula-cell">
-                  <p class="mb-1 text-[11px] text-slate-500">缓存成本价</p>
+                <div class="pricing-matrix-card cost-formula-cell">
+                  <p class="pricing-card-caption">成本价</p>
                   <p class="font-mono text-[13px] font-bold text-slate-900">
-                    {{ currencySymbol }}{{ row.costCacheIn }}
+                    {{ currencySymbol }}{{ dimension.costText }}
                   </p>
                   <p
                     class="cost-formula-text"
-                    :title="costFormulaTitle(row, 'Cache')"
+                    :title="costFormulaTitle(row, dimension.key)"
                   >
-                    {{ costFormulaText(row, 'Cache') }}
+                    {{ costFormulaText(row, dimension.key) }}
                   </p>
                 </div>
-                <div class="profit-input-cell">
-                  <p class="mb-1 text-[11px] text-slate-500">利润期望 (%)</p>
-                  <div
-                    class="flex items-center rounded border border-slate-200 focus-within:border-agione-300 focus-within:ring-2 focus-within:ring-agione-100"
-                  >
-                    <input
-                      :value="row.marginCacheIn"
-                      type="number"
-                      class="w-full bg-transparent px-2 py-1.5 text-right text-[12px] focus:outline-none"
-                      step="0.1"
-                      min="0"
-                      @input="onMarginInput(row, 'Cache', $event)"
-                    />
-                    <span
-                      class="border-l border-slate-200 px-2 text-[11px] text-slate-400"
-                      >%</span
-                    >
-                  </div>
-                </div>
-                <div class="terminal-price-group">
-                  <div class="terminal-price-input">
-                    <p class="mb-1 text-[11px] font-bold text-emerald-600">
-                      缓存售卖价
-                    </p>
-                    <div
-                      class="flex items-center rounded border border-slate-200 focus-within:border-emerald-300 focus-within:ring-2 focus-within:ring-emerald-100"
-                    >
-                      <span
-                        class="border-r border-slate-200 px-2 text-[11px] text-slate-400"
-                        >{{ currencySymbol }}</span
-                      >
-                      <input
-                        :value="row.priceCacheInRaw"
-                        type="number"
-                        class="w-full bg-transparent px-2 py-1.5 text-right font-mono text-[12px] focus:outline-none"
-                        step="0.0001"
-                        min="0"
-                        @input="onPriceInput(row, 'Cache', $event)"
-                      />
-                    </div>
-                  </div>
-                  <div class="market-average-group">
-                    <p class="mb-1 text-[11px] text-slate-500">市场均价</p>
-                    <div class="market-reconcile-card">
-                      <strong class="market-average-value">{{
-                        marketAverageText(marketAvg.cacheIn)
-                      }}</strong>
-                      <span
-                        class="market-diff-pill"
-                        :class="priceDiffClass(row.priceCacheInRaw, marketAvg.cacheIn)"
-                      >
-                        {{ priceDiffText(row.priceCacheInRaw, marketAvg.cacheIn) }}
-                      </span>
-                      <span
-                        v-if="priceDiffAmountText(row.priceCacheInRaw, marketAvg.cacheIn)"
-                        class="market-diff-amount"
-                        :class="priceDiffClass(row.priceCacheInRaw, marketAvg.cacheIn)"
-                      >
-                        {{ priceDiffAmountText(row.priceCacheInRaw, marketAvg.cacheIn) }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div class="final-credit-cell">
-                  <div class="final-credit-card">
-                    <p class="text-[10px] text-agione-600">
-                      最终 {{ pointUnitLabel }}
-                    </p>
-                    <p class="font-mono text-[12px] font-bold text-agione-700">
-                      {{ formatCredit(row.costCacheInRaw, row.marginCacheIn) }}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="space-y-3">
-              <div class="pricing-editor-row">
-                <div class="pricing-dimension-cell">
-                  Output
-                </div>
-                <div class="cost-formula-cell">
-                  <p class="mb-1 text-[11px] text-slate-500">成本价</p>
-                  <p class="font-mono text-[13px] font-bold text-slate-900">
-                    {{ currencySymbol }}{{ row.costOut }}
-                  </p>
-                  <p
-                    class="cost-formula-text"
-                    :title="costFormulaTitle(row, 'Out')"
-                  >
-                    {{ costFormulaText(row, 'Out') }}
-                  </p>
-                </div>
-                <div class="profit-input-cell">
-                  <p class="mb-1 text-[11px] text-slate-500">利润期望 (%)</p>
-                  <div
-                    class="flex items-center rounded border border-slate-200 focus-within:border-agione-300 focus-within:ring-2 focus-within:ring-agione-100"
-                  >
-                    <input
-                      :value="row.marginOut"
-                      type="number"
-                      class="w-full bg-transparent px-2 py-1.5 text-right text-[12px] focus:outline-none"
-                      step="0.1"
-                      min="0"
-                      @input="onMarginInput(row, 'Out', $event)"
-                    />
-                    <span
-                      class="border-l border-slate-200 px-2 text-[11px] text-slate-400"
-                      >%</span
-                    >
-                  </div>
-                </div>
-                <div class="terminal-price-group">
-                  <div class="terminal-price-input">
-                    <p class="mb-1 text-[11px] font-bold text-emerald-600">
+                <div class="pricing-matrix-card terminal-price-card">
+                  <div class="terminal-price-main">
+                    <p class="pricing-card-caption text-emerald-600">
                       终端售卖价
                     </p>
                     <div
-                      class="flex items-center rounded border border-slate-200 focus-within:border-emerald-300 focus-within:ring-2 focus-within:ring-emerald-100"
+                      class="terminal-price-control"
                     >
-                      <span
-                        class="border-r border-slate-200 px-2 text-[11px] text-slate-400"
-                        >{{ currencySymbol }}</span
-                      >
+                      <span>{{ currencySymbol }}</span>
                       <input
-                        :value="row.priceOutRaw"
+                        :value="dimension.priceRaw"
                         type="number"
-                        class="w-full bg-transparent px-2 py-1.5 text-right font-mono text-[12px] focus:outline-none"
                         step="0.0001"
                         min="0"
-                        @input="onPriceInput(row, 'Out', $event)"
+                        @input="onPriceInput(row, dimension.key, $event)"
                       />
                     </div>
                   </div>
-                  <div class="market-average-group">
-                    <p class="mb-1 text-[11px] text-slate-500">市场均价</p>
-                    <div class="market-reconcile-card">
-                      <strong class="market-average-value">{{
-                        marketAverageText(marketAvg.out)
+                  <div class="terminal-price-meta">
+                    <p
+                      :class="
+                        isBelowReferencePrice(
+                          dimension.priceRaw,
+                          dimension.referencePriceRaw
+                        )
+                          ? 'text-amber-600'
+                          : 'text-slate-500'
+                      "
+                      :title="referencePriceTitle(dimension)"
+                    >
+                      下限 {{ currencySymbol
+                      }}{{ dimension.referencePriceText }}
+                    </p>
+                    <p>
+                      均价
+                      <strong>{{
+                        marketAverageText(dimension.marketAverage)
                       }}</strong>
+                    </p>
+                    <p
+                      :class="
+                        priceDiffClass(
+                          dimension.priceRaw,
+                          dimension.marketAverage
+                        )
+                      "
+                    >
+                      {{
+                        priceDiffText(
+                          dimension.priceRaw,
+                          dimension.marketAverage
+                        )
+                      }}
                       <span
-                        class="market-diff-pill"
-                        :class="priceDiffClass(row.priceOutRaw, marketAvg.out)"
+                        v-if="
+                          priceDiffAmountText(
+                            dimension.priceRaw,
+                            dimension.marketAverage
+                          )
+                        "
                       >
-                        {{ priceDiffText(row.priceOutRaw, marketAvg.out) }}
+                        ·
+                        {{
+                          priceDiffAmountText(
+                            dimension.priceRaw,
+                            dimension.marketAverage
+                          )
+                        }}
                       </span>
-                      <span
-                        v-if="priceDiffAmountText(row.priceOutRaw, marketAvg.out)"
-                        class="market-diff-amount"
-                        :class="priceDiffClass(row.priceOutRaw, marketAvg.out)"
-                      >
-                        {{ priceDiffAmountText(row.priceOutRaw, marketAvg.out) }}
-                      </span>
-                    </div>
+                    </p>
                   </div>
                 </div>
-                <div class="final-credit-cell">
-                  <div class="final-credit-card">
-                    <p class="text-[10px] text-agione-600">
-                      最终 {{ pointUnitLabel }}
-                    </p>
-                    <p class="font-mono text-[12px] font-bold text-agione-700">
-                      {{ formatCredit(row.costOutRaw, row.marginOut) }}
-                    </p>
-                  </div>
+                <div class="pricing-matrix-card final-credit-card">
+                  <p class="pricing-card-caption">
+                    最终 {{ pointUnitLabel }}
+                  </p>
+                  <p class="font-mono text-[13px] font-bold text-agione-700">
+                    {{ formatCredit(dimension.priceRaw) }}
+                  </p>
                 </div>
-              </div>
-              <div class="pricing-axis-block">
-                <BulletChart
-                  :min="bulletRange.out.min"
-                  :max="bulletRange.out.max"
-                  :value="row.priceOutRaw"
-                  :refs="bulletRefsOut"
-                  :label="`我方售价 ${currencySymbol}${row.priceOut}`"
-                  :currency-symbol="currencySymbol"
-                  @change="applyPriceChange(row, 'Out', $event)"
-                />
-              </div>
+              </template>
+            </div>
+            <div class="pricing-axis-block compact-pricing-axis">
+              <BulletChart
+                :min="marginAxisRangeFor(row).min"
+                :max="marginAxisRangeFor(row).max"
+                :value="row.margin"
+                :refs="marketMarginRefsFor(row)"
+                :lower-tooltip="marginPolicyTooltip('min')"
+                :upper-tooltip="marginPolicyTooltip('max')"
+                :label="`统一利润率 ${formatPercent(row.margin)}`"
+                value-prefix=""
+                value-suffix="%"
+                :digits="1"
+                @change="onMarginAxisChange(row, $event)"
+              />
             </div>
           </div>
         </article>
@@ -647,6 +506,13 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import BulletChart from '@/components/llm-ops/BulletChart.vue'
+import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import {
+  averageMarginRate,
+  isMarginAutoApprovable,
+  referenceRetailPrice,
+  RESALE_PRICE_DIMENSION_SPECS
+} from '@/utils/resalePricing'
 import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
@@ -683,6 +549,10 @@ const props = defineProps({
     default: () => []
   },
   priceItems: {
+    type: Array,
+    default: () => []
+  },
+  channelPriceItems: {
     type: Array,
     default: () => []
   },
@@ -794,6 +664,20 @@ const modelById = computed(() => {
   return map
 })
 
+const channelPriceItemsByKey = computed(() => {
+  const map = new Map()
+  ;(props.channelPriceItems || []).forEach((item) => {
+    if (!item?.channel || !item?.model || !item?.dimension) return
+    const key = channelPriceItemKey(
+      item.channel,
+      item.model,
+      item.dimension
+    )
+    map.set(key, item)
+  })
+  return map
+})
+
 const procurementByMetaModel = computed(() => {
   const map = new Map()
   ;(props.procurementRows || []).forEach((row) => {
@@ -823,6 +707,13 @@ const selectedMetaModelProcurements = computed(() => {
   return procurementByMetaModel.value.get(String(form.value.modelId)) || []
 })
 
+const platformSelectOptions = computed(() =>
+  (props.platforms || []).map((item) => ({
+    value: String(item.id),
+    label: item.name || item.code || `平台 ${item.id}`
+  }))
+)
+
 const metaVendorOptions = computed(() => {
   const map = new Map()
   metaModelRows.value.forEach((model) => {
@@ -842,6 +733,15 @@ const metaVendorOptions = computed(() => {
   )
 })
 
+const metaVendorSelectOptions = computed(() => [
+  { value: '', label: '全部' },
+  ...metaVendorOptions.value.map((item) => ({
+    value: String(item.id),
+    label: item.name,
+    description: item.code || ''
+  }))
+])
+
 const baseModelOptions = computed(() => {
   const metaVendorId = form.value.metaVendorId
   return metaModelRows.value
@@ -860,6 +760,20 @@ const baseModelOptions = computed(() => {
     .sort((left, right) => String(left.name).localeCompare(String(right.name)))
 })
 
+const baseModelSelectOptions = computed(() => [
+  { value: '', label: '选择元模型' },
+  ...baseModelOptions.value.map((item) => ({
+    value: String(item.id),
+    label: item.name,
+    description: [item.vendorName, item.family, item.code]
+      .filter(Boolean)
+      .join(' · '),
+    searchText: [item.name, item.vendorName, item.family, item.code]
+      .filter(Boolean)
+      .join(' ')
+  }))
+])
+
 const supplierOptions = computed(() => {
   if (!form.value.modelId) return []
   const seen = new Map()
@@ -874,6 +788,19 @@ const supplierOptions = computed(() => {
   return Array.from(seen.values()).sort((a, b) =>
     String(a.name).localeCompare(String(b.name))
   )
+})
+
+const supplierSelectOptions = computed(() => {
+  if (!form.value.modelId) {
+    return [{ value: '', label: '先选择元模型', disabled: true }]
+  }
+  return [
+    { value: '', label: '全部支持渠道' },
+    ...supplierOptions.value.map((item) => ({
+      value: String(item.id),
+      label: item.name
+    }))
+  ]
 })
 
 const supportedSupplierIds = computed(
@@ -893,6 +820,10 @@ const selectedPlatform = computed(() => {
   )
 })
 
+const selectedPlatformLabel = computed(
+  () => selectedPlatform.value?.name || '当前平台'
+)
+
 const platformCurrencyLabel = computed(() =>
   String(selectedPlatform.value?.currency || props.displayCurrency || 'CNY')
     .toUpperCase()
@@ -902,6 +833,21 @@ const currencyLabel = computed(() => String(props.displayCurrency || 'CNY'))
 const currencySymbol = computed(() =>
   currencyLabel.value === 'USD' ? '$' : '¥'
 )
+
+const selectedPlatformFeeRate = computed(() => {
+  const value = Number(selectedPlatform.value?.fee_rate)
+  return Number.isFinite(value) ? value : 0
+})
+
+const selectedPlatformServiceFeeRate = computed(() => {
+  const value = Number(selectedPlatform.value?.service_fee_rate)
+  return Number.isFinite(value) ? value : 0
+})
+
+const selectedPlatformAutoApproveLimit = computed(() => {
+  const value = Number(selectedPlatform.value?.auto_approve_max_margin_rate)
+  return Number.isFinite(value) ? value : null
+})
 
 watch(
   () => props.agionePlatform,
@@ -983,6 +929,28 @@ function convertToDisplay(amount, currency) {
   return null
 }
 
+function channelPriceItemKey(channelId, modelId, dimension) {
+  return [channelId, modelId, dimension].map(String).join(':')
+}
+
+function channelPriceValue(option, modelId, dimension, fallbackValue) {
+  const item = channelPriceItemsByKey.value.get(
+    channelPriceItemKey(option.channel_id, modelId, dimension)
+  )
+  if (item && item.unit_price !== null && item.unit_price !== undefined) {
+    return {
+      value: item.unit_price,
+      currency: item.currency || option.currency,
+      ratio: item.settlement_ratio ?? option.settlement_ratio
+    }
+  }
+  return {
+    value: fallbackValue,
+    currency: option.currency,
+    ratio: option.settlement_ratio
+  }
+}
+
 function normalizeDiscountRatio(value) {
   const ratio = Number(value)
   if (!Number.isFinite(ratio) || ratio <= 0) return 1
@@ -1020,56 +988,74 @@ const chainRows = computed(() => {
         .map((option) => ({ procurement, skuModel, option }))
     })
     .map(({ procurement, skuModel, option }) => {
+      const inputCost = channelPriceValue(
+        option,
+        procurement.model_id,
+        'text_input',
+        option.input_price_per_million
+      )
+      const outputCost = channelPriceValue(
+        option,
+        procurement.model_id,
+        'text_output',
+        option.output_price_per_million
+      )
+      const cacheInputCost = channelPriceValue(
+        option,
+        procurement.model_id,
+        'cache_input',
+        option.cache_input_price_per_million
+      )
       const inDisplay = convertToDisplay(
-        option.input_price_per_million,
-        option.currency
+        inputCost.value,
+        inputCost.currency
       )
       const outDisplay = convertToDisplay(
-        option.output_price_per_million,
-        option.currency
+        outputCost.value,
+        outputCost.currency
       )
       const cacheInDisplay = convertToDisplay(
-        option.cache_input_price_per_million,
-        option.currency
+        cacheInputCost.value,
+        cacheInputCost.currency
       )
       const baseInDisplay = convertToDisplay(
         option.base_input_price_per_million ??
           basePriceFromRatio(
-            option.input_price_per_million,
+            inputCost.value,
             option.input_price_per_million_settlement_ratio ??
-              option.settlement_ratio
+              inputCost.ratio
           ),
-        option.currency
+        inputCost.currency
       )
       const baseOutDisplay = convertToDisplay(
         option.base_output_price_per_million ??
           basePriceFromRatio(
-            option.output_price_per_million,
+            outputCost.value,
             option.output_price_per_million_settlement_ratio ??
-              option.settlement_ratio
+              outputCost.ratio
           ),
-        option.currency
+        outputCost.currency
       )
       const baseCacheInDisplay = convertToDisplay(
         option.base_cache_input_price_per_million ??
           basePriceFromRatio(
-            option.cache_input_price_per_million,
+            cacheInputCost.value,
             option.cache_input_price_per_million_settlement_ratio ??
-              option.settlement_ratio
+              cacheInputCost.ratio
           ),
-        option.currency
+        cacheInputCost.currency
       )
       const discountIn = normalizeDiscountRatio(
         option.input_price_per_million_settlement_ratio ??
-          option.settlement_ratio
+          inputCost.ratio
       )
       const discountOut = normalizeDiscountRatio(
         option.output_price_per_million_settlement_ratio ??
-          option.settlement_ratio
+          outputCost.ratio
       )
       const discountCacheIn = normalizeDiscountRatio(
         option.cache_input_price_per_million_settlement_ratio ??
-          option.settlement_ratio
+          cacheInputCost.ratio
       )
       const uniqueId = `${option.channel_id}-${procurement.model_id}`
       const state = getChainState(uniqueId)
@@ -1104,17 +1090,24 @@ const chainRows = computed(() => {
         costIn: inDisplay !== null ? inDisplay.toFixed(4) : '-',
         costOut: outDisplay !== null ? outDisplay.toFixed(4) : '-',
         costCacheIn:
-          cacheInDisplay !== null && cacheInDisplay > 0
+          cacheInDisplay !== null
             ? cacheInDisplay.toFixed(4)
-            : '-',
+            : '0.0000',
         hasCacheInput: cacheInDisplay !== null && cacheInDisplay > 0,
+        tpmLimit: numberOrNull(option.tpm_limit),
+        rpmLimit: numberOrNull(option.rpm_limit),
+        latencyMs: numberOrNull(option.latency_ms),
         selected: Boolean(state.selected),
-        marginIn: state.marginIn ?? 20,
-        marginOut: state.marginOut ?? 20,
-        marginCacheIn: state.marginCacheIn ?? state.marginIn ?? 20,
+        margin: normalizeMargin(
+          state.margin ??
+            state.marginIn ??
+            state.marginOut ??
+            state.marginCacheIn ??
+            20
+        ),
         priceInRaw: state.priceInRaw ?? null,
         priceOutRaw: state.priceOutRaw ?? null,
-        priceCacheInRaw: state.priceCacheInRaw ?? null,
+        priceCacheInRaw: state.priceCacheInRaw ?? 0,
         priceIn:
           state.priceInRaw !== null && state.priceInRaw !== undefined
             ? Number(state.priceInRaw).toFixed(4)
@@ -1123,14 +1116,11 @@ const chainRows = computed(() => {
           state.priceOutRaw !== null && state.priceOutRaw !== undefined
             ? Number(state.priceOutRaw).toFixed(4)
             : '',
-        priceCacheIn:
-          state.priceCacheInRaw !== null &&
-          state.priceCacheInRaw !== undefined
-            ? Number(state.priceCacheInRaw).toFixed(4)
-            : '',
+        priceCacheIn: Number(state.priceCacheInRaw ?? 0).toFixed(4),
         isLowest: false
       }
     })
+    .filter((row) => Number(row.costInRaw) > 0 && Number(row.costOutRaw) > 0)
     .sort((a, b) => Number(a.costInRaw) - Number(b.costInRaw))
     .map((row, idx) => ({ ...row, isLowest: idx === 0 }))
 })
@@ -1183,26 +1173,16 @@ function syncSelectedChain() {
   const nextState = { ...chainState.value }
   selectedChainRows.value.forEach((row) => {
     const state = { ...(nextState[row.uniqueId] || {}) }
+    const margin = normalizeMargin(state.margin ?? row.margin)
+    state.margin = margin
     if (state.priceInRaw === null || state.priceInRaw === undefined) {
-      state.priceInRaw = Number(
-        (row.costInRaw * (1 + (Number(row.marginIn) || 0) / 100)).toFixed(4)
-      )
+      state.priceInRaw = priceFromMargin(row.costInRaw, margin)
     }
     if (state.priceOutRaw === null || state.priceOutRaw === undefined) {
-      state.priceOutRaw = Number(
-        (row.costOutRaw * (1 + (Number(row.marginOut) || 0) / 100)).toFixed(4)
-      )
+      state.priceOutRaw = priceFromMargin(row.costOutRaw, margin)
     }
-    if (
-      row.hasCacheInput &&
-      (state.priceCacheInRaw === null ||
-        state.priceCacheInRaw === undefined)
-    ) {
-      const margin = Number(row.marginCacheIn ?? row.marginIn) || 0
-      state.marginCacheIn = margin
-      state.priceCacheInRaw = Number(
-        (row.costCacheInRaw * (1 + margin / 100)).toFixed(4)
-      )
+    if (state.priceCacheInRaw === null || state.priceCacheInRaw === undefined) {
+      state.priceCacheInRaw = priceFromMargin(row.costCacheInRaw, margin)
     }
     nextState[row.uniqueId] = state
   })
@@ -1279,103 +1259,131 @@ function hydrateInitialListings(initialModelId) {
         priceInRaw: priceIn ?? row.priceInRaw,
         priceOutRaw: priceOut ?? row.priceOutRaw,
         priceCacheInRaw: priceCacheIn ?? row.priceCacheInRaw,
-        marginIn: marginFromPrice(priceIn, row.costInRaw),
-        marginOut: marginFromPrice(priceOut, row.costOutRaw),
-        marginCacheIn: marginFromPrice(priceCacheIn, row.costCacheInRaw)
+        margin: marginFromListingPrices(row, priceIn, priceOut, priceCacheIn)
       }
     })
   chainState.value = nextState
   syncSelectedChain()
 }
 
-function marginFromPrice(price, cost) {
-  const priceValue = Number(price)
-  const costValue = Number(cost)
-  if (
-    !Number.isFinite(priceValue) ||
-    !Number.isFinite(costValue) ||
-    costValue <= 0
-  ) {
-    return 20
-  }
-  return Number((((priceValue - costValue) / costValue) * 100).toFixed(2))
+function marginFromListingPrices(row, priceIn, priceOut, priceCacheIn) {
+  const margin = averageMarginRate([
+    { price: priceIn, cost: row.costInRaw },
+    { price: priceOut, cost: row.costOutRaw },
+    { price: priceCacheIn, cost: row.costCacheInRaw }
+  ].filter(Boolean))
+  return normalizeMargin(margin ?? 20)
 }
 
-function onMarginInput(row, dir, event) {
-  const value = Number(event?.target?.value)
-  const margin = Number.isFinite(value) ? value : 0
-  const cost =
-    dir === 'In'
-      ? row.costInRaw
-      : dir === 'Cache'
-        ? row.costCacheInRaw
-        : row.costOutRaw
-  const price = Number(cost) * (1 + (Number(margin) || 0) / 100)
-  if (dir === 'In') {
-    updateChainState(row, {
-      marginIn: margin,
-      priceInRaw: Number(price.toFixed(4))
-    })
-  } else if (dir === 'Cache') {
-    updateChainState(row, {
-      marginCacheIn: margin,
-      priceCacheInRaw: Number(price.toFixed(4))
-    })
-  } else {
-    updateChainState(row, {
-      marginOut: margin,
-      priceOutRaw: Number(price.toFixed(4))
-    })
+function normalizeMargin(value) {
+  const margin = Number(value)
+  if (!Number.isFinite(margin)) return 0
+  return Number(margin.toFixed(1))
+}
+
+function referenceMarginFloor() {
+  const feeRate = Number(selectedPlatformFeeRate.value)
+  const serviceFeeRate = Number(selectedPlatformServiceFeeRate.value)
+  const fee = Number.isFinite(feeRate) && feeRate > 0 ? feeRate : 0
+  const service =
+    Number.isFinite(serviceFeeRate) && serviceFeeRate > 0 ? serviceFeeRate : 0
+  return normalizeMargin((fee + service) * 100)
+}
+
+function clampMarginToReference(value) {
+  return Math.max(normalizeMargin(value), referenceMarginFloor())
+}
+
+function priceFromMargin(cost, margin) {
+  const costValue = Number(cost) || 0
+  const marginValue = Number(margin) || 0
+  return Number((costValue * (1 + marginValue / 100)).toFixed(4))
+}
+
+function pricePatchForMargin(row, margin, options = {}) {
+  const shouldClamp = options.clampToReference !== false
+  const nextMargin = shouldClamp
+    ? clampMarginToReference(margin)
+    : normalizeMargin(margin)
+  const patch = {
+    margin: nextMargin,
+    priceInRaw: priceFromMargin(row.costInRaw, nextMargin),
+    priceOutRaw: priceFromMargin(row.costOutRaw, nextMargin)
   }
+  patch.priceCacheInRaw = priceFromMargin(row.costCacheInRaw, nextMargin)
+  return patch
+}
+
+function onMarginInput(row, event) {
+  const rawValue = event?.target?.value
+  if (rawValue === '') {
+    return
+  }
+  const value = Number(rawValue)
+  const margin = Number.isFinite(value) ? value : 0
+  const patch = pricePatchForMargin(row, margin, {
+    clampToReference: false
+  })
+  updateChainState(row, patch)
+}
+
+function onMarginCommit(row, event) {
+  const value = Number(event?.target?.value)
+  const margin = Number.isFinite(value) ? value : row.margin
+  const patch = pricePatchForMargin(row, margin)
+  updateChainState(row, patch)
+  if (event?.target) event.target.value = patch.margin
   emitChange()
 }
 
-function onPriceInput(row, dir, event) {
+function onPriceInput(row, key, event) {
   const rawPrice = Number(event?.target?.value)
-  applyPriceChange(row, dir, rawPrice)
+  const price = applyPriceChange(row, key, rawPrice)
+  if (event?.target && Number.isFinite(price)) {
+    event.target.value = price
+  }
 }
 
-function applyPriceChange(row, dir, rawPrice) {
-  const cost =
-    dir === 'In'
-      ? row.costInRaw
-      : dir === 'Cache'
-        ? row.costCacheInRaw
-        : row.costOutRaw
-  const price = Number.isFinite(rawPrice) ? rawPrice : 0
+function applyPriceChange(row, key, rawPrice) {
+  const dimension = priceDimensions(row).find((item) => item.key === key)
+  const cost = dimension?.costRaw ?? 0
+  const referencePrice = Number(dimension?.referencePriceRaw)
+  const inputPrice = Number.isFinite(rawPrice) ? rawPrice : 0
+  const price =
+    Number.isFinite(referencePrice) && referencePrice > 0
+      ? Math.max(inputPrice, referencePrice)
+      : inputPrice
   const margin =
     Number(cost) > 0
       ? ((Number(price) - Number(cost)) / Number(cost)) * 100
-      : dir === 'In'
-        ? row.marginIn
-        : dir === 'Cache'
-          ? row.marginCacheIn
-          : row.marginOut
-  if (dir === 'In') {
-    updateChainState(row, {
-      priceInRaw: price,
-      marginIn: Number(margin.toFixed(2))
-    })
-  } else if (dir === 'Cache') {
-    updateChainState(row, {
-      priceCacheInRaw: price,
-      marginCacheIn: Number(margin.toFixed(2))
-    })
+      : row.margin
+  const nextMargin = normalizeMargin(margin)
+  const patch = pricePatchForMargin(row, nextMargin)
+  if (key === 'input') {
+    patch.priceInRaw = price
+  } else if (key === 'cache') {
+    patch.priceCacheInRaw = price
   } else {
-    updateChainState(row, {
-      priceOutRaw: price,
-      marginOut: Number(margin.toFixed(2))
-    })
+    patch.priceOutRaw = price
   }
+  updateChainState(row, patch)
   emitChange()
+  return price
 }
 
-function formatCredit(cost, margin) {
-  const c = Number(cost) || 0
-  const m = Number(margin) || 0
+function formatCredit(price) {
+  const amount = Number(price) || 0
   const rate = Number(globalPricing.value.creditRatio) || 0
-  const price = c * (1 + m / 100)
-  return (price * rate).toFixed(2)
+  return formatRoundedPoints(amount * rate)
+}
+
+function formatRoundedPoints(value) {
+  const points = Number(value)
+  if (!Number.isFinite(points)) return '0'
+  const mode = props.pointConversion?.rounding_mode || 'half_up'
+  if (mode === 'up') return String(Math.ceil(points))
+  if (mode === 'down') return String(Math.floor(points))
+  return String(Math.round(points))
 }
 
 function formatReadonlyNumber(value, digits) {
@@ -1395,15 +1403,87 @@ function formatDiscount(value) {
   return `${(ratio * 100).toFixed(1).replace(/\.0$/, '')}%`
 }
 
-function costFormulaParts(row, dir) {
-  if (dir === 'Cache') {
+function formatPercent(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  return `${num.toFixed(1).replace(/\.0$/, '')}%`
+}
+
+function formatRatioPercent(value) {
+  const num = Number(value)
+  if (!Number.isFinite(num)) return '-'
+  return `${(num * 100).toFixed(2).replace(/\.?0+$/, '')}%`
+}
+
+function referencePriceForCost(cost) {
+  return referenceRetailPrice(cost, {
+    feeRate: selectedPlatformFeeRate.value,
+    serviceFeeRate: selectedPlatformServiceFeeRate.value
+  })
+}
+
+function referencePriceText(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return '-'
+  return amount.toFixed(4)
+}
+
+function referencePriceTitle(dimension) {
+  return [
+    '最低参考定价 = 成本价 × (1 + 服务费率 + 平台抽佣比例)',
+    `当前服务费率 ${formatRatioPercent(selectedPlatformServiceFeeRate.value)}`,
+    `当前平台抽佣比例 ${formatRatioPercent(selectedPlatformFeeRate.value)}`,
+    `参考价 ${currencySymbol.value}${referencePriceText(
+      dimension.referencePriceRaw
+    )}`
+  ].join('；')
+}
+
+function isBelowReferencePrice(price, referencePrice) {
+  const priceValue = Number(price)
+  const referenceValue = Number(referencePrice)
+  if (!Number.isFinite(priceValue) || !Number.isFinite(referenceValue)) {
+    return false
+  }
+  return priceValue + 0.000001 < referenceValue
+}
+
+function autoApproveStatus(margin) {
+  if (selectedPlatformAutoApproveLimit.value === null) {
+    return { ok: true, label: '未配置免审利润率' }
+  }
+  const isAllowed = isMarginAutoApprovable(
+    margin,
+    selectedPlatformAutoApproveLimit.value
+  )
+  if (isAllowed === null) {
+    return { ok: true, label: '免审阈值未生效' }
+  }
+  if (isAllowed) {
+    return {
+      ok: true,
+      label: `免审范围内（<= ${formatPercent(
+        selectedPlatformAutoApproveLimit.value
+      )}）`
+    }
+  }
+  return {
+    ok: false,
+    label: `超出免审上限（> ${formatPercent(
+      selectedPlatformAutoApproveLimit.value
+    )}）`
+  }
+}
+
+function costFormulaParts(row, key) {
+  if (key === 'cache') {
     return {
       baseCost: row.baseCostCacheInRaw,
       discount: row.discountCacheIn,
       cost: row.costCacheInRaw
     }
   }
-  const isInput = dir === 'In'
+  const isInput = key === 'input'
   return {
     baseCost: isInput ? row.baseCostInRaw : row.baseCostOutRaw,
     discount: isInput ? row.discountIn : row.discountOut,
@@ -1411,15 +1491,15 @@ function costFormulaParts(row, dir) {
   }
 }
 
-function costFormulaText(row, dir) {
-  const parts = costFormulaParts(row, dir)
+function costFormulaText(row, key) {
+  const parts = costFormulaParts(row, key)
   return `${formatMoneyAmount(parts.baseCost)} × ${formatDiscount(
     parts.discount
   )} = ${formatMoneyAmount(parts.cost)}`
 }
 
-function costFormulaTitle(row, dir) {
-  return `成本价 = 供应商成本价 × 折扣；${costFormulaText(row, dir)}`
+function costFormulaTitle(row, key) {
+  return `成本价 = 供应商成本价 × 折扣；${costFormulaText(row, key)}`
 }
 
 function marketAverageText(avg) {
@@ -1458,20 +1538,16 @@ function priceDiffClass(price, avg) {
   return 'text-slate-500'
 }
 
-const selectedSkuModelIds = computed(() => {
+const selectedMetaModelPriceItems = computed(() => {
   const metaModelId = form.value.modelId
-  if (!metaModelId) return new Set()
-  return new Set(
-    (props.models || [])
-      .filter((model) => String(model.meta_model) === String(metaModelId))
-      .map((model) => String(model.id))
+  if (!metaModelId) return []
+  return (props.priceItems || []).filter(
+    (item) => String(item.meta_model) === String(metaModelId)
   )
 })
 
 const marketAvg = computed(() => {
-  const refs = (props.priceItems || []).filter(
-    (it) => selectedSkuModelIds.value.has(String(it.model))
-  )
+  const refs = selectedMetaModelPriceItems.value
   if (!refs.length) return { in: 0, out: 0, cacheIn: 0 }
   let inSum = 0
   let outSum = 0
@@ -1480,22 +1556,18 @@ const marketAvg = computed(() => {
   let outCount = 0
   let cacheInCount = 0
   refs.forEach((it) => {
-    const inV = convertToDisplay(it.input_price_per_million, it.currency)
-    const outV = convertToDisplay(it.output_price_per_million, it.currency)
-    const cacheInV = convertToDisplay(
-      it.cache_input_price_per_million,
-      it.currency
-    )
-    if (inV !== null) {
-      inSum += inV
+    const value = convertToDisplay(it.unit_price, it.currency)
+    if (value === null) return
+    if (it.dimension === 'text_input') {
+      inSum += value
       inCount += 1
     }
-    if (outV !== null) {
-      outSum += outV
+    if (it.dimension === 'text_output') {
+      outSum += value
       outCount += 1
     }
-    if (cacheInV !== null) {
-      cacheInSum += cacheInV
+    if (it.dimension === 'cache_input') {
+      cacheInSum += value
       cacheInCount += 1
     }
   })
@@ -1507,97 +1579,179 @@ const marketAvg = computed(() => {
   }
 })
 
-const bulletRefsIn = computed(() => {
-  return (props.priceItems || [])
-    .filter((it) => selectedSkuModelIds.value.has(String(it.model)))
-    .map((it) => ({
-      source: it.source_name || it.vendor_name || '市场参考',
-      price: convertToDisplay(it.input_price_per_million, it.currency) || 0
-    }))
-    .filter((r) => r.price > 0)
-})
-
-const bulletRefsOut = computed(() => {
-  return (props.priceItems || [])
-    .filter((it) => selectedSkuModelIds.value.has(String(it.model)))
-    .map((it) => ({
-      source: it.source_name || it.vendor_name || '市场参考',
-      price: convertToDisplay(it.output_price_per_million, it.currency) || 0
-    }))
-    .filter((r) => r.price > 0)
-})
-
-const bulletRange = computed(() => {
-  const inMarketPrices = bulletRefsIn.value.map((r) => r.price)
-  const outMarketPrices = bulletRefsOut.value.map((r) => r.price)
-  const inMin = Math.min(...inMarketPrices)
-  const inMax = Math.max(...inMarketPrices)
-  const outMin = Math.min(...outMarketPrices)
-  const outMax = Math.max(...outMarketPrices)
-  return {
-    in: {
-      min: Number.isFinite(inMin) && inMin > 0 ? inMin : 0,
-      max: Number.isFinite(inMax) && inMax > 0 ? inMax : 0
-    },
-    out: {
-      min: Number.isFinite(outMin) && outMin > 0 ? outMin : 0,
-      max: Number.isFinite(outMax) && outMax > 0 ? outMax : 0
+const priceMetricConfigs = Object.fromEntries(
+  RESALE_PRICE_DIMENSION_SPECS.map((item) => [
+    item.key,
+    {
+      label: item.label,
+      shortLabel: item.shortLabel,
+      priceField: item.workspacePriceField,
+      priceTextField: item.workspacePriceTextField,
+      costRawField: item.workspaceCostField,
+      costTextField: item.workspaceCostTextField,
+      marketKey: item.marketKey,
+      itemDimension: item.itemDimension
     }
-  }
-})
-
-// Performance: derive stable mock metrics from cost to keep bars visually
-// comparable across chains. The dataset is intentionally lightweight
-// until a real channel-perf API exists.
-const perfCompareRows = computed(() =>
-  selectedChainRows.value.map((row) => {
-    const seed = Number(row.costInRaw) || 0
-    return {
-      name: `${row.provider} · ${row.source}`,
-      rpm: Math.max(0, 30000 - Math.round(seed * 60000)),
-      tpm: Math.max(0, 4000000 - Math.round(seed * 4000000)),
-      context: row.context || 128,
-      latency: Math.max(40, Math.round(80 + seed * 200))
-    }
-  })
+  ])
 )
+
+function priceDimensions(row) {
+  return ['input', 'output', 'cache']
+    .map((key) => {
+      const config = priceMetricConfigs[key]
+      return {
+        key,
+        label: config.label,
+        shortLabel: config.shortLabel,
+        priceRaw: row[config.priceField],
+        priceText: row[config.priceTextField],
+        costRaw: row[config.costRawField],
+        costText: row[config.costTextField],
+        marketAverage: marketAvg.value[config.marketKey] || 0,
+        referencePriceRaw: referencePriceForCost(row[config.costRawField]),
+        referencePriceText: referencePriceText(
+          referencePriceForCost(row[config.costRawField])
+        )
+      }
+    })
+}
+
+function marketMarginRefsFor(row) {
+  const margins = priceDimensions(row)
+    .map((dimension) => {
+      const marketPrice = Number(dimension.marketAverage)
+      const cost = Number(dimension.costRaw)
+      if (
+        !Number.isFinite(marketPrice) ||
+        !Number.isFinite(cost) ||
+        marketPrice <= 0 ||
+        cost <= 0
+      ) {
+        return null
+      }
+      return ((marketPrice - cost) / cost) * 100
+    })
+    .filter((value) => value !== null)
+  if (!margins.length) return []
+  const average =
+    margins.reduce((total, value) => total + value, 0) / margins.length
+  return [
+    {
+      source: '市场均价',
+      price: Number(average.toFixed(2))
+    }
+  ]
+}
+
+function marginAxisRangeFor(row) {
+  const current = Number(row.margin)
+  const floor = referenceMarginFloor()
+  const approveLimit = Number(selectedPlatformAutoApproveLimit.value)
+  const limit =
+    Number.isFinite(approveLimit) && approveLimit > floor
+      ? approveLimit
+      : Math.max(floor + 20, Number.isFinite(current) ? current : floor)
+  return {
+    min: floor,
+    max: limit
+  }
+}
+
+function onMarginAxisChange(row, rawMargin) {
+  const nextMargin = normalizeMargin(rawMargin)
+  updateChainState(row, pricePatchForMargin(row, nextMargin))
+  emitChange()
+}
+
+function marginPolicyTooltip(type) {
+  const isMin = type === 'min'
+  const floor = referenceMarginFloor()
+  const approveLimit = Number(selectedPlatformAutoApproveLimit.value)
+  return {
+    title: isMin ? '最低利润率下限' : '免审利润率上限',
+    source: isMin
+      ? '成本价 × (1 + 服务费率 + 平台抽佣比例)'
+      : '平台配置的自动免审阈值，仅影响审批判断',
+    rows: isMin
+      ? [
+          {
+            label: '平台下限',
+            value: formatPercent(floor),
+            source: `服务费 ${formatRatioPercent(
+              selectedPlatformServiceFeeRate.value
+            )} + 抽佣 ${formatRatioPercent(selectedPlatformFeeRate.value)}`
+          }
+        ]
+      : [
+          {
+            label: '免审上限',
+            value: Number.isFinite(approveLimit)
+              ? formatPercent(approveLimit)
+              : '未配置',
+            source: selectedPlatformLabel.value
+          }
+        ]
+  }
+}
+
+const perfCompareRows = computed(() =>
+  selectedChainRows.value.map((row) => ({
+    id: row.uniqueId,
+    name: performanceRowName(row),
+    rpm: row.rpmLimit,
+    tpm: row.tpmLimit,
+    latency: row.latencyMs
+  }))
+)
+
+function performanceRowName(row) {
+  const channelName = row.channelName || row.supplierName || row.source
+  const modelName = row.skuModelName || row.modelName
+  if (!channelName) return modelName || '供货链路'
+  if (!modelName || modelName === row.modelName) return channelName
+  return `${channelName} · ${modelName}`
+}
 
 const perfMetrics = computed(() => {
   const rpmMax = Math.max(1, ...perfCompareRows.value.map((r) => r.rpm))
   const tpmMax = Math.max(1, ...perfCompareRows.value.map((r) => r.tpm))
-  const ctxMax = Math.max(1, ...perfCompareRows.value.map((r) => r.context))
   const latMax = Math.max(1, ...perfCompareRows.value.map((r) => r.latency))
   return [
     {
       key: 'rpm',
       label: '并发请求速率 (RPM)',
       max: rpmMax,
-      format: (v) => `${(v / 1000).toFixed(1)}K`,
+      format: (v) => formatPerformanceValue(v, 'K', 1000),
       barClass: () => 'bg-violet-500'
     },
     {
       key: 'tpm',
       label: 'Token 吞吐量 (TPM)',
       max: tpmMax,
-      format: (v) => `${(v / 1000000).toFixed(1)}M`,
+      format: (v) => formatPerformanceValue(v, 'M', 1000000),
       barClass: () => 'bg-emerald-500'
-    },
-    {
-      key: 'context',
-      label: '上下文长度 (Context)',
-      max: ctxMax,
-      format: (v) => `${v}K`,
-      barClass: () => 'bg-sky-500'
     },
     {
       key: 'latency',
       label: '首字延迟 (Latency · 越低越好)',
       max: latMax,
-      format: (v) => `${v}ms`,
+      format: (v) => (Number.isFinite(v) ? `${v}ms` : '-'),
       barClass: () => 'bg-amber-500'
     }
   ]
 })
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatPerformanceValue(value, suffix, divisor) {
+  if (!Number.isFinite(value)) return '-'
+  if (!value) return '0'
+  return `${(value / divisor).toFixed(1)}${suffix}`
+}
 
 function barWidth(value, max) {
   if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return '0%'
@@ -1617,9 +1771,8 @@ function emitChange() {
       modelId: row.modelId,
       priceIn: row.priceInRaw,
       priceOut: row.priceOutRaw,
-      priceCacheIn: row.hasCacheInput ? row.priceCacheInRaw : null,
-      marginIn: row.marginIn,
-      marginOut: row.marginOut
+      priceCacheIn: row.priceCacheInRaw,
+      margin: row.margin
     }))
   })
 }
@@ -1647,9 +1800,8 @@ defineExpose({
         modelId: row.modelId,
         priceIn: row.priceInRaw,
         priceOut: row.priceOutRaw,
-        priceCacheIn: row.hasCacheInput ? row.priceCacheInRaw : null,
-        marginIn: row.marginIn,
-        marginOut: row.marginOut
+        priceCacheIn: row.priceCacheInRaw,
+        margin: row.margin
       }))
     }
   }
@@ -2043,20 +2195,22 @@ defineExpose({
 .workspace-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  align-items: center;
   gap: 0.75rem;
-  padding: 1rem;
+  padding: 0.75rem 1rem;
 }
 
 @media (min-width: 1280px) {
   .workspace-toolbar {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(720px, 1fr) max-content;
   }
 }
 
 .workspace-filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 0.75rem;
+  align-items: end;
+  gap: 0.625rem;
   min-width: 0;
 }
 
@@ -2066,11 +2220,16 @@ defineExpose({
   }
 }
 
+@media (min-width: 1280px) {
+  .workspace-filter-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .filter-field {
-  display: grid;
-  grid-template-columns: 58px minmax(0, 1fr);
-  align-items: center;
-  gap: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
   min-width: 0;
 }
 
@@ -2079,8 +2238,59 @@ defineExpose({
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0;
-  line-height: 1;
+  line-height: 1.2;
   white-space: nowrap;
+}
+
+.workspace-select :deep(.compact-select-trigger) {
+  min-height: 34px;
+  border-radius: 8px;
+  border-color: #dbe4f0;
+  background-color: #ffffff;
+  padding: 0.375rem 0.625rem;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.workspace-select :deep(.compact-select-trigger:hover:not(:disabled)) {
+  border-color: #cbd5e1;
+  background-color: #f8fafc;
+}
+
+.workspace-select :deep(.compact-select-trigger:focus-visible) {
+  border-color: #8b7dd1;
+  box-shadow: 0 0 0 3px rgba(139, 125, 209, 0.16);
+}
+
+.workspace-select :deep(.compact-select-disabled) {
+  border-color: #e2e8f0;
+  background-color: #f8fafc;
+  color: #94a3b8;
+}
+
+.workspace-select :deep(.compact-select-caret) {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.workspace-select :deep(.compact-select-menu) {
+  border-radius: 10px;
+  padding: 0.375rem;
+}
+
+.workspace-select :deep(.compact-select-search) {
+  min-height: 34px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.workspace-select :deep(.compact-select-option) {
+  border-radius: 8px;
+  padding: 0.5rem 0.625rem;
+  font-size: 13px;
 }
 
 .field-select {
@@ -2117,7 +2327,9 @@ defineExpose({
   display: grid;
   grid-template-columns: repeat(3, minmax(0, max-content));
   gap: 0;
+  align-self: end;
   justify-self: stretch;
+  height: 34px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background-color: #ffffff;
@@ -2133,10 +2345,10 @@ defineExpose({
 .pricing-segment {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  min-height: 38px;
+  gap: 0.375rem;
+  min-height: 32px;
   border-right: 1px solid #e2e8f0;
-  padding: 0 0.75rem;
+  padding: 0 0.625rem;
   white-space: nowrap;
 }
 
@@ -2161,6 +2373,7 @@ defineExpose({
 @media (max-width: 820px) {
   .pricing-context {
     grid-template-columns: 1fr;
+    justify-self: stretch;
   }
 
   .pricing-segment {
@@ -2176,7 +2389,8 @@ defineExpose({
 
 .supply-grid {
   display: grid;
-  grid-template-columns: minmax(300px, 1fr) 170px 170px 140px;
+  grid-template-columns:
+    minmax(260px, 1.1fr) repeat(3, minmax(150px, 0.75fr));
   column-gap: 0.75rem;
   align-items: center;
 }
@@ -2221,60 +2435,152 @@ defineExpose({
   min-width: 0;
 }
 
-.pricing-editor-row {
+.pricing-matrix {
   display: grid;
-  grid-template-columns:
-    52px minmax(156px, 178px) minmax(96px, 108px)
-    minmax(238px, 1fr) minmax(92px, 104px);
+  grid-template-columns: 68px minmax(170px, 0.78fr) minmax(300px, 1.45fr) minmax(118px, 0.48fr);
   gap: 0.625rem;
-  align-items: end;
+  align-items: center;
 }
 
-.pricing-dimension-cell {
-  align-self: center;
+.pricing-matrix-head {
   color: #64748b;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: left;
+}
+
+.pricing-matrix-label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.15;
 }
 
 .pricing-axis-block {
   padding: 2rem 0 4.25rem;
 }
 
+.compact-pricing-axis {
+  position: relative;
+  padding: 1.5rem 0 2.75rem;
+}
+
 .pricing-axis-block :deep(.range-bar-wrapper) {
   margin: 0;
 }
 
-.profit-input-cell,
-.terminal-price-input {
+.pricing-matrix-card {
   min-width: 0;
+  min-height: 68px;
+  border-radius: 6px;
+  background-color: #f8fafc;
+  padding: 0.5rem;
 }
 
-.final-credit-cell {
+.unified-margin-row {
   display: flex;
-  min-width: 0;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px dashed #e2e8f0;
+  padding-bottom: 1rem;
+}
+
+.unified-margin-input {
+  display: flex;
+  min-width: 9rem;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background-color: #ffffff;
+}
+
+.unified-margin-input:focus-within {
+  border-color: #8b7dd1;
+  box-shadow: 0 0 0 2px #d8d2f0;
+}
+
+.unified-margin-input input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0.5rem;
+  text-align: right;
+  font-size: 13px;
+  outline: none;
+}
+
+.unified-margin-input span {
+  border-left: 1px solid #e2e8f0;
+  padding: 0 0.625rem;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.unified-margin-status {
+  border-left: 1px solid #e2e8f0;
+  padding-left: 0.5rem;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pricing-card-caption {
+  margin-bottom: 0.25rem;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 .final-credit-card {
-  width: 100%;
-  min-width: 92px;
-  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
   background-color: #ece9f9;
-  padding: 0.5rem;
   text-align: center;
 }
 
-.terminal-price-group {
+.terminal-price-card {
   display: grid;
-  grid-template-columns: minmax(112px, 132px) minmax(150px, 1fr);
-  align-items: flex-end;
-  gap: 0.375rem;
-  min-width: 0;
+  grid-template-columns: minmax(130px, 0.78fr) minmax(170px, 1.22fr);
+  gap: 0.5rem;
 }
 
-.cost-formula-cell {
-  min-width: 0;
+.terminal-price-control {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background-color: #ffffff;
+}
+
+.terminal-price-control:focus-within {
+  border-color: #86efac;
+  box-shadow: 0 0 0 2px #dcfce7;
+}
+
+.terminal-price-control span {
+  border-right: 1px solid #e2e8f0;
+  padding: 0 0.5rem;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.terminal-price-control input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0.375rem 0.5rem;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  outline: none;
 }
 
 .cost-formula-text {
@@ -2291,66 +2597,41 @@ defineExpose({
   white-space: nowrap;
 }
 
-.market-reconcile-card {
-  display: flex;
-  min-height: 34px;
+.terminal-price-meta {
+  display: grid;
+  align-content: center;
+  gap: 0.125rem;
   min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 0.25rem;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background-color: #f8fafc;
-  padding: 0.25rem 0.5rem;
-  font-size: 10px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.market-average-group {
-  min-width: 0;
-}
-
-.market-average-value,
-.market-diff-amount,
-.market-diff-pill {
-  overflow: hidden;
+  color: #64748b;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
+  font-size: 10px;
   font-weight: 700;
+  line-height: 1.2;
+}
+
+.terminal-price-meta p {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.market-average-value {
+.terminal-price-meta strong {
   color: #334155;
 }
 
-.market-diff-pill {
-  border-left: 1px solid #e2e8f0;
-  padding-left: 0.25rem;
-}
-
-.market-diff-amount {
-  color: #64748b;
-}
-
 @media (max-width: 720px) {
-  .pricing-editor-row {
+  .pricing-matrix {
     grid-template-columns: 1fr;
   }
 
-  .cost-formula-cell {
-    width: 100%;
+  .pricing-matrix-head {
+    display: none;
   }
 
-  .terminal-price-group {
+  .terminal-price-card {
     grid-template-columns: 1fr;
-  }
-
-  .market-reconcile-card {
-    width: 100%;
-    max-width: none;
   }
 }
 
@@ -2558,20 +2839,47 @@ defineExpose({
   white-space: nowrap;
 }
 
-.supply-cost-cell {
+.supply-metric-column {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  gap: 0.375rem;
   color: #334155;
   font-size: 12px;
 }
 
-.supply-value-cell {
-  display: flex;
-  width: 100%;
-  justify-content: space-between;
-  gap: 1rem;
-  font-size: 12px;
+.supply-metric-row {
+  display: grid;
+  grid-template-columns: 4.25rem minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 0.5rem;
+  min-height: 1.25rem;
+}
+
+.supply-metric-label {
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.supply-metric-value {
+  min-width: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-weight: 700;
+}
+
+.supply-metric-empty {
+  display: block;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-weight: 700;
+  text-align: right;
 }
 
 @media (min-width: 1024px) {
@@ -2588,8 +2896,7 @@ defineExpose({
     padding-left: 1.5rem;
   }
 
-  .supply-value-cell {
-    justify-content: flex-end;
+  .supply-metric-column {
     text-align: right;
   }
 }

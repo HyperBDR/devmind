@@ -10,20 +10,49 @@
     :class="{ 'is-dragging': isDragging }"
     @pointerdown="onTrackPointerDown"
   >
-    <div class="range-bar-zone" :style="{ left: '10%', width: '80%' }" />
     <div
-      class="range-boundary-marker range-boundary-min"
-      style="left: 10%"
+      v-if="hasBoundaryRange"
+      class="range-bar-zone"
+      :style="boundaryZoneStyle"
     />
     <div
-      class="range-boundary-marker range-boundary-max"
-      style="left: 90%"
-    />
-    <div class="range-bar-label" style="left: 10%">
-      {{ boundaryLabel }}下限<br />{{ currencySymbol }}{{ formatNumber(axisMin) }}
-    </div>
-    <div class="range-bar-label" style="left: 90%">
-      {{ boundaryLabel }}上限<br />{{ currencySymbol }}{{ formatNumber(axisMax) }}
+      v-for="boundary in boundaryItems"
+      :key="boundary.key"
+      class="range-boundary-hit"
+      :class="boundary.hitClass"
+      :style="{ left: boundary.percent + '%' }"
+      aria-hidden="true"
+      @pointerdown.stop
+    >
+      <span
+        class="range-boundary-marker"
+        :class="boundary.markerClass"
+      />
+      <span class="range-boundary-label">
+        {{ boundaryCaption(boundary) }}
+      </span>
+      <span
+        v-if="boundary.tooltip"
+        class="range-boundary-tooltip"
+      >
+        <span class="range-boundary-tooltip-title">
+          {{ boundary.tooltip.title || boundary.title }}
+        </span>
+        <span class="range-boundary-tooltip-source">
+          {{ boundary.tooltip.source }}
+        </span>
+        <span class="range-boundary-tooltip-rows">
+          <span
+            v-for="row in boundary.tooltip.rows || []"
+            :key="`${boundary.key}-${row.label}`"
+            class="range-boundary-tooltip-row"
+          >
+            <span>{{ row.label }}</span>
+            <strong>{{ row.value }}</strong>
+            <em>{{ row.source }}</em>
+          </span>
+        </span>
+      </span>
     </div>
     <div
       v-for="tick in axisTicks"
@@ -31,20 +60,20 @@
       class="range-axis-tick"
       :style="{ left: tick.percent + '%' }"
     >
-      <span>{{ currencySymbol }}{{ formatNumber(tick.value) }}</span>
+      <span>{{ formatDisplayValue(tick.value) }}</span>
     </div>
 
     <template v-for="(ref, i) in refs" :key="`ref-${i}`">
       <div
         class="range-ref-marker"
         :style="{ left: getMarkerPos(ref.price) + '%' }"
-        :title="`${ref.source}: ${currencySymbol}${formatNumber(ref.price)}`"
+        :title="`${ref.source}: ${formatDisplayValue(ref.price)}`"
       >
         <div class="range-ref-label">
           {{ ref.source }}
         </div>
         <div class="range-ref-val">
-          {{ currencySymbol }}{{ formatNumber(ref.price) }}
+          {{ formatDisplayValue(ref.price) }}
         </div>
       </div>
     </template>
@@ -94,6 +123,14 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  lowerTooltip: {
+    type: Object,
+    default: null
+  },
+  upperTooltip: {
+    type: Object,
+    default: null
+  },
   label: {
     type: String,
     default: ''
@@ -101,6 +138,18 @@ const props = defineProps({
   currencySymbol: {
     type: String,
     default: '¥'
+  },
+  valuePrefix: {
+    type: String,
+    default: null
+  },
+  valueSuffix: {
+    type: String,
+    default: ''
+  },
+  digits: {
+    type: Number,
+    default: null
   }
 })
 
@@ -114,30 +163,108 @@ const AXIS_START_PERCENT = 10
 const AXIS_END_PERCENT = 90
 const AXIS_WIDTH_PERCENT = AXIS_END_PERCENT - AXIS_START_PERCENT
 
-const marketHasRange = computed(() => props.max > props.min)
+const boundaryMin = computed(() => Number(props.min))
+const boundaryMax = computed(() => Number(props.max))
+const hasBoundaryRange = computed(
+  () => Number.isFinite(boundaryMin.value) && Number.isFinite(boundaryMax.value)
+)
 
 const axisRange = computed(() => {
-  if (marketHasRange.value) {
-    return { min: Number(props.min), max: Number(props.max) }
+  if (hasBoundaryRange.value) {
+    const rawMin = Math.min(boundaryMin.value, boundaryMax.value)
+    const rawMax = Math.max(boundaryMin.value, boundaryMax.value)
+    if (rawMax === rawMin) {
+      const padding = Math.max(Math.abs(rawMax) * 0.2, 1)
+      return {
+        min: Math.max(0, rawMin - padding),
+        max: rawMax + padding
+      }
+    }
+    const span = rawMax - rawMin
+    const leftPadding = Math.max(span * 0.04, 1)
+    const rightPadding = Math.max(span * 0.14, 10)
+    return {
+      min: Math.max(0, Math.floor((rawMin - leftPadding) / 5) * 5),
+      max: Math.ceil((rawMax + rightPadding) / 5) * 5
+    }
   }
 
   const value = Number(props.value)
-  if (!fallbackCenter.value && Number.isFinite(value) && value > 0) {
-    fallbackCenter.value = value
+  const candidates = [
+    value,
+    ...props.refs.map((ref) => Number(ref.price))
+  ].filter((item) => Number.isFinite(item))
+
+  if (!candidates.length) {
+    if (!fallbackCenter.value && Number.isFinite(value) && value > 0) {
+      fallbackCenter.value = value
+    }
+    const center = fallbackCenter.value || 1
+    const padding = Math.max(center * 0.5, 0.0001)
+    return {
+      min: Math.max(0, center - padding),
+      max: center + padding
+    }
   }
-  const center = fallbackCenter.value || 1
-  const padding = Math.max(center * 0.5, 0.0001)
+
+  const rawMin = Math.min(...candidates)
+  const rawMax = Math.max(...candidates)
+  if (rawMax === rawMin) {
+    const padding = Math.max(Math.abs(rawMax) * 0.2, 1)
+    return {
+      min: Math.max(0, rawMin - padding),
+      max: rawMax + padding
+    }
+  }
+
+  const span = rawMax - rawMin
+  const padding = Math.max(span * 0.08, 1)
   return {
-    min: Math.max(0, center - padding),
-    max: center + padding
+    min: Math.max(0, Math.floor((rawMin - padding) / 5) * 5),
+    max: Math.ceil((rawMax + padding) / 5) * 5
   }
 })
 
 const axisMin = computed(() => axisRange.value.min)
 const axisMax = computed(() => axisRange.value.max)
-const boundaryLabel = computed(() =>
-  marketHasRange.value ? '市场' : '参考'
-)
+const boundaryLabel = computed(() => (hasBoundaryRange.value ? '市场' : '参考'))
+
+const boundaryZoneStyle = computed(() => {
+  if (!hasBoundaryRange.value) return {}
+  const start = Math.min(
+    getMarkerPos(boundaryMin.value),
+    getMarkerPos(boundaryMax.value)
+  )
+  const end = Math.max(
+    getMarkerPos(boundaryMin.value),
+    getMarkerPos(boundaryMax.value)
+  )
+  return {
+    left: `${start}%`,
+    width: `${Math.max(end - start, 1.5)}%`
+  }
+})
+
+const boundaryItems = computed(() => [
+  {
+    key: 'min',
+    title: `${boundaryLabel.value}下限`,
+    value: boundaryMin.value,
+    percent: getMarkerPos(boundaryMin.value),
+    markerClass: 'range-boundary-min',
+    hitClass: 'range-boundary-hit-min',
+    tooltip: props.lowerTooltip
+  },
+  {
+    key: 'max',
+    title: `${boundaryLabel.value}上限`,
+    value: boundaryMax.value,
+    percent: getMarkerPos(boundaryMax.value),
+    markerClass: 'range-boundary-max',
+    hitClass: 'range-boundary-hit-max',
+    tooltip: props.upperTooltip
+  }
+])
 
 const axisTicks = computed(() => {
   return [25, 50, 75].map((percent) => ({
@@ -165,6 +292,17 @@ function getMarkerColor(price) {
   if (p <= avg) return '#10b981'
   if (p > max * 0.8) return '#f59e0b'
   return '#6366f1'
+}
+
+function boundaryCaption(boundary) {
+  const title = boundary.tooltip?.title || boundary.title || ''
+  let prefix = boundary.key === 'min' ? '下限' : '上限'
+  if (title.includes('免审')) {
+    prefix = '免审'
+  } else if (title.includes('最低') || title.includes('下限')) {
+    prefix = '下限'
+  }
+  return `${prefix} ${formatDisplayValue(boundary.value)}`
 }
 
 function getValueLabelStyle(price) {
@@ -234,7 +372,7 @@ function startValueDrag(event) {
 }
 
 function onTrackPointerDown(event) {
-  if (event.target?.closest('.range-ref-marker, .range-bar-label')) return
+  if (event.target?.closest('.range-ref-marker, .range-boundary-hit')) return
   startValueDrag(event)
 }
 
@@ -255,9 +393,19 @@ onBeforeUnmount(() => {
 function formatNumber(value) {
   const num = Number(value)
   if (!Number.isFinite(num)) return '-'
+  if (props.digits !== null) {
+    return num.toFixed(props.digits).replace(/\.?0+$/, '')
+  }
   if (num >= 1) return num.toFixed(4)
   if (num >= 0.001) return num.toFixed(5)
   return num.toFixed(6)
+}
+
+function formatDisplayValue(value) {
+  const formatted = formatNumber(value)
+  if (formatted === '-') return '-'
+  const prefix = props.valuePrefix ?? props.currencySymbol
+  return `${prefix}${formatted}${props.valueSuffix}`
 }
 </script>
 
@@ -657,16 +805,27 @@ function formatNumber(value) {
   border-radius: 9999px;
 }
 
-.range-bar-label {
+.range-boundary-hit {
   position: absolute;
-  font-size: 10px;
-  font-weight: 700;
-  color: #334155;
-  top: 34px;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  line-height: 1.2;
-  text-align: center;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  z-index: 8;
+  cursor: help;
+}
+
+.range-boundary-hit:focus-visible {
+  outline: none;
+}
+
+.range-boundary-hit:focus-visible .range-boundary-marker {
+  box-shadow: 0 0 0 3px rgba(139, 125, 209, 0.34),
+    0 2px 8px rgba(15, 23, 42, 0.18);
+}
+
+.range-boundary-hit .range-boundary-marker {
+  left: 50%;
 }
 
 .range-boundary-marker {
@@ -681,6 +840,123 @@ function formatNumber(value) {
     0 2px 6px rgba(15, 23, 42, 0.2);
   transform: translate(-50%, -50%);
   z-index: 7;
+}
+
+.range-boundary-label {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  color: #475569;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.range-boundary-hit-min .range-boundary-label {
+  color: #047857;
+}
+
+.range-boundary-hit-max .range-boundary-label {
+  color: #b45309;
+}
+
+.range-boundary-tooltip {
+  position: absolute;
+  top: -0.75rem;
+  z-index: 30;
+  display: grid;
+  width: min(21rem, calc(100vw - 3rem));
+  gap: 0.35rem;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+  opacity: 0;
+  padding: 0.55rem 0.6rem;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s ease;
+}
+
+.range-boundary-hit-min .range-boundary-tooltip {
+  left: 50%;
+  transform: translate(0.7rem, -100%);
+}
+
+.range-boundary-hit-max .range-boundary-tooltip {
+  right: 50%;
+  transform: translate(-0.7rem, -100%);
+}
+
+.range-boundary-hit:hover .range-boundary-tooltip,
+.range-boundary-hit:focus-visible .range-boundary-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
+.range-boundary-hit-min:hover .range-boundary-tooltip,
+.range-boundary-hit-min:focus-visible .range-boundary-tooltip {
+  transform: translate(0.7rem, calc(-100% - 4px));
+}
+
+.range-boundary-hit-max:hover .range-boundary-tooltip,
+.range-boundary-hit-max:focus-visible .range-boundary-tooltip {
+  transform: translate(-0.7rem, calc(-100% - 4px));
+}
+
+.range-boundary-tooltip-title {
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.range-boundary-tooltip-source {
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.range-boundary-tooltip-rows {
+  display: grid;
+  gap: 0.15rem;
+  padding-top: 0.15rem;
+}
+
+.range-boundary-tooltip-row {
+  display: grid;
+  grid-template-columns: 3.8rem minmax(5rem, auto) minmax(0, 1fr);
+  gap: 0.45rem;
+  align-items: center;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.25;
+  padding: 0.3rem 0.4rem;
+}
+
+.range-boundary-tooltip-row strong {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.range-boundary-tooltip-row em {
+  min-width: 0;
+  overflow: hidden;
+  color: #475569;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .range-axis-tick {
@@ -741,27 +1017,34 @@ function formatNumber(value) {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 2px;
-  height: 14px;
-  background-color: #94a3b8;
-  z-index: 5;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #ffffff;
+  border-radius: 9999px;
+  background-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16),
+    0 2px 6px rgba(15, 23, 42, 0.16);
+  z-index: 6;
 }
 
 .range-ref-label {
   position: absolute;
-  font-size: 10px;
-  font-weight: 600;
-  color: #64748b;
-  top: -26px;
+  left: 50%;
+  color: #2563eb;
+  font-size: 9px;
+  font-weight: 800;
+  top: -60px;
   transform: translateX(-50%);
   white-space: nowrap;
 }
 
 .range-ref-val {
   position: absolute;
+  left: 50%;
   font-size: 9px;
-  color: #64748b;
-  top: -12px;
+  color: #2563eb;
+  font-weight: 700;
+  top: -47px;
   transform: translateX(-50%);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }

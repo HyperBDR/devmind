@@ -9,6 +9,15 @@ from typing import Any
 
 import requests
 
+from llm_ops.price_extraction import (
+    validate_extracted_model_prices,
+    validate_official_price_specs,
+)
+from llm_ops.price_extraction.llm_assisted import (
+    LLMPriceExtractionNotConfigured,
+    extract_prices_with_llm,
+)
+
 from .yunce import (
     CollectedModelPricing,
     CollectedPricingCatalog,
@@ -25,6 +34,37 @@ MODELS_DEV_PROVIDER_KEYS = {
     "openai": ("openai",),
 }
 
+CACHE_INPUT_COST_KEYS = (
+    "cache_input",
+    "cache_input_price",
+    "cache_read",
+    "cache_read_price",
+    "cache_hit",
+    "cache_hit_price",
+    "cache_hit_input",
+    "cache_hit_input_price",
+    "cache_hit_tokens",
+    "cache_hits",
+    "cache_hits_price",
+    "cache_hits_input",
+    "cache_hits_input_price",
+    "cached_input",
+    "cached_input_price",
+    "cached_input_tokens",
+    "cached_token",
+    "cached_tokens",
+    "cached_tokens_price",
+    "cache_read_input",
+    "cache_read_input_price",
+    "cache_read_tokens",
+    "input_cache_read",
+    "input_cache_hit",
+    "input_cache_hits",
+    "input_cached",
+    "input_cached_price",
+    "hit_cache",
+)
+
 
 @dataclass(frozen=True)
 class OfficialPriceSpec:
@@ -35,6 +75,7 @@ class OfficialPriceSpec:
     input_per_million: Decimal
     output_per_million: Decimal
     display_name: str = ""
+    cache_input_per_million: Decimal | None = None
     source_model_type: str = "Text"
     image_output_per_image: Decimal | None = None
     video_output_prices: tuple[tuple[str, Decimal], ...] = ()
@@ -211,6 +252,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-opus-4-6",),
                 input_per_million=Decimal("5"),
                 output_per_million=Decimal("25"),
+                cache_input_per_million=Decimal("0.50"),
                 display_name="Claude Opus 4.6",
             ),
             OfficialPriceSpec(
@@ -218,6 +260,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-sonnet-4-6",),
                 input_per_million=Decimal("3"),
                 output_per_million=Decimal("15"),
+                cache_input_per_million=Decimal("0.30"),
                 display_name="Claude Sonnet 4.6",
             ),
             OfficialPriceSpec(
@@ -225,6 +268,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-opus-4-5",),
                 input_per_million=Decimal("5"),
                 output_per_million=Decimal("25"),
+                cache_input_per_million=Decimal("0.50"),
                 display_name="Claude Opus 4.5",
             ),
             OfficialPriceSpec(
@@ -232,6 +276,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-haiku-4-5",),
                 input_per_million=Decimal("1"),
                 output_per_million=Decimal("5"),
+                cache_input_per_million=Decimal("0.10"),
                 display_name="Claude Haiku 4.5",
             ),
             OfficialPriceSpec(
@@ -239,6 +284,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-sonnet-4-5",),
                 input_per_million=Decimal("3"),
                 output_per_million=Decimal("15"),
+                cache_input_per_million=Decimal("0.30"),
                 display_name="Claude Sonnet 4.5",
             ),
             OfficialPriceSpec(
@@ -246,6 +292,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-sonnet-4",),
                 input_per_million=Decimal("3"),
                 output_per_million=Decimal("15"),
+                cache_input_per_million=Decimal("0.30"),
                 display_name="Claude Sonnet 4",
             ),
             OfficialPriceSpec(
@@ -253,6 +300,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-opus-4-1",),
                 input_per_million=Decimal("15"),
                 output_per_million=Decimal("75"),
+                cache_input_per_million=Decimal("1.50"),
                 display_name="Claude Opus 4.1",
             ),
             OfficialPriceSpec(
@@ -260,6 +308,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 aliases=("claude-opus-4",),
                 input_per_million=Decimal("15"),
                 output_per_million=Decimal("75"),
+                cache_input_per_million=Decimal("1.50"),
                 display_name="Claude Opus 4",
             ),
         ),
@@ -582,6 +631,42 @@ OFFICIAL_PROVIDER_CONFIGS = {
             ),
         ),
     ),
+    "deepseek": OfficialProviderConfig(
+        provider_code="deepseek",
+        provider_label="DeepSeek",
+        source_url="https://api-docs.deepseek.com/quick_start/pricing",
+        currency="USD",
+        models=(
+            OfficialPriceSpec(
+                model_id="deepseek-v4-flash",
+                aliases=(
+                    "deepseek-v4-flash",
+                    "deepseek-chat",
+                    "deepseek-v3",
+                    "deepseek-v3.1",
+                    "deepseek-v3.2",
+                    "deepseek-v3.2-exp",
+                ),
+                input_per_million=Decimal("0.28"),
+                output_per_million=Decimal("0.42"),
+                cache_input_per_million=Decimal("0.028"),
+                display_name="DeepSeek V4 Flash",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-v4-pro",
+                aliases=(
+                    "deepseek-v4-pro",
+                    "deepseek-reasoner",
+                    "deepseek-r1",
+                    "deepseek-r1-0528",
+                ),
+                input_per_million=Decimal("3.50"),
+                output_per_million=Decimal("7"),
+                cache_input_per_million=Decimal("0.35"),
+                display_name="DeepSeek V4 Pro",
+            ),
+        ),
+    ),
 }
 
 
@@ -612,7 +697,9 @@ def collect_official_pricing_catalog(
         spec = first_matching_spec(source_config, target_code)
         if spec is None:
             continue
-        models.append(build_collected_pricing(source_config, spec, target_code))
+        models.append(
+            build_collected_pricing(source_config, spec, target_code),
+        )
 
     if not target_codes:
         for spec in source_config.models:
@@ -678,6 +765,12 @@ def config_with_source_prices(
 
     enriched_payload = dict(source_payload)
     if not parsed_specs:
+        parsed_specs = parse_specs_with_llm_fallback(
+            config,
+            enriched_payload,
+        )
+
+    if not parsed_specs:
         enriched_payload["source_parse_warning"] = (
             "No configured model prices could be extracted from the fetched "
             "source page; built-in provider price specs were used after "
@@ -695,15 +788,34 @@ def config_with_source_prices(
         if spec.model_id not in parsed_model_ids
     ]
     if missing_model_ids:
+        llm_specs = parse_specs_with_llm_fallback(
+            config,
+            enriched_payload,
+            target_specs=[
+                spec
+                for spec in config.models
+                if spec.model_id in missing_model_ids
+            ],
+        )
+        parsed_specs.extend(llm_specs)
+        parsed_model_ids = {spec.model_id for spec in parsed_specs}
+        missing_model_ids = [
+            spec.model_id
+            for spec in config.models
+            if spec.model_id not in parsed_model_ids
+        ]
+    if missing_model_ids:
         enriched_payload["source_parse_missing_model_ids"] = missing_model_ids
 
-    return OfficialProviderConfig(
+    parsed_config = OfficialProviderConfig(
         provider_code=config.provider_code,
         provider_label=config.provider_label,
         source_url=source_payload.get("source_url") or config.source_url,
         currency=config.currency,
         models=tuple(parsed_specs),
-    ), enriched_payload
+    )
+    validate_official_price_specs(config=parsed_config, specs=parsed_specs)
+    return parsed_config, enriched_payload
 
 
 def config_with_models_dev_prices(
@@ -759,13 +871,15 @@ def config_with_models_dev_prices(
     if skipped_model_ids:
         enriched_payload["models_dev_skipped_model_ids"] = skipped_model_ids
 
-    return OfficialProviderConfig(
+    parsed_config = OfficialProviderConfig(
         provider_code=config.provider_code,
         provider_label=provider_payload.get("name") or config.provider_label,
         source_url=source_payload.get("source_url") or config.source_url,
         currency="USD",
         models=tuple(parsed_specs),
-    ), enriched_payload
+    )
+    validate_official_price_specs(config=parsed_config, specs=parsed_specs)
+    return parsed_config, enriched_payload
 
 
 def models_dev_provider_key(
@@ -793,6 +907,10 @@ def models_dev_price_spec(
 
     input_price = parse_decimal(cost.get("input"))
     output_price = parse_decimal(cost.get("output"))
+    cache_input_price = parse_decimal_from_mapping(
+        cost,
+        CACHE_INPUT_COST_KEYS,
+    )
     if input_price is None and output_price is None:
         return None
 
@@ -802,6 +920,7 @@ def models_dev_price_spec(
         input_per_million=input_price or Decimal("0"),
         output_per_million=output_price or Decimal("0"),
         display_name=str(model_payload.get("name") or model_id),
+        cache_input_per_million=cache_input_price,
         source_note="models.dev cost, USD per 1M tokens.",
     )
 
@@ -835,6 +954,49 @@ def parse_decimal(value) -> Decimal | None:
     if parsed < 0:
         return None
     return parsed
+
+
+def parse_decimal_from_mapping(
+    values: dict[str, Any],
+    keys: tuple[str, ...],
+) -> Decimal | None:
+    """Parse the first decimal from provider-specific aliases."""
+    normalized_values = {
+        normalize_price_key(key): value
+        for key, value in values.items()
+    }
+    for key in keys:
+        value = parse_decimal(values.get(key))
+        if value is None:
+            value = parse_decimal(
+                normalized_values.get(normalize_price_key(key))
+            )
+        if value is not None:
+            return value
+    return None
+
+
+def first_price_by_dimension(
+    prices: dict[str, Decimal],
+    keys: tuple[str, ...],
+) -> Decimal | None:
+    """Return the first price amount from dimension aliases."""
+    normalized_prices = {
+        normalize_price_key(key): value
+        for key, value in prices.items()
+    }
+    for key in keys:
+        value = prices.get(key)
+        if value is None:
+            value = normalized_prices.get(normalize_price_key(key))
+        if value is not None:
+            return value
+    return None
+
+
+def normalize_price_key(value) -> str:
+    """Normalize provider price labels to comparable keys."""
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
 
 
 def parse_json_content(content: str) -> Any | None:
@@ -898,6 +1060,7 @@ def parse_spec_from_source_text(
                 spec,
                 input_per_million=token_prices[0],
                 output_per_million=token_prices[1],
+                cache_input_per_million=token_prices[2],
             )
 
     return None
@@ -919,6 +1082,9 @@ def source_windows_for_spec(
         if not term:
             continue
         pattern = model_term_pattern(term)
+        for line in source_text.splitlines():
+            if re.search(pattern, line, re.IGNORECASE):
+                windows.append(line)
         for match in re.finditer(pattern, source_text, re.IGNORECASE):
             start = max(match.start() - radius, 0)
             end = min(match.end() + radius, len(source_text))
@@ -935,8 +1101,12 @@ def model_term_pattern(term: str) -> str:
 def extract_token_prices(
     text: str,
     currency: str,
-) -> tuple[Decimal, Decimal] | None:
-    """Extract input and output token prices from a model text window."""
+) -> tuple[Decimal, Decimal, Decimal | None] | None:
+    """Extract input, output, and cache-hit token prices."""
+    table_prices = extract_ordered_token_prices(text, currency)
+    if table_prices is not None:
+        return table_prices
+
     input_price = extract_labeled_price(
         text,
         labels=("input", "prompt", "输入", "输入价格"),
@@ -947,13 +1117,60 @@ def extract_token_prices(
         labels=("output", "completion", "输出", "输出价格"),
         currency=currency,
     )
+    cache_price = extract_labeled_price(
+        text,
+        labels=(
+            "cache hits",
+            "cache hit",
+            "cache read",
+            "cached input",
+            "缓存命中",
+        ),
+        currency=currency,
+    )
     if input_price is not None and output_price is not None:
-        return input_price, output_price
+        return input_price, output_price, cache_price
 
     prices = extract_money_values(text, currency)
     if len(prices) >= 2:
-        return prices[0], prices[1]
+        return prices[0], prices[-1], None
     return None
+
+
+def extract_ordered_token_prices(
+    text: str,
+    currency: str,
+) -> tuple[Decimal, Decimal, Decimal | None] | None:
+    """Extract token prices from table rows with known column order."""
+    prices = extract_money_values(text, currency)
+    if len(prices) >= 5 and has_cache_hit_header(text):
+        return prices[0], prices[4], prices[3]
+    if len(prices) >= 5 and has_anthropic_cache_write_shape(prices):
+        return prices[0], prices[4], prices[3]
+    return None
+
+
+def has_cache_hit_header(text: str) -> bool:
+    """Return whether source text contains a cache-hit column label."""
+    normalized = text.lower()
+    return (
+        "cache hits" in normalized
+        or "cache hit" in normalized
+        or "cache read" in normalized
+        or "cached input" in normalized
+    )
+
+
+def has_anthropic_cache_write_shape(prices: list[Decimal]) -> bool:
+    """Return whether prices resemble Anthropic cache write/hit columns."""
+    if len(prices) < 5 or prices[0] == 0:
+        return False
+    return (
+        prices[1] == prices[0] * Decimal("1.25")
+        and prices[2] == prices[0] * Decimal("2")
+        and prices[3] == prices[0] * Decimal("0.1")
+        and prices[4] == prices[0] * Decimal("5")
+    )
 
 
 def extract_image_price(text: str, currency: str) -> Decimal | None:
@@ -1074,10 +1291,15 @@ def normalize_source_text(content: str) -> str:
     text = html.unescape(str(content or ""))
     text = re.sub(r"<script\b[^>]*>.*?</script>", " ", text, flags=re.I | re.S)
     text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"</tr\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</t[dh]\s*>", " | ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\\u([0-9a-fA-F]{4})", unicode_escape_match, text)
-    text = re.sub(r"[\s\u00a0]+", " ", text)
-    return text.strip()
+    lines = [
+        re.sub(r"[\s\u00a0]+", " ", line).strip()
+        for line in text.splitlines()
+    ]
+    return "\n".join(line for line in lines if line)
 
 
 def unicode_escape_match(match: re.Match) -> str:
@@ -1099,6 +1321,85 @@ def first_matching_spec(
         if spec.matches(model_code):
             return spec
     return None
+
+
+def parse_specs_with_llm_fallback(
+    config: OfficialProviderConfig,
+    source_payload: dict[str, Any],
+    *,
+    target_specs: list[OfficialPriceSpec] | None = None,
+) -> list[OfficialPriceSpec]:
+    """Use optional LLM extraction when deterministic parsing finds nothing."""
+    source_text = source_payload.get("text") or ""
+    if not source_text.strip():
+        return []
+
+    specs = target_specs or list(config.models)
+    model_codes = {spec.model_id for spec in specs}
+    try:
+        candidates = extract_prices_with_llm(
+            source_text=source_text,
+            source_url=source_payload.get("source_url") or config.source_url,
+            provider_code=config.provider_code,
+            model_codes=model_codes,
+        )
+    except LLMPriceExtractionNotConfigured as exc:
+        source_payload["llm_assisted_parse_warning"] = str(exc)
+        return []
+
+    result = validate_extracted_model_prices(
+        candidates,
+        allowed_model_codes=model_codes,
+    )
+    if result.rejected:
+        source_payload["llm_assisted_rejections"] = [
+            {
+                "model_code": item.candidate.model_code,
+                "reason": item.reason,
+            }
+            for item in result.rejected
+        ]
+
+    specs = [
+        spec
+        for candidate in result.accepted
+        if (spec := official_spec_from_extracted_candidate(config, candidate))
+        is not None
+    ]
+    if specs:
+        source_payload["llm_assisted_parse_count"] = len(specs)
+    return specs
+
+
+def official_spec_from_extracted_candidate(
+    config: OfficialProviderConfig,
+    candidate,
+) -> OfficialPriceSpec | None:
+    """Convert one accepted extracted candidate back to official spec."""
+    base_spec = first_matching_spec(config, candidate.model_code)
+    if base_spec is None:
+        return None
+
+    price_by_dimension = {
+        price.dimension: price.amount
+        for price in candidate.prices
+    }
+    input_price = price_by_dimension.get("input")
+    output_price = price_by_dimension.get("output")
+    cache_input_price = first_price_by_dimension(
+        price_by_dimension,
+        CACHE_INPUT_COST_KEYS,
+    )
+    if input_price is None or output_price is None:
+        return None
+
+    return replace(
+        base_spec,
+        input_per_million=input_price,
+        output_per_million=output_price,
+        cache_input_per_million=cache_input_price,
+        source_note="LLM-assisted extraction; validator accepted evidence.",
+    )
 
 
 def build_collected_pricing(
@@ -1182,6 +1483,11 @@ def build_price_rows(
             values={
                 "input_price": str(spec.input_per_million),
                 "output_price": str(spec.output_per_million),
+                "cache_input_price": (
+                    str(spec.cache_input_per_million)
+                    if spec.cache_input_per_million is not None
+                    else None
+                ),
             },
             raw=raw,
         )

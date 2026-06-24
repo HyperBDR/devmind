@@ -1,11 +1,11 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="save"
     >
       <div class="border-b border-slate-200 px-5 py-4">
@@ -17,10 +17,10 @@
               Resale Platform
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑挂售平台' : '新增挂售平台' }}
+              {{ form.id ? '编辑挂售平台' : '新建挂售平台' }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
-              配置 Agione 实例、平台货币、抽佣比例和固定积分兑换比例。
+              配置 Agione 实例、抽佣、服务费率、免审利润率和积分规则。
             </p>
           </div>
           <button
@@ -34,7 +34,7 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-12rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
         <section class="form-section">
           <div class="section-heading">
             <h4>平台信息</h4>
@@ -77,6 +77,19 @@
                 type="url"
               />
             </label>
+            <label class="field-group md:col-span-2">
+              <span class="field-label">平台 API Key</span>
+              <input
+                v-model="form.api_key"
+                class="field font-mono"
+                autocomplete="off"
+                placeholder="用于挂售接口鉴权"
+                type="password"
+              />
+              <span class="field-help">
+                用于调用挂售平台接口执行上架、改价和下架操作。
+              </span>
+            </label>
           </div>
         </section>
 
@@ -94,15 +107,38 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">平台抽佣比例</span>
+              <span class="field-label">平台抽佣比例（%）</span>
               <input
                 v-model="form.fee_rate"
                 class="field"
                 min="0"
-                max="0.9999"
-                step="0.0001"
+                max="99.99"
+                step="0.01"
                 type="number"
-                placeholder="例如：0.03"
+                placeholder="例如：3"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">服务费率（%）</span>
+              <input
+                v-model="form.service_fee_rate"
+                class="field"
+                min="0"
+                max="99.99"
+                step="0.01"
+                type="number"
+                placeholder="例如：10"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">免审最高利润率（%）</span>
+              <input
+                v-model="form.auto_approve_max_margin_rate"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                placeholder="例如：20"
               />
             </label>
             <label class="field-group">
@@ -147,9 +183,7 @@
         </section>
       </div>
 
-      <div
-        class="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between"
-      >
+      <div class="modal-footer">
         <label class="status-inline" :class="{ active: form.is_active }">
           <input v-model="form.is_active" type="checkbox" class="sr-only" />
           <span class="status-switch" aria-hidden="true">
@@ -159,7 +193,7 @@
             {{ form.is_active ? '平台已启用' : '平台已停用' }}
           </span>
         </label>
-        <div class="flex justify-end gap-2">
+        <div class="modal-footer-actions">
           <button
             class="btn-secondary"
             type="button"
@@ -211,7 +245,9 @@ const roundingModeOptions = [
 watch(
   () => [props.open, props.platform],
   () => {
-    form.value = props.platform ? { ...props.platform } : defaults()
+    form.value = props.platform
+      ? platformToForm(props.platform)
+      : defaults()
   },
   { immediate: true }
 )
@@ -221,11 +257,13 @@ function defaults() {
     id: null,
     name: '',
     code: '',
-    platform_type: 'agione',
     website: '',
     api_endpoint: '',
+    api_key: '',
     currency: 'CNY',
-    fee_rate: '0.03',
+    fee_rate: '3',
+    service_fee_rate: '0',
+    auto_approve_max_margin_rate: '100',
     point_name: '积分',
     points_per_currency_unit: '100',
     point_rounding_mode: 'half_up',
@@ -234,11 +272,32 @@ function defaults() {
   }
 }
 
+function platformToForm(platform) {
+  return {
+    ...platform,
+    fee_rate: percentFromRatio(platform.fee_rate),
+    service_fee_rate: percentFromRatio(platform.service_fee_rate)
+  }
+}
+
+function percentFromRatio(value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return ''
+  return (numberValue * 100).toFixed(2).replace(/\.?0+$/, '')
+}
+
+function ratioFromPercent(value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return 0
+  return Number((numberValue / 100).toFixed(6))
+}
+
 function normalizePayload(payload) {
   const clean = { ...payload }
   clean.code = String(clean.code || '').trim().toLowerCase()
   clean.currency = String(clean.currency || 'CNY').trim().toUpperCase()
-  clean.platform_type = 'agione'
+  clean.fee_rate = ratioFromPercent(clean.fee_rate)
+  clean.service_fee_rate = ratioFromPercent(clean.service_fee_rate)
   delete clean.id
   delete clean.listing_count
   return clean
@@ -278,6 +337,10 @@ async function save() {
 
 .field-label {
   @apply block text-sm font-medium text-slate-800;
+}
+
+.field-help {
+  @apply block text-xs leading-5 text-slate-500;
 }
 
 .form-section {

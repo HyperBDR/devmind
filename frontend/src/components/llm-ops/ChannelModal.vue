@@ -1,11 +1,11 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="save"
     >
       <div class="border-b border-slate-200 px-5 py-4">
@@ -17,7 +17,7 @@
               Channel
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑转发渠道' : '新增转发渠道' }}
+              {{ form.id ? '编辑转发渠道' : '新建转发渠道' }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
               渠道用于配置可采购/转发模型的供应入口和默认结算规则。
@@ -33,7 +33,7 @@
           </button>
         </div>
       </div>
-      <div class="max-h-[calc(100vh-12rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
         <section class="form-section">
           <div class="section-heading">
             <h4>基础信息</h4>
@@ -45,7 +45,7 @@
               <input
                 v-model="form.name"
                 class="field"
-                placeholder="例如：真实资源平台"
+                placeholder="例如：生产转发渠道"
                 required
               />
               <span class="field-help">
@@ -57,7 +57,7 @@
               <input
                 v-model="form.code"
                 class="field"
-                placeholder="例如：real-resource-platform"
+                placeholder="例如：prod-forwarding-channel"
                 required
               />
               <span class="field-help">
@@ -98,17 +98,17 @@
               <span class="field-label">默认采购折扣比例</span>
               <div class="relative">
                 <input
-                  v-model="form.settlement_ratio"
+                  v-model="settlementRatioPercent"
                   class="field pr-16"
-                  min="0.0001"
-                  step="0.0001"
+                  min="0.01"
+                  step="0.01"
                   type="number"
-                  placeholder="例如：0.85"
+                  placeholder="例如：85"
                 />
-                <span class="field-suffix">倍</span>
+                <span class="field-suffix">%</span>
               </div>
               <span class="field-help">
-                采购价 = 价格源价格 × 折扣比例；1 为原价。
+                采购价 = 价格源价格 × 折扣比例；85% 表示按 0.85 倍采购。
               </span>
             </label>
           </div>
@@ -132,10 +132,11 @@
           </label>
         </section>
       </div>
-      <div
-        class="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between"
-      >
-        <label class="status-inline" :class="{ active: form.is_active }">
+      <div class="modal-footer">
+        <label
+          class="modal-footer-status status-inline"
+          :class="{ active: form.is_active }"
+        >
           <input
             v-model="form.is_active"
             type="checkbox"
@@ -148,7 +149,7 @@
             {{ form.is_active ? '渠道已启用' : '渠道已停用' }}
           </span>
         </label>
-        <div class="flex justify-end gap-2">
+        <div class="modal-footer-actions">
           <button
             class="btn-secondary"
             type="button"
@@ -168,7 +169,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
@@ -191,6 +192,24 @@ const currencyOptions = [
   { label: 'CNY - 人民币', value: 'CNY' },
   { label: 'USD - 美元', value: 'USD' }
 ]
+
+const settlementRatioPercent = computed({
+  get() {
+    const ratio = Number(form.value.settlement_ratio)
+    if (!Number.isFinite(ratio)) return ''
+    return Number((ratio * 100).toFixed(4))
+  },
+  set(value) {
+    if (value === '' || value === null || value === undefined) {
+      form.value.settlement_ratio = ''
+      return
+    }
+    const percent = Number(value)
+    form.value.settlement_ratio = Number.isFinite(percent)
+      ? String(percent / 100)
+      : ''
+  }
+})
 
 watch(
   () => [props.open, props.channel],

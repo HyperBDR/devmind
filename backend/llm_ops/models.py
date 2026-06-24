@@ -3,10 +3,14 @@ from django.db import models
 
 def _ensure_meta_model_from_model(instance, kwargs):
     """Copy the canonical model reference from the selected model."""
-    if instance.meta_model_id or not instance.model_id:
+    if not instance.model_id:
         return
 
-    instance.meta_model_id = instance.model.meta_model_id
+    model_meta_model_id = instance.model.meta_model_id
+    if instance.meta_model_id == model_meta_model_id:
+        return
+
+    instance.meta_model_id = model_meta_model_id
     update_fields = kwargs.get("update_fields")
     if update_fields is not None:
         kwargs["update_fields"] = list(set(update_fields) | {"meta_model"})
@@ -125,7 +129,6 @@ class MetaModel(models.Model):
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=150, unique=True, db_index=True)
     family = models.CharField(max_length=120, blank=True, default="")
-    version = models.CharField(max_length=120, blank=True, default="")
     vendor = models.ForeignKey(
         LLMProvider,
         related_name="canonical_models",
@@ -147,8 +150,6 @@ class MetaModel(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_ACTIVE,
     )
-    released_at = models.DateField(blank=True, null=True)
-    deprecated_at = models.DateField(blank=True, null=True)
     metadata = models.JSONField(blank=True, default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -163,17 +164,11 @@ class MetaModel(models.Model):
 class LLMModel(models.Model):
     """Provider-specific price record for one canonical model."""
 
-    MODALITY_TEXT = "text"
-    MODALITY_AUDIO = "audio"
-    MODALITY_VIDEO = "video"
-    MODALITY_MULTIMODAL = "multimodal"
-
-    MODALITY_CHOICES = (
-        (MODALITY_TEXT, "Text"),
-        (MODALITY_AUDIO, "Audio"),
-        (MODALITY_VIDEO, "Video"),
-        (MODALITY_MULTIMODAL, "Multimodal"),
-    )
+    MODALITY_TEXT = MetaModel.MODALITY_TEXT
+    MODALITY_AUDIO = MetaModel.MODALITY_AUDIO
+    MODALITY_VIDEO = MetaModel.MODALITY_VIDEO
+    MODALITY_MULTIMODAL = MetaModel.MODALITY_MULTIMODAL
+    MODALITY_CHOICES = MetaModel.MODALITY_CHOICES
 
     PRICE_ROLE_OFFICIAL = "official"
     PRICE_ROLE_SUPPLIER = "supplier"
@@ -270,7 +265,6 @@ class LLMModel(models.Model):
         default=PRICE_ROLE_UNKNOWN,
         db_index=True,
     )
-    upstream_name = models.CharField(max_length=255, blank=True, default="")
     is_active = models.BooleanField(default=True)
     last_price_updated_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -288,8 +282,11 @@ class LLMModel(models.Model):
     def save(self, *args, **kwargs):
         """Ensure direct model creation still links a canonical model."""
         if not self.meta_model_id:
-            code = self.code or self.name
-            name = self.name or code
+            from .constants import canonical_meta_model_identity
+
+            identity = canonical_meta_model_identity(self.code, self.name)
+            code = identity["code"]
+            name = identity["name"]
             meta_model, _ = MetaModel.objects.get_or_create(
                 code=code,
                 defaults={
@@ -298,6 +295,7 @@ class LLMModel(models.Model):
                     "modality": self.modality,
                     "context_window": self.context_window,
                     "max_output_tokens": self.max_output_tokens,
+                    "aliases": identity["aliases"],
                 },
             )
             self.meta_model = meta_model
@@ -645,7 +643,6 @@ class ProcurementChannel(models.Model):
         decimal_places=4,
         default=1,
     )
-    latency_modifier_ms = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -728,6 +725,9 @@ class ChannelModelPrice(models.Model):
         null=True,
     )
     custom_video_resolution_prices = models.JSONField(blank=True, default=dict)
+    tpm_limit = models.PositiveIntegerField(blank=True, null=True)
+    rpm_limit = models.PositiveIntegerField(blank=True, null=True)
+    latency_ms = models.PositiveIntegerField(blank=True, null=True)
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1006,12 +1006,6 @@ class ChannelModelPriceHistory(models.Model):
 class ResalePlatform(models.Model):
     """Downstream resale platform such as Agione."""
 
-    PLATFORM_TYPE_AGIONE = "agione"
-
-    PLATFORM_TYPE_CHOICES = (
-        (PLATFORM_TYPE_AGIONE, "Agione"),
-    )
-
     ROUND_HALF_UP = "half_up"
     ROUND_UP = "up"
     ROUND_DOWN = "down"
@@ -1024,13 +1018,9 @@ class ResalePlatform(models.Model):
 
     name = models.CharField(max_length=255)
     code = models.SlugField(max_length=100, unique=True, db_index=True)
-    platform_type = models.CharField(
-        max_length=50,
-        choices=PLATFORM_TYPE_CHOICES,
-        default=PLATFORM_TYPE_AGIONE,
-    )
     website = models.URLField(max_length=1000, blank=True, default="")
     api_endpoint = models.URLField(max_length=1000, blank=True, default="")
+    api_key = models.CharField(max_length=512, blank=True, default="")
     currency = models.CharField(max_length=10, default="USD")
     point_name = models.CharField(max_length=50, default="积分")
     points_per_currency_unit = models.DecimalField(
@@ -1044,6 +1034,16 @@ class ResalePlatform(models.Model):
         default=ROUND_HALF_UP,
     )
     fee_rate = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    service_fee_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        default=0,
+    )
+    auto_approve_max_margin_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=2,
+        default=100,
+    )
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1163,7 +1163,6 @@ class ResaleListing(models.Model):
         blank=True,
         null=True,
     )
-    volume_label = models.CharField(max_length=50, blank=True, default="")
     publish_status = models.CharField(
         max_length=30,
         choices=PUBLISH_STATUS_CHOICES,

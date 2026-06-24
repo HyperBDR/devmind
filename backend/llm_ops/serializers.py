@@ -26,6 +26,7 @@ from .services import (
     SUPPORTED_DISPLAY_CURRENCIES,
     calculate_channel_model_cost,
     normalize_currency,
+    price_role_for_source,
     stable_fingerprint,
 )
 
@@ -43,11 +44,15 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    business_source_category = serializers.SerializerMethodField()
 
     class Meta:
         model = PriceCollectionSource
         fields = "__all__"
         read_only_fields = ("created_at", "updated_at", "last_collected_at")
+
+    def get_business_source_category(self, instance):
+        return business_source_category_for_catalog(instance)
 
 
 class PriceCollectionRunSerializer(serializers.ModelSerializer):
@@ -202,18 +207,6 @@ def sync_provider_official_source(provider: LLMProvider) -> None:
         source.save(update_fields=changed_fields)
 
 
-def price_role_for_source(source: PriceCollectionSource) -> str:
-    """Map a collection source category to a provider price role."""
-    category = source.source_category
-    if category == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER:
-        return LLMModel.PRICE_ROLE_OFFICIAL
-    if category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
-        return LLMModel.PRICE_ROLE_SUPPLIER
-    if category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
-        return LLMModel.PRICE_ROLE_MANUAL
-    return LLMModel.PRICE_ROLE_UNKNOWN
-
-
 def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
     """Create or update a canonical model identity for a price record.
 
@@ -228,8 +221,13 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
     is added to its alias set so future lookups succeed without
     a database scan.
     """
-    code = str(data.get("code") or data.get("name") or "").strip()
-    name = str(data.get("name") or code).strip() or code
+    from .constants import canonical_meta_model_identity
+
+    reported_code = str(data.get("code") or data.get("name") or "").strip()
+    reported_name = str(data.get("name") or reported_code).strip()
+    identity = canonical_meta_model_identity(reported_code, reported_name)
+    code = identity["code"]
+    name = identity["name"]
     provider = data.get("provider")
     raw_alias = str(data.get("raw_code") or "").strip()
 
@@ -244,7 +242,18 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
     # The meta-model table is small enough (low hundreds of
     # rows) that an in-process scan stays well below 5 ms even
     # on a developer laptop.
-    tokens = [t for t in (raw_alias, code, name) if t]
+    tokens = [
+        t
+        for t in (
+            raw_alias,
+            reported_code,
+            reported_name,
+            code,
+            name,
+            *identity["aliases"],
+        )
+        if t
+    ]
     existing = None
     if tokens:
         all_meta = list(MetaModel.objects.all())
@@ -272,7 +281,7 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
                     break
     if existing is not None:
         merged = list(existing.aliases or [])
-        for token in (raw_alias, code, name):
+        for token in tokens:
             if token and token not in merged:
                 merged.append(token)
         changed = merged != list(existing.aliases or [])
@@ -329,6 +338,7 @@ class MetaModelSerializer(serializers.ModelSerializer):
     effective_vendor = serializers.SerializerMethodField()
     effective_vendor_code = serializers.SerializerMethodField()
     effective_vendor_name = serializers.SerializerMethodField()
+    release_date = serializers.SerializerMethodField()
 
     class Meta:
         model = MetaModel
@@ -357,6 +367,15 @@ class MetaModelSerializer(serializers.ModelSerializer):
             return instance.vendor.name
         return ""
 
+    def get_release_date(self, instance):
+        metadata = instance.metadata or {}
+        models_dev = metadata.get("models_dev") or {}
+        return (
+            models_dev.get("release_date")
+            or models_dev.get("last_updated")
+            or ""
+        )
+
     @staticmethod
     def _canonical_vendor(instance):
         from .constants import canonical_vendor_for_model_code
@@ -382,6 +401,21 @@ class LLMModelSerializer(serializers.ModelSerializer):
         source="meta_model.code",
         read_only=True,
     )
+    meta_model_vendor = serializers.IntegerField(
+        source="meta_model.vendor_id",
+        read_only=True,
+        allow_null=True,
+    )
+    meta_model_vendor_name = serializers.CharField(
+        source="meta_model.vendor.name",
+        read_only=True,
+        allow_null=True,
+    )
+    meta_model_vendor_code = serializers.CharField(
+        source="meta_model.vendor.code",
+        read_only=True,
+        allow_null=True,
+    )
     provider_name = serializers.CharField(
         source="provider.name",
         read_only=True,
@@ -405,6 +439,7 @@ class LLMModelSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    business_source_category = serializers.SerializerMethodField()
 
     class Meta:
         model = LLMModel
@@ -415,14 +450,23 @@ class LLMModelSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
-        if attrs.get("source") and not attrs.get("price_role"):
-            attrs["price_role"] = price_role_for_source(attrs["source"])
+        source = attrs.get("source")
+        if source and not attrs.get("price_role"):
+            attrs["price_role"] = price_role_for_source(
+                source,
+                meta_model=attrs.get("meta_model"),
+            )
         return attrs
 
     def create(self, validated_data):
         if not validated_data.get("meta_model"):
             validated_data["meta_model"] = ensure_meta_model_for_price_data(
                 validated_data,
+            )
+        if validated_data.get("source"):
+            validated_data["price_role"] = price_role_for_source(
+                validated_data["source"],
+                meta_model=validated_data.get("meta_model"),
             )
         return super().create(validated_data)
 
@@ -445,7 +489,18 @@ class LLMModelSerializer(serializers.ModelSerializer):
             validated_data["meta_model"] = ensure_meta_model_for_price_data(
                 merged,
             )
+        if validated_data.get("source", instance.source):
+            validated_data["price_role"] = price_role_for_source(
+                validated_data.get("source", instance.source),
+                meta_model=validated_data.get(
+                    "meta_model",
+                    instance.meta_model,
+                ),
+            )
         return super().update(instance, validated_data)
+
+    def get_business_source_category(self, instance):
+        return business_source_category_for_model(instance)
 
 
 class ModelPriceItemSerializer(serializers.ModelSerializer):
@@ -462,6 +517,21 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
     meta_model_code = serializers.CharField(
         source="meta_model.code",
         read_only=True,
+    )
+    meta_model_vendor = serializers.IntegerField(
+        source="meta_model.vendor_id",
+        read_only=True,
+        allow_null=True,
+    )
+    meta_model_vendor_name = serializers.CharField(
+        source="meta_model.vendor.name",
+        read_only=True,
+        allow_null=True,
+    )
+    meta_model_vendor_code = serializers.CharField(
+        source="meta_model.vendor.code",
+        read_only=True,
+        allow_null=True,
     )
     model_name = serializers.CharField(source="model.name", read_only=True)
     model_code = serializers.CharField(source="model.code", read_only=True)
@@ -490,6 +560,7 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    business_source_category = serializers.SerializerMethodField()
 
     class Meta:
         model = ModelPriceItem
@@ -513,10 +584,7 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data.setdefault(
-            "meta_model",
-            validated_data["model"].meta_model,
-        )
+        validated_data["meta_model"] = validated_data["model"].meta_model
         validated_data.setdefault(
             "price_fingerprint",
             model_price_item_fingerprint(validated_data),
@@ -524,14 +592,98 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        if "model" in validated_data and "meta_model" not in validated_data:
-            validated_data["meta_model"] = validated_data["model"].meta_model
+        model = validated_data.get("model", instance.model)
+        validated_data["meta_model"] = model.meta_model
         if price_item_fingerprint_fields_touched(validated_data):
             validated_data["price_fingerprint"] = model_price_item_fingerprint(
                 validated_data,
                 instance=instance,
             )
         return super().update(instance, validated_data)
+
+    def get_business_source_category(self, instance):
+        return business_source_category_for_price_item(instance)
+
+
+def canonical_vendor_for_meta_model(meta_model):
+    """Resolve the real vendor for one canonical meta model."""
+    if meta_model is None:
+        return None
+
+    canonical = MetaModelSerializer._canonical_vendor(meta_model)
+    if canonical is not None:
+        return canonical["provider"]
+    return meta_model.vendor
+
+
+def business_source_category_for_source_model(*, source, meta_model):
+    """Return official only when the source vendor owns the model."""
+    raw_category = source.source_category
+    if (
+        raw_category
+        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return raw_category
+
+    source_vendor_id = source.provider_id
+    model_vendor = canonical_vendor_for_meta_model(meta_model)
+    model_vendor_id = getattr(model_vendor, "id", None)
+    if not source_vendor_id or not model_vendor_id:
+        return raw_category
+    if source_vendor_id == model_vendor_id:
+        return raw_category
+    return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+
+
+def business_source_category_for_model(model):
+    """Return the business category for one provider model row."""
+    source = model.source
+    if source is None:
+        return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
+    return business_source_category_for_source_model(
+        source=source,
+        meta_model=model.meta_model,
+    )
+
+
+def business_source_category_for_price_item(item):
+    """Return the business category for one normalized price row."""
+    source = item.source or getattr(item.model, "source", None)
+    if source is None:
+        return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
+    meta_model = item.meta_model or getattr(item.model, "meta_model", None)
+    return business_source_category_for_source_model(
+        source=source,
+        meta_model=meta_model,
+    )
+
+
+def business_source_category_for_catalog(source):
+    """Return the business category for a whole price catalog."""
+    raw_category = source.source_category
+    if (
+        raw_category
+        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return raw_category
+
+    models = list(
+        source.models.select_related("meta_model", "meta_model__vendor")
+    )
+    if not models:
+        return raw_category
+
+    for model in models:
+        category = business_source_category_for_source_model(
+            source=source,
+            meta_model=model.meta_model,
+        )
+        if (
+            category
+            != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        ):
+            return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    return raw_category
 
 
 def price_item_fingerprint_fields_touched(data: dict) -> bool:
@@ -699,15 +851,12 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        validated_data.setdefault(
-            "meta_model",
-            validated_data["model"].meta_model,
-        )
+        validated_data["meta_model"] = validated_data["model"].meta_model
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        if "model" in validated_data and "meta_model" not in validated_data:
-            validated_data["meta_model"] = validated_data["model"].meta_model
+        model = validated_data.get("model", instance.model)
+        validated_data["meta_model"] = model.meta_model
         return super().update(instance, validated_data)
 
 
@@ -803,15 +952,12 @@ class ChannelPriceItemSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data.setdefault(
-            "meta_model",
-            validated_data["model"].meta_model,
-        )
+        validated_data["meta_model"] = validated_data["model"].meta_model
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        if "model" in validated_data and "meta_model" not in validated_data:
-            validated_data["meta_model"] = validated_data["model"].meta_model
+        model = validated_data.get("model", instance.model)
+        validated_data["meta_model"] = model.meta_model
         return super().update(instance, validated_data)
 
 
@@ -828,6 +974,20 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
     def validate_fee_rate(self, value):
         if value < Decimal("0") or value >= Decimal("1"):
             raise serializers.ValidationError("fee_rate must be >= 0 and < 1.")
+        return value
+
+    def validate_service_fee_rate(self, value):
+        if value < Decimal("0") or value >= Decimal("1"):
+            raise serializers.ValidationError(
+                "service_fee_rate must be >= 0 and < 1."
+            )
+        return value
+
+    def validate_auto_approve_max_margin_rate(self, value):
+        if value < Decimal("0"):
+            raise serializers.ValidationError(
+                "auto_approve_max_margin_rate must be >= 0."
+            )
         return value
 
     def validate_currency(self, value):
@@ -895,15 +1055,12 @@ class ResaleListingSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        validated_data.setdefault(
-            "meta_model",
-            validated_data["model"].meta_model,
-        )
+        validated_data["meta_model"] = validated_data["model"].meta_model
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        if "model" in validated_data and "meta_model" not in validated_data:
-            validated_data["meta_model"] = validated_data["model"].meta_model
+        model = validated_data.get("model", instance.model)
+        validated_data["meta_model"] = model.meta_model
         return super().update(instance, validated_data)
 
 
@@ -934,15 +1091,12 @@ class ResaleListingExclusionSerializer(serializers.ModelSerializer):
         }
 
     def create(self, validated_data):
-        validated_data.setdefault(
-            "meta_model",
-            validated_data["model"].meta_model,
-        )
+        validated_data["meta_model"] = validated_data["model"].meta_model
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        if "model" in validated_data and "meta_model" not in validated_data:
-            validated_data["meta_model"] = validated_data["model"].meta_model
+        model = validated_data.get("model", instance.model)
+        validated_data["meta_model"] = model.meta_model
         return super().update(instance, validated_data)
 
 
@@ -1041,7 +1195,7 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
         model = attrs.get("model")
         if not channel or not model:
             return attrs
-        attrs.setdefault("meta_model", model.meta_model)
+        attrs["meta_model"] = model.meta_model
 
         expected = calculate_channel_model_cost(
             channel,

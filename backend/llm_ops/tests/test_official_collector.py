@@ -9,6 +9,7 @@ from llm_ops.collection_services import (
     sync_meta_models_from_models_dev,
     sync_official_provider_model_prices,
 )
+from llm_ops.collectors.official import collect_official_pricing_catalog
 from llm_ops.models import (
     CollectedModelPriceSnapshot,
     LLMModel,
@@ -109,6 +110,50 @@ class OfficialCollectionSyncTests(TestCase):
         mock_get.assert_called_once()
 
     @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_anthropic_source_reads_cache_hits_column(self, mock_get):
+        provider = LLMProvider.objects.get(code="anthropic")
+        mock_get.return_value = MockPricingResponse(
+            """
+            <table>
+              <thead>
+                <tr>
+                  <th>Model</th>
+                  <th>Base Input Tokens</th>
+                  <th>5m Cache Writes</th>
+                  <th>1h Cache Writes</th>
+                  <th>Cache Hits &amp; Refreshes</th>
+                  <th>Output Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Claude Sonnet 4.6</td>
+                  <td>$3 / MTok</td>
+                  <td>$3.75 / MTok</td>
+                  <td>$6 / MTok</td>
+                  <td>$0.30 / MTok</td>
+                  <td>$15 / MTok</td>
+                </tr>
+              </tbody>
+            </table>
+            """,
+        )
+
+        catalog = collect_official_pricing_catalog(
+            provider_code=provider.code,
+            model_codes={"claude-sonnet-4-6-20260218"},
+            source_url=(
+                "https://docs.anthropic.com/en/docs/about-claude/pricing"
+            ),
+        )
+
+        self.assertEqual(catalog.total_models, 1)
+        row = catalog.models[0].price_rows[0]
+        self.assertEqual(row.values["input_price"], "3")
+        self.assertEqual(row.values["output_price"], "15")
+        self.assertEqual(row.values["cache_input_price"], "0.30")
+
+    @patch("llm_ops.collectors.official.requests.get")
     def test_sync_official_prices_falls_back_when_source_has_no_prices(
         self,
         mock_get,
@@ -178,6 +223,16 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(source.currency, "USD")
         self.assertEqual(model.input_price_per_million, Decimal("0.120000"))
         self.assertEqual(model.output_price_per_million, Decimal("0.480000"))
+        self.assertEqual(
+            model.cache_input_price_per_million,
+            Decimal("0.060000"),
+        )
+        cache_item = ModelPriceItem.objects.get(
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_CACHE_INPUT,
+            is_current=True,
+        )
+        self.assertEqual(cache_item.unit_price, Decimal("0.060000"))
         self.assertEqual(stats["models"], 1)
         snapshot = CollectedModelPriceSnapshot.objects.get(
             source=source,
@@ -273,6 +328,10 @@ class OfficialCollectionSyncTests(TestCase):
                   "openai/gpt-real-test": {
                     "id": "openai/gpt-real-test",
                     "name": "GPT Real Test"
+                  },
+                  "meta-llama/llama-3.3-70b-instruct-fp8-fast": {
+                    "id": "meta-llama/llama-3.3-70b-instruct-fp8-fast",
+                    "name": "Supplier Llama Variant"
                   }
                 }
               }
@@ -290,6 +349,9 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(
             MetaModel.objects.filter(code="gpt-real-test").count(),
             1,
+        )
+        self.assertFalse(
+            MetaModel.objects.filter(code__startswith="llama-3.3").exists(),
         )
         self.assertEqual(meta.vendor.code, "openai")
         self.assertEqual(meta.family, "gpt-mini")
@@ -348,6 +410,72 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertIn("manual-alias", meta.aliases)
         self.assertIn("openai/gpt-4o-mini", meta.aliases)
 
+    @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_meta_models_from_models_dev_cleans_stale_online_rows(
+        self,
+        mock_get,
+    ):
+        stale = MetaModel.objects.create(
+            code="supplier-only-noise",
+            name="Supplier Only Noise",
+            metadata={
+                "models_dev": {
+                    "id": "supplier/supplier-only-noise",
+                },
+            },
+        )
+        linked = MetaModel.objects.create(
+            code="linked-online-model",
+            name="Linked Online Model",
+            vendor=LLMProvider.objects.get(code="openai"),
+            metadata={
+                "models_dev": {
+                    "id": "supplier/linked-online-model",
+                },
+            },
+        )
+        LLMModel.objects.create(
+            provider=LLMProvider.objects.get(code="openai"),
+            meta_model=linked,
+            name="Linked Online Model",
+            code="linked-online-model",
+        )
+        mock_get.return_value = MockPricingResponse(
+            """
+            {
+              "openai": {
+                "models": {
+                  "openai/gpt-clean-test": {
+                    "id": "openai/gpt-clean-test",
+                    "name": "GPT Clean Test"
+                  }
+                }
+              },
+              "openrouter": {
+                "models": {
+                  "openai/gpt-router-noise": {
+                    "id": "openai/gpt-router-noise",
+                    "name": "GPT Router Noise"
+                  }
+                }
+              }
+            }
+            """,
+            content_type="application/json",
+        )
+
+        stats = sync_meta_models_from_models_dev()
+
+        self.assertEqual(stats["deleted"], 1)
+        self.assertFalse(MetaModel.objects.filter(id=stale.id).exists())
+        self.assertTrue(MetaModel.objects.filter(id=linked.id).exists())
+        self.assertFalse(
+            MetaModel.objects.filter(code="gpt-router-noise").exists(),
+        )
+        self.assertTrue(
+            MetaModel.objects.filter(code="gpt-clean-test").exists(),
+        )
+
     def test_sync_aliyun_official_prices_keeps_cny_currency(self):
         provider = LLMProvider.objects.get(code="aliyun")
 
@@ -404,13 +532,43 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(stats["models"], 1)
         self.assertEqual(stats["skipped"], 11)
         self.assertEqual(model.currency, "CNY")
-        # Volcengine labels the same release as "250528" while
-        # aliyun uses "0528". They are the same model and the
-        # collector now unifies the display name on the
-        # canonical "DeepSeek R1 0528" spelling.
+        self.assertEqual(model.meta_model.code, "deepseek-r1")
+        self.assertIn("deepseek-r1-250528", model.meta_model.aliases)
+        # LLMModel keeps the supplier SKU display name; MetaModel is
+        # normalized to the family-level identity above.
         self.assertEqual(model.name, "DeepSeek R1 0528")
         self.assertEqual(model.input_price_per_million, Decimal("4.000000"))
         self.assertEqual(model.output_price_per_million, Decimal("16.000000"))
+
+    def test_sync_deepseek_official_prices_includes_cache_hit(self):
+        provider = LLMProvider.objects.get(code="deepseek")
+
+        stats = sync_official_provider_model_prices(
+            provider=provider,
+            verify_source=False,
+        )
+
+        source = PriceCollectionSource.objects.get(slug="deepseek-official")
+        input_item = ModelPriceItem.objects.get(
+            source=source,
+            model__code="deepseek-v3",
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+        cache_item = ModelPriceItem.objects.get(
+            source=source,
+            model__code="deepseek-v3",
+            dimension=ModelPriceItem.DIMENSION_CACHE_INPUT,
+        )
+        output_item = ModelPriceItem.objects.get(
+            source=source,
+            model__code="deepseek-v3",
+            dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+        )
+        self.assertEqual(stats["models"], 5)
+        self.assertEqual(source.currency, "USD")
+        self.assertEqual(input_item.unit_price, Decimal("0.280000"))
+        self.assertEqual(cache_item.unit_price, Decimal("0.028000"))
+        self.assertEqual(output_item.unit_price, Decimal("0.420000"))
 
     def test_sync_aliyun_wanx_prices_uses_image_and_video_units(self):
         provider = LLMProvider.objects.get(code="aliyun-wanx")
@@ -484,12 +642,23 @@ class OfficialCollectionSyncTests(TestCase):
             source__slug="anthropic-official",
             code="claude-sonnet-4-20250514",
         )
+        haiku_45 = LLMModel.objects.get(
+            provider=provider,
+            source__slug="anthropic-official",
+            code="claude-haiku-4-5-20251001",
+        )
         self.assertEqual(model.currency, "USD")
         self.assertEqual(model.input_price_per_million, Decimal("3.000000"))
         self.assertEqual(model.output_price_per_million, Decimal("15.000000"))
         self.assertEqual(model.name, "Claude Sonnet 4.6")
         self.assertEqual(sonnet_45.name, "Claude Sonnet 4.5")
         self.assertEqual(sonnet_4.name, "Claude Sonnet 4")
+        cache_item = ModelPriceItem.objects.get(
+            model=haiku_45,
+            dimension=ModelPriceItem.DIMENSION_CACHE_INPUT,
+            is_current=True,
+        )
+        self.assertEqual(cache_item.unit_price, Decimal("0.100000"))
 
     @patch("llm_ops.collection_services.collect_official_pricing_catalog")
     def test_sync_official_prices_uses_configured_source_url(
@@ -547,3 +716,35 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(model.name, "Gemini 3 Pro Preview")
         self.assertEqual(model.input_price_per_million, Decimal("2.000000"))
         self.assertEqual(model.output_price_per_million, Decimal("12.000000"))
+
+    @patch("llm_ops.collection_services.sync_official_provider_model_prices")
+    def test_sync_configured_provider_prices_continues_after_failure(
+        self,
+        mock_sync,
+    ):
+        """One failed official source must not stop other providers."""
+
+        def fake_sync(provider, *, verify_source=True):
+            if provider.code == "openai":
+                raise RuntimeError("source blocked")
+            return {
+                "models": 1,
+                "created": 1,
+                "updated": 0,
+                "skipped": 0,
+                "changed": 1,
+                "unchanged": 0,
+                "skipped_model_codes": [],
+            }
+
+        mock_sync.side_effect = fake_sync
+
+        results = sync_configured_official_model_prices(
+            provider_codes=["openai", "google"],
+            verify_source=False,
+        )
+
+        self.assertIn("source blocked", results["openai"]["error"])
+        self.assertEqual(results["openai"]["models"], 0)
+        self.assertEqual(results["google"]["models"], 1)
+        self.assertEqual(mock_sync.call_count, 2)

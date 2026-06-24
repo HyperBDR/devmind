@@ -32,12 +32,6 @@
             >
               <span class="nav-icon">{{ item.icon }}</span>
               <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
-              <span
-                v-if="item.badge"
-                class="rounded-full border border-slate-700 bg-slate-900 px-1.5 py-0.5 text-[10px] text-slate-300"
-              >
-                {{ item.badge }}
-              </span>
             </button>
           </nav>
 
@@ -54,11 +48,9 @@
         <main
           class="min-w-0 flex-1 overflow-y-auto border-l border-slate-200 bg-white shadow-sm"
         >
-          <header class="border-b border-slate-200 px-5 py-4 lg:px-7">
-            <div
-              class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between"
-            >
-              <div>
+          <header class="border-b border-slate-200 px-5 py-3 lg:px-7">
+            <div class="page-hero">
+              <div class="page-hero-copy">
                 <div class="flex flex-wrap gap-2 lg:hidden">
                   <button
                     v-for="item in navItems"
@@ -76,67 +68,85 @@
                   </button>
                 </div>
                 <p
-                  class="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-agione-600 lg:mt-0"
+                  class="page-hero-eyebrow mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-agione-600 lg:mt-0"
                 >
                   {{ activeNav.eyebrow }}
                 </p>
-                <h2 class="mt-2 text-2xl font-semibold text-slate-900">
+                <h2 class="page-hero-title mt-1 text-2xl font-semibold text-slate-900">
                   {{ activeNav.label }}
                 </h2>
-                <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
+                <p
+                  class="page-hero-description mt-1.5 max-w-3xl text-sm leading-6 text-slate-500"
+                >
                   {{ activeNav.description }}
                 </p>
               </div>
-              <div class="flex flex-wrap items-center gap-2">
-                <div v-if="showPlatformControl" class="currency-control">
-                  <span>挂售平台</span>
-                  <CompactSelect
-                    v-model="selectedResalePlatformId"
-                    :options="resalePlatformOptions"
-                    class-name="w-40"
-                    size="sm"
-                  />
+              <div class="page-hero-actions">
+                <div class="page-hero-group">
+                  <div class="currency-control page-toolbar-control">
+                    <span>显示货币</span>
+                    <CompactSelect
+                      v-model="displayCurrency"
+                      :options="displayCurrencyOptions"
+                      class-name="w-28"
+                      size="sm"
+                    />
+                  </div>
+                  <span
+                    v-if="exchangeRateLabel"
+                    class="page-toolbar-chip"
+                  >
+                    {{ exchangeRateLabel }}
+                  </span>
+                  <button
+                    type="button"
+                    class="btn-secondary page-toolbar-button refresh-action-button"
+                    :disabled="loading"
+                    @click="refreshAll"
+                  >
+                    <svg
+                      aria-hidden="true"
+                      :class="['refresh-action-icon', { 'is-spinning': loading }]"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      viewBox="0 0 24 24"
+                    >
+                      <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                      <path d="M3 16v5h5" />
+                      <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                      <path d="M21 3v5h-5" />
+                    </svg>
+                    刷新
+                  </button>
                 </div>
-                <button
-                  v-if="showPlatformControl"
-                  type="button"
-                  class="btn-secondary"
-                  @click="openPlatformModal(agionePlatform)"
-                >
-                  平台配置
-                </button>
-                <button
-                  v-if="showPlatformControl"
-                  type="button"
-                  class="btn-secondary"
-                  @click="openPlatformModal(null)"
-                >
-                  新增平台
-                </button>
-                <div class="currency-control">
-                  <span>显示货币</span>
-                  <CompactSelect
-                    v-model="displayCurrency"
-                    :options="displayCurrencyOptions"
-                    class-name="w-32"
-                    size="sm"
-                  />
+                <div v-if="showPlatformControl" class="page-hero-group">
+                  <div class="currency-control page-toolbar-control">
+                    <span>挂售平台</span>
+                    <CompactSelect
+                      v-model="selectedResalePlatformId"
+                      :options="resalePlatformOptions"
+                      class-name="w-28"
+                      size="sm"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    class="btn-secondary page-toolbar-button"
+                    @click="openPlatformModal(agionePlatform)"
+                  >
+                    平台配置
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-secondary page-toolbar-button"
+                    @click="openPlatformModal(null)"
+                  >
+                    新建平台
+                  </button>
                 </div>
-                <span
-                  v-if="exchangeRateLabel"
-                  class="rounded-[12px] border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500"
-                >
-                  {{ exchangeRateLabel }}
-                </span>
-                <button
-                  type="button"
-                  class="btn-secondary"
-                  :disabled="loading"
-                  @click="refreshAll"
-                >
-                  <span class="icon-mark" />
-                  刷新
-                </button>
               </div>
             </div>
           </header>
@@ -510,6 +520,7 @@
               :models="models"
               :channel-prices="channelPrices"
               :channel-price-items="channelPriceItems"
+              :price-items="modelPriceItems"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
               @refresh="refreshAll"
@@ -543,6 +554,7 @@
       :channels="channels"
       :procurement-rows="procurementRows"
       :price-items="modelPriceItems"
+      :channel-price-items="channelPriceItems"
       :listings="listings"
       :point-conversion="pointConversion"
       :display-currency="displayCurrency"
@@ -554,7 +566,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import '@/components/llm-ops/llmOpsButtons.css'
+import '@/components/llm-ops/llmOpsModals.css'
+import '@/components/llm-ops/llmOpsTables.css'
+
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
@@ -645,7 +661,7 @@ const navItems = computed(() => [
     key: 'providers',
     label: '模型价格源',
     eyebrow: 'Sources',
-    description: '维护原厂、供货商、人工等模型价格源，并查看对应模型定价。',
+    description: '查看供货商价格源与元模型价格。',
     icon: 'P',
     badge: providerCollectionSources.value.length
   },
@@ -661,7 +677,7 @@ const navItems = computed(() => [
     key: 'reseller',
     label: '挂售平台',
     eyebrow: 'Reseller',
-    description: '维护 Agione 类平台挂售价格、积分换算和渠道选择。',
+    description: '管理挂售定价、积分换算与供货渠道。',
     icon: 'R',
     badge: agioneListingRows.value.length
   },
@@ -1433,7 +1449,14 @@ function initialActiveSection() {
   return 'monitor'
 }
 
-onMounted(refreshAll)
+onMounted(() => {
+  document.body.classList.add('llm-ops-theme')
+  refreshAll()
+})
+
+onBeforeUnmount(() => {
+  document.body.classList.remove('llm-ops-theme')
+})
 </script>
 
 <style scoped>
@@ -1813,6 +1836,154 @@ onMounted(refreshAll)
   border-color: #e2e8f0;
   padding: 1rem;
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+}
+
+.page-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.page-hero-copy {
+  min-width: 0;
+}
+
+.page-hero-eyebrow {
+  margin-top: 0;
+}
+
+.page-hero-title {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+
+.page-hero-description {
+  max-width: 30rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+
+.page-hero-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  max-width: 100%;
+}
+
+.page-hero-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.page-toolbar-control {
+  min-height: 2.5rem;
+  gap: 0.5rem;
+  border-radius: 10px;
+  padding: 0.375rem 0.5rem;
+  white-space: nowrap;
+}
+
+.page-toolbar-control > span {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.page-toolbar-button {
+  min-height: 2.5rem;
+  border-radius: 10px;
+  padding: 0.375rem 0.625rem;
+  white-space: nowrap;
+}
+
+.refresh-action-button {
+  min-width: 5.5rem;
+  border-color: #cbd5e1;
+  background-color: #ffffff;
+  color: #334155;
+  font-weight: 700;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.refresh-action-button:hover:not(:disabled) {
+  border-color: #a5b4fc;
+  background-color: #eef2ff;
+  color: #4338ca;
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.12);
+  transform: translateY(-1px);
+}
+
+.refresh-action-button:disabled {
+  cursor: wait;
+  border-color: #e2e8f0;
+  background-color: #f8fafc;
+  color: #94a3b8;
+  box-shadow: none;
+}
+
+.refresh-action-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+
+.refresh-action-icon.is-spinning {
+  animation: llm-ops-refresh-spin 900ms linear infinite;
+}
+
+@keyframes llm-ops-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.page-toolbar-chip {
+  display: inline-flex;
+  max-width: 10.75rem;
+  min-height: 2.5rem;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background-color: #f8fafc;
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (min-width: 1280px) {
+  .page-hero {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+
+  .page-hero-copy {
+    max-width: 26rem;
+  }
+
+  .page-hero-actions {
+    align-items: flex-end;
+    flex: 0 0 auto;
+    max-width: 31rem;
+  }
+
+  .page-hero-group {
+    justify-content: flex-end;
+  }
 }
 
 .kpi-card {

@@ -14,35 +14,57 @@
           <CompactSelect
             v-model="statusFilter"
             :options="statusFilterOptions"
-            class-name="w-32"
-            size="sm"
+            class-name="control-select sm:w-36"
           />
           <input
             v-model="searchKeyword"
-            class="field-sm sm:w-64"
+            class="control-field sm:w-64"
             placeholder="搜索渠道名称、标识或地址"
           />
-          <button class="btn-primary" type="button" @click="openChannelModal()">
-            <span class="icon-mark" />
-            新增渠道
+          <button
+            class="btn-primary toolbar-button"
+            type="button"
+            @click="openChannelModal()"
+          >
+            <svg
+              class="toolbar-button-icon"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+            新建渠道
           </button>
         </div>
       </div>
       <div class="overflow-x-auto">
-        <table class="data-table">
+        <table class="data-table channel-table">
+          <colgroup>
+            <col class="channel-name-col" />
+            <col class="channel-config-col" />
+            <col class="channel-model-col" />
+            <col class="channel-status-col" />
+            <col class="channel-action-col" />
+          </colgroup>
           <thead>
             <tr>
               <th class="table-head">渠道</th>
               <th class="table-head">默认配置</th>
-              <th class="table-head text-right">模型管理</th>
+              <th class="table-head">模型管理</th>
               <th class="table-head">状态</th>
-              <th class="table-head text-right">操作</th>
+              <th class="table-head">操作</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="channel in filteredChannelRows" :key="channel.id">
               <td class="table-cell">
-                <div class="min-w-44">
+                <div class="channel-name-cell min-w-44">
                   <p class="font-medium text-slate-900">
                     {{ channel.name }}
                   </p>
@@ -52,63 +74,66 @@
                 </div>
               </td>
               <td class="table-cell max-w-sm">
-                <a
-                  v-if="channel.api_endpoint"
-                  class="link-url"
-                  :href="channel.api_endpoint"
-                  rel="noopener noreferrer"
-                  target="_blank"
-                  :title="channel.api_endpoint"
-                >
-                  {{ channel.api_endpoint }}
-                </a>
-                <span v-else class="text-slate-400">未配置</span>
-                <div class="mt-2 flex flex-wrap items-center gap-1.5">
-                  <span class="currency-pill">
-                    {{ channel.currency || 'USD' }}
+                <div class="channel-config-cell">
+                  <a
+                    v-if="channel.api_endpoint"
+                    class="link-url"
+                    :href="channel.api_endpoint"
+                    rel="noopener noreferrer"
+                    target="_blank"
+                    :title="channel.api_endpoint"
+                  >
+                    已配置 API
+                  </a>
+                  <span v-else class="config-status-muted">
+                    API 未配置
                   </span>
-                  <span class="config-chip">
-                    默认折扣 {{ ratioLabel(channel.settlement_ratio) }}
-                  </span>
+                  <div class="channel-config-chips">
+                    <span class="config-chip">
+                      币种 {{ channel.currency || 'USD' }}
+                    </span>
+                    <span class="config-chip">
+                      折扣 {{ ratioLabel(channel.settlement_ratio) }}
+                    </span>
+                  </div>
                 </div>
               </td>
-              <td class="table-cell text-right">
-                <p class="font-medium text-slate-900">
-                  {{ channel.model_count }} / {{ channel.configured_model_count }}
-                </p>
-                <p class="mt-1 text-xs text-slate-400">
-                  已启用 / 已配置
-                </p>
+              <td class="table-cell">
+                <div class="channel-model-metrics">
+                  <span class="model-metric-pill">
+                    <strong>{{ channel.model_count }}</strong>
+                    <span>启用</span>
+                  </span>
+                  <span class="model-metric-pill">
+                    <strong>{{ channel.configured_model_count }}</strong>
+                    <span>配置</span>
+                  </span>
+                </div>
               </td>
               <td class="table-cell">
                 <span :class="channel.is_active ? 'badge-ok' : 'badge-muted'">
                   {{ channel.is_active ? '启用' : '停用' }}
                 </span>
               </td>
-              <td class="table-cell text-right">
-                <div class="inline-flex items-center gap-2">
-                  <button
-                    class="btn-secondary btn-compact"
-                    type="button"
+              <td class="table-cell">
+                <div class="inline-flex items-center justify-center gap-2">
+                  <OperationIconButton
+                    icon="config"
+                    label="管理模型"
                     @click="selectedChannelForModels = channel"
-                  >
-                    管理模型
-                  </button>
-                  <button
-                    class="link-btn"
-                    type="button"
+                  />
+                  <OperationIconButton
+                    icon="edit"
+                    label="编辑"
                     @click="openChannelModal(channel)"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    class="danger-link-btn"
-                    type="button"
+                  />
+                  <OperationIconButton
                     :disabled="deletingChannelId === channel.id"
+                    icon="delete"
+                    label="删除"
+                    tone="danger"
                     @click="openDeleteConfirm(channel)"
-                  >
-                    删除
-                  </button>
+                  />
                 </div>
               </td>
             </tr>
@@ -134,6 +159,7 @@
       :models="models"
       :channel-prices="channelPrices"
       :channel-price-items="channelPriceItems"
+      :price-items="priceItems"
       :display-currency="displayCurrency"
       :exchange-rate="exchangeRate"
       @close="selectedChannelForModels = null"
@@ -200,6 +226,7 @@ import { useToast } from '@/composables/useToast'
 import ChannelModelDrawer from '@/components/llm-ops/ChannelModelDrawer.vue'
 import ChannelModal from '@/components/llm-ops/ChannelModal.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
 const props = defineProps({
   channels: {
@@ -219,6 +246,10 @@ const props = defineProps({
     required: true
   },
   channelPriceItems: {
+    type: Array,
+    default: () => []
+  },
+  priceItems: {
     type: Array,
     default: () => []
   },
@@ -347,12 +378,9 @@ function errorMessage(error, fallback) {
   @apply flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 xl:flex-row xl:items-end xl:justify-between;
 }
 
-.icon-mark {
-  @apply inline-block h-3.5 w-3.5 shrink-0 rounded-sm bg-current;
-}
-
 .data-table {
   @apply min-w-full divide-y divide-slate-200;
+  table-layout: fixed;
 }
 
 .data-table tbody {
@@ -364,15 +392,81 @@ function errorMessage(error, fallback) {
 }
 
 .table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
 }
 
 .table-cell {
-  @apply whitespace-nowrap px-4 py-3 text-sm text-slate-600;
+  @apply min-w-0 px-4 py-3 text-sm text-slate-600;
 }
 
-.field-sm {
-  @apply rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+.channel-table .table-head,
+.channel-table .table-cell {
+  @apply text-center align-middle;
+}
+
+.channel-name-cell {
+  @apply mx-auto;
+}
+
+.channel-table .link-url {
+  @apply mx-auto text-center;
+}
+
+.channel-config-cell {
+  @apply mx-auto flex max-w-[16rem] flex-col items-center gap-2;
+}
+
+.channel-config-chips,
+.channel-model-metrics {
+  @apply flex flex-wrap items-center justify-center gap-1.5;
+}
+
+.config-status-muted {
+  @apply text-xs font-medium text-slate-400;
+}
+
+.model-metric-pill {
+  @apply inline-flex min-w-[3.75rem] items-center justify-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-500;
+}
+
+.model-metric-pill strong {
+  @apply font-mono text-sm font-semibold text-slate-900;
+}
+
+.channel-name-col {
+  width: 22%;
+}
+
+.channel-config-col {
+  width: 34%;
+}
+
+.channel-model-col {
+  width: 18%;
+}
+
+.channel-status-col {
+  width: 10%;
+}
+
+.channel-action-col {
+  width: 16%;
+}
+
+.control-field {
+  @apply h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.control-select :deep(.compact-select-trigger) {
+  @apply h-9 rounded-lg border-slate-200 px-3 text-sm text-slate-700;
+}
+
+.toolbar-button {
+  @apply h-9 justify-center rounded-md border border-indigo-500 bg-indigo-600 px-3.5 font-semibold shadow-sm shadow-indigo-100 hover:-translate-y-px hover:border-indigo-600 hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-100;
+}
+
+.toolbar-button-icon {
+  @apply h-4 w-4 shrink-0;
 }
 
 .btn-primary {
@@ -409,10 +503,6 @@ function errorMessage(error, fallback) {
 
 .badge-muted {
   @apply rounded-full border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-medium text-slate-600;
-}
-
-.currency-pill {
-  @apply inline-flex rounded-full border border-slate-200 bg-white px-2 py-1 font-mono text-xs font-semibold text-slate-600;
 }
 
 .config-chip {

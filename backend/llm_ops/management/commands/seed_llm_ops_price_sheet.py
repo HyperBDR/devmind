@@ -42,11 +42,36 @@ class Command(BaseCommand):
                 "importing the canonical price sheet."
             ),
         )
+        parser.add_argument(
+            "--clean-mock-only",
+            action="store_true",
+            dest="clean_mock_only",
+            help=(
+                "Only remove legacy mock rows and do not import the "
+                "canonical price sheet afterwards."
+            ),
+        )
 
     def handle(self, *args, **options):
         cleaned = None
-        if options.get("clean_mock"):
+        if options.get("clean_mock") or options.get("clean_mock_only"):
             cleaned = clean_mock_llm_ops_seed_data()
+        if options.get("clean_mock_only"):
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "Cleaned legacy mock LLM Ops seed data: "
+                    f"model_price_items={cleaned['model_price_items']}, "
+                    "channel_price_items="
+                    f"{cleaned['channel_price_items']}, "
+                    "channel_model_prices="
+                    f"{cleaned['channel_model_prices']}, "
+                    "channel_model_histories="
+                    f"{cleaned['channel_model_histories']}, "
+                    f"sources={cleaned['sources']}, "
+                    f"channels={cleaned['channels']}"
+                )
+            )
+            return
         if options.get("safe"):
             stats = seed_initial_price_sheet_safely()
             mode = "safe"
@@ -59,6 +84,7 @@ class Command(BaseCommand):
                 f"providers={stats['providers']}, "
                 f"sources={stats['sources']}, "
                 f"models={stats['models']}, "
+                f"model_price_items={stats['model_price_items']}, "
                 f"channel_model_prices={stats['channel_model_prices']}, "
                 "yunce_supplier_sources="
                 f"{stats['yunce_supplier_sources']}, "
@@ -78,6 +104,8 @@ class Command(BaseCommand):
                     f"model_price_items={cleaned['model_price_items']}, "
                     "channel_price_items="
                     f"{cleaned['channel_price_items']}, "
+                    "channel_model_prices="
+                    f"{cleaned['channel_model_prices']}, "
                     "channel_model_histories="
                     f"{cleaned['channel_model_histories']}, "
                     f"sources={cleaned['sources']}, "

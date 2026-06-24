@@ -25,6 +25,7 @@ from django.test import TestCase
 from llm_ops.models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelPriceItem,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -42,6 +43,7 @@ from llm_ops.seed_data import (
     seed_initial_price_sheet_if_empty,
     seed_initial_price_sheet_safely,
     cleanup_orphan_meta_models,
+    normalize_meta_model_catalog,
     reset_meta_models_canonical,
     resolve_orphan_meta_models,
     seed_yunce_supplier_price_demo,
@@ -62,12 +64,12 @@ class LLMOpsBootstrapGuardsTests(TestCase):
         # any provider presence as "populated".
         self.assertFalse(is_llm_ops_database_empty())
 
-    def test_is_llm_ops_database_empty_false_when_channel_exists(self):
+    def test_is_llm_ops_database_empty_ignores_operator_channels(self):
         ProcurementChannel.objects.create(
             name="Real Resource",
             code=REAL_RESOURCE_CHANNEL_CODE,
         )
-        self.assertFalse(is_llm_ops_database_empty())
+        self.assertTrue(is_llm_ops_database_empty())
 
 
 class LLMOpsSeedSafelyTests(TestCase):
@@ -78,28 +80,7 @@ class LLMOpsSeedSafelyTests(TestCase):
         stats = seed_initial_price_sheet_safely()
         self.assertGreater(stats["providers"], 0)
         self.assertGreater(stats["models"], 0)
-
-    def test_safe_seed_preserves_channel_model_price_custom_prices(self):
-        cmp = ChannelModelPrice.objects.filter(
-            channel__code=REAL_RESOURCE_CHANNEL_CODE,
-        ).first()
-        cmp.custom_input_price_per_million = Decimal("9.999999")
-        cmp.custom_output_price_per_million = Decimal("8.888888")
-        cmp.is_listed = False
-        cmp.save()
-
-        seed_initial_price_sheet_safely()
-
-        cmp.refresh_from_db()
-        self.assertEqual(
-            cmp.custom_input_price_per_million, Decimal("9.999999")
-        )
-        self.assertEqual(
-            cmp.custom_output_price_per_million, Decimal("8.888888")
-        )
-        # is_listed is a human toggle. Safe seed never re-enables
-        # channels the operator took offline.
-        self.assertFalse(cmp.is_listed)
+        self.assertGreater(stats["model_price_items"], 0)
 
     def test_safe_seed_does_not_re_enable_disabled_source(self):
         source = PriceCollectionSource.objects.filter(
@@ -126,17 +107,41 @@ class LLMOpsSeedSafelyTests(TestCase):
     def test_safe_seed_is_idempotent(self):
         first_providers = LLMProvider.objects.count()
         first_models = LLMModel.objects.count()
-        first_prices = ChannelModelPrice.objects.count()
+        first_sources = PriceCollectionSource.objects.count()
+        first_items = ModelPriceItem.objects.count()
 
         stats = seed_initial_price_sheet_safely()
 
         self.assertEqual(stats["providers"], 0)
         self.assertEqual(stats["models"], 0)
+        self.assertEqual(stats["model_price_items"], 0)
         self.assertEqual(stats["channel_model_prices"], 0)
         self.assertEqual(LLMProvider.objects.count(), first_providers)
         self.assertEqual(LLMModel.objects.count(), first_models)
         self.assertEqual(
-            ChannelModelPrice.objects.count(), first_prices
+            PriceCollectionSource.objects.count(), first_sources
+        )
+        self.assertEqual(ModelPriceItem.objects.count(), first_items)
+
+    def test_safe_seed_creates_source_price_items(self):
+        sheet_items = ModelPriceItem.objects.filter(
+            spec__seed_source="initial_price_sheet",
+            is_current=True,
+        )
+        self.assertTrue(sheet_items.exists())
+        self.assertTrue(
+            sheet_items.filter(
+                source__slug="siliconflow-sheet",
+                model__code="deepseek-r1",
+                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            ).exists()
+        )
+        self.assertTrue(
+            sheet_items.filter(
+                source__slug="siliconflow-sheet",
+                model__code="deepseek-r1",
+                dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            ).exists()
         )
 
 
@@ -149,8 +154,8 @@ class LLMOpsSeedLegacyTests(TestCase):
     documents that it is intentional and distinct from the safe path.
     """
 
-    def test_legacy_seed_overwrites_seed_managed_fields(self):
-        """Legacy seed re-applies its own defaults (is_listed, currency, ...).
+    def test_legacy_seed_overwrites_seed_managed_source_fields(self):
+        """Legacy seed re-applies its own source defaults.
 
         The two seed paths differ in this respect: the safe seed
         leaves seed-managed fields alone on already-existing rows,
@@ -160,22 +165,17 @@ class LLMOpsSeedLegacyTests(TestCase):
         silently make the two paths equivalent.
         """
         seed_initial_price_sheet_safely()
-        cmp = ChannelModelPrice.objects.filter(
-            channel__code=REAL_RESOURCE_CHANNEL_CODE,
-        ).first()
-        # Operator flips the channel price offline and overrides the
-        # settlement ratio.
-        cmp.is_listed = False
-        cmp.settlement_ratio = Decimal("0.1234")
-        cmp.save()
+        source = PriceCollectionSource.objects.get(slug="aliyun-sheet")
+        source.name = "人工改名价格源"
+        source.currency = "USD"
+        source.save()
 
         seed_initial_price_sheet()
 
-        cmp.refresh_from_db()
-        # ``is_listed`` and ``settlement_ratio`` are seed-managed and
-        # are restored by the legacy re-import.
-        self.assertTrue(cmp.is_listed)
-        self.assertNotEqual(cmp.settlement_ratio, Decimal("0.1234"))
+        source.refresh_from_db()
+        self.assertNotEqual(source.name, "人工改名价格源")
+        self.assertEqual(source.currency, "CNY")
+        self.assertIsNone(source.channel_id)
 
 
 class LLMOpsSeedIfEmptyTests(TestCase):
@@ -219,10 +219,11 @@ class LLMOpsPostMigrateHandlerTests(TestCase):
                 sender=app_config, app_config=app_config
             )
         # The handler should have triggered the safe seed and
-        # therefore populated the canonical tables.
+        # therefore populated the canonical tables without creating
+        # operator-maintained procurement channels.
         self.assertTrue(LLMProvider.objects.exists())
         self.assertTrue(LLMModel.objects.exists())
-        self.assertTrue(
+        self.assertFalse(
             ProcurementChannel.objects.filter(
                 code=REAL_RESOURCE_CHANNEL_CODE
             ).exists()
@@ -344,6 +345,37 @@ class LLMOpsPeriodicTasksTests(TestCase):
         )
         self.assertEqual(result, {"openai": {"models": 0}})
 
+    def test_collect_price_source_prices_delegates_to_code_sync(self):
+        from llm_ops.tasks import collect_price_source_prices
+
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://openai.com/api/pricing/",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        patch_path = "llm_ops.source_collectors.collect_price_source"
+        with mock.patch(patch_path) as mock_collect:
+            mock_collect.return_value = {"models": 1}
+            result = collect_price_source_prices(
+                source_id=source.id,
+                verify_source=False,
+            )
+
+        mock_collect.assert_called_once_with(
+            source,
+            verify_source=False,
+        )
+        self.assertEqual(result, {"models": 1})
+
     def test_sync_meta_models_from_models_dev_task_delegates_to_service(self):
         from llm_ops.tasks import sync_meta_models_from_models_dev_task
 
@@ -412,6 +444,12 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         )
         self.assertFalse(
             ProcurementChannel.objects.filter(
+                code=REAL_RESOURCE_CHANNEL_CODE,
+            ).exists()
+        )
+        self.assertFalse(ChannelModelPrice.objects.exists())
+        self.assertFalse(
+            ProcurementChannel.objects.filter(
                 code="demo-premium-supplier",
             ).exists()
         )
@@ -437,11 +475,13 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         aliyun = LLMProvider.objects.get(code="aliyun")
         deepseek = LLMProvider.objects.get(code="deepseek")
         deepseek_r1 = MetaModel.objects.get(code="deepseek-r1")
-        deepseek_r1_0528 = MetaModel.objects.get(code="deepseek-r1-0528")
         deepseek_v3 = MetaModel.objects.get(code="deepseek-v3")
         qwen_plus = MetaModel.objects.get(code="qwen-plus")
         self.assertEqual(deepseek_r1.vendor, deepseek)
-        self.assertEqual(deepseek_r1_0528.vendor, deepseek)
+        self.assertIn("deepseek-r1-0528", deepseek_r1.aliases)
+        self.assertFalse(
+            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
+        )
         self.assertEqual(deepseek_v3.vendor, deepseek)
         self.assertEqual(qwen_plus.vendor, aliyun)
 
@@ -462,6 +502,87 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         deepseek = LLMProvider.objects.get(code="deepseek")
         deepseek_r1 = MetaModel.objects.get(code="deepseek-r1")
         self.assertEqual(deepseek_r1.vendor, deepseek)
+
+    def test_normalize_meta_model_catalog_merges_dated_releases(self):
+        """Date/build suffixes belong in aliases, not MetaModel.code."""
+        deepseek = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        canonical = MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            vendor=deepseek,
+            context_window=64000,
+        )
+        dated = MetaModel.objects.create(
+            name="DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+            vendor=deepseek,
+            context_window=128000,
+        )
+        model = LLMModel.objects.create(
+            provider=deepseek,
+            meta_model=dated,
+            name="DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+        )
+
+        stats = normalize_meta_model_catalog()
+
+        self.assertEqual(stats["merged"], 1)
+        self.assertFalse(
+            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
+        )
+        canonical.refresh_from_db()
+        model.refresh_from_db()
+        self.assertEqual(model.meta_model, canonical)
+        self.assertEqual(canonical.context_window, 128000)
+        self.assertIn("deepseek-r1-0528", canonical.aliases)
+        self.assertIn("DeepSeek R1 0528", canonical.aliases)
+
+    def test_normalize_meta_model_catalog_relinks_price_source_rows(self):
+        """Existing price-source rows follow their model's meta model."""
+        deepseek = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        aliyun = LLMProvider.objects.create(
+            name="阿里云",
+            code="aliyun",
+        )
+        canonical = MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            vendor=deepseek,
+        )
+        wrong_meta = MetaModel.objects.create(
+            name="阿里云 DeepSeek R1",
+            code="aliyun-deepseek-r1",
+            vendor=aliyun,
+        )
+        model = LLMModel.objects.create(
+            provider=deepseek,
+            meta_model=canonical,
+            name="DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+        )
+        item = ModelPriceItem.objects.create(
+            provider=deepseek,
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("0.550000"),
+            price_fingerprint="legacy-wrong-meta",
+        )
+        ModelPriceItem.objects.filter(id=item.id).update(meta_model=wrong_meta)
+
+        stats = normalize_meta_model_catalog()
+
+        item.refresh_from_db()
+        self.assertEqual(stats["linked_records"], 1)
+        self.assertEqual(item.meta_model, canonical)
 
     def test_resolve_orphan_meta_models_backfills_vendor(self):
         """MetaModel rows without a vendor are auto-rehomed."""
@@ -529,7 +650,6 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         # owned by the deepseek vendor.
         deepseek_codes = [
             "deepseek-r1",
-            "deepseek-r1-0528",
             "deepseek-v3",
             "deepseek-v3.1",
             "deepseek-v3.2",
@@ -538,6 +658,13 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         for code in deepseek_codes:
             meta = MetaModel.objects.get(code=code)
             self.assertEqual(meta.vendor.code, "deepseek")
+        self.assertFalse(
+            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
+        )
+        self.assertIn(
+            "deepseek-r1-0528",
+            MetaModel.objects.get(code="deepseek-r1").aliases,
+        )
         self.assertGreater(seed_stats["models"], 0)
 
     def test_reset_command_refuses_without_yes(self):
@@ -566,6 +693,51 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         seed_initial_price_sheet_safely()
         seed_yunce_supplier_price_demo()
         seed_agione_price_trend_demo()
+        real_channel = ProcurementChannel.objects.create(
+            name="真实资源平台",
+            code=REAL_RESOURCE_CHANNEL_CODE,
+            currency="USD",
+        )
+        real_source = PriceCollectionSource.objects.filter(
+            slug__endswith="-sheet",
+        ).first()
+        real_source.channel = real_channel
+        real_source.save()
+        real_model = LLMModel.objects.first()
+        ChannelModelPrice.objects.create(
+            channel=real_channel,
+            model=real_model,
+            meta_model=real_model.meta_model,
+            price_source=real_source,
+        )
+        test_channel = ProcurementChannel.objects.create(
+            name="测试 02",
+            code="test-02",
+            currency="CNY",
+        )
+        test_source = PriceCollectionSource.objects.create(
+            name="测试 02 供应商价格",
+            slug="test-02-supplier",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        test_model = LLMModel.objects.first()
+        ChannelModelPrice.objects.create(
+            channel=test_channel,
+            model=test_model,
+            meta_model=test_model.meta_model,
+        )
+        ChannelPriceItem.objects.create(
+            channel=test_channel,
+            model=test_model,
+            meta_model=test_model.meta_model,
+            source=test_source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="CNY",
+            unit_price=Decimal("4"),
+            price_fingerprint="legacy-test-fingerprint",
+        )
 
         self.assertTrue(
             ProcurementChannel.objects.filter(
@@ -589,6 +761,7 @@ class LLMOpsMockSeedCleanupTests(TestCase):
 
         self.assertGreater(stats["sources"], 0)
         self.assertGreater(stats["channels"], 0)
+        self.assertGreater(stats["channel_model_prices"], 0)
         self.assertGreater(stats["model_price_items"], 0)
         self.assertGreater(stats["channel_model_histories"], 0)
         self.assertFalse(
@@ -601,6 +774,21 @@ class LLMOpsMockSeedCleanupTests(TestCase):
                 slug__startswith="yunce-",
             ).exists()
         )
+        self.assertFalse(
+            ProcurementChannel.objects.filter(code="test-02").exists()
+        )
+        self.assertFalse(
+            ProcurementChannel.objects.filter(
+                code=REAL_RESOURCE_CHANNEL_CODE,
+            ).exists()
+        )
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(
+                slug="test-02-supplier",
+            ).exists()
+        )
+        real_source.refresh_from_db()
+        self.assertIsNone(real_source.channel_id)
         self.assertEqual(
             sum(second_stats.values()),
             0,
@@ -667,19 +855,18 @@ class LLMOpsSeedCommandSafeFlagTests(TestCase):
         from django.core.management import call_command
 
         seed_initial_price_sheet_safely()
-        cmp = ChannelModelPrice.objects.filter(
-            channel__code=REAL_RESOURCE_CHANNEL_CODE,
-        ).first()
-        cmp.is_listed = False
-        cmp.settlement_ratio = Decimal("0.1234")
-        cmp.save()
+        source = PriceCollectionSource.objects.get(slug="aliyun-sheet")
+        source.name = "人工改名价格源"
+        source.currency = "USD"
+        source.save()
 
         out = StringIO()
         call_command("seed_llm_ops_price_sheet", stdout=out)
 
-        cmp.refresh_from_db()
-        self.assertTrue(cmp.is_listed)
-        self.assertNotEqual(cmp.settlement_ratio, Decimal("0.1234"))
+        source.refresh_from_db()
+        self.assertNotEqual(source.name, "人工改名价格源")
+        self.assertEqual(source.currency, "CNY")
+        self.assertIsNone(source.channel_id)
         self.assertIn("[overwrite]", out.getvalue())
 
     def test_safe_flag_preserves_manual_prices(self):
@@ -688,18 +875,18 @@ class LLMOpsSeedCommandSafeFlagTests(TestCase):
         from django.core.management import call_command
 
         seed_initial_price_sheet_safely()
-        cmp = ChannelModelPrice.objects.filter(
-            channel__code=REAL_RESOURCE_CHANNEL_CODE,
+        source = PriceCollectionSource.objects.filter(
+            slug__endswith="-sheet",
         ).first()
-        cmp.is_listed = False
-        cmp.settlement_ratio = Decimal("0.2345")
-        cmp.save()
+        source.name = "人工改名价格源"
+        source.is_enabled = False
+        source.save()
 
         out = StringIO()
         call_command("seed_llm_ops_price_sheet", "--safe", stdout=out)
-        cmp.refresh_from_db()
-        self.assertFalse(cmp.is_listed)
-        self.assertEqual(cmp.settlement_ratio, Decimal("0.2345"))
+        source.refresh_from_db()
+        self.assertEqual(source.name, "人工改名价格源")
+        self.assertFalse(source.is_enabled)
         self.assertIn("[safe]", out.getvalue())
 
     def test_clean_mock_flag_removes_legacy_demo_rows(self):
@@ -722,6 +909,11 @@ class LLMOpsSeedCommandSafeFlagTests(TestCase):
         self.assertFalse(
             ProcurementChannel.objects.filter(
                 code="demo-premium-supplier",
+            ).exists()
+        )
+        self.assertFalse(
+            ProcurementChannel.objects.filter(
+                code=REAL_RESOURCE_CHANNEL_CODE,
             ).exists()
         )
         self.assertIn("Cleaned legacy mock", out.getvalue())

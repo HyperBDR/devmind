@@ -1,11 +1,11 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-2rem)] w-full max-w-3xl overflow-hidden rounded-lg bg-white shadow-xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="save"
     >
       <div class="border-b border-slate-200 px-5 py-4">
@@ -17,7 +17,7 @@
               Meta Model
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑元模型' : '新增元模型' }}
+              {{ form.id ? '编辑元模型' : '新建元模型' }}
             </h3>
             <p class="mt-1 text-sm leading-6 text-slate-500">
               元模型用于把不同价格源中的同一模型身份归一到厂商、能力和版本。
@@ -34,7 +34,7 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-12rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
         <section class="form-section">
           <div class="section-heading">
             <h4>模型身份</h4>
@@ -62,24 +62,19 @@
             </label>
             <label class="field-group">
               <span class="field-label">模型厂商</span>
-              <select v-model="form.vendor" class="field">
-                <option value="">未绑定</option>
-                <option
-                  v-for="provider in providers"
-                  :key="provider.id"
-                  :value="provider.id"
-                >
-                  {{ provider.name }}
-                </option>
-              </select>
+              <CompactSelect
+                v-model="form.vendor"
+                :options="vendorOptions"
+                class-name="meta-select w-full"
+              />
             </label>
             <label class="field-group">
               <span class="field-label">状态</span>
-              <select v-model="form.status" class="field">
-                <option value="active">Active</option>
-                <option value="deprecated">Deprecated</option>
-                <option value="unknown">Unknown</option>
-              </select>
+              <CompactSelect
+                v-model="form.status"
+                :options="statusOptions"
+                class-name="meta-select w-full"
+              />
             </label>
           </div>
         </section>
@@ -99,21 +94,12 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">版本</span>
-              <input
-                v-model="form.version"
-                class="field"
-                placeholder="例如：2024-08"
-              />
-            </label>
-            <label class="field-group">
               <span class="field-label">模态</span>
-              <select v-model="form.modality" class="field">
-                <option value="text">Text</option>
-                <option value="multimodal">Multimodal</option>
-                <option value="audio">Audio</option>
-                <option value="video">Video</option>
-              </select>
+              <CompactSelect
+                v-model="form.modality"
+                :options="modalityOptions"
+                class-name="meta-select w-full"
+              />
             </label>
             <label class="field-group">
               <span class="field-label">能力标签</span>
@@ -147,25 +133,17 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>别名与生命周期</h4>
+            <h4>别名</h4>
             <p>别名用于从采集结果中匹配同一元模型身份。</p>
           </div>
-          <div class="grid gap-4 md:grid-cols-2">
-            <label class="field-group md:col-span-2">
+          <div class="grid gap-4">
+            <label class="field-group">
               <span class="field-label">别名</span>
               <textarea
                 v-model="form.alias_text"
                 class="field min-h-24 resize-none font-mono"
                 placeholder="每行一个别名，例如 GPT-4o mini"
               />
-            </label>
-            <label class="field-group">
-              <span class="field-label">发布日期</span>
-              <input v-model="form.released_at" class="field" type="date" />
-            </label>
-            <label class="field-group">
-              <span class="field-label">弃用日期</span>
-              <input v-model="form.deprecated_at" class="field" type="date" />
             </label>
           </div>
         </section>
@@ -183,19 +161,17 @@
         </section>
       </div>
 
-      <div
-        class="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between"
-      >
+      <div class="modal-footer">
         <p
           v-if="saveError"
-          class="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"
+          class="modal-footer-status rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"
         >
           {{ saveError }}
         </p>
-        <span v-else class="text-xs text-slate-400">
+        <span v-else class="modal-footer-status modal-footer-note">
           {{ form.id ? '保存后会影响关联模型的展示身份。' : '创建后可绑定到模型 SKU。' }}
         </span>
-        <div class="flex justify-end gap-2">
+        <div class="modal-footer-actions">
           <button
             class="btn-secondary"
             type="button"
@@ -215,8 +191,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { llmOpsApi } from '@/api/llmOps'
+import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
 const props = defineProps({
   open: {
@@ -239,6 +216,27 @@ const form = ref(defaults())
 const saving = ref(false)
 const saveError = ref('')
 
+const statusOptions = [
+  { value: 'active', label: 'Active' },
+  { value: 'deprecated', label: 'Deprecated' },
+  { value: 'unknown', label: 'Unknown' }
+]
+
+const modalityOptions = [
+  { value: 'text', label: 'Text' },
+  { value: 'multimodal', label: 'Multimodal' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'video', label: 'Video' }
+]
+
+const vendorOptions = computed(() => [
+  { value: '', label: '未绑定' },
+  ...props.providers.map((provider) => ({
+    value: provider.id,
+    label: provider.name
+  }))
+])
+
 watch(
   () => [props.open, props.metaModel],
   () => {
@@ -255,7 +253,6 @@ function defaults() {
     code: '',
     vendor: '',
     family: '',
-    version: '',
     modality: 'text',
     status: 'active',
     context_window: 0,
@@ -263,8 +260,6 @@ function defaults() {
     original_capabilities: {},
     feature_text: '',
     alias_text: '',
-    released_at: '',
-    deprecated_at: '',
     metadata_text: '{}'
   }
 }
@@ -277,7 +272,6 @@ function metaModelToForm(item) {
     code: item.code || '',
     vendor: item.vendor || '',
     family: item.family || '',
-    version: item.version || '',
     modality: item.modality || 'text',
     status: item.status || 'active',
     context_window: item.context_window || 0,
@@ -285,8 +279,6 @@ function metaModelToForm(item) {
     original_capabilities: item.capabilities || {},
     feature_text: Array.isArray(features) ? features.join(', ') : '',
     alias_text: Array.isArray(item.aliases) ? item.aliases.join('\n') : '',
-    released_at: item.released_at || '',
-    deprecated_at: item.deprecated_at || '',
     metadata_text: JSON.stringify(item.metadata || {}, null, 2)
   }
 }
@@ -343,7 +335,6 @@ function normalizePayload(payload) {
     code: String(payload.code || '').trim(),
     vendor: payload.vendor || null,
     family: String(payload.family || '').trim(),
-    version: String(payload.version || '').trim(),
     modality: payload.modality || 'text',
     status: payload.status || 'active',
     aliases,
@@ -353,8 +344,6 @@ function normalizePayload(payload) {
     },
     context_window: Number(payload.context_window || 0),
     max_output_tokens: Number(payload.max_output_tokens || 0),
-    released_at: payload.released_at || null,
-    deprecated_at: payload.deprecated_at || null,
     metadata
   }
 }

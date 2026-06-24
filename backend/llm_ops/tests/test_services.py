@@ -19,6 +19,8 @@ from llm_ops.models import (
 from llm_ops.seed_data import seed_initial_price_sheet
 from llm_ops.services import (
     calculate_channel_model_cost,
+    import_manual_model_prices,
+    price_role_for_source,
     record_channel_model_price_history,
     record_resale_listing_price_history,
     resolve_channel_model_currency,
@@ -76,6 +78,32 @@ class LLMOpsPricingServiceTests(TestCase):
         )
 
         self.assertEqual(cost, Decimal("28.000000"))
+
+    def test_official_source_is_supplier_for_third_party_meta_model(self):
+        deepseek = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        deepseek_meta = MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            vendor=deepseek,
+        )
+        official_source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=self.provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+
+        role = price_role_for_source(
+            official_source,
+            meta_model=deepseek_meta,
+        )
+
+        self.assertEqual(role, LLMModel.PRICE_ROLE_SUPPLIER)
 
     def test_records_channel_media_price_history(self):
         self.model.currency = "CNY"
@@ -285,6 +313,60 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].unit_price, Decimal("1.500000"))
         self.assertEqual(cost, Decimal("1.500000"))
 
+    def test_sync_falls_back_to_meta_model_price_items(self):
+        official_source = PriceCollectionSource.objects.create(
+            name="OpenAI Official Meta",
+            slug="openai-official-meta",
+            provider=self.provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            currency="USD",
+        )
+        supplier_source = PriceCollectionSource.objects.create(
+            name="Supplier Without Items",
+            slug="supplier-without-items",
+            provider=self.provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        official_model = LLMModel.objects.create(
+            provider=self.provider,
+            meta_model=self.model.meta_model,
+            source=official_source,
+            name="GPT-4o Official",
+            code="gpt-4o-official",
+        )
+        official_item = ModelPriceItem.objects.create(
+            provider=self.provider,
+            model=official_model,
+            source=official_source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("2.5"),
+            price_fingerprint="official-meta-input",
+            is_current=True,
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=supplier_source,
+            settlement_ratio=Decimal("0.5"),
+        )
+
+        items = sync_channel_price_items(price)
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            input_tokens=1_000_000,
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].base_price_item, official_item)
+        self.assertEqual(items[0].unit_price, Decimal("1.250000"))
+        self.assertEqual(cost, Decimal("1.250000"))
+
     def test_marks_channel_item_comparison_unknown_for_currency_mismatch(self):
         ModelPriceItem.objects.create(
             provider=self.provider,
@@ -315,6 +397,41 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertIsNone(item.delta_amount)
         self.assertIsNone(item.delta_percent)
 
+    def test_manual_import_without_promotion_reuses_existing_model(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Sheet",
+            slug="supplier-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+
+        import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+
+        self.assertEqual(LLMModel.objects.count(), 1)
+        self.model.refresh_from_db()
+        self.assertIsNone(self.model.source)
+        self.assertEqual(
+            self.model.input_price_per_million,
+            Decimal("2.5"),
+        )
+        item = ModelPriceItem.objects.get(source=source)
+        self.assertEqual(item.model, self.model)
+
 
 class LLMOpsPriceSheetSeedTests(TestCase):
     def test_seed_initial_price_sheet_imports_models_and_discounts(self):
@@ -325,15 +442,20 @@ class LLMOpsPriceSheetSeedTests(TestCase):
         # canonical vendor lookup and does not bump this counter.
         self.assertEqual(stats["providers"], 6)
         self.assertEqual(stats["models"], 113)
-        openai = LLMProvider.objects.get(code="openai")
-        model = LLMModel.objects.get(provider=openai, code="gpt-5.4-pro")
-        price = ChannelModelPrice.objects.get(model=model)
-        self.assertEqual(price.channel.code, "real-resource-platform")
-        self.assertEqual(price.settlement_ratio, Decimal("0.55"))
-        self.assertEqual(model.source.provider, openai)
-        self.assertEqual(model.currency, "USD")
         aliyun = LLMProvider.objects.get(code="aliyun")
-        qwen = LLMModel.objects.get(provider=aliyun, code="qwen-plus")
+        model = LLMModel.objects.get(provider=aliyun, code="qwen-plus")
+        item = ModelPriceItem.objects.get(
+            source__slug="aliyun-sheet",
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+        self.assertEqual(item.unit_price, Decimal("0.800000"))
+        self.assertEqual(model.source.slug, "aliyun-sheet")
+        self.assertEqual(model.currency, "CNY")
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(slug="openai-sheet").exists()
+        )
+        qwen = model
         self.assertEqual(qwen.currency, "CNY")
         self.assertEqual(qwen.source.currency, "CNY")
         qwen_meta = MetaModel.objects.get(code="qwen-plus")
@@ -353,16 +475,15 @@ class LLMOpsPriceSheetSeedTests(TestCase):
         deepseek = LLMProvider.objects.get(code="deepseek")
         deepseek_meta = MetaModel.objects.get(code="deepseek-v3")
         self.assertEqual(deepseek_meta.vendor, deepseek)
-        self.assertEqual(
-            ChannelModelPrice.objects.get(
+        self.assertFalse(
+            ChannelModelPrice.objects.filter(
                 channel__code="real-resource-platform",
                 model=qwen,
-            ).currency,
-            "CNY",
+            ).exists()
         )
         source = qwen.source
         self.assertEqual(source.source_category, "supplier")
-        self.assertEqual(source.channel.code, "real-resource-platform")
+        self.assertIsNone(source.channel)
         self.assertFalse(
             PriceCollectionSource.objects.filter(
                 slug="yunce-aliyun-qwen-plus",

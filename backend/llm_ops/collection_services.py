@@ -22,11 +22,73 @@ from .models import (
     CollectedModelPriceSnapshot,
     LLMModel,
     LLMProvider,
+    MetaModel,
     ModelPriceItem,
     PriceCollectionRun,
     PriceCollectionSource,
 )
-from .services import ensure_meta_model, price_role_for_source
+from .services import (
+    ensure_meta_model,
+    find_aggregated_model,
+    normalize_currency,
+    price_role_for_source,
+    update_aggregated_model_identity,
+)
+
+MODELS_DEV_META_SOURCE_PROVIDERS = {
+    "alibaba",
+    "alibaba-cn",
+    "anthropic",
+    "cohere",
+    "deepseek",
+    "google",
+    "llama",
+    "minimax",
+    "minimax-cn",
+    "mistral",
+    "moonshotai",
+    "moonshotai-cn",
+    "novita-ai",
+    "openai",
+    "perplexity",
+    "stepfun",
+    "stepfun-ai",
+    "tencent-tokenhub",
+    "xai",
+    "xiaomi",
+    "zai",
+    "zhipuai",
+}
+
+CACHE_INPUT_PRICE_KEYS = (
+    "cache_input_price",
+    "cache_read",
+    "cache_read_price",
+    "cache_hit",
+    "cache_hit_price",
+    "cache_hit_input",
+    "cache_hit_input_price",
+    "cache_hit_tokens",
+    "cache_hits",
+    "cache_hits_price",
+    "cache_hits_input",
+    "cache_hits_input_price",
+    "cached_input",
+    "cached_input_price",
+    "cached_input_tokens",
+    "cached_token",
+    "cached_tokens",
+    "cached_tokens_price",
+    "cache_read_input",
+    "cache_read_input_price",
+    "cache_read_tokens",
+    "input_cache_read",
+    "input_cache_hit",
+    "input_cache_hits",
+    "input_cached",
+    "input_cached_price",
+    "hit_cache",
+)
 
 
 def collect_yunce_pricing_catalog(
@@ -337,7 +399,7 @@ def sync_configured_official_model_prices(
     *,
     provider_codes: list[str] | None = None,
     verify_source: bool = True,
-) -> dict[str, dict[str, int | list[str]]]:
+) -> dict[str, dict[str, int | str | list[str]]]:
     """Collect official prices for configured supported providers."""
     queryset = LLMProvider.objects.filter(
         code__in=provider_codes or OFFICIAL_PROVIDER_CONFIGS.keys(),
@@ -345,10 +407,22 @@ def sync_configured_official_model_prices(
     ).order_by("code")
     results = {}
     for provider in queryset:
-        results[provider.code] = sync_official_provider_model_prices(
-            provider=provider,
-            verify_source=verify_source,
-        )
+        try:
+            results[provider.code] = sync_official_provider_model_prices(
+                provider=provider,
+                verify_source=verify_source,
+            )
+        except Exception as exc:
+            results[provider.code] = {
+                "models": 0,
+                "created": 0,
+                "updated": 0,
+                "skipped": 0,
+                "changed": 0,
+                "unchanged": 0,
+                "skipped_model_codes": [],
+                "error": str(exc),
+            }
     return results
 
 
@@ -359,6 +433,7 @@ def sync_meta_models_from_models_dev(
 ) -> dict[str, int]:
     """Fetch models.dev and upsert canonical meta-model identities."""
     from .constants import (
+        canonical_meta_model_identity,
         canonical_vendor_for_model_code,
         ensure_canonical_vendor_row,
     )
@@ -368,10 +443,16 @@ def sync_meta_models_from_models_dev(
     if not isinstance(source_json, dict):
         raise ValueError("models.dev source did not return JSON.")
 
-    stats = {"models": 0, "created": 0, "updated": 0, "skipped": 0}
+    stats = {
+        "models": 0,
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "deleted": 0,
+    }
     seen_codes = set()
     with transaction.atomic():
-        for provider_payload in source_json.values():
+        for provider_payload in iter_models_dev_meta_sources(source_json):
             if not isinstance(provider_payload, dict):
                 continue
             models = provider_payload.get("models", {})
@@ -381,7 +462,12 @@ def sync_meta_models_from_models_dev(
                 if not isinstance(model_payload, dict):
                     stats["skipped"] += 1
                     continue
-                code = models_dev_meta_code(model_payload)
+                reported_code = models_dev_meta_code(model_payload)
+                identity = canonical_meta_model_identity(
+                    reported_code,
+                    model_payload.get("name"),
+                )
+                code = identity["code"]
                 if not code or code in seen_codes:
                     stats["skipped"] += 1
                     continue
@@ -397,12 +483,66 @@ def sync_meta_models_from_models_dev(
                 _, created, changed = upsert_models_dev_meta_model(
                     model_payload,
                     code=code,
+                    identity=identity,
                     vendor=vendor,
                     source_url=source_url,
                 )
                 stats["models"] += 1
                 stats["created" if created else "updated"] += int(changed)
+        stats["deleted"] = cleanup_stale_models_dev_meta_models(seen_codes)
     return stats
+
+
+def iter_models_dev_meta_sources(source_json: dict):
+    """Yield model-provider payloads accepted for meta-model sync.
+
+    models.dev contains both original model vendors and marketplaces.
+    The meta-model library should track original model families, not
+    every reseller SKU. We therefore only consume known primary vendor
+    catalogues plus a small fallback source for vendors that are not
+    published directly by models.dev yet.
+    """
+    entries = [
+        (provider_id, payload)
+        for provider_id, payload in source_json.items()
+        if provider_id in MODELS_DEV_META_SOURCE_PROVIDERS
+    ]
+    entries.sort(key=lambda item: models_dev_provider_priority(item[0]))
+    for _, payload in entries:
+        yield payload
+
+
+def models_dev_provider_priority(provider_id: str) -> tuple[int, str]:
+    """Prefer original vendor feeds before fallback aggregators."""
+    fallback_sources = {"novita-ai"}
+    return (1 if provider_id in fallback_sources else 0, provider_id)
+
+
+def cleanup_stale_models_dev_meta_models(active_codes: set[str]) -> int:
+    """Delete old online-only meta models outside the accepted source set."""
+    deleted = 0
+    for meta in MetaModel.objects.all():
+        if not (meta.metadata or {}).get("models_dev"):
+            continue
+        if meta.code in active_codes:
+            continue
+        if meta_model_has_business_links(meta):
+            continue
+        meta.delete()
+        deleted += 1
+    return deleted
+
+
+def meta_model_has_business_links(meta_model: MetaModel) -> bool:
+    """Return whether a meta model is referenced by business records."""
+    for relation in MetaModel._meta.related_objects:
+        if relation.related_model is MetaModel:
+            continue
+        if relation.related_model.objects.filter(
+            **{relation.field.name: meta_model}
+        ).exists():
+            return True
+    return False
 
 
 def models_dev_meta_code(model_payload: dict) -> str:
@@ -419,17 +559,18 @@ def upsert_models_dev_meta_model(
     model_payload: dict,
     *,
     code: str,
+    identity: dict,
     vendor: LLMProvider,
     source_url: str,
 ) -> tuple[MetaModel, bool, bool]:
     """Upsert one models.dev row without overwriting operator fields."""
-    name = str(model_payload.get("name") or code).strip() or code
+    name = identity["name"]
     defaults = {
         "name": name,
         "vendor": vendor,
         "family": str(model_payload.get("family") or "").strip(),
         "modality": models_dev_modality(model_payload),
-        "aliases": models_dev_meta_aliases(model_payload, code),
+        "aliases": models_dev_meta_aliases(model_payload, code, identity),
         "capabilities": models_dev_capabilities(model_payload),
         "context_window": models_dev_limit(model_payload, "context"),
         "max_output_tokens": models_dev_limit(model_payload, "output"),
@@ -514,13 +655,18 @@ def merge_meta_model_json(meta_model: MetaModel, defaults: dict) -> list[str]:
     return changed_fields
 
 
-def models_dev_meta_aliases(model_payload: dict, code: str) -> list[str]:
+def models_dev_meta_aliases(
+    model_payload: dict,
+    code: str,
+    identity: dict,
+) -> list[str]:
     """Return stable aliases from models.dev identity fields."""
     values = [
         model_payload.get("id"),
         model_payload.get("name"),
         model_payload.get("family"),
         code,
+        *identity["aliases"],
     ]
     aliases = []
     seen = set()
@@ -609,22 +755,16 @@ def upsert_collected_model(
     source_url: str,
 ) -> tuple[LLMModel, bool]:
     """Upsert one collected model into the canonical model table."""
-    provider = source.provider
-    if provider is None:
-        provider, _ = LLMProvider.objects.get_or_create(
-            code=slugify_provider(item.model_source),
-            defaults={
-                "name": item.model_source or "Unknown",
-                "is_active": True,
-            },
-        )
+    provider = resolve_collected_provider(item, source=source)
+    model_code = collected_model_code(item)
     lookup = {
         "provider": provider,
         "source": source,
-        "code": item.model_id or item.name,
+        "code": model_code,
     }
     meta_model = ensure_meta_model(
-        code=item.model_id or item.name,
+        code=model_code,
+        raw_code=collected_model_raw_code(item),
         name=item.name or item.model_id,
         provider=provider,
         modality=modality_from_source_type(item.source_model_type),
@@ -635,43 +775,135 @@ def upsert_collected_model(
         source_url=source_url,
     )
     defaults["meta_model"] = meta_model
-    defaults["price_role"] = price_role_for_source(source)
+    defaults["price_role"] = price_role_for_source(
+        source,
+        meta_model=meta_model,
+    )
     if source.updates_model_prices:
         return LLMModel.objects.update_or_create(**lookup, defaults=defaults)
 
-    create_defaults = model_identity_defaults_from_collected_item(
-        item,
+    model = find_aggregated_model(
+        provider=provider,
+        code=model_code,
+        meta_model=meta_model,
         source=source,
-        source_url=source_url,
     )
-    create_defaults["meta_model"] = meta_model
-    create_defaults["price_role"] = price_role_for_source(source)
-    model, created = LLMModel.objects.get_or_create(
-        **lookup,
-        defaults=create_defaults,
-    )
-    if created:
-        return model, True
+    if model is None:
+        create_defaults = model_identity_defaults_from_collected_item(item)
+        create_defaults["meta_model"] = meta_model
+        create_defaults["price_role"] = price_role_for_source(
+            source,
+            meta_model=meta_model,
+        )
+        return (
+            LLMModel.objects.create(
+                provider=provider,
+                code=model_code,
+                **create_defaults,
+            ),
+            True,
+        )
 
-    identity_fields = {
-        "meta_model": meta_model,
-        "name": create_defaults["name"],
-        "modality": create_defaults["modality"],
-        "currency": create_defaults["currency"],
-        "source": source,
-        "source_url": source_url,
-        "price_role": price_role_for_source(source),
-        "is_active": True,
-    }
-    changed_fields = []
-    for field, value in identity_fields.items():
-        if getattr(model, field) != value:
-            setattr(model, field, value)
-            changed_fields.append(field)
+    changed_fields = update_aggregated_model_identity(
+        model,
+        meta_model=meta_model,
+        name=item.name or item.model_id,
+        modality=modality_from_source_type(item.source_model_type),
+        currency=item.currency or source.currency or "USD",
+        current_source=source,
+    )
     if changed_fields:
         changed_fields.append("updated_at")
         model.save(update_fields=changed_fields)
     return model, False
+
+
+def collected_model_code(item: CollectedModelPricing) -> str:
+    """Return the most stable model code reported by a collector."""
+    for candidate in (
+        item.model_id,
+        collected_model_raw_code(item),
+        item.name,
+    ):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def collected_model_raw_code(item: CollectedModelPricing) -> str:
+    """Extract the raw upstream model code from collector payloads."""
+    raw_detail = item.raw_detail or {}
+    model_info = raw_detail.get("model_info") or {}
+    if not isinstance(model_info, dict):
+        model_info = {}
+
+    for candidate in (
+        raw_detail.get("model_id"),
+        raw_detail.get("model_code"),
+        raw_detail.get("code"),
+        raw_detail.get("id"),
+        model_info.get("model_id"),
+        model_info.get("model_code"),
+        model_info.get("code"),
+    ):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def resolve_collected_provider(
+    item: CollectedModelPricing,
+    *,
+    source: PriceCollectionSource,
+) -> LLMProvider:
+    """Resolve the provider row a collected model should attach to."""
+    if source.provider_id:
+        return source.provider
+
+    candidate_labels = [
+        item.provider,
+        item.raw_detail.get("model_info", {}).get("provider"),
+        item.model_source,
+    ]
+    matched = match_existing_provider(candidate_labels)
+    if matched is not None:
+        return matched
+
+    provider_name = next(
+        (
+            str(label).strip()
+            for label in candidate_labels
+            if str(label or "").strip()
+        ),
+        "Unknown",
+    )
+    provider, _ = LLMProvider.objects.get_or_create(
+        code=slugify_provider(provider_name),
+        defaults={
+            "name": provider_name,
+            "is_active": True,
+        },
+    )
+    return provider
+
+
+def match_existing_provider(labels: list[str | None]) -> LLMProvider | None:
+    """Return an existing provider whose aliases match one label."""
+    normalized_labels = {
+        normalize_provider_label(label)
+        for label in labels
+        if normalize_provider_label(label)
+    }
+    if not normalized_labels:
+        return None
+
+    for provider in LLMProvider.objects.all().order_by("id"):
+        aliases = provider_aliases(provider)
+        if aliases & normalized_labels:
+            return provider
+    return None
 
 
 def upsert_collected_snapshot(
@@ -744,7 +976,7 @@ def collected_payload(
         "provider": provider,
         "model": model,
         "meta_model": model.meta_model,
-        "source_model_id": item.model_id or item.name,
+        "source_model_id": collected_model_code(item),
         "source_model_name": item.name or item.model_id,
         "source_model_type": item.source_model_type,
         "source_provider_name": item.model_source,
@@ -965,7 +1197,7 @@ def token_price_item_payloads(
         "output_non_thinking_price",
         "output_thinking_price",
     )
-    cache_price = first_decimal_from_row(values, "cache_input_price")
+    cache_price = first_decimal_from_row(values, *CACHE_INPUT_PRICE_KEYS)
     input_range = parse_price_range(values.get("input_token_range"))
     output_range = parse_price_range(values.get("output_token_range"))
     if input_price is not None:
@@ -1264,17 +1496,12 @@ def model_defaults_from_collected_item(
 
 def model_identity_defaults_from_collected_item(
     item: CollectedModelPricing,
-    *,
-    source: PriceCollectionSource,
-    source_url: str,
 ) -> dict:
     """Build model defaults that do not promote collected prices."""
     return {
         "name": item.name or item.model_id,
         "modality": modality_from_source_type(item.source_model_type),
-        "currency": item.currency or "USD",
-        "source": source,
-        "source_url": source_url,
+        "currency": normalize_currency(item.currency or "USD"),
         "is_active": True,
     }
 
@@ -1302,7 +1529,7 @@ def prices_from_collected_item(item: CollectedModelPricing) -> dict:
             item.unit,
         )
 
-    cache_price = first_decimal_value(item, "cache_input_price")
+    cache_price = first_decimal_value(item, *CACHE_INPUT_PRICE_KEYS)
     if cache_price is not None:
         values["cache_input_price_per_million"] = price_per_million(
             cache_price,
@@ -1515,11 +1742,11 @@ def video_prices_from_rows(item: CollectedModelPricing) -> dict:
 
 def first_decimal_value(
     item: CollectedModelPricing,
-    key: str,
+    *keys: str,
 ) -> Decimal | None:
     """Return the first decimal value for a normalized row key."""
     for row in item.price_rows:
-        value = to_decimal(row.values.get(key))
+        value = first_decimal_from_row(row.values, *keys)
         if value is not None:
             return value
     return None
@@ -1530,11 +1757,22 @@ def first_decimal_from_row(
     *keys: str,
 ) -> Decimal | None:
     """Return the first decimal value from a row dictionary."""
+    normalized_values = {
+        normalize_price_key(key): value
+        for key, value in values.items()
+    }
     for key in keys:
         value = to_decimal(values.get(key))
+        if value is None:
+            value = to_decimal(normalized_values.get(normalize_price_key(key)))
         if value is not None:
             return value
     return None
+
+
+def normalize_price_key(value) -> str:
+    """Normalize provider-specific price labels to comparable keys."""
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
 
 
 def decimal_to_json_value(value: Decimal | None):

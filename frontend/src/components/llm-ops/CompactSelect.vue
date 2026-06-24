@@ -3,8 +3,12 @@
     <button
       ref="triggerRef"
       class="compact-select-trigger"
-      :class="{ 'compact-select-sm': size === 'sm' }"
+      :class="{
+        'compact-select-sm': size === 'sm',
+        'compact-select-disabled': disabled
+      }"
       :title="title || selectedOption?.label || ''"
+      :disabled="disabled"
       type="button"
       @click="toggle"
     >
@@ -96,9 +100,17 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  disabled: {
+    type: Boolean,
+    default: false
+  },
   searchPlaceholder: {
     type: String,
     default: '搜索选项'
+  },
+  menuMinWidth: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -155,6 +167,7 @@ onBeforeUnmount(() => {
 })
 
 function toggle() {
+  if (props.disabled) return
   open.value = !open.value
   if (open.value) {
     nextTick(updateMenuPosition)
@@ -191,20 +204,30 @@ function updateMenuPosition() {
   if (!open.value || !triggerRef.value) return
   const rect = triggerRef.value.getBoundingClientRect()
   const gap = 4
+  const viewportPadding = 12
   const spaceBelow = window.innerHeight - rect.bottom - gap
   const spaceAbove = rect.top - gap
   const opensUp = spaceBelow < 140 && spaceAbove > spaceBelow
+  const desiredWidth = Math.max(rect.width, Number(props.menuMinWidth) || 0)
+  const width = Math.min(
+    desiredWidth,
+    window.innerWidth - viewportPadding * 2
+  )
+  const left = Math.min(
+    Math.max(viewportPadding, rect.left),
+    window.innerWidth - width - viewportPadding
+  )
   const maxHeight = Math.max(
     120,
     Math.min(260, opensUp ? spaceAbove - gap : spaceBelow - gap)
   )
   menuStyle.value = {
-    left: `${rect.left}px`,
+    left: `${left}px`,
     top: opensUp ? 'auto' : `${rect.bottom + gap}px`,
     bottom: opensUp
       ? `${window.innerHeight - rect.top + gap}px`
       : 'auto',
-    width: `${rect.width}px`,
+    width: `${width}px`,
     maxHeight: `${maxHeight}px`
   }
 }
@@ -241,6 +264,26 @@ function normalizeSearch(value) {
   line-height: 1rem;
 }
 
+.meta-select .compact-select-trigger {
+  @apply min-h-10 rounded-xl border-slate-200 bg-white px-3 py-2 text-slate-800 shadow-sm hover:border-slate-300 hover:bg-slate-50 focus:border-indigo-300 focus:bg-white focus:ring-indigo-100;
+}
+
+.meta-select .compact-select-menu {
+  @apply rounded-xl border-slate-200 p-1.5 shadow-xl;
+}
+
+.meta-select .compact-select-search {
+  @apply rounded-lg border-slate-200 bg-white;
+}
+
+.meta-select .compact-select-option {
+  @apply rounded-lg px-3 py-2 text-slate-700;
+}
+
+.meta-select .compact-select-option-active {
+  @apply bg-indigo-50 text-indigo-700;
+}
+
 .compact-select-caret {
   @apply shrink-0 text-xs leading-none text-slate-400;
 }
@@ -259,6 +302,10 @@ function normalizeSearch(value) {
 
 .compact-select-option-active {
   @apply bg-indigo-50 text-indigo-700;
+}
+
+.compact-select-disabled {
+  @apply cursor-not-allowed bg-slate-50 text-slate-400 hover:border-slate-200 focus:border-slate-200 focus:ring-0;
 }
 
 .compact-select-option-disabled {

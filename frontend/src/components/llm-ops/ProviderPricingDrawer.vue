@@ -29,7 +29,7 @@
       </div>
 
       <div class="space-y-5 px-5 py-5">
-        <div class="grid gap-3 md:grid-cols-4">
+        <div class="grid gap-3 md:grid-cols-5">
           <div class="rounded-lg bg-slate-50 px-3 py-2">
             <p class="text-xs text-slate-500">模型数量</p>
             <p class="mt-1 font-mono text-sm text-slate-800">
@@ -37,9 +37,21 @@
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
+            <p class="text-xs text-slate-500">已定价模型</p>
+            <p class="mt-1 font-mono text-sm text-slate-800">
+              {{ pricedModelCount }}
+            </p>
+          </div>
+          <div class="rounded-lg bg-slate-50 px-3 py-2">
             <p class="text-xs text-slate-500">模型价格源</p>
             <p class="mt-1 font-mono text-sm text-slate-800">
               {{ sources.length }}
+            </p>
+          </div>
+          <div class="rounded-lg bg-slate-50 px-3 py-2">
+            <p class="text-xs text-slate-500">价格结构</p>
+            <p class="mt-1 text-sm text-slate-800">
+              原厂 {{ officialModelCount }} · 供货商 {{ supplierModelCount }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
@@ -66,40 +78,52 @@
 
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
-            <h3 class="panel-title">模型定价详情</h3>
+            <div>
+              <h3 class="panel-title">厂商模型价格</h3>
+              <p class="mt-1 text-xs text-slate-500">
+                按模型汇总输入、输出、缓存等核心价格，减少逐维度展开带来的噪音。
+              </p>
+            </div>
+            <div class="grid w-full gap-3 md:max-w-md md:grid-cols-[minmax(0,1fr)_9rem]">
+              <input
+                v-model="search"
+                class="field-input"
+                placeholder="搜索模型、来源或 code"
+              />
+              <select v-model="categoryFilter" class="field-input">
+                <option value="all">全部来源</option>
+                <option value="official_provider">原厂</option>
+                <option value="supplier">供货商</option>
+                <option value="manual">人工</option>
+              </select>
+            </div>
           </div>
           <div class="overflow-x-auto">
-            <table class="data-table">
+            <table class="data-table pricing-source-table">
+              <colgroup>
+                <col class="model-col" />
+                <col class="source-col" />
+                <col class="type-col" />
+                <col class="price-col" />
+                <col class="time-col" />
+              </colgroup>
               <thead>
                 <tr>
                   <th class="table-head">模型</th>
-                  <th class="table-head">计价维度</th>
                   <th class="table-head">模型价格源</th>
                   <th class="table-head">来源类型</th>
-                  <th class="table-head text-right">价格</th>
-                  <th class="table-head">原始币种</th>
+                  <th class="table-head">价格摘要</th>
                   <th class="table-head">更新时间</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in priceRows" :key="row.key">
+                <tr v-for="row in filteredModelRows" :key="row.key">
                   <td class="table-cell max-w-64">
                     <p class="font-medium text-slate-900">
                       {{ row.model.name }}
                     </p>
                     <p class="mt-1 font-mono text-xs text-slate-400">
                       {{ row.model.code }} · {{ modalityLabel(row.model.modality) }}
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <p class="font-medium text-slate-800">
-                      {{ row.dimension_label }}
-                    </p>
-                    <p
-                      v-if="row.spec_label || row.tier_label"
-                      class="mt-1 text-xs text-slate-400"
-                    >
-                      {{ [row.spec_label, row.tier_label].filter(Boolean).join(' · ') }}
                     </p>
                   </td>
                   <td class="table-cell">
@@ -128,18 +152,28 @@
                       {{ row.source_category_label }}
                     </span>
                   </td>
-                  <td class="table-cell text-right font-mono font-semibold text-slate-800">
-                    {{ row.price }}
-                  </td>
-                  <td class="table-cell font-mono">
-                    {{ row.currency || '-' }}
+                  <td class="table-cell">
+                    <div
+                      v-if="row.price_summary.length"
+                      class="flex flex-wrap gap-1.5"
+                    >
+                      <span
+                        v-for="item in row.price_summary"
+                        :key="item.label"
+                        class="price-chip"
+                      >
+                        <span class="text-slate-400">{{ item.label }}</span>
+                        {{ item.value }}
+                      </span>
+                    </div>
+                    <span v-else class="text-xs text-slate-400">暂无价格</span>
                   </td>
                   <td class="table-cell">
                     {{ formatDateTime(row.updated_at) }}
                   </td>
                 </tr>
-                <tr v-if="!priceRows.length">
-                  <td class="table-cell text-slate-500" colspan="7">
+                <tr v-if="!filteredModelRows.length">
+                  <td class="table-cell text-slate-500" colspan="5">
                     当前服务商还没有模型定价记录。
                   </td>
                 </tr>
@@ -149,7 +183,14 @@
         </div>
 
         <div v-if="sources.length" class="panel space-y-3">
-          <h3 class="panel-title">模型价格源</h3>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <h3 class="panel-title">价格源概览</h3>
+              <p class="mt-1 text-xs text-slate-500">
+                这里保留该厂商下的原厂、供货商和人工价格源，便于继续录价和维护。
+              </p>
+            </div>
+          </div>
           <div class="grid gap-3 md:grid-cols-2">
             <div
               v-for="source in sources"
@@ -162,7 +203,7 @@
                     {{ source.name }}
                   </p>
                   <p class="mt-1 text-xs text-slate-500">
-                    {{ sourceCategoryLabel(source.source_category) }}
+                    {{ sourceCategoryLabel(businessSourceCategory(source)) }}
                     <span v-if="source.channel_name">
                       / {{ source.channel_name }}
                     </span>
@@ -183,6 +224,42 @@
                   {{ source.is_enabled ? '启用' : '停用' }}
                 </span>
               </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <OperationIconButton
+                  icon="price"
+                  label="价格明细"
+                  @click="$emit('view-source', source)"
+                />
+                <OperationIconButton
+                  v-if="source.can_manual_entry"
+                  icon="manual"
+                  label="手工录价"
+                  @click="$emit('manual-entry-source', source)"
+                />
+                <OperationIconButton
+                  icon="edit"
+                  label="编辑"
+                  @click="$emit('edit-source', source)"
+                />
+                <OperationIconButton
+                  :icon="source.is_enabled ? 'toggleOff' : 'toggleOn'"
+                  :label="source.is_enabled ? '停用' : '启用'"
+                  :tone="source.is_enabled ? 'warn' : 'success'"
+                  @click="$emit('toggle-source', source)"
+                />
+                <OperationIconButton
+                  v-if="source.can_collect"
+                  icon="collect"
+                  :label="source.collect_action_label || '采集价格'"
+                  @click="$emit('collect-source', source)"
+                />
+                <OperationIconButton
+                  icon="delete"
+                  label="删除"
+                  tone="danger"
+                  @click="$emit('delete-source', source)"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -192,9 +269,18 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
-defineEmits(['close'])
+defineEmits([
+  'close',
+  'view-source',
+  'manual-entry-source',
+  'edit-source',
+  'toggle-source',
+  'collect-source',
+  'delete-source'
+])
 
 const props = defineProps({
   provider: {
@@ -223,16 +309,45 @@ const props = defineProps({
   }
 })
 
+const search = ref('')
+const categoryFilter = ref('all')
+
 const priceSourceUrl = computed(() => {
   const source = preferredPriceSource(props.sources)
   return source?.endpoint_url || props.provider?.price_source_url || ''
 })
 
-const priceRows = computed(() =>
-  props.models.flatMap((model) => {
-    const standardRows = standardPriceRows(model)
-    return standardRows.length ? standardRows : legacyPriceRows(model)
+const modelRows = computed(() =>
+  props.models.map((model) => buildModelRow(model))
+)
+
+const filteredModelRows = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  return modelRows.value.filter((row) => {
+    if (
+      categoryFilter.value !== 'all' &&
+      row.source_category !== categoryFilter.value
+    ) {
+      return false
+    }
+    if (!keyword) return true
+    return row.search_text.includes(keyword)
   })
+})
+
+const officialModelCount = computed(
+  () =>
+    modelRows.value.filter(
+      (row) => row.source_category === 'official_provider'
+    ).length
+)
+
+const supplierModelCount = computed(
+  () => modelRows.value.filter((row) => row.source_category === 'supplier').length
+)
+
+const pricedModelCount = computed(
+  () => modelRows.value.filter((row) => row.price_summary.length > 0).length
 )
 
 function convertCurrencyAmount(value, sourceCurrency = 'USD') {
@@ -264,7 +379,44 @@ function hasValue(value) {
   return value !== null && value !== undefined && value !== ''
 }
 
-function standardPriceRows(model) {
+function buildModelRow(model) {
+  const items = currentPriceItemsForModel(model)
+  const fallbackSource = items[0] ? sourceForItem(items[0]) : null
+  const source = sourceForModel(model) || fallbackSource || {}
+  const relation = sourceRelation({
+    ...source,
+    provider_name: items[0]?.source_provider_name || source.provider_name,
+    channel_name: items[0]?.source_channel_name || source.channel_name
+  })
+  const category = businessSourceCategory(items[0] || model, model, source)
+  const priceSummary = summarizeModelPrices(model, items)
+  const updatedAt = latestModelUpdatedAt(model, items)
+  return {
+    key: `model-${model.id}`,
+    model,
+    source_name: items[0]?.source_name || model.source_name || source.name || '未绑定价格源',
+    source_url: items[0]?.source_endpoint_url || model.source_endpoint_url || source.endpoint_url || '',
+    source_relation: relation,
+    source_category: category,
+    source_category_label: sourceCategoryLabel(category),
+    source_tone: sourceTone(category),
+    price_summary: priceSummary,
+    updated_at: updatedAt,
+    search_text: [
+      model.name,
+      model.code,
+      modalityLabel(model.modality),
+      items[0]?.source_name || model.source_name || source.name,
+      relation,
+      category
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  }
+}
+
+function currentPriceItemsForModel(model) {
   return props.priceItems
     .filter(
       (item) =>
@@ -277,57 +429,6 @@ function standardPriceRows(model) {
       const rightKey = `${right.dimension}-${right.tier_start || ''}`
       return leftKey.localeCompare(rightKey)
     })
-    .map((item) => priceRowFromItem(model, item))
-}
-
-function priceRowFromItem(model, item) {
-  const source = sourceForItem(item) || {}
-  const relation = sourceRelation({
-    ...source,
-    provider_name: item.source_provider_name || source.provider_name,
-    channel_name: item.source_channel_name || source.channel_name
-  })
-  return {
-    key: `item-${item.id}`,
-    model,
-    dimension_label: `${dimensionLabel(item.dimension)} ${billingUnitLabel(item.billing_unit)}`,
-    spec_label: specLabel(item.spec || {}),
-    tier_label: tierLabel(item),
-    source_name: item.source_name || source.name || '未绑定价格源',
-    source_url: item.source_endpoint_url || source.endpoint_url || '',
-    source_relation: relation,
-    source_category_label: sourceCategoryLabel(
-      item.source_category || source.source_category
-    ),
-    source_tone: sourceTone(item.source_category || source.source_category),
-    price: money(item.unit_price, item.currency),
-    currency: item.currency,
-    updated_at: item.updated_at || item.effective_from
-  }
-}
-
-function legacyPriceRows(model) {
-  return legacyPricingItems(model).map((item, index) => {
-    const source = sourceForModel(model) || {}
-    const relation = sourceRelation(source)
-    return {
-      key: `legacy-${model.id}-${index}`,
-      model,
-      dimension_label: item.label,
-      spec_label: '',
-      tier_label: '',
-      source_name: model.source_name || source.name || '模型主表价格',
-      source_url: model.source_endpoint_url || source.endpoint_url || '',
-      source_relation: relation,
-      source_category_label: sourceCategoryLabel(
-        model.source_category || source.source_category
-      ),
-      source_tone: sourceTone(model.source_category || source.source_category),
-      price: item.value,
-      currency: model.currency,
-      updated_at: model.last_price_updated_at || model.updated_at
-    }
-  })
 }
 
 function legacyPricingItems(model) {
@@ -366,42 +467,6 @@ function dimensionLabel(dimension) {
     video_output: '视频输出'
   }
   return labels[dimension] || dimension || '-'
-}
-
-function billingUnitLabel(unit) {
-  const labels = {
-    per_1m_tokens: '/ 1M tokens',
-    per_image: '/ 张',
-    per_second: '/ 秒',
-    per_generation: '/ 次'
-  }
-  return labels[unit] || unit || ''
-}
-
-function specLabel(spec) {
-  const entries = Object.entries(spec || {}).filter(
-    ([, value]) => value !== null && value !== undefined && value !== ''
-  )
-  return entries.map(([key, value]) => `${specKeyLabel(key)}:${value}`).join(' ')
-}
-
-function specKeyLabel(key) {
-  const labels = {
-    resolution: '分辨率',
-    size: '尺寸',
-    quality: '质量',
-    audio: '音频',
-    mode: '模式',
-    inference_type: '推理'
-  }
-  return labels[key] || key
-}
-
-function tierLabel(item) {
-  if (!item.tier_start && !item.tier_end) return ''
-  const start = item.tier_start ?? 0
-  const end = item.tier_end || '不限'
-  return `${start}-${end}`
 }
 
 function tokenPricingItems(model) {
@@ -452,6 +517,70 @@ function priceItem(label, value, currency) {
   }
 }
 
+function currentPriceItemSummary(item) {
+  return {
+    label: compactDimensionLabel(item.dimension, item.billing_unit),
+    value: money(item.unit_price, item.currency)
+  }
+}
+
+function compactDimensionLabel(dimension, billingUnit) {
+  const labels = {
+    text_input: '输入',
+    text_output: '输出',
+    cache_input: '缓存',
+    image_input: '图入',
+    image_output: '图出',
+    audio_input: '音入',
+    audio_output: '音出',
+    video_input: '视入',
+    video_output: '视出'
+  }
+  const base = labels[dimension] || dimensionLabel(dimension)
+  if (billingUnit === 'per_image') return `${base}/张`
+  if (billingUnit === 'per_second') return `${base}/秒`
+  if (billingUnit === 'per_generation') return `${base}/次`
+  return base
+}
+
+function summarizeModelPrices(model, items) {
+  if (items.length) {
+    const preferredOrder = [
+      'text_input',
+      'text_output',
+      'cache_input',
+      'audio_input',
+      'audio_output',
+      'image_output',
+      'video_input',
+      'video_output'
+    ]
+    return items
+      .slice()
+      .sort(
+        (left, right) =>
+          preferredOrder.indexOf(left.dimension) -
+          preferredOrder.indexOf(right.dimension)
+      )
+      .map((item) => currentPriceItemSummary(item))
+      .slice(0, 3)
+  }
+  return legacyPricingItems(model).slice(0, 3)
+}
+
+function latestModelUpdatedAt(model, items) {
+  const itemTimes = items.map((item) => item.updated_at || item.effective_from)
+  const candidates = [
+    ...itemTimes,
+    model.last_price_updated_at,
+    model.updated_at
+  ].filter(Boolean)
+  if (!candidates.length) return ''
+  return candidates.sort(
+    (left, right) => new Date(right).getTime() - new Date(left).getTime()
+  )[0]
+}
+
 function sourceRelation(source) {
   if (source?.channel_name) return source.channel_name
   if (source?.provider_name) return source.provider_name
@@ -494,11 +623,25 @@ function formatDateTime(value) {
 
 function preferredPriceSource(sources) {
   return (
-    sources.find((source) => source.source_category === 'official_provider') ||
+    sources.find(
+      (source) => businessSourceCategory(source) === 'official_provider'
+    ) ||
     sources.find((source) => String(source.slug || '').endsWith('-official')) ||
     sources.find((source) => source.updates_model_prices) ||
     sources.find((source) => source.endpoint_url) ||
     null
+  )
+}
+
+function businessSourceCategory(item, model = {}, source = null) {
+  return (
+    item?.business_source_category ||
+    model?.business_source_category ||
+    source?.business_source_category ||
+    item?.source_category ||
+    model?.source_category ||
+    source?.source_category ||
+    'unknown'
   )
 }
 
@@ -538,6 +681,7 @@ function sourceTone(category) {
 
 .data-table {
   @apply min-w-full divide-y divide-slate-200;
+  table-layout: fixed;
 }
 
 .data-table tbody {
@@ -549,15 +693,43 @@ function sourceTone(category) {
 }
 
 .table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
 }
 
 .table-cell {
-  @apply whitespace-nowrap px-4 py-3 text-sm text-slate-600;
+  @apply min-w-0 px-4 py-3 text-sm text-slate-600;
+}
+
+.pricing-source-table .model-col {
+  width: 24%;
+}
+
+.pricing-source-table .source-col {
+  width: 24%;
+}
+
+.pricing-source-table .type-col {
+  width: 14%;
+}
+
+.pricing-source-table .price-col {
+  width: 24%;
+}
+
+.pricing-source-table .time-col {
+  width: 14%;
+}
+
+.field-input {
+  @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100;
 }
 
 .source-link {
   @apply block max-w-52 truncate font-medium text-indigo-600 hover:text-indigo-700 hover:underline;
+}
+
+.price-chip {
+  @apply inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700;
 }
 
 .source-badge {

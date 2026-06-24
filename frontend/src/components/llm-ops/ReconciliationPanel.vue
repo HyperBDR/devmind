@@ -143,7 +143,7 @@
           :title="createDisabledReason"
         >
           <span class="icon-mark" />
-          新增对账记录
+          新建对账记录
         </button>
       </div>
       <p v-if="createDisabledReason" class="form-warning">

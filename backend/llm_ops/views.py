@@ -12,7 +12,6 @@ from rest_framework.views import APIView
 
 from .collection_services import (
     sync_meta_models_from_models_dev,
-    sync_official_provider_model_prices,
     sync_yunce_model_prices,
 )
 from .constants import SUPPLIER_SOURCE_VENDOR_ALIASES
@@ -56,6 +55,7 @@ from .serializers import (
     UsageReconciliationRecordSerializer,
     YunceCollectionRequestSerializer,
 )
+from .source_collectors import source_supports_code_collection
 from .services import (
     build_currency_conversion_context,
     calculate_usage_cost,
@@ -68,6 +68,7 @@ from .services import (
     resolve_resale_listing_currency,
     sync_channel_price_items,
 )
+from .tasks import collect_price_source_prices
 
 
 FEATURE_KEY = "llm_ops"
@@ -148,34 +149,36 @@ class PriceCollectionSourceViewSet(
         return PriceCollectionSource.objects.select_related(
             "provider",
             "channel",
+        ).prefetch_related(
+            "models__meta_model",
+            "models__meta_model__vendor",
         ).order_by("source_category", "provider__name", "channel__name", "id")
 
     @action(detail=True, methods=["post"], url_path="collect")
     def collect(self, request, pk=None):
-        """Collect prices from a configured source."""
+        """Schedule backend code to collect prices from a source."""
         source = self.get_object()
         if not source.is_enabled:
             return Response(
                 {"detail": "Price collection source is disabled."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if (
-            source.source_category
-            == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-            and source.provider_id
-        ):
-            try:
-                stats = sync_official_provider_model_prices(
-                    provider=source.provider,
-                    source=source,
-                    verify_source=True,
-                )
-            except ValueError as exc:
-                return Response(
-                    {"detail": str(exc)},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            return Response(stats, status=status.HTTP_200_OK)
+        if source_supports_code_collection(source):
+            task = collect_price_source_prices.delay(
+                source_id=source.id,
+                verify_source=True,
+            )
+            return Response(
+                {
+                    "detail": "Price collection task scheduled.",
+                    "task_id": task.id,
+                    "provider_code": (
+                        source.provider.code if source.provider_id else ""
+                    ),
+                    "source_id": source.id,
+                },
+                status=status.HTTP_202_ACCEPTED,
+            )
 
         return Response(
             {
@@ -302,21 +305,32 @@ class MetaModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
         return queryset.order_by("name", "id")
 
     def list(self, request, *args, **kwargs):
-        from .seed_data import resolve_orphan_meta_models
+        from .seed_data import (
+            normalize_meta_model_catalog,
+            resolve_orphan_meta_models,
+        )
 
+        normalize_meta_model_catalog()
         resolve_orphan_meta_models()
         return super().list(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
-        from .seed_data import resolve_orphan_meta_models
+        from .seed_data import (
+            normalize_meta_model_catalog,
+            resolve_orphan_meta_models,
+        )
 
+        normalize_meta_model_catalog()
         resolve_orphan_meta_models()
         return super().retrieve(request, *args, **kwargs)
 
     @action(detail=False, methods=["post"], url_path="sync")
     def sync(self, request):
         """Refresh meta models from the public models.dev API."""
+        from .seed_data import normalize_meta_model_catalog
+
         stats = sync_meta_models_from_models_dev()
+        stats["meta_model_normalization"] = normalize_meta_model_catalog()
         return Response(stats, status=status.HTTP_200_OK)
 
 
@@ -328,6 +342,7 @@ class LLMModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
     def get_queryset(self):
         queryset = LLMModel.objects.select_related(
             "meta_model",
+            "meta_model__vendor",
             "provider",
             "source",
         )
@@ -351,8 +366,11 @@ class ModelPriceItemViewSet(
     def get_queryset(self):
         queryset = ModelPriceItem.objects.select_related(
             "meta_model",
+            "meta_model__vendor",
             "provider",
             "model",
+            "model__meta_model",
+            "model__meta_model__vendor",
             "source",
         )
         provider = self.request.query_params.get("provider")
@@ -408,6 +426,20 @@ class ProcurementChannelViewSet(
                 output_field=IntegerField(),
             ),
         ).order_by("name", "id")
+
+    def perform_destroy(self, instance):
+        """Delete channel-scoped records before removing the channel.
+
+        ``ResaleListing.channel`` is nullable. Letting Django delete the
+        channel first would set channel-specific listings to ``NULL`` and
+        can collide with the platform/model auto-listing uniqueness
+        constraint. A removed procurement channel should remove the
+        channel-specific listing rows instead of converting them into
+        auto-listings.
+        """
+        with transaction.atomic():
+            ResaleListing.objects.filter(channel=instance).delete()
+            instance.delete()
 
 
 class ChannelModelPriceViewSet(
@@ -827,13 +859,23 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
 
         platform_id = request.data.get("platform")
         model_ids = request.data.get("models", [])
+        listing_ids = request.data.get("listings", [])
         action_name = request.data.get("action")
         if not platform_id:
             return Response(
                 {"detail": "platform is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not isinstance(model_ids, list) or not model_ids:
+        if listing_ids is None:
+            listing_ids = []
+        if not isinstance(listing_ids, list):
+            return Response(
+                {"detail": "listings must be a list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not listing_ids and (
+            not isinstance(model_ids, list) or not model_ids
+        ):
             return Response(
                 {"detail": "models must be a non-empty list."},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -846,24 +888,39 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
 
         listings = []
         with transaction.atomic():
-            queryset = ResaleListing.objects.filter(
-                platform_id=platform_id,
-                model_id__in=model_ids,
-            ).order_by("model_id", "-is_active", "-updated_at", "-id")
-            seen = set()
-            for listing in queryset:
-                if listing.model_id in seen:
-                    continue
-                if not _is_transition_candidate(listing, action_name):
-                    candidate = queryset.filter(
-                        model_id=listing.model_id,
-                        workflow_status__in=_transition_source_workflows(
-                            action_name
-                        ),
-                    ).first()
-                    if candidate:
-                        listing = candidate
-                seen.add(listing.model_id)
+            if listing_ids:
+                queryset = ResaleListing.objects.filter(
+                    platform_id=platform_id,
+                    id__in=listing_ids,
+                ).order_by("id")
+                if queryset.count() != len(set(listing_ids)):
+                    return Response(
+                        {"detail": "Some listings were not found."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                target_listings = list(queryset)
+            else:
+                queryset = ResaleListing.objects.filter(
+                    platform_id=platform_id,
+                    model_id__in=model_ids,
+                ).order_by("model_id", "-is_active", "-updated_at", "-id")
+                target_listings = []
+                seen = set()
+                for listing in queryset:
+                    if listing.model_id in seen:
+                        continue
+                    if not _is_transition_candidate(listing, action_name):
+                        candidate = queryset.filter(
+                            model_id=listing.model_id,
+                            workflow_status__in=_transition_source_workflows(
+                                action_name
+                            ),
+                        ).first()
+                        if candidate:
+                            listing = candidate
+                    seen.add(listing.model_id)
+                    target_listings.append(listing)
+            for listing in target_listings:
                 try:
                     _apply_resale_listing_transition(listing, action_name)
                 except ValueError as exc:
@@ -884,30 +941,47 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
 
         platform_id = request.data.get("platform")
         model_ids = request.data.get("models", [])
+        listing_ids = request.data.get("listings", [])
         if not platform_id:
             return Response(
                 {"detail": "platform is required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not isinstance(model_ids, list) or not model_ids:
+        if listing_ids is None:
+            listing_ids = []
+        if not isinstance(listing_ids, list):
+            return Response(
+                {"detail": "listings must be a list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not listing_ids and (
+            not isinstance(model_ids, list) or not model_ids
+        ):
             return Response(
                 {"detail": "models must be a non-empty list."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         with transaction.atomic():
-            listings = list(
-                ResaleListing.objects.filter(
+            if listing_ids:
+                queryset = ResaleListing.objects.filter(
+                    platform_id=platform_id,
+                    id__in=listing_ids,
+                    is_active=True,
+                )
+                if queryset.count() != len(set(listing_ids)):
+                    return Response(
+                        {"detail": "Some listings were not found."},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+            else:
+                queryset = ResaleListing.objects.filter(
                     platform_id=platform_id,
                     model_id__in=model_ids,
                     is_active=True,
                 )
-            )
-            ResaleListing.objects.filter(
-                platform_id=platform_id,
-                model_id__in=model_ids,
-                is_active=True,
-            ).update(
+            listings = list(queryset)
+            queryset.update(
                 is_active=False,
                 publish_status=ResaleListing.PUBLISH_OFFLINE,
                 workflow_status=ResaleListing.WORKFLOW_OFFLINE,
@@ -1150,43 +1224,58 @@ def _invalid_transition(action_name: str, listing: ResaleListing):
     )
 
 
+# (action, source_workflow) -> (publish_status, workflow_status, is_active)
+_RL = ResaleListing
+_LISTING_TRANSITIONS: dict[tuple[str, str], tuple[str, str, bool]] = {
+    ("withdraw", _RL.WORKFLOW_PENDING_PUBLISH): (
+        _RL.PUBLISH_NONE, _RL.WORKFLOW_DRAFT, False),
+    ("withdraw", _RL.WORKFLOW_PENDING_UPDATE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_UPDATE_DRAFT, True),
+    ("withdraw", _RL.WORKFLOW_PENDING_OFFLINE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+    ("submit", _RL.WORKFLOW_DRAFT): (
+        _RL.PUBLISH_NONE, _RL.WORKFLOW_PENDING_PUBLISH, False),
+    ("submit", _RL.WORKFLOW_UPDATE_DRAFT): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_PENDING_UPDATE, True),
+    ("confirm_publish", _RL.WORKFLOW_PENDING_PUBLISH): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+    ("start_edit", _RL.WORKFLOW_ONLINE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_UPDATE_DRAFT, True),
+    ("abandon_update", _RL.WORKFLOW_UPDATE_DRAFT): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+    ("confirm_update", _RL.WORKFLOW_PENDING_UPDATE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+    ("request_offline", _RL.WORKFLOW_ONLINE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_PENDING_OFFLINE, True),
+    ("confirm_offline", _RL.WORKFLOW_PENDING_OFFLINE): (
+        _RL.PUBLISH_OFFLINE, _RL.WORKFLOW_OFFLINE, False),
+    ("confirm_offline", _RL.WORKFLOW_OFFLINE_EXCEPTION): (
+        _RL.PUBLISH_OFFLINE, _RL.WORKFLOW_OFFLINE, False),
+    ("reject_offline", _RL.WORKFLOW_PENDING_OFFLINE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+    ("mark_offline_exception", _RL.WORKFLOW_PENDING_OFFLINE): (
+        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_OFFLINE_EXCEPTION, True),
+    ("republish", _RL.WORKFLOW_OFFLINE): (
+        _RL.PUBLISH_NONE, _RL.WORKFLOW_PENDING_PUBLISH, False),
+    ("delete", _RL.WORKFLOW_DRAFT): (
+        _RL.PUBLISH_DELETED, _RL.WORKFLOW_DELETED, False),
+    ("delete", _RL.WORKFLOW_OFFLINE): (
+        _RL.PUBLISH_DELETED, _RL.WORKFLOW_DELETED, False),
+}
+
+
 def _transition_source_workflows(action_name: str) -> tuple[str, ...]:
     """Return workflow states accepted by a transition action."""
-    workflows = {
-        "withdraw": (
-            ResaleListing.WORKFLOW_PENDING_PUBLISH,
-            ResaleListing.WORKFLOW_PENDING_UPDATE,
-            ResaleListing.WORKFLOW_PENDING_OFFLINE,
-        ),
-        "submit": (
-            ResaleListing.WORKFLOW_DRAFT,
-            ResaleListing.WORKFLOW_UPDATE_DRAFT,
-        ),
-        "confirm_publish": (ResaleListing.WORKFLOW_PENDING_PUBLISH,),
-        "start_edit": (ResaleListing.WORKFLOW_ONLINE,),
-        "abandon_update": (ResaleListing.WORKFLOW_UPDATE_DRAFT,),
-        "confirm_update": (ResaleListing.WORKFLOW_PENDING_UPDATE,),
-        "request_offline": (ResaleListing.WORKFLOW_ONLINE,),
-        "confirm_offline": (
-            ResaleListing.WORKFLOW_PENDING_OFFLINE,
-            ResaleListing.WORKFLOW_OFFLINE_EXCEPTION,
-        ),
-        "reject_offline": (ResaleListing.WORKFLOW_PENDING_OFFLINE,),
-        "mark_offline_exception": (ResaleListing.WORKFLOW_PENDING_OFFLINE,),
-        "republish": (ResaleListing.WORKFLOW_OFFLINE,),
-        "delete": (
-            ResaleListing.WORKFLOW_DRAFT,
-            ResaleListing.WORKFLOW_OFFLINE,
-        ),
-    }
-    return workflows.get(action_name, ())
+    return tuple(
+        wf for (action, wf) in _LISTING_TRANSITIONS if action == action_name
+    )
 
 
 def _is_transition_candidate(
     listing: ResaleListing,
     action_name: str,
 ) -> bool:
-    return listing.workflow_status in _transition_source_workflows(action_name)
+    return (action_name, listing.workflow_status) in _LISTING_TRANSITIONS
 
 
 def _apply_resale_listing_transition(
@@ -1194,147 +1283,16 @@ def _apply_resale_listing_transition(
     action_name: str,
 ) -> None:
     """Apply the dual-state transition matrix from state.html."""
-    publish = listing.publish_status
-    workflow = listing.workflow_status
-    if action_name == "withdraw":
-        if workflow == ResaleListing.WORKFLOW_PENDING_PUBLISH:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_NONE,
-                workflow_status=ResaleListing.WORKFLOW_DRAFT,
-                is_active=False,
-            )
-            return
-        if workflow == ResaleListing.WORKFLOW_PENDING_UPDATE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_UPDATE_DRAFT,
-                is_active=True,
-            )
-            return
-        if workflow == ResaleListing.WORKFLOW_PENDING_OFFLINE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_ONLINE,
-                is_active=True,
-            )
-            return
-    elif action_name == "submit":
-        if workflow == ResaleListing.WORKFLOW_DRAFT:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_NONE,
-                workflow_status=ResaleListing.WORKFLOW_PENDING_PUBLISH,
-                is_active=False,
-            )
-            return
-        if workflow == ResaleListing.WORKFLOW_UPDATE_DRAFT:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_PENDING_UPDATE,
-                is_active=True,
-            )
-            return
-    elif action_name == "confirm_publish":
-        if workflow == ResaleListing.WORKFLOW_PENDING_PUBLISH:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_ONLINE,
-                is_active=True,
-            )
-            return
-    elif action_name == "start_edit":
-        if workflow == ResaleListing.WORKFLOW_ONLINE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_UPDATE_DRAFT,
-                is_active=True,
-            )
-            return
-    elif action_name == "abandon_update":
-        if workflow == ResaleListing.WORKFLOW_UPDATE_DRAFT:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_ONLINE,
-                is_active=True,
-            )
-            return
-    elif action_name == "confirm_update":
-        if workflow == ResaleListing.WORKFLOW_PENDING_UPDATE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_ONLINE,
-                is_active=True,
-            )
-            return
-    elif action_name == "request_offline":
-        if workflow == ResaleListing.WORKFLOW_ONLINE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_PENDING_OFFLINE,
-                is_active=True,
-            )
-            return
-    elif action_name == "confirm_offline":
-        if workflow in {
-            ResaleListing.WORKFLOW_PENDING_OFFLINE,
-            ResaleListing.WORKFLOW_OFFLINE_EXCEPTION,
-        }:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_OFFLINE,
-                workflow_status=ResaleListing.WORKFLOW_OFFLINE,
-                is_active=False,
-            )
-            return
-    elif action_name == "reject_offline":
-        if workflow == ResaleListing.WORKFLOW_PENDING_OFFLINE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_ONLINE,
-                is_active=True,
-            )
-            return
-    elif action_name == "mark_offline_exception":
-        if workflow == ResaleListing.WORKFLOW_PENDING_OFFLINE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_ONLINE,
-                workflow_status=ResaleListing.WORKFLOW_OFFLINE_EXCEPTION,
-                is_active=True,
-            )
-            return
-    elif action_name == "republish":
-        if publish == ResaleListing.PUBLISH_OFFLINE:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_NONE,
-                workflow_status=ResaleListing.WORKFLOW_PENDING_PUBLISH,
-                is_active=False,
-            )
-            return
-    elif action_name == "delete":
-        if workflow in {
-            ResaleListing.WORKFLOW_DRAFT,
-            ResaleListing.WORKFLOW_OFFLINE,
-        }:
-            _set_listing_state(
-                listing,
-                publish_status=ResaleListing.PUBLISH_DELETED,
-                workflow_status=ResaleListing.WORKFLOW_DELETED,
-                is_active=False,
-            )
-            return
-    raise ValueError(_invalid_transition(action_name, listing))
+    target = _LISTING_TRANSITIONS.get((action_name, listing.workflow_status))
+    if target is None:
+        raise ValueError(_invalid_transition(action_name, listing))
+    publish_status, workflow_status, is_active = target
+    _set_listing_state(
+        listing,
+        publish_status=publish_status,
+        workflow_status=workflow_status,
+        is_active=is_active,
+    )
 
 
 def _effective_settlement_ratio(channel, override) -> Decimal:
@@ -1419,8 +1377,6 @@ def _selected_resale_platform(value: str | None):
             return selected
     return (
         queryset.filter(code="agione").first()
-        or queryset.filter(platform_type=ResalePlatform.PLATFORM_TYPE_AGIONE)
-        .first()
         or queryset.first()
     )
 
@@ -1438,9 +1394,17 @@ def _point_conversion_payload(platform: ResalePlatform | None):
         ),
         "rounding_mode": platform.point_rounding_mode,
         "currency": platform.currency,
+        "fee_rate": _as_float(platform.fee_rate),
+        "service_fee_rate": _as_float(platform.service_fee_rate),
+        "auto_approve_max_margin_rate": _as_float(
+            platform.auto_approve_max_margin_rate
+        ),
         "formula_label": (
             f"1 {platform.currency} = "
             f"{platform.points_per_currency_unit} {platform.point_name}"
+        ),
+        "reference_pricing_formula_label": (
+            "reference = cost * (1 + service_fee_rate + fee_rate)"
         ),
     }
 
@@ -1480,6 +1444,13 @@ def _select_best_option(options: list[dict]):
         comparable_options,
         key=lambda item: item["estimated_cost"],
     )[0]
+
+
+def _has_procurement_text_price(unit_prices) -> bool:
+    return (
+        Decimal(str(unit_prices.input_per_million or "0")) > 0
+        and Decimal(str(unit_prices.output_per_million or "0")) > 0
+    )
 
 
 def _listing_option(
@@ -1608,6 +1579,8 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     override=override,
                     video_resolution=video_resolution,
                 )
+                if not _has_procurement_text_price(unit_prices):
+                    continue
                 currency = resolve_channel_model_currency(
                     channel,
                     model,
@@ -1646,6 +1619,9 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "video_output_price_per_second": _as_float(
                         unit_prices.video_output_per_second
                     ),
+                    "tpm_limit": override.tpm_limit,
+                    "rpm_limit": override.rpm_limit,
+                    "latency_ms": override.latency_ms,
                     "estimated_cost": _as_float(estimated_cost),
                     **_cost_basis_payload(channel, override, unit_prices),
                 }

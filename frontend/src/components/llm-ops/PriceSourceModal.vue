@@ -1,11 +1,11 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="save"
     >
       <div class="border-b border-slate-200 px-5 py-4">
@@ -17,12 +17,12 @@
               Price Source
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ isEditing ? '编辑模型价格源' : '新增模型价格源' }}
+              {{ isEditing ? '编辑模型价格源' : '新建模型价格源' }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
               {{ isEditing
-                ? '修改供货商或价格源的显示名称、价格地址、币种和采集状态。'
-                : '新增原厂、供货商或人工维护价格源，用于后续录入和采集模型价格。' }}
+                ? '维护价格源名称、口径、价格地址和启停状态。'
+                : '新建原厂、供货商或人工维护价格源，用于后续录价和采集模型价格。' }}
             </p>
           </div>
           <button
@@ -36,11 +36,21 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-12rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
         <section class="form-section">
           <div class="section-heading">
             <h4>基础信息</h4>
-            <p>用于在价格源列表、渠道上游选择和价格对比中展示。</p>
+            <p>只保留运营侧需要维护的字段。</p>
+          </div>
+          <div class="source-meta-strip">
+            <div class="source-meta-item">
+              <span>系统标识</span>
+              <strong>{{ internalSlugLabel }}</strong>
+            </div>
+            <div class="source-meta-item">
+              <span>来源方式</span>
+              <strong>{{ sourceTypeLabel }}</strong>
+            </div>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
@@ -51,18 +61,12 @@
                 placeholder="例如：云测 / 阿里云百炼华东专线"
                 required
               />
+              <span v-if="!isEditing" class="field-help">
+                创建后系统标识将自动生成：{{ internalSlugLabel }}
+              </span>
             </label>
             <label class="field-group">
-              <span class="field-label">价格源标识</span>
-              <input
-                v-model="form.slug"
-                class="field"
-                placeholder="例如：yunce-aliyun-east"
-                required
-              />
-            </label>
-            <label class="field-group">
-              <span class="field-label">价格源类型</span>
+              <span class="field-label">价格口径</span>
               <CompactSelect
                 v-model="form.source_category"
                 :options="sourceCategoryOptions"
@@ -92,8 +96,8 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>备注</h4>
-            <p>记录供货口径、区域、合同价或后续采集适配说明。</p>
+            <h4>补充说明</h4>
+            <p>可选，用于记录区域、合同价或特殊说明。</p>
           </div>
           <textarea
             v-model="form.notes"
@@ -103,10 +107,11 @@
         </section>
       </div>
 
-      <div
-        class="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between"
-      >
-        <label class="status-inline" :class="{ active: form.is_enabled }">
+      <div class="modal-footer">
+        <label
+          class="modal-footer-status status-inline"
+          :class="{ active: form.is_enabled }"
+        >
           <input
             v-model="form.is_enabled"
             type="checkbox"
@@ -119,7 +124,7 @@
             {{ form.is_enabled ? '价格源已启用' : '价格源已停用' }}
           </span>
         </label>
-        <div class="flex justify-end gap-2">
+        <div class="modal-footer-actions">
           <button
             class="btn-secondary"
             type="button"
@@ -161,6 +166,18 @@ const { showSuccess, showError } = useToast()
 const saving = ref(false)
 const form = ref(defaults())
 const isEditing = computed(() => Boolean(props.source?.id))
+const internalSlugLabel = computed(() =>
+  isEditing.value ? form.value.slug || '-' : autoSlug(form.value.name || '')
+)
+const sourceTypeLabel = computed(() => {
+  const type = props.source?.source_type || 'custom'
+  const labels = {
+    agione: 'Agione',
+    yunce: 'Yunce',
+    custom: '自定义'
+  }
+  return labels[type] || type || '-'
+})
 
 const sourceCategoryOptions = [
   { label: '原厂价格源', value: 'official_provider' },
@@ -218,6 +235,9 @@ async function save() {
   try {
     const payload = {
       ...form.value,
+      slug: isEditing.value
+        ? props.source?.slug || form.value.slug || autoSlug(form.value.name)
+        : form.value.slug || autoSlug(form.value.name),
       source_type: props.source?.source_type || 'custom'
     }
     if (isEditing.value) {
@@ -242,6 +262,15 @@ function errorMessage(error, fallback) {
     error?.message ||
     fallback
   )
+}
+
+function autoSlug(value) {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return normalized || 'price-source'
 }
 </script>
 
@@ -276,6 +305,22 @@ function errorMessage(error, fallback) {
 
 .field {
   @apply h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100;
+}
+
+.source-meta-strip {
+  @apply mb-4 grid gap-3 sm:grid-cols-2;
+}
+
+.source-meta-item {
+  @apply rounded-lg border border-slate-200 bg-white px-3 py-2;
+}
+
+.source-meta-item span {
+  @apply block text-xs text-slate-500;
+}
+
+.source-meta-item strong {
+  @apply mt-1 block truncate font-mono text-sm text-slate-800;
 }
 
 .status-inline {

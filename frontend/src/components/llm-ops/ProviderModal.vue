@@ -1,11 +1,11 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-hidden rounded-lg bg-white shadow-xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="save"
     >
       <div class="border-b border-slate-200 px-5 py-4">
@@ -17,7 +17,7 @@
               Provider
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑模型厂商' : '新增模型厂商' }}
+              {{ form.id ? '编辑模型厂商' : '新建模型厂商' }}
             </h3>
             <p class="mt-1 text-sm leading-6 text-slate-500">
               模型厂商由系统适配，页面只维护展示名称、价格采集地址和运营备注。
@@ -34,7 +34,7 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-12rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
         <section class="form-section">
           <div class="section-heading">
             <h4>基础信息</h4>
@@ -124,10 +124,8 @@
         </section>
       </div>
 
-      <div
-        class="flex flex-col gap-3 border-t border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between"
-      >
-        <div class="min-w-0 space-y-2">
+      <div class="modal-footer">
+        <div class="modal-footer-status min-w-0 space-y-2">
           <label class="status-inline" :class="{ active: form.is_active }">
             <input
               v-model="form.is_active"
@@ -148,7 +146,7 @@
             {{ saveError }}
           </p>
         </div>
-        <div class="flex justify-end gap-2">
+        <div class="modal-footer-actions">
           <button
             class="btn-secondary"
             type="button"

@@ -8,6 +8,7 @@ from .models import (
     CollectedModelPriceSnapshot,
     LLMModel,
     LLMProvider,
+    MetaModel,
     ModelPriceItem,
     PriceCollectionRun,
     PriceCollectionSource,
@@ -111,6 +112,21 @@ class LLMProviderAdmin(admin.ModelAdmin):
     list_display = ("name", "code", "website", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "code")
+
+
+@admin.register(MetaModel)
+class MetaModelAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "code",
+        "vendor",
+        "modality",
+        "status",
+        "context_window",
+        "max_output_tokens",
+    )
+    list_filter = ("vendor", "modality", "status")
+    search_fields = ("name", "code", "family")
 
 
 @admin.register(LLMModel)
@@ -231,14 +247,22 @@ class ResalePlatformAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "code",
-        "platform_type",
         "currency",
+        "has_api_key",
         "points_per_currency_unit",
         "fee_rate",
+        "service_fee_rate",
+        "auto_approve_max_margin_rate",
         "is_active",
     )
-    list_filter = ("platform_type", "currency", "is_active")
+    list_filter = ("currency", "is_active")
     search_fields = ("name", "code")
+
+    def has_api_key(self, obj):
+        return bool(obj.api_key)
+
+    has_api_key.boolean = True
+    has_api_key.short_description = "API Key"
 
 
 @admin.register(ResaleListing)

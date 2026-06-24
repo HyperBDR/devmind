@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 import hashlib
 import json
+import re
 
 from cloud_billing.dashboard import _build_exchange_rate_info
 from django.db import transaction
@@ -97,6 +98,7 @@ def ensure_meta_model(
     code: str,
     name: str,
     provider=None,
+    raw_code: str = "",
     modality: str = LLMModel.MODALITY_TEXT,
     context_window: int = 0,
     max_output_tokens: int = 0,
@@ -106,14 +108,23 @@ def ensure_meta_model(
     The ``vendor`` argument is treated as a price-sheet hint. The
     canonical vendor is resolved from the model code, and a
     supplier alias is never written as the meta model vendor.
+    ``raw_code`` keeps the original collector spelling so alias-only
+    lookups can still reuse an existing canonical row.
     """
-    canonical_code = str(code or name or "").strip()
-    canonical_name = str(name or canonical_code).strip() or canonical_code
     from .constants import (
+        canonical_meta_model_identity,
         canonical_vendor_for_model_code,
         ensure_canonical_vendor_row,
         is_canonical_vendor_code,
     )
+
+    reported_code = str(code or "").strip()
+    reported_name = str(name or reported_code or raw_code).strip()
+    source_code = str(raw_code or reported_code or reported_name).strip()
+    identity = canonical_meta_model_identity(source_code, reported_name)
+    canonical_code = identity["code"]
+    canonical_name = identity["name"]
+    seed_aliases = identity["aliases"]
     spec = canonical_vendor_for_model_code(canonical_code)
     canonical_vendor = None
     if spec:
@@ -127,11 +138,24 @@ def ensure_meta_model(
         "context_window": context_window or 0,
         "max_output_tokens": max_output_tokens or 0,
         "status": MetaModel.STATUS_ACTIVE,
+        "aliases": seed_aliases,
     }
-    meta_model, created = MetaModel.objects.get_or_create(
-        code=canonical_code,
-        defaults=defaults,
-    )
+    meta_model = MetaModel.objects.filter(code=canonical_code).first()
+    created = False
+    if meta_model is None:
+        meta_model = match_meta_model_by_alias_or_name(
+            raw_code=raw_code,
+            reported_code=reported_code,
+            reported_name=reported_name,
+            canonical_code=canonical_code,
+            canonical_name=canonical_name,
+            seed_aliases=seed_aliases,
+        )
+    if meta_model is None:
+        meta_model, created = MetaModel.objects.get_or_create(
+            code=canonical_code,
+            defaults=defaults,
+        )
     if created:
         return meta_model
 
@@ -160,24 +184,263 @@ def ensure_meta_model(
     if meta_model.status == MetaModel.STATUS_UNKNOWN:
         meta_model.status = MetaModel.STATUS_ACTIVE
         changed_fields.append("status")
+    merged_aliases = list(meta_model.aliases or [])
+    for alias in meta_model_alias_tokens(
+        raw_code=raw_code,
+        reported_code=reported_code,
+        reported_name=reported_name,
+        canonical_code=canonical_code,
+        canonical_name=canonical_name,
+        seed_aliases=seed_aliases,
+    ):
+        if alias and alias not in merged_aliases:
+            merged_aliases.append(alias)
+    if merged_aliases != list(meta_model.aliases or []):
+        meta_model.aliases = merged_aliases
+        changed_fields.append("aliases")
     if changed_fields:
         changed_fields.append("updated_at")
         meta_model.save(update_fields=changed_fields)
     return meta_model
 
 
-def price_role_for_source(source: PriceCollectionSource) -> str:
-    """Map collection source category to a provider model price role."""
+def match_meta_model_by_alias_or_name(
+    *,
+    raw_code: str,
+    reported_code: str,
+    reported_name: str,
+    canonical_code: str,
+    canonical_name: str,
+    seed_aliases: list[str],
+) -> MetaModel | None:
+    """Reuse an existing meta model through aliases or display name."""
+    tokens = meta_model_alias_tokens(
+        raw_code=raw_code,
+        reported_code=reported_code,
+        reported_name=reported_name,
+        canonical_code=canonical_code,
+        canonical_name=canonical_name,
+        seed_aliases=seed_aliases,
+    )
+    if not tokens:
+        return None
+
+    all_meta = list(MetaModel.objects.all())
+    alias_index = {
+        alias: meta
+        for meta in all_meta
+        for alias in (meta.aliases or [])
+        if alias
+    }
+    for token in tokens:
+        hit = alias_index.get(token)
+        if hit is not None:
+            return hit
+
+    normalized_name = normalize_meta_model_lookup_name(canonical_name)
+    if not normalized_name:
+        return None
+    for meta in all_meta:
+        if normalize_meta_model_lookup_name(meta.name) == normalized_name:
+            return meta
+    return None
+
+
+def meta_model_alias_tokens(
+    *,
+    raw_code: str,
+    reported_code: str,
+    reported_name: str,
+    canonical_code: str,
+    canonical_name: str,
+    seed_aliases: list[str],
+) -> list[str]:
+    """Return distinct alias tokens relevant for one collector record."""
+    tokens = []
+    for token in (
+        raw_code,
+        reported_code,
+        reported_name,
+        canonical_code,
+        canonical_name,
+        *seed_aliases,
+    ):
+        value = str(token or "").strip()
+        if value and value not in tokens:
+            tokens.append(value)
+    return tokens
+
+
+def normalize_meta_model_lookup_name(value: str | None) -> str:
+    """Normalize a model display name for loose matching."""
+    return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
+
+
+def price_role_for_source(
+    source: PriceCollectionSource,
+    *,
+    meta_model: MetaModel | None = None,
+) -> str:
+    """Map a price source to the business role of one model row."""
+    category = source.source_category
     if (
-        source.source_category
+        category
+        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        and meta_model is not None
+    ):
+        from .serializers import business_source_category_for_source_model
+
+        category = business_source_category_for_source_model(
+            source=source,
+            meta_model=meta_model,
+        )
+    if (
+        category
         == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
     ):
         return LLMModel.PRICE_ROLE_OFFICIAL
-    if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
+    if category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
         return LLMModel.PRICE_ROLE_SUPPLIER
-    if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+    if category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
         return LLMModel.PRICE_ROLE_MANUAL
     return LLMModel.PRICE_ROLE_UNKNOWN
+
+
+def find_aggregated_model(
+    *,
+    provider,
+    code: str,
+    meta_model: MetaModel,
+    source: PriceCollectionSource | None = None,
+) -> LLMModel | None:
+    """Return the best shared model row for non-promoted source prices."""
+    current_source_id = source.id if source else None
+    exact_matches = list(
+        LLMModel.objects.filter(
+            provider=provider,
+            code=code,
+        ).select_related("source")
+    )
+    match = preferred_aggregated_model(
+        exact_matches,
+        current_source_id=current_source_id,
+    )
+    if match is not None:
+        return match
+
+    meta_matches = list(
+        LLMModel.objects.filter(
+            provider=provider,
+            meta_model=meta_model,
+        ).select_related("source")
+    )
+    return preferred_aggregated_model(
+        meta_matches,
+        current_source_id=current_source_id,
+    )
+
+
+def preferred_aggregated_model(
+    candidates: list[LLMModel],
+    *,
+    current_source_id: int | None,
+) -> LLMModel | None:
+    """Pick the least source-bound model row from candidate matches."""
+    if not candidates:
+        return None
+
+    def sort_key(model: LLMModel) -> tuple[int, int, int, int]:
+        category = (
+            model.source.source_category
+            if model.source_id and model.source is not None
+            else ""
+        )
+        is_current_source = (
+            bool(current_source_id)
+            and model.source_id == current_source_id
+        )
+        if category == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER:
+            category_rank = 0
+        elif category == "":
+            category_rank = 1
+        elif category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+            category_rank = 2 if is_current_source else 3
+        elif category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
+            category_rank = 4 if is_current_source else 5
+        elif category == PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN:
+            category_rank = 6
+        else:
+            category_rank = 7
+        supplier_role_rank = (
+            1
+            if model.price_role == LLMModel.PRICE_ROLE_SUPPLIER
+            else 0
+        )
+        return (
+            category_rank,
+            supplier_role_rank,
+            0 if is_current_source else 1,
+            model.id,
+        )
+
+    return min(candidates, key=sort_key)
+
+
+def update_aggregated_model_identity(
+    model: LLMModel,
+    *,
+    meta_model: MetaModel,
+    name: str,
+    modality: str,
+    currency: str,
+    current_source: PriceCollectionSource | None = None,
+) -> list[str]:
+    """Refresh shared model identity without binding it to one source."""
+    changed_fields = []
+    desired_name = str(name or "").strip() or model.name
+    desired_currency = normalize_currency(currency) or model.currency
+
+    if model.meta_model_id != meta_model.id:
+        model.meta_model = meta_model
+        changed_fields.append("meta_model")
+    if desired_name and model.name in {"", model.code}:
+        model.name = desired_name
+        changed_fields.append("name")
+    if (
+        modality
+        and model.modality == LLMModel.MODALITY_TEXT
+        and modality != LLMModel.MODALITY_TEXT
+    ):
+        model.modality = modality
+        changed_fields.append("modality")
+    if desired_currency and not normalize_currency(model.currency):
+        model.currency = desired_currency
+        changed_fields.append("currency")
+    if not model.is_active:
+        model.is_active = True
+        changed_fields.append("is_active")
+
+    if (
+        current_source is not None
+        and model.source_id == current_source.id
+        and can_detach_model_from_source(model)
+    ):
+        model.source = None
+        model.source_url = ""
+        changed_fields.extend(["source", "source_url"])
+
+    return changed_fields
+
+
+def can_detach_model_from_source(model: LLMModel) -> bool:
+    """Return whether a legacy source-bound model can become shared."""
+    if not model.source_id:
+        return False
+    return not LLMModel.objects.filter(
+        provider=model.provider,
+        code=model.code,
+        source__isnull=True,
+    ).exclude(id=model.id).exists()
 
 
 def build_currency_conversion_context(
@@ -277,22 +540,56 @@ def import_manual_model_prices(
             provider=provider,
             modality=row.get("modality") or LLMModel.MODALITY_TEXT,
         )
-        model, created = LLMModel.objects.get_or_create(
-            provider=provider,
-            source=source,
-            code=model_code,
-            defaults={
-                "meta_model": meta_model,
-                "name": row.get("model_name") or model_code,
-                "modality": row.get("modality") or LLMModel.MODALITY_TEXT,
-                "currency": normalize_currency(
-                    row.get("currency") or default_currency,
-                ),
-                "source_url": row.get("source_url") or source.endpoint_url,
-                "price_role": price_role_for_source(source),
-                "last_price_updated_at": now,
-            },
-        )
+        if updates_model_prices:
+            model, created = LLMModel.objects.get_or_create(
+                provider=provider,
+                source=source,
+                code=model_code,
+                defaults={
+                    "meta_model": meta_model,
+                    "name": row.get("model_name") or model_code,
+                    "modality": (
+                        row.get("modality") or LLMModel.MODALITY_TEXT
+                    ),
+                    "currency": normalize_currency(
+                        row.get("currency") or default_currency,
+                    ),
+                    "source_url": (
+                        row.get("source_url") or source.endpoint_url
+                    ),
+                    "price_role": price_role_for_source(
+                        source,
+                        meta_model=meta_model,
+                    ),
+                    "last_price_updated_at": now,
+                },
+            )
+        else:
+            model = find_aggregated_model(
+                provider=provider,
+                code=model_code,
+                meta_model=meta_model,
+                source=source,
+            )
+            created = model is None
+            if model is None:
+                model = LLMModel.objects.create(
+                    provider=provider,
+                    meta_model=meta_model,
+                    name=row.get("model_name") or model_code,
+                    code=model_code,
+                    modality=(
+                        row.get("modality") or LLMModel.MODALITY_TEXT
+                    ),
+                    currency=normalize_currency(
+                        row.get("currency") or default_currency,
+                    ),
+                    price_role=price_role_for_source(
+                        source,
+                        meta_model=meta_model,
+                    ),
+                    is_active=True,
+                )
         if created:
             created_count += 1
         else:
@@ -377,10 +674,6 @@ def update_model_from_manual_row(
         "currency": normalize_currency(
             row.get("currency") or default_currency,
         ),
-        "source": source,
-        "source_url": row.get("source_url") or source.endpoint_url,
-        "price_role": price_role_for_source(source),
-        "last_price_updated_at": now,
     }
     for field, value in basic_updates.items():
         if getattr(model, field) != value:
@@ -388,7 +681,25 @@ def update_model_from_manual_row(
             changed_fields.append(field)
 
     if not updates_model_prices:
+        if model.source_id == source.id and can_detach_model_from_source(model):
+            model.source = None
+            model.source_url = ""
+            changed_fields.extend(["source", "source_url"])
         return changed_fields
+
+    promoted_updates = {
+        "source": source,
+        "source_url": row.get("source_url") or source.endpoint_url,
+        "price_role": price_role_for_source(
+            source,
+            meta_model=model.meta_model,
+        ),
+        "last_price_updated_at": now,
+    }
+    for field, value in promoted_updates.items():
+        if getattr(model, field) != value:
+            setattr(model, field, value)
+            changed_fields.append(field)
 
     for field in MANUAL_MODEL_PRICE_FIELDS:
         if field not in row or row.get(field) is None:
@@ -633,7 +944,7 @@ def source_unit_prices_for_channel_model(
     override: ChannelModelPrice | None,
 ) -> UnitPrices | None:
     """Resolve flat unit prices from the selected procurement source."""
-    if not override or not override.price_source_id:
+    if not override:
         return None
 
     target_currency = resolve_channel_model_currency(
@@ -955,7 +1266,58 @@ def current_model_price_items_for_channel_price(
     )
     if price.price_source_id:
         queryset = queryset.filter(source_id=price.price_source_id)
-    return list(queryset.order_by("dimension", "tier_start", "id"))
+    rows = list(queryset.order_by("dimension", "tier_start", "id"))
+    if rows:
+        return rows
+    return fallback_price_items_for_meta_model(price.model)
+
+
+def fallback_price_items_for_meta_model(
+    model: LLMModel,
+) -> list[ModelPriceItem]:
+    """Return the best current flat price item group for a meta model."""
+    if not model.meta_model_id:
+        return []
+
+    rows = list(
+        ModelPriceItem.objects.filter(
+            meta_model_id=model.meta_model_id,
+            is_current=True,
+            unit_price__gt=ZERO,
+        )
+        .select_related("source")
+        .order_by("dimension", "tier_start", "id")
+    )
+    if not rows:
+        return []
+
+    groups: dict[str, list[ModelPriceItem]] = {}
+    for item in rows:
+        key = str(item.source_id or item.model_id)
+        groups.setdefault(key, []).append(item)
+
+    return sorted(
+        groups.values(),
+        key=price_item_group_score,
+        reverse=True,
+    )[0]
+
+
+def price_item_group_score(rows: list[ModelPriceItem]) -> tuple:
+    """Score fallback price groups like the frontend channel preview."""
+    if not rows:
+        return (0, 0, 0)
+    first = rows[0]
+    category = ""
+    if first.source_id:
+        category = first.source.source_category
+    category_score = {
+        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER: 300,
+        PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER: 200,
+    }.get(category, 0)
+    latest = max((item.effective_from for item in rows), default=None)
+    latest_score = latest.timestamp() if latest else 0
+    return (category_score, len(rows), latest_score)
 
 
 def channel_price_payload_from_base_item(

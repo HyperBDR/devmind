@@ -1,0 +1,130 @@
+from unittest import mock
+
+from django.test import TestCase
+
+from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
+from llm_ops.models import LLMProvider, PriceCollectionSource
+from llm_ops.source_collectors import (
+    collect_price_source,
+    get_price_source_collector,
+    source_supports_code_collection,
+)
+from llm_ops.source_collectors.official import OFFICIAL_COLLECTOR_CLASSES
+
+
+class PriceSourceCollectorRegistryTests(TestCase):
+    def test_all_official_configs_have_registered_collectors(self):
+        self.assertEqual(
+            set(OFFICIAL_PROVIDER_CONFIGS),
+            set(OFFICIAL_COLLECTOR_CLASSES),
+        )
+
+    def test_official_provider_source_dispatches_to_provider_collector(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://openai.com/api/pricing/",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "official_provider:openai")
+        self.assertEqual(
+            collector.__class__.__name__,
+            "OpenAIOfficialPriceSourceCollector",
+        )
+        self.assertTrue(source_supports_code_collection(source))
+
+        with mock.patch(
+            "llm_ops.source_collectors.official."
+            "sync_official_provider_model_prices"
+        ) as mock_sync:
+            mock_sync.return_value = {"models": 1}
+            result = collect_price_source(
+                source,
+                verify_source=False,
+            )
+
+        mock_sync.assert_called_once_with(
+            provider=provider,
+            source=source,
+            verify_source=False,
+        )
+        self.assertEqual(result, {"models": 1})
+
+    def test_deepseek_official_provider_source_dispatches_to_collector(self):
+        provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
+        source = PriceCollectionSource.objects.create(
+            name="DeepSeek Official",
+            slug="deepseek-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://api-docs.deepseek.com/quick_start/pricing"
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "official_provider:deepseek")
+        self.assertEqual(
+            collector.__class__.__name__,
+            "DeepSeekOfficialPriceSourceCollector",
+        )
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_supplier_source_does_not_support_code_collection(self):
+        provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
+        source = PriceCollectionSource.objects.create(
+            name="SiliconFlow Sheet",
+            slug="siliconflow-sheet",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://example.com/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        self.assertIsNone(get_price_source_collector(source))
+        self.assertFalse(source_supports_code_collection(source))
+        with self.assertRaisesMessage(
+            ValueError,
+            "This source does not support code collection.",
+        ):
+            collect_price_source(source)
+
+    def test_unknown_official_provider_does_not_match_collector(self):
+        provider = LLMProvider.objects.create(
+            name="Unknown AI",
+            code="unknown-ai",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Unknown Official",
+            slug="unknown-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://example.com/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        self.assertIsNone(get_price_source_collector(source))
+        self.assertFalse(source_supports_code_collection(source))

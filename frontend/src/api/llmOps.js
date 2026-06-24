@@ -35,24 +35,6 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/collection-runs/`, paramsOrEmpty(params))
   },
 
-  listCollectedPriceSnapshots(params) {
-    return apiClient.get(
-      `${base}/collected-price-snapshots/`,
-      paramsOrEmpty(params)
-    )
-  },
-
-  listCollectedPriceHistory(params) {
-    return apiClient.get(
-      `${base}/collected-price-history/`,
-      paramsOrEmpty(params)
-    )
-  },
-
-  collectYunce(payload) {
-    return apiClient.post(`${base}/collect/yunce/`, payload)
-  },
-
   importManualPrices(payload) {
     return apiClient.post(`${base}/manual-price-import/`, payload)
   },
@@ -141,36 +123,14 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/channel-model-prices/`, paramsOrEmpty(params))
   },
 
-  listChannelModelPriceHistory(params) {
-    return apiClient.get(
-      `${base}/channel-model-price-history/`,
-      paramsOrEmpty(params)
-    )
-  },
-
   listChannelPriceItems(params) {
     return apiClient.get(`${base}/channel-price-items/`, paramsOrEmpty(params))
-  },
-
-  createChannelModelPrice(payload) {
-    return apiClient.post(`${base}/channel-model-prices/`, payload)
   },
 
   bulkUpsertChannelModelPrices(items) {
     return apiClient.post(`${base}/channel-model-prices/bulk-upsert/`, {
       items
     })
-  },
-
-  syncChannelPriceItems(payload) {
-    return apiClient.post(
-      `${base}/channel-model-prices/sync-price-items/`,
-      payload
-    )
-  },
-
-  updateChannelModelPrice(id, payload) {
-    return apiClient.patch(`${base}/channel-model-prices/${id}/`, payload)
   },
 
   deleteChannelModelPrice(id) {
@@ -193,34 +153,12 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/resale-listings/`, paramsOrEmpty(params))
   },
 
-  listResaleListingExclusions(params) {
-    return apiClient.get(
-      `${base}/resale-listing-exclusions/`,
-      paramsOrEmpty(params)
-    )
-  },
-
-  listResaleListingPriceHistory(params) {
-    return apiClient.get(
-      `${base}/resale-listing-price-history/`,
-      paramsOrEmpty(params)
-    )
-  },
-
-  createResaleListing(payload) {
-    return apiClient.post(`${base}/resale-listings/`, payload)
-  },
-
   bulkUpsertResaleListings(items) {
     return apiClient.post(`${base}/resale-listings/bulk-upsert/`, { items })
   },
 
   bulkDraftResaleListings(items) {
     return apiClient.post(`${base}/resale-listings/bulk-draft/`, { items })
-  },
-
-  bulkReplaceResaleListings(items) {
-    return apiClient.post(`${base}/resale-listings/bulk-replace/`, { items })
   },
 
   bulkOfflineResaleListings(payload) {
@@ -234,28 +172,6 @@ export const llmOpsApi = {
     )
   },
 
-  bulkRemoveResaleListingModels(payload) {
-    return apiClient.post(
-      `${base}/resale-listing-exclusions/bulk-upsert/`,
-      payload
-    )
-  },
-
-  bulkRestoreResaleListingModels(payload) {
-    return apiClient.post(
-      `${base}/resale-listing-exclusions/bulk-restore/`,
-      payload
-    )
-  },
-
-  updateResaleListing(id, payload) {
-    return apiClient.patch(`${base}/resale-listings/${id}/`, payload)
-  },
-
-  deleteResaleListing(id) {
-    return apiClient.delete(`${base}/resale-listings/${id}/`)
-  },
-
   listReconciliationRecords(params) {
     return apiClient.get(
       `${base}/reconciliation-records/`,
@@ -265,9 +181,5 @@ export const llmOpsApi = {
 
   createReconciliationRecord(payload) {
     return apiClient.post(`${base}/reconciliation-records/`, payload)
-  },
-
-  deleteReconciliationRecord(id) {
-    return apiClient.delete(`${base}/reconciliation-records/${id}/`)
   }
 }

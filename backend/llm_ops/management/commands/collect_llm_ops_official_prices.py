@@ -35,6 +35,13 @@ class Command(BaseCommand):
             return
 
         for provider_code, stats in results.items():
+            if stats.get("error"):
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"{provider_code}: failed={stats['error']}"
+                    )
+                )
+                continue
             self.stdout.write(
                 self.style.SUCCESS(
                     f"{provider_code}: "

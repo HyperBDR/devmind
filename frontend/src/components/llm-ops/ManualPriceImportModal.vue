@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="open"
-    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6"
     @click.self="close"
   >
     <div class="modal-panel">
@@ -165,18 +165,20 @@
       </div>
 
       <div class="modal-footer">
-        <button class="btn-secondary" type="button" @click="close">
-          取消
-        </button>
-        <button
-          class="btn-primary"
-          type="button"
-          :disabled="saving || !canSubmit"
-          @click="submit"
-        >
-          <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
-          {{ saving ? '导入中' : '确认导入' }}
-        </button>
+        <div class="modal-footer-actions">
+          <button class="btn-secondary" type="button" @click="close">
+            取消
+          </button>
+          <button
+            class="btn-primary"
+            type="button"
+            :disabled="saving || !canSubmit"
+            @click="submit"
+          >
+            <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
+            {{ saving ? '导入中' : '确认导入' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -435,7 +437,7 @@ function modalityLabel(value) {
 <style scoped>
 .modal-panel {
   width: min(100%, 980px);
-  max-height: min(92vh, 860px);
+  max-height: min(calc(100vh - 3rem), 860px);
   @apply flex flex-col overflow-hidden rounded-xl bg-white shadow-2xl;
 }
 

@@ -4,7 +4,9 @@
     class="fixed inset-0 z-50 flex justify-end bg-slate-950/30"
     @click.self="$emit('close')"
   >
-    <aside class="h-full w-full max-w-5xl overflow-y-auto bg-white shadow-xl">
+    <aside
+      class="h-full w-full max-w-[72rem] overflow-y-auto bg-white shadow-xl"
+    >
       <div
         class="sticky top-0 z-10 border-b border-slate-200 bg-white px-5 py-4"
       >
@@ -13,7 +15,7 @@
             <p
               class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
             >
-              Price Source
+              Supplier Source
             </p>
             <h3 class="mt-2 truncate text-xl font-semibold text-slate-900">
               {{ source.name }}
@@ -41,15 +43,15 @@
       <div class="space-y-5 px-5 py-5">
         <div class="grid gap-3 md:grid-cols-4">
           <div class="summary-card">
-            <p>价格项</p>
-            <strong>{{ sourceRows.length }}</strong>
+            <p>覆盖元模型</p>
+            <strong>{{ modelRows.length }}</strong>
           </div>
           <div class="summary-card">
-            <p>覆盖模型</p>
-            <strong>{{ coveredModelCount }}</strong>
+            <p>当前价格项</p>
+            <strong>{{ sourceItemRows.length }}</strong>
           </div>
           <div class="summary-card">
-            <p>币种</p>
+            <p>默认币种</p>
             <strong>{{ source.currency || '-' }}</strong>
           </div>
           <div class="summary-card">
@@ -60,12 +62,12 @@
 
         <div class="source-info-grid">
           <div>
-            <span>来源类型</span>
-            <strong>{{ sourceCategoryLabel(source.source_category) }}</strong>
+            <span>来源归属</span>
+            <strong>{{ relationName }}</strong>
           </div>
           <div>
-            <span>关联对象</span>
-            <strong>{{ relationName }}</strong>
+            <span>更新方式</span>
+            <strong>{{ sourceConfigSummary }}</strong>
           </div>
           <div>
             <span>价格地址</span>
@@ -77,7 +79,7 @@
               target="_blank"
               :title="source.endpoint_url"
             >
-              {{ source.endpoint_url }}
+              {{ sourceAddressLabel }}
             </a>
             <strong v-else class="text-slate-400">-</strong>
           </div>
@@ -86,78 +88,70 @@
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
             <div>
-              <h3 class="panel-title">当前价格源模型价格</h3>
+              <h3 class="panel-title">供货商下的元模型价格</h3>
               <p class="mt-1 text-xs text-slate-500">
-                仅展示该价格源写入的当前有效价格项。
+                按元模型直接展示 Input、Output、Cache 三项核心价格。
               </p>
             </div>
+            <input
+              v-model="search"
+              class="field-input w-full md:w-72"
+              placeholder="搜索元模型、厂商或 code"
+            />
           </div>
           <div class="overflow-x-auto">
-            <table class="data-table">
+            <table class="data-table source-price-table">
+              <colgroup>
+                <col class="model-col" />
+                <col class="price-col" />
+                <col class="time-col" />
+              </colgroup>
               <thead>
                 <tr>
                   <th class="table-head">元模型</th>
-                  <th class="table-head">计价维度</th>
-                  <th class="table-head text-right">价格</th>
-                  <th class="table-head">原始币种</th>
-                  <th class="table-head">更新时间</th>
-                  <th class="table-head text-right">操作</th>
+                  <th class="table-head">{{ priceHeaderLabel }}</th>
+                  <th class="table-head">最近更新</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in sourceRows" :key="row.key">
-                  <td class="table-cell">
-                    <p class="truncate font-medium text-slate-900">
-                      {{ row.meta_model_name }}
-                    </p>
-                    <p class="mt-1 truncate font-mono text-xs text-slate-400">
-                      {{ row.meta_model_code }} · {{ row.source_label }}
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <p class="font-medium text-slate-800">
-                      {{ row.dimension_label }}
-                    </p>
-                    <p
-                      v-if="row.spec_label || row.tier_label"
-                      class="mt-1 text-xs text-slate-400"
-                    >
-                      {{ [row.spec_label, row.tier_label].filter(Boolean).join(' · ') }}
-                    </p>
-                  </td>
-                  <td
-                    class="table-cell text-right font-mono font-semibold text-slate-800"
-                  >
-                    {{ row.price }}
-                  </td>
-                  <td class="table-cell font-mono">
-                    {{ row.currency || '-' }}
-                  </td>
-                  <td class="table-cell">
-                    {{ formatDateTime(row.updated_at) }}
-                  </td>
-                  <td class="table-cell">
-                    <div class="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        class="btn-ghost"
-                        @click="openEdit(row)"
+                <template v-for="row in filteredModelRows" :key="row.key">
+                  <tr>
+                    <td class="table-cell">
+                      <p class="truncate font-medium text-slate-900">
+                        {{ row.meta_model_name }}
+                      </p>
+                      <p class="mt-1 font-mono text-xs text-slate-400">
+                        {{ row.meta_model_code }}
+                        <span v-if="row.modality_label">
+                          · {{ row.modality_label }}
+                        </span>
+                      </p>
+                    </td>
+                    <td class="table-cell">
+                      <div
+                        v-if="row.token_price_rows.length"
+                        class="token-price-list"
                       >
-                        编辑
-                      </button>
-                      <button
-                        type="button"
-                        class="btn-text-danger"
-                        :disabled="deletingItemId === row.id"
-                        @click="deletePriceItem(row)"
-                      >
-                        {{ deletingItemId === row.id ? '删除中' : '删除' }}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="!sourceRows.length">
-                  <td class="table-cell text-slate-500" colspan="6">
+                        <div
+                          v-for="item in row.token_price_rows"
+                          :key="`${row.key}-${item.label}`"
+                          class="token-price-row"
+                        >
+                          <span>{{ item.label }}</span>
+                          <strong>{{ item.value }}</strong>
+                        </div>
+                      </div>
+                      <span v-else class="text-xs text-slate-400">
+                        暂无价格
+                      </span>
+                    </td>
+                    <td class="table-cell">
+                      {{ formatDateTime(row.updated_at) }}
+                    </td>
+                  </tr>
+                </template>
+                <tr v-if="!filteredModelRows.length">
+                  <td class="table-cell text-slate-500" colspan="3">
                     当前价格源还没有模型价格记录。
                   </td>
                 </tr>
@@ -167,138 +161,13 @@
         </div>
       </div>
     </aside>
-
-    <div
-      v-if="editingRow"
-      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
-      @click.self="closeEdit"
-    >
-      <form class="price-modal" @submit.prevent="savePriceItem">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <p
-              class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
-            >
-              Edit Price Item
-            </p>
-            <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              编辑模型价格
-            </h3>
-            <p class="mt-1 text-xs text-slate-500">
-              {{ editingRow.meta_model_name }} · {{ editingRow.dimension_label }}
-            </p>
-          </div>
-          <button type="button" class="btn-secondary" @click="closeEdit">
-            关闭
-          </button>
-        </div>
-
-        <div class="mt-5 grid gap-4 sm:grid-cols-2">
-          <label class="field-block">
-            <span>计价维度</span>
-            <select v-model="editForm.dimension" class="field-input">
-              <option
-                v-for="option in dimensionOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label class="field-block">
-            <span>计价单位</span>
-            <select v-model="editForm.billing_unit" class="field-input">
-              <option
-                v-for="option in billingUnitOptions"
-                :key="option.value"
-                :value="option.value"
-              >
-                {{ option.label }}
-              </option>
-            </select>
-          </label>
-          <label class="field-block">
-            <span>单价</span>
-            <input
-              v-model="editForm.unit_price"
-              class="field-input font-mono"
-              min="0"
-              step="0.000001"
-              type="number"
-              required
-            />
-          </label>
-          <label class="field-block">
-            <span>币种</span>
-            <select v-model="editForm.currency" class="field-input">
-              <option value="CNY">CNY 人民币</option>
-              <option value="USD">USD 美元</option>
-            </select>
-          </label>
-          <label class="field-block">
-            <span>阶梯类型</span>
-            <select v-model="editForm.tier_type" class="field-input">
-              <option value="flat">固定价</option>
-              <option value="usage_range">用量区间</option>
-              <option value="volume">阶梯用量</option>
-            </select>
-          </label>
-          <div class="grid grid-cols-2 gap-3">
-            <label class="field-block">
-              <span>起始用量</span>
-              <input
-                v-model="editForm.tier_start"
-                class="field-input font-mono"
-                min="0"
-                step="0.000001"
-                type="number"
-              />
-            </label>
-            <label class="field-block">
-              <span>结束用量</span>
-              <input
-                v-model="editForm.tier_end"
-                class="field-input font-mono"
-                min="0"
-                step="0.000001"
-                type="number"
-              />
-            </label>
-          </div>
-          <label class="field-block sm:col-span-2">
-            <span>规格 JSON</span>
-            <textarea
-              v-model="editForm.spec"
-              class="field-input min-h-[92px] font-mono"
-              placeholder='例如 {"resolution":"1080P","audio":"included"}'
-            />
-          </label>
-        </div>
-
-        <p v-if="formError" class="mt-3 text-sm text-rose-600">
-          {{ formError }}
-        </p>
-        <div class="mt-5 flex justify-end gap-2">
-          <button type="button" class="btn-secondary" @click="closeEdit">
-            取消
-          </button>
-          <button type="submit" class="btn-primary" :disabled="saving">
-            {{ saving ? '保存中' : '保存价格' }}
-          </button>
-        </div>
-      </form>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
-import { llmOpsApi } from '@/api/llmOps'
-import { useToast } from '@/composables/useToast'
+import { computed, ref } from 'vue'
 
-const emit = defineEmits(['close', 'delete', 'refresh'])
-const { showSuccess, showError } = useToast()
+defineEmits(['close', 'delete', 'refresh'])
 
 const props = defineProps({
   source: {
@@ -313,52 +182,18 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
-  displayCurrency: {
-    type: String,
-    default: 'CNY'
-  },
-  exchangeRate: {
-    type: Number,
-    default: 7.15
-  },
   deleting: {
     type: Boolean,
     default: false
   }
 })
 
-const editingRow = ref(null)
-const saving = ref(false)
-const deletingItemId = ref(null)
-const formError = ref('')
-const editForm = reactive({
-  dimension: 'text_input',
-  billing_unit: 'per_1m_tokens',
-  unit_price: '',
-  currency: 'CNY',
-  tier_type: 'flat',
-  tier_start: '',
-  tier_end: '',
-  spec: '{}'
-})
+const search = ref('')
 
-const dimensionOptions = [
-  { value: 'text_input', label: '文本输入' },
-  { value: 'text_output', label: '文本输出' },
-  { value: 'cache_input', label: '缓存输入' },
-  { value: 'image_input', label: '图片输入' },
-  { value: 'image_output', label: '图片输出' },
-  { value: 'audio_input', label: '音频输入' },
-  { value: 'audio_output', label: '音频输出' },
-  { value: 'video_input', label: '视频输入' },
-  { value: 'video_output', label: '视频输出' }
-]
-
-const billingUnitOptions = [
-  { value: 'per_1m_tokens', label: '每百万 tokens' },
-  { value: 'per_image', label: '每张图片' },
-  { value: 'per_second', label: '每秒' },
-  { value: 'per_generation', label: '每次生成' }
+const tokenPriceDimensions = [
+  { dimension: 'text_input', label: 'Input' },
+  { dimension: 'text_output', label: 'Output' },
+  { dimension: 'cache_input', label: 'Cache' }
 ]
 
 const modelMap = computed(() => {
@@ -366,7 +201,7 @@ const modelMap = computed(() => {
   return new Map(entries)
 })
 
-const sourceRows = computed(() =>
+const sourceItemRows = computed(() =>
   props.priceItems
     .filter(
       (item) =>
@@ -377,41 +212,48 @@ const sourceRows = computed(() =>
     .sort((left, right) => {
       const leftModel = modelName(left).localeCompare(modelName(right))
       if (leftModel !== 0) return leftModel
-      const leftKey = `${left.dimension}-${left.tier_start || ''}`
-      const rightKey = `${right.dimension}-${right.tier_start || ''}`
-      return leftKey.localeCompare(rightKey)
+      return dimensionSort(left, right)
     })
-    .map((item) => {
-      const model = modelMap.value.get(String(item.model)) || {}
-      return {
-        key: `source-price-${item.id}`,
-        id: item.id,
-        raw: item,
-        meta_model_name:
-          item.meta_model_name || model.meta_model_name || '未知元模型',
-        meta_model_code: item.meta_model_code || model.meta_model_code || '-',
-        provider_name: item.provider_name || model.provider_name || '-',
-        source_label: sourceLabel(item, model),
-        dimension_label: `${dimensionLabel(item.dimension)} ${billingUnitLabel(item.billing_unit)}`,
-        spec_label: specLabel(item.spec || {}),
-        tier_label: tierLabel(item),
-        price: money(item.unit_price, item.currency),
-        unit_price: item.unit_price,
-        currency: item.currency,
-        dimension: item.dimension,
-        billing_unit: item.billing_unit,
-        tier_type: item.tier_type,
-        tier_start: item.tier_start,
-        tier_end: item.tier_end,
-        spec: item.spec || {},
-        updated_at: item.updated_at || item.effective_from
-      }
-    })
+    .map((item) => buildRawItemRow(item))
 )
 
-const coveredModelCount = computed(() => {
-  const ids = new Set(sourceRows.value.map((row) => row.meta_model_code))
-  return ids.size
+const modelRows = computed(() => {
+  const grouped = new Map()
+  const rows = []
+
+  sourceItemRows.value.forEach((row) => {
+    const key = String(row.meta_model_id || row.meta_model_code || row.id)
+    if (!grouped.has(key)) grouped.set(key, [])
+    grouped.get(key).push(row)
+  })
+
+  Array.from(grouped.entries()).forEach(([key, groupedRows]) => {
+    rows.push(buildModelRow(key, groupedRows))
+  })
+
+  sourceBoundModels.value.forEach((model) => {
+    const key = String(model.meta_model || model.meta_model_code || model.id)
+    if (!grouped.has(key)) {
+      rows.push(buildFallbackModelRow(model, key))
+      grouped.set(key, [])
+    }
+  })
+
+  return rows.sort((left, right) =>
+    left.meta_model_name.localeCompare(right.meta_model_name)
+  )
+})
+
+const sourceBoundModels = computed(() =>
+  props.models.filter(
+    (model) => String(model.source) === String(props.source?.id)
+  )
+)
+
+const filteredModelRows = computed(() => {
+  const keyword = search.value.trim().toLowerCase()
+  if (!keyword) return modelRows.value
+  return modelRows.value.filter((row) => row.search_text.includes(keyword))
 })
 
 const relationName = computed(() => {
@@ -420,44 +262,197 @@ const relationName = computed(() => {
   return '未绑定'
 })
 
+const sourceConfigSummary = computed(() =>
+  [
+    sourceCategoryLabel(businessSourceCategory(props.source)),
+    sourceModeLabel(props.source),
+    props.source?.currency
+  ]
+    .filter(Boolean)
+    .join(' · ')
+)
+
+const sourceAddressLabel = computed(() => {
+  const value = props.source?.endpoint_url
+  if (!value) return ''
+  try {
+    const url = new URL(value)
+    return `${url.hostname}${url.pathname === '/' ? '' : url.pathname}`
+  } catch {
+    return String(value)
+  }
+})
+
+const priceHeaderLabel = computed(() => '价格（原始币种 / 1M tokens）')
+
+function buildRawItemRow(item) {
+  const model = modelMap.value.get(String(item.model)) || {}
+  return {
+    key: `source-price-${item.id}`,
+    id: item.id,
+    model_id: item.model,
+    meta_model_id: item.meta_model || model.meta_model || '',
+    raw: item,
+    meta_model_name:
+      item.meta_model_name || model.meta_model_name || '未知元模型',
+    meta_model_code: item.meta_model_code || model.meta_model_code || '-',
+    provider_name:
+      item.meta_model_vendor_name ||
+      model.meta_model_vendor_name ||
+      item.provider_name ||
+      model.provider_name ||
+      '未绑定厂商',
+    sku_name: item.model_name || model.name || '',
+    sku_code: item.model_code || model.code || '',
+    modality_label: modalityLabel(model.modality),
+    dimension_label: `${dimensionLabel(item.dimension)} ${billingUnitLabel(item.billing_unit)}`,
+    price: money(item.unit_price, item.currency),
+    unit_price: item.unit_price,
+    currency: item.currency,
+    dimension: item.dimension,
+    billing_unit: item.billing_unit,
+    tier_type: item.tier_type,
+    tier_start: item.tier_start,
+    tier_end: item.tier_end,
+    spec: item.spec || {},
+    updated_at: item.updated_at || item.effective_from
+  }
+}
+
+function buildModelRow(key, rows) {
+  const sortedRows = rows.slice().sort(dimensionSort)
+  const firstRow = sortedRows[0]
+
+  return {
+    key,
+    meta_model_name: firstRow.meta_model_name,
+    meta_model_code: firstRow.meta_model_code,
+    provider_name: firstRow.provider_name,
+    modality_label: firstRow.modality_label,
+    token_price_rows: tokenPriceRowsFromRawRows(sortedRows),
+    price_count: sortedRows.length,
+    updated_at: latestUpdatedAt(sortedRows),
+    raw_rows: sortedRows,
+    search_text: [
+      firstRow.meta_model_name,
+      firstRow.meta_model_code,
+      firstRow.provider_name,
+      ...sortedRows.map((row) => row.sku_name),
+      ...sortedRows.map((row) => row.sku_code),
+      firstRow.modality_label,
+      ...sortedRows.map((row) => row.dimension_label)
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  }
+}
+
+function buildFallbackModelRow(model, key) {
+  return {
+    key,
+    meta_model_name: model.meta_model_name || model.name || '未知元模型',
+    meta_model_code: model.meta_model_code || model.code || '-',
+    provider_name:
+      model.meta_model_vendor_name || model.provider_name || '未绑定厂商',
+    modality_label: modalityLabel(model.modality),
+    token_price_rows: tokenPriceRowsFromModel(model),
+    price_count: 0,
+    updated_at: model.last_price_updated_at || model.updated_at || '',
+    raw_rows: [],
+    search_text: [
+      model.meta_model_name,
+      model.name,
+      model.meta_model_code,
+      model.code,
+      model.provider_name,
+      modalityLabel(model.modality)
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  }
+}
+
+function tokenPriceRowsFromRawRows(rows) {
+  return tokenPriceDimensions.map((item) => {
+    const matchedRow = rows.find(
+      (row) =>
+        row.dimension === item.dimension && row.billing_unit === 'per_1m_tokens'
+    )
+    return {
+      label: item.label,
+      value: matchedRow?.price || '-'
+    }
+  })
+}
+
+function tokenPriceRowsFromModel(model) {
+  return [
+    {
+      label: 'Input',
+      value: legacyPriceValue(model.input_price_per_million, model.currency)
+    },
+    {
+      label: 'Output',
+      value: legacyPriceValue(model.output_price_per_million, model.currency)
+    },
+    {
+      label: 'Cache',
+      value: legacyPriceValue(
+        model.cache_input_price_per_million,
+        model.currency
+      )
+    }
+  ]
+}
+
+function legacyPriceValue(value, currency) {
+  if (!hasValue(value)) return '-'
+  return money(value, currency)
+}
+
 function modelName(item) {
   const model = modelMap.value.get(String(item.model)) || {}
   return item.meta_model_name || model.meta_model_name || item.model_name || ''
 }
 
-function sourceLabel(item, model) {
-  return (
-    item.source_name ||
-    model.source_name ||
-    item.provider_name ||
-    model.provider_name ||
-    '-'
-  )
+function latestUpdatedAt(rows) {
+  const values = rows.map((row) => row.updated_at).filter(Boolean)
+  if (!values.length) return ''
+  return values.sort(
+    (left, right) => new Date(right).getTime() - new Date(left).getTime()
+  )[0]
 }
 
-function convertCurrencyAmount(value, sourceCurrency = 'USD') {
-  if (value === null || value === undefined || value === '') return null
-  const source = String(sourceCurrency || '').toUpperCase()
-  const target = String(props.displayCurrency || 'CNY').toUpperCase()
-  const amount = Number(value)
-  if (!Number.isFinite(amount)) return null
-  if (source === target) return amount
-  if (source === 'USD' && target === 'CNY') {
-    return amount * Number(props.exchangeRate || 7.15)
-  }
-  if (source === 'CNY' && target === 'USD') {
-    return amount / Number(props.exchangeRate || 7.15)
-  }
-  return null
+function dimensionSort(left, right) {
+  const order = [
+    'text_input',
+    'text_output',
+    'cache_input',
+    'audio_input',
+    'audio_output',
+    'image_input',
+    'image_output',
+    'video_input',
+    'video_output'
+  ]
+  const leftIndex = order.indexOf(left.dimension)
+  const rightIndex = order.indexOf(right.dimension)
+  if (leftIndex !== rightIndex) return leftIndex - rightIndex
+
+  const leftKey = `${left.dimension}-${left.tier_start || ''}`
+  const rightKey = `${right.dimension}-${right.tier_start || ''}`
+  return leftKey.localeCompare(rightKey)
 }
 
 function money(value, currency = 'USD') {
   if (value === null || value === undefined || value === '') return '-'
-  const displayValue = convertCurrencyAmount(value, currency)
-  if (displayValue === null) {
-    return `${currency || 'USD'} ${Number(value).toFixed(4)}`
-  }
-  return `${props.displayCurrency || 'CNY'} ${displayValue.toFixed(4)}`
+  return `${currency || 'USD'} ${Number(value).toFixed(4)}`
+}
+
+function hasValue(value) {
+  return value !== null && value !== undefined && value !== ''
 }
 
 function dimensionLabel(dimension) {
@@ -485,113 +480,14 @@ function billingUnitLabel(unit) {
   return labels[unit] || ''
 }
 
-function specLabel(spec) {
-  const parts = [
-    spec.resolution,
-    spec.quality,
-    spec.audio,
-    spec.mode
-  ].filter(Boolean)
-  return parts.join(' / ')
-}
-
-function tierLabel(item) {
-  if (item.tier_type === 'flat') return ''
-  const start = item.tier_start || 0
-  const end = item.tier_end || '∞'
-  return `${start} - ${end}`
-}
-
-function openEdit(row) {
-  editingRow.value = row
-  formError.value = ''
-  editForm.dimension = row.dimension || 'text_input'
-  editForm.billing_unit = row.billing_unit || 'per_1m_tokens'
-  editForm.unit_price = row.unit_price ?? ''
-  editForm.currency = row.currency || props.source?.currency || 'CNY'
-  editForm.tier_type = row.tier_type || 'flat'
-  editForm.tier_start = row.tier_start ?? ''
-  editForm.tier_end = row.tier_end ?? ''
-  editForm.spec = JSON.stringify(row.spec || {}, null, 2)
-}
-
-function closeEdit() {
-  editingRow.value = null
-  formError.value = ''
-}
-
-async function savePriceItem() {
-  if (!editingRow.value?.id) return
-  const spec = parseSpec()
-  if (spec === null) return
-  saving.value = true
-  try {
-    await llmOpsApi.updateModelPriceItem(editingRow.value.id, {
-      dimension: editForm.dimension,
-      billing_unit: editForm.billing_unit,
-      unit_price: editForm.unit_price,
-      currency: editForm.currency,
-      tier_type: editForm.tier_type,
-      tier_start: emptyToNull(editForm.tier_start),
-      tier_end: emptyToNull(editForm.tier_end),
-      spec
-    })
-    showSuccess('模型价格已更新')
-    closeEdit()
-    emit('refresh')
-  } catch (error) {
-    showError(errorMessage(error, '保存模型价格失败'))
-  } finally {
-    saving.value = false
+function modalityLabel(modality) {
+  const labels = {
+    text: '文本',
+    audio: '音频',
+    video: '视频',
+    multimodal: '多模态'
   }
-}
-
-async function deletePriceItem(row) {
-  if (!row?.id) return
-  const confirmed = window.confirm(
-    `确认删除「${row.meta_model_name} / ${row.dimension_label}」这条价格吗？`
-  )
-  if (!confirmed) return
-  deletingItemId.value = row.id
-  try {
-    await llmOpsApi.deleteModelPriceItem(row.id)
-    showSuccess('模型价格已删除')
-    emit('refresh')
-  } catch (error) {
-    showError(errorMessage(error, '删除模型价格失败'))
-  } finally {
-    deletingItemId.value = null
-  }
-}
-
-function parseSpec() {
-  try {
-    const value = editForm.spec.trim() ? JSON.parse(editForm.spec) : {}
-    if (!value || Array.isArray(value) || typeof value !== 'object') {
-      formError.value = '规格 JSON 必须是对象。'
-      return null
-    }
-    formError.value = ''
-    return value
-  } catch {
-    formError.value = '规格 JSON 格式不正确。'
-    return null
-  }
-}
-
-function emptyToNull(value) {
-  return value === '' || value === undefined ? null : value
-}
-
-function errorMessage(error, fallback) {
-  const data = error?.response?.data
-  if (!data) return fallback
-  if (typeof data === 'string') return data
-  if (data.detail) return data.detail
-  const firstKey = Object.keys(data)[0]
-  const firstValue = firstKey ? data[firstKey] : null
-  if (Array.isArray(firstValue)) return firstValue.join('、')
-  return fallback
+  return labels[modality] || modality || ''
 }
 
 function sourceCategoryLabel(category) {
@@ -602,6 +498,24 @@ function sourceCategoryLabel(category) {
     unknown: '其他'
   }
   return labels[category] || labels.unknown
+}
+
+function businessSourceCategory(source) {
+  return (
+    source?.business_source_category || source?.source_category || 'unknown'
+  )
+}
+
+function sourceModeLabel(source) {
+  const category = source?.source_category || ''
+  if (String(source?.endpoint_url || '').includes('models.dev/api.json')) {
+    return '聚合同步'
+  }
+  if (category === 'official_provider') return '自动采集'
+  if (category === 'supplier') return '供货商维护'
+  if (category === 'manual') return '手动维护'
+  if (source?.source_type === 'yunce') return '专用采集'
+  return '待适配'
 }
 
 function formatDateTime(value) {
@@ -658,7 +572,7 @@ function formatDateTime(value) {
 }
 
 .table-toolbar {
-  @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
+  @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 md:flex-row md:items-center md:justify-between;
 }
 
 .data-table {
@@ -669,16 +583,40 @@ function formatDateTime(value) {
   @apply divide-y divide-slate-100 bg-white;
 }
 
-.data-table tr {
-  @apply hover:bg-slate-50;
-}
-
 .table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500;
+  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
 }
 
 .table-cell {
   @apply min-w-0 px-4 py-3 text-sm text-slate-600;
+}
+
+.source-price-table .model-col {
+  width: 38%;
+}
+
+.source-price-table .price-col {
+  width: 44%;
+}
+
+.source-price-table .time-col {
+  width: 18%;
+}
+
+.token-price-list {
+  @apply grid max-w-md gap-1.5;
+}
+
+.token-price-row {
+  @apply grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3 text-xs;
+}
+
+.token-price-row span {
+  @apply text-slate-400;
+}
+
+.token-price-row strong {
+  @apply truncate text-right font-mono font-semibold text-slate-800;
 }
 
 .btn-secondary {
@@ -687,30 +625,6 @@ function formatDateTime(value) {
 
 .btn-danger {
   @apply inline-flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:border-rose-200 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.btn-ghost {
-  @apply rounded-lg px-2.5 py-1.5 text-xs font-medium text-indigo-600 transition hover:bg-indigo-50 hover:text-indigo-700;
-}
-
-.btn-text-danger {
-  @apply rounded-lg px-2.5 py-1.5 text-xs font-medium text-rose-600 transition hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.btn-primary {
-  @apply inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.price-modal {
-  @apply w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-5 shadow-xl;
-}
-
-.field-block {
-  @apply block;
-}
-
-.field-block span {
-  @apply mb-1.5 block text-xs font-medium text-slate-500;
 }
 
 .field-input {

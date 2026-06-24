@@ -70,7 +70,7 @@
                   :disabled="!canPublish || saving"
                   @click="handlePublish"
                 >
-                  {{ saving ? '提交中…' : '提交发布申请' }}
+                  {{ saving ? '提交中…' : '提交上架' }}
                 </button>
               </div>
             </header>
@@ -88,6 +88,7 @@
                 :channels="channels"
                 :procurement-rows="procurementRows"
                 :price-items="priceItems"
+                :channel-price-items="channelPriceItems"
                 :listings="listings"
                 :point-conversion="pointConversion"
                 :display-currency="displayCurrency"
@@ -145,6 +146,10 @@ const props = defineProps({
     default: () => []
   },
   priceItems: {
+    type: Array,
+    default: () => []
+  },
+  channelPriceItems: {
     type: Array,
     default: () => []
   },

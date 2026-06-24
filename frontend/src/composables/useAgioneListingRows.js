@@ -58,57 +58,44 @@ export function useAgioneListingRows({
       const modelListings = listingsByModel.get(modelId) || []
       if (!options.length && !modelListings.length) return []
 
-      const rows = modelListings.length
-        ? modelListings.map((listing) => {
-            const isActive = listing.publish_status === 'online'
-            const listingOptionData = listingOption(
-              { ...listing, model, listings: [listing] },
-              lowestOption,
-              options
-            )
-            const cheapestActiveOption = isActive && listingOptionData
-              ? listingOptionData
-              : null
-            return {
-              model,
-              procurement,
-              options,
-              listings: [listing],
-              status_listing: listing,
-              active_listings: isActive ? [listing] : [],
-              publish_status: listing.publish_status,
-              workflow_status: listing.workflow_status,
-              is_listed: isActive,
-              is_removed: false,
-              lowest_option: lowestOption,
-              requires_currency_conversion:
-                procurement.requires_currency_conversion || false,
-              has_lowest_listing:
-                isActive &&
-                lowestOption &&
-                String(listing.channel) === String(lowestOption.channel_id),
-              price_gap: listingPriceGap(cheapestActiveOption, lowestOption),
-            }
-          })
-        : [{
-            model,
-            procurement,
-            options,
-            listings: [],
-            status_listing: null,
-            active_listings: [],
-            publish_status: 'none',
-            workflow_status: 'draft',
-            is_listed: false,
-            is_removed: false,
-            lowest_option: lowestOption,
-            requires_currency_conversion:
-              procurement.requires_currency_conversion || false,
-            has_lowest_listing: false,
-            price_gap: null,
-          }]
+      // Only models that have actually entered the resale-platform
+      // workflow should appear in the platform list. Channel-priced
+      // candidates stay available in the publishing workspace, but they
+      // should not be auto-inserted into the platform board as
+      // "unlisted" rows.
+      if (!modelListings.length) return []
 
-      return rows
+      return modelListings.map((listing) => {
+        const isActive = listing.publish_status === 'online'
+        const listingOptionData = listingOption(
+          { ...listing, model, listings: [listing] },
+          lowestOption,
+          options
+        )
+        const cheapestActiveOption = isActive && listingOptionData
+          ? listingOptionData
+          : null
+        return {
+          model,
+          procurement,
+          options,
+          listings: [listing],
+          status_listing: listing,
+          active_listings: isActive ? [listing] : [],
+          publish_status: listing.publish_status,
+          workflow_status: listing.workflow_status,
+          is_listed: isActive,
+          is_removed: false,
+          lowest_option: lowestOption,
+          requires_currency_conversion:
+            procurement.requires_currency_conversion || false,
+          has_lowest_listing:
+            isActive &&
+            lowestOption &&
+            String(listing.channel) === String(lowestOption.channel_id),
+          price_gap: listingPriceGap(cheapestActiveOption, lowestOption),
+        }
+      })
     })
   })
 
