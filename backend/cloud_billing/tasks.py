@@ -8,7 +8,7 @@ import os
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone as dt_timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
 from celery import shared_task
@@ -129,58 +129,6 @@ def _inject_recharge_fields(
     elif currency_text and not str(payload.get("currency") or "").strip():
         payload["currency"] = currency_text
     return json.dumps(payload, ensure_ascii=False)
-
-
-def _quantize_amount_to_whole_unit(value: Decimal) -> Decimal:
-    if value <= 0:
-        return Decimal("0")
-    return value.quantize(Decimal("1"), rounding=ROUND_CEILING)
-
-
-def _suggest_alert_recharge_amount(
-    alert_record: AlertRecord,
-) -> tuple[Optional[Decimal], str]:
-    current_balance = Decimal(str(alert_record.current_balance or 0))
-    currency = str(alert_record.currency or "").strip().upper() or "CNY"
-    suggestions = []
-
-    if (
-        alert_record.days_remaining_threshold is not None
-        and alert_record.current_days_remaining is not None
-    ):
-        current_days_remaining = Decimal(
-            str(alert_record.current_days_remaining)
-        )
-        threshold_days = Decimal(str(alert_record.days_remaining_threshold))
-        if (
-            current_days_remaining > 0
-            and threshold_days > current_days_remaining
-            and current_balance > 0
-        ):
-            shortage_days = threshold_days - current_days_remaining
-            suggested = (
-                current_balance
-                * shortage_days
-                / current_days_remaining
-            )
-            suggestions.append(_quantize_amount_to_whole_unit(suggested))
-
-    if (
-        alert_record.balance_threshold is not None
-        and current_balance > 0
-    ):
-        threshold_balance = Decimal(str(alert_record.balance_threshold))
-        if threshold_balance > current_balance:
-            suggestions.append(
-                _quantize_amount_to_whole_unit(
-                    threshold_balance - current_balance
-                )
-            )
-
-    if not suggestions:
-        return None, currency
-
-    return max(suggestions), currency
 
 
 def _extract_recharge_approval_config(provider: CloudProvider) -> Dict:
@@ -1390,6 +1338,7 @@ def check_alert_for_provider(
                     balance_threshold_triggered
                     or days_remaining_threshold_triggered
                 )
+                and alert_rule.auto_recharge_amount is not None
                 and bool(str(provider.recharge_info or "").strip())
             )
 
@@ -1471,16 +1420,12 @@ def check_alert_for_provider(
             # Even if webhook is not configured, alert record is still created
             send_alert_notification.delay(alert_record.id)
             if auto_recharge_approval_triggered:
-                suggested_amount, suggested_currency = (
-                    _suggest_alert_recharge_amount(alert_record)
-                )
                 submit_kwargs = {
                     "alert_record_id": alert_record.id,
                     "trigger_source": RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+                    "amount": str(alert_rule.auto_recharge_amount),
+                    "currency": str(current_billing.currency or "").upper(),
                 }
-                if suggested_amount is not None:
-                    submit_kwargs["amount"] = str(suggested_amount)
-                    submit_kwargs["currency"] = suggested_currency
                 submit_recharge_approval.delay(
                     provider.id,
                     **submit_kwargs,
@@ -1707,18 +1652,7 @@ def submit_recharge_approval(
             alert_payload["expected_date"] = _default_alert_expected_date()
         amount_value = str(amount or "").strip()
         currency_text = str(currency or "").strip().upper()
-        if not amount_value and alert_record_id:
-            alert_record = AlertRecord.objects.filter(
-                id=alert_record_id
-            ).first()
-            if alert_record is not None:
-                suggested_amount, suggested_currency = (
-                    _suggest_alert_recharge_amount(alert_record)
-                )
-                if suggested_amount is not None:
-                    amount_value = int(suggested_amount)
-                    currency_text = currency_text or suggested_currency
-        if amount_value and not str(alert_payload.get("amount") or "").strip():
+        if amount_value:
             alert_payload["amount"] = amount_value
             if currency_text:
                 alert_payload["currency"] = currency_text

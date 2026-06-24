@@ -51,7 +51,7 @@ class AlertRuleAdmin(admin.ModelAdmin):
     list_display = [
         'provider', 'cost_threshold', 'growth_threshold',
         'balance_threshold', 'days_remaining_threshold',
-        'auto_submit_recharge_approval', 'is_active',
+        'auto_submit_recharge_approval', 'auto_recharge_amount', 'is_active',
         'created_at'
     ]
     list_filter = ['is_active', 'created_at']
