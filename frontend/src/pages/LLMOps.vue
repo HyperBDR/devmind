@@ -3,7 +3,7 @@
     <div class="h-full min-h-[calc(100vh-4rem)] bg-slate-50">
       <div class="flex h-full min-h-[calc(100vh-4rem)] w-full gap-0">
         <aside
-          class="hidden w-72 shrink-0 overflow-hidden bg-slate-950 text-white shadow-sm lg:block"
+          class="sticky top-0 hidden h-[calc(100vh-4rem)] w-72 shrink-0 self-start overflow-hidden bg-slate-950 text-white shadow-sm lg:block"
         >
           <div class="border-b border-slate-800 px-5 py-5">
             <p
@@ -46,7 +46,7 @@
         </aside>
 
         <main
-          class="min-w-0 flex-1 overflow-y-auto border-l border-slate-200 bg-white shadow-sm"
+          class="min-w-0 flex-1 border-l border-slate-200 bg-white shadow-sm"
         >
           <header class="border-b border-slate-200 px-5 py-3 lg:px-7">
             <div class="page-hero">
