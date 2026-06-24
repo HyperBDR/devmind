@@ -2,15 +2,17 @@
 Tests for cloud billing services.
 """
 
-import pytest
 from decimal import Decimal
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
+
+import pytest
+
+from cloud_billing.models import AlertRecord, RechargeApprovalRecord
 from cloud_billing.services.notification_service import (
     CloudBillingNotificationService,
     RechargeApprovalNotificationService,
 )
 from cloud_billing.services.provider_service import ProviderService
-from cloud_billing.models import CloudProvider, AlertRecord, RechargeApprovalRecord
 
 
 @pytest.mark.django_db
@@ -87,6 +89,36 @@ class TestProviderService:
         service = ProviderService()
         with pytest.raises(Exception):
             service.get_billing_info("aws", {}, period="2025-01")
+
+    @patch("cloud_billing.services.provider_service.BillingService")
+    def test_get_billing_info_classifies_volcengine_timeout(
+        self, mock_billing_service
+    ):
+        """
+        Volcengine service timeouts should be treated as cloud API errors.
+        """
+        mock_instance = Mock()
+        mock_instance.get_billing_info.return_value = {
+            "status": "error",
+            "data": None,
+            "error": (
+                "InternalServiceTimeout: Internal Service is timeout. "
+                "Pls Contact With Admin"
+            ),
+        }
+        mock_billing_service.return_value = mock_instance
+
+        service = ProviderService()
+        result = service.get_billing_info(
+            "volcengine",
+            {"api_key": "test", "api_secret": "test"},
+            period="2026-06",
+        )
+
+        assert result["status"] == "error"
+        assert result["error_code"] == "volcengine_timeout"
+        assert result["is_api_error"] is True
+        assert result["required_permissions"] == []
 
     @patch("cloud_billing.services.provider_service.ProviderFactory")
     def test_create_provider_volcengine_normalizes_config(self, mock_factory):
@@ -197,7 +229,7 @@ class TestProviderService:
         mock_factory.create_provider.return_value = mock_provider_instance
 
         service = ProviderService()
-        result = service.create_provider(
+        service.create_provider(
             "baidu",
             {
                 "BAIDU_ACCESS_KEY_ID": "test_key",
