@@ -642,12 +642,15 @@ const pageSize = ref(10)
 
 const getSearchableProviderTexts = (provider) => {
   const config = provider?.config || {}
+  const tags = Array.isArray(provider?.tags) ? provider.tags : []
+
   return [
     provider?.display_name,
     provider?.displayName,
     provider?.name,
     provider?.notes,
     provider?.auth_identifier,
+    ...tags,
     config.username,
     config.zhipu_username,
     config.ZHIPU_USERNAME,
@@ -973,7 +976,7 @@ const editAuthConfig = async (provider) => {
   try {
     const response = await cloudBillingApi.getProvider(provider.id)
     const data = extractResponseData(response)
-    editingProvider.value = data?.id ? data : (data?.data || data)
+    editingProvider.value = data?.id ? data : data?.data || data
   } catch {
     showError(t('errors.serverError'))
     editingProvider.value = provider
