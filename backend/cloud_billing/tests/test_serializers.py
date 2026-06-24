@@ -94,6 +94,7 @@ class TestAlertRuleSerializer:
         assert "balance_threshold" in data
         assert "days_remaining_threshold" in data
         assert "auto_submit_recharge_approval" in data
+        assert "auto_recharge_amount" in data
 
     def test_deserialize_create_alert_rule(self, cloud_provider, user):
         data = {
@@ -103,6 +104,7 @@ class TestAlertRuleSerializer:
             "balance_threshold": "100.00",
             "days_remaining_threshold": 7,
             "auto_submit_recharge_approval": True,
+            "auto_recharge_amount": "500.00",
             "is_active": True,
         }
         serializer = AlertRuleSerializer(data=data)
@@ -113,6 +115,19 @@ class TestAlertRuleSerializer:
         assert rule.balance_threshold == Decimal("100.00")
         assert rule.days_remaining_threshold == 7
         assert rule.auto_submit_recharge_approval is True
+        assert rule.auto_recharge_amount == Decimal("500.00")
+
+    def test_auto_submit_requires_manual_recharge_amount(self, cloud_provider):
+        data = {
+            "provider": cloud_provider.id,
+            "balance_threshold": "100.00",
+            "auto_submit_recharge_approval": True,
+            "auto_recharge_amount": None,
+            "is_active": True,
+        }
+        serializer = AlertRuleSerializer(data=data)
+        assert not serializer.is_valid()
+        assert "auto_recharge_amount" in serializer.errors
 
     def test_validate_at_least_one_threshold(self, cloud_provider):
         data = {

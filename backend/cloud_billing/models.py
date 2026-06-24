@@ -310,6 +310,16 @@ class AlertRule(models.Model):
             "when this alert rule is hit."
         ),
     )
+    auto_recharge_amount = models.DecimalField(
+        max_digits=20,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=(
+            "Manual recharge amount used when alert-triggered automatic "
+            "recharge approval is enabled."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey(
@@ -350,6 +360,29 @@ class AlertRule(models.Model):
                 "At least one of cost_threshold, growth_threshold, "
                 "growth_amount_threshold, balance_threshold, or "
                 "days_remaining_threshold must be set."
+            )
+        if (
+            self.auto_recharge_amount is not None
+            and self.auto_recharge_amount <= 0
+        ):
+            raise ValidationError(
+                {
+                    "auto_recharge_amount": (
+                        "Auto recharge amount must be greater than 0."
+                    )
+                }
+            )
+        if (
+            self.auto_submit_recharge_approval
+            and self.auto_recharge_amount is None
+        ):
+            raise ValidationError(
+                {
+                    "auto_recharge_amount": (
+                        "Auto recharge amount is required when automatic "
+                        "recharge approval is enabled."
+                    )
+                }
             )
 
     def save(self, *args, **kwargs):
