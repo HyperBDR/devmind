@@ -1,6 +1,6 @@
 """Tests for the llm_ops deployment bootstrap and periodic tasks.
 
-These tests cover the four guarantees that the deployment pipeline
+These tests cover the deployment guarantees that the pipeline
 relies on:
 
 1. ``seed_initial_price_sheet_if_empty`` runs the import on a fresh
@@ -8,9 +8,7 @@ relies on:
 2. ``seed_initial_price_sheet_safely`` never overwrites manually
    maintained overrides (``ChannelModelPrice.custom_*``,
    ``LLMModel.is_active``, ``PriceCollectionSource.is_enabled``).
-3. The ``post_migrate`` handler registered by ``apps.py`` fires the
-   safe seed on a clean database and skips on a populated one.
-4. ``register_periodic_tasks`` exposes a single
+3. ``register_periodic_tasks`` exposes a single
    ``llm_ops_official_collect`` entry, and the corresponding Celery
    task is registered with the worker.
 """
@@ -19,7 +17,6 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest import mock
 
-from django.apps import apps
 from django.test import TestCase
 
 from llm_ops.models import (
@@ -48,7 +45,6 @@ from llm_ops.seed_data import (
     resolve_orphan_meta_models,
     seed_yunce_supplier_price_demo,
 )
-from llm_ops.signals import auto_seed_initial_price_sheet
 from llm_ops.views import LLMProviderViewSet, MetaModelViewSet
 
 
@@ -179,7 +175,7 @@ class LLMOpsSeedLegacyTests(TestCase):
 
 
 class LLMOpsSeedIfEmptyTests(TestCase):
-    """``seed_initial_price_sheet_if_empty`` is the auto-seed gate."""
+    """``seed_initial_price_sheet_if_empty`` gates explicit bootstrap."""
 
     def test_runs_seed_on_empty_database(self):
         result = seed_initial_price_sheet_if_empty()
@@ -195,78 +191,6 @@ class LLMOpsSeedIfEmptyTests(TestCase):
         self.assertIsNone(result)
         # The provider we just created must not be touched.
         self.assertEqual(LLMProvider.objects.filter(code="openai").count(), 1)
-
-
-class LLMOpsPostMigrateHandlerTests(TestCase):
-    """The ``post_migrate`` signal handler fires the safe seed once."""
-
-    def setUp(self):
-        # Reset the module-level re-entry flag so each test gets a
-        # clean slate regardless of test execution order.
-        setattr(
-            auto_seed_initial_price_sheet,
-            "_llm_ops_bootstrap_post_migrate_seen",
-            False,
-        )
-
-    def test_handler_seeds_empty_database(self):
-        app_config = apps.get_app_config("llm_ops")
-        with mock.patch.dict(
-            "os.environ",
-            {"LLM_OPS_AUTO_SEED_IN_TESTS": "1"},
-        ):
-            auto_seed_initial_price_sheet(
-                sender=app_config, app_config=app_config
-            )
-        # The handler should have triggered the safe seed and
-        # therefore populated the canonical tables without creating
-        # operator-maintained procurement channels.
-        self.assertTrue(LLMProvider.objects.exists())
-        self.assertTrue(LLMModel.objects.exists())
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code=REAL_RESOURCE_CHANNEL_CODE
-            ).exists()
-        )
-
-    def test_handler_is_noop_when_database_already_populated(self):
-        LLMProvider.objects.create(name="OpenAI", code="openai")
-        app_config = apps.get_app_config("llm_ops")
-        auto_seed_initial_price_sheet(
-            sender=app_config, app_config=app_config
-        )
-        # Operator's pre-existing provider must remain untouched
-        # (no other providers imported).
-        self.assertEqual(LLMProvider.objects.count(), 1)
-        self.assertEqual(
-            LLMProvider.objects.get(code="openai").name, "OpenAI"
-        )
-
-    def test_handler_ignores_other_apps(self):
-        other = apps.get_app_config("contenttypes")
-        auto_seed_initial_price_sheet(
-            sender=other, app_config=other
-        )
-        # The handler must not seed on signals from other apps.
-        self.assertFalse(LLMProvider.objects.exists())
-
-    def test_handler_ignores_none_sender(self):
-        auto_seed_initial_price_sheet(sender=None)
-        self.assertFalse(LLMProvider.objects.exists())
-
-    def test_handler_skips_in_test_mode(self):
-        # Even on an empty DB, the handler must not seed during a
-        # test run. Tests opt in explicitly by calling
-        # ``seed_initial_price_sheet_if_empty`` instead.
-        app_config = apps.get_app_config("llm_ops")
-        with mock.patch.dict(
-            "os.environ",
-            {"PYTEST_CURRENT_TEST": "some/test.py::Test"},
-        ):
-            auto_seed_initial_price_sheet(
-                sender=app_config, app_config=app_config
-            )
-        self.assertFalse(LLMProvider.objects.exists())
 
 
 class LLMOpsPeriodicTasksTests(TestCase):
@@ -919,56 +843,29 @@ class LLMOpsSeedCommandSafeFlagTests(TestCase):
         self.assertIn("Cleaned legacy mock", out.getvalue())
 
 
-class LLMOpsPostMigrateHandlerErrorPathTests(TestCase):
-    """The handler must swallow seed errors so the migration pipeline
-    never aborts because of a transient bootstrap problem.
+class LLMOpsBootstrapCommandTests(TestCase):
+    """The explicit bootstrap command seeds only on a fresh database."""
 
-    Auto-seed is best-effort: the operator can re-run
-    ``manage.py seed_llm_ops_price_sheet`` after the fact. Crashing
-    inside ``post_migrate`` would block the entire deploy.
-    """
+    def test_bootstrap_command_seeds_empty_database(self):
+        from io import StringIO
 
-    def setUp(self):
-        setattr(
-            auto_seed_initial_price_sheet,
-            "_llm_ops_bootstrap_post_migrate_seen",
-            False,
-        )
+        from django.core.management import call_command
 
-    def test_handler_logs_and_swallows_seed_exception(self):
-        # The handler imports ``seed_initial_price_sheet_if_empty``
-        # lazily from ``llm_ops.seed_data``; patch the source module
-        # so we exercise the ``except`` path.
-        app_config = apps.get_app_config("llm_ops")
-        with mock.patch(
-            "llm_ops.seed_data.seed_initial_price_sheet_if_empty",
-            side_effect=RuntimeError("boom"),
-        ):
-            with mock.patch.dict(
-                "os.environ",
-                {"LLM_OPS_AUTO_SEED_IN_TESTS": "1"},
-            ):
-                # Must not raise: the post_migrate pipeline keeps
-                # running even when the bootstrap step fails.
-                auto_seed_initial_price_sheet(
-                    sender=app_config, app_config=app_config
-                )
-        self.assertFalse(LLMProvider.objects.exists())
+        out = StringIO()
+        call_command("bootstrap_llm_ops_catalog", stdout=out)
 
-    def test_handler_reentry_is_a_noop(self):
-        """The module-level flag prevents running the seed twice."""
-        app_config = apps.get_app_config("llm_ops")
-        with mock.patch.dict(
-            "os.environ",
-            {"LLM_OPS_AUTO_SEED_IN_TESTS": "1"},
-        ):
-            auto_seed_initial_price_sheet(
-                sender=app_config, app_config=app_config
-            )
-            count_after_first = LLMProvider.objects.count()
-            # Second call within the same process: the flag short
-            # circuits. Database state must remain identical.
-            auto_seed_initial_price_sheet(
-                sender=app_config, app_config=app_config
-            )
-        self.assertEqual(LLMProvider.objects.count(), count_after_first)
+        self.assertTrue(LLMProvider.objects.filter(code="openai").exists())
+        self.assertIn("Bootstrapped LLM Ops catalog", out.getvalue())
+
+    def test_bootstrap_command_skips_populated_database(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        LLMProvider.objects.create(name="OpenAI", code="openai")
+
+        out = StringIO()
+        call_command("bootstrap_llm_ops_catalog", stdout=out)
+
+        self.assertEqual(LLMProvider.objects.count(), 1)
+        self.assertIn("already initialized", out.getvalue())

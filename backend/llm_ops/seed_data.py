@@ -2262,20 +2262,15 @@ def _delete_count(queryset) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Public wrappers for safe (auto-bootstrap) vs legacy (full overwrite) seed
+# Public wrappers for safe vs legacy seed
 # ---------------------------------------------------------------------------
-
-# Track that auto-bootstrap has run once per process to avoid noisy re-runs
-# in test suites that re-create the schema. The DB emptiness check is the
-# real guard, but this flag short-circuits the signal handler early.
-_bootstrap_signal_handled = False
 
 
 def is_llm_ops_database_empty() -> bool:
     """Return True when no llm_ops canonical rows exist yet.
 
-    Used by the post_migrate handler to decide whether to run the
-    initial price sheet bootstrap. Returns ``True`` only when every
+    Used by explicit bootstrap flows to decide whether the initial
+    price sheet still needs to run. Returns ``True`` only when every
     canonical anchor (providers and models) is missing. Procurement
     channels are operator-maintained resources and must not decide
     whether the canonical model catalogue should be bootstrapped.
@@ -2398,8 +2393,8 @@ def seed_initial_price_sheet() -> dict[str, int]:
     ``update_or_create`` and overwrote all defaults. Existing
     ``seed_llm_ops_price_sheet`` management command and downstream
     callers continue to receive the same overwrite semantics. The
-    auto-bootstrap path uses :func:`seed_initial_price_sheet_safely`
-    instead.
+    explicit bootstrap path can use
+    :func:`seed_initial_price_sheet_safely` instead.
     """
     return _seed_initial_price_sheet_core(preserve_manual_overrides=False)
 
@@ -2407,8 +2402,8 @@ def seed_initial_price_sheet() -> dict[str, int]:
 def seed_initial_price_sheet_safely() -> dict[str, int]:
     """Idempotent seed that preserves manually-maintained overrides.
 
-    Used by the :class:`LLMOpsConfig` ``post_migrate`` handler on a fresh
-    deploy. Differs from :func:`seed_initial_price_sheet` in two ways:
+    Intended for explicit bootstrap commands on a fresh deploy.
+    Differs from :func:`seed_initial_price_sheet` in two ways:
 
     1. Models, sources and channel prices are created with
        :func:`~django.db.models.Manager.get_or_create` rather than
@@ -2426,8 +2421,7 @@ def seed_initial_price_sheet_if_empty() -> dict[str, int] | None:
 
     Returns the import stats when seeding actually happened, or ``None``
     when the database already contains llm_ops canonical rows. Safe to
-    call from a ``post_migrate`` signal handler and from management
-    commands.
+    call from management commands and deployment scripts.
     """
     if not is_llm_ops_database_empty():
         return None
