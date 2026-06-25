@@ -22,7 +22,11 @@
               {{ provider.code }}
             </p>
           </div>
-          <button type="button" class="btn-secondary" @click="$emit('close')">
+          <button
+            type="button"
+            class="btn-secondary btn-action-cancel"
+            @click="$emit('close')"
+          >
             关闭
           </button>
         </div>
@@ -84,7 +88,9 @@
                 按模型汇总输入、输出、缓存等核心价格，减少逐维度展开带来的噪音。
               </p>
             </div>
-            <div class="grid w-full gap-3 md:max-w-md md:grid-cols-[minmax(0,1fr)_9rem]">
+            <div
+              class="grid w-full gap-3 md:max-w-md md:grid-cols-[minmax(0,1fr)_9rem]"
+            >
               <input
                 v-model="search"
                 class="field-input"
@@ -123,7 +129,8 @@
                       {{ row.model.name }}
                     </p>
                     <p class="mt-1 font-mono text-xs text-slate-400">
-                      {{ row.model.code }} · {{ modalityLabel(row.model.modality) }}
+                      {{ row.model.code }} ·
+                      {{ modalityLabel(row.model.modality) }}
                     </p>
                   </td>
                   <td class="table-cell">
@@ -234,6 +241,7 @@
                   v-if="source.can_manual_entry"
                   icon="manual"
                   label="手工录价"
+                  tone="success"
                   @click="$emit('manual-entry-source', source)"
                 />
                 <OperationIconButton
@@ -251,6 +259,7 @@
                   v-if="source.can_collect"
                   icon="collect"
                   :label="source.collect_action_label || '采集价格'"
+                  tone="primary"
                   @click="$emit('collect-source', source)"
                 />
                 <OperationIconButton
@@ -337,13 +346,13 @@ const filteredModelRows = computed(() => {
 
 const officialModelCount = computed(
   () =>
-    modelRows.value.filter(
-      (row) => row.source_category === 'official_provider'
-    ).length
+    modelRows.value.filter((row) => row.source_category === 'official_provider')
+      .length
 )
 
 const supplierModelCount = computed(
-  () => modelRows.value.filter((row) => row.source_category === 'supplier').length
+  () =>
+    modelRows.value.filter((row) => row.source_category === 'supplier').length
 )
 
 const pricedModelCount = computed(
@@ -394,8 +403,16 @@ function buildModelRow(model) {
   return {
     key: `model-${model.id}`,
     model,
-    source_name: items[0]?.source_name || model.source_name || source.name || '未绑定价格源',
-    source_url: items[0]?.source_endpoint_url || model.source_endpoint_url || source.endpoint_url || '',
+    source_name:
+      items[0]?.source_name ||
+      model.source_name ||
+      source.name ||
+      '未绑定价格源',
+    source_url:
+      items[0]?.source_endpoint_url ||
+      model.source_endpoint_url ||
+      source.endpoint_url ||
+      '',
     source_relation: relation,
     source_category: category,
     source_category_label: sourceCategoryLabel(category),
@@ -420,8 +437,7 @@ function currentPriceItemsForModel(model) {
   return props.priceItems
     .filter(
       (item) =>
-        String(item.model) === String(model.id) &&
-        item.is_current !== false
+        String(item.model) === String(model.id) && item.is_current !== false
     )
     .slice()
     .sort((left, right) => {
@@ -473,14 +489,26 @@ function tokenPricingItems(model) {
   return [
     priceItem('输入 / 1M', model.input_price_per_million, model.currency),
     priceItem('输出 / 1M', model.output_price_per_million, model.currency),
-    priceItem('缓存输入 / 1M', model.cache_input_price_per_million, model.currency)
+    priceItem(
+      '缓存输入 / 1M',
+      model.cache_input_price_per_million,
+      model.currency
+    )
   ].filter(Boolean)
 }
 
 function audioPricingItems(model) {
   return [
-    priceItem('音频输入 / 秒', model.audio_input_price_per_second, model.currency),
-    priceItem('音频输出 / 秒', model.audio_output_price_per_second, model.currency)
+    priceItem(
+      '音频输入 / 秒',
+      model.audio_input_price_per_second,
+      model.currency
+    ),
+    priceItem(
+      '音频输出 / 秒',
+      model.audio_output_price_per_second,
+      model.currency
+    )
   ].filter(Boolean)
 }
 
@@ -496,8 +524,16 @@ function imagePricingItems(model) {
 
 function videoPricingItems(model) {
   const items = [
-    priceItem('视频输入 / 秒', model.video_input_price_per_second, model.currency),
-    priceItem('视频输出 / 秒', model.video_output_price_per_second, model.currency)
+    priceItem(
+      '视频输入 / 秒',
+      model.video_input_price_per_second,
+      model.currency
+    ),
+    priceItem(
+      '视频输出 / 秒',
+      model.video_output_price_per_second,
+      model.currency
+    )
   ].filter(Boolean)
   const resolutionItems = Object.entries(model.video_resolution_prices || {})
     .slice(0, 2)

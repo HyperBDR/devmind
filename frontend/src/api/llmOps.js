@@ -11,6 +11,10 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/summary/`, paramsOrEmpty(params))
   },
 
+  listAuditLogs(params) {
+    return apiClient.get(`${base}/audit-logs/`, paramsOrEmpty(params))
+  },
+
   listCollectionSources(params) {
     return apiClient.get(`${base}/collection-sources/`, paramsOrEmpty(params))
   },
@@ -166,10 +170,7 @@ export const llmOpsApi = {
   },
 
   bulkTransitionResaleListings(payload) {
-    return apiClient.post(
-      `${base}/resale-listings/bulk-transition/`,
-      payload
-    )
+    return apiClient.post(`${base}/resale-listings/bulk-transition/`, payload)
   },
 
   listReconciliationRecords(params) {

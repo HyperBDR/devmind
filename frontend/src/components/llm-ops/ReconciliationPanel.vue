@@ -1,9 +1,6 @@
 <template>
   <section class="space-y-5">
-    <form
-      class="panel space-y-4"
-      @submit.prevent="saveReconciliation"
-    >
+    <form class="panel space-y-4" @submit.prevent="saveReconciliation">
       <div class="flex flex-col gap-1">
         <p
           class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
@@ -44,10 +41,7 @@
       </div>
 
       <div class="usage-grid">
-        <div
-          v-if="!selectedModel"
-          class="usage-helper lg:col-span-2"
-        >
+        <div v-if="!selectedModel" class="usage-helper lg:col-span-2">
           选择调用模型后，只显示该模型相关的用量维度。
         </div>
         <template v-if="showTextUsage">
@@ -137,7 +131,7 @@
 
       <div class="flex gap-2">
         <button
-          class="btn-primary"
+          class="btn-primary btn-action-create"
           type="submit"
           :disabled="!canCreateRecord"
           :title="createDisabledReason"

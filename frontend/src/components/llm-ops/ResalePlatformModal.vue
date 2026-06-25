@@ -25,7 +25,7 @@
           </div>
           <button
             type="button"
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             :disabled="saving"
             @click="close"
           >
@@ -34,7 +34,9 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div
+        class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5"
+      >
         <section class="form-section">
           <div class="section-heading">
             <h4>平台信息</h4>
@@ -195,14 +197,18 @@
         </label>
         <div class="modal-footer-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="saving"
             @click="close"
           >
             取消
           </button>
-          <button class="btn-primary" type="submit" :disabled="saving">
+          <button
+            class="btn-primary btn-action-save"
+            type="submit"
+            :disabled="saving"
+          >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
             {{ saving ? '保存中' : form.id ? '保存修改' : '创建平台' }}
           </button>
@@ -245,9 +251,7 @@ const roundingModeOptions = [
 watch(
   () => [props.open, props.platform],
   () => {
-    form.value = props.platform
-      ? platformToForm(props.platform)
-      : defaults()
+    form.value = props.platform ? platformToForm(props.platform) : defaults()
   },
   { immediate: true }
 )
@@ -294,8 +298,12 @@ function ratioFromPercent(value) {
 
 function normalizePayload(payload) {
   const clean = { ...payload }
-  clean.code = String(clean.code || '').trim().toLowerCase()
-  clean.currency = String(clean.currency || 'CNY').trim().toUpperCase()
+  clean.code = String(clean.code || '')
+    .trim()
+    .toLowerCase()
+  clean.currency = String(clean.currency || 'CNY')
+    .trim()
+    .toUpperCase()
   clean.fee_rate = ratioFromPercent(clean.fee_rate)
   clean.service_fee_rate = ratioFromPercent(clean.service_fee_rate)
   delete clean.id

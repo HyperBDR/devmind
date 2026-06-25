@@ -26,14 +26,14 @@
         </div>
         <div class="provider-toolbar-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-import"
             type="button"
             @click="showManualImportModal = true"
           >
             批量导入
           </button>
           <button
-            class="btn-primary source-primary-button"
+            class="btn-primary source-primary-button btn-action-create"
             type="button"
             @click="showPriceSourceModal = true"
           >
@@ -142,6 +142,7 @@
                     v-if="source.can_manual_entry"
                     icon="manual"
                     label="手工录价"
+                    tone="success"
                     @click.stop="priceEntrySource = source"
                   />
                   <OperationIconButton
@@ -160,6 +161,7 @@
                         ? '提交中'
                         : source.collect_action_label
                     "
+                    tone="primary"
                     @click.stop="collectSource(source)"
                   />
                   <OperationIconButton

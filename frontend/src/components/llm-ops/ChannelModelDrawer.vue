@@ -28,12 +28,16 @@
             <span v-if="hasUnsavedChanges" class="dirty-badge">
               未保存变更
             </span>
-            <button type="button" class="btn-secondary" @click="close">
+            <button
+              type="button"
+              class="btn-secondary btn-action-cancel"
+              @click="close"
+            >
               关闭
             </button>
             <button
               type="button"
-              class="btn-primary"
+              class="btn-primary btn-action-save"
               :disabled="saving || !hasUnsavedChanges"
               @click="save"
             >
@@ -48,9 +52,7 @@
         <div class="panel space-y-4">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
             <div class="min-w-0 flex-1">
-              <h4 class="text-sm font-semibold text-slate-900">
-                添加渠道模型
-              </h4>
+              <h4 class="text-sm font-semibold text-slate-900">添加渠道模型</h4>
               <p class="mt-1 text-xs leading-5 text-slate-500">
                 先选择元模型，再指定该渠道实际使用的上游供货源。
                 添加后默认启用，可在下方设置成本规则和固定成本价。
@@ -60,9 +62,7 @@
               <span class="summary-pill">
                 已配置 {{ managedRows.length }}
               </span>
-              <span class="summary-pill">
-                已启用 {{ listedCount }}
-              </span>
+              <span class="summary-pill"> 已启用 {{ listedCount }} </span>
               <span class="summary-pill">
                 可添加 {{ availableModelCount }}
               </span>
@@ -129,10 +129,16 @@
                           </template>
                         </span>
                         <span class="searchable-meta-actions">
-                          <button type="button" @click.stop="selectVisibleModels">
+                          <button
+                            type="button"
+                            @click.stop="selectVisibleModels"
+                          >
                             全选当前结果
                           </button>
-                          <button type="button" @click.stop="clearSelectedModels">
+                          <button
+                            type="button"
+                            @click.stop="clearSelectedModels"
+                          >
                             清空
                           </button>
                         </span>
@@ -142,9 +148,11 @@
                           v-for="model in availableModelOptions"
                           :key="model.key"
                           class="searchable-option"
-                          :class="isModelSelected(model.key)
-                            ? 'searchable-option-active'
-                            : ''"
+                          :class="
+                            isModelSelected(model.key)
+                              ? 'searchable-option-active'
+                              : ''
+                          "
                           :aria-checked="isModelSelected(model.key)"
                           role="checkbox"
                           type="button"
@@ -152,9 +160,11 @@
                         >
                           <span
                             class="searchable-checkbox"
-                            :class="isModelSelected(model.key)
-                              ? 'searchable-checkbox-checked'
-                              : ''"
+                            :class="
+                              isModelSelected(model.key)
+                                ? 'searchable-checkbox-checked'
+                                : ''
+                            "
                           >
                             <span v-if="isModelSelected(model.key)">✓</span>
                           </span>
@@ -169,7 +179,10 @@
                             </span>
                           </span>
                           <span class="option-provider">
-                            {{ model.modalitySummary || modalityLabel(model.modality) }}
+                            {{
+                              model.modalitySummary ||
+                              modalityLabel(model.modality)
+                            }}
                           </span>
                         </button>
                         <div
@@ -246,7 +259,10 @@
                         当前模型的图片等特殊计价维度暂不支持在渠道配置中手动覆盖，
                         会使用上游价格或折扣后的渠道成本价。
                       </div>
-                      <div v-else-if="!selectedCostModel" class="fixed-price-note">
+                      <div
+                        v-else-if="!selectedCostModel"
+                        class="fixed-price-note"
+                      >
                         先选择元模型，再配置固定成本价。
                       </div>
                     </div>
@@ -282,28 +298,26 @@
                     </div>
                     <CompactSelect
                       v-if="item.options.length"
-                      :model-value="selectedProviderByModelKey[item.group.key] || ''"
+                      :model-value="
+                        selectedProviderByModelKey[item.group.key] || ''
+                      "
                       :options="item.options"
                       placeholder="选择渠道上游"
                       searchable
                       search-placeholder="搜索上游 / 币种 / 类型"
                       @change="
-                        (value) => selectBatchPriceSourceModel(
-                          item.group.key,
-                          value
-                        )
+                        (value) =>
+                          selectBatchPriceSourceModel(item.group.key, value)
                       "
                     />
                     <div v-else class="readonly-field">
                       <span class="truncate">无可用上游</span>
                     </div>
-                    <div
-                      v-if="item.model"
-                      class="batch-price-preview"
-                    >
+                    <div v-if="item.model" class="batch-price-preview">
                       <span>上游 {{ upstreamPriceSummary(item.model) }}</span>
                       <strong>
-                        成本 {{ pendingDraftPriceSummary(newDraft, item.model) }}
+                        成本
+                        {{ pendingDraftPriceSummary(newDraft, item.model) }}
                       </strong>
                     </div>
                     <div v-else class="batch-price-preview muted">
@@ -356,7 +370,7 @@
             </div>
             <button
               type="button"
-              class="btn-primary btn-compact"
+              class="btn-primary btn-compact btn-action-create"
               :disabled="!canAddSelectedModels"
               @click="addSelectedModels"
             >
@@ -396,7 +410,7 @@
               <button
                 v-if="hiddenConfiguredRowCount"
                 type="button"
-                class="btn-toolbar"
+                class="btn-toolbar btn-action-view"
                 @click="configuredRowsExpanded = !configuredRowsExpanded"
               >
                 {{
@@ -438,7 +452,10 @@
               <div class="mt-3 flex flex-wrap items-center gap-1.5">
                 <span
                   v-if="hasKnownSourceCategory(modelSourceCategory(row.model))"
-                  :class="['source-badge', sourceTone(modelSourceCategory(row.model))]"
+                  :class="[
+                    'source-badge',
+                    sourceTone(modelSourceCategory(row.model))
+                  ]"
                 >
                   {{ sourceCategoryLabel(modelSourceCategory(row.model)) }}
                 </span>
@@ -542,10 +559,7 @@
                       type="number"
                       placeholder="85"
                       @input="
-                        updateSettlementPercent(
-                          row.draft,
-                          $event.target.value
-                        )
+                        updateSettlementPercent(row.draft, $event.target.value)
                       "
                     />
                     <span>%</span>
@@ -661,7 +675,9 @@
                             sourceTone(modelSourceCategory(row.model))
                           ]"
                         >
-                          {{ sourceCategoryLabel(modelSourceCategory(row.model)) }}
+                          {{
+                            sourceCategoryLabel(modelSourceCategory(row.model))
+                          }}
                         </span>
                         <span class="source-badge unknown">
                           {{ modalityLabel(row.model.modality) }}
@@ -1050,25 +1066,24 @@ const managedRows = computed(() => {
 const filteredRows = computed(() => {
   if (!props.channel) return []
   const keyword = search.value.trim().toLowerCase()
-  return managedRows.value
-    .filter((row) => {
-      const currentModel = row.model
-      const haystack = [
-        currentModel.name,
-        currentModel.code,
-        currentModel.meta_model_name,
-        currentModel.meta_model_code,
-        currentModel.provider_name,
-        currentModel.provider_code
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      if (keyword && !haystack.includes(keyword)) {
-        return false
-      }
-      return true
-    })
+  return managedRows.value.filter((row) => {
+    const currentModel = row.model
+    const haystack = [
+      currentModel.name,
+      currentModel.code,
+      currentModel.meta_model_name,
+      currentModel.meta_model_code,
+      currentModel.provider_name,
+      currentModel.provider_code
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    if (keyword && !haystack.includes(keyword)) {
+      return false
+    }
+    return true
+  })
 })
 
 const displayedRows = computed(() => {
@@ -1195,7 +1210,9 @@ function serializeDraft(draft) {
 }
 
 function isSerializedConfigured(draft) {
-  return Boolean(draft?.id || draft?.is_configured || shouldPersist(draft || {}))
+  return Boolean(
+    draft?.id || draft?.is_configured || shouldPersist(draft || {})
+  )
 }
 
 function serializedDraftChanged(left, right) {
@@ -1265,8 +1282,7 @@ function draftDefaults(model, price) {
     price_mode: priceModeFromDraft(price || {}),
     currency: price?.currency || '',
     settlement_ratio: price?.settlement_ratio || '',
-    custom_input_price_per_million:
-      price?.custom_input_price_per_million || '',
+    custom_input_price_per_million: price?.custom_input_price_per_million || '',
     custom_output_price_per_million:
       price?.custom_output_price_per_million || '',
     custom_audio_input_price_per_second:
@@ -1485,17 +1501,6 @@ function normalizeSearch(value) {
     .replace(/\s+/g, '')
 }
 
-function modelIdentityKey(model) {
-  return normalizeSearch(
-    [
-      model.meta_model || model.meta_model_code || model.code || model.name,
-      model.modality || 'text'
-    ]
-      .filter(Boolean)
-      .join('|')
-  )
-}
-
 function modelVendorKey(model) {
   return normalizeSearch(
     model.meta_model_vendor ||
@@ -1580,9 +1585,8 @@ function channelModelSubtitle(row) {
 }
 
 function ratioPercent(value, fallback = null) {
-  const rawValue = value === '' || value === null || value === undefined
-    ? fallback
-    : value
+  const rawValue =
+    value === '' || value === null || value === undefined ? fallback : value
   const ratio = Number(rawValue)
   if (!Number.isFinite(ratio)) return '-'
   return `${(ratio * 100).toFixed(1)}%`
@@ -1616,7 +1620,9 @@ function priceRuleSummary(row) {
 }
 
 function costCurrencyTitle(currency) {
-  const value = String(currency || '').trim().toUpperCase()
+  const value = String(currency || '')
+    .trim()
+    .toUpperCase()
   if (value) {
     return `成本价保存为 ${value}；页面价格按全局显示货币换算。`
   }
@@ -1647,7 +1653,9 @@ function normalizePayload(payload, nullableFields = []) {
       clean[key] = null
     }
   })
-  clean.currency = String(clean.currency || '').trim().toUpperCase()
+  clean.currency = String(clean.currency || '')
+    .trim()
+    .toUpperCase()
   delete clean.id
   delete clean.is_configured
   delete clean.price_mode
@@ -1880,10 +1888,7 @@ function compactCostSummary(row) {
   return previewItems
     .map(
       (item) =>
-        `${previewPriceLabel(item.label)} ${priceText(
-          item,
-          row?.model
-        )}`
+        `${previewPriceLabel(item.label)} ${priceText(item, row?.model)}`
     )
     .join(' · ')
 }
@@ -1900,9 +1905,7 @@ function pendingDraftPriceSummary(draft, model) {
   const rows = draftPricePreview(draft, model)
   if (!rows.length) return '-'
   return rows
-    .map((item) =>
-      `${previewPriceLabel(item.label)} ${priceText(item, model)}`
-    )
+    .map((item) => `${previewPriceLabel(item.label)} ${priceText(item, model)}`)
     .join(' · ')
 }
 
@@ -1996,8 +1999,7 @@ function providerPriceItemsForModel(model) {
   const exactRows = sortPriceItems(
     props.priceItems.filter(
       (item) =>
-        String(item.model) === String(model.id) &&
-        item.is_current !== false
+        String(item.model) === String(model.id) && item.is_current !== false
     )
   )
   if (exactRows.length) return exactRows
@@ -2129,13 +2131,14 @@ function previewPriceLabel(label) {
 function compactPriceRowsWithMissingReason(model, rows) {
   const missingReason = missingPriceReason(model)
   return rows
-    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .filter(
+      ([, value]) => value !== null && value !== undefined && value !== ''
+    )
     .map(([label, value, currency]) => ({
       label,
       value,
       currency,
-      missingReason:
-        Number(value) === 0 && missingReason ? missingReason : ''
+      missingReason: Number(value) === 0 && missingReason ? missingReason : ''
     }))
 }
 
@@ -2200,7 +2203,9 @@ function discountPricePreview(model, currency, ratio) {
 
 function compactPriceRows(rows) {
   return rows
-    .filter(([, value]) => value !== null && value !== undefined && value !== '')
+    .filter(
+      ([, value]) => value !== null && value !== undefined && value !== ''
+    )
     .map(([label, value, currency]) => ({ label, value, currency }))
 }
 
@@ -2282,8 +2287,7 @@ function comparisonTone(status) {
 function comparisonTitle(item) {
   if (item.comparison_status === 'unknown') {
     return (
-      '已按全局显示货币换算展示；缺少同维度上游基准价时，' +
-      '暂无法判断高低。'
+      '已按全局显示货币换算展示；缺少同维度上游基准价时，' + '暂无法判断高低。'
     )
   }
   const delta = item.delta_amount || 0
@@ -2300,7 +2304,6 @@ function modalityLabel(modality) {
   }
   return labels[modality] || modality || '-'
 }
-
 </script>
 
 <style scoped>

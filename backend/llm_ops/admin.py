@@ -1,6 +1,7 @@
 from django.contrib import admin
 
 from .models import (
+    AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
     ChannelPriceItem,
@@ -19,6 +20,28 @@ from .models import (
     ResalePlatform,
     UsageReconciliationRecord,
 )
+
+
+@admin.register(AuditLog)
+class AuditLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "created_at",
+        "actor_identifier",
+        "category",
+        "action",
+        "target_type",
+        "target_id",
+        "summary",
+    )
+    list_filter = ("category", "action", "target_type", "created_at")
+    search_fields = (
+        "actor_identifier",
+        "target_type",
+        "target_id",
+        "target_repr",
+        "summary",
+    )
+    readonly_fields = tuple(field.name for field in AuditLog._meta.fields)
 
 
 @admin.register(PriceCollectionSource)

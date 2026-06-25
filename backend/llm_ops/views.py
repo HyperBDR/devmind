@@ -10,12 +10,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .audit import record_audit_log, snapshot_instance
 from .collection_services import (
     sync_meta_models_from_models_dev,
     sync_yunce_model_prices,
 )
 from .constants import SUPPLIER_SOURCE_VENDOR_ALIASES
 from .models import (
+    AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
     ChannelPriceItem,
@@ -35,6 +37,7 @@ from .models import (
     UsageReconciliationRecord,
 )
 from .serializers import (
+    AuditLogSerializer,
     ChannelModelPriceSerializer,
     ChannelModelPriceHistorySerializer,
     ChannelPriceItemSerializer,
@@ -137,12 +140,58 @@ class LLMOpsPermissionMixin:
     required_feature = FEATURE_KEY
 
 
+class AuditModelViewSetMixin:
+    """Record standard CRUD operations for LLM Ops model viewsets."""
+
+    audit_category = None
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_CREATE,
+            category=self.audit_category,
+            target=instance,
+            summary=f"Created {instance}",
+            after=snapshot_instance(instance),
+        )
+
+    def perform_update(self, serializer):
+        before = snapshot_instance(serializer.instance)
+        instance = serializer.save()
+        after = snapshot_instance(instance)
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_UPDATE,
+            category=self.audit_category,
+            target=instance,
+            summary=f"Updated {instance}",
+            before=before,
+            after=after,
+        )
+
+    def perform_destroy(self, instance):
+        before = snapshot_instance(instance)
+        target_repr = str(instance)
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_DELETE,
+            category=self.audit_category,
+            target=instance,
+            summary=f"Deleted {target_repr}",
+            before=before,
+        )
+        instance.delete()
+
+
 class PriceCollectionSourceViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for typed pricing sources."""
 
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
     serializer_class = PriceCollectionSourceSerializer
 
     def get_queryset(self):
@@ -168,6 +217,15 @@ class PriceCollectionSourceViewSet(
                 source_id=source.id,
                 verify_source=True,
             )
+            record_audit_log(
+                request=request,
+                action=AuditLog.ACTION_COLLECT,
+                category=AuditLog.CATEGORY_COLLECTION,
+                target=source,
+                summary=f"Scheduled price collection for {source}",
+                after=snapshot_instance(source),
+                metadata={"task_id": task.id},
+            )
             return Response(
                 {
                     "detail": "Price collection task scheduled.",
@@ -189,6 +247,54 @@ class PriceCollectionSourceViewSet(
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class AuditLogViewSet(LLMOpsPermissionMixin, viewsets.ReadOnlyModelViewSet):
+    """Read-only API for LLM operations audit records."""
+
+    serializer_class = AuditLogSerializer
+
+    def get_queryset(self):
+        queryset = AuditLog.objects.select_related("actor")
+        action = self.request.query_params.get("action")
+        category = self.request.query_params.get("category")
+        target = self.request.query_params.get("target")
+        target_type = self.request.query_params.get("target_type")
+        target_id = self.request.query_params.get("target_id")
+        actor = self.request.query_params.get("actor")
+        if action:
+            queryset = queryset.filter(action=action)
+        if category:
+            queryset = queryset.filter(category=category)
+        if target_type:
+            target_types = [
+                value.strip()
+                for value in target_type.split(",")
+                if value.strip()
+            ]
+            if len(target_types) > 1:
+                queryset = queryset.filter(target_type__in=target_types)
+            elif target_types:
+                queryset = queryset.filter(target_type=target_types[0])
+        if target:
+            target_query = Q(target_repr__icontains=target) | Q(
+                summary__icontains=target,
+            )
+            if target.isdigit():
+                target_query |= Q(target_id=target)
+            queryset = queryset.filter(target_query)
+        if target_id:
+            queryset = queryset.filter(target_id=target_id)
+        if actor:
+            actor_query = (
+                Q(actor_identifier__icontains=actor)
+                | Q(actor__username__icontains=actor)
+                | Q(actor__email__icontains=actor)
+            )
+            if actor.isdigit():
+                actor_query |= Q(actor_id=actor)
+            queryset = queryset.filter(actor_query)
+        return queryset.order_by("-created_at", "-id")
 
 
 class PriceCollectionRunViewSet(
@@ -269,9 +375,14 @@ class CollectedModelPriceHistoryViewSet(
         return queryset.order_by("-effective_from", "-id")
 
 
-class LLMProviderViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
+class LLMProviderViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
     """CRUD API for original LLM providers."""
 
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
     serializer_class = LLMProviderSerializer
 
     def get_queryset(self):
@@ -282,7 +393,11 @@ class LLMProviderViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
         ).order_by("name", "id")
 
 
-class MetaModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
+class MetaModelViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
     """CRUD API for canonical model identities.
 
     Every meta model must belong to a real model vendor. The
@@ -291,6 +406,7 @@ class MetaModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
     API never exposes an "unbound" meta model.
     """
 
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
     serializer_class = MetaModelSerializer
 
     def get_queryset(self):
@@ -331,12 +447,25 @@ class MetaModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
 
         stats = sync_meta_models_from_models_dev()
         stats["meta_model_normalization"] = normalize_meta_model_catalog()
+        record_audit_log(
+            request=request,
+            action=AuditLog.ACTION_SYNC,
+            category=AuditLog.CATEGORY_COLLECTION,
+            target="llm_ops.MetaModel",
+            summary="Synced meta models from models.dev",
+            metadata=stats,
+        )
         return Response(stats, status=status.HTTP_200_OK)
 
 
-class LLMModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
+class LLMModelViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
     """CRUD API for model SKUs."""
 
+    audit_category = AuditLog.CATEGORY_PRICING
     serializer_class = LLMModelSerializer
 
     def get_queryset(self):
@@ -356,11 +485,13 @@ class LLMModelViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
 
 
 class ModelPriceItemViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for normalized model price items."""
 
+    audit_category = AuditLog.CATEGORY_PRICING
     serializer_class = ModelPriceItemSerializer
 
     def get_queryset(self):
@@ -401,11 +532,13 @@ class ModelPriceItemViewSet(
 
 
 class ProcurementChannelViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for procurement channels."""
 
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
     serializer_class = ProcurementChannelSerializer
 
     def get_queryset(self):
@@ -437,17 +570,29 @@ class ProcurementChannelViewSet(
         channel-specific listing rows instead of converting them into
         auto-listings.
         """
+        before = snapshot_instance(instance)
+        target_repr = str(instance)
         with transaction.atomic():
+            record_audit_log(
+                request=self.request,
+                action=AuditLog.ACTION_DELETE,
+                category=AuditLog.CATEGORY_CONFIGURATION,
+                target=instance,
+                summary=f"Deleted procurement channel {target_repr}",
+                before=before,
+            )
             ResaleListing.objects.filter(channel=instance).delete()
             instance.delete()
 
 
 class ChannelModelPriceViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for channel model price overrides."""
 
+    audit_category = AuditLog.CATEGORY_PRICING
     serializer_class = ChannelModelPriceSerializer
 
     def get_queryset(self):
@@ -473,11 +618,29 @@ class ChannelModelPriceViewSet(
         price = serializer.save()
         record_channel_model_price_history(price)
         sync_channel_price_items(price)
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_CREATE,
+            category=AuditLog.CATEGORY_PRICING,
+            target=price,
+            summary=f"Created channel model price {price}",
+            after=snapshot_instance(price),
+        )
 
     def perform_update(self, serializer):
+        before = snapshot_instance(serializer.instance)
         price = serializer.save()
         record_channel_model_price_history(price)
         sync_channel_price_items(price)
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_UPDATE,
+            category=AuditLog.CATEGORY_PRICING,
+            target=price,
+            summary=f"Updated channel model price {price}",
+            before=before,
+            after=snapshot_instance(price),
+        )
 
     @action(detail=False, methods=["post"], url_path="bulk-upsert")
     def bulk_upsert(self, request):
@@ -497,6 +660,7 @@ class ChannelModelPriceViewSet(
                     channel_id=item.get("channel"),
                     model_id=item.get("model"),
                 ).first()
+                before = snapshot_instance(existing)
                 serializer = self.get_serializer(
                     existing,
                     data=item,
@@ -514,12 +678,26 @@ class ChannelModelPriceViewSet(
                     if key not in {"channel", "model"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
-                price, _ = ChannelModelPrice.objects.update_or_create(
+                price, created = ChannelModelPrice.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
                 )
                 record_channel_model_price_history(price)
                 sync_channel_price_items(price)
+                record_audit_log(
+                    request=request,
+                    action=(
+                        AuditLog.ACTION_CREATE
+                        if created
+                        else AuditLog.ACTION_UPDATE
+                    ),
+                    category=AuditLog.CATEGORY_PRICING,
+                    target=price,
+                    summary="Bulk upsert channel model price",
+                    before=before,
+                    after=snapshot_instance(price),
+                    metadata={"bulk_count": len(items)},
+                )
                 prices.append(price)
 
         output = self.get_serializer(prices, many=True)
@@ -542,6 +720,19 @@ class ChannelModelPriceViewSet(
             for price in queryset:
                 synced_count += len(sync_channel_price_items(price))
                 model_count += 1
+            record_audit_log(
+                request=request,
+                action=AuditLog.ACTION_SYNC,
+                category=AuditLog.CATEGORY_PRICING,
+                target="llm_ops.ChannelPriceItem",
+                summary="Synced channel price items",
+                metadata={
+                    "channel_id": channel_id or "",
+                    "model_id": model_id or "",
+                    "models": model_count,
+                    "price_items": synced_count,
+                },
+            )
 
         return Response(
             {
@@ -583,11 +774,13 @@ class ChannelModelPriceHistoryViewSet(
 
 
 class ChannelPriceItemViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for normalized channel price items."""
 
+    audit_category = AuditLog.CATEGORY_PRICING
     serializer_class = ChannelPriceItemSerializer
 
     def get_queryset(self):
@@ -623,9 +816,14 @@ class ChannelPriceItemViewSet(
         )
 
 
-class ResalePlatformViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
+class ResalePlatformViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
     """CRUD API for downstream resale platforms."""
 
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
     serializer_class = ResalePlatformSerializer
 
     def get_queryset(self):
@@ -634,9 +832,14 @@ class ResalePlatformViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
         ).order_by("name", "id")
 
 
-class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
+class ResaleListingViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
     """CRUD API for downstream resale listings."""
 
+    audit_category = AuditLog.CATEGORY_PUBLISHING
     serializer_class = ResaleListingSerializer
 
     def get_queryset(self):
@@ -664,11 +867,29 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
             is_active=False,
         )
         record_resale_listing_price_history(listing)
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_CREATE,
+            category=AuditLog.CATEGORY_PUBLISHING,
+            target=listing,
+            summary=f"Created resale listing {listing}",
+            after=snapshot_instance(listing),
+        )
 
     def perform_update(self, serializer):
+        before = snapshot_instance(serializer.instance)
         status_defaults = _listing_draft_status(serializer.instance)
         listing = serializer.save(**status_defaults)
         record_resale_listing_price_history(listing)
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_UPDATE,
+            category=AuditLog.CATEGORY_PUBLISHING,
+            target=listing,
+            summary=f"Updated resale listing {listing}",
+            before=before,
+            after=snapshot_instance(listing),
+        )
 
     @action(detail=False, methods=["post"], url_path="bulk-upsert")
     def bulk_upsert(self, request):
@@ -690,6 +911,7 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     model_id=item.get("model"),
                     channel_id=channel_id,
                 ).first()
+                before = snapshot_instance(existing)
                 serializer = self.get_serializer(
                     existing,
                     data=item,
@@ -709,7 +931,7 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                 }
                 defaults["meta_model"] = data["model"].meta_model
                 defaults.update(_listing_submit_status(existing))
-                listing, _ = ResaleListing.objects.update_or_create(
+                listing, created = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
                 )
@@ -718,6 +940,20 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                record_audit_log(
+                    request=request,
+                    action=(
+                        AuditLog.ACTION_CREATE
+                        if created
+                        else AuditLog.ACTION_BULK_UPSERT
+                    ),
+                    category=AuditLog.CATEGORY_PUBLISHING,
+                    target=listing,
+                    summary="Submitted resale listing change",
+                    before=before,
+                    after=snapshot_instance(listing),
+                    metadata={"bulk_count": len(items)},
+                )
                 listings.append(listing)
 
         output = self.get_serializer(listings, many=True)
@@ -743,6 +979,7 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     model_id=item.get("model"),
                     channel_id=channel_id,
                 ).first()
+                before = snapshot_instance(existing)
                 serializer = self.get_serializer(
                     existing,
                     data=item,
@@ -762,7 +999,7 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                 }
                 defaults["meta_model"] = data["model"].meta_model
                 defaults.update(_listing_draft_status(existing))
-                listing, _ = ResaleListing.objects.update_or_create(
+                listing, created = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
                 )
@@ -771,6 +1008,20 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                record_audit_log(
+                    request=request,
+                    action=(
+                        AuditLog.ACTION_CREATE
+                        if created
+                        else AuditLog.ACTION_BULK_DRAFT
+                    ),
+                    category=AuditLog.CATEGORY_PUBLISHING,
+                    target=listing,
+                    summary="Saved resale listing draft",
+                    before=before,
+                    after=snapshot_instance(listing),
+                    metadata={"bulk_count": len(items)},
+                )
                 listings.append(listing)
 
         output = self.get_serializer(listings, many=True)
@@ -810,6 +1061,10 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                         is_active=True,
                     )
                 )
+                active_before = {
+                    listing.id: snapshot_instance(listing)
+                    for listing in active_listings
+                }
                 ResaleListing.objects.filter(
                     platform=data["platform"],
                     model=data["model"],
@@ -827,6 +1082,16 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                         is_active=False,
                     )
                     record_resale_listing_price_history(active_listing)
+                    record_audit_log(
+                        request=request,
+                        action=AuditLog.ACTION_OFFLINE,
+                        category=AuditLog.CATEGORY_PUBLISHING,
+                        target=active_listing,
+                        summary="Offline listing during bulk replace",
+                        before=active_before.get(active_listing.id, {}),
+                        after=snapshot_instance(active_listing),
+                        metadata={"bulk_count": len(items)},
+                    )
                 lookup = {
                     "platform": data["platform"],
                     "model": data["model"],
@@ -839,7 +1104,8 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                 }
                 defaults["meta_model"] = data["model"].meta_model
                 defaults.update(_listing_submit_status(existing))
-                listing, _ = ResaleListing.objects.update_or_create(
+                before = snapshot_instance(existing)
+                listing, created = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
                 )
@@ -848,6 +1114,20 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                record_audit_log(
+                    request=request,
+                    action=(
+                        AuditLog.ACTION_CREATE
+                        if created
+                        else AuditLog.ACTION_BULK_REPLACE
+                    ),
+                    category=AuditLog.CATEGORY_PUBLISHING,
+                    target=listing,
+                    summary="Replaced active resale listing",
+                    before=before,
+                    after=snapshot_instance(listing),
+                    metadata={"bulk_count": len(items)},
+                )
                 listings.append(listing)
 
         output = self.get_serializer(listings, many=True)
@@ -921,6 +1201,7 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     seen.add(listing.model_id)
                     target_listings.append(listing)
             for listing in target_listings:
+                before = snapshot_instance(listing)
                 try:
                     _apply_resale_listing_transition(listing, action_name)
                 except ValueError as exc:
@@ -930,6 +1211,16 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     )
                 listing.save()
                 record_resale_listing_price_history(listing)
+                record_audit_log(
+                    request=request,
+                    action=AuditLog.ACTION_TRANSITION,
+                    category=AuditLog.CATEGORY_APPROVAL,
+                    target=listing,
+                    summary=f"Applied resale workflow action {action_name}",
+                    before=before,
+                    after=snapshot_instance(listing),
+                    metadata={"workflow_action": action_name},
+                )
                 listings.append(listing)
 
         output = self.get_serializer(listings, many=True)
@@ -981,6 +1272,10 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     is_active=True,
                 )
             listings = list(queryset)
+            before_by_id = {
+                listing.id: snapshot_instance(listing)
+                for listing in listings
+            }
             queryset.update(
                 is_active=False,
                 publish_status=ResaleListing.PUBLISH_OFFLINE,
@@ -994,17 +1289,28 @@ class ResaleListingViewSet(LLMOpsPermissionMixin, viewsets.ModelViewSet):
                     is_active=False,
                 )
                 record_resale_listing_price_history(listing)
+                record_audit_log(
+                    request=request,
+                    action=AuditLog.ACTION_OFFLINE,
+                    category=AuditLog.CATEGORY_PUBLISHING,
+                    target=listing,
+                    summary="Directly offlined resale listing",
+                    before=before_by_id.get(listing.id, {}),
+                    after=snapshot_instance(listing),
+                )
 
         output = self.get_serializer(listings, many=True)
         return Response(output.data, status=status.HTTP_200_OK)
 
 
 class ResaleListingExclusionViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for models removed from resale platform workbench lists."""
 
+    audit_category = AuditLog.CATEGORY_PUBLISHING
     serializer_class = ResaleListingExclusionSerializer
 
     def get_queryset(self):
@@ -1045,13 +1351,34 @@ class ResaleListingExclusionViewSet(
         with transaction.atomic():
             for model_id in model_ids:
                 model = LLMModel.objects.get(id=model_id)
-                exclusion, _ = ResaleListingExclusion.objects.update_or_create(
+                existing = ResaleListingExclusion.objects.filter(
                     platform_id=platform_id,
                     model_id=model_id,
-                    defaults={
-                        "meta_model": model.meta_model,
-                        "reason": request.data.get("reason", ""),
-                    },
+                ).first()
+                before = snapshot_instance(existing)
+                exclusion, created = (
+                    ResaleListingExclusion.objects.update_or_create(
+                        platform_id=platform_id,
+                        model_id=model_id,
+                        defaults={
+                            "meta_model": model.meta_model,
+                            "reason": request.data.get("reason", ""),
+                        },
+                    )
+                )
+                record_audit_log(
+                    request=request,
+                    action=(
+                        AuditLog.ACTION_CREATE
+                        if created
+                        else AuditLog.ACTION_BULK_UPSERT
+                    ),
+                    category=AuditLog.CATEGORY_PUBLISHING,
+                    target=exclusion,
+                    summary="Excluded resale listing candidate",
+                    before=before,
+                    after=snapshot_instance(exclusion),
+                    metadata={"bulk_count": len(model_ids)},
                 )
                 exclusions.append(exclusion)
 
@@ -1075,10 +1402,30 @@ class ResaleListingExclusionViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        deleted_count, _ = ResaleListingExclusion.objects.filter(
-            platform_id=platform_id,
-            model_id__in=model_ids,
-        ).delete()
+        with transaction.atomic():
+            exclusions = list(
+                ResaleListingExclusion.objects.filter(
+                    platform_id=platform_id,
+                    model_id__in=model_ids,
+                )
+            )
+            for exclusion in exclusions:
+                before = snapshot_instance(exclusion)
+                record_audit_log(
+                    request=request,
+                    action=AuditLog.ACTION_RESTORE,
+                    category=AuditLog.CATEGORY_PUBLISHING,
+                    target=exclusion,
+                    summary="Restored resale listing candidate",
+                    before=before,
+                    metadata={"bulk_count": len(model_ids)},
+                )
+            deleted_count, _ = (
+                ResaleListingExclusion.objects.filter(
+                    platform_id=platform_id,
+                    model_id__in=model_ids,
+                ).delete()
+            )
         return Response(
             {"deleted_count": deleted_count},
             status=status.HTTP_200_OK,
@@ -1113,11 +1460,13 @@ class ResaleListingPriceHistoryViewSet(
 
 
 class UsageReconciliationRecordViewSet(
+    AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
     viewsets.ModelViewSet,
 ):
     """CRUD API for reconciliation records."""
 
+    audit_category = AuditLog.CATEGORY_RECONCILIATION
     serializer_class = UsageReconciliationRecordSerializer
 
     def get_queryset(self):
@@ -2031,6 +2380,14 @@ class YunceCollectionAPIView(LLMOpsPermissionMixin, APIView):
             if data.get("base_url"):
                 kwargs["base_url"] = data["base_url"]
             result = sync_yunce_model_prices(**kwargs)
+            record_audit_log(
+                request=request,
+                action=AuditLog.ACTION_COLLECT,
+                category=AuditLog.CATEGORY_COLLECTION,
+                target=data.get("source") or "llm_ops.YunceCollection",
+                summary="Collected Yunce model prices",
+                metadata=result,
+            )
         except Exception as exc:
             return Response(
                 {"detail": str(exc)},
@@ -2054,12 +2411,17 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
         data = serializer.validated_data
         provider = data["provider"]
         source = data.get("source")
+        source_before = snapshot_instance(source)
         if source is None:
             source_slug = data.get("source_slug") or slugify(
                 f"{provider.code}-{data['source_name']}",
             )
             if not source_slug:
                 source_slug = f"{provider.code}-manual"
+            existing_source = PriceCollectionSource.objects.filter(
+                slug=source_slug,
+            ).first()
+            source_before = snapshot_instance(existing_source)
             source, _ = PriceCollectionSource.objects.update_or_create(
                 slug=source_slug,
                 defaults={
@@ -2081,5 +2443,20 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
             rows=data["rows"],
             default_currency=data["currency"],
             updates_model_prices=data["updates_model_prices"],
+        )
+        record_audit_log(
+            request=request,
+            action=AuditLog.ACTION_IMPORT,
+            category=AuditLog.CATEGORY_PRICING,
+            target=source,
+            summary=f"Imported manual model prices from {source}",
+            before=source_before,
+            after=snapshot_instance(source),
+            metadata={
+                "provider_id": provider.id,
+                "row_count": len(data["rows"]),
+                "updates_model_prices": data["updates_model_prices"],
+                "result": result,
+            },
         )
         return Response(result)

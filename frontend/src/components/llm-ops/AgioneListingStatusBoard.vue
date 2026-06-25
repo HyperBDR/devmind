@@ -38,9 +38,7 @@
       <div class="listing-board-toolbar">
         <div class="listing-board-heading">
           <h3 class="panel-title">模型挂售列表</h3>
-          <p class="listing-board-subtitle">
-            仅展示当前平台流程内模型。
-          </p>
+          <p class="listing-board-subtitle">仅展示当前平台流程内模型。</p>
         </div>
         <div class="listing-board-controls">
           <input
@@ -67,15 +65,8 @@
           </div>
           <label class="pagination-size-field">
             <span>每页</span>
-            <select
-              v-model.number="pageSize"
-              class="pagination-select"
-            >
-              <option
-                v-for="size in pageSizeOptions"
-                :key="size"
-                :value="size"
-              >
+            <select v-model.number="pageSize" class="pagination-select">
+              <option v-for="size in pageSizeOptions" :key="size" :value="size">
                 {{ size }}
               </option>
             </select>
@@ -118,7 +109,7 @@
           </template>
           <button
             type="button"
-            class="add-listing-button"
+            class="add-listing-button btn-action-create"
             @click="openWorkspace(null, 'create')"
           >
             新建上架
@@ -279,10 +270,7 @@
           </tbody>
         </table>
       </div>
-      <div
-        v-if="filteredListingRows.length"
-        class="pagination-bar"
-      >
+      <div v-if="filteredListingRows.length" class="pagination-bar">
         <p class="pagination-summary">
           第 {{ currentPage }} / {{ totalPages }} 页 · 共
           {{ filteredListingRows.length }} 条
@@ -416,28 +404,30 @@ const filteredListingRows = computed(() => {
   const query = String(searchQuery.value || '')
     .trim()
     .toLowerCase()
-  return all.filter((row) => {
-    if (listingStatusFilter.value === 'actionable') {
-      if (!isActionableRow(row)) return false
-    } else if (listingStatusFilter.value === 'listed') {
-      if (!row.is_listed) return false
-    } else if (listingStatusFilter.value === 'unlisted') {
-      if (row.is_listed) return false
-    } else if (listingStatusFilter.value === 'all') {
-      // visible rows only
-    } else {
-      return false
-    }
-    if (!query) return true
-    const name = String(rows.modelDisplayName(row.model) || '').toLowerCase()
-    const code = String(row.model?.code || '').toLowerCase()
-    return name.includes(query) || code.includes(query)
-  }).sort((left, right) => {
-    if (listingStatusFilter.value !== 'all') return 0
-    return String(left.model?.name || '').localeCompare(
-      String(right.model?.name || '')
-    )
-  })
+  return all
+    .filter((row) => {
+      if (listingStatusFilter.value === 'actionable') {
+        if (!isActionableRow(row)) return false
+      } else if (listingStatusFilter.value === 'listed') {
+        if (!row.is_listed) return false
+      } else if (listingStatusFilter.value === 'unlisted') {
+        if (row.is_listed) return false
+      } else if (listingStatusFilter.value === 'all') {
+        // visible rows only
+      } else {
+        return false
+      }
+      if (!query) return true
+      const name = String(rows.modelDisplayName(row.model) || '').toLowerCase()
+      const code = String(row.model?.code || '').toLowerCase()
+      return name.includes(query) || code.includes(query)
+    })
+    .sort((left, right) => {
+      if (listingStatusFilter.value !== 'all') return 0
+      return String(left.model?.name || '').localeCompare(
+        String(right.model?.name || '')
+      )
+    })
 })
 
 const totalPages = computed(() =>
@@ -576,8 +566,7 @@ const listingKpis = computed(() => {
   const avgMargin = rowMargins.length
     ? Number(
         (
-          rowMargins.reduce((sum, value) => sum + value, 0) /
-          rowMargins.length
+          rowMargins.reduce((sum, value) => sum + value, 0) / rowMargins.length
         ).toFixed(1)
       )
     : null
@@ -650,7 +639,7 @@ function isActionableRow(row) {
       'pending_update',
       'pending_offline',
       'offline_exception',
-      'offline',
+      'offline'
     ].includes(row.workflow_status)
   ) {
     return true
@@ -667,24 +656,22 @@ function activeListingChannelLabel(row) {
 }
 
 function listingPriceMetrics(row) {
-  return RESALE_PRICE_DIMENSION_SPECS
-    .filter((spec) => {
-      if (spec.key !== 'cache') return true
-      return (
-        row.status_listing?.[spec.retailField] ||
-        row.lowest_option?.[spec.costField]
-      )
-    })
-    .map((spec) => ({
-      key: spec.key,
-      label: spec.label,
-      retail: listingAmountText(row.status_listing?.[spec.retailField]),
-      points: listingPointText(
-        row.status_listing?.[spec.retailField],
-        row.status_listing?.currency
-      ),
-      cost: listingAmountText(row.lowest_option?.[spec.costField])
-    }))
+  return RESALE_PRICE_DIMENSION_SPECS.filter((spec) => {
+    if (spec.key !== 'cache') return true
+    return (
+      row.status_listing?.[spec.retailField] ||
+      row.lowest_option?.[spec.costField]
+    )
+  }).map((spec) => ({
+    key: spec.key,
+    label: spec.label,
+    retail: listingAmountText(row.status_listing?.[spec.retailField]),
+    points: listingPointText(
+      row.status_listing?.[spec.retailField],
+      row.status_listing?.currency
+    ),
+    cost: listingAmountText(row.lowest_option?.[spec.costField])
+  }))
 }
 
 function listingAmountText(value) {
@@ -726,18 +713,16 @@ function convertPointCurrencyAmount(value, sourceCurrency, targetCurrency) {
 
 function listingUnifiedMarginRate(row) {
   return averageMarginRate(
-    RESALE_PRICE_DIMENSION_SPECS
-      .filter((spec) => {
-        if (spec.key !== 'cache') return true
-        return (
-          row.status_listing?.[spec.retailField] ||
-          row.lowest_option?.[spec.costField]
-        )
-      })
-      .map((spec) => ({
-        price: row.status_listing?.[spec.retailField],
-        cost: row.lowest_option?.[spec.costField]
-      }))
+    RESALE_PRICE_DIMENSION_SPECS.filter((spec) => {
+      if (spec.key !== 'cache') return true
+      return (
+        row.status_listing?.[spec.retailField] ||
+        row.lowest_option?.[spec.costField]
+      )
+    }).map((spec) => ({
+      price: row.status_listing?.[spec.retailField],
+      cost: row.lowest_option?.[spec.costField]
+    }))
   )
 }
 
@@ -768,8 +753,7 @@ function statusPillTone(row) {
   )
     return 'tone-warn'
   if (row.workflow_status === 'offline_exception') return 'tone-danger'
-  if (['offline', 'deleted'].includes(row.workflow_status))
-    return 'tone-muted'
+  if (['offline', 'deleted'].includes(row.workflow_status)) return 'tone-muted'
   return 'tone-warn'
 }
 
@@ -814,7 +798,9 @@ function rowStateActions(row) {
     ],
     deleted: []
   }
-  return actions[status] || [{ label: '去挂售', kind: 'create', tone: 'primary' }]
+  return (
+    actions[status] || [{ label: '去挂售', kind: 'create', tone: 'primary' }]
+  )
 }
 
 function isSelectable(row) {
@@ -858,10 +844,11 @@ function goToNextPage() {
 function emitAction(row, kind) {
   const modelId = row.model.id
   const listingId = row.status_listing?.id || null
-  if (
-    kind === 'direct_offline' ||
-    isWorkflowTransition(kind)
-  ) {
+  if (kind === 'start_edit') {
+    emit('action', { modelId, listingId, kind: 'edit' })
+    return
+  }
+  if (kind === 'direct_offline' || isWorkflowTransition(kind)) {
     handleDirectAction(row, kind)
     return
   }
@@ -873,7 +860,6 @@ function isWorkflowTransition(kind) {
     'submit',
     'withdraw',
     'confirm_publish',
-    'start_edit',
     'abandon_update',
     'confirm_update',
     'request_offline',
@@ -949,7 +935,6 @@ function actionPayloadForRows(targetRows, action = null) {
 
 async function handleDirectAction(row, kind) {
   if (!props.agionePlatform) return
-  const modelId = row.model.id
   savingListings.value = true
   try {
     if (kind === 'direct_offline') {
@@ -968,13 +953,6 @@ async function handleDirectAction(row, kind) {
       )
       emitUpdatedListings(response)
       showSuccess(workflowSuccessText(kind))
-      if (kind === 'start_edit') {
-        emit('action', {
-          modelId,
-          listingId: row.status_listing?.id || null,
-          kind: 'edit'
-        })
-      }
     }
     emit('refresh')
   } catch (error) {
@@ -1686,8 +1664,9 @@ function workflowSuccessText(kind) {
   margin-left: auto;
   margin-right: auto;
   max-width: 12rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 12px;
 }
 
@@ -1736,8 +1715,9 @@ function workflowSuccessText(kind) {
   background-color: #ece9f9;
   padding: 0.25rem 0.625rem;
   color: #4a3eb0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 12px;
   font-weight: 700;
 }
@@ -1914,7 +1894,10 @@ function workflowSuccessText(kind) {
   color: #334155;
   font-size: 0.875rem;
   font-weight: 500;
-  transition: color 150ms, background-color 150ms, border-color 150ms,
+  transition:
+    color 150ms,
+    background-color 150ms,
+    border-color 150ms,
     box-shadow 150ms;
 }
 

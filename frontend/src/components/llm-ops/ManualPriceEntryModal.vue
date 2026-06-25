@@ -20,7 +20,7 @@
         </div>
         <button
           type="button"
-          class="btn-secondary"
+          class="btn-secondary btn-action-cancel"
           :disabled="saving"
           @click="close"
         >
@@ -68,7 +68,10 @@
             </button>
           </div>
 
-          <div v-if="modelMode === 'existing'" class="grid gap-4 md:grid-cols-2">
+          <div
+            v-if="modelMode === 'existing'"
+            class="grid gap-4 md:grid-cols-2"
+          >
             <label class="field-group md:col-span-2">
               <span class="field-label">模型</span>
               <CompactSelect
@@ -136,7 +139,10 @@
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group compact-field">
               <span class="field-label">币种</span>
-              <CompactSelect v-model="form.currency" :options="currencyOptions" />
+              <CompactSelect
+                v-model="form.currency"
+                :options="currencyOptions"
+              />
             </label>
             <label class="field-group">
               <span class="field-label">来源地址</span>
@@ -151,7 +157,7 @@
 
           <div class="price-grid">
             <label
-              v-for="field in priceFields"
+              v-for="field in activePriceFields"
               :key="field.key"
               class="field-group"
             >
@@ -175,18 +181,22 @@
         </p>
       </div>
 
-      <div class="modal-footer">
-        <div class="modal-footer-actions">
+      <div class="modal-footer manual-price-modal-footer">
+        <div class="modal-footer-actions manual-price-modal-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="saving"
             @click="close"
           >
             取消
           </button>
-          <button class="btn-primary" type="submit" :disabled="saving">
-            <span class="icon-mark" />
+          <button
+            class="btn-primary btn-action-save"
+            type="submit"
+            :disabled="saving"
+          >
+            <span class="save-icon" aria-hidden="true" />
             {{ saving ? '保存中' : '保存价格' }}
           </button>
         </div>
@@ -231,42 +241,50 @@ const priceFields = [
   {
     key: 'input_price_per_million',
     label: '文本输入 / 百万 token',
-    help: 'Prompt 或输入 token 单价'
+    help: 'Prompt 或输入 token 单价',
+    modalities: ['text', 'multimodal']
   },
   {
     key: 'output_price_per_million',
     label: '文本输出 / 百万 token',
-    help: 'Completion 或输出 token 单价'
+    help: 'Completion 或输出 token 单价',
+    modalities: ['text', 'multimodal']
   },
   {
     key: 'cache_input_price_per_million',
     label: '缓存输入 / 百万 token',
-    help: '可选，命中缓存后的输入价格'
+    help: '可选，命中缓存后的输入价格',
+    modalities: ['text', 'multimodal']
   },
   {
     key: 'image_output_price_per_image',
     label: '图片输出 / 张',
-    help: '图片生成模型按张计价'
+    help: '图片生成模型按张计价',
+    modalities: ['multimodal']
   },
   {
     key: 'audio_input_price_per_second',
     label: '音频输入 / 秒',
-    help: '语音识别或音频理解输入'
+    help: '语音识别或音频理解输入',
+    modalities: ['audio']
   },
   {
     key: 'audio_output_price_per_second',
     label: '音频输出 / 秒',
-    help: '语音合成或音频生成输出'
+    help: '语音合成或音频生成输出',
+    modalities: ['audio']
   },
   {
     key: 'video_input_price_per_second',
     label: '视频输入 / 秒',
-    help: '视频理解输入'
+    help: '视频理解输入',
+    modalities: ['video']
   },
   {
     key: 'video_output_price_per_second',
     label: '视频输出 / 秒',
-    help: '视频生成输出'
+    help: '视频生成输出',
+    modalities: ['video']
   }
 ]
 
@@ -294,13 +312,22 @@ const providerOptions = computed(() => [
     }))
 ])
 
-const modelOptions = computed(() =>
-  buildModelOptions()
-)
+const modelOptions = computed(() => buildModelOptions())
 
 const selectedModel = computed(() =>
-  props.models.find(
-    (model) => String(model.id) === String(form.value.model_id)
+  props.models.find((model) => String(model.id) === String(form.value.model_id))
+)
+
+const currentPriceModality = computed(() => {
+  if (modelMode.value === 'existing') {
+    return selectedModel.value?.modality || 'text'
+  }
+  return form.value.modality || 'text'
+})
+
+const activePriceFields = computed(() =>
+  priceFields.filter((field) =>
+    field.modalities.includes(currentPriceModality.value)
   )
 )
 
@@ -338,7 +365,8 @@ const sourceCategoryTone = computed(() => {
 })
 
 const sourceRelationLabel = computed(() => {
-  if (props.source?.provider_name) return `模型厂商 ${props.source.provider_name}`
+  if (props.source?.provider_name)
+    return `模型厂商 ${props.source.provider_name}`
   if (props.source?.channel_name) return `转发渠道 ${props.source.channel_name}`
   return '未绑定模型厂商'
 })
@@ -372,6 +400,10 @@ watch(
     }
   }
 )
+
+watch(currentPriceModality, () => {
+  clearInactivePrices()
+})
 
 function defaults() {
   return {
@@ -453,7 +485,7 @@ function buildImportRow(model) {
     currency: form.value.currency,
     source_url: form.value.source_url || props.source.endpoint_url || ''
   }
-  priceFields.forEach((field) => {
+  activePriceFields.value.forEach((field) => {
     const value = normalizePrice(form.value[field.key])
     if (value !== null) row[field.key] = value
   })
@@ -461,7 +493,18 @@ function buildImportRow(model) {
 }
 
 function hasAnyPrice() {
-  return priceFields.some((field) => normalizePrice(form.value[field.key]) !== null)
+  return activePriceFields.value.some(
+    (field) => normalizePrice(form.value[field.key]) !== null
+  )
+}
+
+function clearInactivePrices() {
+  const activeKeys = new Set(activePriceFields.value.map((field) => field.key))
+  priceFields.forEach((field) => {
+    if (!activeKeys.has(field.key)) {
+      form.value[field.key] = ''
+    }
+  })
 }
 
 function buildModelOptions() {
@@ -534,10 +577,6 @@ function errorMessage(error, fallback) {
 
 .modal-body {
   @apply max-h-[calc(100vh-13rem)] overflow-y-auto px-5 py-5;
-}
-
-.modal-footer {
-  @apply flex justify-end gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4;
 }
 
 .eyebrow {
@@ -624,10 +663,6 @@ function errorMessage(error, fallback) {
   @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
 }
 
-.icon-mark {
-  @apply inline-block h-3.5 w-3.5 shrink-0 rounded-sm bg-current;
-}
-
 .source-badge {
   @apply shrink-0 rounded-full border px-2 py-1 text-xs font-medium;
 }
@@ -646,5 +681,36 @@ function errorMessage(error, fallback) {
 
 .source-badge.unknown {
   @apply border-slate-200 bg-slate-100 text-slate-600;
+}
+
+:global(body.llm-ops-theme) .manual-price-modal-footer.modal-footer {
+  gap: 0.75rem !important;
+  padding: 0.75rem 1.25rem !important;
+}
+
+:global(body.llm-ops-theme) .manual-price-modal-actions.modal-footer-actions {
+  gap: 0.5rem !important;
+}
+
+.save-icon {
+  align-items: center;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  border-radius: 999px;
+  display: inline-flex;
+  height: 1rem;
+  justify-content: center;
+  position: relative;
+  width: 1rem;
+}
+
+.save-icon::after {
+  border-bottom: 2px solid currentColor;
+  border-right: 2px solid currentColor;
+  content: '';
+  height: 0.45rem;
+  margin-top: -0.1rem;
+  transform: rotate(45deg);
+  width: 0.25rem;
 }
 </style>

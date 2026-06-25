@@ -20,14 +20,16 @@
               {{ isEditing ? '编辑模型价格源' : '新建模型价格源' }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
-              {{ isEditing
-                ? '维护价格源名称、口径、价格地址和启停状态。'
-                : '新建原厂、供货商或人工维护价格源，用于后续录价和采集模型价格。' }}
+              {{
+                isEditing
+                  ? '维护价格源名称、口径、价格地址和启停状态。'
+                  : '新建原厂、供货商或人工维护价格源，用于后续录价和采集模型价格。'
+              }}
             </p>
           </div>
           <button
             type="button"
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             :disabled="saving"
             @click="close"
           >
@@ -36,7 +38,9 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div
+        class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5"
+      >
         <section class="form-section">
           <div class="section-heading">
             <h4>基础信息</h4>
@@ -112,11 +116,7 @@
           class="modal-footer-status status-inline"
           :class="{ active: form.is_enabled }"
         >
-          <input
-            v-model="form.is_enabled"
-            type="checkbox"
-            class="sr-only"
-          />
+          <input v-model="form.is_enabled" type="checkbox" class="sr-only" />
           <span class="status-switch" aria-hidden="true">
             <span class="status-switch-dot" />
           </span>
@@ -126,14 +126,18 @@
         </label>
         <div class="modal-footer-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="saving"
             @click="close"
           >
             取消
           </button>
-          <button class="btn-primary" type="submit" :disabled="saving">
+          <button
+            class="btn-primary btn-action-save"
+            type="submit"
+            :disabled="saving"
+          >
             <span class="icon-mark" />
             {{ saving ? '保存中' : isEditing ? '保存修改' : '创建价格源' }}
           </button>

@@ -96,6 +96,104 @@ body.llm-ops-theme .refresh-action-button:disabled {
   color: #94a3b8 !important;
 }
 
+body.llm-ops-theme .btn-action-create,
+body.llm-ops-theme .btn-action-save,
+body.llm-ops-theme .btn-action-submit,
+body.llm-ops-theme .btn-action-confirm {
+  border-color: #4f46e5 !important;
+  background: linear-gradient(135deg, #5b4bdb, #4338ca) !important;
+  color: #ffffff !important;
+  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.18) !important;
+}
+
+body.llm-ops-theme .btn-action-create:hover:not(:disabled),
+body.llm-ops-theme .btn-action-save:hover:not(:disabled),
+body.llm-ops-theme .btn-action-submit:hover:not(:disabled),
+body.llm-ops-theme .btn-action-confirm:hover:not(:disabled) {
+  border-color: #4338ca !important;
+  background: linear-gradient(135deg, #4f46e5, #3730a3) !important;
+  color: #ffffff !important;
+  box-shadow: 0 10px 24px rgba(79, 70, 229, 0.24) !important;
+}
+
+body.llm-ops-theme .btn-action-refresh,
+body.llm-ops-theme .btn-action-sync {
+  border-color: #bfdbfe !important;
+  background: #eff6ff !important;
+  color: #1d4ed8 !important;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.06) !important;
+}
+
+body.llm-ops-theme .btn-action-refresh:hover:not(:disabled),
+body.llm-ops-theme .btn-action-sync:hover:not(:disabled) {
+  border-color: #93c5fd !important;
+  background: #dbeafe !important;
+  color: #1e40af !important;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12) !important;
+}
+
+body.llm-ops-theme .btn-action-import,
+body.llm-ops-theme .btn-action-manual {
+  border-color: #99f6e4 !important;
+  background: #f0fdfa !important;
+  color: #0f766e !important;
+  box-shadow: 0 1px 2px rgba(15, 118, 110, 0.06) !important;
+}
+
+body.llm-ops-theme .btn-action-import:hover:not(:disabled),
+body.llm-ops-theme .btn-action-manual:hover:not(:disabled) {
+  border-color: #5eead4 !important;
+  background: #ccfbf1 !important;
+  color: #115e59 !important;
+  box-shadow: 0 8px 18px rgba(15, 118, 110, 0.12) !important;
+}
+
+body.llm-ops-theme .btn-action-config,
+body.llm-ops-theme .btn-action-edit,
+body.llm-ops-theme .btn-action-view,
+body.llm-ops-theme .btn-action-neutral,
+body.llm-ops-theme .btn-action-cancel {
+  border-color: #dbe4f0 !important;
+  background: #ffffff !important;
+  color: #334155 !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+}
+
+body.llm-ops-theme .btn-action-config:hover:not(:disabled),
+body.llm-ops-theme .btn-action-edit:hover:not(:disabled),
+body.llm-ops-theme .btn-action-view:hover:not(:disabled),
+body.llm-ops-theme .btn-action-neutral:hover:not(:disabled),
+body.llm-ops-theme .btn-action-cancel:hover:not(:disabled) {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+}
+
+body.llm-ops-theme .btn-action-warning {
+  border-color: #fed7aa !important;
+  background: #fff7ed !important;
+  color: #c2410c !important;
+}
+
+body.llm-ops-theme .btn-action-warning:hover:not(:disabled) {
+  border-color: #fdba74 !important;
+  background: #ffedd5 !important;
+  color: #9a3412 !important;
+}
+
+body.llm-ops-theme .btn-action-danger {
+  border-color: #fecdd3 !important;
+  background: #fff1f2 !important;
+  color: #be123c !important;
+}
+
+body.llm-ops-theme .btn-action-danger:hover:not(:disabled) {
+  border-color: #fda4af !important;
+  background: #ffe4e6 !important;
+  color: #9f1239 !important;
+}
+
 body.llm-ops-theme .header-back {
   min-width: 2.25rem !important;
   width: 2.25rem !important;
@@ -250,16 +348,24 @@ body.llm-ops-theme .operation-icon {
   flex: 0 0 auto !important;
 }
 
-body.llm-ops-theme .operation-icon-default,
+body.llm-ops-theme .operation-icon-default {
+  color: #475569 !important;
+}
+
 body.llm-ops-theme .operation-icon-primary {
   color: #4f46e5 !important;
 }
 
-body.llm-ops-theme .operation-icon-default:hover:not(:disabled),
 body.llm-ops-theme .operation-icon-primary:hover:not(:disabled) {
   border-color: #c7d2fe !important;
   background: #eef2ff !important;
   color: #4338ca !important;
+}
+
+body.llm-ops-theme .operation-icon-default:hover:not(:disabled) {
+  border-color: #cbd5e1 !important;
+  background: #f8fafc !important;
+  color: #0f172a !important;
 }
 
 body.llm-ops-theme .operation-icon-success {

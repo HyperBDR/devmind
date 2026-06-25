@@ -58,7 +58,7 @@
               <div class="flex items-center gap-2">
                 <button
                   type="button"
-                  class="btn-secondary"
+                  class="btn-secondary btn-action-save"
                   :disabled="!canDraft || saving"
                   @click="handleSaveDraft"
                 >
@@ -66,7 +66,7 @@
                 </button>
                 <button
                   type="button"
-                  class="btn-primary"
+                  class="btn-primary btn-action-submit"
                   :disabled="!canPublish || saving"
                   @click="handlePublish"
                 >
@@ -196,7 +196,11 @@ const canPublish = computed(() => {
 })
 
 const canDraft = computed(() => {
-  return Boolean(latestPayload.value?.platformId && latestPayload.value?.listings?.length)
+  return Boolean(
+    latestPayload.value?.platformId &&
+      latestPayload.value?.listings?.length &&
+      latestPayload.value?.hasChanges
+  )
 })
 
 function onWorkspaceChange(payload) {

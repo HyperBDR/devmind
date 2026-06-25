@@ -3,9 +3,7 @@
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
         <div>
-          <h3 class="panel-title">
-            转发渠道配置
-          </h3>
+          <h3 class="panel-title">转发渠道配置</h3>
           <p class="mt-1 text-xs text-slate-500">
             维护渠道基础信息，并进入模型管理配置渠道上游、成本规则和转发能力。
           </p>
@@ -22,7 +20,7 @@
             placeholder="搜索渠道名称、标识或地址"
           />
           <button
-            class="btn-primary toolbar-button"
+            class="btn-primary toolbar-button btn-action-create"
             type="button"
             @click="openChannelModal()"
           >
@@ -85,9 +83,7 @@
                   >
                     已配置 API
                   </a>
-                  <span v-else class="config-status-muted">
-                    API 未配置
-                  </span>
+                  <span v-else class="config-status-muted"> API 未配置 </span>
                   <div class="channel-config-chips">
                     <span class="config-chip">
                       币种 {{ channel.currency || 'USD' }}
@@ -120,6 +116,7 @@
                   <OperationIconButton
                     icon="config"
                     label="管理模型"
+                    tone="primary"
                     @click="selectedChannelForModels = channel"
                   />
                   <OperationIconButton
@@ -173,9 +170,7 @@
     >
       <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
         <div class="border-b border-slate-200 px-5 py-4">
-          <h3 class="text-base font-semibold text-slate-900">
-            删除转发渠道
-          </h3>
+          <h3 class="text-base font-semibold text-slate-900">删除转发渠道</h3>
           <p class="mt-1 text-sm text-slate-500">
             删除后，该渠道下的模型配置、采购价格项和对账记录会一并删除；
             已上架记录会保留，但不再关联该渠道。
@@ -198,7 +193,7 @@
           class="flex items-center justify-end gap-2 border-t border-slate-200 px-5 py-4"
         >
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="Boolean(deletingChannelId)"
             @click="closeDeleteConfirm"
@@ -206,7 +201,7 @@
             取消
           </button>
           <button
-            class="btn-danger"
+            class="btn-danger btn-action-danger"
             type="button"
             :disabled="Boolean(deletingChannelId)"
             @click="deleteChannel"
@@ -295,11 +290,7 @@ const filteredChannelRows = computed(() => {
       statusFilter.value === 'all' ||
       (statusFilter.value === 'active' && channel.is_active) ||
       (statusFilter.value === 'inactive' && !channel.is_active)
-    const haystack = [
-      channel.name,
-      channel.code,
-      channel.api_endpoint
-    ]
+    const haystack = [channel.name, channel.code, channel.api_endpoint]
       .filter(Boolean)
       .join(' ')
       .toLowerCase()

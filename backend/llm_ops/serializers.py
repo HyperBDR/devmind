@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from .collectors.official import OFFICIAL_PROVIDER_CONFIGS
 from .models import (
+    AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
     CollectedModelPriceHistory,
@@ -53,6 +54,23 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
 
     def get_business_source_category(self, instance):
         return business_source_category_for_catalog(instance)
+
+
+class AuditLogSerializer(serializers.ModelSerializer):
+    """Serializer for immutable LLM operations audit records."""
+
+    actor_username = serializers.CharField(
+        source="actor.username",
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = AuditLog
+        fields = "__all__"
+        read_only_fields = tuple(
+            field.name for field in AuditLog._meta.fields
+        )
 
 
 class PriceCollectionRunSerializer(serializers.ModelSerializer):

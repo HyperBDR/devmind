@@ -25,7 +25,7 @@
           </div>
           <button
             type="button"
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             :disabled="saving"
             @click="close"
           >
@@ -33,7 +33,9 @@
           </button>
         </div>
       </div>
-      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div
+        class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5"
+      >
         <section class="form-section">
           <div class="section-heading">
             <h4>基础信息</h4>
@@ -137,11 +139,7 @@
           class="modal-footer-status status-inline"
           :class="{ active: form.is_active }"
         >
-          <input
-            v-model="form.is_active"
-            type="checkbox"
-            class="sr-only"
-          />
+          <input v-model="form.is_active" type="checkbox" class="sr-only" />
           <span class="status-switch" aria-hidden="true">
             <span class="status-switch-dot" />
           </span>
@@ -151,14 +149,18 @@
         </label>
         <div class="modal-footer-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="saving"
             @click="close"
           >
             取消
           </button>
-          <button class="btn-primary" type="submit" :disabled="saving">
+          <button
+            class="btn-primary btn-action-save"
+            type="submit"
+            :disabled="saving"
+          >
             <span class="icon-mark" />
             {{ saving ? '保存中' : form.id ? '保存修改' : '创建渠道' }}
           </button>
@@ -234,7 +236,9 @@ function defaults() {
 
 function normalizePayload(payload) {
   const clean = { ...payload }
-  clean.currency = String(clean.currency || 'CNY').trim().toUpperCase()
+  clean.currency = String(clean.currency || 'CNY')
+    .trim()
+    .toUpperCase()
   delete clean.id
   return clean
 }

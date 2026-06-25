@@ -25,7 +25,7 @@
           </div>
           <button
             type="button"
-            class="btn-secondary shrink-0"
+            class="btn-secondary btn-action-cancel shrink-0"
             :disabled="saving"
             @click="close"
           >
@@ -34,7 +34,9 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div
+        class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5"
+      >
         <section class="form-section">
           <div class="section-heading">
             <h4>基础信息</h4>
@@ -127,11 +129,7 @@
       <div class="modal-footer">
         <div class="modal-footer-status min-w-0 space-y-2">
           <label class="status-inline" :class="{ active: form.is_active }">
-            <input
-              v-model="form.is_active"
-              type="checkbox"
-              class="sr-only"
-            />
+            <input v-model="form.is_active" type="checkbox" class="sr-only" />
             <span class="status-switch" aria-hidden="true">
               <span class="status-switch-dot" />
             </span>
@@ -148,14 +146,18 @@
         </div>
         <div class="modal-footer-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="saving"
             @click="close"
           >
             取消
           </button>
-          <button class="btn-primary" type="submit" :disabled="saving">
+          <button
+            class="btn-primary btn-action-save"
+            type="submit"
+            :disabled="saving"
+          >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
             {{ form.id ? '保存修改' : '创建厂商' }}
           </button>
@@ -189,9 +191,7 @@ const saveError = ref('')
 watch(
   () => [props.open, props.provider],
   () => {
-    form.value = props.provider
-      ? providerToForm(props.provider)
-      : defaults()
+    form.value = props.provider ? providerToForm(props.provider) : defaults()
   },
   { immediate: true }
 )
@@ -211,7 +211,8 @@ function defaults() {
 }
 
 function providerToForm(provider) {
-  const endpoint = provider.primary_source_url || provider.price_source_url || ''
+  const endpoint =
+    provider.primary_source_url || provider.price_source_url || ''
   return {
     id: provider.id,
     name: provider.name || '',
@@ -232,7 +233,9 @@ function normalizePayload(payload) {
     notes: payload.notes,
     is_active: payload.is_active
   }
-  clean.code = String(clean.code || '').trim().toLowerCase()
+  clean.code = String(clean.code || '')
+    .trim()
+    .toLowerCase()
   return clean
 }
 
@@ -268,9 +271,7 @@ async function save() {
 
 async function savePriceSourceEndpoint() {
   if (!form.value.primary_source_id) return
-  const nextEndpoint = String(
-    form.value.price_source_endpoint_url || ''
-  ).trim()
+  const nextEndpoint = String(form.value.price_source_endpoint_url || '').trim()
   const previousEndpoint = String(
     form.value.original_price_source_endpoint_url || ''
   ).trim()

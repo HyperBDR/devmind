@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 
 
@@ -629,6 +630,89 @@ class CollectedModelPriceHistory(models.Model):
 
     def __str__(self) -> str:
         return f"{self.source.name} / {self.source_model_name}"
+
+
+class AuditLog(models.Model):
+    """Append-only audit trail for LLM operations business changes."""
+
+    ACTION_CREATE = "create"
+    ACTION_UPDATE = "update"
+    ACTION_DELETE = "delete"
+    ACTION_COLLECT = "collect"
+    ACTION_IMPORT = "import"
+    ACTION_BULK_UPSERT = "bulk_upsert"
+    ACTION_BULK_DRAFT = "bulk_draft"
+    ACTION_BULK_REPLACE = "bulk_replace"
+    ACTION_TRANSITION = "transition"
+    ACTION_OFFLINE = "offline"
+    ACTION_RESTORE = "restore"
+    ACTION_SYNC = "sync"
+
+    ACTION_CHOICES = (
+        (ACTION_CREATE, "Create"),
+        (ACTION_UPDATE, "Update"),
+        (ACTION_DELETE, "Delete"),
+        (ACTION_COLLECT, "Collect"),
+        (ACTION_IMPORT, "Import"),
+        (ACTION_BULK_UPSERT, "Bulk Upsert"),
+        (ACTION_BULK_DRAFT, "Bulk Draft"),
+        (ACTION_BULK_REPLACE, "Bulk Replace"),
+        (ACTION_TRANSITION, "Transition"),
+        (ACTION_OFFLINE, "Offline"),
+        (ACTION_RESTORE, "Restore"),
+        (ACTION_SYNC, "Sync"),
+    )
+
+    CATEGORY_CONFIGURATION = "configuration"
+    CATEGORY_PRICING = "pricing"
+    CATEGORY_PUBLISHING = "publishing"
+    CATEGORY_APPROVAL = "approval"
+    CATEGORY_COLLECTION = "collection"
+    CATEGORY_RECONCILIATION = "reconciliation"
+
+    CATEGORY_CHOICES = (
+        (CATEGORY_CONFIGURATION, "Configuration"),
+        (CATEGORY_PRICING, "Pricing"),
+        (CATEGORY_PUBLISHING, "Publishing"),
+        (CATEGORY_APPROVAL, "Approval"),
+        (CATEGORY_COLLECTION, "Collection"),
+        (CATEGORY_RECONCILIATION, "Reconciliation"),
+    )
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_audit_logs",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    actor_identifier = models.CharField(max_length=255, blank=True, default="")
+    action = models.CharField(max_length=50, choices=ACTION_CHOICES)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    target_type = models.CharField(max_length=100, db_index=True)
+    target_id = models.CharField(max_length=100, blank=True, default="")
+    target_repr = models.CharField(max_length=255, blank=True, default="")
+    summary = models.CharField(max_length=500, blank=True, default="")
+    before = models.JSONField(blank=True, default=dict)
+    after = models.JSONField(blank=True, default=dict)
+    changes = models.JSONField(blank=True, default=dict)
+    metadata = models.JSONField(blank=True, default=dict)
+    request_id = models.CharField(max_length=100, blank=True, default="")
+    ip_address = models.GenericIPAddressField(blank=True, null=True)
+    user_agent = models.CharField(max_length=500, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["category", "action", "created_at"]),
+            models.Index(fields=["target_type", "target_id", "created_at"]),
+            models.Index(fields=["actor", "created_at"]),
+        ]
+
+    def __str__(self) -> str:
+        actor = self.actor_identifier or "system"
+        return f"{self.created_at:%Y-%m-%d %H:%M:%S} {actor} {self.action}"
 
 
 class ProcurementChannel(models.Model):

@@ -25,7 +25,7 @@
           </div>
           <button
             type="button"
-            class="btn-secondary shrink-0"
+            class="btn-secondary btn-action-cancel shrink-0"
             :disabled="saving"
             @click="close"
           >
@@ -34,7 +34,9 @@
         </div>
       </div>
 
-      <div class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5">
+      <div
+        class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5"
+      >
         <section class="form-section">
           <div class="section-heading">
             <h4>模型身份</h4>
@@ -169,18 +171,26 @@
           {{ saveError }}
         </p>
         <span v-else class="modal-footer-status modal-footer-note">
-          {{ form.id ? '保存后会影响关联模型的展示身份。' : '创建后可绑定到模型 SKU。' }}
+          {{
+            form.id
+              ? '保存后会影响关联模型的展示身份。'
+              : '创建后可绑定到模型 SKU。'
+          }}
         </span>
         <div class="modal-footer-actions">
           <button
-            class="btn-secondary"
+            class="btn-secondary btn-action-cancel"
             type="button"
             :disabled="saving"
             @click="close"
           >
             取消
           </button>
-          <button class="btn-primary" type="submit" :disabled="saving">
+          <button
+            class="btn-primary btn-action-save"
+            type="submit"
+            :disabled="saving"
+          >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
             {{ form.id ? '保存修改' : '创建元模型' }}
           </button>
@@ -311,9 +321,7 @@ async function save() {
 function normalizePayload(payload) {
   let metadata = {}
   try {
-    metadata = payload.metadata_text
-      ? JSON.parse(payload.metadata_text)
-      : {}
+    metadata = payload.metadata_text ? JSON.parse(payload.metadata_text) : {}
   } catch (_error) {
     throw new Error('元数据必须是合法 JSON 对象。')
   }

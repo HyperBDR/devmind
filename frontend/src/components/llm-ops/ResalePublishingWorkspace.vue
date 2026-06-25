@@ -99,7 +99,7 @@
           >
           <button
             type="button"
-            class="btn-secondary !px-2.5 !py-1.5 !text-xs"
+            class="btn-secondary btn-action-view !px-2.5 !py-1.5 !text-xs"
             @click="isSupplyChainExpanded = !isSupplyChainExpanded"
           >
             {{ isSupplyChainExpanded ? '收起' : '展开' }}
@@ -241,9 +241,7 @@
       :class="{ 'is-resizing-sidebar': isResizingSidebar }"
       :style="workbenchGridStyle"
     >
-      <aside
-        class="workspace-section performance-sidebar overflow-hidden p-0"
-      >
+      <aside class="workspace-section performance-sidebar overflow-hidden p-0">
         <header class="performance-sidebar-header">
           <span class="performance-sidebar-dot" />
           <h3>链路性能全景对标</h3>
@@ -263,10 +261,7 @@
                 :key="`${metric.key}-${item.id}`"
                 class="perf-metric-row"
               >
-                <div
-                  class="perf-metric-name"
-                  :title="item.name"
-                >
+                <div class="perf-metric-name" :title="item.name">
                   {{ item.name }}
                 </div>
                 <div class="perf-metric-track">
@@ -280,10 +275,7 @@
                   {{ metric.format(item[metric.key]) }}
                 </div>
               </div>
-              <p
-                v-if="!perfCompareRows.length"
-                class="perf-empty"
-              >
+              <p v-if="!perfCompareRows.length" class="perf-empty">
                 暂无对比数据
               </p>
             </div>
@@ -397,9 +389,7 @@
                     <p class="pricing-card-caption text-emerald-600">
                       终端售卖价
                     </p>
-                    <div
-                      class="terminal-price-control"
-                    >
+                    <div class="terminal-price-control">
                       <span>{{ currencySymbol }}</span>
                       <input
                         :value="dimension.priceRaw"
@@ -465,9 +455,7 @@
                   </div>
                 </div>
                 <div class="pricing-matrix-card final-credit-card">
-                  <p class="pricing-card-caption">
-                    最终 {{ pointUnitLabel }}
-                  </p>
+                  <p class="pricing-card-caption">最终 {{ pointUnitLabel }}</p>
                   <p class="font-mono text-[13px] font-bold text-agione-700">
                     {{ formatCredit(dimension.priceRaw) }}
                   </p>
@@ -668,11 +656,7 @@ const channelPriceItemsByKey = computed(() => {
   const map = new Map()
   ;(props.channelPriceItems || []).forEach((item) => {
     if (!item?.channel || !item?.model || !item?.dimension) return
-    const key = channelPriceItemKey(
-      item.channel,
-      item.model,
-      item.dimension
-    )
+    const key = channelPriceItemKey(item.channel, item.model, item.dimension)
     map.set(key, item)
   })
   return map
@@ -825,8 +809,9 @@ const selectedPlatformLabel = computed(
 )
 
 const platformCurrencyLabel = computed(() =>
-  String(selectedPlatform.value?.currency || props.displayCurrency || 'CNY')
-    .toUpperCase()
+  String(
+    selectedPlatform.value?.currency || props.displayCurrency || 'CNY'
+  ).toUpperCase()
 )
 
 const currencyLabel = computed(() => String(props.displayCurrency || 'CNY'))
@@ -890,7 +875,7 @@ watch(
 )
 
 watch(
-  () => supplierOptions.value.map((item) => item.id).join(","),
+  () => supplierOptions.value.map((item) => item.id).join(','),
   () => {
     if (
       form.value.supplierId &&
@@ -1006,14 +991,8 @@ const chainRows = computed(() => {
         'cache_input',
         option.cache_input_price_per_million
       )
-      const inDisplay = convertToDisplay(
-        inputCost.value,
-        inputCost.currency
-      )
-      const outDisplay = convertToDisplay(
-        outputCost.value,
-        outputCost.currency
-      )
+      const inDisplay = convertToDisplay(inputCost.value, inputCost.currency)
+      const outDisplay = convertToDisplay(outputCost.value, outputCost.currency)
       const cacheInDisplay = convertToDisplay(
         cacheInputCost.value,
         cacheInputCost.currency
@@ -1022,8 +1001,7 @@ const chainRows = computed(() => {
         option.base_input_price_per_million ??
           basePriceFromRatio(
             inputCost.value,
-            option.input_price_per_million_settlement_ratio ??
-              inputCost.ratio
+            option.input_price_per_million_settlement_ratio ?? inputCost.ratio
           ),
         inputCost.currency
       )
@@ -1031,8 +1009,7 @@ const chainRows = computed(() => {
         option.base_output_price_per_million ??
           basePriceFromRatio(
             outputCost.value,
-            option.output_price_per_million_settlement_ratio ??
-              outputCost.ratio
+            option.output_price_per_million_settlement_ratio ?? outputCost.ratio
           ),
         outputCost.currency
       )
@@ -1046,12 +1023,10 @@ const chainRows = computed(() => {
         cacheInputCost.currency
       )
       const discountIn = normalizeDiscountRatio(
-        option.input_price_per_million_settlement_ratio ??
-          inputCost.ratio
+        option.input_price_per_million_settlement_ratio ?? inputCost.ratio
       )
       const discountOut = normalizeDiscountRatio(
-        option.output_price_per_million_settlement_ratio ??
-          outputCost.ratio
+        option.output_price_per_million_settlement_ratio ?? outputCost.ratio
       )
       const discountCacheIn = normalizeDiscountRatio(
         option.cache_input_price_per_million_settlement_ratio ??
@@ -1090,9 +1065,7 @@ const chainRows = computed(() => {
         costIn: inDisplay !== null ? inDisplay.toFixed(4) : '-',
         costOut: outDisplay !== null ? outDisplay.toFixed(4) : '-',
         costCacheIn:
-          cacheInDisplay !== null
-            ? cacheInDisplay.toFixed(4)
-            : '0.0000',
+          cacheInDisplay !== null ? cacheInDisplay.toFixed(4) : '0.0000',
         hasCacheInput: cacheInDisplay !== null && cacheInDisplay > 0,
         tpmLimit: numberOrNull(option.tpm_limit),
         rpmLimit: numberOrNull(option.rpm_limit),
@@ -1127,6 +1100,10 @@ const chainRows = computed(() => {
 
 const selectedChainRows = computed(() =>
   chainRows.value.filter((r) => r.selected)
+)
+
+const workspaceHasChanges = computed(() =>
+  selectedChainRows.value.some((row) => listingRowHasChanges(row))
 )
 
 watch(
@@ -1267,11 +1244,13 @@ function hydrateInitialListings(initialModelId) {
 }
 
 function marginFromListingPrices(row, priceIn, priceOut, priceCacheIn) {
-  const margin = averageMarginRate([
-    { price: priceIn, cost: row.costInRaw },
-    { price: priceOut, cost: row.costOutRaw },
-    { price: priceCacheIn, cost: row.costCacheInRaw }
-  ].filter(Boolean))
+  const margin = averageMarginRate(
+    [
+      { price: priceIn, cost: row.costInRaw },
+      { price: priceOut, cost: row.costOutRaw },
+      { price: priceCacheIn, cost: row.costCacheInRaw }
+    ].filter(Boolean)
+  )
   return normalizeMargin(margin ?? 20)
 }
 
@@ -1596,24 +1575,23 @@ const priceMetricConfigs = Object.fromEntries(
 )
 
 function priceDimensions(row) {
-  return ['input', 'output', 'cache']
-    .map((key) => {
-      const config = priceMetricConfigs[key]
-      return {
-        key,
-        label: config.label,
-        shortLabel: config.shortLabel,
-        priceRaw: row[config.priceField],
-        priceText: row[config.priceTextField],
-        costRaw: row[config.costRawField],
-        costText: row[config.costTextField],
-        marketAverage: marketAvg.value[config.marketKey] || 0,
-        referencePriceRaw: referencePriceForCost(row[config.costRawField]),
-        referencePriceText: referencePriceText(
-          referencePriceForCost(row[config.costRawField])
-        )
-      }
-    })
+  return ['input', 'output', 'cache'].map((key) => {
+    const config = priceMetricConfigs[key]
+    return {
+      key,
+      label: config.label,
+      shortLabel: config.shortLabel,
+      priceRaw: row[config.priceField],
+      priceText: row[config.priceTextField],
+      costRaw: row[config.costRawField],
+      costText: row[config.costTextField],
+      marketAverage: marketAvg.value[config.marketKey] || 0,
+      referencePriceRaw: referencePriceForCost(row[config.costRawField]),
+      referencePriceText: referencePriceText(
+        referencePriceForCost(row[config.costRawField])
+      )
+    }
+  })
 }
 
 function marketMarginRefsFor(row) {
@@ -1747,6 +1725,81 @@ function numberOrNull(value) {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+function comparablePrice(value, options = {}) {
+  if (value === null || value === undefined || value === '') {
+    return options.emptyAsZero ? 0 : null
+  }
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return options.emptyAsZero ? 0 : null
+  const normalized = Math.abs(parsed) < 0.00005 ? 0 : parsed
+  return Number(normalized.toFixed(4))
+}
+
+function listingForRow(row) {
+  const platformId = String(selectedPlatform.value?.id || '')
+  return (props.listings || []).find(
+    (item) =>
+      String(item.model) === String(row.modelId) &&
+      String(item.channel) === String(row.channelId) &&
+      (!platformId || String(item.platform) === platformId)
+  )
+}
+
+function baselineForRow(row) {
+  const listing = listingForRow(row)
+  if (!listing) return null
+  return {
+    priceIn: comparablePrice(
+      convertToDisplay(listing.retail_input_price_per_million, listing.currency)
+    ),
+    priceOut: comparablePrice(
+      convertToDisplay(
+        listing.retail_output_price_per_million,
+        listing.currency
+      )
+    ),
+    priceCacheIn: comparablePrice(
+      convertToDisplay(
+        listing.retail_cache_input_price_per_million,
+        listing.currency
+      ),
+      { emptyAsZero: true }
+    )
+  }
+}
+
+function listingRowHasChanges(row) {
+  const baseline = baselineForRow(row)
+  if (!baseline) return true
+  return (
+    comparablePrice(row.priceInRaw) !== baseline.priceIn ||
+    comparablePrice(row.priceOutRaw) !== baseline.priceOut ||
+    comparablePrice(row.priceCacheInRaw, { emptyAsZero: true }) !==
+      baseline.priceCacheIn
+  )
+}
+
+function workspacePayload() {
+  return {
+    platformId: form.value.platformId,
+    metaVendorId: form.value.metaVendorId,
+    metaModelId: form.value.modelId,
+    modelId: form.value.modelId,
+    supplierId: form.value.supplierId,
+    hasChanges: workspaceHasChanges.value,
+    listings: selectedChainRows.value.map((row) => ({
+      channelId: row.channelId,
+      metaModelId: row.metaModelId,
+      modelId: row.modelId,
+      priceIn: row.priceInRaw,
+      priceOut: row.priceOutRaw,
+      priceCacheIn: row.priceCacheInRaw,
+      margin: row.margin,
+      hasChanges: listingRowHasChanges(row)
+    }))
+  }
+}
+
 function formatPerformanceValue(value, suffix, divisor) {
   if (!Number.isFinite(value)) return '-'
   if (!value) return '0'
@@ -1759,22 +1812,7 @@ function barWidth(value, max) {
 }
 
 function emitChange() {
-  emit('change', {
-    platformId: form.value.platformId,
-    metaVendorId: form.value.metaVendorId,
-    metaModelId: form.value.modelId,
-    modelId: form.value.modelId,
-    supplierId: form.value.supplierId,
-    listings: selectedChainRows.value.map((row) => ({
-      channelId: row.channelId,
-      metaModelId: row.metaModelId,
-      modelId: row.modelId,
-      priceIn: row.priceInRaw,
-      priceOut: row.priceOutRaw,
-      priceCacheIn: row.priceCacheInRaw,
-      margin: row.margin
-    }))
-  })
+  emit('change', workspacePayload())
 }
 
 defineExpose({
@@ -1788,22 +1826,7 @@ defineExpose({
     chainState.value = {}
   },
   getPayload() {
-    return {
-      platformId: form.value.platformId,
-      metaVendorId: form.value.metaVendorId,
-      metaModelId: form.value.modelId,
-      modelId: form.value.modelId,
-      supplierId: form.value.supplierId,
-      listings: selectedChainRows.value.map((row) => ({
-        channelId: row.channelId,
-        metaModelId: row.metaModelId,
-        modelId: row.modelId,
-        priceIn: row.priceInRaw,
-        priceOut: row.priceOutRaw,
-        priceCacheIn: row.priceCacheInRaw,
-        margin: row.margin
-      }))
-    }
+    return workspacePayload()
   }
 })
 </script>
@@ -2364,8 +2387,9 @@ defineExpose({
 
 .pricing-segment-value {
   color: #334155;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 12px;
   font-weight: 700;
 }
@@ -2389,8 +2413,7 @@ defineExpose({
 
 .supply-grid {
   display: grid;
-  grid-template-columns:
-    minmax(260px, 1.1fr) repeat(3, minmax(150px, 0.75fr));
+  grid-template-columns: minmax(260px, 1.1fr) repeat(3, minmax(150px, 0.75fr));
   column-gap: 0.75rem;
   align-items: center;
 }
@@ -2437,7 +2460,9 @@ defineExpose({
 
 .pricing-matrix {
   display: grid;
-  grid-template-columns: 68px minmax(170px, 0.78fr) minmax(300px, 1.45fr) minmax(118px, 0.48fr);
+  grid-template-columns:
+    68px minmax(170px, 0.78fr) minmax(300px, 1.45fr)
+    minmax(118px, 0.48fr);
   gap: 0.625rem;
   align-items: center;
 }
@@ -2577,8 +2602,9 @@ defineExpose({
   background: transparent;
   padding: 0.375rem 0.5rem;
   text-align: right;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 12px;
   outline: none;
 }
@@ -2588,8 +2614,9 @@ defineExpose({
   max-width: 100%;
   overflow: hidden;
   color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 10px;
   font-weight: 600;
   line-height: 1.2;
@@ -2603,8 +2630,9 @@ defineExpose({
   gap: 0.125rem;
   min-width: 0;
   color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 10px;
   font-weight: 700;
   line-height: 1.2;
@@ -2744,8 +2772,9 @@ defineExpose({
 
 .perf-metric-value {
   color: #334155;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-size: 11px;
   font-weight: 700;
   line-height: 1;
@@ -2765,8 +2794,10 @@ defineExpose({
 
 @media (min-width: 1024px) {
   .publishing-workbench-grid {
-    grid-template-columns:
-      var(--performance-sidebar-width, 380px) minmax(0, 1fr);
+    grid-template-columns: var(--performance-sidebar-width, 380px) minmax(
+        0,
+        1fr
+      );
     align-items: stretch;
     min-height: 0;
   }
@@ -2802,10 +2833,12 @@ defineExpose({
     height: 44px;
     border-radius: 9999px;
     background-color: #cbd5e1;
-    content: "";
+    content: '';
     opacity: 0;
     transform: translateY(-50%);
-    transition: opacity 150ms ease, background-color 150ms ease;
+    transition:
+      opacity 150ms ease,
+      background-color 150ms ease;
   }
 
   .performance-sidebar-resize:hover::after,
@@ -2868,16 +2901,18 @@ defineExpose({
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-weight: 700;
 }
 
 .supply-metric-empty {
   display: block;
   color: #94a3b8;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    "Liberation Mono", "Courier New", monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   font-weight: 700;
   text-align: right;
 }

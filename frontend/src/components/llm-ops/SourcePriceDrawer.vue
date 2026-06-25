@@ -27,13 +27,17 @@
           <div class="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              class="btn-danger"
+              class="btn-danger btn-action-danger"
               :disabled="deleting"
               @click="$emit('delete', source)"
             >
               {{ deleting ? '删除中' : '删除' }}
             </button>
-            <button type="button" class="btn-secondary" @click="$emit('close')">
+            <button
+              type="button"
+              class="btn-secondary btn-action-cancel"
+              @click="$emit('close')"
+            >
               关闭
             </button>
           </div>

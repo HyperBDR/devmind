@@ -15,7 +15,11 @@
             适合无法自动采集的模型价格源，可从 Excel 复制整张表后粘贴。
           </p>
         </div>
-        <button class="btn-secondary" type="button" @click="close">
+        <button
+          class="btn-secondary btn-action-cancel"
+          type="button"
+          @click="close"
+        >
           关闭
         </button>
       </div>
@@ -87,16 +91,13 @@
         <div class="preview-panel">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p class="text-sm font-semibold text-slate-900">
-                解析预览
-              </p>
+              <p class="text-sm font-semibold text-slate-900">解析预览</p>
               <p class="mt-1 text-xs text-slate-500">
-                有效 {{ parsedRows.length }} 行，错误 {{ parseErrors.length }} 条
+                有效 {{ parsedRows.length }} 行，错误
+                {{ parseErrors.length }} 条
               </p>
             </div>
-            <span
-              :class="parseErrors.length ? 'badge-warn' : 'badge-ok'"
-            >
+            <span :class="parseErrors.length ? 'badge-warn' : 'badge-ok'">
               {{ parseErrors.length ? '需要修正' : '可导入' }}
             </span>
           </div>
@@ -147,10 +148,20 @@
                     {{ row.image_output_price_per_image || '-' }}
                   </td>
                   <td class="text-right font-mono">
-                    {{ compactPair(row.audio_input_price_per_second, row.audio_output_price_per_second) }}
+                    {{
+                      compactPair(
+                        row.audio_input_price_per_second,
+                        row.audio_output_price_per_second
+                      )
+                    }}
                   </td>
                   <td class="text-right font-mono">
-                    {{ compactPair(row.video_input_price_per_second, row.video_output_price_per_second) }}
+                    {{
+                      compactPair(
+                        row.video_input_price_per_second,
+                        row.video_output_price_per_second
+                      )
+                    }}
                   </td>
                 </tr>
                 <tr v-if="!parsedRows.length">
@@ -166,11 +177,15 @@
 
       <div class="modal-footer">
         <div class="modal-footer-actions">
-          <button class="btn-secondary" type="button" @click="close">
+          <button
+            class="btn-secondary btn-action-cancel"
+            type="button"
+            @click="close"
+          >
             取消
           </button>
           <button
-            class="btn-primary"
+            class="btn-primary btn-action-import"
             type="button"
             :disabled="saving || !canSubmit"
             @click="submit"
@@ -388,7 +403,9 @@ function normalizeRow(row, lineNumber, errors) {
 }
 
 function normalizeModality(value) {
-  const text = String(value || '').trim().toLowerCase()
+  const text = String(value || '')
+    .trim()
+    .toLowerCase()
   const labels = {
     文本: 'text',
     text: 'text',
@@ -404,7 +421,9 @@ function normalizeModality(value) {
 }
 
 function normalizeCurrency(value) {
-  return String(value || '').trim().toUpperCase()
+  return String(value || '')
+    .trim()
+    .toUpperCase()
 }
 
 function cleanRow(row) {

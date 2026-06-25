@@ -72,7 +72,9 @@
                 >
                   {{ activeNav.eyebrow }}
                 </p>
-                <h2 class="page-hero-title mt-1 text-2xl font-semibold text-slate-900">
+                <h2
+                  class="page-hero-title mt-1 text-2xl font-semibold text-slate-900"
+                >
                   {{ activeNav.label }}
                 </h2>
                 <p
@@ -92,21 +94,21 @@
                       size="sm"
                     />
                   </div>
-                  <span
-                    v-if="exchangeRateLabel"
-                    class="page-toolbar-chip"
-                  >
+                  <span v-if="exchangeRateLabel" class="page-toolbar-chip">
                     {{ exchangeRateLabel }}
                   </span>
                   <button
                     type="button"
-                    class="btn-secondary page-toolbar-button refresh-action-button"
+                    class="btn-secondary page-toolbar-button refresh-action-button btn-action-refresh"
                     :disabled="loading"
                     @click="refreshAll"
                   >
                     <svg
                       aria-hidden="true"
-                      :class="['refresh-action-icon', { 'is-spinning': loading }]"
+                      :class="[
+                        'refresh-action-icon',
+                        { 'is-spinning': loading }
+                      ]"
                       fill="none"
                       stroke="currentColor"
                       stroke-linecap="round"
@@ -134,14 +136,14 @@
                   </div>
                   <button
                     type="button"
-                    class="btn-secondary page-toolbar-button"
+                    class="btn-secondary page-toolbar-button btn-action-config"
                     @click="openPlatformModal(agionePlatform)"
                   >
                     平台配置
                   </button>
                   <button
                     type="button"
-                    class="btn-secondary page-toolbar-button"
+                    class="btn-primary page-toolbar-button btn-action-create"
                     @click="openPlatformModal(null)"
                   >
                     新建平台
@@ -152,7 +154,15 @@
           </header>
 
           <BaseLoading v-if="loading" class="py-20" />
-          <div v-else class="space-y-6 px-5 py-5 lg:px-7">
+          <div
+            v-else
+            :class="[
+              'px-5 py-5 lg:px-7',
+              activeSection === 'audit'
+                ? 'flex h-[calc(100vh-10.75rem)] min-h-0 flex-col'
+                : 'space-y-6'
+            ]"
+          >
             <section v-if="activeSection === 'monitor'" class="space-y-6">
               <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <div
@@ -205,7 +215,7 @@
                     </div>
                     <button
                       type="button"
-                      class="btn-secondary"
+                      class="btn-secondary btn-action-view"
                       @click="activeSection = 'reseller'"
                     >
                       去挂售
@@ -312,7 +322,7 @@
                   </div>
                   <button
                     type="button"
-                    class="btn-secondary"
+                    class="btn-secondary btn-action-config"
                     @click="activeSection = 'providers'"
                   >
                     管理厂商
@@ -533,6 +543,11 @@
               :records="records"
               @refresh="refreshLight"
             />
+
+            <AuditLogPanel
+              v-else-if="activeSection === 'audit'"
+              :channels="channels"
+            />
           </div>
         </main>
       </div>
@@ -574,6 +589,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
+import AuditLogPanel from '@/components/llm-ops/AuditLogPanel.vue'
 import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
 import MetaModelManagement from '@/components/llm-ops/MetaModelManagement.vue'
 import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
@@ -591,7 +607,8 @@ const sectionKeys = new Set([
   'providers',
   'channels',
   'reseller',
-  'reconciler'
+  'reconciler',
+  'audit'
 ])
 const activeSection = ref(initialActiveSection())
 const loading = ref(false)
@@ -687,6 +704,13 @@ const navItems = computed(() => [
     eyebrow: 'Reconciliation',
     description: '录入生产用量和账单金额，自动计算应付金额与差异。',
     icon: 'A'
+  },
+  {
+    key: 'audit',
+    label: '操作记录',
+    eyebrow: 'Audit',
+    description: '查询渠道配置、价格调整、模型上架和审批流转的审计记录。',
+    icon: 'L'
   }
 ])
 
@@ -1153,22 +1177,17 @@ async function refreshAll() {
 }
 
 async function refreshLight() {
-  const [
-    priceRes,
-    channelPriceItemRes,
-    listingRes,
-    recordRes,
-    summaryRes
-  ] = await Promise.all([
-    llmOpsApi.listChannelModelPrices(FULL_LIST_PARAMS),
-    llmOpsApi.listChannelPriceItems({
-      ...FULL_LIST_PARAMS,
-      is_current: 'true'
-    }),
-    llmOpsApi.listResaleListings(FULL_LIST_PARAMS),
-    llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS),
-    llmOpsApi.getSummary(summaryParams())
-  ])
+  const [priceRes, channelPriceItemRes, listingRes, recordRes, summaryRes] =
+    await Promise.all([
+      llmOpsApi.listChannelModelPrices(FULL_LIST_PARAMS),
+      llmOpsApi.listChannelPriceItems({
+        ...FULL_LIST_PARAMS,
+        is_current: 'true'
+      }),
+      llmOpsApi.listResaleListings(FULL_LIST_PARAMS),
+      llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS),
+      llmOpsApi.getSummary(summaryParams())
+    ])
   channelPrices.value = extract(priceRes)
   channelPriceItems.value = extract(channelPriceItemRes)
   listings.value = extract(listingRes)
@@ -1420,7 +1439,17 @@ async function handleResaleWorkspaceDraft(payload) {
     showInfo('没有需要保存的草稿')
     return
   }
-  const items = payload.listings.map(mapWorkspaceListingToPayload)
+  if (!payload.hasChanges) {
+    showInfo('没有检测到需要保存的修改')
+    return
+  }
+  const items = payload.listings
+    .filter((item) => item.hasChanges !== false)
+    .map(mapWorkspaceListingToPayload)
+  if (!items.length) {
+    showInfo('没有检测到需要保存的修改')
+    return
+  }
   try {
     await llmOpsApi.bulkDraftResaleListings(items)
     showSuccess(`已保存 ${items.length} 条草稿`)

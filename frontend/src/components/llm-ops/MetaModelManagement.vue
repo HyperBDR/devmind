@@ -98,7 +98,7 @@
           </div>
           <div class="drawer-header-actions">
             <button
-              class="btn-secondary"
+              class="btn-secondary btn-action-sync"
               type="button"
               :disabled="syncingMetaModels"
               @click="syncMetaModels"
@@ -106,7 +106,7 @@
               {{ syncingMetaModels ? '同步中' : '同步元模型' }}
             </button>
             <button
-              class="btn-secondary"
+              class="btn-secondary btn-action-cancel"
               type="button"
               @click="closeVendorModelsDrawer"
             >
@@ -217,7 +217,9 @@
                     </td>
                     <td class="table-cell">
                       <div class="meta-model-context">
-                        <p class="font-mono text-xs font-semibold text-slate-800">
+                        <p
+                          class="font-mono text-xs font-semibold text-slate-800"
+                        >
                           In {{ compactTokenLabel(item.context_window) }}
                         </p>
                         <p class="mt-1 font-mono text-xs text-slate-400">
@@ -226,7 +228,9 @@
                       </div>
                     </td>
                     <td class="table-cell">
-                      <p class="text-center font-mono text-xs font-semibold text-slate-700">
+                      <p
+                        class="text-center font-mono text-xs font-semibold text-slate-700"
+                      >
                         {{ releaseDateLabel(item.release_date) }}
                       </p>
                     </td>
@@ -246,17 +250,14 @@
                 </tbody>
               </table>
             </div>
-            <div
-              v-if="vendorMetaRows.length"
-              class="pagination-bar"
-            >
+            <div v-if="vendorMetaRows.length" class="pagination-bar">
               <p class="text-xs text-slate-500">
                 共 {{ vendorMetaRows.length }} 条，第 {{ safeCurrentPage }} /
                 {{ totalPages }} 页
               </p>
               <div class="flex items-center gap-2">
                 <button
-                  class="btn-secondary pagination-btn"
+                  class="btn-secondary pagination-btn btn-action-neutral"
                   type="button"
                   :disabled="safeCurrentPage <= 1"
                   @click="goToPreviousPage"
@@ -264,7 +265,7 @@
                   上一页
                 </button>
                 <button
-                  class="btn-secondary pagination-btn"
+                  class="btn-secondary pagination-btn btn-action-neutral"
                   type="button"
                   :disabled="safeCurrentPage >= totalPages"
                   @click="goToNextPage"
@@ -277,7 +278,6 @@
         </div>
       </aside>
     </div>
-
   </section>
 </template>
 
@@ -349,12 +349,9 @@ const rows = computed(() =>
     const canonicalVendor = resolveCanonicalMetaVendor(item, props.providers)
     return {
       ...item,
-      effective_vendor:
-        item.effective_vendor || canonicalVendor.id,
-      effective_vendor_code:
-        item.effective_vendor_code || canonicalVendor.code,
-      effective_vendor_name:
-        item.effective_vendor_name || canonicalVendor.name,
+      effective_vendor: item.effective_vendor || canonicalVendor.id,
+      effective_vendor_code: item.effective_vendor_code || canonicalVendor.code,
+      effective_vendor_name: item.effective_vendor_name || canonicalVendor.name,
       sku_count: skuCount
     }
   })
@@ -409,7 +406,9 @@ const filteredVendorRows = computed(() => {
 })
 
 const selectedVendorRow = computed(() =>
-  vendorRows.value.find((item) => String(item.id) === String(selectedVendorId.value))
+  vendorRows.value.find(
+    (item) => String(item.id) === String(selectedVendorId.value)
+  )
 )
 
 const vendorMetaRows = computed(() => {
@@ -419,7 +418,9 @@ const vendorMetaRows = computed(() => {
       if (!selectedVendorId.value) {
         return false
       }
-      if (String(item.effective_vendor || '') !== String(selectedVendorId.value)) {
+      if (
+        String(item.effective_vendor || '') !== String(selectedVendorId.value)
+      ) {
         return false
       }
       if (statusFilter.value && item.status !== statusFilter.value) {
@@ -489,8 +490,8 @@ const metricCards = computed(() => {
   ]
 })
 
-const selectedVendorActiveCount = computed(() =>
-  vendorMetaRows.value.filter((item) => item.status === 'active').length
+const selectedVendorActiveCount = computed(
+  () => vendorMetaRows.value.filter((item) => item.status === 'active').length
 )
 
 function openVendorModelsDrawer(row) {
@@ -560,7 +561,9 @@ function capabilityItems(item) {
   const modality = String(item.modality || '').trim()
   const items = []
   if (modality) {
-    items.push(capabilityDescriptor(modality, modalityLabel(modality), 'primary'))
+    items.push(
+      capabilityDescriptor(modality, modalityLabel(modality), 'primary')
+    )
   }
   featureLabels(item).forEach((feature) => {
     items.push(capabilityDescriptor(feature, featureLabel(feature), 'default'))
@@ -584,44 +587,21 @@ function capabilityIconPaths(value) {
     attachment: [
       'M21.44 11.05 12 20.49a6 6 0 0 1-8.49-8.49l9.9-9.9a4 4 0 0 1 5.66 5.66l-9.9 9.9a2 2 0 1 1-2.83-2.83l8.49-8.49'
     ],
-    audio: [
-      'M4 10v4',
-      'M8 8v8',
-      'M12 5v14',
-      'M16 8v8',
-      'M20 10v4'
-    ],
-    chat: [
-      'M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z'
-    ],
-    image_generation: [
-      'M4 5h16v14H4Z',
-      'm4 15 4-4 4 4 3-3 5 5',
-      'M9 9h.01'
-    ],
-    multimodal: [
-      'M4 5h16v14H4Z',
-      'M8 9h.01',
-      'm4 15 4-4 4 4 2-2 4 4'
-    ],
+    audio: ['M4 10v4', 'M8 8v8', 'M12 5v14', 'M16 8v8', 'M20 10v4'],
+    chat: ['M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z'],
+    image_generation: ['M4 5h16v14H4Z', 'm4 15 4-4 4 4 3-3 5 5', 'M9 9h.01'],
+    multimodal: ['M4 5h16v14H4Z', 'M8 9h.01', 'm4 15 4-4 4 4 2-2 4 4'],
     reasoning: [
       'M9 18h6',
       'M10 22h4',
       'M8 14a6 6 0 1 1 8 0c-.8.7-1.3 1.6-1.5 2.5h-5A5 5 0 0 0 8 14Z'
     ],
-    structured_output: [
-      'M8 8 4 12l4 4',
-      'm16 8 4 4-4 4',
-      'M14 4 10 20'
-    ],
+    structured_output: ['M8 8 4 12l4 4', 'm16 8 4 4-4 4', 'M14 4 10 20'],
     text: ['M4 6h16', 'M4 12h16', 'M4 18h10'],
     tool_calling: [
       'M14.7 6.3a4 4 0 0 0-5 5L4 17v3h3l5.7-5.7a4 4 0 0 0 5-5l-2.4 2.4-2-2Z'
     ],
-    video: [
-      'M4 6h11a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H4Z',
-      'm18 10 4-2v8l-4-2'
-    ]
+    video: ['M4 6h11a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H4Z', 'm18 10 4-2v8l-4-2']
   }
   return iconMap[normalized] || ['M5 5h14v14H5Z']
 }

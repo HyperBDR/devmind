@@ -6,6 +6,7 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from llm_ops.models import (
+    AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
     ChannelPriceItem,
@@ -103,6 +104,47 @@ class LLMOpsViewTests(TestCase):
             base_url="https://example.com/admin/api",
         )
 
+    @patch("llm_ops.views.import_manual_model_prices")
+    def test_manual_price_import_records_pricing_audit(self, mock_import):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        mock_import.return_value = {
+            "created_models": 1,
+            "updated_models": 0,
+            "created_price_items": 2,
+        }
+
+        response = self.client.post(
+            reverse("llm-ops-manual-price-import"),
+            {
+                "provider": provider.id,
+                "source_name": "Manual Sheet",
+                "source_slug": "manual-sheet",
+                "currency": "USD",
+                "updates_model_prices": True,
+                "rows": [
+                    {
+                        "model_code": "gpt-5",
+                        "model_name": "GPT-5",
+                        "input_price_per_million": "1.000000",
+                        "output_price_per_million": "5.000000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        source = PriceCollectionSource.objects.get(slug="manual-sheet")
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.PriceCollectionSource",
+            target_id=str(source.id),
+        )
+        self.assertEqual(audit.action, AuditLog.ACTION_IMPORT)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_PRICING)
+        self.assertEqual(audit.metadata["row_count"], 1)
+        self.assertEqual(audit.metadata["provider_id"], provider.id)
+        self.assertNotIn("rows", audit.metadata)
+
     def test_collection_source_can_be_deleted(self):
         source = PriceCollectionSource.objects.create(
             name="Manual Source",
@@ -168,6 +210,131 @@ class LLMOpsViewTests(TestCase):
             ResaleListing.objects.filter(id=channel_listing.id).exists(),
         )
 
+    def test_channel_update_records_configuration_audit(self):
+        channel = ProcurementChannel.objects.create(
+            name="Default Channel",
+            code="default-channel",
+            currency="USD",
+        )
+
+        response = self.client.patch(
+            reverse("channel-detail", args=[channel.id]),
+            {
+                "currency": "CNY",
+                "settlement_ratio": "0.8000",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.ProcurementChannel",
+            target_id=str(channel.id),
+        )
+        self.assertEqual(audit.action, AuditLog.ACTION_UPDATE)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_CONFIGURATION)
+        self.assertEqual(audit.changes["currency"]["before"], "USD")
+        self.assertEqual(audit.changes["currency"]["after"], "CNY")
+
+    def test_audit_log_ignores_invalid_forwarded_ip(self):
+        channel = ProcurementChannel.objects.create(
+            name="Forwarded Channel",
+            code="forwarded-channel",
+            currency="USD",
+        )
+
+        response = self.client.patch(
+            reverse("channel-detail", args=[channel.id]),
+            {"currency": "CNY"},
+            format="json",
+            HTTP_X_FORWARDED_FOR="not-an-ip, 10.0.0.1",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.ProcurementChannel",
+            target_id=str(channel.id),
+        )
+        self.assertIsNone(audit.ip_address)
+
+    def test_audit_logs_endpoint_is_read_only_and_filterable(self):
+        channel = ProcurementChannel.objects.create(
+            name="Default Channel",
+            code="default-channel",
+            currency="USD",
+        )
+        self.client.patch(
+            reverse("channel-detail", args=[channel.id]),
+            {"currency": "CNY"},
+            format="json",
+        )
+
+        response = self.client.get(
+            reverse("audit-log-list"),
+            {"category": AuditLog.CATEGORY_CONFIGURATION},
+        )
+        create_response = self.client.post(
+            reverse("audit-log-list"),
+            {"action": AuditLog.ACTION_CREATE},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.data.get("results", response.data)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["category"], AuditLog.CATEGORY_CONFIGURATION)
+        self.assertEqual(create_response.status_code, 405)
+
+    def test_audit_logs_endpoint_filters_by_names(self):
+        provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="DeepSeek R1",
+            code="deepseek-r1",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Yunce",
+            code="yunce",
+        )
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+        )
+        listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="1.000000",
+            retail_output_price_per_million="2.000000",
+        )
+
+        self.client.patch(
+            reverse("resale-listing-detail", args=[listing.id]),
+            {"notes": "name filter test"},
+            format="json",
+        )
+
+        target_response = self.client.get(
+            reverse("audit-log-list"),
+            {"target": "DeepSeek R1"},
+        )
+        actor_response = self.client.get(
+            reverse("audit-log-list"),
+            {"actor": "ops"},
+        )
+
+        self.assertEqual(target_response.status_code, 200)
+        self.assertEqual(actor_response.status_code, 200)
+        target_rows = target_response.data.get(
+            "results",
+            target_response.data,
+        )
+        actor_rows = actor_response.data.get("results", actor_response.data)
+        self.assertEqual(len(target_rows), 1)
+        self.assertEqual(target_rows[0]["target_repr"], str(listing))
+        self.assertEqual(len(actor_rows), 1)
+        self.assertEqual(actor_rows[0]["actor_username"], "ops")
+
     def test_model_price_item_can_be_updated(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
@@ -210,6 +377,18 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(str(item.unit_price), "0.120000")
         self.assertEqual(item.currency, "CNY")
         self.assertEqual(item.spec["note"], "manual correction")
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.ModelPriceItem",
+            target_id=str(item.id),
+        )
+        self.assertEqual(audit.action, AuditLog.ACTION_UPDATE)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_PRICING)
+        self.assertEqual(audit.actor, self.user)
+        self.assertEqual(
+            audit.changes["unit_price"]["before"],
+            "0.150000",
+        )
+        self.assertEqual(audit.changes["unit_price"]["after"], "0.120000")
 
     def test_model_price_item_can_be_deleted(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -266,6 +445,10 @@ class LLMOpsViewTests(TestCase):
             source_id=source.id,
             verify_source=True,
         )
+        audit = AuditLog.objects.get(target_id=str(source.id))
+        self.assertEqual(audit.action, AuditLog.ACTION_COLLECT)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_COLLECTION)
+        self.assertEqual(audit.metadata["task_id"], "task-123")
 
     @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_rejects_disabled_source(
@@ -742,6 +925,13 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["models"], 1)
         self.assertEqual(response.data["price_items"], 1)
         self.assertEqual(ChannelPriceItem.objects.count(), 1)
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.ChannelPriceItem",
+        )
+        self.assertEqual(audit.action, AuditLog.ACTION_SYNC)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_PRICING)
+        self.assertEqual(audit.metadata["models"], 1)
+        self.assertEqual(audit.metadata["price_items"], 1)
 
     def test_channel_model_price_rejects_negative_custom_price(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -1151,6 +1341,15 @@ class LLMOpsViewTests(TestCase):
                 model=model,
             ).exists()
         )
+        actions = list(
+            AuditLog.objects.filter(
+                target_type="llm_ops.ResaleListingExclusion",
+            ).order_by("created_at").values_list("action", flat=True)
+        )
+        self.assertEqual(
+            actions,
+            [AuditLog.ACTION_CREATE, AuditLog.ACTION_RESTORE],
+        )
 
     def test_resale_listing_bulk_offline_deactivates_selected_models(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -1307,6 +1506,13 @@ class LLMOpsViewTests(TestCase):
             listing.workflow_status,
             ResaleListing.WORKFLOW_ONLINE,
         )
+        audit = AuditLog.objects.filter(
+            target_type="llm_ops.ResaleListing",
+            target_id=str(listing.id),
+            action=AuditLog.ACTION_TRANSITION,
+            category=AuditLog.CATEGORY_APPROVAL,
+        ).latest("created_at")
+        self.assertEqual(audit.metadata["workflow_action"], "confirm_publish")
 
         request_response = self.client.post(
             reverse("resale-listing-bulk-transition"),
