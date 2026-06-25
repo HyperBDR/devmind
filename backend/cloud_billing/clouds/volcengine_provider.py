@@ -112,9 +112,10 @@ class VolcengineCloud(BaseCloudProvider):
 
     def __init__(self, config: VolcengineConfig):
         super().__init__(config)
+        self.config: VolcengineConfig = config
         self.name = "volcengine"
         self._session = requests.Session()
-        self._last_balance_debug = {}
+        self._last_balance_debug: Dict[str, Any] = {}
         sanitized_config = mask_sensitive_config_object(config)
         logger.info(
             f"Initialized Volcengine Cloud provider with config: "
@@ -200,10 +201,10 @@ class VolcengineCloud(BaseCloudProvider):
         )
         # Match Volcengine OpenAPI signer:
         # HMAC(secret, date) -> region -> service -> request.
-        signing_key = self._hmac_sha256(
-            self.config.api_secret.encode("utf-8"),
-            short_date,
-        )
+        api_secret = self.config.api_secret
+        if api_secret is None:
+            raise ValueError("Volcengine secret key is required.")
+        signing_key = self._hmac_sha256(api_secret.encode("utf-8"), short_date)
         signing_key = self._hmac_sha256(signing_key, self.config.region or "")
         signing_key = self._hmac_sha256(signing_key, self.config.service or "")
         signing_key = self._hmac_sha256(signing_key, "request")
@@ -524,10 +525,10 @@ class VolcengineCloud(BaseCloudProvider):
             data["balance_debug"] = self._last_balance_debug
             return {"status": "success", "data": data, "error": None}
         except requests.HTTPError as exc:
-            logger.error(f"Volcengine billing HTTP error: {exc}")
+            logger.warning(f"Volcengine billing HTTP error: {exc}")
             return {"status": "error", "data": None, "error": str(exc)}
         except (requests.RequestException, ValueError, RuntimeError) as exc:
-            logger.error(f"Volcengine billing error: {exc}")
+            logger.warning(f"Volcengine billing error: {exc}")
             return {"status": "error", "data": None, "error": str(exc)}
         except Exception as exc:
             logger.exception(f"Unexpected Volcengine billing error: {exc}")
