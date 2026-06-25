@@ -36,11 +36,21 @@ app.conf.update(
     result_backend='django-db',
     beat_scheduler='django_celery_beat.schedulers:DatabaseScheduler',
     imports=tuple(app.conf.get("imports", ())) + (
+        # First-party business tasks must be imported in the worker main
+        # process before the consumer starts. If they are only discovered in
+        # child processes, the parent can discard early messages as
+        # "unregistered task" before a child ever sees them.
+        "cloud_billing.tasks",
+        "data_collector.tasks",
+        "hyperbdr_dashboard.tasks",
+        "llm_ops.tasks",
+        "sals.tasks",
         # Each entry must be a fully-qualified module that exposes its
         # ``@shared_task`` definitions at import time. Listing only the
         # package name is not enough: submodules of that package need to
         # be imported explicitly so their task names land in
         # ``app.tasks`` before celery beat starts dispatching.
+        "agentcore_task.adapters.django.tasks",
         "agentcore_notifier.adapters.django.tasks",
         "agentcore_notifier.adapters.django.tasks.cleanup",
         "agentcore_metering.adapters.django.tasks",
