@@ -1,5 +1,6 @@
 """Tests for the Volcengine cloud billing provider."""
 
+import logging
 from unittest.mock import Mock, patch
 
 import pytest
@@ -197,6 +198,38 @@ class TestVolcengineCloud:
 
         assert result["status"] == "success"
         assert mock_get.call_count == 3
+
+    @patch("cloud_billing.clouds.volcengine_provider.requests.Session.get")
+    def test_get_billing_info_logs_service_timeout_as_warning(
+        self, mock_get, caplog
+    ):
+        provider = self._make_provider()
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "ResponseMetadata": {
+                "Error": {
+                    "Code": "InternalServiceTimeout",
+                    "Message": (
+                        "Internal Service is timeout. "
+                        "Pls Contact With Admin"
+                    ),
+                },
+            }
+        }
+        mock_get.return_value = response
+
+        with caplog.at_level(logging.WARNING):
+            result = provider.get_billing_info("2026-06")
+
+        error_logs = [
+            record for record in caplog.records
+            if record.levelno >= logging.ERROR
+        ]
+        assert result["status"] == "error"
+        assert "InternalServiceTimeout" in result["error"]
+        assert not error_logs
+        assert "Volcengine billing error" in caplog.text
 
     def test_get_account_id_uses_payer_id(self):
         provider = self._make_provider()
