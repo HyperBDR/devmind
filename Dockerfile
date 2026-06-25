@@ -18,14 +18,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN set -eux; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Setting up Chinese mirrors for Ubuntu 24.04 LTS..."; \
-        # Backup original sources
-        cp /etc/apt/sources.list /etc/apt/sources.list.backup; \
-        # Replace with Chinese mirrors
-        echo "deb https://mirrors.aliyun.com/ubuntu/ noble main restricted universe multiverse" > /etc/apt/sources.list; \
-        echo "deb https://mirrors.aliyun.com/ubuntu/ noble-updates main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "deb https://mirrors.aliyun.com/ubuntu/ noble-backports main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "deb https://mirrors.aliyun.com/ubuntu/ noble-security main restricted universe multiverse" >> /etc/apt/sources.list; \
+        arch="$(dpkg --print-architecture)"; \
+        mirror_path="ubuntu"; \
+        if [ "$arch" != "amd64" ]; then \
+            mirror_path="ubuntu-ports"; \
+        fi; \
+        if [ -f /etc/apt/sources.list ]; then \
+            cp /etc/apt/sources.list /etc/apt/sources.list.backup; \
+        fi; \
+        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+            cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.backup; \
+            rm -f /etc/apt/sources.list.d/ubuntu.sources; \
+        fi; \
+        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble main restricted universe multiverse" > /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble-updates main restricted universe multiverse" >> /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble-backports main restricted universe multiverse" >> /etc/apt/sources.list; \
+        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble-security main restricted universe multiverse" >> /etc/apt/sources.list; \
         echo "✓ Chinese mirrors configured for Ubuntu 24.04 LTS (Noble Numbat)"; \
+        echo "Architecture: ${arch}; mirror path: ${mirror_path}"; \
         echo "Current sources.list content:"; \
         cat /etc/apt/sources.list; \
     else \
@@ -73,10 +83,12 @@ RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
 RUN set -eux; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Installing uv with Chinese PyPI mirror"; \
-        pip install --index-url https://mirrors.aliyun.com/pypi/simple --trusted-host mirrors.aliyun.com uv; \
+        pip install --retries 5 --timeout 120 --progress-bar off \
+            --index-url https://mirrors.aliyun.com/pypi/simple \
+            --trusted-host mirrors.aliyun.com uv; \
     else \
         echo "Installing uv with default PyPI"; \
-        pip install uv; \
+        pip install --retries 5 --timeout 120 --progress-bar off uv; \
     fi; \
     echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc; \
     export PATH="/root/.local/bin:$PATH"
