@@ -101,6 +101,21 @@ class TestAzureCloud:
         assert data["currency"] == "EUR"
         assert data["account_id"] == "sub"
 
+    def test_resource_client_uses_resource_management_client(self):
+        provider = self._make_provider()
+        provider._resource_client = None
+
+        with patch(
+            "cloud_billing.clouds.azure_provider.ResourceManagementClient"
+        ) as client_cls:
+            resource_client = provider.resource_client
+
+        assert resource_client == client_cls.return_value
+        client_cls.assert_called_once_with(
+            credential=provider.credential,
+            subscription_id="sub",
+        )
+
     def test_get_balance_prefers_available_balance_endpoint(self):
         provider = self._make_provider()
         provider._management_get = Mock(

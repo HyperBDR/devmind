@@ -18,7 +18,6 @@ from .serializers import (
 )
 from . import services as dashboard_services
 from .services.analyzer import build_dashboard_stats
-from .tasks import run_collection_for_data_source
 from accounts.access import get_effective_feature_keys
 
 logger = logging.getLogger(__name__)
@@ -177,6 +176,8 @@ class DataSourceCollectAPIView(APIView):
             start_time=timezone.now(),
             trigger_mode="manual",
         )
+        from .tasks import run_collection_for_data_source
+
         celery_task = run_collection_for_data_source.delay(data_source.id, task.id, "manual")
         task.celery_task_id = celery_task.id
         task.save(update_fields=["celery_task_id", "updated_at"])
@@ -288,6 +289,8 @@ class TriggerCollectionAPIView(APIView):
         else:
             targets = list(DataSource.objects.filter(is_active=True))
         scheduled = []
+        from .tasks import run_collection_for_data_source
+
         for source in targets:
             task = CollectionTask.objects.create(
                 data_source=source,

@@ -4,21 +4,46 @@ Service helpers for recharge approval submission and callback tracking.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import os
 import re
 import threading
 import time
-import uuid
-import importlib.util
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Optional, Tuple
+
+
+from django.contrib.auth.models import User
+from django.core.cache import cache
+from django.db.models import Q
+from django.utils import timezone
+from langchain_core.callbacks.base import BaseCallbackHandler
+from langchain_core.outputs import LLMResult
+from langchain_core.tools import tool
+from pydantic import BaseModel, Field
+
+from cloud_billing.models import (
+    CloudProvider,
+    RechargeApprovalEvent,
+    RechargeApprovalLLMRun,
+    RechargeApprovalRecord,
+)
+from cloud_billing.services.parser_llm_config import (
+    resolve_parser_llm_settings,
+)
+
+if TYPE_CHECKING:
+    from agentcore_metering.adapters.django.models import LLMUsage
+
+logger = logging.getLogger(__name__)
 
 
 class MissingRechargeFieldsError(ValueError):
     """
     Raised when recharge info is missing required fields.
+
     Carries the list of missing field names for structured error responses.
     """
 
@@ -30,35 +55,6 @@ class MissingRechargeFieldsError(ValueError):
         )
         super().__init__(message or default_message)
 
-from langchain_core.callbacks.base import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
-
-from agentcore_metering.adapters.django.models import LLMUsage
-from cloud_billing.services.parser_llm_config import resolve_parser_llm_settings
-from django.contrib.auth.models import User
-from django.core.cache import cache
-from django.db.models import Q
-from django.utils import timezone
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
-
-from cloud_billing.models import (
-    CloudProvider,
-    RechargeApprovalEvent,
-    RechargeApprovalLLMRun,
-    RechargeApprovalRecord,
-)
-from cloud_billing.tracked_llm import (
-    build_tracking_state,
-    invoke_tracked_structured_llm,
-)
-from agent_runner import AgentRunner, SkillSpec
-from agent_runner.observability.langfuse import create_langfuse_observer
-
-logger = logging.getLogger(__name__)
 
 CLOUD_TYPE_LABELS = {
     "aws": "AWS",
@@ -97,7 +93,6 @@ RECHARGE_INFO_KEY_MAP = {
     "remark": "remark",
     "备注": "remark",
     "payee.type": "payee.type",
-    "账户类型": "payee.type",
     "账户类型": "payee.type",
     "收款账户类型": "payee.type",
     "payee.account_name": "payee.account_name",
@@ -1684,11 +1679,6 @@ def _enrich_user_details(token: str, users: List[Dict[str, str]]) -> None:
     import urllib.request
     import urllib.error
 
-    base_user_url = (
-        FEISHU_LIST_USERS_URL.split("?")[0]
-        + "?user_id_type=user_id&department_id=0&page_size=50"
-    )
-
     for user in users:
         if user.get("email") or user.get("mobile"):
             continue
@@ -2198,20 +2188,29 @@ class RechargeApprovalAgentCallbackHandler(BaseCallbackHandler):
         user_id: Optional[int],
         langfuse_runtime: Any | None = None,
     ) -> None:
+        if langfuse_runtime is None:
+            from agent_runner.observability.langfuse import (
+                create_langfuse_observer,
+            )
+
+            langfuse_runtime = create_langfuse_observer(
+                name="RechargeApprovalAgentRunner",
+                trace_seed=str(getattr(record, "trace_id", "") or ""),
+                user_id=str(user_id) if user_id else None,
+                session_id=str(getattr(record, "id", "") or ""),
+                metadata={
+                    "record_id": getattr(record, "id", None),
+                    "record_trace_id": str(
+                        getattr(record, "trace_id", "") or ""
+                    ),
+                    "component": "recharge_approval_callback",
+                },
+                tags=["agent", "recharge_approval", "tool"],
+            )
+
         self.record = record
         self.user_id = user_id
-        self.langfuse_runtime = langfuse_runtime or create_langfuse_observer(
-            name="RechargeApprovalAgentRunner",
-            trace_seed=str(getattr(record, "trace_id", "") or ""),
-            user_id=str(user_id) if user_id else None,
-            session_id=str(getattr(record, "id", "") or ""),
-            metadata={
-                "record_id": getattr(record, "id", None),
-                "record_trace_id": str(getattr(record, "trace_id", "") or ""),
-                "component": "recharge_approval_callback",
-            },
-            tags=["agent", "recharge_approval", "tool"],
-        )
+        self.langfuse_runtime = langfuse_runtime
         self.starts: Dict[str, Any] = {}
         self.inputs: Dict[str, str] = {}
         self._tool_starts: Dict[str, Dict[str, Any]] = {}
@@ -2249,6 +2248,8 @@ class RechargeApprovalAgentCallbackHandler(BaseCallbackHandler):
         tags=None,
         **kwargs,
     ) -> Any:
+        from agentcore_metering.adapters.django.models import LLMUsage
+
         key = str(run_id)
         started_at = self.starts.get(key) or timezone.now()
         finished_at = timezone.now()
@@ -2600,6 +2601,10 @@ class RechargeApprovalAgentCallbackHandler(BaseCallbackHandler):
                 if callable(safe_flush):
                     safe_flush()
 def build_deep_agent_model(user_id: Optional[int] = None):
+    from langchain_anthropic import ChatAnthropic
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_openai import AzureChatOpenAI, ChatOpenAI
+
     llm_settings = resolve_parser_llm_settings(None)
     provider = str(llm_settings.get("provider") or "openai").strip().lower()
     model_name = str(llm_settings.get("model") or "").strip()
@@ -2880,7 +2885,17 @@ def refresh_recharge_approval_record_status(
             "detail": None,
         }
 
-    detail = _request_feishu_approval_instance_detail(
+    token = _get_feishu_access_token()
+    if not token:
+        return {
+            "is_ongoing": record.status in ONGOING_RECHARGE_APPROVAL_STATUSES,
+            "live_status": record.status,
+            "live_status_text": record.status_message or "",
+            "detail": None,
+        }
+
+    detail = _feishu_get_instance(
+        token,
         approval_code,
         instance_code,
         approval_base_url=approval_base_url,
@@ -3260,6 +3275,8 @@ def latest_usage_for_trace(
     stage: str,
     user_id: Optional[int],
 ) -> Optional[LLMUsage]:
+    from agentcore_metering.adapters.django.models import LLMUsage
+
     queryset = LLMUsage.objects.filter(
         metadata__trace_id=str(trace_id),
         metadata__source_record_id=record_id,
@@ -3319,6 +3336,11 @@ def parse_recharge_info_with_tracking(
             payload=payload,
         )
         return payload
+
+    from cloud_billing.tracked_llm import (
+        build_tracking_state,
+        invoke_tracked_structured_llm,
+    )
 
     llm_state = {
         **build_tracking_state(

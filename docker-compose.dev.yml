@@ -1,4 +1,24 @@
 services:
+  backend-init:
+    image: devmind-backend:dev
+    container_name: backend-init-dev
+    restart: "no"
+    env_file:
+      - ./.env.dev
+    volumes:
+      - ./data.dev/django/staticfiles:/opt/backend/core/staticfiles
+      - ./data.dev/logs/api:/var/log/gunicorn
+      - ./backend:/opt/backend
+      - ./cache.dev:/opt/cache
+      - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
+      - ./data.dev/storage:/opt/storage
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    command: init
+
   backend-api:
     image: devmind-backend:dev
     container_name: backend-api-dev
@@ -22,6 +42,8 @@ services:
     networks:
       - backend_network
     depends_on:
+      backend-init:
+        condition: service_completed_successfully
       postgresql:
         condition: service_healthy
     command: development

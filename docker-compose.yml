@@ -1,4 +1,23 @@
 services:
+  backend-init:
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
+    container_name: backend-init
+    restart: "no"
+    env_file:
+      - ./.env
+    volumes:
+      - ./data/django/staticfiles:/opt/backend/core/staticfiles
+      - ./data/logs/api:/var/log/gunicorn
+      - ./data/storage:/opt/storage
+      - ./cache:/opt/cache
+      - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    command: init
+
   backend-api:
     image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
     container_name: backend-api
@@ -21,6 +40,8 @@ services:
     networks:
       - backend_network
     depends_on:
+      backend-init:
+        condition: service_completed_successfully
       postgresql:
         condition: service_healthy
     command: gunicorn

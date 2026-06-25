@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import requests
 from azure.identity import ClientSecretCredential
 from azure.mgmt.consumption import ConsumptionManagementClient
-from azure.mgmt.resource import ResourceManagementClient
+from azure.mgmt.resource.resources import ResourceManagementClient
 from django.utils import timezone
 
 from ..utils.logging import mask_sensitive_config_object
