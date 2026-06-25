@@ -13,8 +13,6 @@ from agentcore_task.adapters.django import (
     TaskTracker,
 )
 
-from ..tasks import collect_billing_data
-
 
 class BillingTaskViewSet(viewsets.ViewSet):
     """
@@ -62,6 +60,8 @@ class BillingTaskViewSet(viewsets.ViewSet):
                     ),
                     'reason': 'task_already_running',
                 }, status=status.HTTP_409_CONFLICT)
+
+            from ..tasks import collect_billing_data
 
             task = collect_billing_data.delay(
                 provider_id_int, user_id=user_id

@@ -25,6 +25,7 @@ THREADS=${THREADS:-1}
 REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
 REDIS_HEALTHCHECK_URL=${REDIS_HEALTHCHECK_URL:-${CELERY_BROKER_URL:-$REDIS_URL}}
 DB_ENGINE=${DB_ENGINE:-sqlite}
+RUN_STARTUP_MAINTENANCE=${RUN_STARTUP_MAINTENANCE:-false}
 
 # --- Ensure log directories exist ---
 mkdir -p $LOG_BASE_DIR /var/log/celery
@@ -127,6 +128,11 @@ collect_static() {
     python manage.py collectstatic --noinput
 }
 
+run_startup_maintenance() {
+    run_migrations
+    collect_static
+}
+
 # --- Process Starters ---
 start_gunicorn() {
     log "Starting Gunicorn..."
@@ -160,7 +166,7 @@ start_celery_worker() {
     # - Waits for currently running tasks to complete
     # - Docker stop_grace_period (600s) allows time for tasks to finish
     # - CELERY_TASK_ACKS_LATE=True ensures tasks are only acknowledged after completion
-    exec celery -A core worker \
+    exec celery -A core.celery:app worker \
         --loglevel=${CELERY_LOG_LEVEL:-INFO} \
         --concurrency=$DEFAULT_CONCURRENCY \
         --max-tasks-per-child=${CELERY_MAX_TASKS_PER_CHILD:-1000} \
@@ -170,7 +176,7 @@ start_celery_worker() {
 
 start_celery_beat() {
     log "Starting Celery beat with DatabaseScheduler..."
-    exec celery -A core beat \
+    exec celery -A core.celery:app beat \
         --scheduler django_celery_beat.schedulers:DatabaseScheduler \
         --loglevel=${CELERY_LOG_LEVEL:-INFO} \
         --logfile=/var/log/celery/beat.log
@@ -178,7 +184,7 @@ start_celery_beat() {
 
 start_flower() {
     log "Starting Flower..."
-    exec celery -A core flower \
+    exec celery -A core.celery:app flower \
         --port=${FLOWER_PORT:-5555} \
         --address=0.0.0.0 \
         --broker="$REDIS_URL" \
@@ -193,10 +199,18 @@ start_development() {
 
 # --- Main Entrypoint ---
 case "$1" in
+    init)
+        wait_for_db
+        run_startup_maintenance
+        ;;
     gunicorn)
         wait_for_db
-        run_migrations
-        collect_static
+        if [ "$RUN_STARTUP_MAINTENANCE" = "true" ]; then
+            log "RUN_STARTUP_MAINTENANCE=true; running maintenance before Gunicorn..."
+            run_startup_maintenance
+        else
+            log "Skipping startup maintenance before Gunicorn."
+        fi
         start_gunicorn
         ;;
     celery)
@@ -215,8 +229,12 @@ case "$1" in
         ;;
     development)
         wait_for_db
-        run_migrations
-        collect_static
+        if [ "$RUN_STARTUP_MAINTENANCE" = "true" ]; then
+            log "RUN_STARTUP_MAINTENANCE=true; running maintenance before runserver..."
+            run_startup_maintenance
+        else
+            log "Skipping startup maintenance before runserver."
+        fi
         start_development
         ;;
     *)

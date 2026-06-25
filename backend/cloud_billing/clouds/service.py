@@ -4,20 +4,11 @@ This module provides base classes for cloud services and a factory
 for creating cloud provider instances.
 """
 
+import importlib
 import logging
 from typing import Dict, Any, Optional
 
 from ..utils.logging import mask_sensitive_config
-
-from .aws_provider import AWSConfig, AWSCloud
-from .huawei_provider import HuaweiConfig, HuaweiCloud
-from .huawei_intl_provider import HuaweiIntlConfig, HuaweiIntlCloud
-from .alibaba_provider import AlibabaConfig, AlibabaCloud
-from .azure_provider import AzureConfig, AzureCloud
-from .tencent_provider import TencentConfig, TencentCloud
-from .volcengine_provider import VolcengineConfig, VolcengineCloud
-from .baidu_provider import BaiduConfig, BaiduCloud
-from .zhipu_provider import ZhipuConfig, ZhipuCloud
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -25,36 +16,51 @@ logger = logging.getLogger(__name__)
 
 def _build_provider_mapping():
     mapping = {
-        "aws": {"config_class": AWSConfig, "provider_class": AWSCloud},
+        "aws": {
+            "module": "cloud_billing.clouds.aws_provider",
+            "config_class": "AWSConfig",
+            "provider_class": "AWSCloud",
+        },
         "huawei": {
-            "config_class": HuaweiConfig,
-            "provider_class": HuaweiCloud,
+            "module": "cloud_billing.clouds.huawei_provider",
+            "config_class": "HuaweiConfig",
+            "provider_class": "HuaweiCloud",
         },
         "huawei-intl": {
-            "config_class": HuaweiIntlConfig,
-            "provider_class": HuaweiIntlCloud,
+            "module": "cloud_billing.clouds.huawei_intl_provider",
+            "config_class": "HuaweiIntlConfig",
+            "provider_class": "HuaweiIntlCloud",
         },
         "alibaba": {
-            "config_class": AlibabaConfig,
-            "provider_class": AlibabaCloud,
+            "module": "cloud_billing.clouds.alibaba_provider",
+            "config_class": "AlibabaConfig",
+            "provider_class": "AlibabaCloud",
         },
-        "azure": {"config_class": AzureConfig, "provider_class": AzureCloud},
+        "azure": {
+            "module": "cloud_billing.clouds.azure_provider",
+            "config_class": "AzureConfig",
+            "provider_class": "AzureCloud",
+        },
         "volcengine": {
-            "config_class": VolcengineConfig,
-            "provider_class": VolcengineCloud,
+            "module": "cloud_billing.clouds.volcengine_provider",
+            "config_class": "VolcengineConfig",
+            "provider_class": "VolcengineCloud",
         },
         "baidu": {
-            "config_class": BaiduConfig,
-            "provider_class": BaiduCloud,
+            "module": "cloud_billing.clouds.baidu_provider",
+            "config_class": "BaiduConfig",
+            "provider_class": "BaiduCloud",
         },
         "zhipu": {
-            "config_class": ZhipuConfig,
-            "provider_class": ZhipuCloud,
+            "module": "cloud_billing.clouds.zhipu_provider",
+            "config_class": "ZhipuConfig",
+            "provider_class": "ZhipuCloud",
         },
     }
     mapping["tencentcloud"] = {
-        "config_class": TencentConfig,
-        "provider_class": TencentCloud,
+        "module": "cloud_billing.clouds.tencent_provider",
+        "config_class": "TencentConfig",
+        "provider_class": "TencentCloud",
     }
     return mapping
 
@@ -85,8 +91,9 @@ class ProviderFactory:
             raise ValueError(f"Unsupported provider: {provider_name}")
 
         provider_info = cls.PROVIDER_MAPPING[provider_name]
-        config_class = provider_info["config_class"]
-        provider_class = provider_info["provider_class"]
+        module = importlib.import_module(provider_info["module"])
+        config_class = getattr(module, provider_info["config_class"])
+        provider_class = getattr(module, provider_info["provider_class"])
 
         # Create provider instance with validated config
         # Add fallback to empty dict if config is None

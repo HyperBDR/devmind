@@ -44,7 +44,9 @@ def _is_local_mode() -> bool:
 
 def _load_skill_tools_module():
     """Load the skill tools module dynamically using importlib."""
-    import importlib.util, sys
+    import importlib.util
+    import sys
+
     from cloud_billing.services.recharge_approval import _approval_skill_path
 
     tools_path = _approval_skill_path() / "tools.py"
@@ -304,7 +306,8 @@ def _local_feishu_token() -> str:
 
 
 def _local_api(url: str, payload: Dict[str, Any], token: str, method: str = "POST") -> Dict[str, Any]:
-    import urllib.error, urllib.request
+    import urllib.error
+    import urllib.request
 
     body = json.dumps(payload, ensure_ascii=False).encode()
     headers = {
@@ -433,9 +436,21 @@ def _local_create_instance(
                 approval_code, user_id[:8] if len(user_id) > 8 else user_id)
     return _local_api(
         f"{base_url}/approval/openapi/v2/instance/create",
-        {"approval_code": approval_code, "user_id": user_id, "form": json.dumps(form_payload, ensure_ascii=False)},
+        _local_create_instance_payload(approval_code, user_id, form_payload),
         token,
     )
+
+
+def _local_create_instance_payload(
+    approval_code: str,
+    user_id: str,
+    form_payload: list,
+) -> Dict[str, Any]:
+    return {
+        "approval_code": approval_code,
+        "user_id": user_id,
+        "form": json.dumps(form_payload, ensure_ascii=False),
+    }
 
 
 def _local_resolve_user_id(identifier: str, token: str) -> str:
@@ -486,6 +501,34 @@ def _build_remark(payee: Dict[str, Any]) -> str:
         f"银行地区：{payee.get('bank_region', '')}",
         f"支行：{payee.get('bank_branch', '')}",
     ])
+
+
+def _build_remark_with_payee(data: Dict[str, Any]) -> str:
+    remark = str(data.get("remark") or "").strip()
+    payee = data.get("payee")
+    if not isinstance(payee, dict):
+        return remark
+
+    payee_keys = (
+        "type",
+        "account_name",
+        "account_number",
+        "bank_name",
+        "bank_region",
+        "bank_branch",
+    )
+    has_payee_value = any(
+        str(payee.get(key) or "").strip() for key in payee_keys
+    )
+    if not has_payee_value:
+        return remark
+
+    payee_remark = _build_remark(payee).strip()
+    if not remark:
+        return payee_remark
+    if payee_remark and payee_remark not in remark:
+        return f"{remark}\n{payee_remark}"
+    return remark
 
 
 def _split_amount(value: Any) -> tuple:
@@ -568,12 +611,11 @@ def _build_form_payload(data: Dict[str, Any], schema: Dict[str, Dict[str, Any]])
         if not str(data.get(field_key) or "").strip():
             raise RuntimeError(f"Missing required field: {label}")
 
-    payee = data.get("payee", {})
     payment_type = str(data.get("payment_type", "仅充值")).strip()
     payment_way = str(data.get("payment_way", "公司支付")).strip()
     remit_method = str(data.get("remit_method", "转账")).strip()
     payment_note = str(data.get("payment_note", "")).strip()
-    remark = str(data.get("remark") or _build_remark(payee))
+    remark = _build_remark_with_payee(data)
     expected_date = str(data.get("expected_date") or _default_expected_date()).strip()
 
     form_payload: list = []
@@ -738,6 +780,11 @@ def _execute_local(
         logger.info("[LocalExecutor] Form built with %d fields", len(form_payload))
 
         # Step 6: submit or deduplicate
+        feishu_request_payload = _local_create_instance_payload(
+            approval_code,
+            resolved_user_id,
+            form_payload,
+        )
         if existing:
             instance_code = str(existing.get("instance_code", ""))
             serial = str(existing.get("serial_number", ""))
@@ -821,6 +868,7 @@ def _execute_local(
             "resolved_submitter_user_id": resolved_user_id,
             "submitter_user_label": submitter_user_label,
             "request_payload": parsed_payload,
+            "feishu_request_payload": feishu_request_payload,
             "submission_payload": record.response_payload,
             "notification_message": notification_msg,
             "success": True,

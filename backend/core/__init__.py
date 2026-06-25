@@ -1,11 +1,3 @@
-import os
-
-from .celery import app as celery_app
-
-# __all__ is a list that specifies the public objects of the module
-__all__ = ('celery_app',)
-
-
 def _init_sentry():
     """Initialize Sentry error tracking if configured."""
     from core.settings.sentry import (

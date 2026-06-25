@@ -22,7 +22,6 @@ import cloud_billing.services.recharge_approval as recharge_service
 from cloud_billing.services.recharge_approval import (
     RechargeApprovalAgentCallbackHandler,
     build_notification_message_from_payload,
-    _get_feishu_access_token,
     _redact_feishu_body_for_log,
     _redact_feishu_payload_for_log,
     _skill_root_path,
@@ -32,7 +31,6 @@ from cloud_billing.services.recharge_approval import (
     parse_recharge_info,
     parse_recharge_info_with_tracking,
     prepare_recharge_request_payload,
-    refresh_recharge_approval_record_status,
     sanitize_recharge_request_payload,
     validate_recharge_request_payload,
 )
@@ -68,7 +66,7 @@ def test_agent_runner_package_exports_core_symbols():
 def test_feishu_log_redaction_handles_nested_form_json_strings():
     form_payload = [
         {"id": "cloud", "type": "input", "value": "智谱"},
-        {"id": "account", "type": "input", "value": "18017606559"},
+        {"id": "account", "type": "input", "value": "demo-account-001"},
         {"id": "amount", "type": "amount", "value": 200},
         {"id": "remark", "type": "textarea", "value": "账号：1109385104"},
     ]
@@ -81,7 +79,7 @@ def test_feishu_log_redaction_handles_nested_form_json_strings():
     redacted_payload = _redact_feishu_payload_for_log(payload)
     redacted_text = json.dumps(redacted_payload, ensure_ascii=False)
 
-    assert "18017606559" not in redacted_text
+    assert "demo-account-001" not in redacted_text
     assert "1109385104" not in redacted_text
     assert '"value": "***REDACTED***"' in redacted_text
     assert redacted_payload["form"][0]["id"] == "cloud"
@@ -118,17 +116,17 @@ def test_parse_recharge_info_with_tracking_uses_heuristic_parser(cloud_provider)
     cloud_provider.recharge_info = json.dumps(
         {
             "cloud_type": "智谱",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
-            "recharge_account": "18017606559",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
+            "recharge_account": "demo-account-001",
+            "payment_company": "示例云科技有限公司",
             "amount": 200,
             "payee": {
                 "type": "对公账户",
-                "account_name": "北京智谱华章科技股份有限公司",
-                "account_number": "11093851041070210011884",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "account_number": "00000000000000000000",
+                "bank_name": "示例银行",
                 "bank_region": "北京市/北京市",
-                "bank_branch": "招商银行股份有限公司北京上地支行",
+                "bank_branch": "示例银行示例支行",
             },
         },
         ensure_ascii=False,
@@ -144,7 +142,7 @@ def test_parse_recharge_info_with_tracking_uses_heuristic_parser(cloud_provider)
         record=record,
     )
 
-    assert payload["recharge_account"] == "18017606559"
+    assert payload["recharge_account"] == "demo-account-001"
     run = record.llm_runs.get()
     assert run.runner_type == "agent"
     assert run.model == "heuristic-parser"
@@ -154,20 +152,20 @@ def test_validate_recharge_request_payload_requires_cloud_type():
     with pytest.raises(ValueError, match="cloud_type"):
         validate_recharge_request_payload(
             {
-                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_customer_name": "示例云科技有限公司",
                 "recharge_account": "acct-288",
-                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_company": "示例云科技有限公司",
                 "payment_way": "公司支付",
                 "payment_type": "仅充值",
                 "remit_method": "转账",
                 "currency": "CNY",
                 "payee": {
                     "type": "对公账户",
-                    "account_name": "北京智谱华章科技股份有限公司",
-                    "account_number": "11093851041070210011884",
-                    "bank_name": "招商银行",
+                    "account_name": "示例收款有限公司",
+                    "account_number": "00000000000000000000",
+                    "bank_name": "示例银行",
                     "bank_region": "北京市/北京市",
-                    "bank_branch": "招商银行股份有限公司北京上地支行",
+                    "bank_branch": "示例银行示例支行",
                 },
             }
         )
@@ -177,20 +175,20 @@ def test_prepare_recharge_request_payload_injects_cloud_type():
     payload = prepare_recharge_request_payload(
         json.dumps(
             {
-                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_customer_name": "示例云科技有限公司",
                 "recharge_account": "acct-288",
-                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_company": "示例云科技有限公司",
                 "payment_way": "公司支付",
                 "payment_type": "仅充值",
                 "remit_method": "转账",
                 "currency": "CNY",
                 "payee": {
                     "type": "对公账户",
-                    "account_name": "北京智谱华章科技股份有限公司",
-                    "account_number": "11093851041070210011884",
-                    "bank_name": "招商银行",
+                    "account_name": "示例收款有限公司",
+                    "account_number": "00000000000000000000",
+                    "bank_name": "示例银行",
                     "bank_region": "北京市/北京市",
-                    "bank_branch": "招商银行股份有限公司北京上地支行",
+                    "bank_branch": "示例银行示例支行",
                 },
             },
             ensure_ascii=False,
@@ -207,20 +205,20 @@ def test_validate_recharge_request_payload_allows_missing_amount():
     payload = validate_recharge_request_payload(
         {
             "cloud_type": "阿里云",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
             "recharge_account": "acct-288",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "payment_company": "示例云科技有限公司",
             "payment_way": "公司支付",
             "payment_type": "仅充值",
             "remit_method": "转账",
             "currency": "CNY",
             "payee": {
                 "type": "对公账户",
-                "account_name": "北京智谱华章科技股份有限公司",
-                "account_number": "11093851041070210011884",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "account_number": "00000000000000000000",
+                "bank_name": "示例银行",
                 "bank_region": "北京市/北京市",
-                "bank_branch": "招商银行股份有限公司北京上地支行",
+                "bank_branch": "示例银行示例支行",
             },
         }
     )
@@ -234,16 +232,16 @@ def test_validate_recharge_request_payload_requires_payee_fields():
     with pytest.raises(ValueError, match="payee\\.account_number"):
         validate_recharge_request_payload(
             {
-                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_customer_name": "示例云科技有限公司",
                 "recharge_account": "acct-288",
-                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_company": "示例云科技有限公司",
                 "currency": "CNY",
                 "payee": {
                     "type": "对公账户",
-                    "account_name": "北京智谱华章科技股份有限公司",
-                    "bank_name": "招商银行",
+                    "account_name": "示例收款有限公司",
+                    "bank_name": "示例银行",
                     "bank_region": "北京市/北京市",
-                    "bank_branch": "招商银行股份有限公司北京上地支行",
+                    "bank_branch": "示例银行示例支行",
                 },
             }
         )
@@ -255,17 +253,17 @@ def test_parse_recharge_info_moves_remit_value_out_of_payment_type():
             [
                 "cloud_type: 智谱",
                 "payment_type: 转账",
-                "recharge_customer_name: 深圳壹铂云科技有限公司",
+                "recharge_customer_name: 示例云科技有限公司",
                 "recharge_account: acct-188",
                 "payment_way: 公司支付",
-                "payment_company: 深圳壹铂云科技有限公司",
+                "payment_company: 示例云科技有限公司",
                 "amount: 188",
                 "payee.type: 对公账户",
-                "payee.account_name: 北京智谱华章科技股份有限公司",
-                "payee.account_number: 11093851041070210011884",
-                "payee.bank_name: 招商银行",
+                "payee.account_name: 示例收款有限公司",
+                "payee.account_number: 00000000000000000000",
+                "payee.bank_name: 示例银行",
                 "payee.bank_region: 北京市/北京市",
-                "payee.bank_branch: 招商银行股份有限公司北京上地支行",
+                "payee.bank_branch: 示例银行示例支行",
             ]
         )
     )
@@ -298,7 +296,7 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
                 "支付类型",
                 "仅充值",
                 "充值客户名称",
-                "深圳壹铂云科技有限公司",
+                "示例云科技有限公司",
                 "充值云账号",
                 "13301962892",
                 "付款说明",
@@ -306,7 +304,7 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
                 "支付方式",
                 "公司支付",
                 "付款公司",
-                "深圳壹铂云科技有限公司",
+                "示例云科技有限公司",
                 "付款方式",
                 "转账",
                 "付款金额",
@@ -317,15 +315,15 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
                 "账户类型",
                 "对公账户",
                 "户名",
-                "北京智谱华章科技股份有限公司",
+                "示例收款有限公司",
                 "账号",
                 "1109 3851 0410 7021 0011 884",
                 "银行",
-                "招商银行",
+                "示例银行",
                 "银行所在地区",
                 "北京市/北京市",
                 "银行支行",
-                "招商银行股份有限公司北京上地支行",
+                "示例银行示例支行",
             ]
         )
     )
@@ -336,9 +334,9 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
     assert payload["amount"] == 200.0
     assert payload["currency"] == "CNY"
     assert payload["payee"]["type"] == "对公账户"
-    assert payload["payee"]["account_number"] == "11093851041070210011884"
+    assert payload["payee"]["account_number"] == "00000000000000000000"
     assert payload["payee"]["bank_region"] == "北京市/北京市"
-    assert payload["payee"]["bank_branch"] == "招商银行股份有限公司北京上地支行"
+    assert payload["payee"]["bank_branch"] == "示例银行示例支行"
 
 
 def test_parse_recharge_info_splits_amount_and_currency_from_value():
@@ -346,17 +344,17 @@ def test_parse_recharge_info_splits_amount_and_currency_from_value():
         json.dumps(
             {
                 "cloud_type": "智谱",
-                "recharge_customer_name": "深圳壹铂云科技有限公司",
-                "recharge_account": "18017606559",
-                "payment_company": "深圳壹铂云科技有限公司",
+                "recharge_customer_name": "示例云科技有限公司",
+                "recharge_account": "demo-account-001",
+                "payment_company": "示例云科技有限公司",
                 "amount": "200.00 CNY",
                 "payee": {
                     "type": "对公账户",
-                    "account_name": "北京智谱华章科技股份有限公司",
-                    "account_number": "11093851041070210011884",
-                    "bank_name": "招商银行",
+                    "account_name": "示例收款有限公司",
+                    "account_number": "00000000000000000000",
+                    "bank_name": "示例银行",
                     "bank_region": "北京市/北京市",
-                    "bank_branch": "招商银行股份有限公司北京上地支行",
+                    "bank_branch": "示例银行示例支行",
                 },
             },
             ensure_ascii=False,
@@ -378,7 +376,7 @@ def test_parse_recharge_info_with_tracking_falls_back_to_llm(
     user,
     monkeypatch,
 ):
-    cloud_provider.recharge_info = "客户=深圳壹铂云科技有限公司\n账号=18017606559"
+    cloud_provider.recharge_info = "客户=示例云科技有限公司\n账号=demo-account-001"
     cloud_provider.save(update_fields=["recharge_info"])
     record = RechargeApprovalRecord.objects.create(
         provider=cloud_provider,
@@ -399,17 +397,17 @@ def test_parse_recharge_info_with_tracking_falls_back_to_llm(
         lambda **kwargs: (
             kwargs["schema"](
                 cloud_type="智谱",
-                recharge_customer_name="深圳壹铂云科技有限公司",
-                recharge_account="18017606559",
-                payment_company="深圳壹铂云科技有限公司",
+                recharge_customer_name="示例云科技有限公司",
+                recharge_account="demo-account-001",
+                payment_company="示例云科技有限公司",
                 amount=200,
                 payee={
                     "type": "对公账户",
-                    "account_name": "北京智谱华章科技股份有限公司",
-                    "account_number": "11093851041070210011884",
-                    "bank_name": "招商银行",
-                    "bank_region": "北京市/北京市",
-                    "bank_branch": "招商银行股份有限公司北京上地支行",
+                    "account_name": "示例收款有限公司",
+                    "account_number": "0000 0000 0000 0000",
+                    "bank_name": "示例银行",
+                    "bank_region": "示例省/示例市",
+                    "bank_branch": "示例银行示例支行",
                 },
             ),
             {"model": "gpt-4o-mini", "total_tokens": 321},
@@ -627,7 +625,7 @@ def test_run_skill_script_records_sanitized_script_execution_trace(
         json.dumps(
             {
                 "amount": 188,
-                "recharge_account": "11093851041070210011884",
+                "recharge_account": "00000000000000000000",
                 "secret_note": "should not leak",
             },
             ensure_ascii=False,
@@ -689,7 +687,7 @@ def test_run_skill_script_records_sanitized_script_execution_trace(
     assert trace["env"]["FEISHU_APP_SECRET"] == "***REDACTED***"
     assert trace["env"]["FEISHU_APP_ID"] == "cli_test"
     assert "super-secret" not in run.input_snapshot
-    assert "11093851041070210011884" not in run.input_snapshot
+    assert "00000000000000000000" not in run.input_snapshot
 
 
 @pytest.mark.django_db
@@ -762,17 +760,17 @@ def test_plan_recharge_approval_workflow_generates_account_scoped_json_file(
     """Plan step writes JSON before execution using an account-scoped filename."""
     payload = {
         "cloud_type": "智谱",
-        "recharge_customer_name": "深圳壹铂云科技有限公司",
+        "recharge_customer_name": "示例云科技有限公司",
         "recharge_account": "acct-188",
-        "payment_company": "深圳壹铂云科技有限公司",
+        "payment_company": "示例云科技有限公司",
         "amount": "188.00 CNY",
         "payee": {
             "type": "对公账户",
-            "account_name": "北京智谱华章科技股份有限公司",
-            "account_number": "11093851041070210011884",
-            "bank_name": "招商银行",
+            "account_name": "示例收款有限公司",
+            "account_number": "00000000000000000000",
+            "bank_name": "示例银行",
             "bank_region": "北京市/北京市",
-            "bank_branch": "招商银行股份有限公司北京上地支行",
+            "bank_branch": "示例银行示例支行",
         },
     }
     record = RechargeApprovalRecord.objects.create(
@@ -807,7 +805,7 @@ def test_plan_recharge_approval_workflow_generates_account_scoped_json_file(
     assert generated["amount"] == 188.0
     assert generated["currency"] == "CNY"
     assert "payee" not in generated
-    assert "账号：11093851041070210011884" in generated["remark"]
+    assert "账号：00000000000000000000" in generated["remark"]
 
 
 @pytest.mark.django_db
@@ -902,17 +900,17 @@ def test_execute_recharge_approval_plan_retains_generated_request_json(
 ):
     payload = {
         "cloud_type": "智谱",
-        "recharge_customer_name": "深圳壹铂云科技有限公司",
+        "recharge_customer_name": "示例云科技有限公司",
         "recharge_account": "acct-debug",
-        "payment_company": "深圳壹铂云科技有限公司",
+        "payment_company": "示例云科技有限公司",
         "amount": 188,
         "payee": {
             "type": "对公账户",
-            "account_name": "北京智谱华章科技股份有限公司",
-            "account_number": "11093851041070210011884",
-            "bank_name": "招商银行",
+            "account_name": "示例收款有限公司",
+            "account_number": "00000000000000000000",
+            "bank_name": "示例银行",
             "bank_region": "北京市/北京市",
-            "bank_branch": "招商银行股份有限公司北京上地支行",
+            "bank_branch": "示例银行示例支行",
         },
     }
     record = RechargeApprovalRecord.objects.create(
@@ -968,7 +966,7 @@ def test_execute_recharge_approval_plan_retains_generated_request_json(
     assert generated["amount"] == 188
     assert generated["currency"] == "CNY"
     assert "payee" not in generated
-    assert "账号：11093851041070210011884" in generated["remark"]
+    assert "账号：00000000000000000000" in generated["remark"]
 
 
 # Removed: test_run_skill_script_materializes_missing_recharge_request_file
@@ -1681,21 +1679,21 @@ def test_recharge_approval_script_builds_request_from_history(monkeypatch):
     history_form = [
         {"name": "公有云类型", "value": "智谱"},
         {"name": "支付类型", "value": "仅充值"},
-        {"name": "充值客户名称", "value": "深圳壹铂云科技有限公司"},
-        {"name": "充值云账号", "value": "18017606559"},
+        {"name": "充值客户名称", "value": "示例云科技有限公司"},
+        {"name": "充值云账号", "value": "demo-account-001"},
         {"name": "支付方式", "value": "公司支付"},
-        {"name": "付款公司", "value": "深圳壹铂云科技有限公司"},
+        {"name": "付款公司", "value": "示例云科技有限公司"},
         {"name": "付款方式", "value": "转账"},
         {"name": "付款金额", "value": 200},
         {
             "name": "备注",
             "value": (
                 "账户类型：对公账户\n"
-                "户名：北京智谱华章科技股份有限公司\n"
-                "账号：11093851041070210011884\n"
-                "银行：招商银行\n"
+                "户名：示例收款有限公司\n"
+                "账号：00000000000000000000\n"
+                "银行：示例银行\n"
                 "银行地区：北京市/北京市\n"
-                "支行：招商银行股份有限公司北京上地支行"
+                "支行：示例银行示例支行"
             ),
         },
     ]
@@ -1723,14 +1721,14 @@ def test_recharge_approval_script_builds_request_from_history(monkeypatch):
         "token",
         "approval",
         "智谱",
-        "18017606559",
+        "demo-account-001",
         365,
         5,
     )
 
     assert result["found"] is True
-    assert result["request_data"]["recharge_account"] == "18017606559"
-    assert result["request_data"]["payee"]["account_number"] == "11093851041070210011884"
+    assert result["request_data"]["recharge_account"] == "demo-account-001"
+    assert result["request_data"]["payee"]["account_number"] == "00000000000000000000"
     assert "expected_date" not in result["request_data"]
 
 
@@ -1742,21 +1740,21 @@ def test_recharge_approval_script_pages_history_in_ten_item_batches_and_skips_de
     history_form = [
         {"name": "公有云类型", "value": "智谱"},
         {"name": "支付类型", "value": "仅充值"},
-        {"name": "充值客户名称", "value": "深圳壹铂云科技有限公司"},
-        {"name": "充值云账号", "value": "18017606559"},
+        {"name": "充值客户名称", "value": "示例云科技有限公司"},
+        {"name": "充值云账号", "value": "demo-account-001"},
         {"name": "支付方式", "value": "公司支付"},
-        {"name": "付款公司", "value": "深圳壹铂云科技有限公司"},
+        {"name": "付款公司", "value": "示例云科技有限公司"},
         {"name": "付款方式", "value": "转账"},
         {"name": "付款金额", "value": 200},
         {
             "name": "备注",
             "value": (
                 "账户类型：对公账户\n"
-                "户名：北京智谱华章科技股份有限公司\n"
-                "账号：11093851041070210011884\n"
-                "银行：招商银行\n"
+                "户名：示例收款有限公司\n"
+                "账号：00000000000000000000\n"
+                "银行：示例银行\n"
                 "银行地区：北京市/北京市\n"
-                "支行：招商银行股份有限公司北京上地支行"
+                "支行：示例银行示例支行"
             ),
         },
     ]
@@ -1842,7 +1840,7 @@ def test_recharge_approval_script_pages_history_in_ten_item_batches_and_skips_de
         "token",
         "approval",
         "智谱",
-        "18017606559",
+        "demo-account-001",
         90,
         5,
     )
@@ -1858,24 +1856,24 @@ def test_build_notification_message_bolds_keys_and_skips_empty_expected_date():
     message = build_notification_message_from_payload(
         {
             "recharge_account": "acct-188",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
             "amount": 188.5,
             "currency": "CNY",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "payment_company": "示例云科技有限公司",
             "payment_way": "公司支付",
             "payment_type": "仅充值",
             "remit_method": "转账",
             "payee": {
-                "account_name": "北京智谱华章科技股份有限公司",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "bank_name": "示例银行",
             },
             "remark": (
                 "账户类型：对公账户\n"
-                "户名：北京智谱华章科技股份有限公司\n"
-                "账号：11093851041070210011884\n"
-                "银行：招商银行\n"
+                "户名：示例收款有限公司\n"
+                "账号：00000000000000000000\n"
+                "银行：示例银行\n"
                 "银行地区：北京市/北京市\n"
-                "支行：招商银行股份有限公司北京上地支行"
+                "支行：示例银行示例支行"
             ),
         },
         trigger_source="manual",
@@ -1890,7 +1888,7 @@ def test_build_notification_message_bolds_keys_and_skips_empty_expected_date():
     assert "**触发人**: testuser" in message
     assert "**期望到账时间**" not in message
     assert "**收款信息**" in message
-    assert "  - 户名: 北京智谱华章科技股份有限公司" in message
+    assert "  - 户名: 示例收款有限公司" in message
     assert "**备注**" not in message
 
 
@@ -1899,11 +1897,11 @@ def test_build_notification_message_parses_ascii_colon_payee_remark():
         {
             "remark": (
                 "账户类型: 对公账户\n"
-                "户名: 北京智谱华章科技股份有限公司\n"
-                "账号: 11093851041070210011884\n"
-                "银行: 招商银行\n"
+                "户名: 示例收款有限公司\n"
+                "账号: 00000000000000000000\n"
+                "银行: 示例银行\n"
                 "银行地区: 北京市/北京市\n"
-                "支行: 招商银行股份有限公司北京上地支行"
+                "支行: 示例银行示例支行"
             ),
         },
         trigger_source="manual",
@@ -1914,7 +1912,7 @@ def test_build_notification_message_parses_ascii_colon_payee_remark():
     )
 
     assert "**收款信息**" in message
-    assert "  - 户名: 北京智谱华章科技股份有限公司" in message
+    assert "  - 户名: 示例收款有限公司" in message
 
 
 @pytest.mark.django_db
@@ -2009,7 +2007,7 @@ def test_recharge_approval_puts_payee_in_remark_for_company_pay():
             ],
         },
         "付款公司": {"id": "f_payment_company", "name": "付款公司", "type": "radioV2",
-                     "option": [{"value": "sz-yibo", "text": "深圳壹铂云科技有限公司"}]},
+                     "option": [{"value": "demo-company", "text": "示例云科技有限公司"}]},
         "付款方式": {"id": "f_remit_method", "name": "付款方式", "type": "radioV2",
                      "option": [{"value": "transfer", "text": "转账"}]},
         "充值客户名称": {"id": "f_customer", "name": "充值客户名称", "type": "input", "option": []},
@@ -2022,19 +2020,19 @@ def test_recharge_approval_puts_payee_in_remark_for_company_pay():
     request_data = {
         "cloud_type": "智谱",
         "payment_type": "仅充值",
-        "recharge_customer_name": "深圳壹铂云科技有限公司",
-        "recharge_account": "18017606559",
+        "recharge_customer_name": "示例云科技有限公司",
+        "recharge_account": "demo-account-001",
         "payment_way": "公司支付",
-        "payment_company": "深圳壹铂云科技有限公司",
+        "payment_company": "示例云科技有限公司",
         "remit_method": "转账",
         "amount": 200,
         "payee": {
             "type": "对公账户",
-            "account_name": "北京智谱华章科技股份有限公司",
-            "account_number": "11093851041070210011884",
-            "bank_name": "招商银行",
+            "account_name": "示例收款有限公司",
+            "account_number": "00000000000000000000",
+            "bank_name": "示例银行",
             "bank_region": "北京市/北京市",
-            "bank_branch": "招商银行股份有限公司北京上地支行",
+            "bank_branch": "示例银行示例支行",
         },
     }
 
@@ -2047,9 +2045,9 @@ def test_recharge_approval_puts_payee_in_remark_for_company_pay():
     # 收款账户 info must be encoded in 备注
     remark = remark_item["value"]
     assert "对公账户" in remark
-    assert "北京智谱华章科技股份有限公司" in remark
-    assert "11093851041070210011884" in remark
-    assert "招商银行" in remark
+    assert "示例收款有限公司" in remark
+    assert "00000000000000000000" in remark
+    assert "示例银行" in remark
     # 说明 1 field should be present with fixed instruction text
     note1_item = next(
         (item for item in form_payload if item["id"] == "f_note1"),
@@ -2066,6 +2064,124 @@ def test_recharge_approval_puts_payee_in_remark_for_company_pay():
     assert account_item["type"] == "input", "充值云账号 should be input type"
 
 
+def test_local_recharge_approval_appends_payee_to_existing_remark():
+    from cloud_billing.agents.recharge_approval.definition import (
+        _build_form_payload,
+    )
+
+    schema_by_name = {
+        "公有云类型": {
+            "id": "f_cloud_type",
+            "name": "公有云类型",
+            "type": "radioV2",
+            "option": [
+                {
+                    "value": "huawei_partner",
+                    "text": "示例云-测试伙伴",
+                }
+            ],
+        },
+        "支付类型": {
+            "id": "f_payment_type",
+            "name": "支付类型",
+            "type": "radioV2",
+            "option": [{"value": "recharge-only", "text": "仅充值"}],
+        },
+        "支付方式": {
+            "id": "f_payment_way",
+            "name": "支付方式",
+            "type": "radioV2",
+            "option": [{"value": "company-pay", "text": "公司支付"}],
+        },
+        "付款公司": {
+            "id": "f_payment_company",
+            "name": "付款公司",
+            "type": "radioV2",
+            "option": [
+                {
+                    "value": "customer",
+                    "text": "示例客户有限公司",
+                }
+            ],
+        },
+        "付款方式": {
+            "id": "f_remit_method",
+            "name": "付款方式",
+            "type": "radioV2",
+            "option": [{"value": "transfer", "text": "转账"}],
+        },
+        "充值客户名称": {
+            "id": "f_customer",
+            "name": "充值客户名称",
+            "type": "input",
+            "option": [],
+        },
+        "充值云账号": {
+            "id": "f_account",
+            "name": "充值云账号",
+            "type": "input",
+            "option": [],
+        },
+        "付款说明": {
+            "id": "f_payment_note",
+            "name": "付款说明",
+            "type": "input",
+            "option": [],
+        },
+        "付款金额": {
+            "id": "f_amount",
+            "name": "付款金额",
+            "type": "amount",
+            "option": [],
+        },
+        "期望到账时间": {
+            "id": "f_date",
+            "name": "期望到账时间",
+            "type": "date",
+            "option": [],
+        },
+        "备注": {
+            "id": "f_remark",
+            "name": "备注",
+            "type": "input",
+            "option": [],
+        },
+    }
+    request_data = {
+        "cloud_type": "示例云-测试伙伴",
+        "payment_type": "仅充值",
+        "recharge_customer_name": "示例客户有限公司",
+        "recharge_account": "example-account",
+        "payment_way": "公司支付",
+        "payment_company": "示例客户有限公司",
+        "remit_method": "转账",
+        "amount": 200,
+        "expected_date": "2026-04-13",
+        "payment_note": "示例测试用途",
+        "remark": "示例业务备注",
+        "payee": {
+            "type": "对公账户",
+            "account_name": "示例收款方有限公司",
+            "account_number": "0000000000000000000",
+            "bank_name": "示例银行",
+            "bank_region": "示例省/示例市",
+            "bank_branch": "示例银行示例支行",
+        },
+    }
+
+    form_payload = _build_form_payload(request_data, schema_by_name)
+    values_by_id = {item["id"]: item["value"] for item in form_payload}
+    remark = values_by_id["f_remark"]
+
+    assert "示例业务备注" in remark
+    assert "账户类型：对公账户" in remark
+    assert "户名：示例收款方有限公司" in remark
+    assert "账号：0000000000000000000" in remark
+    assert "银行：示例银行" in remark
+    assert "银行地区：示例省/示例市" in remark
+    assert "支行：示例银行示例支行" in remark
+
+
 def test_recharge_approval_recovers_remit_method_from_payment_type():
     module = _load_skill_module(
         "submit_recharge_approval_payment_type_recovery",
@@ -2079,7 +2195,7 @@ def test_recharge_approval_recovers_remit_method_from_payment_type():
         "支付方式": {"id": "f_payment_way", "name": "支付方式", "type": "radioV2",
                      "option": [{"value": "company-pay", "text": "公司支付"}]},
         "付款公司": {"id": "f_payment_company", "name": "付款公司", "type": "radioV2",
-                     "option": [{"value": "sz-yibo", "text": "深圳壹铂云科技有限公司"}]},
+                     "option": [{"value": "demo-company", "text": "示例云科技有限公司"}]},
         "付款方式": {"id": "f_remit_method", "name": "付款方式", "type": "radioV2",
                      "option": [{"value": "transfer", "text": "转账"}]},
         "充值客户名称": {"id": "f_customer", "name": "充值客户名称", "type": "input", "option": []},
@@ -2091,18 +2207,18 @@ def test_recharge_approval_recovers_remit_method_from_payment_type():
     request_data = {
         "cloud_type": "智谱",
         "payment_type": "转账",
-        "recharge_customer_name": "深圳壹铂云科技有限公司",
-        "recharge_account": "18017606559",
+        "recharge_customer_name": "示例云科技有限公司",
+        "recharge_account": "demo-account-001",
         "payment_way": "公司支付",
-        "payment_company": "深圳壹铂云科技有限公司",
+        "payment_company": "示例云科技有限公司",
         "amount": 200,
         "payee": {
             "type": "对公账户",
-            "account_name": "北京智谱华章科技股份有限公司",
-            "account_number": "11093851041070210011884",
-            "bank_name": "招商银行",
+            "account_name": "示例收款有限公司",
+            "account_number": "00000000000000000000",
+            "bank_name": "示例银行",
             "bank_region": "北京市/北京市",
-            "bank_branch": "招商银行股份有限公司北京上地支行",
+            "bank_branch": "示例银行示例支行",
         },
     }
 
@@ -2124,27 +2240,27 @@ def test_recharge_approval_hydrates_payee_from_remark_only_request():
     request_data = {
         "cloud_type": "智谱",
         "payment_type": "仅充值",
-        "recharge_customer_name": "深圳壹铂云科技有限公司",
-        "recharge_account": "18017606559",
+        "recharge_customer_name": "示例云科技有限公司",
+        "recharge_account": "demo-account-001",
         "payment_way": "公司支付",
-        "payment_company": "深圳壹铂云科技有限公司",
+        "payment_company": "示例云科技有限公司",
         "remit_method": "转账",
         "amount": 200,
         "remark": (
             "账户类型：对公账户\n"
-            "户名：北京智谱华章科技股份有限公司\n"
-            "账号：11093851041070210011884\n"
-            "银行：招商银行\n"
+            "户名：示例收款有限公司\n"
+            "账号：00000000000000000000\n"
+            "银行：示例银行\n"
             "银行地区：北京市/北京市\n"
-            "支行：招商银行股份有限公司北京上地支行"
+            "支行：示例银行示例支行"
         ),
     }
 
     module.validate_request(request_data)
 
     assert "payee" in request_data
-    assert request_data["payee"]["account_number"] == "11093851041070210011884"
-    assert request_data["payee"]["bank_branch"] == "招商银行股份有限公司北京上地支行"
+    assert request_data["payee"]["account_number"] == "00000000000000000000"
+    assert request_data["payee"]["bank_branch"] == "示例银行示例支行"
 
 
 def test_recharge_approval_rejects_required_account_widget_when_api_cannot_fill():
@@ -2176,7 +2292,7 @@ def test_recharge_approval_resolves_user_id_with_query_param_and_include_resigne
 ):
     cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
     cloud_provider.save(update_fields=["recharge_info"])
-    record = RechargeApprovalRecord.objects.create(
+    RechargeApprovalRecord.objects.create(
         provider=cloud_provider,
         raw_recharge_info=cloud_provider.recharge_info,
     )
@@ -2207,14 +2323,14 @@ def test_recharge_approval_resolves_user_id_with_query_param_and_include_resigne
     )
 
     result = _resolve_user_id_by_email_or_mobile(
-        "zhengwei@oneprocloud.cn",
+        "reviewer@example.test",
         "t-token",
     )
 
     assert result == ("ou_123", "")
     assert captured["url"].endswith("/open-apis/contact/v3/users/batch_get_id?user_id_type=user_id")
     assert captured["body"]["include_resigned"] is True
-    assert captured["body"]["emails"] == ["zhengwei@oneprocloud.cn"]
+    assert captured["body"]["emails"] == ["reviewer@example.test"]
     assert captured["body"]["mobiles"] == []
     assert "Authorization" in captured["headers"]
 
@@ -2230,17 +2346,17 @@ def test_resolve_submitter_identity_prefers_feishu_user_name(
     monkeypatch.setattr(
         recharge_service,
         "_resolve_user_id_by_email_or_mobile",
-        lambda identifier, access_token: ("ou_456", "郑伟"),
+        lambda identifier, access_token: ("ou_456", "示例用户"),
     )
 
     identifier, label, user_id = resolve_submitter_identity(
-        provider_config={"recharge_approval": {"submitter_identifier": "zhengwei@oneprocloud.cn"}},
+        provider_config={"recharge_approval": {"submitter_identifier": "reviewer@example.test"}},
         explicit_identifier="",
         explicit_label="财务机器人",
     )
 
-    assert identifier == "zhengwei@oneprocloud.cn"
-    assert label == "郑伟"
+    assert identifier == "reviewer@example.test"
+    assert label == "示例用户"
     assert user_id == "ou_456"
 
 
@@ -2260,10 +2376,10 @@ def test_submit_recharge_skill_resolves_user_id_with_query_param():
 
     module.api_request = fake_api_request
 
-    assert module._resolve_user_id("https://open.feishu.cn", "tok_abc", "zhengwei@oneprocloud.cn") == "ou_456"
+    assert module._resolve_user_id("https://open.feishu.cn", "tok_abc", "reviewer@example.test") == "ou_456"
     assert captured["url"].endswith("/open-apis/contact/v3/users/batch_get_id?user_id_type=user_id")
     assert captured["payload"]["include_resigned"] is True
-    assert captured["payload"]["emails"] == ["zhengwei@oneprocloud.cn"]
+    assert captured["payload"]["emails"] == ["reviewer@example.test"]
     assert captured["payload"]["mobiles"] == []
     assert captured["headers"]["Authorization"] == "Bearer tok_abc"
 
@@ -2408,21 +2524,21 @@ def test_submit_recharge_skill_inspects_ongoing_account_state():
         {
             "cloud_type": "智谱",
             "payment_type": "仅充值",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
             "recharge_account": "acct-188",
             "payment_way": "公司支付",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "payment_company": "示例云科技有限公司",
             "remit_method": "转账",
             "amount": 188,
             "expected_date": "2025-01-08",
             "remark": "测试",
             "payee": {
                 "type": "对公账户",
-                "account_name": "北京智谱华章科技股份有限公司",
-                "account_number": "11093851041070210011884",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "account_number": "00000000000000000000",
+                "bank_name": "示例银行",
                 "bank_region": "北京市/北京市",
-                "bank_branch": "招商银行股份有限公司北京上地支行",
+                "bank_branch": "示例银行示例支行",
             },
         },
         30,
@@ -2476,21 +2592,21 @@ def test_submit_recharge_skill_inspects_finished_account_state():
         {
             "cloud_type": "智谱",
             "payment_type": "仅充值",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
             "recharge_account": "acct-188",
             "payment_way": "公司支付",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "payment_company": "示例云科技有限公司",
             "remit_method": "转账",
             "amount": 188,
             "expected_date": "2025-01-08",
             "remark": "测试",
             "payee": {
                 "type": "对公账户",
-                "account_name": "北京智谱华章科技股份有限公司",
-                "account_number": "11093851041070210011884",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "account_number": "00000000000000000000",
+                "bank_name": "示例银行",
                 "bank_region": "北京市/北京市",
-                "bank_branch": "招商银行股份有限公司北京上地支行",
+                "bank_branch": "示例银行示例支行",
             },
         },
         30,
@@ -2552,21 +2668,21 @@ def test_submit_recharge_skill_prefers_latest_account_state():
         {
             "cloud_type": "智谱",
             "payment_type": "仅充值",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
             "recharge_account": "acct-188",
             "payment_way": "公司支付",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "payment_company": "示例云科技有限公司",
             "remit_method": "转账",
             "amount": 188,
             "expected_date": "2025-01-08",
             "remark": "测试",
             "payee": {
                 "type": "对公账户",
-                "account_name": "北京智谱华章科技股份有限公司",
-                "account_number": "11093851041070210011884",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "account_number": "00000000000000000000",
+                "bank_name": "示例银行",
                 "bank_region": "北京市/北京市",
-                "bank_branch": "招商银行股份有限公司北京上地支行",
+                "bank_branch": "示例银行示例支行",
             },
         },
         30,
@@ -2620,21 +2736,21 @@ def test_submit_recharge_skill_ignores_same_account_with_different_cloud_type():
         {
             "cloud_type": "智谱",
             "payment_type": "仅充值",
-            "recharge_customer_name": "深圳壹铂云科技有限公司",
+            "recharge_customer_name": "示例云科技有限公司",
             "recharge_account": "acct-188",
             "payment_way": "公司支付",
-            "payment_company": "深圳壹铂云科技有限公司",
+            "payment_company": "示例云科技有限公司",
             "remit_method": "转账",
             "amount": 188,
             "expected_date": "2025-01-08",
             "remark": "测试",
             "payee": {
                 "type": "对公账户",
-                "account_name": "北京智谱华章科技股份有限公司",
-                "account_number": "11093851041070210011884",
-                "bank_name": "招商银行",
+                "account_name": "示例收款有限公司",
+                "account_number": "00000000000000000000",
+                "bank_name": "示例银行",
                 "bank_region": "北京市/北京市",
-                "bank_branch": "招商银行股份有限公司北京上地支行",
+                "bank_branch": "示例银行示例支行",
             },
         },
         30,

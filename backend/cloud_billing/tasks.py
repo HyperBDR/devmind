@@ -66,6 +66,7 @@ from .clouds.service import BillingService
 from .services.recharge_approval import (
     CLOUD_TYPE_LABELS,
     _looks_like_legacy_submitter_identifier,
+    _redact_feishu_payload_for_log,
     check_ongoing_recharge_approval_submission,
     create_recharge_approval_event,
     execute_recharge_approval_agent,
@@ -1958,7 +1959,6 @@ def submit_recharge_approval(
             ),
         )
 
-    started_at = timezone.now()
     try:
         log_collector.info(
             "Executing recharge approval agent "
@@ -1985,6 +1985,14 @@ def submit_recharge_approval(
         )
         finished_at = timezone.now()
         output_payload = agent_payload.get("submission_payload") or {}
+        feishu_request_payload = (
+            agent_payload.get("feishu_request_payload") or {}
+        )
+        feishu_request_payload_redacted = None
+        if feishu_request_payload:
+            feishu_request_payload_redacted = _redact_feishu_payload_for_log(
+                feishu_request_payload,
+            )
         instance_code = agent_payload.get("instance_code")
         approval_code = agent_payload.get("approval_code")
         normalized_status = normalize_feishu_status(
@@ -2042,13 +2050,21 @@ def submit_recharge_approval(
                 "updated_at",
             ],
         )
+        agent_event_payload = dict(agent_payload)
+        if feishu_request_payload:
+            agent_event_payload["feishu_request_payload"] = (
+                feishu_request_payload_redacted
+            )
+            agent_event_payload["feishu_request_payload_redacted"] = (
+                feishu_request_payload_redacted
+            )
         create_recharge_approval_event(
             record=record,
             event_type="approval_agent_finished",
             stage="agent_execute",
             source=trigger_source,
             message="Recharge approval agent completed successfully.",
-            payload=agent_payload,
+            payload=agent_event_payload,
             operator=trigger_user,
         )
         result = {
@@ -2063,6 +2079,12 @@ def submit_recharge_approval(
             f"(record_id={record.id}, instance_code={instance_code or ''}, "
             f"approval_code={approval_code or ''}, status={normalized_status})"
         )
+        if feishu_request_payload:
+            log_collector.info(
+                "Feishu approval instance create request payload "
+                "(redacted): "
+                f"{json.dumps(feishu_request_payload_redacted, ensure_ascii=False)}"
+            )
         if task_id:
             TaskTracker.update_task_status(
                 task_id=task_id,
@@ -2074,6 +2096,8 @@ def submit_recharge_approval(
                     recharge_approval_record_id=record.id,
                     feishu_instance_code=instance_code or "",
                     feishu_approval_code=approval_code or "",
+                    feishu_request_payload=feishu_request_payload_redacted,
+                    feishu_request_payload_redacted=feishu_request_payload_redacted,
                     recharge_approval_status=normalized_status,
                 ),
             )

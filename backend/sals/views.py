@@ -5,8 +5,7 @@ import logging
 import re
 from collections import Counter
 
-from django.db.models import Avg, Count, Q, Sum, Case, When, Value, CharField, IntegerField, FloatField
-from django.db.models.functions import Coalesce
+from django.db.models import Avg, Count, Q, Sum, Case, When, Value, CharField, IntegerField
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -24,7 +23,6 @@ from .serializers import (
     UserSerializer,
 )
 from .services import etl
-from .tasks import sync_incidents
 
 logger = logging.getLogger(__name__)
 
@@ -741,6 +739,8 @@ class InitDbAPIView(APIView):
             )
 
         try:
+            from .tasks import sync_incidents
+
             result = sync_incidents.delay(
                 full_sync=full_sync,
                 user_id=request.user.id,
