@@ -21,7 +21,10 @@ def _init_sentry():
     if not SENTRY_ENABLED or not SENTRY_DSN:
         return
 
-    import sentry_sdk
+    try:
+        import sentry_sdk
+    except ModuleNotFoundError:
+        return
     from sentry_sdk.integrations.celery import CeleryIntegration
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.redis import RedisIntegration

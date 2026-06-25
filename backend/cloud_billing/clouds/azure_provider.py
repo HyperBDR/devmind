@@ -344,17 +344,35 @@ class AzureCloud(BaseCloudProvider):
             if not billing_account_id:
                 continue
 
+            if account.get("id"):
+                scopes.append(
+                    self._build_billing_scope(
+                        billing_account_id=billing_account_id,
+                        source="billing_accounts.list",
+                    )
+                )
+                continue
+
+            try:
+                profiles = self._list_billing_profiles(billing_account_id)
+            except requests.HTTPError as exc:
+                scopes.append(
+                    {
+                        **self._build_billing_scope(
+                            billing_account_id=billing_account_id,
+                            source="billing_accounts.list",
+                        ),
+                        "deferred_available_balance_error": exc,
+                    }
+                )
+                continue
+
             scopes.append(
                 self._build_billing_scope(
                     billing_account_id=billing_account_id,
                     source="billing_accounts.list",
                 )
             )
-
-            try:
-                profiles = self._list_billing_profiles(billing_account_id)
-            except requests.HTTPError:
-                continue
 
             for profile in profiles:
                 billing_profile_id = (
@@ -402,6 +420,11 @@ class AzureCloud(BaseCloudProvider):
                 billing_account_id = scope["billing_account_id"]
                 billing_profile_id = scope.get("billing_profile_id")
                 try:
+                    deferred_error = scope.get(
+                        "deferred_available_balance_error"
+                    )
+                    if deferred_error:
+                        raise deferred_error
                     available_payload = self._management_get(
                         self._build_available_balance_path(scope),
                         "2024-04-01",
