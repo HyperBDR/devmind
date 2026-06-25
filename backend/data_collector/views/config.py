@@ -25,7 +25,6 @@ from agentcore_task.adapters.django import TaskStatus, register_task_execution
 
 from ..services.beat_sync import sync_config_to_beat, unsync_config_from_beat
 from ..services.providers import get_provider
-from ..tasks import run_collect, run_validate
 
 
 HYPERBDR_PLATFORM = "hyperbdr"
@@ -297,6 +296,8 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
         if start_time is not None and end_time is not None:
             task_kwargs["start_time"] = start_time
             task_kwargs["end_time"] = end_time
+        from ..tasks import run_collect
+
         task = run_collect.delay(**task_kwargs)
         register_task_execution(
             task_id=task.id,
@@ -514,6 +515,8 @@ class CollectorConfigViewSet(viewsets.ModelViewSet):
                 {"detail": "start_time and end_time are required."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        from ..tasks import run_validate
+
         task = run_validate.delay(
             config_uuid=str(config.uuid),
             start_time=start_time,

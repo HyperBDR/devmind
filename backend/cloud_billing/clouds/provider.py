@@ -8,7 +8,7 @@ allowing for extensibility beyond just billing functionality.
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Any, Optional
 
 
 # Configure logging
@@ -53,9 +53,7 @@ class BaseCloudProvider(ABC):
         self.config = config
 
     @abstractmethod
-    def get_billing_info(
-        self, period: Optional[str] = None
-    ) -> Tuple[float, str, Dict[str, float]]:
+    def get_billing_info(self, period: Optional[str] = None) -> Any:
         """Get billing information for a specific period.
 
         Args:

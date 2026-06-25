@@ -24,7 +24,6 @@ from ..services.provider_service import ProviderService
 from ..services.recharge_approval import (
     parse_recharge_info,
 )
-from ..tasks import submit_recharge_approval
 from ..utils.logging import mask_sensitive_config
 
 logger = logging.getLogger(__name__)
@@ -719,6 +718,8 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
             currency=request.data.get("currency") or "",
             expected_date=request.data.get("expected_date") or "",
         )
+        from ..tasks import submit_recharge_approval
+
         task = submit_recharge_approval.delay(
             provider.id,
             trigger_source="manual",

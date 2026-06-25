@@ -10,11 +10,9 @@ from decimal import Decimal
 from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 
-from django.contrib.auth.models import User
 from django.utils import timezone
 
 from cloud_billing.models import (
-    CloudProvider,
     BillingData,
     AlertRule,
     AlertRecord,
@@ -884,8 +882,27 @@ class TestSubmitRechargeApproval:
         """
         cloud_provider.recharge_info = '{"amount": 188, "recharge_account": "acct-188"}'
         cloud_provider.save(update_fields=["recharge_info"])
+        feishu_request_payload = {
+            "approval_code": "approval_188",
+            "user_id": "ou_submitter_188",
+            "form": json.dumps(
+                [
+                    {
+                        "id": "f_remark",
+                        "type": "input",
+                        "value": (
+                            "示例业务备注\n"
+                            "户名：示例收款方有限公司\n"
+                            "账号：0000000000000000000"
+                        ),
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+        }
         mock_execute_agent.return_value = {
             "request_payload": {"amount": 188, "recharge_account": "acct-188"},
+            "feishu_request_payload": feishu_request_payload,
             "submission_payload": {"ok": True},
             "submitter_identifier": "",
             "resolved_submitter_user_id": "",
@@ -911,6 +928,23 @@ class TestSubmitRechargeApproval:
         assert any("Created recharge approval record" in item for item in messages)
         assert any("Executing recharge approval agent" in item for item in messages)
         assert any("Recharge approval agent completed successfully" in item for item in messages)
+        assert any(
+            "Feishu approval instance create request payload" in item
+            and "***REDACTED***" in item
+            and "示例收款方有限公司" not in item
+            and "0000000000000000000" not in item
+            for item in messages
+        )
+        assert (
+            execution.metadata["feishu_request_payload"]["form"][0]["value"]
+            == "***REDACTED***"
+        )
+        assert (
+            execution.metadata["feishu_request_payload_redacted"]["form"][0][
+                "value"
+            ]
+            == "***REDACTED***"
+        )
         assert execution.metadata["log_summary"]["total"] >= 5
 
     @patch("cloud_billing.tasks.execute_recharge_approval_agent")
@@ -1068,9 +1102,9 @@ class TestSubmitRechargeApproval:
         labels even when the caller does not pass a human operator.
         """
         cloud_provider.recharge_info = (
-            '{"recharge_account": "18017606559", '
-            '"recharge_customer_name": "深圳壹铂云科技有限公司", '
-            '"payment_company": "深圳壹铂云科技有限公司", '
+            '{"recharge_account": "demo-account-001", '
+            '"recharge_customer_name": "示例云科技有限公司", '
+            '"payment_company": "示例云科技有限公司", '
             '"payment_way": "公司支付", '
             '"payment_type": "仅充值", '
             '"remit_method": "转账"}'
@@ -1094,11 +1128,11 @@ class TestSubmitRechargeApproval:
         )
         mock_execute_agent.return_value = {
             "request_payload": {
-                "recharge_account": "18017606559",
-                "recharge_customer_name": "深圳壹铂云科技有限公司",
+                "recharge_account": "demo-account-001",
+                "recharge_customer_name": "示例云科技有限公司",
                 "amount": 358,
                 "currency": "CNY",
-                "payment_company": "深圳壹铂云科技有限公司",
+                "payment_company": "示例云科技有限公司",
                 "payment_way": "公司支付",
                 "payment_type": "仅充值",
                 "remit_method": "转账",
