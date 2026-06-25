@@ -176,6 +176,7 @@ class PaymentTypeTests(SimpleTestCase):
             {
                 'provider_id': 1,
                 'id': '1-acct-a',
+                'type': 'prepaid',
                 'balance': Decimal('200.00'),
                 'days_remaining': 8,
                 'name': 'AWS Main',
@@ -187,6 +188,7 @@ class PaymentTypeTests(SimpleTestCase):
             {
                 'provider_id': 1,
                 'id': '1-acct-b',
+                'type': 'prepaid',
                 'balance': Decimal('200.00'),
                 'days_remaining': 12,
                 'name': 'AWS Main',
@@ -198,6 +200,7 @@ class PaymentTypeTests(SimpleTestCase):
             {
                 'provider_id': 2,
                 'id': '2-default',
+                'type': 'prepaid',
                 'balance': Decimal('50.00'),
                 'days_remaining': 5,
                 'name': 'Baidu',
@@ -211,6 +214,69 @@ class PaymentTypeTests(SimpleTestCase):
         financial_health = _build_financial_health(accounts)
 
         self.assertEqual(financial_health['total_funds'], 250.0)
+
+    def test_financial_health_deduplicates_prepaid_recharge_alerts(self):
+        accounts = [
+            {
+                'provider_id': 1,
+                'id': '1-acct-a',
+                'type': 'prepaid',
+                'balance': Decimal('200.00'),
+                'days_remaining': 8,
+                'name': 'Baidu',
+                'category': 'Cloud',
+                'account_id': 'acct-a',
+                'notes': '',
+                'tags': [],
+            },
+            {
+                'provider_id': 1,
+                'id': '1-acct-b',
+                'type': 'prepaid',
+                'balance': Decimal('200.00'),
+                'days_remaining': 12,
+                'name': 'Baidu',
+                'category': 'Cloud',
+                'account_id': 'acct-b',
+                'notes': '',
+                'tags': [],
+            },
+            {
+                'provider_id': 2,
+                'id': '2-acct-a',
+                'type': 'postpaid',
+                'balance': Decimal('0.00'),
+                'days_remaining': 45,
+                'name': 'AWS',
+                'category': 'Cloud',
+                'account_id': 'acct-a',
+                'notes': '',
+                'tags': [],
+            },
+            {
+                'provider_id': 2,
+                'id': '2-acct-b',
+                'type': 'postpaid',
+                'balance': Decimal('0.00'),
+                'days_remaining': 45,
+                'name': 'AWS',
+                'category': 'Cloud',
+                'account_id': 'acct-b',
+                'notes': '',
+                'tags': [],
+            },
+        ]
+
+        financial_health = _build_financial_health(accounts)
+        alert_keys = [
+            (item['provider_id'], item['account_id'])
+            for item in financial_health['recharge_alerts']
+        ]
+
+        self.assertEqual(
+            alert_keys,
+            [(1, 'acct-a'), (2, 'acct-a'), (2, 'acct-b')],
+        )
 
 
 class AccountFundsTests(SimpleTestCase):

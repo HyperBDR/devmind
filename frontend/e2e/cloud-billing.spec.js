@@ -221,6 +221,93 @@ test.describe('Cloud Billing Settings', () => {
     await expect(page).toHaveURL(/\/cloud-billing\/settings/)
   })
 
+  test('Settings search filters providers by tag', async ({ page }) => {
+    await page.route('**/v1/cloud-billing/providers**', async (route) => {
+      const url = new URL(route.request().url())
+      const pathname = url.pathname
+      const method = route.request().method()
+
+      if (method === 'GET' && pathname === '/v1/cloud-billing/providers/') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            results: [
+              {
+                id: 1,
+                name: 'Primary Provider',
+                provider_type: 'aws',
+                display_name: 'Primary Provider',
+                auth_identifier: 'primary@example.com',
+                is_active: true,
+                created_at: '2026-04-21T00:00:00Z',
+                tags: ['production', 'critical'],
+                config: {}
+              },
+              {
+                id: 2,
+                name: 'Archive Provider',
+                provider_type: 'azure',
+                display_name: 'Archive Provider',
+                auth_identifier: 'archive@example.com',
+                is_active: true,
+                created_at: '2026-04-21T00:00:00Z',
+                tags: ['backup'],
+                config: {}
+              }
+            ],
+            count: 2
+          })
+        })
+        return
+      }
+
+      if (
+        method === 'GET' &&
+        pathname === '/v1/cloud-billing/providers/tags/'
+      ) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ tags: ['production', 'critical', 'backup'] })
+        })
+        return
+      }
+
+      await route.continue()
+    })
+
+    await page.route('**/v1/cloud-billing/alert-rules**', async (route) => {
+      const request = route.request()
+      if (
+        request.method() === 'GET' &&
+        new URL(request.url()).pathname === '/v1/cloud-billing/alert-rules/'
+      ) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ results: [] })
+        })
+        return
+      }
+
+      await route.continue()
+    })
+
+    await page.goto('/cloud-billing/settings')
+    await page.waitForLoadState('networkidle')
+
+    await expect(page.getByText('Primary Provider').first()).toBeVisible()
+    await expect(page.getByText('Archive Provider').first()).toBeVisible()
+
+    await page
+      .locator('input[placeholder*="标签"], input[placeholder*="tag" i]')
+      .fill('critical')
+
+    await expect(page.getByText('Primary Provider').first()).toBeVisible()
+    await expect(page.getByText('Archive Provider')).not.toBeVisible()
+  })
+
   test('Recharge info save requires submitter identifier', async ({ page }) => {
     let patchCalls = 0
 

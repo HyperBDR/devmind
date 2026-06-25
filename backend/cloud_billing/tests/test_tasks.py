@@ -6,7 +6,7 @@ check_alert_for_provider, send_alert_notification.
 import datetime
 import json
 import pytest
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 from unittest.mock import patch, MagicMock
 from types import SimpleNamespace
 
@@ -181,6 +181,7 @@ class TestCheckAlertForProvider:
             provider=cloud_provider,
             cost_threshold=Decimal("1.00"),
             auto_submit_recharge_approval=True,
+            auto_recharge_amount=Decimal("500.00"),
             is_active=True,
             created_by=user,
             updated_by=user,
@@ -278,6 +279,7 @@ class TestCheckAlertForProvider:
             provider=cloud_provider,
             balance_threshold=Decimal("550.00"),
             auto_submit_recharge_approval=True,
+            auto_recharge_amount=Decimal("500.00"),
             is_active=True,
             created_by=user,
             updated_by=user,
@@ -299,7 +301,7 @@ class TestCheckAlertForProvider:
             cloud_provider.id,
             alert_record_id=record.id,
             trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
-            amount="30",
+            amount="500.00",
             currency="USD",
         )
 
@@ -979,16 +981,18 @@ class TestSubmitRechargeApproval:
         assert json.loads(raw_recharge_info)["expected_date"] == "2026-04-25"
 
     @patch("cloud_billing.tasks.execute_recharge_approval_agent")
-    def test_submit_recharge_approval_infers_alert_amount(
+    def test_submit_recharge_approval_uses_explicit_alert_amount(
         self,
         mock_execute_agent,
         cloud_provider,
         monkeypatch,
     ):
         """
-        Alert-triggered submissions should infer an amount when it is missing.
+        Alert-triggered submissions should use the configured manual amount.
         """
-        cloud_provider.recharge_info = '{"recharge_account": "acct-188"}'
+        cloud_provider.recharge_info = (
+            '{"recharge_account": "acct-188", "amount": 188}'
+        )
         cloud_provider.save(update_fields=["recharge_info"])
         monkeypatch.setattr(
             timezone,
@@ -1032,17 +1036,14 @@ class TestSubmitRechargeApproval:
             cloud_provider.id,
             trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
             alert_record_id=record.id,
+            amount="500.00",
+            currency="CNY",
         )
 
         assert result["success"] is True
         raw_recharge_info = mock_execute_agent.call_args.kwargs["raw_recharge_info"]
         payload = json.loads(raw_recharge_info)
-        expected_amount = (
-            Decimal("407.52")
-            * Decimal("1402")
-            / Decimal("1598")
-        ).quantize(Decimal("1"), rounding=ROUND_CEILING)
-        assert payload["amount"] == int(expected_amount)
+        assert payload["amount"] == "500.00"
         assert payload["currency"] == "CNY"
         assert payload["expected_date"] == "2026-04-25"
 

@@ -2497,9 +2497,26 @@ const groupedRows = computed(() => {
   }))
 })
 
-const prepaidAccounts = computed(() =>
-  (overview.value.accounts || []).filter((item) => item.type === 'prepaid')
-)
+const prepaidAccounts = computed(() => {
+  const accountsByProvider = new Map()
+
+  ;(overview.value.accounts || []).forEach((item) => {
+    if (item.type !== 'prepaid') {
+      return
+    }
+
+    const providerKey = providerLevelAccountKey(item)
+    if (!providerKey || accountsByProvider.has(providerKey)) {
+      return
+    }
+
+    accountsByProvider.set(providerKey, item)
+  })
+
+  return Array.from(accountsByProvider.values()).sort(
+    compareAccountsByAvailability
+  )
+})
 
 const postpaidAccounts = computed(() =>
   (overview.value.accounts || []).filter((item) => item.type === 'postpaid')
@@ -2621,6 +2638,22 @@ function normalizedBalanceForSort(account) {
     account?.display_funds_currency || account?.balance_currency || 'CNY',
     'CNY'
   )
+}
+
+function providerLevelAccountKey(account) {
+  const providerId = String(account?.provider_id || '').trim()
+  if (providerId) {
+    return `provider:${providerId}`
+  }
+
+  const providerName = String(account?.provider || account?.name || '')
+    .trim()
+    .toLowerCase()
+  if (providerName) {
+    return `provider-name:${providerName}`
+  }
+
+  return String(account?.id || account?.account_id || '').trim()
 }
 
 function compareAccountsByAvailability(a, b) {

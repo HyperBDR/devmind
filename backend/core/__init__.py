@@ -26,6 +26,8 @@ def _init_sentry():
     from sentry_sdk.integrations.django import DjangoIntegration
     from sentry_sdk.integrations.redis import RedisIntegration
 
+    from .sentry import before_send
+
     sentry_sdk.init(
         dsn=SENTRY_DSN,
         environment=SENTRY_ENVIRONMENT,
@@ -38,6 +40,7 @@ def _init_sentry():
             CeleryIntegration(),
             RedisIntegration(),
         ],
+        before_send=before_send,
     )
 
 

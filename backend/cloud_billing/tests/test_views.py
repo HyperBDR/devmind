@@ -836,11 +836,13 @@ class TestAlertRuleViewSet:
             "growth_threshold": "15.00",
             "balance_threshold": "150.00",
             "auto_submit_recharge_approval": True,
+            "auto_recharge_amount": "500.00",
             "is_active": True,
         }
         response = api_client.put(url, data, format="json")
         assert response.status_code == 200
         assert response.data["auto_submit_recharge_approval"] is True
+        assert response.data["auto_recharge_amount"] == "500.00"
 
 
 @pytest.mark.django_db

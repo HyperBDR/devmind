@@ -974,8 +974,28 @@ def _build_financial_health(accounts):
         provider_balances[provider_key] = _to_float(item.get('balance'))
 
     total_funds = round(sum(provider_balances.values()), 2)
+    health_accounts = []
+    prepaid_provider_keys = set()
+    for item in accounts:
+        if item.get('type') != 'prepaid':
+            health_accounts.append(item)
+            continue
+
+        provider_key = item.get('provider_id')
+        if provider_key in (None, ''):
+            provider_key = item.get('id')
+        if provider_key in (None, ''):
+            health_accounts.append(item)
+            continue
+        if provider_key in prepaid_provider_keys:
+            continue
+
+        prepaid_provider_keys.add(provider_key)
+        health_accounts.append(item)
+
     referenced_accounts = [
-        item for item in accounts if item.get('has_days_remaining_reference')
+        item for item in health_accounts
+        if item.get('has_days_remaining_reference')
     ]
     total_days = min(
         (item['days_remaining'] for item in referenced_accounts),
@@ -1022,7 +1042,7 @@ def _build_financial_health(accounts):
                 False,
             ),
         }
-        for item in accounts
+        for item in health_accounts
     ]
     return {
         'total_funds': total_funds,

@@ -334,6 +334,40 @@
           </div>
         </div>
 
+        <div
+          v-if="canAutoSubmitRechargeApproval"
+          class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start"
+        >
+          <div class="md:col-span-1">
+            <label
+              for="autoRechargeAmount"
+              class="block text-sm font-medium text-gray-700 mb-1"
+            >
+              {{ t('cloudBilling.settings.alertRule.autoRechargeAmount') }}
+            </label>
+            <p class="text-xs text-gray-500 mb-2 md:mb-0">
+              {{
+                t('cloudBilling.settings.alertRule.autoRechargeAmountDesc')
+              }}
+            </p>
+          </div>
+          <div class="md:col-span-2">
+            <BaseInput
+              id="autoRechargeAmount"
+              v-model="formData.auto_recharge_amount"
+              type="number"
+              step="0.01"
+              min="0.01"
+              :placeholder="
+                t(
+                  'cloudBilling.settings.alertRule.autoRechargeAmountPlaceholder'
+                )
+              "
+              class="w-full"
+            />
+          </div>
+        </div>
+
         <div class="rounded-md bg-blue-50 p-3 border border-blue-200">
           <p class="text-xs text-blue-800">
             {{ t('cloudBilling.settings.alertRule.note') }}
@@ -415,7 +449,8 @@ const formData = ref({
   growth_amount_threshold: null,
   balance_threshold: null,
   days_remaining_threshold: null,
-  auto_submit_recharge_approval: false
+  auto_submit_recharge_approval: false,
+  auto_recharge_amount: null
 })
 
 const allChannels = ref([])
@@ -689,7 +724,11 @@ watch(
             ? String(newRule.days_remaining_threshold)
             : null,
         auto_submit_recharge_approval:
-          newRule.auto_submit_recharge_approval ?? false
+          newRule.auto_submit_recharge_approval ?? false,
+        auto_recharge_amount:
+          newRule.auto_recharge_amount != null
+            ? String(newRule.auto_recharge_amount)
+            : null
       }
     } else {
       formData.value = {
@@ -699,7 +738,8 @@ watch(
         growth_amount_threshold: null,
         balance_threshold: null,
         days_remaining_threshold: null,
-        auto_submit_recharge_approval: false
+        auto_submit_recharge_approval: false,
+        auto_recharge_amount: null
       }
     }
   },
@@ -720,6 +760,9 @@ const handleSubmit = async () => {
   )
   const daysRemainingThreshold = normalizeThresholdValue(
     formData.value.days_remaining_threshold
+  )
+  const autoRechargeAmount = normalizeThresholdValue(
+    formData.value.auto_recharge_amount
   )
   const hasAnyThreshold = [
     costThreshold,
@@ -753,6 +796,25 @@ const handleSubmit = async () => {
     // If all thresholds are empty and no rule exists, cannot create
     if (!hasAnyThreshold && !props.alertRule) {
       showError(t('cloudBilling.settings.alertRule.atLeastOneThreshold'))
+      saving.value = false
+      return
+    }
+
+    if (
+      canAutoSubmitRechargeApproval.value &&
+      formData.value.auto_submit_recharge_approval &&
+      autoRechargeAmount === null
+    ) {
+      showError(t('cloudBilling.settings.alertRule.autoRechargeAmountRequired'))
+      saving.value = false
+      return
+    }
+
+    if (
+      autoRechargeAmount !== null &&
+      parseFloat(autoRechargeAmount) <= 0
+    ) {
+      showError(t('cloudBilling.settings.alertRule.autoRechargeAmountInvalid'))
       saving.value = false
       return
     }
@@ -805,7 +867,11 @@ const handleSubmit = async () => {
           : null,
       auto_submit_recharge_approval:
         canAutoSubmitRechargeApproval.value &&
-        formData.value.auto_submit_recharge_approval
+        formData.value.auto_submit_recharge_approval,
+      auto_recharge_amount:
+        canAutoSubmitRechargeApproval.value && autoRechargeAmount !== null
+          ? parseFloat(autoRechargeAmount)
+          : null
     }
 
     const successMessage = existingRuleId

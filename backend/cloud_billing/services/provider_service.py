@@ -367,6 +367,20 @@ class ProviderService:
             )
             billing_service = BillingService(provider_type, normalized_config)
             result = billing_service.get_billing_info(period=period)
+            error_msg = result.get("error")
+            if result.get("status") == "error" and error_msg:
+                classification = self._classify_error(
+                    provider_type, str(error_msg)
+                )
+                error_type = classification.get("error_type")
+                result["error_code"] = classification.get("error_code")
+                result["required_permissions"] = classification.get(
+                    "required_permissions", []
+                )
+                if error_type == "permission_error":
+                    result["is_permission_error"] = True
+                elif error_type == "service_error":
+                    result["is_api_error"] = True
             return result
         except ValueError as e:
             # Configuration errors should not be reported as system errors
@@ -447,18 +461,24 @@ class ProviderService:
                         f"error={str(e)})"
                     )
 
+            if not is_valid and error_classification is None:
+                error_classification = self._classify_error(
+                    provider_type, error_message
+                )
+
+            classification = error_classification if not is_valid else None
             result = {
                 "valid": is_valid,
                 "error_code": (
-                    error_classification["error_code"] if not is_valid else None
+                    classification["error_code"] if classification else None
                 ),
                 "account_id": account_id,
                 "error_type": (
-                    error_classification["error_type"] if not is_valid else None
+                    classification["error_type"] if classification else None
                 ),
                 "required_permissions": (
-                    error_classification["required_permissions"]
-                    if not is_valid
+                    classification["required_permissions"]
+                    if classification
                     else []
                 ),
             }

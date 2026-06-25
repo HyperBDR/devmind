@@ -480,7 +480,7 @@ class AlertRuleSerializer(serializers.ModelSerializer):
             'cost_threshold', 'growth_threshold',
             'growth_amount_threshold', 'balance_threshold',
             'days_remaining_threshold', 'is_active',
-            'auto_submit_recharge_approval',
+            'auto_submit_recharge_approval', 'auto_recharge_amount',
             'created_at', 'updated_at',
             'created_by', 'created_by_username',
             'updated_by', 'updated_by_username',
@@ -514,6 +514,18 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         if days_remaining_threshold is None and self.instance:
             days_remaining_threshold = self.instance.days_remaining_threshold
 
+        auto_submit_recharge_approval = attrs.get(
+            'auto_submit_recharge_approval'
+        )
+        if auto_submit_recharge_approval is None and self.instance:
+            auto_submit_recharge_approval = (
+                self.instance.auto_submit_recharge_approval
+            )
+
+        auto_recharge_amount = attrs.get('auto_recharge_amount')
+        if auto_recharge_amount is None and self.instance:
+            auto_recharge_amount = self.instance.auto_recharge_amount
+
         if (
             cost_threshold is None
             and growth_threshold is None
@@ -525,6 +537,23 @@ class AlertRuleSerializer(serializers.ModelSerializer):
                 "At least one of cost_threshold, growth_threshold, "
                 "growth_amount_threshold, balance_threshold, or "
                 "days_remaining_threshold must be set."
+            )
+        if auto_recharge_amount is not None and auto_recharge_amount <= 0:
+            raise serializers.ValidationError(
+                {
+                    "auto_recharge_amount": (
+                        "Auto recharge amount must be greater than 0."
+                    )
+                }
+            )
+        if auto_submit_recharge_approval and auto_recharge_amount is None:
+            raise serializers.ValidationError(
+                {
+                    "auto_recharge_amount": (
+                        "Auto recharge amount is required when automatic "
+                        "recharge approval is enabled."
+                    )
+                }
             )
         return attrs
 
@@ -544,7 +573,7 @@ class AlertRuleListSerializer(serializers.ModelSerializer):
             'cost_threshold', 'growth_threshold',
             'growth_amount_threshold', 'balance_threshold',
             'days_remaining_threshold', 'is_active',
-            'auto_submit_recharge_approval',
+            'auto_submit_recharge_approval', 'auto_recharge_amount',
             'created_at', 'updated_at',
         ]
 
