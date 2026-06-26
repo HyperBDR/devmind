@@ -125,52 +125,9 @@ PY
 }
 
 # --- Django Management Tasks ---
-run_migrations() {
-    log "Running Django migrations..."
-    python manage.py migrate --noinput
-
-    log "Bootstrapping LLM Ops catalog when database is empty..."
-    python manage.py bootstrap_llm_ops_catalog
-
-    log "Ensuring superuser exists..."
-    DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
-    DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-admin@example.com}
-    DJANGO_SUPERUSER_PASSWORD=${DJANGO_SUPERUSER_PASSWORD:-adminpassword}
-
-    # Export environment variables for createsuperuser command
-    # Django 3.0+ supports DJANGO_SUPERUSER_PASSWORD, DJANGO_SUPERUSER_USERNAME, DJANGO_SUPERUSER_EMAIL
-    export DJANGO_SUPERUSER_USERNAME
-    export DJANGO_SUPERUSER_EMAIL
-    export DJANGO_SUPERUSER_PASSWORD
-
-    # Use Django's createsuperuser command with --noinput flag
-    # If user already exists, the command will fail (exit code != 0) and we ignore it
-    # This ensures password won't be reset on container restart
-    set +e
-    python manage.py createsuperuser \
-        --username "$DJANGO_SUPERUSER_USERNAME" \
-        --email "$DJANGO_SUPERUSER_EMAIL" \
-        --noinput > /dev/null 2>&1
-    exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        log "Superuser \"$DJANGO_SUPERUSER_USERNAME\" created successfully"
-    else
-        log "Superuser \"$DJANGO_SUPERUSER_USERNAME\" already exists, skipping creation"
-    fi
-    set -e
-
-    log "Registering periodic tasks to django_celery_beat..."
-    python manage.py register_periodic_tasks || true
-}
-
-collect_static() {
-    log "Collecting static files..."
-    python manage.py collectstatic --noinput
-}
-
 run_startup_maintenance() {
-    run_migrations
-    collect_static
+    log "Running backend initialization..."
+    python manage.py init_backend
 }
 
 # --- Process Starters ---
@@ -242,6 +199,10 @@ case "$1" in
     init)
         wait_for_db
         run_startup_maintenance
+        ;;
+    create-superuser)
+        wait_for_db
+        python manage.py create_default_superuser
         ;;
     gunicorn)
         wait_for_db
