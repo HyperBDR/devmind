@@ -1488,6 +1488,10 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+:global(body.llm-ops-theme) {
+  padding: 0 !important;
+}
+
 /* === Base utility classes (hardcoded, Tailwind fallback) === */
 .bg-white {
   background-color: #ffffff;
