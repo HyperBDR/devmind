@@ -121,11 +121,15 @@ Periodic (cron-like) tasks are **not** auto-discovered by Celery alone. They mus
 
 | Container | Behavior |
 |---|---|
-| gunicorn / development | `wait_for_db` → `migrate` → `register_periodic_tasks` → start service |
+| backend-init | `wait_for_db` → `migrate` |
+| backend-runtime-init | `wait_for_db` → bootstrap runtime catalogs → `register_periodic_tasks` → optional `collectstatic` |
+| gunicorn / development | `wait_for_db` → start service |
 | celery | `wait_for_db` → start worker (`autodiscover_tasks` loads tasks) |
-| celery-beat | `wait_for_db` → start beat (`DatabaseScheduler` reads schedule from DB) |
+| celery-beat | waits for `backend-runtime-init` → start beat (`DatabaseScheduler` reads schedule from DB) |
 
-In a typical multi-container setup, the gunicorn container runs `register_periodic_tasks` once; celery and celery-beat share the same database and see the registered tasks without running the command again.
+In a typical multi-container setup, API startup only waits for migrations.
+Runtime maintenance runs in a separate one-shot container, and celery-beat
+starts after periodic tasks have been registered.
 
 ## Design Principles
 

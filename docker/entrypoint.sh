@@ -130,6 +130,16 @@ run_startup_maintenance() {
     python manage.py init_backend
 }
 
+run_schema_initialization() {
+    log "Running backend schema initialization..."
+    python manage.py init_backend --phase schema
+}
+
+run_runtime_initialization() {
+    log "Running backend runtime initialization..."
+    python manage.py init_backend --phase runtime
+}
+
 # --- Process Starters ---
 start_gunicorn() {
     log "Starting Gunicorn..."
@@ -199,6 +209,14 @@ case "$1" in
     init)
         wait_for_db
         run_startup_maintenance
+        ;;
+    init-schema)
+        wait_for_db
+        run_schema_initialization
+        ;;
+    init-runtime)
+        wait_for_db
+        run_runtime_initialization
         ;;
     create-superuser)
         wait_for_db
