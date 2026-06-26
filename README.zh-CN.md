@@ -121,11 +121,14 @@ done
 
 | 容器 | 行为 |
 |---|---|
-| gunicorn / development | `wait_for_db` → `migrate` → `register_periodic_tasks` → 启动服务 |
+| backend-init | `wait_for_db` → `migrate` |
+| backend-runtime-init | `wait_for_db` → 引导运行时目录数据 → `register_periodic_tasks` → 可选 `collectstatic` |
+| gunicorn / development | `wait_for_db` → 启动服务 |
 | celery | `wait_for_db` → 启动 worker（`autodiscover_tasks` 加载 tasks） |
-| celery-beat | `wait_for_db` → 启动 beat（`DatabaseScheduler` 从数据库读取调度表） |
+| celery-beat | 等待 `backend-runtime-init` → 启动 beat（`DatabaseScheduler` 从数据库读取调度表） |
 
-典型多容器部署下，gunicorn 容器执行一次 `register_periodic_tasks`；celery / celery-beat 共用同一数据库，无需重复执行。
+典型多容器部署下，API 启动只等待 migrations。运行时维护任务在独立
+一次性容器中执行，celery-beat 等定时任务注册完成后再启动。
 
 ## 设计原则
 

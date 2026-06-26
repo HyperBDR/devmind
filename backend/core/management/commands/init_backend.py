@@ -40,6 +40,15 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
+            "--phase",
+            choices=("all", "schema", "runtime"),
+            default="all",
+            help=(
+                "Initialization phase to run. schema runs migrations only; "
+                "runtime runs database-backed runtime setup only."
+            ),
+        )
+        parser.add_argument(
             "--skip-collectstatic",
             action="store_true",
             help="Skip collectstatic even if BACKEND_INIT_COLLECTSTATIC=true.",
@@ -76,9 +85,14 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         verbosity = options.get("verbosity", 1)
+        phase = options["phase"]
 
-        with self._timed_step("Running Django migrations"):
-            call_command("migrate", interactive=False, verbosity=verbosity)
+        if phase in {"all", "schema"}:
+            with self._timed_step("Running Django migrations"):
+                call_command("migrate", interactive=False, verbosity=verbosity)
+
+        if phase == "schema":
+            return
 
         should_bootstrap_llm_ops = _env_enabled(
             "BACKEND_INIT_BOOTSTRAP_LLM_OPS",
