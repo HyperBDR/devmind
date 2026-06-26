@@ -16,6 +16,9 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 
+from dj_rest_auth.views import (
+    PasswordChangeView as DjRestAuthPasswordChangeView,
+)
 from drf_spectacular.utils import extend_schema
 
 from rest_framework import status
@@ -30,6 +33,67 @@ from ..serializers import (
 from ..services import PasswordResetEmailService
 
 logger = logging.getLogger(__name__)
+
+
+def _first_present(data, keys):
+    """Return the first non-empty value found for the given keys."""
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ''):
+            return value
+    return None
+
+
+def normalize_password_change_data(data):
+    """
+    Normalize password change field aliases to dj-rest-auth names.
+
+    The global CamelCaseJSONParser may convert ``newPassword1`` to
+    ``new_password_1``, while dj-rest-auth expects ``new_password1``.
+    Accepting both shapes keeps the endpoint compatible with existing
+    clients and the current frontend.
+    """
+    normalized = data.copy()
+
+    alias_map = {
+        'old_password': (
+            'old_password',
+            'oldPassword',
+            'current_password',
+            'currentPassword',
+        ),
+        'new_password1': (
+            'new_password1',
+            'newPassword1',
+            'new_password_1',
+            'newPassword',
+            'new_password',
+        ),
+        'new_password2': (
+            'new_password2',
+            'newPassword2',
+            'new_password_2',
+            'confirmPassword',
+            'confirm_password',
+        ),
+    }
+
+    for canonical_key, aliases in alias_map.items():
+        value = _first_present(normalized, aliases)
+        if value is not None:
+            normalized[canonical_key] = value
+
+    return normalized
+
+
+class CustomPasswordChangeView(DjRestAuthPasswordChangeView):
+    """Password change view that accepts frontend field aliases."""
+
+    def get_serializer(self, *args, **kwargs):
+        """Normalize request data before dj-rest-auth validation."""
+        if 'data' in kwargs:
+            kwargs['data'] = normalize_password_change_data(kwargs['data'])
+        return super().get_serializer(*args, **kwargs)
 
 
 @method_decorator(csrf_exempt, name='dispatch')

@@ -21,6 +21,9 @@
 
         <!-- Basic Information Card -->
         <BasicInfoCard />
+
+        <!-- Change Password Card -->
+        <ChangePasswordCard />
       </template>
     </div>
   </AppLayout>
@@ -34,6 +37,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import UserProfileSection from '@/components/settings/UserProfileSection.vue'
 import BasicInfoCard from '@/components/settings/BasicInfoCard.vue'
+import ChangePasswordCard from '@/components/settings/ChangePasswordCard.vue'
 
 const { t } = useI18n()
 const userStore = useUserStore()

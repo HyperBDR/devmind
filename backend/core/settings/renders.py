@@ -15,6 +15,8 @@ import decimal
 import uuid
 from json import JSONEncoder
 
+from django.utils.functional import Promise
+
 from rest_framework.renderers import JSONRenderer
 from rest_framework import status
 from rest_framework.settings import api_settings
@@ -38,6 +40,8 @@ class StandardJSONEncoder(JSONEncoder):
         if isinstance(obj, (datetime.datetime, datetime.date)):
             return obj.isoformat()
         if isinstance(obj, uuid.UUID):
+            return str(obj)
+        if isinstance(obj, Promise):
             return str(obj)
         if isinstance(obj, (bytes, bytearray)):
             try:
