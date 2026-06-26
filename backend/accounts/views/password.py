@@ -39,7 +39,11 @@ def _first_present(data, keys):
     """Return the first non-empty value found for the given keys."""
     for key in keys:
         value = data.get(key)
-        if value not in (None, ''):
+        if value is None:
+            continue
+        if isinstance(value, str) and value == '':
+            continue
+        if value is not None:
             return value
     return None
 
@@ -66,8 +70,6 @@ def normalize_password_change_data(data):
             'new_password1',
             'newPassword1',
             'new_password_1',
-            'newPassword',
-            'new_password',
         ),
         'new_password2': (
             'new_password2',
@@ -82,6 +84,18 @@ def normalize_password_change_data(data):
         value = _first_present(normalized, aliases)
         if value is not None:
             normalized[canonical_key] = value
+
+    single_new_password = _first_present(
+        normalized,
+        ('new_password', 'newPassword'),
+    )
+    if (
+        single_new_password is not None and
+        'new_password1' not in normalized and
+        'new_password2' not in normalized
+    ):
+        normalized['new_password1'] = single_new_password
+        normalized['new_password2'] = single_new_password
 
     return normalized
 

@@ -2,7 +2,10 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
-from accounts.views.password import normalize_password_change_data
+from accounts.views.password import (
+    _first_present,
+    normalize_password_change_data,
+)
 
 
 def test_normalize_password_change_data_accepts_parser_digit_aliases():
@@ -17,6 +20,24 @@ def test_normalize_password_change_data_accepts_parser_digit_aliases():
     assert normalized['old_password'] == 'old-secret'
     assert normalized['new_password1'] == 'NewSecret123'
     assert normalized['new_password2'] == 'NewSecret123'
+
+
+def test_normalize_password_change_data_accepts_single_new_password_alias():
+    data = {
+        'old_password': 'old-secret',
+        'new_password': 'NewSecret123',
+    }
+
+    normalized = normalize_password_change_data(data)
+
+    assert normalized['new_password1'] == 'NewSecret123'
+    assert normalized['new_password2'] == 'NewSecret123'
+
+
+def test_first_present_only_skips_none_and_empty_strings():
+    assert _first_present({'value': False}, ('value',)) is False
+    assert _first_present({'value': 0}, ('value',)) == 0
+    assert _first_present({'value': ''}, ('value',)) is None
 
 
 @pytest.mark.django_db
