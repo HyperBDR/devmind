@@ -1,3 +1,10 @@
+def test_django_project_import_loads_celery_app():
+    import core
+
+    assert hasattr(core, "celery_app")
+    assert core.celery_app.conf.task_default_queue == "backend"
+
+
 def test_business_tasks_are_registered_before_worker_consumes():
     from core.celery import app
 
