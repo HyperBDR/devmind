@@ -6,9 +6,11 @@ WORKDIR /app
 
 # Build arguments for configuration
 ARG VITE_API_BASE_URL
+ARG VITE_APP_VERSION
 
 # Set as environment variable for build
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_APP_VERSION=${VITE_APP_VERSION}
 
 # Copy package files
 COPY package*.json ./

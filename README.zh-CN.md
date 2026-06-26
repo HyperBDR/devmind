@@ -160,4 +160,5 @@ npm run dev          # http://localhost:5173
 npm run build        # Docker 构建使用根目录 Dockerfile frontend target
 ```
 
-环境变量：`VITE_API_BASE_URL`、`VITE_APP_TITLE`、`VITE_API_TIMEOUT`
+环境变量：`VITE_API_BASE_URL`、`VITE_APP_TITLE`、`VITE_APP_VERSION`、
+`VITE_API_TIMEOUT`

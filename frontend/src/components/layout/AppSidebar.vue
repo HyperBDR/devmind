@@ -18,29 +18,64 @@
   <!-- Sidebar -->
   <aside
     :class="[
-      'bg-white border-r border-gray-200 flex flex-col transition-transform duration-300 ease-in-out w-64 flex-shrink-0 h-full',
+      'relative bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ease-in-out flex-shrink-0 h-full',
+      !isMobile && collapsed ? 'w-16' : 'w-64',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <!-- Logo and close button -->
     <div
-      class="flex items-center justify-between h-16 px-4 border-b border-gray-200"
+      class="flex items-center h-16 border-b border-gray-200"
+      :class="
+        !isMobile && collapsed ? 'justify-center px-2' : 'justify-between px-4'
+      "
     >
       <router-link
         :to="homePath"
-        class="flex items-center space-x-2 flex-1"
+        class="flex items-center min-w-0"
+        :class="!isMobile && collapsed ? 'justify-center' : 'space-x-2 flex-1'"
         @click="isMobile && $emit('close')"
+        :title="!isMobile && collapsed ? t('common.appName') : undefined"
       >
         <img
           src="/android-chrome-192x192.png"
           alt="DevMind Logo"
           class="w-8 h-8"
         />
-        <span class="text-xl font-semibold text-gray-900">{{
-          t('common.appName')
-        }}</span>
+        <span
+          v-if="isMobile || !collapsed"
+          class="text-xl font-semibold text-gray-900 truncate"
+          >{{ t('common.appName') }}</span
+        >
       </router-link>
+      <button
+        v-if="!isMobile"
+        type="button"
+        class="sidebar-toggle"
+        :aria-label="
+          collapsed ? t('common.expandSidebar') : t('common.collapseSidebar')
+        "
+        :title="
+          collapsed ? t('common.expandSidebar') : t('common.collapseSidebar')
+        "
+        @click="$emit('toggle-collapse')"
+      >
+        <svg
+          class="w-4 h-4 transition-transform"
+          :class="collapsed ? 'rotate-180' : ''"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 19l-7-7 7-7"
+          />
+        </svg>
+      </button>
       <button
         v-if="isMobile"
         @click="$emit('close')"
@@ -63,15 +98,26 @@
     </div>
 
     <!-- Navigation -->
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto flex flex-col">
+    <nav
+      class="flex-1 py-4 space-y-1 flex flex-col"
+      :class="
+        collapsed && !isMobile
+          ? 'overflow-visible px-2'
+          : 'overflow-y-auto px-3'
+      "
+    >
       <div class="flex-1 space-y-1">
         <router-link
           v-if="userStore.userHasFeature('workspace')"
           to="/dashboard"
           class="nav-item"
-          :class="isActive('/dashboard') ? 'nav-item-active' : ''"
+          :class="[
+            isActive('/dashboard') ? 'nav-item-active' : '',
+            collapsed && !isMobile ? 'nav-item-collapsed' : ''
+          ]"
           @click="isMobile && $emit('close')"
           @mouseenter="preloadRoute('/dashboard')"
+          :title="collapsed && !isMobile ? t('dashboard.title') : undefined"
         >
           <svg
             class="w-5 h-5"
@@ -86,17 +132,22 @@
               d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"
             />
           </svg>
-          <span>{{ t('dashboard.title') }}</span>
+          <span v-if="isMobile || !collapsed">{{ t('dashboard.title') }}</span>
         </router-link>
 
         <!-- Cloud Billing Menu with Submenu -->
         <div
           v-if="userStore.userHasFeature('operations_console')"
           class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleCloudBillingMenu"
             class="nav-item nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'nav-item-collapsed' : ''"
+            :title="
+              collapsed && !isMobile ? t('cloudBilling.menuTitle') : undefined
+            "
           >
             <svg
               class="w-5 h-5"
@@ -111,10 +162,11 @@
                 d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
               />
             </svg>
-            <span class="flex-1 text-left">{{
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
               t('cloudBilling.menuTitle')
             }}</span>
             <svg
+              v-if="isMobile || !collapsed"
               class="w-4 h-4 transition-transform"
               :class="cloudBillingMenuOpen ? 'rotate-90' : ''"
               fill="none"
@@ -138,7 +190,14 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="cloudBillingMenuOpen" class="submenu">
+            <div
+              v-if="cloudBillingMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('cloudBilling.menuTitle') }}
+              </div>
               <router-link
                 to="/cloud-billing/billing"
                 class="nav-item nav-item-child"
@@ -249,10 +308,15 @@
         <div
           v-if="userStore.userHasFeature('operations_console')"
           class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleDataCollectorMenu"
             class="nav-item nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'nav-item-collapsed' : ''"
+            :title="
+              collapsed && !isMobile ? t('dataCollector.menuTitle') : undefined
+            "
           >
             <svg
               class="w-5 h-5"
@@ -267,10 +331,11 @@
                 d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"
               />
             </svg>
-            <span class="flex-1 text-left">{{
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
               t('dataCollector.menuTitle')
             }}</span>
             <svg
+              v-if="isMobile || !collapsed"
               class="w-4 h-4 transition-transform"
               :class="dataCollectorMenuOpen ? 'rotate-90' : ''"
               fill="none"
@@ -294,7 +359,14 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="dataCollectorMenuOpen" class="submenu">
+            <div
+              v-if="dataCollectorMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('dataCollector.menuTitle') }}
+              </div>
               <router-link
                 to="/data-collector/stats"
                 class="nav-item nav-item-child"
@@ -400,37 +472,6 @@
             </div>
           </Transition>
         </div>
-
-        <router-link
-          v-if="userStore.userHasFeature('llm_ops')"
-          to="/llm-ops"
-          class="nav-item"
-          :class="isActive('/llm-ops') ? 'nav-item-active' : ''"
-          @click="isMobile && $emit('close')"
-          @mouseenter="preloadRoute('/llm-ops')"
-        >
-          <svg
-            class="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"
-            />
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M8 13h3m3 0h2M8 16h8"
-            />
-          </svg>
-          <span>{{ t('platforms.llmOps') }}</span>
-        </router-link>
-
       </div>
 
       <!-- Settings Menu -->
@@ -438,8 +479,12 @@
         <router-link
           :to="{ name: 'SettingsNotifications' }"
           class="nav-item"
-          :class="isActive('/settings/notifications') ? 'nav-item-active' : ''"
+          :class="[
+            isActive('/settings/notifications') ? 'nav-item-active' : '',
+            collapsed && !isMobile ? 'nav-item-collapsed' : ''
+          ]"
           @mouseenter="preloadRoute('/settings/notifications')"
+          :title="collapsed && !isMobile ? t('common.settings') : undefined"
         >
           <svg
             class="w-5 h-5"
@@ -460,7 +505,7 @@
               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
             />
           </svg>
-          <span>{{ t('common.settings') }}</span>
+          <span v-if="isMobile || !collapsed">{{ t('common.settings') }}</span>
         </router-link>
       </div>
     </nav>
@@ -473,14 +518,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 
-const props = defineProps({
+defineProps({
   showMobileMenu: {
+    type: Boolean,
+    default: false
+  },
+  collapsed: {
     type: Boolean,
     default: false
   }
 })
 
-defineEmits(['close'])
+defineEmits(['close', 'toggle-collapse'])
 
 const { t } = useI18n()
 const route = useRoute()
@@ -610,6 +659,10 @@ onMounted(() => {
   @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all duration-200;
 }
 
+.nav-item-collapsed {
+  @apply h-10 w-10 justify-center gap-0 px-0 py-0;
+}
+
 .nav-item-active {
   @apply bg-primary-50 text-primary-600;
 }
@@ -640,13 +693,46 @@ onMounted(() => {
   @apply space-y-0 mb-1.5;
 }
 
+.menu-group-collapsed {
+  @apply relative;
+}
+
 .submenu {
   @apply overflow-hidden pl-0 mt-1 space-y-0.5;
   transition: all 0.2s ease-in-out;
 }
 
+.submenu-flyout {
+  @apply invisible absolute left-full top-0 z-50 ml-3 min-w-56 rounded-lg border border-gray-200 bg-white p-2 opacity-0 shadow-lg;
+  max-height: none;
+  overflow: visible;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease,
+    transform 0.15s ease;
+  transform: translateX(-0.25rem);
+}
+
+.menu-group-collapsed:hover .submenu-flyout,
+.menu-group-collapsed:focus-within .submenu-flyout {
+  @apply visible opacity-100;
+  transform: translateX(0);
+}
+
+.submenu-flyout-title {
+  @apply px-3 pb-2 pt-1 text-xs font-semibold text-gray-500;
+}
+
 .submenu .nav-item {
   @apply ml-0;
+}
+
+.submenu-flyout .nav-item-child {
+  @apply ml-0 px-3 pl-3;
+}
+
+.submenu-flyout .nav-item-child::before {
+  content: none;
 }
 
 /* Add a subtle left border indicator for child items */
@@ -678,5 +764,9 @@ onMounted(() => {
 
 .nav-item-parent:hover svg:last-child {
   @apply opacity-100;
+}
+
+.sidebar-toggle {
+  @apply absolute -right-3 top-5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500;
 }
 </style>

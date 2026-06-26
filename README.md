@@ -161,4 +161,5 @@ npm run dev          # http://localhost:5173
 npm run build        # Docker: use root `Dockerfile --target frontend`
 ```
 
-Environment variables: `VITE_API_BASE_URL`, `VITE_APP_TITLE`, `VITE_API_TIMEOUT`
+Environment variables: `VITE_API_BASE_URL`, `VITE_APP_TITLE`,
+`VITE_APP_VERSION`, `VITE_API_TIMEOUT`

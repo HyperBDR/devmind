@@ -16,28 +16,67 @@
 
   <aside
     :class="[
-      'layout-admin-sidebar bg-slate-800/95 border-r border-slate-700 flex flex-col transition-transform duration-300 ease-in-out w-64 flex-shrink-0 h-full',
+      'layout-admin-sidebar relative bg-slate-800/95 border-r border-slate-700 flex flex-col transition-all duration-300 ease-in-out flex-shrink-0 h-full',
+      !isMobile && collapsed ? 'w-16' : 'w-64',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
     ]"
   >
     <div
-      class="flex items-center justify-between h-16 px-4 border-b border-slate-700"
+      class="flex items-center h-16 border-b border-slate-700"
+      :class="
+        !isMobile && collapsed ? 'justify-center px-2' : 'justify-between px-4'
+      "
     >
       <router-link
         to="/management"
-        class="flex items-center space-x-2 flex-1"
+        class="flex items-center min-w-0"
+        :class="!isMobile && collapsed ? 'justify-center' : 'space-x-2 flex-1'"
         @click="isMobile && $emit('close')"
+        :title="!isMobile && collapsed ? t('management.logoTitle') : undefined"
       >
         <img
           src="/android-chrome-192x192.png"
           alt="Devmind Admin"
           class="w-8 h-8"
         />
-        <span class="text-xl font-semibold text-slate-100">{{
-          t('management.logoTitle')
-        }}</span>
+        <span
+          v-if="isMobile || !collapsed"
+          class="text-xl font-semibold text-slate-100 truncate"
+          >{{ t('management.logoTitle') }}</span
+        >
       </router-link>
+      <button
+        v-if="!isMobile"
+        type="button"
+        class="admin-sidebar-toggle"
+        :aria-label="
+          collapsed
+            ? t('management.expandSidebar')
+            : t('management.collapseSidebar')
+        "
+        :title="
+          collapsed
+            ? t('management.expandSidebar')
+            : t('management.collapseSidebar')
+        "
+        @click="$emit('toggle-collapse')"
+      >
+        <svg
+          class="w-4 h-4 transition-transform"
+          :class="collapsed ? 'rotate-180' : ''"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 19l-7-7 7-7"
+          />
+        </svg>
+      </button>
       <button
         v-if="isMobile"
         @click="$emit('close')"
@@ -59,15 +98,29 @@
       </button>
     </div>
 
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto flex flex-col">
+    <nav
+      class="flex-1 py-4 space-y-1 flex flex-col"
+      :class="
+        collapsed && !isMobile
+          ? 'overflow-visible px-2'
+          : 'overflow-y-auto px-3'
+      "
+    >
       <div class="flex-1 space-y-1">
         <div
           v-if="userStore.userHasFeature('admin_console')"
           class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleUserManagementMenu"
             class="admin-nav-item admin-nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'admin-nav-item-collapsed' : ''"
+            :title="
+              collapsed && !isMobile
+                ? t('management.userManagement')
+                : undefined
+            "
           >
             <svg
               class="w-5 h-5"
@@ -82,10 +135,11 @@
                 d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
               />
             </svg>
-            <span class="flex-1 text-left">{{
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
               t('management.userManagement')
             }}</span>
             <svg
+              v-if="isMobile || !collapsed"
               class="w-4 h-4 transition-transform"
               :class="userManagementMenuOpen ? 'rotate-90' : ''"
               fill="none"
@@ -108,7 +162,14 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="userManagementMenuOpen" class="submenu">
+            <div
+              v-if="userManagementMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('management.userManagement') }}
+              </div>
               <router-link
                 to="/management/users"
                 class="admin-nav-item admin-nav-item-child"
@@ -188,10 +249,13 @@
         <div
           v-if="userStore.userHasFeature('admin_console')"
           class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleLLMMenu"
             class="admin-nav-item admin-nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'admin-nav-item-collapsed' : ''"
+            :title="collapsed && !isMobile ? t('llm.menuTitle') : undefined"
           >
             <svg
               class="w-5 h-5"
@@ -206,8 +270,11 @@
                 d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
               />
             </svg>
-            <span class="flex-1 text-left">{{ t('llm.menuTitle') }}</span>
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
+              t('llm.menuTitle')
+            }}</span>
             <svg
+              v-if="isMobile || !collapsed"
               class="w-4 h-4 transition-transform"
               :class="llmMenuOpen ? 'rotate-90' : ''"
               fill="none"
@@ -230,7 +297,14 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="llmMenuOpen" class="submenu">
+            <div
+              v-if="llmMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('llm.menuTitle') }}
+              </div>
               <router-link
                 to="/management/llm/stats"
                 class="admin-nav-item admin-nav-item-child"
@@ -342,10 +416,15 @@
         <div
           v-if="userStore.userHasFeature('admin_console')"
           class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleTaskManagementMenu"
             class="admin-nav-item admin-nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'admin-nav-item-collapsed' : ''"
+            :title="
+              collapsed && !isMobile ? t('taskManagement.menuTitle') : undefined
+            "
           >
             <svg
               class="w-5 h-5"
@@ -360,10 +439,11 @@
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
               />
             </svg>
-            <span class="flex-1 text-left">{{
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
               t('taskManagement.menuTitle')
             }}</span>
             <svg
+              v-if="isMobile || !collapsed"
               class="w-4 h-4 transition-transform"
               :class="taskManagementMenuOpen ? 'rotate-90' : ''"
               fill="none"
@@ -386,7 +466,14 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="taskManagementMenuOpen" class="submenu">
+            <div
+              v-if="taskManagementMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('taskManagement.menuTitle') }}
+              </div>
               <router-link
                 to="/management/task-management/stats"
                 class="admin-nav-item admin-nav-item-child"
@@ -474,10 +561,17 @@
         <div
           v-if="userStore.userHasFeature('admin_console')"
           class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
         >
           <button
             @click="toggleNotificationManagementMenu"
             class="admin-nav-item admin-nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'admin-nav-item-collapsed' : ''"
+            :title="
+              collapsed && !isMobile
+                ? t('notificationManagement.menuTitle')
+                : undefined
+            "
           >
             <svg
               class="w-5 h-5"
@@ -492,10 +586,11 @@
                 d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
               />
             </svg>
-            <span class="flex-1 text-left">{{
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
               t('notificationManagement.menuTitle')
             }}</span>
             <svg
+              v-if="isMobile || !collapsed"
               class="w-4 h-4 transition-transform"
               :class="notificationManagementMenuOpen ? 'rotate-90' : ''"
               fill="none"
@@ -518,7 +613,14 @@
             leave-from-class="opacity-100 max-h-96"
             leave-to-class="opacity-0 max-h-0"
           >
-            <div v-if="notificationManagementMenuOpen" class="submenu">
+            <div
+              v-if="notificationManagementMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('notificationManagement.menuTitle') }}
+              </div>
               <router-link
                 to="/management/notifier/stats"
                 class="admin-nav-item admin-nav-item-child"
@@ -642,8 +744,14 @@
         <router-link
           to="/dashboard"
           class="admin-nav-item"
+          :class="collapsed && !isMobile ? 'admin-nav-item-collapsed' : ''"
           @click="isMobile && $emit('close')"
           @mouseenter="preloadRoute('/dashboard')"
+          :title="
+            collapsed && !isMobile
+              ? t('management.backToUserPlatform')
+              : undefined
+          "
         >
           <svg
             class="w-5 h-5"
@@ -658,7 +766,9 @@
               d="M10 19l-7-7m0 0l7-7m-7 7h18"
             />
           </svg>
-          <span>{{ t('management.backToUserPlatform') }}</span>
+          <span v-if="isMobile || !collapsed">{{
+            t('management.backToUserPlatform')
+          }}</span>
         </router-link>
       </div>
     </nav>
@@ -671,14 +781,18 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 
-const props = defineProps({
+defineProps({
   showMobileMenu: {
+    type: Boolean,
+    default: false
+  },
+  collapsed: {
     type: Boolean,
     default: false
   }
 })
 
-defineEmits(['close'])
+defineEmits(['close', 'toggle-collapse'])
 
 const { t } = useI18n()
 const route = useRoute()
@@ -747,7 +861,9 @@ const preloadRoute = (path) => {
         }
       })
     }
-  } catch (_) {}
+  } catch {
+    // Ignore preload errors silently
+  }
 }
 
 onMounted(() => {})
@@ -756,6 +872,10 @@ onMounted(() => {})
 <style scoped>
 .admin-nav-item {
   @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-all duration-200;
+}
+
+.admin-nav-item-collapsed {
+  @apply h-10 w-10 justify-center gap-0 px-0 py-0;
 }
 
 .admin-nav-item-active {
@@ -788,13 +908,46 @@ onMounted(() => {})
   @apply space-y-0 mb-1.5;
 }
 
+.menu-group-collapsed {
+  @apply relative;
+}
+
 .submenu {
   @apply overflow-hidden pl-0 mt-1 space-y-0.5;
   transition: all 0.2s ease-in-out;
 }
 
+.submenu-flyout {
+  @apply invisible absolute left-full top-0 z-50 ml-3 min-w-60 rounded-lg border border-slate-700 bg-slate-800 p-2 opacity-0 shadow-lg;
+  max-height: none;
+  overflow: visible;
+  transition:
+    opacity 0.15s ease,
+    visibility 0.15s ease,
+    transform 0.15s ease;
+  transform: translateX(-0.25rem);
+}
+
+.menu-group-collapsed:hover .submenu-flyout,
+.menu-group-collapsed:focus-within .submenu-flyout {
+  @apply visible opacity-100;
+  transform: translateX(0);
+}
+
+.submenu-flyout-title {
+  @apply px-3 pb-2 pt-1 text-xs font-semibold text-slate-400;
+}
+
 .submenu .admin-nav-item {
   @apply ml-0;
+}
+
+.submenu-flyout .admin-nav-item-child {
+  @apply ml-0 px-3 pl-3;
+}
+
+.submenu-flyout .admin-nav-item-child::before {
+  content: none;
 }
 
 .admin-nav-item-child::before {
@@ -820,5 +973,9 @@ onMounted(() => {})
 
 .admin-nav-item-parent:hover svg:last-child {
   @apply opacity-100;
+}
+
+.admin-sidebar-toggle {
+  @apply absolute -right-3 top-5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-slate-600 bg-slate-800 text-slate-300 shadow-sm transition-colors hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500;
 }
 </style>
