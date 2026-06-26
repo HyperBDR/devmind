@@ -720,6 +720,171 @@
       "currency": "货币"
     }
   },
+  "llmOps": {
+    "shell": {
+      "title": "大模型运营管理",
+      "subtitle": "价格、渠道、转售与对账的独立运营视图",
+      "defaultPlatform": "默认平台：{name}",
+      "priceSourceCount": "模型价格源：{count}"
+    },
+    "toolbar": {
+      "displayCurrency": "显示货币",
+      "resalePlatform": "挂售平台",
+      "platformConfig": "平台配置",
+      "createPlatform": "新建平台"
+    },
+    "currency": {
+      "cny": "人民币 CNY",
+      "usd": "美元 USD"
+    },
+    "nav": {
+      "monitor": {
+        "label": "运营总览",
+        "description": "汇总模型价格、渠道覆盖、采购路径和关键运营指标。"
+      },
+      "metaModels": {
+        "label": "元模型库",
+        "description": "管理厂商、模型家族、能力标签和采集归一化后的元模型身份。"
+      },
+      "providers": {
+        "label": "模型价格源",
+        "description": "查看供货商价格源与元模型价格。"
+      },
+      "channels": {
+        "label": "转发渠道",
+        "description": "维护渠道，并在渠道内管理可启用转发的服务商模型和价格策略。"
+      },
+      "reseller": {
+        "label": "挂售平台",
+        "description": "管理挂售定价、积分换算与供货渠道。"
+      },
+      "reconciler": {
+        "label": "用量对账",
+        "description": "录入生产用量和账单金额，自动计算应付金额与差异。"
+      },
+      "audit": {
+        "label": "操作记录",
+        "description": "查询渠道配置、价格调整、模型上架和审批流转的审计记录。"
+      }
+    },
+    "filters": {
+      "priority": "优先处理",
+      "allModels": "全部模型",
+      "allChannels": "全部渠道"
+    },
+    "fields": {
+      "model": "模型",
+      "provider": "服务商",
+      "status": "状态"
+    },
+    "price": {
+      "input": "输入价",
+      "output": "输出价",
+      "lowestInput": "最低输入",
+      "lowestOutput": "最低输出"
+    },
+    "actions": {
+      "goResale": "去挂售",
+      "manageProviders": "管理厂商"
+    },
+    "status": {
+      "currencyMismatch": "需要汇率",
+      "missingChannel": "缺渠道价",
+      "unlisted": "未挂售",
+      "listed": "已挂售",
+      "ready": "已就绪",
+      "readyShort": "就绪",
+      "readyToList": "可上架",
+      "notLowest": "非最低价",
+      "lowCoverage": "覆盖偏少",
+      "noSupply": "无供应",
+      "needsHandling": "需处理",
+      "normal": "正常"
+    },
+    "monitor": {
+      "actionQueueTitle": "今日优先处理",
+      "channelCoverageTitle": "渠道覆盖与最低价命中",
+      "channelCount": "{count} 个渠道",
+      "channelCoverageMeta": "覆盖 {covered} 个模型 · 最低价命中 {best} 个",
+      "emptyChannelCoverage": "暂无渠道覆盖数据。",
+      "providerMatrixTitle": "厂商模型运营覆盖",
+      "modelCount": "{count} 个模型",
+      "channelCoverage": "渠道覆盖",
+      "agioneListed": "Agione 已挂售",
+      "todo": "待处理",
+      "focusTableTitle": "重点模型运营表",
+      "focusTableSubtitle": "优先展示缺渠道价、未挂售、非最低价和覆盖偏少的模型",
+      "filteredChannel": "筛选渠道",
+      "lowestProcurementChannel": "最低采购渠道",
+      "emptyFocusRows": "当前筛选条件下没有需要展示的模型。"
+    },
+    "kpi": {
+      "ready": {
+        "label": "运营就绪",
+        "hint": "{count} 个模型渠道覆盖、挂售和最低价状态均就绪"
+      },
+      "procurement": {
+        "label": "渠道覆盖",
+        "hint": "{missing} 个缺渠道价 · {currency} 个需要汇率"
+      },
+      "listing": {
+        "label": "平台挂售",
+        "hint": "{unlisted} 个未上架 · {nonLowest} 个非最低价"
+      },
+      "channels": {
+        "label": "渠道数",
+        "badge": "{count} 源",
+        "hint": "转发渠道和模型价格源配置情况"
+      },
+      "reconciliation": {
+        "label": "对账异常",
+        "hint": "生产用量与账单金额的差异记录"
+      }
+    },
+    "queue": {
+      "fillChannelPrice": {
+        "label": "补齐渠道采购价",
+        "hint": "没有渠道价的模型无法进行可靠挂售和成本计算"
+      },
+      "configureExchange": {
+        "label": "配置汇率",
+        "hint": "同一模型存在不同采购币种，需要汇率后才能判断最低价"
+      },
+      "publishToPlatform": {
+        "label": "上架挂售平台",
+        "hint": "已有模型主数据但尚未进入当前挂售平台"
+      },
+      "switchLowestChannel": {
+        "label": "切换最低价渠道",
+        "hint": "已上架但当前渠道不是最低采购价，需要评估切换"
+      },
+      "addChannelCoverage": {
+        "label": "补充渠道覆盖",
+        "hint": "只有一个可用渠道的模型缺少采购备选，价格稳定性较弱"
+      },
+      "checkPriceSource": {
+        "label": "检查模型价格源",
+        "latestRun": "{status} · {time}",
+        "empty": "还没有模型价格源记录"
+      },
+      "handleReconciliation": {
+        "label": "处理对账差异",
+        "hint": "对账异常会影响渠道结算和毛利判断"
+      }
+    },
+    "messages": {
+      "configureChannelFirst": "请先在转发渠道中为该模型配置采购价，再返回挂售平台。",
+      "configurePlatformFirst": "请先配置挂售平台后再编辑挂售。",
+      "noListingsToPublish": "没有需要上架的链路",
+      "invalidListingPrices": "请为每条链路填写有效的 In/Out 售价后再发布",
+      "publishSubmitted": "已提交 {count} 条发布申请",
+      "submitFailed": "提交失败",
+      "noDraftsToSave": "没有需要保存的草稿",
+      "noChangesToSave": "没有检测到需要保存的修改",
+      "draftsSaved": "已保存 {count} 条草稿",
+      "saveFailed": "保存失败"
+    }
+  },
   "sals": {
     "dashboard": {
       "badge": "售后工单",

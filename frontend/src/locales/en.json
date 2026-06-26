@@ -710,6 +710,171 @@
       "currency": "Currency"
     }
   },
+  "llmOps": {
+    "shell": {
+      "title": "LLM Operations",
+      "subtitle": "A dedicated view for pricing, channels, resale, and reconciliation",
+      "defaultPlatform": "Default platform: {name}",
+      "priceSourceCount": "Model price sources: {count}"
+    },
+    "toolbar": {
+      "displayCurrency": "Display currency",
+      "resalePlatform": "Resale platform",
+      "platformConfig": "Platform settings",
+      "createPlatform": "New platform"
+    },
+    "currency": {
+      "cny": "Chinese Yuan CNY",
+      "usd": "US Dollar USD"
+    },
+    "nav": {
+      "monitor": {
+        "label": "Operations Overview",
+        "description": "Track model pricing, channel coverage, procurement paths, and key operating metrics."
+      },
+      "metaModels": {
+        "label": "Meta Models",
+        "description": "Manage vendors, model families, capability tags, and normalized model identities."
+      },
+      "providers": {
+        "label": "Model Price Sources",
+        "description": "Review supplier price sources and meta-model prices."
+      },
+      "channels": {
+        "label": "Forwarding Channels",
+        "description": "Maintain channels and manage enabled provider models and pricing policies inside each channel."
+      },
+      "reseller": {
+        "label": "Resale Platforms",
+        "description": "Manage listing prices, credit conversion, and procurement channels."
+      },
+      "reconciler": {
+        "label": "Usage Reconciliation",
+        "description": "Enter production usage and billing amounts to calculate payables and variances."
+      },
+      "audit": {
+        "label": "Audit Log",
+        "description": "Review channel configuration, price changes, model listings, and approval activity."
+      }
+    },
+    "filters": {
+      "priority": "Priority",
+      "allModels": "All models",
+      "allChannels": "All channels"
+    },
+    "fields": {
+      "model": "Model",
+      "provider": "Provider",
+      "status": "Status"
+    },
+    "price": {
+      "input": "Input price",
+      "output": "Output price",
+      "lowestInput": "Lowest input",
+      "lowestOutput": "Lowest output"
+    },
+    "actions": {
+      "goResale": "Go to resale",
+      "manageProviders": "Manage providers"
+    },
+    "status": {
+      "currencyMismatch": "Needs FX rate",
+      "missingChannel": "Missing channel price",
+      "unlisted": "Unlisted",
+      "listed": "Listed",
+      "ready": "Ready",
+      "readyShort": "Ready",
+      "readyToList": "Ready to list",
+      "notLowest": "Not lowest",
+      "lowCoverage": "Low coverage",
+      "noSupply": "No supply",
+      "needsHandling": "Needs handling",
+      "normal": "Normal"
+    },
+    "monitor": {
+      "actionQueueTitle": "Today's Priority Queue",
+      "channelCoverageTitle": "Channel Coverage and Lowest-Price Hits",
+      "channelCount": "{count} channels",
+      "channelCoverageMeta": "{covered} models covered · {best} lowest-price hits",
+      "emptyChannelCoverage": "No channel coverage data yet.",
+      "providerMatrixTitle": "Provider Model Operations Coverage",
+      "modelCount": "{count} models",
+      "channelCoverage": "Channel coverage",
+      "agioneListed": "Listed on Agione",
+      "todo": "To do",
+      "focusTableTitle": "Priority Model Operations Table",
+      "focusTableSubtitle": "Prioritizes models missing channel prices, listings, lowest-price routing, or coverage.",
+      "filteredChannel": "Filtered channel",
+      "lowestProcurementChannel": "Lowest procurement channel",
+      "emptyFocusRows": "No models match the current filters."
+    },
+    "kpi": {
+      "ready": {
+        "label": "Operations ready",
+        "hint": "{count} models have channel coverage, listing, and lowest-price status ready"
+      },
+      "procurement": {
+        "label": "Channel coverage",
+        "hint": "{missing} missing channel prices · {currency} need FX rates"
+      },
+      "listing": {
+        "label": "Platform listings",
+        "hint": "{unlisted} unlisted · {nonLowest} not on the lowest channel"
+      },
+      "channels": {
+        "label": "Channels",
+        "badge": "{count} sources",
+        "hint": "Forwarding channel and model price source configuration"
+      },
+      "reconciliation": {
+        "label": "Reconciliation issues",
+        "hint": "Variance records between production usage and billed amounts"
+      }
+    },
+    "queue": {
+      "fillChannelPrice": {
+        "label": "Fill channel procurement prices",
+        "hint": "Models without channel prices cannot be listed or costed reliably"
+      },
+      "configureExchange": {
+        "label": "Configure FX rates",
+        "hint": "Models priced in multiple procurement currencies need FX rates before lowest-price comparison"
+      },
+      "publishToPlatform": {
+        "label": "List on resale platform",
+        "hint": "Model master data exists but has not entered the current resale platform"
+      },
+      "switchLowestChannel": {
+        "label": "Switch to lowest channel",
+        "hint": "Listed models are not using the lowest procurement channel and need review"
+      },
+      "addChannelCoverage": {
+        "label": "Add channel coverage",
+        "hint": "Models with only one available channel lack procurement fallback"
+      },
+      "checkPriceSource": {
+        "label": "Check model price sources",
+        "latestRun": "{status} · {time}",
+        "empty": "No model price source records yet"
+      },
+      "handleReconciliation": {
+        "label": "Handle reconciliation variances",
+        "hint": "Reconciliation issues affect channel settlement and margin checks"
+      }
+    },
+    "messages": {
+      "configureChannelFirst": "Configure a procurement price for this model in forwarding channels before returning to the resale platform.",
+      "configurePlatformFirst": "Configure a resale platform before editing listings.",
+      "noListingsToPublish": "No links need to be listed",
+      "invalidListingPrices": "Enter valid In/Out listing prices for every link before publishing",
+      "publishSubmitted": "Submitted {count} publishing requests",
+      "submitFailed": "Submit failed",
+      "noDraftsToSave": "No drafts need to be saved",
+      "noChangesToSave": "No changes need to be saved",
+      "draftsSaved": "Saved {count} drafts",
+      "saveFailed": "Save failed"
+    }
+  },
   "sals": {
     "dashboard": {
       "badge": "After-Sales",
