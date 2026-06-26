@@ -34,8 +34,8 @@ class Command(BaseCommand):
     """Initialize database-backed runtime state for the backend service."""
 
     help = (
-        "Run migrations, register periodic tasks, and optionally collect "
-        "static files in one Django process."
+        "Run migrations, bootstrap runtime catalogs, register periodic "
+        "tasks, and optionally collect static files in one Django process."
     )
 
     def add_arguments(self, parser):
@@ -43,6 +43,14 @@ class Command(BaseCommand):
             "--skip-collectstatic",
             action="store_true",
             help="Skip collectstatic even if BACKEND_INIT_COLLECTSTATIC=true.",
+        )
+        parser.add_argument(
+            "--skip-llm-ops-bootstrap",
+            action="store_true",
+            help=(
+                "Skip LLM Ops catalog bootstrap even if "
+                "BACKEND_INIT_BOOTSTRAP_LLM_OPS=true."
+            ),
         )
 
     @contextmanager
@@ -71,6 +79,25 @@ class Command(BaseCommand):
 
         with self._timed_step("Running Django migrations"):
             call_command("migrate", interactive=False, verbosity=verbosity)
+
+        should_bootstrap_llm_ops = _env_enabled(
+            "BACKEND_INIT_BOOTSTRAP_LLM_OPS",
+            default=True,
+        )
+        if options["skip_llm_ops_bootstrap"]:
+            should_bootstrap_llm_ops = False
+
+        if should_bootstrap_llm_ops:
+            with self._timed_step("Bootstrapping LLM Ops catalog"):
+                call_command(
+                    "bootstrap_llm_ops_catalog",
+                    verbosity=verbosity,
+                )
+        else:
+            self.stdout.write(
+                "[init_backend] BACKEND_INIT_BOOTSTRAP_LLM_OPS disabled; "
+                "skipping LLM Ops catalog bootstrap."
+            )
 
         with self._timed_step("Registering periodic tasks"):
             discover_and_register()
