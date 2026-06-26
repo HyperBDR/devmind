@@ -43,21 +43,58 @@ wait_for_db() {
             HOST=${MYSQL_HOST:-localhost}
             PORT=${MYSQL_PORT:-3306}
             log "Waiting for MySQL at $HOST:$PORT..."
-            until mysqladmin ping -h "$HOST" -P "$PORT" --silent; do
+            until python - <<PY
+import os
+import sys
+
+import pymysql
+
+try:
+    connection = pymysql.connect(
+        host=os.environ.get("MYSQL_HOST", "localhost"),
+        port=int(os.environ.get("MYSQL_PORT", "3306")),
+        user=os.environ.get("MYSQL_USER", "root"),
+        password=os.environ.get("MYSQL_PASSWORD", ""),
+        database=os.environ.get("MYSQL_DATABASE", "app"),
+        connect_timeout=2,
+        read_timeout=2,
+        write_timeout=2,
+    )
+    connection.close()
+except Exception:
+    sys.exit(1)
+PY
+            do
                 sleep 2
             done
             log "MySQL is ready!"
             ;;
         postgresql|postgres)
-            # In Docker Compose, use service name 'postgresql' as default host
-            # For local development, use 'localhost'
+            # In Docker Compose, use service name 'postgresql' as default host.
+            # For local development, use 'localhost'.
             HOST=${POSTGRES_HOST:-postgresql}
             PORT=${POSTGRES_PORT:-5432}
-            USER=${POSTGRES_USER:-postgres}
-            DB=${POSTGRES_DB:-postgres}
             log "Waiting for PostgreSQL at $HOST:$PORT..."
-            # pg_isready doesn't require authentication, just checks if server is accepting connections
-            until pg_isready -h "$HOST" -p "$PORT" > /dev/null 2>&1; do
+            until python - <<PY
+import os
+import sys
+
+import psycopg2
+
+try:
+    connection = psycopg2.connect(
+        host=os.environ.get("POSTGRES_HOST", "postgresql"),
+        port=int(os.environ.get("POSTGRES_PORT", "5432")),
+        user=os.environ.get("POSTGRES_USER", "postgres"),
+        password=os.environ.get("POSTGRES_PASSWORD", ""),
+        dbname=os.environ.get("POSTGRES_DB", "postgres"),
+        connect_timeout=2,
+    )
+    connection.close()
+except Exception:
+    sys.exit(1)
+PY
+            do
                 sleep 2
             done
             log "PostgreSQL is ready!"
