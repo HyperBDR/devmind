@@ -37,15 +37,19 @@
     <div class="panel overflow-hidden p-0">
       <div class="listing-board-toolbar">
         <div class="listing-board-heading">
-          <h3 class="panel-title">模型挂售列表</h3>
-          <p class="listing-board-subtitle">仅展示当前平台流程内模型。</p>
+          <h3 class="panel-title">
+            {{ t('llmOps.listingBoard.title') }}
+          </h3>
+          <p class="listing-board-subtitle">
+            {{ t('llmOps.listingBoard.subtitle') }}
+          </p>
         </div>
         <div class="listing-board-controls">
           <input
             v-model="searchQuery"
             type="text"
             class="listing-search-input"
-            placeholder="搜索模型 / code"
+            :placeholder="t('llmOps.listingBoard.searchPlaceholder')"
           />
           <div class="status-filter-group">
             <button
@@ -64,7 +68,7 @@
             </button>
           </div>
           <label class="pagination-size-field">
-            <span>每页</span>
+            <span>{{ t('llmOps.listingBoard.pagination.pageSize') }}</span>
             <select v-model.number="pageSize" class="pagination-select">
               <option v-for="size in pageSizeOptions" :key="size" :value="size">
                 {{ size }}
@@ -77,7 +81,11 @@
           </span>
           <template v-if="selectedRows.length">
             <span class="listing-selected-count">
-              已选 {{ selectedRows.length }}
+              {{
+                t('llmOps.listingBoard.selectedCount', {
+                  count: selectedRows.length
+                })
+              }}
             </span>
             <button
               type="button"
@@ -95,7 +103,7 @@
               :disabled="!canBatchOffline || savingListings"
               @click="handleBatchAction('offline')"
             >
-              批量下架
+              {{ t('llmOps.listingBoard.batch.offline') }}
             </button>
             <button
               type="button"
@@ -104,7 +112,7 @@
               :disabled="savingListings"
               @click="handleBatchAction('price')"
             >
-              批量改价
+              {{ t('llmOps.listingBoard.batch.price') }}
             </button>
           </template>
           <button
@@ -112,7 +120,7 @@
             class="add-listing-button btn-action-create"
             @click="openWorkspace(null, 'create')"
           >
-            新建上架
+            {{ t('llmOps.listingBoard.createListing') }}
           </button>
         </div>
       </div>
@@ -142,15 +150,33 @@
                   @change="toggleAllVisible"
                 />
               </th>
-              <th class="table-head">挂售平台</th>
-              <th class="table-head min-w-[200px]">模型</th>
-              <th class="table-head">供货链路</th>
-              <th class="table-head">成本</th>
-              <th class="table-head">售价</th>
-              <th class="table-head">积分</th>
-              <th class="table-head">利润率</th>
-              <th class="table-head">状态</th>
-              <th class="table-head">操作</th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.platform') }}
+              </th>
+              <th class="table-head min-w-[200px]">
+                {{ t('llmOps.listingBoard.table.model') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.supplyChain') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.cost') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.retail') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.points') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.margin') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.status') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingBoard.table.actions') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -272,8 +298,13 @@
       </div>
       <div v-if="filteredListingRows.length" class="pagination-bar">
         <p class="pagination-summary">
-          第 {{ currentPage }} / {{ totalPages }} 页 · 共
-          {{ filteredListingRows.length }} 条
+          {{
+            t('llmOps.listingBoard.pagination.summary', {
+              current: currentPage,
+              total: totalPages,
+              count: filteredListingRows.length
+            })
+          }}
         </p>
         <div class="pagination-actions">
           <button
@@ -282,7 +313,7 @@
             :disabled="currentPage <= 1"
             @click="goToPreviousPage"
           >
-            上一页
+            {{ t('llmOps.listingBoard.pagination.previous') }}
           </button>
           <button
             type="button"
@@ -290,7 +321,7 @@
             :disabled="currentPage >= totalPages"
             @click="goToNextPage"
           >
-            下一页
+            {{ t('llmOps.listingBoard.pagination.next') }}
           </button>
         </div>
       </div>
@@ -300,6 +331,8 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import { useAgioneListingRows } from '@/composables/useAgioneListingRows'
@@ -357,6 +390,7 @@ const emit = defineEmits([
   'open-workspace',
   'listings-updated'
 ])
+const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const listingStatusFilter = ref('all')
@@ -367,12 +401,12 @@ const savingListings = ref(false)
 const selectedModelIds = ref(new Set())
 const pageSizeOptions = [10, 20, 50]
 
-const listingStatusOptions = [
-  { label: '待处理', value: 'actionable' },
-  { label: '全部', value: 'all' },
-  { label: '已上架', value: 'listed' },
-  { label: '未上架', value: 'unlisted' }
-]
+const listingStatusOptions = computed(() => [
+  { label: t('llmOps.listingBoard.filters.actionable'), value: 'actionable' },
+  { label: t('llmOps.listingBoard.filters.all'), value: 'all' },
+  { label: t('llmOps.listingBoard.filters.listed'), value: 'listed' },
+  { label: t('llmOps.listingBoard.filters.unlisted'), value: 'unlisted' }
+])
 
 const unusedModelId = ref('')
 const unusedChannelId = ref('')
@@ -393,7 +427,9 @@ const rows = useAgioneListingRows({
   pointConversionRef: toRef(props, 'pointConversion')
 })
 
-const platformLabel = computed(() => props.agionePlatform?.name || '挂售平台')
+const platformLabel = computed(
+  () => props.agionePlatform?.name || t('llmOps.listingBoard.platformFallback')
+)
 
 const visibleListingRows = computed(() =>
   rows.listingRows.value.filter((row) => !isHiddenRow(row))
@@ -477,11 +513,11 @@ const batchConfirmAction = computed(() => {
 const batchConfirmLabel = computed(() => {
   return (
     {
-      submit: '批量确认提交',
-      confirm_publish: '批量确认上架',
-      confirm_update: '批量确认更新',
-      confirm_offline: '批量确认下架'
-    }[batchConfirmAction.value] || '批量确认'
+      submit: t('llmOps.listingBoard.batch.confirmSubmit'),
+      confirm_publish: t('llmOps.listingBoard.batch.confirmPublish'),
+      confirm_update: t('llmOps.listingBoard.batch.confirmUpdate'),
+      confirm_offline: t('llmOps.listingBoard.batch.confirmOffline')
+    }[batchConfirmAction.value] || t('llmOps.listingBoard.batch.confirm')
   )
 })
 
@@ -523,20 +559,22 @@ function actionTone(kind) {
 function rowActionVisibleLabel(action) {
   return (
     {
-      abandon_update: '放弃',
-      confirm_offline: '确认下架',
-      confirm_publish: '确认上架',
-      confirm_update: '确认更新',
-      delete: '删除',
-      direct_offline: '直接下架',
-      edit: '编辑',
-      mark_offline_exception: '标记异常',
-      reject_offline: '驳回',
-      republish: '重新发布',
-      request_offline: '申请下架',
-      start_edit: '编辑',
-      submit: '提交',
-      withdraw: '撤回'
+      abandon_update: t('llmOps.listingBoard.rowActions.abandonUpdate'),
+      confirm_offline: t('llmOps.listingBoard.rowActions.confirmOffline'),
+      confirm_publish: t('llmOps.listingBoard.rowActions.confirmPublish'),
+      confirm_update: t('llmOps.listingBoard.rowActions.confirmUpdate'),
+      delete: t('llmOps.listingBoard.rowActions.delete'),
+      direct_offline: t('llmOps.listingBoard.rowActions.directOffline'),
+      edit: t('llmOps.listingBoard.rowActions.edit'),
+      mark_offline_exception: t(
+        'llmOps.listingBoard.rowActions.markOfflineException'
+      ),
+      reject_offline: t('llmOps.listingBoard.rowActions.rejectOffline'),
+      republish: t('llmOps.listingBoard.rowActions.republish'),
+      request_offline: t('llmOps.listingBoard.rowActions.requestOffline'),
+      start_edit: t('llmOps.listingBoard.rowActions.edit'),
+      submit: t('llmOps.listingBoard.rowActions.submit'),
+      withdraw: t('llmOps.listingBoard.rowActions.withdraw')
     }[action.kind] || action.label
   )
 }
@@ -572,38 +610,43 @@ const listingKpis = computed(() => {
     : null
   return [
     {
-      label: '可挂售模型',
+      label: t('llmOps.listingBoard.kpis.availableModels.label'),
       value: visibleRows.length,
-      hint: `${unlistedCount(visibleRows, listedRows)} 个未上架`,
-      delta: '本周期',
+      hint: t('llmOps.listingBoard.kpis.availableModels.hint', {
+        count: unlistedCount(visibleRows, listedRows)
+      }),
+      delta: t('llmOps.listingBoard.kpis.availableModels.delta'),
       deltaTone: 'text-slate-400'
     },
     {
-      label: '挂售平台',
+      label: t('llmOps.listingBoard.kpis.platforms.label'),
       value: props.platformCount,
-      hint: '可见挂售平台汇总',
-      delta: '稳定',
+      hint: t('llmOps.listingBoard.kpis.platforms.hint'),
+      delta: t('llmOps.listingBoard.kpis.platforms.delta'),
       deltaTone: 'text-slate-400'
     },
     {
-      label: '已上架',
+      label: t('llmOps.listingBoard.kpis.listed.label'),
       value: listedRows.length,
-      hint: '外部平台当前在线',
-      delta: listedRows.length > 0 ? '+ 上架中' : '待上架',
+      hint: t('llmOps.listingBoard.kpis.listed.hint'),
+      delta:
+        listedRows.length > 0
+          ? t('llmOps.listingBoard.kpis.listed.activeDelta')
+          : t('llmOps.listingBoard.kpis.listed.pendingDelta'),
       deltaTone: listedRows.length > 0 ? 'text-emerald-600' : 'text-amber-600'
     },
     {
-      label: '未上架',
+      label: t('llmOps.listingBoard.kpis.unlisted.label'),
       value: visibleRows.length - listedRows.length,
-      hint: '可在工作台一键处理',
-      delta: '需处理',
+      hint: t('llmOps.listingBoard.kpis.unlisted.hint'),
+      delta: t('llmOps.listingBoard.kpis.unlisted.delta'),
       deltaTone: 'text-amber-600'
     },
     {
-      label: '整体平均利润率',
+      label: t('llmOps.listingBoard.kpis.averageMargin.label'),
       value: avgMargin !== null ? `${avgMargin}%` : '—',
-      hint: '按 Input / Output / Cached 统一估算',
-      delta: '参考',
+      hint: t('llmOps.listingBoard.kpis.averageMargin.hint'),
+      delta: t('llmOps.listingBoard.kpis.averageMargin.delta'),
       deltaTone: 'text-slate-400'
     }
   ]
@@ -615,10 +658,12 @@ function unlistedCount(visibleRows, listedRows) {
 
 const listingEmptyText = computed(() => {
   if (listingStatusFilter.value === 'actionable')
-    return '暂无需要处理的挂售模型。'
-  if (listingStatusFilter.value === 'listed') return '当前没有已上架的模型。'
-  if (listingStatusFilter.value === 'unlisted') return '当前没有可上架的模型。'
-  return '没有符合筛选条件的模型。'
+    return t('llmOps.listingBoard.empty.actionable')
+  if (listingStatusFilter.value === 'listed')
+    return t('llmOps.listingBoard.empty.listed')
+  if (listingStatusFilter.value === 'unlisted')
+    return t('llmOps.listingBoard.empty.unlisted')
+  return t('llmOps.listingBoard.empty.default')
 })
 
 function isHiddenRow(row) {
@@ -650,9 +695,11 @@ function isActionableRow(row) {
 function activeListingChannelLabel(row) {
   const activeListings = row.active_listings || []
   if (activeListings.length > 1) {
-    return `${activeListings.length} 条上架链路`
+    return t('llmOps.listingBoard.supply.activeLinks', {
+      count: activeListings.length
+    })
   }
-  return row.lowest_option?.channel_name || '暂无供应'
+  return row.lowest_option?.channel_name || t('llmOps.listingBoard.supply.none')
 }
 
 function listingPriceMetrics(row) {
@@ -728,17 +775,19 @@ function listingUnifiedMarginRate(row) {
 
 function statusPillLabel(row) {
   const labels = {
-    draft: '草稿',
-    pending_publish: '待发布',
-    online: '已上架',
-    update_draft: '更新草稿',
-    pending_update: '待更新',
-    pending_offline: '待下架',
-    offline_exception: '下架异常',
-    offline: '已下架',
-    deleted: '已失效'
+    draft: t('llmOps.listingBoard.workflowStatus.draft'),
+    pending_publish: t('llmOps.listingBoard.workflowStatus.pendingPublish'),
+    online: t('llmOps.listingBoard.workflowStatus.online'),
+    update_draft: t('llmOps.listingBoard.workflowStatus.updateDraft'),
+    pending_update: t('llmOps.listingBoard.workflowStatus.pendingUpdate'),
+    pending_offline: t('llmOps.listingBoard.workflowStatus.pendingOffline'),
+    offline_exception: t('llmOps.listingBoard.workflowStatus.offlineException'),
+    offline: t('llmOps.listingBoard.workflowStatus.offline'),
+    deleted: t('llmOps.listingBoard.workflowStatus.deleted')
   }
-  return labels[row.workflow_status] || '未上架'
+  return (
+    labels[row.workflow_status] || t('llmOps.listingBoard.filters.unlisted')
+  )
 }
 
 function statusPillTone(row) {
@@ -761,45 +810,131 @@ function rowStateActions(row) {
   const status = row.workflow_status || 'draft'
   const actions = {
     draft: [
-      { label: '继续编辑', kind: 'edit', tone: 'default' },
-      { label: '确认提交', kind: 'submit', tone: 'primary' },
-      { label: '删除数据', kind: 'delete', tone: 'danger' }
+      {
+        label: t('llmOps.listingBoard.rowActions.continueEdit'),
+        kind: 'edit',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.confirmSubmit'),
+        kind: 'submit',
+        tone: 'primary'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.deleteData'),
+        kind: 'delete',
+        tone: 'danger'
+      }
     ],
     pending_publish: [
-      { label: '撤回申请', kind: 'withdraw', tone: 'default' },
-      { label: '确认上架', kind: 'confirm_publish', tone: 'success' }
+      {
+        label: t('llmOps.listingBoard.rowActions.withdrawRequest'),
+        kind: 'withdraw',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.confirmPublish'),
+        kind: 'confirm_publish',
+        tone: 'success'
+      }
     ],
     online: [
-      { label: '发起编辑', kind: 'start_edit', tone: 'default' },
-      { label: '发起下架', kind: 'request_offline', tone: 'warn' },
-      { label: '直接下架', kind: 'direct_offline', tone: 'danger' }
+      {
+        label: t('llmOps.listingBoard.rowActions.startEdit'),
+        kind: 'start_edit',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.requestOffline'),
+        kind: 'request_offline',
+        tone: 'warn'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.directOffline'),
+        kind: 'direct_offline',
+        tone: 'danger'
+      }
     ],
     update_draft: [
-      { label: '继续编辑', kind: 'edit', tone: 'default' },
-      { label: '确认提交', kind: 'submit', tone: 'primary' },
-      { label: '放弃修改', kind: 'abandon_update', tone: 'warn' }
+      {
+        label: t('llmOps.listingBoard.rowActions.continueEdit'),
+        kind: 'edit',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.confirmSubmit'),
+        kind: 'submit',
+        tone: 'primary'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.abandonChange'),
+        kind: 'abandon_update',
+        tone: 'warn'
+      }
     ],
     pending_update: [
-      { label: '撤回修改', kind: 'withdraw', tone: 'default' },
-      { label: '确认更新', kind: 'confirm_update', tone: 'success' }
+      {
+        label: t('llmOps.listingBoard.rowActions.withdrawChange'),
+        kind: 'withdraw',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.confirmUpdate'),
+        kind: 'confirm_update',
+        tone: 'success'
+      }
     ],
     pending_offline: [
-      { label: '撤回下架', kind: 'withdraw', tone: 'default' },
-      { label: '确认下架', kind: 'confirm_offline', tone: 'danger' },
-      { label: '驳回下架', kind: 'reject_offline', tone: 'default' },
-      { label: '标记异常', kind: 'mark_offline_exception', tone: 'danger' }
+      {
+        label: t('llmOps.listingBoard.rowActions.withdrawOffline'),
+        kind: 'withdraw',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.confirmOffline'),
+        kind: 'confirm_offline',
+        tone: 'danger'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.rejectOffline'),
+        kind: 'reject_offline',
+        tone: 'default'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.markOfflineException'),
+        kind: 'mark_offline_exception',
+        tone: 'danger'
+      }
     ],
     offline_exception: [
-      { label: '确认下架', kind: 'confirm_offline', tone: 'danger' }
+      {
+        label: t('llmOps.listingBoard.rowActions.confirmOffline'),
+        kind: 'confirm_offline',
+        tone: 'danger'
+      }
     ],
     offline: [
-      { label: '重新发布', kind: 'republish', tone: 'primary' },
-      { label: '删除数据', kind: 'delete', tone: 'danger' }
+      {
+        label: t('llmOps.listingBoard.rowActions.republish'),
+        kind: 'republish',
+        tone: 'primary'
+      },
+      {
+        label: t('llmOps.listingBoard.rowActions.deleteData'),
+        kind: 'delete',
+        tone: 'danger'
+      }
     ],
     deleted: []
   }
   return (
-    actions[status] || [{ label: '去挂售', kind: 'create', tone: 'primary' }]
+    actions[status] || [
+      {
+        label: t('llmOps.listingBoard.rowActions.goListing'),
+        kind: 'create',
+        tone: 'primary'
+      }
+    ]
   )
 }
 
@@ -980,10 +1115,17 @@ async function handleBatchAction(kind) {
   const selectedKeys = targetRows.map((row) => rowSelectionKey(row))
   const confirmMessage =
     kind === 'offline'
-      ? `确认批量发起下架 ${modelIds.length} 个模型？`
+      ? t('llmOps.listingBoard.confirm.batchOffline', {
+          count: modelIds.length
+        })
       : kind === 'confirm'
-        ? `${batchConfirmLabel.value} ${modelIds.length} 个模型？`
-        : `确认对 ${modelIds.length} 个模型进入批量改价工作台？`
+        ? t('llmOps.listingBoard.confirm.batchConfirm', {
+            action: batchConfirmLabel.value,
+            count: modelIds.length
+          })
+        : t('llmOps.listingBoard.confirm.batchPrice', {
+            count: modelIds.length
+          })
   if (!confirm(confirmMessage)) return
   if (kind === 'price') {
     emit('open-workspace', { modelId: null, kind: 'batch-price', modelIds })
@@ -996,13 +1138,17 @@ async function handleBatchAction(kind) {
         actionPayloadForRows(targetRows, 'request_offline')
       )
       emitUpdatedListings(response)
-      showSuccess('已批量发起下架')
+      showSuccess(t('llmOps.listingBoard.messages.batchOfflineRequested'))
     } else if (kind === 'confirm') {
       const response = await llmOpsApi.bulkTransitionResaleListings(
         actionPayloadForRows(targetRows, batchConfirmAction.value)
       )
       emitUpdatedListings(response)
-      showSuccess(batchConfirmLabel.value.replace('批量', '已批量'))
+      showSuccess(
+        t('llmOps.listingBoard.messages.batchConfirmed', {
+          action: batchConfirmLabel.value
+        })
+      )
     }
     setSelectedModelIds(
       Array.from(selectedModelIds.value).filter(
@@ -1028,38 +1174,42 @@ function emitUpdatedListings(response) {
 }
 
 function actionErrorLabel(kind) {
-  if (kind === 'direct_offline') return '直接下架失败'
-  if (isWorkflowTransition(kind)) return '状态流转失败'
-  return '操作失败'
+  if (kind === 'direct_offline')
+    return t('llmOps.listingBoard.errors.directOfflineFailed')
+  if (isWorkflowTransition(kind))
+    return t('llmOps.listingBoard.errors.transitionFailed')
+  return t('llmOps.listingBoard.errors.operationFailed')
 }
 
 function workflowConfirmText(kind) {
   const messages = {
-    request_offline: '确认发起下架申请？外部平台仍保持已上架，等待确认下架。',
-    confirm_offline: '确认外部平台已完成下架？该模型将进入已下架状态。',
-    direct_offline: '确认直接下架？该操作表示外部平台已同步下线。',
-    delete: '确认删除该挂售数据？删除后将从常规业务列表隐藏。'
+    request_offline: t('llmOps.listingBoard.confirm.requestOffline'),
+    confirm_offline: t('llmOps.listingBoard.confirm.confirmOffline'),
+    direct_offline: t('llmOps.listingBoard.confirm.directOffline'),
+    delete: t('llmOps.listingBoard.confirm.delete')
   }
-  return messages[kind] || '确认执行该状态操作？'
+  return messages[kind] || t('llmOps.listingBoard.confirm.default')
 }
 
 function workflowSuccessText(kind) {
   const messages = {
-    submit: '已提交',
-    withdraw: '已撤回',
-    confirm_publish: '已确认上架',
-    start_edit: '已进入更新草稿',
-    abandon_update: '已放弃修改',
-    confirm_update: '已确认更新',
-    request_offline: '已发起下架',
-    confirm_offline: '已确认下架',
-    direct_offline: '已直接下架',
-    reject_offline: '已驳回下架',
-    mark_offline_exception: '已标记异常',
-    republish: '已重新提交发布',
-    delete: '已删除'
+    submit: t('llmOps.listingBoard.messages.submitted'),
+    withdraw: t('llmOps.listingBoard.messages.withdrawn'),
+    confirm_publish: t('llmOps.listingBoard.messages.publishConfirmed'),
+    start_edit: t('llmOps.listingBoard.messages.updateDraftStarted'),
+    abandon_update: t('llmOps.listingBoard.messages.updateAbandoned'),
+    confirm_update: t('llmOps.listingBoard.messages.updateConfirmed'),
+    request_offline: t('llmOps.listingBoard.messages.offlineRequested'),
+    confirm_offline: t('llmOps.listingBoard.messages.offlineConfirmed'),
+    direct_offline: t('llmOps.listingBoard.messages.directOfflineDone'),
+    reject_offline: t('llmOps.listingBoard.messages.offlineRejected'),
+    mark_offline_exception: t(
+      'llmOps.listingBoard.messages.offlineExceptionMarked'
+    ),
+    republish: t('llmOps.listingBoard.messages.republishSubmitted'),
+    delete: t('llmOps.listingBoard.messages.deleted')
   }
-  return messages[kind] || '状态已更新'
+  return messages[kind] || t('llmOps.listingBoard.messages.statusUpdated')
 }
 </script>
 

@@ -3,7 +3,9 @@
     <div class="panel audit-filter-panel">
       <div class="audit-filter-grid">
         <label class="form-field audit-filter-field">
-          <span class="field-label">大类</span>
+          <span class="field-label">
+            {{ t('llmOps.auditLog.filters.category') }}
+          </span>
           <CompactSelect
             v-model="filters.target_type"
             :options="businessCategoryOptions"
@@ -11,7 +13,9 @@
           />
         </label>
         <label class="form-field audit-filter-field">
-          <span class="field-label">操作动作</span>
+          <span class="field-label">
+            {{ t('llmOps.auditLog.filters.action') }}
+          </span>
           <CompactSelect
             v-model="filters.action"
             :options="actionOptions"
@@ -19,23 +23,27 @@
           />
         </label>
         <label class="form-field audit-filter-field">
-          <span class="field-label">实例名称</span>
+          <span class="field-label">
+            {{ t('llmOps.auditLog.filters.target') }}
+          </span>
           <input
             id="audit-target"
             v-model.trim="filters.target"
             class="audit-filter-input"
             name="target"
-            placeholder="如 DeepSeek R1"
+            :placeholder="t('llmOps.auditLog.filters.targetPlaceholder')"
           />
         </label>
         <label class="form-field audit-filter-field">
-          <span class="field-label">操作人</span>
+          <span class="field-label">
+            {{ t('llmOps.auditLog.filters.actor') }}
+          </span>
           <input
             id="audit-actor"
             v-model.trim="filters.actor"
             class="audit-filter-input"
             name="actor"
-            placeholder="如 ops"
+            :placeholder="t('llmOps.auditLog.filters.actorPlaceholder')"
           />
         </label>
       </div>
@@ -47,7 +55,7 @@
           :disabled="loading"
           @click="applyFilters"
         >
-          查询
+          {{ t('llmOps.auditLog.actions.search') }}
         </button>
         <button
           type="button"
@@ -55,9 +63,11 @@
           :disabled="loading"
           @click="resetFilters"
         >
-          重置
+          {{ t('llmOps.auditLog.actions.reset') }}
         </button>
-        <span class="audit-count"> {{ totalCount }} 条记录 </span>
+        <span class="audit-count">
+          {{ t('llmOps.auditLog.recordCount', { count: totalCount }) }}
+        </span>
       </div>
     </div>
 
@@ -78,12 +88,20 @@
           </colgroup>
           <thead>
             <tr>
-              <th class="table-head">大类</th>
-              <th class="table-head">平台</th>
-              <th class="table-head">实例</th>
-              <th class="table-head">操作人</th>
-              <th class="table-head">操作时间</th>
-              <th class="table-head">变更内容</th>
+              <th class="table-head">
+                {{ t('llmOps.auditLog.table.category') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.auditLog.table.platform') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.auditLog.table.instance') }}
+              </th>
+              <th class="table-head">{{ t('llmOps.auditLog.table.actor') }}</th>
+              <th class="table-head">{{ t('llmOps.auditLog.table.time') }}</th>
+              <th class="table-head">
+                {{ t('llmOps.auditLog.table.changes') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -160,11 +178,17 @@
                       v-if="extraChangeCount(row)"
                       class="audit-more-change"
                     >
-                      +{{ extraChangeCount(row) }} 项
+                      {{
+                        t('llmOps.auditLog.moreChanges', {
+                          count: extraChangeCount(row)
+                        })
+                      }}
                     </span>
                   </div>
                   <span v-else class="audit-muted">
-                    {{ row.summary || '未记录字段变更' }}
+                    {{
+                      row.summary || t('llmOps.auditLog.empty.noFieldChanges')
+                    }}
                   </span>
                 </td>
               </tr>
@@ -172,7 +196,7 @@
                 <td class="detail-cell" colspan="6">
                   <div class="audit-detail-grid">
                     <div class="audit-detail-block">
-                      <h4>状态变更</h4>
+                      <h4>{{ t('llmOps.auditLog.detail.statusChanges') }}</h4>
                       <div
                         v-if="statusChangeItems(row).length"
                         class="audit-change-list"
@@ -192,10 +216,12 @@
                           </strong>
                         </div>
                       </div>
-                      <p v-else class="audit-muted">未记录状态变更。</p>
+                      <p v-else class="audit-muted">
+                        {{ t('llmOps.auditLog.empty.noStatusChanges') }}
+                      </p>
                     </div>
                     <div class="audit-detail-block">
-                      <h4>内容变更</h4>
+                      <h4>{{ t('llmOps.auditLog.detail.contentChanges') }}</h4>
                       <div
                         v-if="contentChangeItems(row).length"
                         class="audit-change-list"
@@ -211,7 +237,9 @@
                           <strong>{{ item.after }}</strong>
                         </div>
                       </div>
-                      <p v-else class="audit-muted">未记录内容字段差异。</p>
+                      <p v-else class="audit-muted">
+                        {{ t('llmOps.auditLog.empty.noContentChanges') }}
+                      </p>
                     </div>
                   </div>
                 </td>
@@ -220,15 +248,19 @@
             <tr v-if="!loading && !rows.length">
               <td class="table-cell" colspan="6">
                 <div class="empty-state">
-                  <p class="font-medium text-slate-700">暂无操作记录</p>
+                  <p class="font-medium text-slate-700">
+                    {{ t('llmOps.auditLog.empty.title') }}
+                  </p>
                   <p class="mt-1 text-sm text-slate-500">
-                    调整筛选条件，或完成一次渠道、价格、上架、审批操作后再查询。
+                    {{ t('llmOps.auditLog.empty.description') }}
                   </p>
                 </div>
               </td>
             </tr>
             <tr v-if="loading">
-              <td class="table-cell" colspan="6">正在加载操作记录...</td>
+              <td class="table-cell" colspan="6">
+                {{ t('llmOps.auditLog.loading') }}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -240,7 +272,7 @@
         </div>
         <div class="audit-footer-controls">
           <label class="audit-footer-page-size">
-            <span>每页</span>
+            <span>{{ t('llmOps.auditLog.pagination.pageSize') }}</span>
             <CompactSelect
               v-model="filters.page_size"
               :options="pageSizeOptions"
@@ -254,7 +286,7 @@
               :disabled="loading || page <= 1"
               @click="goToPage(page - 1)"
             >
-              上一页
+              {{ t('llmOps.auditLog.pagination.previous') }}
             </button>
             <span class="audit-page-label">{{ page }} / {{ totalPages }}</span>
             <button
@@ -263,7 +295,7 @@
               :disabled="loading || page >= totalPages"
               @click="goToPage(page + 1)"
             >
-              下一页
+              {{ t('llmOps.auditLog.pagination.next') }}
             </button>
           </div>
         </div>
@@ -274,6 +306,8 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
@@ -283,27 +317,40 @@ const props = defineProps({
     default: () => []
   }
 })
+const { t } = useI18n()
 
-const actionOptions = [
-  { label: '全部动作', value: '' },
-  { label: '创建', value: 'create' },
-  { label: '更新', value: 'update' },
-  { label: '删除', value: 'delete' },
-  { label: '采集', value: 'collect' },
-  { label: '导入', value: 'import' },
-  { label: '批量提交', value: 'bulk_upsert' },
-  { label: '保存草稿', value: 'bulk_draft' },
-  { label: '批量替换', value: 'bulk_replace' },
-  { label: '审批流转', value: 'transition' },
-  { label: '下架', value: 'offline' },
-  { label: '恢复', value: 'restore' },
-  { label: '同步', value: 'sync' }
-]
-
-const businessCategoryOptions = [
-  { label: '全部大类', value: '' },
+const actionOptions = computed(() => [
+  { label: t('llmOps.auditLog.actionOptions.all'), value: '' },
+  { label: t('llmOps.auditLog.actionOptions.create'), value: 'create' },
+  { label: t('llmOps.auditLog.actionOptions.update'), value: 'update' },
+  { label: t('llmOps.auditLog.actionOptions.delete'), value: 'delete' },
+  { label: t('llmOps.auditLog.actionOptions.collect'), value: 'collect' },
+  { label: t('llmOps.auditLog.actionOptions.import'), value: 'import' },
   {
-    label: '模型挂售',
+    label: t('llmOps.auditLog.actionOptions.bulkUpsert'),
+    value: 'bulk_upsert'
+  },
+  {
+    label: t('llmOps.auditLog.actionOptions.bulkDraft'),
+    value: 'bulk_draft'
+  },
+  {
+    label: t('llmOps.auditLog.actionOptions.bulkReplace'),
+    value: 'bulk_replace'
+  },
+  {
+    label: t('llmOps.auditLog.actionOptions.transition'),
+    value: 'transition'
+  },
+  { label: t('llmOps.auditLog.actionOptions.offline'), value: 'offline' },
+  { label: t('llmOps.auditLog.actionOptions.restore'), value: 'restore' },
+  { label: t('llmOps.auditLog.actionOptions.sync'), value: 'sync' }
+])
+
+const businessCategoryOptions = computed(() => [
+  { label: t('llmOps.auditLog.businessCategories.all'), value: '' },
+  {
+    label: t('llmOps.auditLog.businessCategories.listing'),
     value: [
       'llm_ops.ResaleListing',
       'llm_ops.ResaleListingExclusion',
@@ -311,7 +358,7 @@ const businessCategoryOptions = [
     ].join(',')
   },
   {
-    label: '渠道配置',
+    label: t('llmOps.auditLog.businessCategories.channelConfig'),
     value: [
       'llm_ops.ProcurementChannel',
       'llm_ops.ChannelModelPrice',
@@ -319,23 +366,33 @@ const businessCategoryOptions = [
     ].join(',')
   },
   {
-    label: '元模型',
+    label: t('llmOps.auditLog.businessCategories.metaModel'),
     value: [
       'llm_ops.LLMProvider',
       'llm_ops.LLMModel',
       'llm_ops.MetaModel'
     ].join(',')
   },
-  { label: '模型价格', value: 'llm_ops.ModelPriceItem' },
-  { label: '价格源配置', value: 'llm_ops.PriceCollectionSource' },
-  { label: '用量对账', value: 'llm_ops.UsageReconciliationRecord' }
-]
+  {
+    label: t('llmOps.auditLog.businessCategories.modelPrice'),
+    value: 'llm_ops.ModelPriceItem'
+  },
+  {
+    label: t('llmOps.auditLog.businessCategories.priceSource'),
+    value: 'llm_ops.PriceCollectionSource'
+  },
+  {
+    label: t('llmOps.auditLog.businessCategories.reconciliation'),
+    value: 'llm_ops.UsageReconciliationRecord'
+  }
+])
 
-const pageSizeOptions = [
-  { label: '20 条/页', value: '20' },
-  { label: '50 条/页', value: '50' },
-  { label: '100 条/页', value: '100' }
-]
+const pageSizeOptions = computed(() =>
+  ['20', '50', '100'].map((size) => ({
+    label: t('llmOps.auditLog.pagination.pageSizeOption', { size }),
+    value: size
+  }))
+)
 
 const statusFieldKeys = new Set([
   'comparison_status',
@@ -349,34 +406,34 @@ const statusFieldKeys = new Set([
   'workflow_status'
 ])
 
-const auditBusinessCategoryLabels = {
-  'llm_ops.ChannelModelPrice': '渠道配置',
-  'llm_ops.ChannelPriceItem': '渠道配置',
-  'llm_ops.LLMModel': '元模型',
-  'llm_ops.LLMProvider': '元模型',
-  'llm_ops.MetaModel': '元模型',
-  'llm_ops.ModelPriceItem': '模型价格',
-  'llm_ops.PriceCollectionSource': '价格源配置',
-  'llm_ops.ProcurementChannel': '渠道配置',
-  'llm_ops.ResaleListing': '模型挂售',
-  'llm_ops.ResaleListingExclusion': '模型挂售',
-  'llm_ops.ResalePlatform': '模型挂售',
-  'llm_ops.UsageReconciliationRecord': '用量对账'
+const auditBusinessCategoryKeys = {
+  'llm_ops.ChannelModelPrice': 'channelConfig',
+  'llm_ops.ChannelPriceItem': 'channelConfig',
+  'llm_ops.LLMModel': 'metaModel',
+  'llm_ops.LLMProvider': 'metaModel',
+  'llm_ops.MetaModel': 'metaModel',
+  'llm_ops.ModelPriceItem': 'modelPrice',
+  'llm_ops.PriceCollectionSource': 'priceSource',
+  'llm_ops.ProcurementChannel': 'channelConfig',
+  'llm_ops.ResaleListing': 'listing',
+  'llm_ops.ResaleListingExclusion': 'listing',
+  'llm_ops.ResalePlatform': 'listing',
+  'llm_ops.UsageReconciliationRecord': 'reconciliation'
 }
 
-const targetTypeLabels = {
-  'llm_ops.ChannelModelPrice': '渠道模型配置',
-  'llm_ops.ChannelPriceItem': '渠道价格项',
-  'llm_ops.LLMModel': '模型',
-  'llm_ops.LLMProvider': '元模型厂商',
-  'llm_ops.MetaModel': '元模型',
-  'llm_ops.ModelPriceItem': '模型价格',
-  'llm_ops.PriceCollectionSource': '价格源',
-  'llm_ops.ProcurementChannel': '渠道',
-  'llm_ops.ResaleListing': '模型挂售',
-  'llm_ops.ResaleListingExclusion': '挂售排除',
-  'llm_ops.ResalePlatform': '挂售平台',
-  'llm_ops.UsageReconciliationRecord': '对账记录'
+const targetTypeKeys = {
+  'llm_ops.ChannelModelPrice': 'channelModelPrice',
+  'llm_ops.ChannelPriceItem': 'channelPriceItem',
+  'llm_ops.LLMModel': 'model',
+  'llm_ops.LLMProvider': 'provider',
+  'llm_ops.MetaModel': 'metaModel',
+  'llm_ops.ModelPriceItem': 'modelPrice',
+  'llm_ops.PriceCollectionSource': 'priceSource',
+  'llm_ops.ProcurementChannel': 'channel',
+  'llm_ops.ResaleListing': 'listing',
+  'llm_ops.ResaleListingExclusion': 'listingExclusion',
+  'llm_ops.ResalePlatform': 'resalePlatform',
+  'llm_ops.UsageReconciliationRecord': 'reconciliationRecord'
 }
 
 const auditBusinessCategoryTones = {
@@ -394,114 +451,114 @@ const auditBusinessCategoryTones = {
   'llm_ops.UsageReconciliationRecord': 'tone-danger'
 }
 
-const fieldLabels = {
-  aliases: '别名',
-  api_endpoint: 'API Endpoint',
-  base_price_item_id: '基准价格项',
-  billing_unit: '计费单位',
-  capabilities: '能力',
-  channel_id: '渠道',
-  code: '编码',
-  comparison_status: '价格对比状态',
-  context_window: '上下文窗口',
-  currency: '币种',
-  custom_audio_input_price_per_second: '自定义音频输入价',
-  custom_audio_output_price_per_second: '自定义音频输出价',
-  custom_input_price_per_million: '自定义输入价',
-  custom_output_price_per_million: '自定义输出价',
-  custom_video_input_price_per_second: '自定义视频输入价',
-  custom_video_output_price_per_second: '自定义视频输出价',
-  custom_video_resolution_prices: '自定义视频分辨率价格',
-  delta_amount: '价差金额',
-  delta_percent: '价差比例',
-  dimension: '计费维度',
-  endpoint_url: '端点 URL',
-  family: '模型族',
-  fee_rate: '费率',
-  is_active: '启用状态',
-  is_current: '当前版本',
-  is_enabled: '采集状态',
-  is_listed: '渠道上架状态',
-  latency_ms: '延迟',
-  max_output_tokens: '最大输出 Token',
-  meta_model_id: '元模型',
-  metadata: '扩展信息',
-  modality: '模态',
-  model_id: '模型',
-  name: '名称',
-  notes: '备注',
-  platform_id: '平台',
-  point_name: '点数名称',
-  point_rounding_mode: '点数取整',
-  points_per_currency_unit: '点数换算',
-  price_fingerprint: '价格指纹',
-  price_source_id: '价格来源',
-  price_source_type: '价格来源类型',
-  provider_id: '厂商',
-  publish_status: '发布状态',
-  reason: '原因',
-  retail_audio_input_price_per_second: '零售音频输入价',
-  retail_audio_output_price_per_second: '零售音频输出价',
-  retail_cache_input_price_per_million: '零售缓存输入价',
-  retail_image_output_price_per_image: '零售图片输出价',
-  retail_input_price_per_million: '零售输入价',
-  retail_output_price_per_million: '零售输出价',
-  retail_video_input_price_per_second: '零售视频输入价',
-  retail_video_output_price_per_second: '零售视频输出价',
-  retail_video_resolution_prices: '零售视频分辨率价格',
-  rpm_limit: 'RPM 限制',
-  service_fee_rate: '服务费率',
-  settlement_ratio: '结算比例',
-  source_category: '价格源分类',
-  source_id: '价格源',
-  source_type: '价格源类型',
-  source_url: '来源 URL',
-  spec: '规格',
-  status: '状态',
-  tier_end: '阶梯结束',
-  tier_start: '阶梯起始',
-  tier_type: '阶梯类型',
-  tpm_limit: 'TPM 限制',
-  unit_price: '单价',
-  updates_model_prices: '更新模型价格',
-  website: '官网',
-  workflow_status: '流程状态'
+const fieldLabelKeys = {
+  aliases: 'aliases',
+  api_endpoint: 'apiEndpoint',
+  base_price_item_id: 'basePriceItem',
+  billing_unit: 'billingUnit',
+  capabilities: 'capabilities',
+  channel_id: 'channel',
+  code: 'code',
+  comparison_status: 'comparisonStatus',
+  context_window: 'contextWindow',
+  currency: 'currency',
+  custom_audio_input_price_per_second: 'customAudioInput',
+  custom_audio_output_price_per_second: 'customAudioOutput',
+  custom_input_price_per_million: 'customInput',
+  custom_output_price_per_million: 'customOutput',
+  custom_video_input_price_per_second: 'customVideoInput',
+  custom_video_output_price_per_second: 'customVideoOutput',
+  custom_video_resolution_prices: 'customVideoResolution',
+  delta_amount: 'deltaAmount',
+  delta_percent: 'deltaPercent',
+  dimension: 'dimension',
+  endpoint_url: 'endpointUrl',
+  family: 'family',
+  fee_rate: 'feeRate',
+  is_active: 'isActive',
+  is_current: 'isCurrent',
+  is_enabled: 'isEnabled',
+  is_listed: 'isListed',
+  latency_ms: 'latency',
+  max_output_tokens: 'maxOutputTokens',
+  meta_model_id: 'metaModel',
+  metadata: 'metadata',
+  modality: 'modality',
+  model_id: 'model',
+  name: 'name',
+  notes: 'notes',
+  platform_id: 'platform',
+  point_name: 'pointName',
+  point_rounding_mode: 'pointRoundingMode',
+  points_per_currency_unit: 'pointsPerCurrencyUnit',
+  price_fingerprint: 'priceFingerprint',
+  price_source_id: 'priceSource',
+  price_source_type: 'priceSourceType',
+  provider_id: 'provider',
+  publish_status: 'publishStatus',
+  reason: 'reason',
+  retail_audio_input_price_per_second: 'retailAudioInput',
+  retail_audio_output_price_per_second: 'retailAudioOutput',
+  retail_cache_input_price_per_million: 'retailCacheInput',
+  retail_image_output_price_per_image: 'retailImageOutput',
+  retail_input_price_per_million: 'retailInput',
+  retail_output_price_per_million: 'retailOutput',
+  retail_video_input_price_per_second: 'retailVideoInput',
+  retail_video_output_price_per_second: 'retailVideoOutput',
+  retail_video_resolution_prices: 'retailVideoResolution',
+  rpm_limit: 'rpmLimit',
+  service_fee_rate: 'serviceFeeRate',
+  settlement_ratio: 'settlementRatio',
+  source_category: 'sourceCategory',
+  source_id: 'priceSource',
+  source_type: 'sourceType',
+  source_url: 'sourceUrl',
+  spec: 'spec',
+  status: 'status',
+  tier_end: 'tierEnd',
+  tier_start: 'tierStart',
+  tier_type: 'tierType',
+  tpm_limit: 'tpmLimit',
+  unit_price: 'unitPrice',
+  updates_model_prices: 'updatesModelPrices',
+  website: 'website',
+  workflow_status: 'workflowStatus'
 }
 
-const valueLabelsByField = {
+const valueLabelKeysByField = {
   comparison_status: {
-    above_official: '高于上游价',
-    below_official: '低于上游价',
-    same_as_official: '等于上游价',
-    unknown: '待判断'
+    above_official: 'aboveOfficial',
+    below_official: 'belowOfficial',
+    same_as_official: 'sameAsOfficial',
+    unknown: 'unknown'
   },
   publish_status: {
-    deleted: '已删除',
-    none: '未发布',
-    offline: '已下架',
-    online: '已发布'
+    deleted: 'deleted',
+    none: 'none',
+    offline: 'offline',
+    online: 'online'
   },
   status: {
-    active: '启用',
-    draft: '草稿',
-    failed: '失败',
-    inactive: '停用',
-    matched: '已匹配',
-    mismatch: '不一致',
-    pending: '待处理',
-    retired: '停用',
-    unmatched: '未匹配'
+    active: 'active',
+    draft: 'draft',
+    failed: 'failed',
+    inactive: 'inactive',
+    matched: 'matched',
+    mismatch: 'mismatch',
+    pending: 'pending',
+    retired: 'retired',
+    unmatched: 'unmatched'
   },
   workflow_status: {
-    deleted: '已失效',
-    draft: '草稿',
-    offline: '已下架',
-    offline_exception: '下架异常',
-    online: '已上架',
-    pending_offline: '待下架',
-    pending_publish: '待发布',
-    pending_update: '待更新',
-    update_draft: '更新草稿'
+    deleted: 'deleted',
+    draft: 'draft',
+    offline: 'offline',
+    offline_exception: 'offlineException',
+    online: 'online',
+    pending_offline: 'pendingOffline',
+    pending_publish: 'pendingPublish',
+    pending_update: 'pendingUpdate',
+    update_draft: 'updateDraft'
   }
 }
 
@@ -527,10 +584,14 @@ const totalPages = computed(() =>
 )
 
 const pageRangeLabel = computed(() => {
-  if (!totalCount.value) return '0 条记录'
+  if (!totalCount.value) return t('llmOps.auditLog.pagination.emptyRange')
   const start = (page.value - 1) * pageSizeNumber.value + 1
   const end = Math.min(page.value * pageSizeNumber.value, totalCount.value)
-  return `${start}-${end} / ${totalCount.value} 条记录`
+  return t('llmOps.auditLog.pagination.range', {
+    count: totalCount.value,
+    end,
+    start
+  })
 })
 
 watch(
@@ -584,7 +645,7 @@ async function loadAuditLogs() {
       error?.response?.data?.detail ||
       error?.response?.data?.message ||
       error?.message ||
-      '操作记录加载失败'
+      t('llmOps.auditLog.errors.loadFailed')
   } finally {
     loading.value = false
   }
@@ -612,7 +673,8 @@ function actorLabel(row) {
 }
 
 function targetTypeLabel(value) {
-  return targetTypeLabels[value] || value || '-'
+  const key = targetTypeKeys[value]
+  return key ? t(`llmOps.auditLog.targetTypes.${key}`) : value || '-'
 }
 
 function platformLabel(row) {
@@ -628,7 +690,7 @@ function instanceLabel(row) {
 function channelModelLabel(row) {
   const channel = channelName(row)
   if (!channel || channel === '-') return ''
-  return `渠道：${channel}`
+  return t('llmOps.auditLog.channelPrefix', { name: channel })
 }
 
 function channelName(row) {
@@ -636,7 +698,7 @@ function channelName(row) {
   if (!channelId) return '-'
   return (
     props.channels.find((channel) => String(channel.id) === String(channelId))
-      ?.name || `渠道 #${channelId}`
+      ?.name || t('llmOps.auditLog.channelFallback', { id: channelId })
   )
 }
 
@@ -672,11 +734,10 @@ function splitTargetRepr(value) {
 }
 
 function auditBusinessCategoryLabel(targetType) {
-  return (
-    auditBusinessCategoryLabels[targetType] ||
-    targetTypeLabel(targetType) ||
-    '-'
-  )
+  const key = auditBusinessCategoryKeys[targetType]
+  return key
+    ? t(`llmOps.auditLog.businessCategories.${key}`)
+    : targetTypeLabel(targetType) || '-'
 }
 
 function auditBusinessCategoryTone(targetType) {
@@ -721,37 +782,73 @@ function changeItems(row) {
 }
 
 function fieldLabel(key) {
-  return fieldLabels[key] || key
+  const labelKey = fieldLabelKeys[key]
+  return labelKey ? t(`llmOps.auditLog.fields.${labelKey}`) : key
 }
 
 function formatChangeValue(key, value) {
-  if (Object.prototype.hasOwnProperty.call(valueLabelsByField, key)) {
+  if (Object.prototype.hasOwnProperty.call(valueLabelKeysByField, key)) {
     const normalized = compactValue(value)
-    return valueLabelsByField[key][normalized] || normalized
+    const labelKey = valueLabelKeysByField[key][normalized]
+    return labelKey
+      ? t(`llmOps.auditLog.values.${key}.${labelKey}`)
+      : normalized
   }
   return compactValue(value)
 }
 
 function compactValue(value) {
   if (value === null || value === undefined || value === '') return '-'
-  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (typeof value === 'boolean') {
+    return value
+      ? t('llmOps.auditLog.values.boolean.yes')
+      : t('llmOps.auditLog.values.boolean.no')
+  }
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
 }
 
 function statusValueClass(value) {
-  if (['停用', '已删除', '已失效', '已下架', '否'].includes(value)) {
+  const mutedValues = [
+    t('llmOps.auditLog.values.boolean.no'),
+    t('llmOps.auditLog.values.publish_status.deleted'),
+    t('llmOps.auditLog.values.publish_status.offline'),
+    t('llmOps.auditLog.values.status.inactive'),
+    t('llmOps.auditLog.values.status.retired'),
+    t('llmOps.auditLog.values.workflow_status.deleted'),
+    t('llmOps.auditLog.values.workflow_status.offline')
+  ]
+  const dangerValues = [
+    t('llmOps.auditLog.values.status.failed'),
+    t('llmOps.auditLog.values.status.mismatch'),
+    t('llmOps.auditLog.values.workflow_status.offlineException')
+  ]
+  const warnValues = [
+    t('llmOps.auditLog.values.status.draft'),
+    t('llmOps.auditLog.values.status.pending'),
+    t('llmOps.auditLog.values.workflow_status.draft'),
+    t('llmOps.auditLog.values.workflow_status.pendingOffline'),
+    t('llmOps.auditLog.values.workflow_status.pendingPublish'),
+    t('llmOps.auditLog.values.workflow_status.pendingUpdate'),
+    t('llmOps.auditLog.values.workflow_status.updateDraft')
+  ]
+  const successValues = [
+    t('llmOps.auditLog.values.boolean.yes'),
+    t('llmOps.auditLog.values.publish_status.online'),
+    t('llmOps.auditLog.values.status.active'),
+    t('llmOps.auditLog.values.status.matched'),
+    t('llmOps.auditLog.values.workflow_status.online')
+  ]
+  if (mutedValues.includes(value)) {
     return 'audit-status-value tone-muted'
   }
-  if (['失败', '不一致', '下架异常'].includes(value)) {
+  if (dangerValues.includes(value)) {
     return 'audit-status-value tone-danger'
   }
-  if (
-    ['待发布', '待更新', '待下架', '待处理', '草稿', '更新草稿'].includes(value)
-  ) {
+  if (warnValues.includes(value)) {
     return 'audit-status-value tone-warn'
   }
-  if (['启用', '已上架', '已发布', '已匹配', '是'].includes(value)) {
+  if (successValues.includes(value)) {
     return 'audit-status-value tone-success'
   }
   return 'audit-status-value tone-info'

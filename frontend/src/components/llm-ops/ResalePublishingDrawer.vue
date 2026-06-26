@@ -40,7 +40,9 @@
                       clip-rule="evenodd"
                     />
                   </svg>
-                  <span class="sr-only">返回</span>
+                  <span class="sr-only">
+                    {{ t('llmOps.publishingDrawer.back') }}
+                  </span>
                 </button>
                 <div class="min-w-0 flex-1">
                   <p
@@ -51,7 +53,7 @@
                   <h2
                     class="mt-0.5 truncate text-base font-bold text-slate-900"
                   >
-                    模型沉浸式上架工作台
+                    {{ t('llmOps.publishingDrawer.title') }}
                   </h2>
                 </div>
               </div>
@@ -62,7 +64,7 @@
                   :disabled="!canDraft || saving"
                   @click="handleSaveDraft"
                 >
-                  保存草稿
+                  {{ t('llmOps.publishingDrawer.saveDraft') }}
                 </button>
                 <button
                   type="button"
@@ -70,7 +72,11 @@
                   :disabled="!canPublish || saving"
                   @click="handlePublish"
                 >
-                  {{ saving ? '提交中…' : '提交上架' }}
+                  {{
+                    saving
+                      ? t('llmOps.publishingDrawer.submitting')
+                      : t('llmOps.publishingDrawer.submit')
+                  }}
                 </button>
               </div>
             </header>
@@ -105,6 +111,8 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import ResalePublishingWorkspace from '@/components/llm-ops/ResalePublishingWorkspace.vue'
 import { useToast } from '@/composables/useToast'
 
@@ -172,6 +180,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:open', 'saved', 'draft'])
+const { t } = useI18n()
 const { showError } = useToast()
 
 const workspaceRef = ref(null)
@@ -218,7 +227,7 @@ async function handleSaveDraft() {
     emit('draft', latestPayload.value)
     tryClose()
   } catch (error) {
-    showError(error?.message || '保存失败')
+    showError(error?.message || t('llmOps.publishingDrawer.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -231,7 +240,7 @@ async function handlePublish() {
     emit('saved', latestPayload.value)
     tryClose()
   } catch (error) {
-    showError(error?.message || '提交失败')
+    showError(error?.message || t('llmOps.publishingDrawer.submitFailed'))
   } finally {
     saving.value = false
   }

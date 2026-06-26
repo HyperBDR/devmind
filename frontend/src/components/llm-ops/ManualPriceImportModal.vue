@@ -9,10 +9,10 @@
         <div>
           <p class="eyebrow">Manual Price Source</p>
           <h3 class="mt-1 text-lg font-semibold text-slate-900">
-            导入人工价格表
+            {{ t('llmOps.manualPriceImport.title') }}
           </h3>
           <p class="mt-1 text-xs leading-5 text-slate-500">
-            适合无法自动采集的模型价格源，可从 Excel 复制整张表后粘贴。
+            {{ t('llmOps.manualPriceImport.description') }}
           </p>
         </div>
         <button
@@ -20,34 +20,46 @@
           type="button"
           @click="close"
         >
-          关闭
+          {{ t('llmOps.manualPriceImport.actions.close') }}
         </button>
       </div>
 
       <div class="modal-body space-y-4">
         <div class="grid gap-3 md:grid-cols-2">
           <label class="form-field">
-            <span class="field-label">模型厂商</span>
+            <span class="field-label">
+              {{ t('llmOps.manualPriceImport.fields.provider') }}
+            </span>
             <CompactSelect v-model="form.provider" :options="providerOptions" />
           </label>
           <label class="form-field">
-            <span class="field-label">默认币种</span>
+            <span class="field-label">
+              {{ t('llmOps.manualPriceImport.fields.currency') }}
+            </span>
             <CompactSelect v-model="form.currency" :options="currencyOptions" />
           </label>
           <label class="form-field">
-            <span class="field-label">模型价格源名称</span>
+            <span class="field-label">
+              {{ t('llmOps.manualPriceImport.fields.sourceName') }}
+            </span>
             <input
               v-model="form.source_name"
               class="field"
-              placeholder="例如 OpenAI 2026-06 手动价格表"
+              :placeholder="
+                t('llmOps.manualPriceImport.placeholders.sourceName')
+              "
             />
           </label>
           <label class="form-field">
-            <span class="field-label">模型价格源地址</span>
+            <span class="field-label">
+              {{ t('llmOps.manualPriceImport.fields.sourceUrl') }}
+            </span>
             <input
               v-model="form.source_url"
               class="field"
-              placeholder="可选，官网或内部表格链接"
+              :placeholder="
+                t('llmOps.manualPriceImport.placeholders.sourceUrl')
+              "
             />
           </label>
         </div>
@@ -59,15 +71,16 @@
             type="checkbox"
           />
           <span>
-            导入后同步更新模型价格源价格。关闭后只生成模型价格源和标准价格项，
-            不覆盖模型主数据价格。
+            {{ t('llmOps.manualPriceImport.updateModelPrices') }}
           </span>
         </label>
 
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
             <div class="min-w-0 flex-1">
-              <label class="field-label">Excel / CSV 内容</label>
+              <label class="field-label">
+                {{ t('llmOps.manualPriceImport.fields.tableContent') }}
+              </label>
               <textarea
                 v-model="rawTable"
                 class="table-input"
@@ -76,7 +89,9 @@
               />
             </div>
             <div class="example-box">
-              <p class="text-xs font-semibold text-slate-700">支持字段</p>
+              <p class="text-xs font-semibold text-slate-700">
+                {{ t('llmOps.manualPriceImport.supportedFieldsTitle') }}
+              </p>
               <p class="mt-2 text-xs leading-5 text-slate-500">
                 model_code、model_name、modality、currency、source_url、
                 input_price_per_million、output_price_per_million、
@@ -91,14 +106,24 @@
         <div class="preview-panel">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p class="text-sm font-semibold text-slate-900">解析预览</p>
+              <p class="text-sm font-semibold text-slate-900">
+                {{ t('llmOps.manualPriceImport.preview.title') }}
+              </p>
               <p class="mt-1 text-xs text-slate-500">
-                有效 {{ parsedRows.length }} 行，错误
-                {{ parseErrors.length }} 条
+                {{
+                  t('llmOps.manualPriceImport.preview.summary', {
+                    valid: parsedRows.length,
+                    errors: parseErrors.length
+                  })
+                }}
               </p>
             </div>
             <span :class="parseErrors.length ? 'badge-warn' : 'badge-ok'">
-              {{ parseErrors.length ? '需要修正' : '可导入' }}
+              {{
+                parseErrors.length
+                  ? t('llmOps.manualPriceImport.preview.needsFix')
+                  : t('llmOps.manualPriceImport.preview.ready')
+              }}
             </span>
           </div>
 
@@ -116,14 +141,24 @@
             <table class="preview-table">
               <thead>
                 <tr>
-                  <th>模型</th>
-                  <th>类型</th>
-                  <th>币种</th>
-                  <th class="text-right">输入</th>
-                  <th class="text-right">输出</th>
-                  <th class="text-right">图片</th>
-                  <th class="text-right">音频</th>
-                  <th class="text-right">视频</th>
+                  <th>{{ t('llmOps.manualPriceImport.table.model') }}</th>
+                  <th>{{ t('llmOps.manualPriceImport.table.type') }}</th>
+                  <th>{{ t('llmOps.manualPriceImport.table.currency') }}</th>
+                  <th class="text-right">
+                    {{ t('llmOps.manualPriceImport.table.input') }}
+                  </th>
+                  <th class="text-right">
+                    {{ t('llmOps.manualPriceImport.table.output') }}
+                  </th>
+                  <th class="text-right">
+                    {{ t('llmOps.manualPriceImport.table.image') }}
+                  </th>
+                  <th class="text-right">
+                    {{ t('llmOps.manualPriceImport.table.audio') }}
+                  </th>
+                  <th class="text-right">
+                    {{ t('llmOps.manualPriceImport.table.video') }}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -166,7 +201,7 @@
                 </tr>
                 <tr v-if="!parsedRows.length">
                   <td class="py-6 text-center text-slate-400" colspan="8">
-                    粘贴带表头的价格表后会显示预览。
+                    {{ t('llmOps.manualPriceImport.emptyPreview') }}
                   </td>
                 </tr>
               </tbody>
@@ -182,7 +217,7 @@
             type="button"
             @click="close"
           >
-            取消
+            {{ t('llmOps.manualPriceImport.actions.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-import"
@@ -191,7 +226,11 @@
             @click="submit"
           >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
-            {{ saving ? '导入中' : '确认导入' }}
+            {{
+              saving
+                ? t('llmOps.manualPriceImport.actions.importing')
+                : t('llmOps.manualPriceImport.actions.confirmImport')
+            }}
           </button>
         </div>
       </div>
@@ -201,6 +240,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
@@ -216,6 +256,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'imported'])
+const { t } = useI18n()
 
 const rawTable = ref('')
 const saving = ref(false)
@@ -227,7 +268,10 @@ const currencyOptions = [
 ]
 
 const providerOptions = computed(() => [
-  { label: '选择模型归属方', value: '' },
+  {
+    label: t('llmOps.manualPriceImport.placeholders.selectProvider'),
+    value: ''
+  },
   ...props.providers
     .slice()
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -292,13 +336,16 @@ function parseTable(value) {
   if (!text) return { rows: [], errors: [] }
   const lines = text.split(/\r?\n/).filter((line) => line.trim())
   if (lines.length < 2) {
-    return { rows: [], errors: ['至少需要表头和一行数据。'] }
+    return {
+      rows: [],
+      errors: [t('llmOps.manualPriceImport.parseErrors.needHeaderAndRow')]
+    }
   }
   const delimiter = lines[0].includes('\t') ? '\t' : ','
   const headers = splitLine(lines[0], delimiter).map(normalizeHeader)
   const errors = []
   if (!headers.includes('model_code')) {
-    errors.push('缺少必填表头：model_code。')
+    errors.push(t('llmOps.manualPriceImport.parseErrors.missingModelCode'))
   }
   const rows = lines.slice(1).map((line, index) => {
     const cells = splitLine(line, delimiter)
@@ -340,18 +387,18 @@ function normalizeHeader(header) {
   const aliases = {
     code: 'model_code',
     model: 'model_code',
-    模型编码: 'model_code',
-    模型名称: 'model_name',
-    类型: 'modality',
-    币种: 'currency',
-    输入价格: 'input_price_per_million',
-    输出价格: 'output_price_per_million',
-    图片输出: 'image_output_price_per_image',
-    音频输入: 'audio_input_price_per_second',
-    音频输出: 'audio_output_price_per_second',
-    视频输入: 'video_input_price_per_second',
-    视频输出: 'video_output_price_per_second',
-    来源地址: 'source_url'
+    '\u6a21\u578b\u7f16\u7801': 'model_code',
+    '\u6a21\u578b\u540d\u79f0': 'model_name',
+    '\u7c7b\u578b': 'modality',
+    '\u5e01\u79cd': 'currency',
+    '\u8f93\u5165\u4ef7\u683c': 'input_price_per_million',
+    '\u8f93\u51fa\u4ef7\u683c': 'output_price_per_million',
+    '\u56fe\u7247\u8f93\u51fa': 'image_output_price_per_image',
+    '\u97f3\u9891\u8f93\u5165': 'audio_input_price_per_second',
+    '\u97f3\u9891\u8f93\u51fa': 'audio_output_price_per_second',
+    '\u89c6\u9891\u8f93\u5165': 'video_input_price_per_second',
+    '\u89c6\u9891\u8f93\u51fa': 'video_output_price_per_second',
+    '\u6765\u6e90\u5730\u5740': 'source_url'
   }
   const normalized = String(header || '').trim()
   return aliases[normalized] || normalized
@@ -359,7 +406,11 @@ function normalizeHeader(header) {
 
 function normalizeRow(row, lineNumber, errors) {
   if (!row.model_code) {
-    errors.push(`第 ${lineNumber} 行缺少 model_code。`)
+    errors.push(
+      t('llmOps.manualPriceImport.parseErrors.rowMissingModelCode', {
+        line: lineNumber
+      })
+    )
     return null
   }
   const next = {
@@ -385,18 +436,31 @@ function normalizeRow(row, lineNumber, errors) {
     }
     const value = Number(next[field])
     if (!Number.isFinite(value) || value < 0) {
-      errors.push(`第 ${lineNumber} 行 ${field} 不是有效的非负数字。`)
+      errors.push(
+        t('llmOps.manualPriceImport.parseErrors.invalidNumber', {
+          line: lineNumber,
+          field
+        })
+      )
       return
     }
     next[field] = String(value)
     hasPrice = true
   })
   if (!hasPrice) {
-    errors.push(`第 ${lineNumber} 行至少需要一个价格字段。`)
+    errors.push(
+      t('llmOps.manualPriceImport.parseErrors.noPrice', {
+        line: lineNumber
+      })
+    )
     return null
   }
   if (next.currency && !['USD', 'CNY'].includes(next.currency)) {
-    errors.push(`第 ${lineNumber} 行币种只支持 USD 或 CNY。`)
+    errors.push(
+      t('llmOps.manualPriceImport.parseErrors.unsupportedCurrency', {
+        line: lineNumber
+      })
+    )
     return null
   }
   return next
@@ -407,14 +471,14 @@ function normalizeModality(value) {
     .trim()
     .toLowerCase()
   const labels = {
-    文本: 'text',
+    '\u6587\u672c': 'text',
     text: 'text',
-    图片: 'multimodal',
-    多模态: 'multimodal',
+    '\u56fe\u7247': 'multimodal',
+    '\u591a\u6a21\u6001': 'multimodal',
     multimodal: 'multimodal',
-    音频: 'audio',
+    '\u97f3\u9891': 'audio',
     audio: 'audio',
-    视频: 'video',
+    '\u89c6\u9891': 'video',
     video: 'video'
   }
   return labels[text] || 'text'
@@ -444,12 +508,12 @@ function compactPair(input, output) {
 
 function modalityLabel(value) {
   const labels = {
-    text: '文本',
-    multimodal: '多模态',
-    audio: '音频',
-    video: '视频'
+    text: t('llmOps.manualPriceImport.modalities.text'),
+    multimodal: t('llmOps.manualPriceImport.modalities.multimodal'),
+    audio: t('llmOps.manualPriceImport.modalities.audio'),
+    video: t('llmOps.manualPriceImport.modalities.video')
   }
-  return labels[value] || value || '文本'
+  return labels[value] || value || labels.text
 }
 </script>
 

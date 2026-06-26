@@ -12,10 +12,10 @@
         <div class="min-w-0">
           <p class="eyebrow">Manual Price Entry</p>
           <h3 class="mt-2 text-lg font-semibold text-slate-900">
-            录入模型价格
+            {{ t('llmOps.manualPriceEntry.title') }}
           </h3>
           <p class="mt-1 text-sm text-slate-500">
-            为当前价格源维护一条模型价格。优先选择已有原厂模型，确实不存在时可新增自定义模型。
+            {{ t('llmOps.manualPriceEntry.description') }}
           </p>
         </div>
         <button
@@ -24,7 +24,7 @@
           :disabled="saving"
           @click="close"
         >
-          关闭
+          {{ t('llmOps.manualPriceEntry.actions.close') }}
         </button>
       </div>
 
@@ -35,7 +35,12 @@
               {{ source?.name || '-' }}
             </p>
             <p class="mt-1 truncate text-xs text-slate-500">
-              {{ sourceRelationLabel }} · 默认币种 {{ form.currency }}
+              {{
+                t('llmOps.manualPriceEntry.sourceContext', {
+                  relation: sourceRelationLabel,
+                  currency: form.currency
+                })
+              }}
             </p>
           </div>
           <span :class="['source-badge', sourceCategoryTone]">
@@ -45,8 +50,8 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>选择模型</h4>
-            <p>渠道和挂售后续会基于这个模型和价格源计算成本。</p>
+            <h4>{{ t('llmOps.manualPriceEntry.sections.model') }}</h4>
+            <p>{{ t('llmOps.manualPriceEntry.sections.modelHint') }}</p>
           </div>
 
           <div class="mode-tabs">
@@ -56,7 +61,7 @@
               type="button"
               @click="modelMode = 'existing'"
             >
-              选择已有模型
+              {{ t('llmOps.manualPriceEntry.modelMode.existing') }}
             </button>
             <button
               class="mode-tab"
@@ -64,7 +69,7 @@
               type="button"
               @click="modelMode = 'custom'"
             >
-              新建自定义模型
+              {{ t('llmOps.manualPriceEntry.modelMode.custom') }}
             </button>
           </div>
 
@@ -73,55 +78,73 @@
             class="grid gap-4 md:grid-cols-2"
           >
             <label class="field-group md:col-span-2">
-              <span class="field-label">模型</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.model') }}
+              </span>
               <CompactSelect
                 v-model="form.model_id"
                 :options="modelOptions"
                 searchable
-                search-placeholder="搜索模型名称、编码或厂商"
+                :search-placeholder="
+                  t('llmOps.manualPriceEntry.placeholders.searchModel')
+                "
               />
               <span class="field-help">
-                只从当前系统已有模型中选择，选择后会自动带入模型厂商和类型。
+                {{ t('llmOps.manualPriceEntry.help.existingModel') }}
               </span>
             </label>
             <div class="readonly-field">
-              <span>模型厂商</span>
+              <span>{{ t('llmOps.manualPriceEntry.fields.provider') }}</span>
               <strong>{{ selectedModel?.provider_name || '-' }}</strong>
             </div>
             <div class="readonly-field">
-              <span>模型类型</span>
+              <span>{{ t('llmOps.manualPriceEntry.fields.modality') }}</span>
               <strong>{{ modalityLabel(selectedModel?.modality) }}</strong>
             </div>
           </div>
 
           <div v-else class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">模型名称</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.modelName') }}
+              </span>
               <input
                 v-model="form.custom_model_name"
                 class="field"
-                placeholder="例如 DeepSeek V3"
+                :placeholder="
+                  t('llmOps.manualPriceEntry.placeholders.modelName')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模型编码</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.modelCode') }}
+              </span>
               <input
                 v-model="form.custom_model_code"
                 class="field"
-                placeholder="例如 deepseek-v3"
+                :placeholder="
+                  t('llmOps.manualPriceEntry.placeholders.modelCode')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模型厂商</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.provider') }}
+              </span>
               <CompactSelect
                 v-model="form.provider"
                 :options="providerOptions"
                 searchable
-                search-placeholder="搜索模型厂商"
+                :search-placeholder="
+                  t('llmOps.manualPriceEntry.placeholders.searchProvider')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模型类型</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.modality') }}
+              </span>
               <CompactSelect
                 v-model="form.modality"
                 :options="modalityOptions"
@@ -132,24 +155,30 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>价格明细</h4>
-            <p>按模型支持的计费维度填写；未填写的维度不会生成价格项。</p>
+            <h4>{{ t('llmOps.manualPriceEntry.sections.price') }}</h4>
+            <p>{{ t('llmOps.manualPriceEntry.sections.priceHint') }}</p>
           </div>
 
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group compact-field">
-              <span class="field-label">币种</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.currency') }}
+              </span>
               <CompactSelect
                 v-model="form.currency"
                 :options="currencyOptions"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">来源地址</span>
+              <span class="field-label">
+                {{ t('llmOps.manualPriceEntry.fields.sourceUrl') }}
+              </span>
               <input
                 v-model="form.source_url"
                 class="field"
-                placeholder="可选，价格页或报价单链接"
+                :placeholder="
+                  t('llmOps.manualPriceEntry.placeholders.sourceUrl')
+                "
                 type="url"
               />
             </label>
@@ -189,7 +218,7 @@
             :disabled="saving"
             @click="close"
           >
-            取消
+            {{ t('llmOps.manualPriceEntry.actions.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-save"
@@ -197,7 +226,11 @@
             :disabled="saving"
           >
             <span class="save-icon" aria-hidden="true" />
-            {{ saving ? '保存中' : '保存价格' }}
+            {{
+              saving
+                ? t('llmOps.manualPriceEntry.actions.saving')
+                : t('llmOps.manualPriceEntry.actions.save')
+            }}
           </button>
         </div>
       </div>
@@ -207,6 +240,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -232,76 +266,83 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'saved'])
 const { showSuccess, showError } = useToast()
+const { t } = useI18n()
 
 const saving = ref(false)
 const modelMode = ref('existing')
 const form = ref(defaults())
 
-const priceFields = [
+const priceFields = computed(() => [
   {
     key: 'input_price_per_million',
-    label: '文本输入 / 百万 token',
-    help: 'Prompt 或输入 token 单价',
+    label: t('llmOps.manualPriceEntry.priceFields.textInput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.textInput.help'),
     modalities: ['text', 'multimodal']
   },
   {
     key: 'output_price_per_million',
-    label: '文本输出 / 百万 token',
-    help: 'Completion 或输出 token 单价',
+    label: t('llmOps.manualPriceEntry.priceFields.textOutput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.textOutput.help'),
     modalities: ['text', 'multimodal']
   },
   {
     key: 'cache_input_price_per_million',
-    label: '缓存输入 / 百万 token',
-    help: '可选，命中缓存后的输入价格',
+    label: t('llmOps.manualPriceEntry.priceFields.cacheInput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.cacheInput.help'),
     modalities: ['text', 'multimodal']
   },
   {
     key: 'image_output_price_per_image',
-    label: '图片输出 / 张',
-    help: '图片生成模型按张计价',
+    label: t('llmOps.manualPriceEntry.priceFields.imageOutput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.imageOutput.help'),
     modalities: ['multimodal']
   },
   {
     key: 'audio_input_price_per_second',
-    label: '音频输入 / 秒',
-    help: '语音识别或音频理解输入',
+    label: t('llmOps.manualPriceEntry.priceFields.audioInput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.audioInput.help'),
     modalities: ['audio']
   },
   {
     key: 'audio_output_price_per_second',
-    label: '音频输出 / 秒',
-    help: '语音合成或音频生成输出',
+    label: t('llmOps.manualPriceEntry.priceFields.audioOutput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.audioOutput.help'),
     modalities: ['audio']
   },
   {
     key: 'video_input_price_per_second',
-    label: '视频输入 / 秒',
-    help: '视频理解输入',
+    label: t('llmOps.manualPriceEntry.priceFields.videoInput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.videoInput.help'),
     modalities: ['video']
   },
   {
     key: 'video_output_price_per_second',
-    label: '视频输出 / 秒',
-    help: '视频生成输出',
+    label: t('llmOps.manualPriceEntry.priceFields.videoOutput.label'),
+    help: t('llmOps.manualPriceEntry.priceFields.videoOutput.help'),
     modalities: ['video']
   }
-]
+])
 
-const modalityOptions = [
-  { label: '文本', value: 'text' },
-  { label: '多模态', value: 'multimodal' },
-  { label: '音频', value: 'audio' },
-  { label: '视频', value: 'video' }
-]
+const modalityOptions = computed(() => [
+  { label: t('llmOps.manualPriceEntry.modalities.text'), value: 'text' },
+  {
+    label: t('llmOps.manualPriceEntry.modalities.multimodal'),
+    value: 'multimodal'
+  },
+  { label: t('llmOps.manualPriceEntry.modalities.audio'), value: 'audio' },
+  { label: t('llmOps.manualPriceEntry.modalities.video'), value: 'video' }
+])
 
-const currencyOptions = [
-  { label: '人民币 CNY', value: 'CNY' },
-  { label: '美元 USD', value: 'USD' }
-]
+const currencyOptions = computed(() => [
+  { label: t('llmOps.manualPriceEntry.currencies.cny'), value: 'CNY' },
+  { label: t('llmOps.manualPriceEntry.currencies.usd'), value: 'USD' }
+])
 
 const providerOptions = computed(() => [
-  { label: '选择模型厂商', value: '' },
+  {
+    label: t('llmOps.manualPriceEntry.placeholders.selectProvider'),
+    value: ''
+  },
   ...props.providers
     .slice()
     .sort((left, right) => left.name.localeCompare(right.name))
@@ -326,7 +367,7 @@ const currentPriceModality = computed(() => {
 })
 
 const activePriceFields = computed(() =>
-  priceFields.filter((field) =>
+  priceFields.value.filter((field) =>
     field.modalities.includes(currentPriceModality.value)
   )
 )
@@ -339,16 +380,16 @@ const selectedProvider = computed(() =>
 
 const sourceCategoryLabel = computed(() => {
   const labels = {
-    official_provider: '原厂',
-    supplier: '供货商',
-    manual: '人工',
-    unknown: '其他'
+    official_provider: t('llmOps.manualPriceEntry.categories.officialProvider'),
+    supplier: t('llmOps.manualPriceEntry.categories.supplier'),
+    manual: t('llmOps.manualPriceEntry.categories.manual'),
+    unknown: t('llmOps.manualPriceEntry.categories.unknown')
   }
   const category =
     props.source?.business_source_category ||
     props.source?.source_category ||
     'unknown'
-  return labels[category] || '其他'
+  return labels[category] || labels.unknown
 })
 
 const sourceCategoryTone = computed(() => {
@@ -365,23 +406,36 @@ const sourceCategoryTone = computed(() => {
 })
 
 const sourceRelationLabel = computed(() => {
-  if (props.source?.provider_name)
-    return `模型厂商 ${props.source.provider_name}`
-  if (props.source?.channel_name) return `转发渠道 ${props.source.channel_name}`
-  return '未绑定模型厂商'
+  if (props.source?.provider_name) {
+    return t('llmOps.manualPriceEntry.relation.provider', {
+      name: props.source.provider_name
+    })
+  }
+  if (props.source?.channel_name) {
+    return t('llmOps.manualPriceEntry.relation.channel', {
+      name: props.source.channel_name
+    })
+  }
+  return t('llmOps.manualPriceEntry.relation.unbound')
 })
 
 const validationMessage = computed(() => {
-  if (!props.source?.id) return '缺少价格源。'
+  if (!props.source?.id) return t('llmOps.manualPriceEntry.validation.noSource')
   if (modelMode.value === 'existing' && !selectedModel.value) {
-    return '请选择一个已有模型。'
+    return t('llmOps.manualPriceEntry.validation.selectExistingModel')
   }
   if (modelMode.value === 'custom') {
-    if (!form.value.custom_model_name.trim()) return '请填写自定义模型名称。'
-    if (!form.value.custom_model_code.trim()) return '请填写自定义模型编码。'
-    if (!selectedProvider.value) return '请选择自定义模型的模型厂商。'
+    if (!form.value.custom_model_name.trim()) {
+      return t('llmOps.manualPriceEntry.validation.customModelName')
+    }
+    if (!form.value.custom_model_code.trim()) {
+      return t('llmOps.manualPriceEntry.validation.customModelCode')
+    }
+    if (!selectedProvider.value) {
+      return t('llmOps.manualPriceEntry.validation.customModelProvider')
+    }
   }
-  if (!hasAnyPrice()) return '至少填写一个价格维度。'
+  if (!hasAnyPrice()) return t('llmOps.manualPriceEntry.validation.price')
   return ''
 })
 
@@ -451,10 +505,10 @@ async function submit() {
       updates_model_prices: Boolean(props.source.updates_model_prices),
       rows: [row]
     })
-    showSuccess('模型价格已保存')
+    showSuccess(t('llmOps.manualPriceEntry.messages.saved'))
     emit('saved')
   } catch (error) {
-    showError(errorMessage(error, '保存模型价格失败'))
+    showError(errorMessage(error, t('llmOps.manualPriceEntry.errors.save')))
   } finally {
     saving.value = false
   }
@@ -500,7 +554,7 @@ function hasAnyPrice() {
 
 function clearInactivePrices() {
   const activeKeys = new Set(activePriceFields.value.map((field) => field.key))
-  priceFields.forEach((field) => {
+  priceFields.value.forEach((field) => {
     if (!activeKeys.has(field.key)) {
       form.value[field.key] = ''
     }
@@ -526,9 +580,17 @@ function buildModelOptions() {
     return sortedModels.map(modelOption)
   }
   return [
-    { label: '当前价格源关联厂商', value: '__group_preferred', type: 'group' },
+    {
+      label: t('llmOps.manualPriceEntry.groups.currentProvider'),
+      value: '__group_preferred',
+      type: 'group'
+    },
     ...preferred.map(modelOption),
-    { label: '其他模型', value: '__group_others', type: 'group' },
+    {
+      label: t('llmOps.manualPriceEntry.groups.otherModels'),
+      value: '__group_others',
+      type: 'group'
+    },
     ...others.map(modelOption)
   ]
 }
@@ -537,7 +599,10 @@ function modelOption(model) {
   return {
     label: model.name || model.code,
     value: model.id,
-    description: `${model.provider_name || '未知厂商'} · ${model.code}`,
+    description: `${
+      model.provider_name ||
+      t('llmOps.manualPriceEntry.fallback.unknownProvider')
+    } · ${model.code}`,
     badge: modalityLabel(model.modality),
     searchText: [model.name, model.code, model.provider_name].join(' ')
   }
@@ -552,12 +617,12 @@ function normalizePrice(value) {
 
 function modalityLabel(value) {
   const labels = {
-    text: '文本',
-    multimodal: '多模态',
-    audio: '音频',
-    video: '视频'
+    text: t('llmOps.manualPriceEntry.modalities.text'),
+    multimodal: t('llmOps.manualPriceEntry.modalities.multimodal'),
+    audio: t('llmOps.manualPriceEntry.modalities.audio'),
+    video: t('llmOps.manualPriceEntry.modalities.video')
   }
-  return labels[value] || value || '文本'
+  return labels[value] || value || labels.text
 }
 
 function errorMessage(error, fallback) {

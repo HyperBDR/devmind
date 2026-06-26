@@ -3,9 +3,11 @@
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
         <div>
-          <h3 class="panel-title">转发渠道配置</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.channelManagement.title') }}
+          </h3>
           <p class="mt-1 text-xs text-slate-500">
-            维护渠道基础信息，并进入模型管理配置渠道上游、成本规则和转发能力。
+            {{ t('llmOps.channelManagement.description') }}
           </p>
         </div>
         <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -17,7 +19,7 @@
           <input
             v-model="searchKeyword"
             class="control-field sm:w-64"
-            placeholder="搜索渠道名称、标识或地址"
+            :placeholder="t('llmOps.channelManagement.searchPlaceholder')"
           />
           <button
             class="btn-primary toolbar-button btn-action-create"
@@ -37,7 +39,7 @@
               <path d="M12 5v14" />
               <path d="M5 12h14" />
             </svg>
-            新建渠道
+            {{ t('llmOps.channelManagement.createChannel') }}
           </button>
         </div>
       </div>
@@ -52,11 +54,21 @@
           </colgroup>
           <thead>
             <tr>
-              <th class="table-head">渠道</th>
-              <th class="table-head">默认配置</th>
-              <th class="table-head">模型管理</th>
-              <th class="table-head">状态</th>
-              <th class="table-head">操作</th>
+              <th class="table-head">
+                {{ t('llmOps.channelManagement.table.channel') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.channelManagement.table.defaultConfig') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.channelManagement.table.modelManagement') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.channelManagement.table.status') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.channelManagement.table.actions') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -81,15 +93,25 @@
                     target="_blank"
                     :title="channel.api_endpoint"
                   >
-                    已配置 API
+                    {{ t('llmOps.channelManagement.apiConfigured') }}
                   </a>
-                  <span v-else class="config-status-muted"> API 未配置 </span>
+                  <span v-else class="config-status-muted">
+                    {{ t('llmOps.channelManagement.apiNotConfigured') }}
+                  </span>
                   <div class="channel-config-chips">
                     <span class="config-chip">
-                      币种 {{ channel.currency || 'USD' }}
+                      {{
+                        t('llmOps.channelManagement.currency', {
+                          currency: channel.currency || 'USD'
+                        })
+                      }}
                     </span>
                     <span class="config-chip">
-                      折扣 {{ ratioLabel(channel.settlement_ratio) }}
+                      {{
+                        t('llmOps.channelManagement.discount', {
+                          ratio: ratioLabel(channel.settlement_ratio)
+                        })
+                      }}
                     </span>
                   </div>
                 </div>
@@ -98,36 +120,40 @@
                 <div class="channel-model-metrics">
                   <span class="model-metric-pill">
                     <strong>{{ channel.model_count }}</strong>
-                    <span>启用</span>
+                    <span>{{ t('llmOps.channelManagement.enabled') }}</span>
                   </span>
                   <span class="model-metric-pill">
                     <strong>{{ channel.configured_model_count }}</strong>
-                    <span>配置</span>
+                    <span>{{ t('llmOps.channelManagement.configured') }}</span>
                   </span>
                 </div>
               </td>
               <td class="table-cell">
                 <span :class="channel.is_active ? 'badge-ok' : 'badge-muted'">
-                  {{ channel.is_active ? '启用' : '停用' }}
+                  {{
+                    channel.is_active
+                      ? t('llmOps.channelManagement.status.active')
+                      : t('llmOps.channelManagement.status.inactive')
+                  }}
                 </span>
               </td>
               <td class="table-cell">
                 <div class="inline-flex items-center justify-center gap-2">
                   <OperationIconButton
                     icon="config"
-                    label="管理模型"
+                    :label="t('llmOps.channelManagement.actions.manageModels')"
                     tone="primary"
                     @click="selectedChannelForModels = channel"
                   />
                   <OperationIconButton
                     icon="edit"
-                    label="编辑"
+                    :label="t('llmOps.channelManagement.actions.edit')"
                     @click="openChannelModal(channel)"
                   />
                   <OperationIconButton
                     :disabled="deletingChannelId === channel.id"
                     icon="delete"
-                    label="删除"
+                    :label="t('llmOps.channelManagement.actions.delete')"
                     tone="danger"
                     @click="openDeleteConfirm(channel)"
                   />
@@ -136,7 +162,7 @@
             </tr>
             <tr v-if="!filteredChannelRows.length">
               <td class="table-cell text-slate-500" colspan="5">
-                暂无符合条件的渠道配置。
+                {{ t('llmOps.channelManagement.empty') }}
               </td>
             </tr>
           </tbody>
@@ -170,10 +196,11 @@
     >
       <div class="w-full max-w-md rounded-lg bg-white shadow-xl">
         <div class="border-b border-slate-200 px-5 py-4">
-          <h3 class="text-base font-semibold text-slate-900">删除转发渠道</h3>
+          <h3 class="text-base font-semibold text-slate-900">
+            {{ t('llmOps.channelManagement.deleteDialog.title') }}
+          </h3>
           <p class="mt-1 text-sm text-slate-500">
-            删除后，该渠道下的模型配置、采购价格项和对账记录会一并删除；
-            已上架记录会保留，但不再关联该渠道。
+            {{ t('llmOps.channelManagement.deleteDialog.description') }}
           </p>
         </div>
         <div class="space-y-3 px-5 py-4">
@@ -186,7 +213,7 @@
             </p>
           </div>
           <p class="text-sm text-slate-500">
-            请确认不再需要这个渠道及其模型关系后再删除。
+            {{ t('llmOps.channelManagement.deleteDialog.confirmation') }}
           </p>
         </div>
         <div
@@ -198,7 +225,7 @@
             :disabled="Boolean(deletingChannelId)"
             @click="closeDeleteConfirm"
           >
-            取消
+            {{ t('llmOps.channelManagement.actions.cancel') }}
           </button>
           <button
             class="btn-danger btn-action-danger"
@@ -206,7 +233,11 @@
             :disabled="Boolean(deletingChannelId)"
             @click="deleteChannel"
           >
-            {{ deletingChannelId ? '删除中' : '确认删除' }}
+            {{
+              deletingChannelId
+                ? t('llmOps.channelManagement.deleteDialog.deleting')
+                : t('llmOps.channelManagement.deleteDialog.confirmDelete')
+            }}
           </button>
         </div>
       </div>
@@ -216,6 +247,8 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import ChannelModelDrawer from '@/components/llm-ops/ChannelModelDrawer.vue'
@@ -259,6 +292,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['refresh'])
+const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const showChannelModal = ref(false)
@@ -269,11 +303,14 @@ const searchKeyword = ref('')
 const statusFilter = ref('all')
 const deletingChannelId = ref(null)
 
-const statusFilterOptions = [
-  { label: '全部状态', value: 'all' },
-  { label: '仅启用', value: 'active' },
-  { label: '仅停用', value: 'inactive' }
-]
+const statusFilterOptions = computed(() => [
+  { label: t('llmOps.channelManagement.filters.allStatus'), value: 'all' },
+  { label: t('llmOps.channelManagement.filters.activeOnly'), value: 'active' },
+  {
+    label: t('llmOps.channelManagement.filters.inactiveOnly'),
+    value: 'inactive'
+  }
+])
 
 const channelRows = computed(() =>
   props.channels.map((channel) => ({
@@ -332,14 +369,20 @@ async function deleteChannel() {
   deletingChannelId.value = deleteTarget.value.id
   try {
     await llmOpsApi.deleteChannel(deleteTarget.value.id)
-    showSuccess(`${deleteTarget.value.name} 已删除`)
+    showSuccess(
+      t('llmOps.channelManagement.messages.deleted', {
+        name: deleteTarget.value.name
+      })
+    )
     if (selectedChannelForModels.value?.id === deleteTarget.value.id) {
       selectedChannelForModels.value = null
     }
     deleteTarget.value = null
     emit('refresh')
   } catch (error) {
-    showError(errorMessage(error, '删除渠道失败'))
+    showError(
+      errorMessage(error, t('llmOps.channelManagement.messages.deleteFailed'))
+    )
   } finally {
     deletingChannelId.value = null
   }

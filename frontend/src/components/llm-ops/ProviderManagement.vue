@@ -19,10 +19,9 @@
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
         <div>
-          <h3 class="panel-title">供货商价格列表</h3>
-          <p class="mt-1 text-xs text-slate-500">
-            先看供货商与价格源列表，再进入抽屉查看该供货商下的元模型价格。
-          </p>
+          <h3 class="panel-title">
+            {{ t('llmOps.providerManagement.title') }}
+          </h3>
         </div>
         <div class="provider-toolbar-actions">
           <button
@@ -30,7 +29,7 @@
             type="button"
             @click="showManualImportModal = true"
           >
-            批量导入
+            {{ t('llmOps.providerManagement.actions.bulkImport') }}
           </button>
           <button
             class="btn-primary source-primary-button btn-action-create"
@@ -50,7 +49,7 @@
               <path d="M12 5v14" />
               <path d="M5 12h14" />
             </svg>
-            新建价格源
+            {{ t('llmOps.providerManagement.actions.createSource') }}
           </button>
         </div>
       </div>
@@ -60,19 +59,27 @@
           <input
             v-model="sourceSearch"
             class="field-input"
-            placeholder="搜索供货商、价格源、厂商或地址"
+            :placeholder="
+              t('llmOps.providerManagement.filters.searchPlaceholder')
+            "
           />
           <select v-model="sourceCategoryFilter" class="field-input">
-            <option value="all">全部类型</option>
-            <option value="official_provider">原厂</option>
-            <option value="supplier">供货商</option>
-            <option value="manual">人工</option>
-            <option value="unknown">其他</option>
+            <option
+              v-for="option in sourceCategoryFilterOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
           </select>
           <select v-model="sourceStatusFilter" class="field-input">
-            <option value="all">全部状态</option>
-            <option value="active">仅启用</option>
-            <option value="inactive">仅停用</option>
+            <option
+              v-for="option in sourceStatusFilterOptions"
+              :key="option.value"
+              :value="option.value"
+            >
+              {{ option.label }}
+            </option>
           </select>
         </div>
       </div>
@@ -88,11 +95,21 @@
           </colgroup>
           <thead>
             <tr>
-              <th class="table-head">供货商 / 价格源</th>
-              <th class="table-head">类型</th>
-              <th class="table-head">关联元模型</th>
-              <th class="table-head">状态</th>
-              <th class="table-head">操作</th>
+              <th class="table-head">
+                {{ t('llmOps.providerManagement.table.source') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.providerManagement.table.type') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.providerManagement.table.metaModels') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.providerManagement.table.status') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.providerManagement.table.actions') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -118,7 +135,11 @@
 
               <td class="table-cell">
                 <p class="font-medium text-slate-900">
-                  {{ source.covered_model_count }} 个元模型
+                  {{
+                    t('llmOps.providerManagement.modelsCount', {
+                      count: source.covered_model_count
+                    })
+                  }}
                 </p>
               </td>
 
@@ -135,19 +156,21 @@
                 <div class="provider-actions">
                   <OperationIconButton
                     icon="view"
-                    label="查看元模型"
+                    :label="t('llmOps.providerManagement.actions.viewModels')"
                     @click.stop="selectedSource = source"
                   />
                   <OperationIconButton
                     v-if="source.can_manual_entry"
                     icon="manual"
-                    label="手工录价"
+                    :label="
+                      t('llmOps.providerManagement.actions.manualPricing')
+                    "
                     tone="success"
                     @click.stop="priceEntrySource = source"
                   />
                   <OperationIconButton
                     icon="edit"
-                    label="编辑"
+                    :label="t('llmOps.providerManagement.actions.edit')"
                     @click.stop="editingSource = source"
                   />
                   <OperationIconButton
@@ -158,7 +181,7 @@
                     icon="collect"
                     :label="
                       collectingSourceId === source.id
-                        ? '提交中'
+                        ? t('llmOps.providerManagement.actions.submitting')
                         : source.collect_action_label
                     "
                     tone="primary"
@@ -167,7 +190,11 @@
                   <OperationIconButton
                     :disabled="deletingSourceId === source.id"
                     icon="delete"
-                    :label="deletingSourceId === source.id ? '删除中' : '删除'"
+                    :label="
+                      deletingSourceId === source.id
+                        ? t('llmOps.providerManagement.actions.deleting')
+                        : t('llmOps.providerManagement.actions.delete')
+                    "
                     tone="danger"
                     @click.stop="deleteSource(source)"
                   />
@@ -176,7 +203,7 @@
             </tr>
             <tr v-if="!filteredSourceRows.length">
               <td class="table-cell text-slate-500" colspan="5">
-                暂无匹配的供货商价格源。
+                {{ t('llmOps.providerManagement.empty') }}
               </td>
             </tr>
           </tbody>
@@ -220,6 +247,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import ManualPriceImportModal from '@/components/llm-ops/ManualPriceImportModal.vue'
@@ -261,6 +289,7 @@ const props = defineProps({
 
 const emit = defineEmits(['refresh'])
 const { showSuccess, showError } = useToast()
+const { t } = useI18n()
 
 const selectedSource = ref(null)
 const editingSource = ref(null)
@@ -272,6 +301,44 @@ const deletingSourceId = ref(null)
 const sourceSearch = ref('')
 const sourceCategoryFilter = ref('all')
 const sourceStatusFilter = ref('all')
+
+const sourceCategoryFilterOptions = computed(() => [
+  {
+    value: 'all',
+    label: t('llmOps.providerManagement.filters.allTypes')
+  },
+  {
+    value: 'official_provider',
+    label: t('llmOps.providerManagement.category.officialProvider')
+  },
+  {
+    value: 'supplier',
+    label: t('llmOps.providerManagement.category.supplier')
+  },
+  {
+    value: 'manual',
+    label: t('llmOps.providerManagement.category.manual')
+  },
+  {
+    value: 'unknown',
+    label: t('llmOps.providerManagement.category.unknown')
+  }
+])
+
+const sourceStatusFilterOptions = computed(() => [
+  {
+    value: 'all',
+    label: t('llmOps.providerManagement.filters.allStatuses')
+  },
+  {
+    value: 'active',
+    label: t('llmOps.providerManagement.filters.activeOnly')
+  },
+  {
+    value: 'inactive',
+    label: t('llmOps.providerManagement.filters.inactiveOnly')
+  }
+])
 
 const sourceRows = computed(() =>
   props.sources
@@ -302,24 +369,27 @@ const sourceMetrics = computed(() => {
 
   return [
     {
-      label: '价格源',
+      label: t('llmOps.providerManagement.metrics.sources.label'),
       value: sourceRows.value.length,
-      hint: '供货商与原厂价格目录'
+      hint: t('llmOps.providerManagement.metrics.sources.hint')
     },
     {
-      label: '覆盖元模型',
+      label: t('llmOps.providerManagement.metrics.metaModels.label'),
       value: coveredMetaModelIds.size,
-      hint: '至少绑定一条当前价格'
+      hint: t('llmOps.providerManagement.metrics.metaModels.hint')
     },
     {
-      label: '原厂源',
+      label: t('llmOps.providerManagement.metrics.official.label'),
       value: official,
-      hint: '由元模型厂商直接发布'
+      hint: t('llmOps.providerManagement.metrics.official.hint')
     },
     {
-      label: '供货商 / 人工',
+      label: t('llmOps.providerManagement.metrics.supplierManual.label'),
       value: supplier + manual,
-      hint: `供货商 ${supplier} · 人工 ${manual}`
+      hint: t('llmOps.providerManagement.metrics.supplierManual.hint', {
+        supplier,
+        manual
+      })
     }
   ]
 })
@@ -458,11 +528,18 @@ async function collectSource(source) {
     const response = await llmOpsApi.collectCollectionSource(source.id)
     const taskId = response?.data?.task_id
     showSuccess(
-      `${source.name} 同步任务已提交` + `${taskId ? `（${taskId}）` : ''}`
+      t('llmOps.providerManagement.messages.syncSubmitted', {
+        name: source.name,
+        taskId: taskId
+          ? t('llmOps.providerManagement.messages.taskId', { taskId })
+          : ''
+      })
     )
     emit('refresh')
   } catch (error) {
-    showError(errorMessage(error, '提交价格同步任务失败'))
+    showError(
+      errorMessage(error, t('llmOps.providerManagement.errors.syncFailed'))
+    )
   } finally {
     collectingSourceId.value = null
   }
@@ -471,8 +548,9 @@ async function collectSource(source) {
 async function deleteSource(source) {
   if (!source?.id) return
   const confirmed = window.confirm(
-    `确认删除模型价格源「${source.name}」吗？\n\n` +
-      '删除后会移除该价格源及其采集记录，关联模型或渠道会失去这个价格来源。'
+    t('llmOps.providerManagement.confirm.deleteSource', {
+      name: source.name
+    })
   )
   if (!confirmed) return
 
@@ -482,10 +560,12 @@ async function deleteSource(source) {
     if (selectedSource.value?.id === source.id) {
       selectedSource.value = null
     }
-    showSuccess('模型价格源已删除')
+    showSuccess(t('llmOps.providerManagement.messages.deleted'))
     emit('refresh')
   } catch (error) {
-    showError(errorMessage(error, '删除模型价格源失败'))
+    showError(
+      errorMessage(error, t('llmOps.providerManagement.errors.deleteFailed'))
+    )
   } finally {
     deletingSourceId.value = null
   }
@@ -500,19 +580,19 @@ function businessSourceCategory(source) {
 function sourceCategory(category) {
   const labels = {
     official_provider: {
-      label: '原厂',
+      label: t('llmOps.providerManagement.category.officialProvider'),
       tone: 'official'
     },
     supplier: {
-      label: '供货商',
+      label: t('llmOps.providerManagement.category.supplier'),
       tone: 'supplier'
     },
     manual: {
-      label: '人工',
+      label: t('llmOps.providerManagement.category.manual'),
       tone: 'manual'
     },
     unknown: {
-      label: '其他',
+      label: t('llmOps.providerManagement.category.unknown'),
       tone: 'unknown'
     }
   }
@@ -533,18 +613,18 @@ function sourceRelation(source) {
   if (source.provider_name) {
     return {
       name: source.provider_name,
-      hint: '元模型厂商'
+      hint: t('llmOps.providerManagement.relation.metaProvider')
     }
   }
   if (source.channel_name) {
     return {
       name: source.channel_name,
-      hint: '转发渠道'
+      hint: t('llmOps.providerManagement.relation.forwardingChannel')
     }
   }
   return {
-    name: '未绑定来源',
-    hint: '待补充归属'
+    name: t('llmOps.providerManagement.relation.unbound'),
+    hint: t('llmOps.providerManagement.relation.needsOwner')
   }
 }
 
@@ -552,17 +632,27 @@ function sourceModeLabel(source) {
   const type = source?.source_type || ''
   const category = source?.source_category || ''
 
-  if (isModelsDevSource(source)) return '聚合同步'
-  if (category === 'official_provider') return '自动采集'
-  if (category === 'manual') return '手动维护'
-  if (category === 'supplier') return '供货商维护'
+  if (isModelsDevSource(source)) {
+    return t('llmOps.providerManagement.sourceMode.aggregateSync')
+  }
+  if (category === 'official_provider') {
+    return t('llmOps.providerManagement.sourceMode.autoCollect')
+  }
+  if (category === 'manual') {
+    return t('llmOps.providerManagement.sourceMode.manualMaintenance')
+  }
+  if (category === 'supplier') {
+    return t('llmOps.providerManagement.sourceMode.supplierMaintenance')
+  }
 
   const labels = {
     agione: 'Agione',
-    yunce: '专用采集',
-    custom: '自定义'
+    yunce: t('llmOps.providerManagement.sourceMode.dedicatedCollect'),
+    custom: t('llmOps.providerManagement.sourceMode.custom')
   }
-  return labels[type] || type || '待适配'
+  return (
+    labels[type] || type || t('llmOps.providerManagement.sourceMode.pending')
+  )
 }
 
 function sourceConfigSummary(source, relation = sourceRelation(source)) {
@@ -574,43 +664,43 @@ function sourceConfigSummary(source, relation = sourceRelation(source)) {
 function sourceStatus(source, latestRun) {
   if (!source.is_enabled) {
     return {
-      label: '停用',
+      label: t('llmOps.providerManagement.sourceStatus.inactive.label'),
       tone: 'muted',
-      hint: '不会参与采集'
+      hint: t('llmOps.providerManagement.sourceStatus.inactive.hint')
     }
   }
   if (canManualEntrySource(source)) {
     return {
-      label: '手动维护',
+      label: t('llmOps.providerManagement.sourceStatus.manual.label'),
       tone: 'info',
-      hint: '通过录入或 Excel 导入更新'
+      hint: t('llmOps.providerManagement.sourceStatus.manual.hint')
     }
   }
   if (!canCollectSource(source)) {
     return {
-      label: '待适配',
+      label: t('llmOps.providerManagement.sourceStatus.pending.label'),
       tone: 'warn',
       hint: collectModeLabel(source)
     }
   }
   if (latestRun?.status === 'failed') {
     return {
-      label: '采集失败',
+      label: t('llmOps.providerManagement.sourceStatus.failed.label'),
       tone: 'danger',
-      hint: '需要检查价格地址或采集器'
+      hint: t('llmOps.providerManagement.sourceStatus.failed.hint')
     }
   }
   if (['running', 'pending', 'processing'].includes(latestRun?.status)) {
     return {
-      label: '同步中',
+      label: t('llmOps.providerManagement.sourceStatus.syncing.label'),
       tone: 'info',
-      hint: '请稍后刷新'
+      hint: t('llmOps.providerManagement.sourceStatus.syncing.hint')
     }
   }
   return {
-    label: '启用',
+    label: t('llmOps.providerManagement.sourceStatus.active.label'),
     tone: 'ok',
-    hint: '可参与采集和计算'
+    hint: t('llmOps.providerManagement.sourceStatus.active.hint')
   }
 }
 
@@ -625,8 +715,10 @@ function canManualEntrySource(source) {
 }
 
 function collectActionLabel(source) {
-  if (canCollectSource(source)) return '同步价格'
-  return '暂不支持'
+  if (canCollectSource(source)) {
+    return t('llmOps.providerManagement.actions.syncPrice')
+  }
+  return t('llmOps.providerManagement.actions.notSupported')
 }
 
 function collectModeLabel(source) {
@@ -634,15 +726,15 @@ function collectModeLabel(source) {
     if (isModelsDevSource(source)) {
       return 'models.dev'
     }
-    return '自动采集'
+    return t('llmOps.providerManagement.collectMode.autoCollect')
   }
   if (canManualEntrySource(source)) {
-    return '手工维护'
+    return t('llmOps.providerManagement.collectMode.manualMaintenance')
   }
   if (source.source_type === 'yunce') {
-    return '专用采集器'
+    return t('llmOps.providerManagement.collectMode.dedicatedCollector')
   }
-  return '未适配'
+  return t('llmOps.providerManagement.collectMode.pending')
 }
 
 function isModelsDevSource(source) {

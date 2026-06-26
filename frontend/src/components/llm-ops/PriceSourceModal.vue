@@ -17,13 +17,17 @@
               Price Source
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ isEditing ? '编辑模型价格源' : '新建模型价格源' }}
+              {{
+                isEditing
+                  ? t('llmOps.priceSourceModal.title.edit')
+                  : t('llmOps.priceSourceModal.title.create')
+              }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
               {{
                 isEditing
-                  ? '维护价格源名称、口径、价格地址和启停状态。'
-                  : '新建原厂、供货商或人工维护价格源，用于后续录价和采集模型价格。'
+                  ? t('llmOps.priceSourceModal.description.edit')
+                  : t('llmOps.priceSourceModal.description.create')
               }}
             </p>
           </div>
@@ -33,7 +37,7 @@
             :disabled="saving"
             @click="close"
           >
-            关闭
+            {{ t('llmOps.priceSourceModal.actions.close') }}
           </button>
         </div>
       </div>
@@ -43,48 +47,60 @@
       >
         <section class="form-section">
           <div class="section-heading">
-            <h4>基础信息</h4>
-            <p>只保留运营侧需要维护的字段。</p>
+            <h4>{{ t('llmOps.priceSourceModal.sections.basic') }}</h4>
+            <p>{{ t('llmOps.priceSourceModal.sections.basicHint') }}</p>
           </div>
           <div class="source-meta-strip">
             <div class="source-meta-item">
-              <span>系统标识</span>
+              <span>{{ t('llmOps.priceSourceModal.fields.slug') }}</span>
               <strong>{{ internalSlugLabel }}</strong>
             </div>
             <div class="source-meta-item">
-              <span>来源方式</span>
+              <span>{{ t('llmOps.priceSourceModal.fields.sourceType') }}</span>
               <strong>{{ sourceTypeLabel }}</strong>
             </div>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">价格源名称</span>
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.name') }}
+              </span>
               <input
                 v-model="form.name"
                 class="field"
-                placeholder="例如：云测 / 阿里云百炼华东专线"
+                :placeholder="t('llmOps.priceSourceModal.placeholders.name')"
                 required
               />
               <span v-if="!isEditing" class="field-help">
-                创建后系统标识将自动生成：{{ internalSlugLabel }}
+                {{
+                  t('llmOps.priceSourceModal.help.autoSlug', {
+                    slug: internalSlugLabel
+                  })
+                }}
               </span>
             </label>
             <label class="field-group">
-              <span class="field-label">价格口径</span>
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.category') }}
+              </span>
               <CompactSelect
                 v-model="form.source_category"
                 :options="sourceCategoryOptions"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">默认币种</span>
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.currency') }}
+              </span>
               <CompactSelect
                 v-model="form.currency"
                 :options="currencyOptions"
               />
             </label>
             <label class="field-group md:col-span-2">
-              <span class="field-label">价格地址</span>
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.endpointUrl') }}
+              </span>
               <input
                 v-model="form.endpoint_url"
                 class="field"
@@ -92,7 +108,7 @@
                 type="url"
               />
               <span class="field-help">
-                官方价格页、供货商价格接口或人工价格来源地址。
+                {{ t('llmOps.priceSourceModal.help.endpointUrl') }}
               </span>
             </label>
           </div>
@@ -100,13 +116,13 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>补充说明</h4>
-            <p>可选，用于记录区域、合同价或特殊说明。</p>
+            <h4>{{ t('llmOps.priceSourceModal.sections.notes') }}</h4>
+            <p>{{ t('llmOps.priceSourceModal.sections.notesHint') }}</p>
           </div>
           <textarea
             v-model="form.notes"
             class="field min-h-20 resize-none"
-            placeholder="例如：华东专线、合同价、只覆盖 qwen-plus"
+            :placeholder="t('llmOps.priceSourceModal.placeholders.notes')"
           />
         </section>
       </div>
@@ -121,7 +137,11 @@
             <span class="status-switch-dot" />
           </span>
           <span class="text-sm text-slate-700">
-            {{ form.is_enabled ? '价格源已启用' : '价格源已停用' }}
+            {{
+              form.is_enabled
+                ? t('llmOps.priceSourceModal.status.enabled')
+                : t('llmOps.priceSourceModal.status.disabled')
+            }}
           </span>
         </label>
         <div class="modal-footer-actions">
@@ -131,7 +151,7 @@
             :disabled="saving"
             @click="close"
           >
-            取消
+            {{ t('llmOps.priceSourceModal.actions.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-save"
@@ -139,7 +159,13 @@
             :disabled="saving"
           >
             <span class="icon-mark" />
-            {{ saving ? '保存中' : isEditing ? '保存修改' : '创建价格源' }}
+            {{
+              saving
+                ? t('llmOps.priceSourceModal.actions.saving')
+                : isEditing
+                  ? t('llmOps.priceSourceModal.actions.saveChanges')
+                  : t('llmOps.priceSourceModal.actions.create')
+            }}
           </button>
         </div>
       </div>
@@ -149,6 +175,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -166,6 +193,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'saved'])
 const { showSuccess, showError } = useToast()
+const { t } = useI18n()
 
 const saving = ref(false)
 const form = ref(defaults())
@@ -178,22 +206,34 @@ const sourceTypeLabel = computed(() => {
   const labels = {
     agione: 'Agione',
     yunce: 'Yunce',
-    custom: '自定义'
+    custom: t('llmOps.priceSourceModal.sourceTypes.custom')
   }
   return labels[type] || type || '-'
 })
 
-const sourceCategoryOptions = [
-  { label: '原厂价格源', value: 'official_provider' },
-  { label: '供货商价格源', value: 'supplier' },
-  { label: '人工维护', value: 'manual' },
-  { label: '其他', value: 'unknown' }
-]
+const sourceCategoryOptions = computed(() => [
+  {
+    label: t('llmOps.priceSourceModal.categories.officialProvider'),
+    value: 'official_provider'
+  },
+  {
+    label: t('llmOps.priceSourceModal.categories.supplier'),
+    value: 'supplier'
+  },
+  {
+    label: t('llmOps.priceSourceModal.categories.manual'),
+    value: 'manual'
+  },
+  {
+    label: t('llmOps.priceSourceModal.categories.unknown'),
+    value: 'unknown'
+  }
+])
 
-const currencyOptions = [
-  { label: '人民币 CNY', value: 'CNY' },
-  { label: '美元 USD', value: 'USD' }
-]
+const currencyOptions = computed(() => [
+  { label: t('llmOps.priceSourceModal.currencies.cny'), value: 'CNY' },
+  { label: t('llmOps.priceSourceModal.currencies.usd'), value: 'USD' }
+])
 
 watch(
   () => props.source,
@@ -246,14 +286,14 @@ async function save() {
     }
     if (isEditing.value) {
       await llmOpsApi.updateCollectionSource(props.source.id, payload)
-      showSuccess('模型价格源已更新')
+      showSuccess(t('llmOps.priceSourceModal.messages.updated'))
     } else {
       await llmOpsApi.createCollectionSource(payload)
-      showSuccess('模型价格源已创建')
+      showSuccess(t('llmOps.priceSourceModal.messages.created'))
     }
     emit('saved')
   } catch (error) {
-    showError(errorMessage(error, '保存模型价格源失败'))
+    showError(errorMessage(error, t('llmOps.priceSourceModal.errors.save')))
   } finally {
     saving.value = false
   }
