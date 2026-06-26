@@ -12,6 +12,8 @@ services:
         DEV_MODE: "1"
     env_file:
       - ./.env.dev
+    environment:
+      BACKEND_INIT_COLLECTSTATIC: "false"
     volumes:
       - ./data.dev/django/staticfiles:/opt/backend/core/staticfiles
       - ./data.dev/logs/api:/var/log/gunicorn
@@ -32,6 +34,8 @@ services:
     restart: unless-stopped
     env_file:
       - ./.env.dev
+    environment:
+      BACKEND_INIT_COLLECTSTATIC: "false"
     build:
       context: .
       dockerfile: Dockerfile
