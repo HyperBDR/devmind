@@ -2,6 +2,8 @@
   "management": {
     "adminConsole": "管理员控制台",
     "logoTitle": "Devmind Admin",
+    "expandSidebar": "展开侧边栏",
+    "collapseSidebar": "收起侧边栏",
     "userManagement": "用户管理",
     "groupManagement": "组管理",
     "roleManagement": "角色管理",

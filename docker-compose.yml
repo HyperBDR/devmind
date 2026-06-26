@@ -103,6 +103,7 @@ services:
       target: frontend
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_APP_VERSION: ${VITE_APP_VERSION:-${APP_VERSION}}
     image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-frontend:${APP_VERSION:?APP_VERSION is required}
     pull_policy: missing
     expose:

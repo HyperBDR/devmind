@@ -2,6 +2,8 @@
   "management": {
     "adminConsole": "Admin Console",
     "logoTitle": "Devmind Admin",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse sidebar",
     "userManagement": "User Management",
     "groupManagement": "Group Management",
     "roleManagement": "Role Management",

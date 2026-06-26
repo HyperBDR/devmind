@@ -1,6 +1,13 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { readFileSync } from 'fs'
 import { resolve } from 'path'
+
+const packageJson = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8')
+)
+
+const appVersion = process.env.VITE_APP_VERSION || packageJson.version
 
 export default defineConfig({
   plugins: [vue()],
@@ -13,7 +20,8 @@ export default defineConfig({
     // vue-i18n feature flags for better tree-shaking
     __VUE_I18N_FULL_INSTALL__: true,
     __VUE_I18N_LEGACY_API__: false,
-    __INTLIFY_PROD_DEVTOOLS__: false
+    __INTLIFY_PROD_DEVTOOLS__: false,
+    __APP_VERSION__: JSON.stringify(appVersion)
   },
   build: {
     rollupOptions: {

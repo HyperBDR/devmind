@@ -106,6 +106,29 @@
                     <span>{{ t('common.settings') }}</span>
                   </router-link>
                 </div>
+                <div class="px-4 pb-2">
+                  <div
+                    class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700"
+                  >
+                    <svg
+                      class="w-4 h-4 text-gray-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M12 18a6 6 0 100-12 6 6 0 000 12z"
+                      />
+                    </svg>
+                    <span class="flex-1">{{ t('common.about') }}</span>
+                    <span class="font-mono text-xs text-gray-500">
+                      {{ displayVersion }}
+                    </span>
+                  </div>
+                </div>
                 <div class="border-t border-gray-100 my-1"></div>
                 <button
                   @click="handleLogout"
@@ -129,6 +152,7 @@ import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
 import PlatformSwitcher from '@/components/layout/PlatformSwitcher.vue'
+import { appVersion } from '@/config/version'
 
 defineEmits(['toggle-menu'])
 
@@ -139,6 +163,9 @@ const userStore = useUserStore()
 
 const showUserMenu = ref(false)
 const userMenuRef = ref(null)
+const displayVersion = computed(() => {
+  return appVersion.startsWith('v') ? appVersion : `v${appVersion}`
+})
 
 const pageTitle = computed(() => {
   const routeNames = {
