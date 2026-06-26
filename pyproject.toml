@@ -28,6 +28,7 @@ dependencies = [
     "flower==2.0.1",
     "redis",
     "sentry-sdk>=1.40.0",  # Error tracking and performance monitoring
+    "setuptools>=61.0",  # Runtime dependency for Gunicorn 20 pkg_resources
     "channels>=4.1,<4.2",
     "daphne>=4.1,<4.2",
     "channels_redis>=4.2,<4.3",
