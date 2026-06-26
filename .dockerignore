@@ -49,6 +49,7 @@ docker-compose.*.yml
 
 # Other
 .env
+.env.*
 *.bak
 *.tmp
 *.temp
@@ -59,7 +60,28 @@ yarn-error.log*
 
 # Project specific
 data/
+data.dev/
 cache/
+cache.dev/
+docker_runtime/
+output/
+samples/
+
+# Tool caches and analysis output
+.codegraph/
+.mypy_cache/
+.nox/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.understand-anything/
+htmlcov/
+**/.codegraph/
+**/.mypy_cache/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.tox/
+**/__pycache__/
 
 # Frontend workspace
 frontend/node_modules/

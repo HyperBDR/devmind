@@ -1,85 +1,63 @@
-# Use official Python 3.12 on Ubuntu 24.04 LTS
-FROM ubuntu:24.04 AS backend
+# syntax=docker/dockerfile:1.6
+
+# -----------------------------------------------------------------------------
+# Backend builder image
+# -----------------------------------------------------------------------------
+
+FROM python:3.12-slim-bookworm AS backend-builder
 
 # Build argument to control mirror usage
 ARG USE_MIRROR=false
 
 # Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
+ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    DEBIAN_FRONTEND=noninteractive
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_LINK_MODE=copy
 
-# Install ca-certificates first to avoid SSL certificate issues
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
-
-# Setup mirrors based on build argument (before installing packages)
+# Setup mirrors based on build argument before installing packages.
 RUN set -eux; \
     if [ "$USE_MIRROR" = "true" ]; then \
-        echo "Setting up Chinese mirrors for Ubuntu 24.04 LTS..."; \
-        arch="$(dpkg --print-architecture)"; \
-        mirror_path="ubuntu"; \
-        if [ "$arch" != "amd64" ]; then \
-            mirror_path="ubuntu-ports"; \
-        fi; \
-        if [ -f /etc/apt/sources.list ]; then \
-            cp /etc/apt/sources.list /etc/apt/sources.list.backup; \
-        fi; \
-        if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
-            cp /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list.d/ubuntu.sources.backup; \
-            rm -f /etc/apt/sources.list.d/ubuntu.sources; \
-        fi; \
-        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble main restricted universe multiverse" > /etc/apt/sources.list; \
-        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble-updates main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble-backports main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "deb https://mirrors.aliyun.com/${mirror_path}/ noble-security main restricted universe multiverse" >> /etc/apt/sources.list; \
-        echo "✓ Chinese mirrors configured for Ubuntu 24.04 LTS (Noble Numbat)"; \
-        echo "Architecture: ${arch}; mirror path: ${mirror_path}"; \
-        echo "Current sources.list content:"; \
-        cat /etc/apt/sources.list; \
+        printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://mirrors.aliyun.com/debian' \
+            'Suites: bookworm bookworm-updates bookworm-backports' \
+            'Components: main contrib non-free non-free-firmware' \
+            'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+            '' \
+            'Types: deb' \
+            'URIs: https://mirrors.aliyun.com/debian-security' \
+            'Suites: bookworm-security' \
+            'Components: main contrib non-free non-free-firmware' \
+            'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+            > /etc/apt/sources.list.d/debian.sources; \
+        echo "Chinese Debian mirrors configured"; \
     else \
-        echo "Using default Ubuntu sources"; \
+        echo "Using default Debian sources"; \
     fi; \
     apt-get update
 
-# Install Python 3.12, pip and system dependencies in one step
-# libmagic is for python-magic which is a library for file type detection
-# gettext is for Django i18n (makemessages, compilemessages)
-# postgresql-client is for PostgreSQL database support
+# Install build-only system dependencies.
+# libmagic is for python-magic file type detection.
+# gettext is for Django i18n commands.
 RUN apt-get install -y --no-install-recommends \
-    python3.12 \
-    python3.12-dev \
-    python3-pip \
+    ca-certificates \
     build-essential \
-    git \
     curl \
+    git \
     default-libmysqlclient-dev \
     libpq-dev \
-    postgresql-client \
-    pkg-config \
+    libmagic-dev \
     libxml2-dev \
     libxslt1-dev \
-    zlib1g-dev \
-    libmagic1 \
-    libmagic-dev \
     gettext \
-    procps \
-    htop \
-    net-tools \
-    iputils-ping \
-    dnsutils \
-    mariadb-client \
-    # Note: MySQL/MariaDB packages are kept for backward compatibility
-    # PostgreSQL is the recommended database (postgresql-client, libpq-dev)
-    && rm -rf /var/lib/apt/lists/* \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.12 1 \
-    && update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.12 1
+    pkg-config \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
-# Disable externally-managed-environment restriction for container environment
-RUN rm -f /usr/lib/python3.12/EXTERNALLY-MANAGED
-
-# Install uv using pip with mirror selection
+# Install uv using pip with mirror selection.
 RUN set -eux; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Installing uv with Chinese PyPI mirror"; \
@@ -90,57 +68,106 @@ RUN set -eux; \
         echo "Installing uv with default PyPI"; \
         pip install --retries 5 --timeout 120 --progress-bar off uv; \
     fi; \
-    echo 'export PATH="/root/.local/bin:$PATH"' >> /root/.bashrc; \
-    export PATH="/root/.local/bin:$PATH"
+    python -m venv /opt/venv
 
-# Set working directory
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV=/opt/venv
+
 WORKDIR /opt/backend
 
-# Copy project files
+# Copy project files.
 COPY backend /opt/backend
 COPY pyproject.toml /opt/backend/
 
-# Install project dependencies with mirror selection
+# Install project dependencies with mirror selection.
 RUN set -eux; \
-    export PATH="/root/.local/bin:$PATH"; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Using Chinese PyPI mirror for dependencies"; \
-        uv pip compile pyproject.toml -o requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple; \
-        uv pip install --system -r requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple; \
+        uv pip compile pyproject.toml -o requirements.txt \
+            --index-url https://mirrors.aliyun.com/pypi/simple; \
+        uv pip install --python /opt/venv/bin/python -r requirements.txt \
+            --index-url https://mirrors.aliyun.com/pypi/simple; \
     else \
         echo "Using default PyPI for dependencies"; \
         uv pip compile pyproject.toml -o requirements.txt; \
-        uv pip install --system -r requirements.txt; \
+        uv pip install --python /opt/venv/bin/python -r requirements.txt; \
     fi
 
-# Dev mode: after unified deps, overlay agentcore from image copy in editable mode.
-# Without DEV_MODE=1, agentcore-task/agentcore-metering come from GitHub only (see
-# pyproject.toml). Use DEV_MODE=1 when building to pick up local agentcore fixes
-# (e.g. django __getattr__ recursion fix) without publishing to GitHub first.
-# COPY backend /opt/backend puts agentcore at /opt/backend/agentcore/, so loop uses agentcore/*/
+# Dev mode overlays local agentcore packages after unified dependencies.
+# Without DEV_MODE=1, agentcore packages come from GitHub in pyproject.toml.
 ARG DEV_MODE=0
 RUN set -eux; \
     if [ "$DEV_MODE" = "1" ]; then \
-        export PATH="/root/.local/bin:$PATH"; \
         for d in agentcore/*/; do \
             if [ -f "${d}pyproject.toml" ]; then \
                 echo "Dev mode: pip install -e $d"; \
-                (cd "$d" && uv pip install --system -e .); \
+                (cd "$d" && uv pip install \
+                    --python /opt/venv/bin/python -e .); \
             fi; \
         done; \
     fi
 
-# Compile Django message catalogs (.po -> .mo) so runtime gettext works
+# Compile Django message catalogs (.po -> .mo) so runtime gettext works.
 RUN python manage.py compilemessages -l zh_Hans -l en
 
-# Create necessary directories
+RUN rm -rf /root/.cache /tmp/* \
+    && find /opt/venv -type d -name __pycache__ -prune -exec rm -rf {} + \
+    && find /opt/backend -type d -name __pycache__ -prune -exec rm -rf {} +
+
+# -----------------------------------------------------------------------------
+# Backend runtime image
+# -----------------------------------------------------------------------------
+
+FROM python:3.12-slim-bookworm AS backend
+
+ARG USE_MIRROR=false
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PATH="/opt/venv/bin:$PATH" \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/opt/venv
+
+RUN set -eux; \
+    if [ "$USE_MIRROR" = "true" ]; then \
+        printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://mirrors.aliyun.com/debian' \
+            'Suites: bookworm bookworm-updates bookworm-backports' \
+            'Components: main contrib non-free non-free-firmware' \
+            'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+            '' \
+            'Types: deb' \
+            'URIs: https://mirrors.aliyun.com/debian-security' \
+            'Suites: bookworm-security' \
+            'Components: main contrib non-free non-free-firmware' \
+            'Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg' \
+            > /etc/apt/sources.list.d/debian.sources; \
+        echo "Chinese Debian mirrors configured"; \
+    else \
+        echo "Using default Debian sources"; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        bash \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+
+WORKDIR /opt/backend
+
+COPY --from=backend-builder /opt/venv /opt/venv
+COPY --from=backend-builder /opt/backend /opt/backend
+
+# Create necessary directories.
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/backend
 
-# Copy entrypoint script
+# Copy entrypoint script.
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Set default command
 ENTRYPOINT ["/entrypoint.sh"]
 
 # -----------------------------------------------------------------------------
