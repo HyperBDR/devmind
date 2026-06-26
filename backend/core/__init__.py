@@ -37,3 +37,10 @@ def _init_sentry():
 
 
 _init_sentry()
+
+# Load the project Celery app when Django imports the project package.
+# Without this, shared_task.delay() in web requests can fall back to Celery's
+# default app and publish messages to the default "celery" queue.
+from .celery import app as celery_app
+
+__all__ = ("celery_app",)
