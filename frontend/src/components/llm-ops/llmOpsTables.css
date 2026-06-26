@@ -1,0 +1,125 @@
+body.llm-ops-theme .data-table,
+body.llm-ops-theme .preview-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+body.llm-ops-theme .data-table thead,
+body.llm-ops-theme .preview-table thead {
+  background: #f8fafc;
+}
+
+body.llm-ops-theme .data-table tbody,
+body.llm-ops-theme .preview-table tbody {
+  background: #ffffff;
+}
+
+body.llm-ops-theme .data-table tbody tr,
+body.llm-ops-theme .preview-table tbody tr {
+  background: #ffffff;
+  transition: background-color 0.14s ease;
+}
+
+body.llm-ops-theme .data-table tbody tr:hover,
+body.llm-ops-theme .preview-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+body.llm-ops-theme .data-table th,
+body.llm-ops-theme .data-table .table-head,
+body.llm-ops-theme .preview-table th {
+  height: 40px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  line-height: 1.2;
+  padding: 0.625rem 1rem;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body.llm-ops-theme .data-table td,
+body.llm-ops-theme .data-table .table-cell,
+body.llm-ops-theme .preview-table td {
+  border-bottom: 1px solid #f1f5f9;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  padding: 0.75rem 1rem;
+  vertical-align: middle;
+}
+
+body.llm-ops-theme .data-table tbody tr:last-child td,
+body.llm-ops-theme .preview-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+body.llm-ops-theme .data-table .table-cell.text-right,
+body.llm-ops-theme .data-table .table-head.text-right,
+body.llm-ops-theme .preview-table .text-right {
+  text-align: right;
+}
+
+body.llm-ops-theme .data-table .table-cell.text-center,
+body.llm-ops-theme .data-table .table-head.text-center,
+body.llm-ops-theme .preview-table .text-center {
+  text-align: center;
+}
+
+body.llm-ops-theme .data-table .font-mono,
+body.llm-ops-theme .preview-table .font-mono,
+body.llm-ops-theme .model-code,
+body.llm-ops-theme .sku-code {
+  color: #64748b;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 12px;
+  letter-spacing: 0;
+}
+
+body.llm-ops-theme .data-table .font-medium,
+body.llm-ops-theme .preview-table .font-medium {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+body.llm-ops-theme .data-table td[colspan],
+body.llm-ops-theme .preview-table td[colspan] {
+  color: #94a3b8;
+  font-size: 13px;
+  padding: 1.5rem 1rem;
+  text-align: center;
+}
+
+body.llm-ops-theme .data-table .detail-cell {
+  background: #f8fafc;
+  padding: 0.875rem 1rem;
+}
+
+body.llm-ops-theme .data-table.channel-model-table .table-head,
+body.llm-ops-theme .data-table.channel-model-table th {
+  font-size: 11px;
+  padding: 0.625rem 1rem;
+}
+
+body.llm-ops-theme .data-table.channel-model-table .table-cell,
+body.llm-ops-theme .data-table.channel-model-table td {
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 0.75rem 1rem;
+  vertical-align: middle;
+}
+
+body.llm-ops-theme .data-table .operation-icon-button {
+  vertical-align: middle;
+}

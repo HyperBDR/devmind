@@ -27,7 +27,7 @@ services:
       dockerfile: Dockerfile
       target: backend
       args:
-        USE_MIRROR: ${USE_MIRROR:-false}
+        USE_MIRROR: ${USE_MIRROR:-true}
         DEV_MODE: "0"
     env_file:
       - ./.env

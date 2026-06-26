@@ -38,6 +38,9 @@ urlpatterns = [
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),
 
 
+    # LLM operations management routes
+    path('api/v1/llm-ops/', include('llm_ops.urls')),
+
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),
 

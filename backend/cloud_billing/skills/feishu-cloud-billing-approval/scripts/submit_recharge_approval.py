@@ -1282,6 +1282,65 @@ def detect_duplicate_or_conflict(
     return None
 
 
+def inspect_recharge_account_state(
+    base_url: str,
+    token: str,
+    approval_code: str,
+    request_data: dict[str, Any],
+    lookback_days: int,
+) -> dict[str, Any]:
+    expected = expected_name_map(dict(request_data))
+    now = dt.datetime.now(dt.timezone.utc)
+    end_time_ms = int(now.timestamp() * 1000)
+    start_time_ms = int(
+        (now - dt.timedelta(days=lookback_days)).timestamp() * 1000
+    )
+    instance_codes = _list_history_instance_codes(
+        base_url,
+        token,
+        approval_code,
+        start_time_ms,
+        end_time_ms,
+    )
+
+    for instance_code, data in _history_instances_recent_first(
+        base_url,
+        token,
+        approval_code,
+        instance_codes,
+    ):
+        form_map = form_list_to_name_map(json.loads(data.get("form", "[]")))
+        if not same_cloud_recharge_account(form_map, expected):
+            continue
+
+        status = str(data.get("status") or "").strip().upper()
+        state = "none"
+        if status == "PENDING":
+            state = "ongoing"
+        elif historical_status_matches(status):
+            state = "finished"
+
+        if state != "none":
+            return {
+                "state": state,
+                "approval_code": approval_code,
+                "instance_code": instance_code,
+                "serial_number": data.get("serial_number"),
+                "status": data.get("status"),
+                "user_id": data.get("user_id"),
+                "start_time": data.get("start_time"),
+                "cloud_type": expected[FIELD_CLOUD_TYPE],
+                "recharge_account": expected[FIELD_RECHARGE_ACCOUNT],
+            }
+
+    return {
+        "state": "none",
+        "approval_code": approval_code,
+        "cloud_type": expected[FIELD_CLOUD_TYPE],
+        "recharge_account": expected[FIELD_RECHARGE_ACCOUNT],
+    }
+
+
 def historical_status_matches(status: str | None) -> bool:
     return str(status or "").strip().upper() in {"APPROVED", "PASSED", "DONE"}
 

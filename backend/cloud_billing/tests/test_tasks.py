@@ -397,14 +397,24 @@ class TestCheckAlertForProvider:
         mock_channel = SimpleNamespace(config={"language": "en"})
         mock_get_default_webhook_channel.return_value = (mock_channel, {})
         now = timezone.now()
+        current_day = timezone.localdate(now)
+        current_hour = now.hour
+
+        BillingData.objects.filter(pk=billing_data.pk).update(
+            period=now.strftime("%Y-%m"),
+            day=current_day,
+            hour=current_hour,
+            collected_at=now,
+        )
 
         for offset in range(1, 7):
             collected_at = now - datetime.timedelta(days=offset)
+            collected_day = current_day - datetime.timedelta(days=offset)
             row = BillingData.objects.create(
                 provider=cloud_provider,
-                period=collected_at.strftime("%Y-%m"),
-                day=collected_at.date(),
-                hour=collected_at.hour,
+                period=collected_day.strftime("%Y-%m"),
+                day=collected_day,
+                hour=current_hour,
                 total_cost=Decimal("10.00") * Decimal(7 - offset),
                 hourly_cost=Decimal("10.00"),
                 balance=Decimal("520.00"),

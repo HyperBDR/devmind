@@ -917,10 +917,20 @@ def build_notification_message_from_payload(
                 add_line(label, value.strip())
         return receipt_lines
 
+    submitter_identifier_text = str(
+        payload.get("submitter_identifier") or ""
+    ).strip()
+    submitter_display = fmt_value(submitter_label)
+    if (
+        submitter_identifier_text
+        and submitter_identifier_text not in submitter_display
+    ):
+        submitter_display = f"{submitter_display} / {submitter_identifier_text}"
+
     lines = [
         f"{fmt_label('触发方式')}{sep}{_trigger_source_label(trigger_source)}",
         f"{fmt_label('触发人')}{sep}{fmt_value(trigger_user_label)}",
-        f"{fmt_label('审批发起人')}{sep}{fmt_value(submitter_label)}",
+        f"{fmt_label('审批发起人')}{sep}{submitter_display}",
     ]
     if trigger_reason:
         lines.append(f"{fmt_label('触发原因')}{sep}{fmt_value(trigger_reason)}")
@@ -1827,10 +1837,18 @@ def check_ongoing_recharge_approval_submission(
     except Exception as exc:
         logger.warning(
             "Failed to inspect recharge account submission state; "
-            "treating as no matches (error=%s, exc_info=True). "
-            "If submission is unexpectedly blocked, redeploy after fixing this error.",
+            "blocking submission until the preflight check is fixed "
+            "(error=%s, exc_info=True).",
             exc,
             exc_info=True,
+        )
+        result.update(
+            {
+                "blocked": True,
+                "reason": "preflight_check_failed",
+                "status": "error",
+                "message": "充值审批预检失败，请修复预检后再提交。",
+            }
         )
         return result
 
@@ -3062,17 +3080,20 @@ def resolve_submitter_identity(
         or approval_cfg.get("resolved_submitter_user_id")
         or approval_cfg.get("submitter_user_id")
         or approval_cfg.get("user_id")
+        or ""
     ).strip()
     resolved_user_name = ""
 
-    if not resolved_user_id and identifier:
+    if identifier:
         access_token = _get_feishu_access_token()
         resolved_identity = _resolve_user_id_by_email_or_mobile(
             identifier,
             access_token or "",
         )
         if resolved_identity:
-            resolved_user_id, resolved_user_name = resolved_identity
+            resolved_lookup_user_id, resolved_user_name = resolved_identity
+            if not resolved_user_id:
+                resolved_user_id = resolved_lookup_user_id
 
     if not resolved_user_id:
         resolved_user_id = os.getenv("FEISHU_USER_ID", "").strip()

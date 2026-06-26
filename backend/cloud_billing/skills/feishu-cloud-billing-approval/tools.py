@@ -961,9 +961,21 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
                     parsed_payload["remark"] = payee_remark
                 parsed_payload.pop("payee", None)
 
+            if (
+                "amount" in parsed_payload
+                and not str(parsed_payload.get("currency") or "").strip()
+            ):
+                parsed_payload["currency"] = "CNY"
+
+            plan_submitter_identifier = str(
+                submitter_identifier or ctx.submitter_identifier or ""
+            ).strip()
             resolved_user_id = ctx.resolved_submitter_user_id
-            if not resolved_user_id:
-                raise RuntimeError("Feishu submitter user_id is required.")
+            if not resolved_user_id and plan_submitter_identifier:
+                resolved_user_id = ctx.resolve_submitter_user_id(
+                    plan_submitter_identifier,
+                    "",
+                )
 
             request_file = _request_file_for_payload(ctx, parsed_payload)
             request_file.parent.mkdir(parents=True, exist_ok=True)
@@ -979,7 +991,7 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
                 request_file=str(request_file),
                 request_file_name=request_file.name,
                 request_payload=parsed_payload,
-                submitter_identifier="",
+                submitter_identifier=plan_submitter_identifier,
                 resolved_submitter_user_id=resolved_user_id,
                 summary=f"Request JSON generated at {request_file.name}",
             )
@@ -1057,8 +1069,6 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
                 raise RuntimeError(f"Request JSON must contain an object: {request_path}")
 
             resolved_user_id = resolved_submitter_user_id or ctx.resolved_submitter_user_id
-            if not resolved_user_id:
-                raise RuntimeError("Feishu submitter user_id is required.")
 
             script_path = (
                 ctx.workspace_root()

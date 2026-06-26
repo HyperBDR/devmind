@@ -1,6 +1,8 @@
 """
 Serializers for cloud billing API.
 """
+import json
+
 from datetime import date as date_cls
 
 from django.contrib.auth.models import User
@@ -294,8 +296,22 @@ class CloudProviderSerializer(serializers.ModelSerializer):
         if provider is None:
             return text
 
-        # Skip validation for update operations - edit doesn't need recharge info
-        return text
+        cloud_type = CLOUD_TYPE_LABELS.get(
+            getattr(provider, "provider_type", ""),
+            getattr(provider, "display_name", ""),
+        )
+        try:
+            payload = prepare_recharge_request_payload(
+                text,
+                cloud_type=cloud_type,
+                require_cloud_type=False,
+            )
+        except MissingRechargeFieldsError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 class CloudProviderListSerializer(serializers.ModelSerializer):

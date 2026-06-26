@@ -836,8 +836,9 @@ class RechargeApprovalNotificationService:
     def _build_submitter_label(self, record: RechargeApprovalRecord) -> str:
         parts = []
         label = str(record.submitter_user_label or "").strip()
+        identifier = str(record.submitter_identifier or "").strip()
         user_id = str(record.resolved_submitter_user_id or "").strip()
-        for value in (label, user_id):
+        for value in (label, identifier or user_id):
             if value and value not in parts:
                 parts.append(value)
         if parts:

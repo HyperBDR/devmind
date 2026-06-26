@@ -92,6 +92,9 @@ run_migrations() {
     log "Running Django migrations..."
     python manage.py migrate --noinput
 
+    log "Bootstrapping LLM Ops catalog when database is empty..."
+    python manage.py bootstrap_llm_ops_catalog
+
     log "Ensuring superuser exists..."
     DJANGO_SUPERUSER_USERNAME=${DJANGO_SUPERUSER_USERNAME:-admin}
     DJANGO_SUPERUSER_EMAIL=${DJANGO_SUPERUSER_EMAIL:-admin@example.com}

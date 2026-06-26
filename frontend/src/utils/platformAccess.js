@@ -18,6 +18,12 @@ export const FEATURE_DEFINITIONS = [
     matchers: ['/hyperbdr-dashboard']
   },
   {
+    key: 'llm_ops',
+    labelKey: 'platforms.llmOps',
+    defaultPath: '/llm-ops',
+    matchers: ['/llm-ops']
+  },
+  {
     key: 'sales_work_orders',
     labelKey: 'platforms.salesWorkOrders',
     defaultPath: '/sals/dashboard',
@@ -41,6 +47,8 @@ const FEATURE_ALIASES = {
   cloud_billing: 'operations_console',
   data_collector: 'operations_console',
   sals: 'sales_work_orders',
+  llm_operations: 'llm_ops',
+  llm_ops_management: 'llm_ops',
   llm_console: 'admin_console',
   task_management_console: 'admin_console',
   notification_console: 'admin_console'
@@ -86,7 +94,10 @@ export function hasFeature(user, featureKey) {
 export function getAvailablePlatforms(user, t) {
   const accessProfile = getAccessProfile(user)
   const platformMap = new Map(
-    (accessProfile.available_platforms || []).map((item) => [item.key, item])
+    (accessProfile.available_platforms || []).map((item) => [
+      FEATURE_ALIASES[item.key] || item.key,
+      item
+    ])
   )
 
   return FEATURE_DEFINITIONS.filter((item) => platformMap.has(item.key)).map(

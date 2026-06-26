@@ -123,7 +123,7 @@ def _inject_recharge_fields(
         payload["recharge_account"] = account_id
     if cloud_type:
         payload["cloud_type"] = cloud_type
-    if amount_text and not str(payload.get("amount") or "").strip():
+    if amount_text:
         payload["amount"] = amount_text
         if currency_text:
             payload["currency"] = currency_text

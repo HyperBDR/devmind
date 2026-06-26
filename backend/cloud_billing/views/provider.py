@@ -698,12 +698,6 @@ class CloudProviderViewSet(viewsets.ModelViewSet):
         submitter_identifier = str(
             request.data.get("submitter_identifier") or ""
         ).strip()
-        if (
-            not submitter_identifier
-            and _looks_like_legacy_submitter_identifier(submitter_user_id)
-        ):
-            submitter_identifier = submitter_user_id
-            submitter_user_id = ""
         submitter_user_label = str(
             request.data.get("submitter_user_label") or ""
         ).strip()

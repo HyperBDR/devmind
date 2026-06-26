@@ -23,6 +23,11 @@ FEATURE_DEFINITIONS = (
         'default_path': '/hyperbdr-dashboard',
     },
     {
+        'key': 'llm_ops',
+        'label': 'LLM Operations Management',
+        'default_path': '/llm-ops',
+    },
+    {
         'key': 'admin_console',
         'label': 'Admin Console',
         'default_path': '/management/users',
@@ -52,6 +57,8 @@ FEATURE_ALIASES = {
     'cloud_billing': 'operations_console',
     'data_collector': 'operations_console',
     'sals': 'sales_work_orders',
+    'llm_operations': 'llm_ops',
+    'llm_ops_management': 'llm_ops',
     'llm_console': 'admin_console',
     'task_management_console': 'admin_console',
     'notification_console': 'admin_console',

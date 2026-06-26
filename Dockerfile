@@ -105,8 +105,8 @@ RUN set -eux; \
     export PATH="/root/.local/bin:$PATH"; \
     if [ "$USE_MIRROR" = "true" ]; then \
         echo "Using Chinese PyPI mirror for dependencies"; \
-        uv pip compile pyproject.toml -o requirements.txt --index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
-        uv pip install --system -r requirements.txt --index-url https://pypi.tuna.tsinghua.edu.cn/simple; \
+        uv pip compile pyproject.toml -o requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple; \
+        uv pip install --system -r requirements.txt --index-url https://mirrors.aliyun.com/pypi/simple; \
     else \
         echo "Using default PyPI for dependencies"; \
         uv pip compile pyproject.toml -o requirements.txt; \

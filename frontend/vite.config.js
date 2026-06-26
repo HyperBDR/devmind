@@ -20,10 +20,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (
-            id.includes('/node_modules/vue') ||
-            id.includes('/node_modules/vue-router') ||
-            id.includes('/node_modules/pinia') ||
-            id.includes('/node_modules/vue-i18n')
+            /node_modules\/(vue|vue-router|pinia|vue-i18n)\//.test(id)
           ) {
             return 'vue-vendor'
           }

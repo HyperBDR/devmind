@@ -693,6 +693,7 @@
     "switchPlatform": "Switch view",
     "workspace": "Workspace",
     "operationsConsole": "Operations Console",
+    "llmOps": "LLM Operations",
     "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard",
     "adminConsole": "Admin Console",
     "llmConsole": "LLM Console",
@@ -1712,6 +1713,7 @@
       "jira": "Jira",
       "license": "License",
       "hyperbdr": "HyperBDR",
+      "llm_ops": "LLM Operations",
       "after_sales_incident": "After-Sales Work Order"
     },
     "records": {
