@@ -239,8 +239,8 @@ const emit = defineEmits(['close', 'saved'])
 const form = ref(defaults())
 const saving = ref(false)
 const currencyOptions = [
-  { label: 'CNY - 人民币', value: 'CNY' },
-  { label: 'USD - 美元', value: 'USD' }
+  { label: 'CNY', value: 'CNY' },
+  { label: 'USD', value: 'USD' }
 ]
 const roundingModeOptions = [
   { label: '四舍五入', value: 'half_up' },

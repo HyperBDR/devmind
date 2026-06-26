@@ -24,7 +24,7 @@
               v-for="item in navItems"
               :key="item.key"
               type="button"
-              class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition"
+              class="flex w-full items-center gap-2.5 rounded-lg py-2.5 pl-7 pr-3 text-left text-sm font-medium transition"
               :class="
                 activeSection === item.key
                   ? 'bg-agione-600 text-white shadow-sm'
@@ -32,7 +32,18 @@
               "
               @click="activeSection = item.key"
             >
-              <span class="nav-icon">{{ item.icon }}</span>
+              <svg
+                class="nav-icon"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+              >
+                <path v-for="path in item.icon" :key="path" :d="path" />
+              </svg>
               <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
             </button>
           </nav>
@@ -716,20 +727,37 @@ const monitorStatusLabelKeys = {
   unlisted: 'llmOps.status.unlisted'
 }
 
+const navIcons = {
+  audit: ['M4 5h16', 'M4 12h16', 'M4 19h10'],
+  channels: ['M4 7h16', 'M7 7v10', 'M17 7v10', 'M4 17h16'],
+  metaModels: ['M12 3l8 4-8 4-8-4 8-4Z', 'M4 12l8 4 8-4', 'M4 17l8 4 8-4'],
+  monitor: ['M4 19V5', 'M8 19v-6', 'M12 19v-9', 'M16 19v-4', 'M20 19V8'],
+  providers: ['M5 5h14v14H5Z', 'M9 9h6', 'M9 13h6', 'M9 17h3'],
+  reconciler: [
+    'M4 7h16',
+    'M7 7v12',
+    'M17 7v12',
+    'M4 13h16',
+    'M9 17h1',
+    'M14 17h1'
+  ],
+  reseller: ['M6 8h12l-1 12H7L6 8Z', 'M9 8a3 3 0 0 1 6 0']
+}
+
 const navItems = computed(() => [
   {
     key: 'monitor',
     label: t('llmOps.nav.monitor.label'),
     eyebrow: 'Monitor',
     description: t('llmOps.nav.monitor.description'),
-    icon: 'M'
+    icon: navIcons.monitor
   },
   {
     key: 'metaModels',
     label: t('llmOps.nav.metaModels.label'),
     eyebrow: 'Meta Models',
     description: t('llmOps.nav.metaModels.description'),
-    icon: 'M',
+    icon: navIcons.metaModels,
     badge: metaModels.value.length
   },
   {
@@ -737,7 +765,7 @@ const navItems = computed(() => [
     label: t('llmOps.nav.providers.label'),
     eyebrow: 'Sources',
     description: t('llmOps.nav.providers.description'),
-    icon: 'P',
+    icon: navIcons.providers,
     badge: providerCollectionSources.value.length
   },
   {
@@ -745,7 +773,7 @@ const navItems = computed(() => [
     label: t('llmOps.nav.channels.label'),
     eyebrow: 'Channels',
     description: t('llmOps.nav.channels.description'),
-    icon: 'C',
+    icon: navIcons.channels,
     badge: channels.value.length
   },
   {
@@ -753,7 +781,7 @@ const navItems = computed(() => [
     label: t('llmOps.nav.reseller.label'),
     eyebrow: 'Reseller',
     description: t('llmOps.nav.reseller.description'),
-    icon: 'R',
+    icon: navIcons.reseller,
     badge: agioneListingRows.value.length
   },
   {
@@ -761,14 +789,14 @@ const navItems = computed(() => [
     label: t('llmOps.nav.reconciler.label'),
     eyebrow: 'Reconciliation',
     description: t('llmOps.nav.reconciler.description'),
-    icon: 'A'
+    icon: navIcons.reconciler
   },
   {
     key: 'audit',
     label: t('llmOps.nav.audit.label'),
     eyebrow: 'Audit',
     description: t('llmOps.nav.audit.description'),
-    icon: 'L'
+    icon: navIcons.audit
   }
 ])
 
@@ -2250,17 +2278,9 @@ onBeforeUnmount(() => {
 }
 
 .nav-icon {
-  display: flex;
-  height: 1.25rem;
-  width: 1.25rem;
+  height: 1rem;
+  width: 1rem;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 4px;
-  background-color: #1e293b;
-  font-size: 10px;
-  font-weight: 700;
-  color: #cbd5e1;
 }
 
 .icon-mark {

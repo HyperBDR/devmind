@@ -17,6 +17,8 @@
     "submit": "提交",
     "submitting": "提交中…",
     "search": "搜索",
+    "searchOptions": "搜索选项",
+    "select": "请选择",
     "filter": "筛选",
     "all": "全部",
     "refresh": "刷新",
@@ -38,6 +40,7 @@
     "logout": "退出登录",
     "profile": "个人资料",
     "noData": "暂无数据",
+    "noResults": "未找到匹配结果",
     "error": "错误",
     "success": "成功",
     "language": "语言",
@@ -758,8 +761,8 @@
       "createPlatform": "新建平台"
     },
     "currency": {
-      "cny": "人民币 CNY",
-      "usd": "美元 USD"
+      "cny": "CNY",
+      "usd": "USD"
     },
     "nav": {
       "monitor": {
@@ -997,6 +1000,160 @@
         "notConfigured": "未配置"
       }
     },
+    "metaModelManagement": {
+      "title": "元模型厂商",
+      "description": "展示已绑定元模型的厂商，点击后通过抽屉查看该厂商下的元模型。",
+      "actions": {
+        "close": "关闭",
+        "sync": "同步元模型",
+        "syncing": "同步中",
+        "viewModels": "查看模型"
+      },
+      "context": {
+        "input": "输入 {value}",
+        "output": "输出 {value}"
+      },
+      "drawer": {
+        "description": "展示该厂商下的元模型，支持状态、模态和关键字筛选。",
+        "eyebrow": "厂商元模型",
+        "fallbackTitle": "厂商元模型"
+      },
+      "empty": {
+        "models": "当前厂商下暂无符合条件的元模型。",
+        "vendors": "暂无符合条件的元模型厂商。"
+      },
+      "errors": {
+        "sync": "同步元模型失败"
+      },
+      "features": {
+        "attachment": "附件",
+        "chat": "对话",
+        "imageGeneration": "图像生成",
+        "reasoning": "推理",
+        "structuredOutput": "结构化输出",
+        "toolCalling": "工具调用"
+      },
+      "filters": {
+        "allModalities": "全部模态",
+        "allStatuses": "全部状态",
+        "searchModels": "搜索名称、Code、别名或家族",
+        "searchVendors": "搜索厂商"
+      },
+      "messages": {
+        "synced": "已同步 {count} 个真实元模型"
+      },
+      "metrics": {
+        "boundVendors": {
+          "hint": "存在元模型的厂商数",
+          "label": "已绑定厂商"
+        },
+        "metaModels": {
+          "hint": "归一化后的模型身份",
+          "label": "元模型"
+        },
+        "status": {
+          "hint": "可用 / 弃用",
+          "label": "可用 / 弃用"
+        }
+      },
+      "modality": {
+        "audio": "音频",
+        "multimodal": "多模态",
+        "text": "文本",
+        "video": "视频"
+      },
+      "pagination": {
+        "next": "下一页",
+        "pageSize": "{count} 条/页",
+        "previous": "上一页",
+        "summary": "共 {total} 条，第 {current} / {pages} 页"
+      },
+      "status": {
+        "active": "可用",
+        "deprecated": "弃用",
+        "unknown": "未知"
+      },
+      "summary": {
+        "modelResult": "{total} 个元模型 · {active} 个可用",
+        "vendors": "厂商"
+      },
+      "table": {
+        "actions": "操作",
+        "capability": "能力",
+        "context": "上下文",
+        "metaModel": "元模型",
+        "metaModels": "元模型",
+        "releaseDate": "发布日期",
+        "status": "状态",
+        "vendor": "厂商"
+      }
+    },
+    "reconciliationPanel": {
+      "title": "生产使用对账",
+      "actions": {
+        "create": "新建对账记录"
+      },
+      "empty": {
+        "description": "选择渠道、模型和账单金额后创建记录。",
+        "title": "暂无对账记录"
+      },
+      "fields": {
+        "audioInputSeconds": "音频输入秒数",
+        "audioOutputSeconds": "音频输出秒数",
+        "channel": "转发渠道",
+        "chargedAmount": "渠道账单金额",
+        "date": "对账日期",
+        "inputTokens": "文本输入 Tokens",
+        "model": "调用模型",
+        "outputTokens": "文本输出 Tokens",
+        "videoInputSeconds": "视频输入秒数",
+        "videoOutputSeconds": "视频输出秒数",
+        "videoResolution": "视频规格"
+      },
+      "helper": {
+        "selectModel": "选择模型后显示对应用量维度。"
+      },
+      "modality": {
+        "audio": "音频",
+        "multimodal": "多模态",
+        "text": "文本",
+        "video": "视频"
+      },
+      "option": {
+        "defaultCurrency": "默认币种 {currency}",
+        "disabled": "停用",
+        "enabled": "启用"
+      },
+      "placeholders": {
+        "channel": "选择账单归属渠道",
+        "model": "选择调用模型",
+        "searchChannel": "搜索渠道名称 / code / 接入地址",
+        "searchModel": "搜索模型名称 / code / 服务商",
+        "videoResolution": "如 720p / 1080p，可选"
+      },
+      "records": {
+        "title": "对账记录"
+      },
+      "status": {
+        "overcharged": "超收",
+        "perfect": "正常",
+        "undercharged": "少收"
+      },
+      "table": {
+        "bill": "账单",
+        "channel": "渠道",
+        "date": "日期",
+        "model": "模型",
+        "payable": "应付",
+        "status": "状态",
+        "variance": "差异"
+      },
+      "validation": {
+        "amountRequired": "请输入渠道账单金额。",
+        "channelRequired": "请选择账单归属的转发渠道。",
+        "modelRequired": "请选择本次用量对应的调用模型。"
+      }
+    },
     "providerManagement": {
       "title": "供货商价格列表",
       "modelsCount": "{count} 个元模型",
@@ -1162,8 +1319,8 @@
         "unknown": "其他"
       },
       "currencies": {
-        "cny": "人民币 CNY",
-        "usd": "美元 USD"
+        "cny": "CNY",
+        "usd": "USD"
       },
       "messages": {
         "created": "模型价格源已创建",
@@ -1329,8 +1486,8 @@
         "video": "视频"
       },
       "currencies": {
-        "cny": "人民币 CNY",
-        "usd": "美元 USD"
+        "cny": "CNY",
+        "usd": "USD"
       },
       "categories": {
         "manual": "人工",

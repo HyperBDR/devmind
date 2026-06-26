@@ -13,7 +13,7 @@
       @click="toggle"
     >
       <span class="truncate">
-        {{ selectedOption?.label || placeholder }}
+        {{ selectedOption?.label || displayPlaceholder }}
       </span>
       <span class="compact-select-caret">⌄</span>
     </button>
@@ -24,7 +24,7 @@
         ref="searchInputRef"
         v-model="search"
         class="compact-select-search"
-        :placeholder="searchPlaceholder"
+        :placeholder="displaySearchPlaceholder"
         @keydown.escape="open = false"
       />
       <button
@@ -36,10 +36,7 @@
         type="button"
         @click="select(option.value)"
       >
-        <span
-          v-if="option.type === 'group'"
-          class="compact-select-group-label"
-        >
+        <span v-if="option.type === 'group'" class="compact-select-group-label">
           {{ option.label }}
         </span>
         <span v-else class="min-w-0 flex-1">
@@ -62,7 +59,7 @@
         </span>
       </button>
       <div v-if="!filteredOptions.length" class="compact-select-empty">
-        没有匹配的选项
+        {{ displayEmptyText }}
       </div>
     </div>
   </div>
@@ -70,6 +67,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   modelValue: {
@@ -82,7 +80,7 @@ const props = defineProps({
   },
   placeholder: {
     type: String,
-    default: '请选择'
+    default: ''
   },
   size: {
     type: String,
@@ -106,7 +104,11 @@ const props = defineProps({
   },
   searchPlaceholder: {
     type: String,
-    default: '搜索选项'
+    default: ''
+  },
+  emptyText: {
+    type: String,
+    default: ''
   },
   menuMinWidth: {
     type: Number,
@@ -115,6 +117,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue', 'change'])
+const { t } = useI18n()
 
 const open = ref(false)
 const selectRef = ref(null)
@@ -127,6 +130,18 @@ const selectedOption = computed(() =>
   props.options.find(
     (option) => String(option.value) === String(props.modelValue)
   )
+)
+
+const displayPlaceholder = computed(
+  () => props.placeholder || t('common.select')
+)
+
+const displaySearchPlaceholder = computed(
+  () => props.searchPlaceholder || t('common.searchOptions')
+)
+
+const displayEmptyText = computed(
+  () => props.emptyText || t('common.noResults')
 )
 
 const filteredOptions = computed(() => {
@@ -209,10 +224,7 @@ function updateMenuPosition() {
   const spaceAbove = rect.top - gap
   const opensUp = spaceBelow < 140 && spaceAbove > spaceBelow
   const desiredWidth = Math.max(rect.width, Number(props.menuMinWidth) || 0)
-  const width = Math.min(
-    desiredWidth,
-    window.innerWidth - viewportPadding * 2
-  )
+  const width = Math.min(desiredWidth, window.innerWidth - viewportPadding * 2)
   const left = Math.min(
     Math.max(viewportPadding, rect.left),
     window.innerWidth - width - viewportPadding
@@ -224,9 +236,7 @@ function updateMenuPosition() {
   menuStyle.value = {
     left: `${left}px`,
     top: opensUp ? 'auto' : `${rect.bottom + gap}px`,
-    bottom: opensUp
-      ? `${window.innerHeight - rect.top + gap}px`
-      : 'auto',
+    bottom: opensUp ? `${window.innerHeight - rect.top + gap}px` : 'auto',
     width: `${width}px`,
     maxHeight: `${maxHeight}px`
   }
