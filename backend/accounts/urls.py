@@ -3,7 +3,6 @@ from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenRefreshView
 from dj_rest_auth.views import (
     LoginView, LogoutView,
-    PasswordChangeView,
 )
 
 from accounts.views import (
@@ -11,6 +10,7 @@ from accounts.views import (
     CompleteGoogleSetupView,
     CompleteRegistrationView,
     ConfirmPasswordResetView,
+    CustomPasswordChangeView,
     CustomUserDetailsView,
     GetAvailableScenesView,
     SendPasswordResetEmailView,
@@ -71,7 +71,7 @@ urlpatterns = [
     # Change password
     path(
         'api/v1/auth/password/change',
-        PasswordChangeView.as_view(),
+        CustomPasswordChangeView.as_view(),
         name='rest_password_change'
     ),
 

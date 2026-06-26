@@ -13,6 +13,7 @@ from .registration import (
     CheckVirtualEmailUsernameView,
 )
 from .password import (
+    CustomPasswordChangeView,
     SendPasswordResetEmailView,
     ConfirmPasswordResetView,
 )
@@ -26,6 +27,7 @@ __all__ = [
     'VerifyRegistrationTokenView',
     'CompleteRegistrationView',
     'CheckVirtualEmailUsernameView',
+    'CustomPasswordChangeView',
     'SendPasswordResetEmailView',
     'ConfirmPasswordResetView',
     'CustomUserDetailsView',
