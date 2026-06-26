@@ -17,6 +17,8 @@
     "submit": "Submit",
     "submitting": "Submitting…",
     "search": "Search",
+    "searchOptions": "Search options",
+    "select": "Select",
     "filter": "Filter",
     "all": "All",
     "refresh": "Refresh",
@@ -38,6 +40,7 @@
     "logout": "Logout",
     "profile": "Profile",
     "noData": "No data available",
+    "noResults": "No matching results found",
     "error": "Error",
     "success": "Success",
     "language": "Language",
@@ -748,8 +751,8 @@
       "createPlatform": "New platform"
     },
     "currency": {
-      "cny": "Chinese Yuan CNY",
-      "usd": "US Dollar USD"
+      "cny": "CNY",
+      "usd": "USD"
     },
     "nav": {
       "monitor": {
@@ -987,6 +990,160 @@
         "notConfigured": "Not configured"
       }
     },
+    "metaModelManagement": {
+      "title": "Meta Model Providers",
+      "description": "Shows providers with linked meta models. Open the drawer to inspect each provider's models.",
+      "actions": {
+        "close": "Close",
+        "sync": "Sync meta models",
+        "syncing": "Syncing",
+        "viewModels": "View models"
+      },
+      "context": {
+        "input": "In {value}",
+        "output": "Out {value}"
+      },
+      "drawer": {
+        "description": "Review this provider's meta models with status, modality, and keyword filters.",
+        "eyebrow": "Vendor Meta Models",
+        "fallbackTitle": "Provider meta models"
+      },
+      "empty": {
+        "models": "No meta models match the current filters for this provider.",
+        "vendors": "No meta model providers match the current filters."
+      },
+      "errors": {
+        "sync": "Failed to sync meta models"
+      },
+      "features": {
+        "attachment": "Attachment",
+        "chat": "Chat",
+        "imageGeneration": "Image generation",
+        "reasoning": "Reasoning",
+        "structuredOutput": "Structured output",
+        "toolCalling": "Tool calling"
+      },
+      "filters": {
+        "allModalities": "All modalities",
+        "allStatuses": "All statuses",
+        "searchModels": "Search name, code, aliases, or family",
+        "searchVendors": "Search providers"
+      },
+      "messages": {
+        "synced": "Synced {count} real meta models"
+      },
+      "metrics": {
+        "boundVendors": {
+          "hint": "Providers that have meta models",
+          "label": "Linked providers"
+        },
+        "metaModels": {
+          "hint": "Normalized model identities",
+          "label": "Meta models"
+        },
+        "status": {
+          "hint": "Active / deprecated",
+          "label": "Active / deprecated"
+        }
+      },
+      "modality": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "pagination": {
+        "next": "Next",
+        "pageSize": "{count} / page",
+        "previous": "Previous",
+        "summary": "{total} rows, page {current} / {pages}"
+      },
+      "status": {
+        "active": "Active",
+        "deprecated": "Deprecated",
+        "unknown": "Unknown"
+      },
+      "summary": {
+        "modelResult": "{total} meta models · {active} active",
+        "vendors": "Providers"
+      },
+      "table": {
+        "actions": "Actions",
+        "capability": "Capability",
+        "context": "Context",
+        "metaModel": "Meta model",
+        "metaModels": "Meta models",
+        "releaseDate": "Release date",
+        "status": "Status",
+        "vendor": "Provider"
+      }
+    },
+    "reconciliationPanel": {
+      "title": "Production Usage Reconciliation",
+      "actions": {
+        "create": "New reconciliation record"
+      },
+      "empty": {
+        "description": "Select a channel, model, and billed amount to create a record.",
+        "title": "No reconciliation records"
+      },
+      "fields": {
+        "audioInputSeconds": "Audio input seconds",
+        "audioOutputSeconds": "Audio output seconds",
+        "channel": "Forwarding channel",
+        "chargedAmount": "Channel billed amount",
+        "date": "Reconciliation date",
+        "inputTokens": "Text input tokens",
+        "model": "Model",
+        "outputTokens": "Text output tokens",
+        "videoInputSeconds": "Video input seconds",
+        "videoOutputSeconds": "Video output seconds",
+        "videoResolution": "Video resolution"
+      },
+      "helper": {
+        "selectModel": "Select a model to show matching usage dimensions."
+      },
+      "modality": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "option": {
+        "defaultCurrency": "Default currency {currency}",
+        "disabled": "Inactive",
+        "enabled": "Active"
+      },
+      "placeholders": {
+        "channel": "Select billing channel",
+        "model": "Select model",
+        "searchChannel": "Search channel name / code / endpoint",
+        "searchModel": "Search model name / code / provider",
+        "videoResolution": "Example: 720p / 1080p, optional"
+      },
+      "records": {
+        "title": "Reconciliation Records"
+      },
+      "status": {
+        "overcharged": "Overcharged",
+        "perfect": "Balanced",
+        "undercharged": "Undercharged"
+      },
+      "table": {
+        "bill": "Bill",
+        "channel": "Channel",
+        "date": "Date",
+        "model": "Model",
+        "payable": "Payable",
+        "status": "Status",
+        "variance": "Variance"
+      },
+      "validation": {
+        "amountRequired": "Enter the channel billed amount.",
+        "channelRequired": "Select the forwarding channel for this bill.",
+        "modelRequired": "Select the model used for this usage."
+      }
+    },
     "providerManagement": {
       "title": "Supplier Price Sources",
       "modelsCount": "{count} meta models",
@@ -1152,8 +1309,8 @@
         "unknown": "Other"
       },
       "currencies": {
-        "cny": "CNY - Chinese yuan",
-        "usd": "USD - US dollar"
+        "cny": "CNY",
+        "usd": "USD"
       },
       "messages": {
         "created": "Model price source created",
@@ -1319,8 +1476,8 @@
         "video": "Video"
       },
       "currencies": {
-        "cny": "CNY - Chinese yuan",
-        "usd": "USD - US dollar"
+        "cny": "CNY",
+        "usd": "USD"
       },
       "categories": {
         "manual": "Manual",

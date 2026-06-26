@@ -866,8 +866,8 @@ const currencyOptions = computed(() => [
     value: '',
     description: `保存为 ${channelCurrency.value}`
   },
-  { label: '人民币 CNY', value: 'CNY', description: '固定保存为人民币' },
-  { label: '美元 USD', value: 'USD', description: '固定保存为美元' }
+  { label: 'CNY', value: 'CNY', description: '固定保存为人民币' },
+  { label: 'USD', value: 'USD', description: '固定保存为美元' }
 ])
 
 const listedCount = computed(

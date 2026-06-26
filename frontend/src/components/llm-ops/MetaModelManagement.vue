@@ -20,9 +20,11 @@
       <article class="panel min-w-0 overflow-hidden p-0">
         <div class="table-toolbar">
           <div class="toolbar-copy">
-            <h3 class="panel-title">元模型厂商</h3>
+            <h3 class="panel-title">
+              {{ t('llmOps.metaModelManagement.title') }}
+            </h3>
             <p class="mt-1 text-xs text-slate-500">
-              展示已绑定元模型的厂商，点击后通过抽屉查看该厂商下的元模型。
+              {{ t('llmOps.metaModelManagement.description') }}
             </p>
           </div>
           <div class="vendor-toolbar-summary">
@@ -30,19 +32,21 @@
               v-model="vendorSearchKeyword"
               class="control-field vendor-search"
               name="meta-model-vendor-search"
-              placeholder="搜索厂商"
+              :placeholder="
+                t('llmOps.metaModelManagement.filters.searchVendors')
+              "
             />
             <span class="summary-pill">
-              <span>厂商</span>
+              <span>{{ t('llmOps.metaModelManagement.summary.vendors') }}</span>
               <strong>{{ vendorRows.length }}</strong>
             </span>
           </div>
         </div>
         <div class="vendor-list">
           <div class="vendor-list-header">
-            <span>厂商</span>
-            <span>元模型</span>
-            <span>操作</span>
+            <span>{{ t('llmOps.metaModelManagement.table.vendor') }}</span>
+            <span>{{ t('llmOps.metaModelManagement.table.metaModels') }}</span>
+            <span>{{ t('llmOps.metaModelManagement.table.actions') }}</span>
           </div>
           <button
             v-for="row in filteredVendorRows"
@@ -65,13 +69,15 @@
                 {{ row.meta_model_count }}
               </p>
             </div>
-            <span class="link-btn text-center">查看模型</span>
+            <span class="link-btn text-center">
+              {{ t('llmOps.metaModelManagement.actions.viewModels') }}
+            </span>
           </button>
           <div
             v-if="!filteredVendorRows.length"
             class="px-4 py-6 text-sm text-slate-500"
           >
-            暂无符合条件的元模型厂商。
+            {{ t('llmOps.metaModelManagement.empty.vendors') }}
           </div>
         </div>
       </article>
@@ -85,15 +91,20 @@
       <aside class="meta-drawer library-drawer">
         <div class="drawer-header">
           <div class="min-w-0 flex-1">
-            <p class="drawer-eyebrow">Vendor Meta Models</p>
+            <p class="drawer-eyebrow">
+              {{ t('llmOps.metaModelManagement.drawer.eyebrow') }}
+            </p>
             <h3 class="drawer-title">
-              {{ selectedVendorRow?.name || '厂商元模型' }}
+              {{
+                selectedVendorRow?.name ||
+                t('llmOps.metaModelManagement.drawer.fallbackTitle')
+              }}
             </h3>
             <p class="mt-1 font-mono text-xs text-slate-500">
               {{ selectedVendorRow?.code || '-' }}
             </p>
             <p class="drawer-desc">
-              展示该厂商下的元模型，支持状态、模态和关键字筛选。
+              {{ t('llmOps.metaModelManagement.drawer.description') }}
             </p>
           </div>
           <div class="drawer-header-actions">
@@ -103,14 +114,18 @@
               :disabled="syncingMetaModels"
               @click="syncMetaModels"
             >
-              {{ syncingMetaModels ? '同步中' : '同步元模型' }}
+              {{
+                syncingMetaModels
+                  ? t('llmOps.metaModelManagement.actions.syncing')
+                  : t('llmOps.metaModelManagement.actions.sync')
+              }}
             </button>
             <button
               class="btn-secondary btn-action-cancel"
               type="button"
               @click="closeVendorModelsDrawer"
             >
-              关闭
+              {{ t('llmOps.metaModelManagement.actions.close') }}
             </button>
           </div>
         </div>
@@ -137,11 +152,17 @@
                 v-model="searchKeyword"
                 class="control-field drawer-search"
                 name="meta-model-search"
-                placeholder="搜索名称、Code、别名或家族"
+                :placeholder="
+                  t('llmOps.metaModelManagement.filters.searchModels')
+                "
               />
               <p class="drawer-result-note">
-                {{ vendorMetaRows.length }} 个元模型 ·
-                {{ selectedVendorActiveCount }} 个可用
+                {{
+                  t('llmOps.metaModelManagement.summary.modelResult', {
+                    total: vendorMetaRows.length,
+                    active: selectedVendorActiveCount
+                  })
+                }}
               </p>
             </div>
           </div>
@@ -158,11 +179,21 @@
                 </colgroup>
                 <thead>
                   <tr>
-                    <th class="table-head">元模型</th>
-                    <th class="table-head">能力</th>
-                    <th class="table-head">上下文</th>
-                    <th class="table-head">发布日期</th>
-                    <th class="table-head">状态</th>
+                    <th class="table-head">
+                      {{ t('llmOps.metaModelManagement.table.metaModel') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('llmOps.metaModelManagement.table.capability') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('llmOps.metaModelManagement.table.context') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('llmOps.metaModelManagement.table.releaseDate') }}
+                    </th>
+                    <th class="table-head">
+                      {{ t('llmOps.metaModelManagement.table.status') }}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -220,10 +251,18 @@
                         <p
                           class="font-mono text-xs font-semibold text-slate-800"
                         >
-                          In {{ compactTokenLabel(item.context_window) }}
+                          {{
+                            t('llmOps.metaModelManagement.context.input', {
+                              value: compactTokenLabel(item.context_window)
+                            })
+                          }}
                         </p>
                         <p class="mt-1 font-mono text-xs text-slate-400">
-                          Out {{ compactTokenLabel(item.max_output_tokens) }}
+                          {{
+                            t('llmOps.metaModelManagement.context.output', {
+                              value: compactTokenLabel(item.max_output_tokens)
+                            })
+                          }}
                         </p>
                       </div>
                     </td>
@@ -244,7 +283,7 @@
                   </tr>
                   <tr v-if="!vendorMetaRows.length">
                     <td class="table-cell text-slate-500" colspan="5">
-                      当前厂商下暂无符合条件的元模型。
+                      {{ t('llmOps.metaModelManagement.empty.models') }}
                     </td>
                   </tr>
                 </tbody>
@@ -252,8 +291,13 @@
             </div>
             <div v-if="vendorMetaRows.length" class="pagination-bar">
               <p class="text-xs text-slate-500">
-                共 {{ vendorMetaRows.length }} 条，第 {{ safeCurrentPage }} /
-                {{ totalPages }} 页
+                {{
+                  t('llmOps.metaModelManagement.pagination.summary', {
+                    total: vendorMetaRows.length,
+                    current: safeCurrentPage,
+                    pages: totalPages
+                  })
+                }}
               </p>
               <div class="flex items-center gap-2">
                 <button
@@ -262,7 +306,7 @@
                   :disabled="safeCurrentPage <= 1"
                   @click="goToPreviousPage"
                 >
-                  上一页
+                  {{ t('llmOps.metaModelManagement.pagination.previous') }}
                 </button>
                 <button
                   class="btn-secondary pagination-btn btn-action-neutral"
@@ -270,7 +314,7 @@
                   :disabled="safeCurrentPage >= totalPages"
                   @click="goToNextPage"
                 >
-                  下一页
+                  {{ t('llmOps.metaModelManagement.pagination.next') }}
                 </button>
               </div>
             </div>
@@ -283,6 +327,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -309,6 +354,7 @@ const props = defineProps({
 
 const emit = defineEmits(['refresh'])
 const { showSuccess, showError } = useToast()
+const { t } = useI18n()
 
 const searchKeyword = ref('')
 const vendorSearchKeyword = ref('')
@@ -320,26 +366,47 @@ const selectedVendorId = ref('')
 const showVendorModelsDrawer = ref(false)
 const syncingMetaModels = ref(false)
 
-const statusOptions = [
-  { value: '', label: '全部状态' },
-  { value: 'active', label: 'Active' },
-  { value: 'deprecated', label: 'Deprecated' },
-  { value: 'unknown', label: 'Unknown' }
-]
+const statusOptions = computed(() => [
+  {
+    value: '',
+    label: t('llmOps.metaModelManagement.filters.allStatuses')
+  },
+  { value: 'active', label: t('llmOps.metaModelManagement.status.active') },
+  {
+    value: 'deprecated',
+    label: t('llmOps.metaModelManagement.status.deprecated')
+  },
+  { value: 'unknown', label: t('llmOps.metaModelManagement.status.unknown') }
+])
 
-const modalityOptions = [
-  { value: '', label: '全部模态' },
-  { value: 'text', label: 'Text' },
-  { value: 'multimodal', label: 'Multimodal' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'video', label: 'Video' }
-]
+const modalityOptions = computed(() => [
+  {
+    value: '',
+    label: t('llmOps.metaModelManagement.filters.allModalities')
+  },
+  { value: 'text', label: t('llmOps.metaModelManagement.modality.text') },
+  {
+    value: 'multimodal',
+    label: t('llmOps.metaModelManagement.modality.multimodal')
+  },
+  { value: 'audio', label: t('llmOps.metaModelManagement.modality.audio') },
+  { value: 'video', label: t('llmOps.metaModelManagement.modality.video') }
+])
 
-const pageSizeOptions = [
-  { value: 10, label: '10 条/页' },
-  { value: 20, label: '20 条/页' },
-  { value: 50, label: '50 条/页' }
-]
+const pageSizeOptions = computed(() => [
+  {
+    value: 10,
+    label: t('llmOps.metaModelManagement.pagination.pageSize', { count: 10 })
+  },
+  {
+    value: 20,
+    label: t('llmOps.metaModelManagement.pagination.pageSize', { count: 20 })
+  },
+  {
+    value: 50,
+    label: t('llmOps.metaModelManagement.pagination.pageSize', { count: 50 })
+  }
+])
 
 const rows = computed(() =>
   props.metaModels.map((item) => {
@@ -473,19 +540,19 @@ const metricCards = computed(() => {
   )
   return [
     {
-      label: '元模型',
+      label: t('llmOps.metaModelManagement.metrics.metaModels.label'),
       value: props.metaModels.length,
-      hint: '归一化后的模型身份'
+      hint: t('llmOps.metaModelManagement.metrics.metaModels.hint')
     },
     {
-      label: '已绑定厂商',
+      label: t('llmOps.metaModelManagement.metrics.boundVendors.label'),
       value: boundVendorIds.size,
-      hint: '存在元模型的厂商数'
+      hint: t('llmOps.metaModelManagement.metrics.boundVendors.hint')
     },
     {
-      label: '可用 / 弃用',
+      label: t('llmOps.metaModelManagement.metrics.status.label'),
       value: `${active.length}/${deprecated.length}`,
-      hint: 'Active / Deprecated'
+      hint: t('llmOps.metaModelManagement.metrics.status.hint')
     }
   ]
 })
@@ -524,10 +591,14 @@ async function syncMetaModels() {
   try {
     const response = await llmOpsApi.syncMetaModels()
     const stats = response?.data || {}
-    showSuccess(`已同步 ${stats.models || 0} 个真实元模型`)
+    showSuccess(
+      t('llmOps.metaModelManagement.messages.synced', {
+        count: stats.models || 0
+      })
+    )
     emit('refresh')
   } catch (error) {
-    showError(errorMessage(error, '同步元模型失败'))
+    showError(errorMessage(error, t('llmOps.metaModelManagement.errors.sync')))
   } finally {
     syncingMetaModels.value = false
   }
@@ -608,12 +679,14 @@ function capabilityIconPaths(value) {
 
 function featureLabel(value) {
   const labels = {
-    attachment: 'Attachment',
-    chat: 'Chat',
-    image_generation: 'Image generation',
-    reasoning: 'Reasoning',
-    structured_output: 'Structured output',
-    tool_calling: 'Tool calling'
+    attachment: t('llmOps.metaModelManagement.features.attachment'),
+    chat: t('llmOps.metaModelManagement.features.chat'),
+    image_generation: t('llmOps.metaModelManagement.features.imageGeneration'),
+    reasoning: t('llmOps.metaModelManagement.features.reasoning'),
+    structured_output: t(
+      'llmOps.metaModelManagement.features.structuredOutput'
+    ),
+    tool_calling: t('llmOps.metaModelManagement.features.toolCalling')
   }
   return labels[value] || value || '-'
 }
@@ -679,21 +752,23 @@ function compactNumber(value) {
 
 function modalityLabel(value) {
   const labels = {
-    text: 'Text',
-    multimodal: 'Multimodal',
-    audio: 'Audio',
-    video: 'Video'
+    text: t('llmOps.metaModelManagement.modality.text'),
+    multimodal: t('llmOps.metaModelManagement.modality.multimodal'),
+    audio: t('llmOps.metaModelManagement.modality.audio'),
+    video: t('llmOps.metaModelManagement.modality.video')
   }
   return labels[value] || value || '-'
 }
 
 function statusLabel(value) {
   const labels = {
-    active: 'Active',
-    deprecated: 'Deprecated',
-    unknown: 'Unknown'
+    active: t('llmOps.metaModelManagement.status.active'),
+    deprecated: t('llmOps.metaModelManagement.status.deprecated'),
+    unknown: t('llmOps.metaModelManagement.status.unknown')
   }
-  return labels[value] || value || 'Unknown'
+  return (
+    labels[value] || value || t('llmOps.metaModelManagement.status.unknown')
+  )
 }
 
 function statusTone(value) {
@@ -737,7 +812,7 @@ function errorMessage(error, fallback) {
 }
 
 .source-summary-strip {
-  @apply grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 shadow-sm sm:grid-cols-2 lg:grid-cols-4;
+  @apply grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 shadow-sm sm:grid-cols-3;
 }
 
 .source-summary-item {
