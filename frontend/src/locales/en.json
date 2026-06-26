@@ -897,6 +897,909 @@
       "noChangesToSave": "No changes need to be saved",
       "draftsSaved": "Saved {count} drafts",
       "saveFailed": "Save failed"
+    },
+    "publishingDrawer": {
+      "back": "Back",
+      "title": "Immersive Model Publishing Workspace",
+      "saveDraft": "Save draft",
+      "submitting": "Submitting…",
+      "submit": "Submit listing",
+      "saveFailed": "Save failed",
+      "submitFailed": "Submit failed"
+    },
+    "publishingWorkspace": {
+      "filters": {
+        "platform": "Publishing platform",
+        "vendor": "Meta vendor",
+        "metaModel": "Meta model",
+        "supplier": "Supplier channel",
+        "all": "All",
+        "selectMetaModel": "Select meta model",
+        "selectMetaModelFirst": "Select a meta model first",
+        "allSupportedChannels": "All supported channels"
+      },
+      "context": {
+        "platformCurrency": "Platform currency",
+        "exchangeRate": "Exchange rate",
+        "pointConversion": "{point} conversion"
+      },
+      "supply": {
+        "title": "Supply Chain Selection",
+        "selectedCount": "{count} selected links",
+        "availableCount": "{count} available links",
+        "collapse": "Collapse",
+        "expand": "Expand",
+        "chain": "Commercial and physical link",
+        "empty": "No available supply links for this meta model.",
+        "supplierPrefix": "Supplier channel: {name}",
+        "sourcePrefix": "Supply source: {name}",
+        "lowest": "Lowest",
+        "lowestProcurement": "Lowest procurement link",
+        "selectRequired": "Select at least one supply link in the selection panel to continue pricing.",
+        "chainFallback": "Supply link"
+      },
+      "pricing": {
+        "cost": "Cost",
+        "price": "Price",
+        "finalPoint": "Final {point}",
+        "costPrice": "Cost price",
+        "retailPrice": "Retail price",
+        "floor": "Floor {value}",
+        "average": "Average",
+        "referenceTitle": "Minimum reference price = cost price × (1 + service fee rate + platform commission rate); current service fee {serviceFee}; current platform commission {commission}; reference price {reference}",
+        "costFormulaTitle": "Cost price = supplier cost price × discount; {formula}",
+        "noBenchmark": "No benchmark",
+        "lowerThanAverage": "↓ {pct}% lower",
+        "higherThanAverage": "↑ {pct}% higher",
+        "sameAsAverage": "- Flat",
+        "marketAverage": "Market average"
+      },
+      "performance": {
+        "title": "Link Performance Benchmark",
+        "empty": "No comparison data",
+        "resize": "Resize link performance benchmark width",
+        "rpm": "Request rate (RPM)",
+        "tpm": "Token throughput (TPM)",
+        "latency": "First-token latency (lower is better)"
+      },
+      "margin": {
+        "title": "Unified Margin Target",
+        "description": "Input, Output, and Cache prices are derived from the same margin rate.",
+        "input": "Unified margin rate",
+        "axisLabel": "Unified margin {value}",
+        "noAutoApprove": "No auto-approval margin configured",
+        "autoApproveInactive": "Auto-approval threshold inactive",
+        "withinAutoApprove": "Within auto-approval range (<= {value})",
+        "aboveAutoApprove": "Above auto-approval limit (> {value})",
+        "minTitle": "Minimum margin floor",
+        "autoApproveTitle": "Auto-approval margin limit",
+        "minSource": "Cost price × (1 + service fee rate + platform commission rate)",
+        "autoApproveSource": "Auto-approval threshold from platform settings; affects approval only",
+        "platformFloor": "Platform floor",
+        "feeBreakdown": "Service fee {serviceFee} + commission {commission}",
+        "autoApproveLimit": "Auto-approval limit"
+      },
+      "fallback": {
+        "platform": "Platform {id}",
+        "uncategorized": "Uncategorized",
+        "points": "points",
+        "currentPlatform": "Current platform",
+        "notConfigured": "Not configured"
+      }
+    },
+    "providerManagement": {
+      "title": "Supplier Price Sources",
+      "modelsCount": "{count} meta models",
+      "empty": "No supplier price sources match the current filters.",
+      "actions": {
+        "bulkImport": "Bulk import",
+        "createSource": "New price source",
+        "delete": "Delete",
+        "deleting": "Deleting",
+        "edit": "Edit",
+        "manualPricing": "Manual pricing",
+        "notSupported": "Not supported",
+        "submitting": "Submitting",
+        "syncPrice": "Sync prices",
+        "viewModels": "View meta models"
+      },
+      "filters": {
+        "activeOnly": "Active only",
+        "allStatuses": "All statuses",
+        "allTypes": "All types",
+        "inactiveOnly": "Inactive only",
+        "searchPlaceholder": "Search supplier, price source, provider, or URL"
+      },
+      "table": {
+        "actions": "Actions",
+        "metaModels": "Linked meta models",
+        "source": "Supplier / price source",
+        "status": "Status",
+        "type": "Type"
+      },
+      "metrics": {
+        "metaModels": {
+          "hint": "At least one current price is linked",
+          "label": "Covered meta models"
+        },
+        "official": {
+          "hint": "Published directly by meta model providers",
+          "label": "Official sources"
+        },
+        "sources": {
+          "hint": "Supplier and official price catalogs",
+          "label": "Price sources"
+        },
+        "supplierManual": {
+          "hint": "Supplier {supplier} · manual {manual}",
+          "label": "Supplier / manual"
+        }
+      },
+      "category": {
+        "manual": "Manual",
+        "officialProvider": "Official",
+        "supplier": "Supplier",
+        "unknown": "Other"
+      },
+      "relation": {
+        "forwardingChannel": "Forwarding channel",
+        "metaProvider": "Meta model provider",
+        "needsOwner": "Ownership needs completion",
+        "unbound": "Unbound source"
+      },
+      "sourceMode": {
+        "aggregateSync": "Aggregate sync",
+        "autoCollect": "Auto collect",
+        "custom": "Custom",
+        "dedicatedCollect": "Dedicated collection",
+        "manualMaintenance": "Manual maintenance",
+        "pending": "Pending adapter",
+        "supplierMaintenance": "Supplier maintained"
+      },
+      "sourceStatus": {
+        "active": {
+          "hint": "Participates in collection and calculation",
+          "label": "Active"
+        },
+        "failed": {
+          "hint": "Check the price URL or collector",
+          "label": "Collection failed"
+        },
+        "inactive": {
+          "hint": "Does not participate in collection",
+          "label": "Inactive"
+        },
+        "manual": {
+          "hint": "Updated through manual entry or Excel import",
+          "label": "Manual maintenance"
+        },
+        "pending": {
+          "label": "Pending adapter"
+        },
+        "syncing": {
+          "hint": "Refresh again later",
+          "label": "Syncing"
+        }
+      },
+      "collectMode": {
+        "autoCollect": "Auto collect",
+        "dedicatedCollector": "Dedicated collector",
+        "manualMaintenance": "Manual maintenance",
+        "pending": "Not adapted"
+      },
+      "confirm": {
+        "deleteSource": "Delete model price source \"{name}\"?\n\nThis removes the price source and its collection records. Linked models or channels will lose this price source."
+      },
+      "messages": {
+        "deleted": "Model price source deleted",
+        "syncSubmitted": "{name} sync task submitted{taskId}",
+        "taskId": " ({taskId})"
+      },
+      "errors": {
+        "deleteFailed": "Failed to delete model price source",
+        "syncFailed": "Failed to submit price sync task"
+      }
+    },
+    "priceSourceModal": {
+      "title": {
+        "create": "New Model Price Source",
+        "edit": "Edit Model Price Source"
+      },
+      "description": {
+        "create": "Create an official, supplier, or manually maintained price source for later price entry and collection.",
+        "edit": "Maintain the source name, pricing scope, price URL, and enabled status."
+      },
+      "sections": {
+        "basic": "Basic information",
+        "basicHint": "Only operational fields that need maintenance are shown.",
+        "notes": "Additional notes",
+        "notesHint": "Optional details for region, contract pricing, or special notes."
+      },
+      "fields": {
+        "category": "Pricing scope",
+        "currency": "Default currency",
+        "endpointUrl": "Price URL",
+        "name": "Price source name",
+        "slug": "System slug",
+        "sourceType": "Source mode"
+      },
+      "placeholders": {
+        "name": "Example: Yunce / Alibaba Bailian East China line",
+        "notes": "Example: East China line, contract price, qwen-plus only"
+      },
+      "help": {
+        "autoSlug": "The system slug will be generated after creation: {slug}",
+        "endpointUrl": "Official pricing page, supplier price API, or manual price source URL."
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "create": "Create price source",
+        "saveChanges": "Save changes",
+        "saving": "Saving"
+      },
+      "status": {
+        "disabled": "Price source disabled",
+        "enabled": "Price source enabled"
+      },
+      "sourceTypes": {
+        "custom": "Custom"
+      },
+      "categories": {
+        "manual": "Manual maintenance",
+        "officialProvider": "Official price source",
+        "supplier": "Supplier price source",
+        "unknown": "Other"
+      },
+      "currencies": {
+        "cny": "CNY - Chinese yuan",
+        "usd": "USD - US dollar"
+      },
+      "messages": {
+        "created": "Model price source created",
+        "updated": "Model price source updated"
+      },
+      "errors": {
+        "save": "Failed to save model price source"
+      }
+    },
+    "sourcePriceDrawer": {
+      "title": "Meta Model Prices Under Supplier",
+      "searchPlaceholder": "Search meta model, provider, or code",
+      "actions": {
+        "close": "Close",
+        "delete": "Delete",
+        "deleting": "Deleting"
+      },
+      "summary": {
+        "currency": "Default currency",
+        "currentItems": "Current price items",
+        "metaModels": "Covered meta models",
+        "status": "Status"
+      },
+      "status": {
+        "disabled": "Inactive",
+        "enabled": "Active"
+      },
+      "info": {
+        "owner": "Source owner",
+        "priceUrl": "Price URL",
+        "updateMode": "Update mode"
+      },
+      "table": {
+        "metaModel": "Meta model",
+        "price": "Price (source currency / 1M tokens)",
+        "updatedAt": "Last updated"
+      },
+      "empty": {
+        "noPrice": "No price",
+        "noRows": "This price source has no model price records yet."
+      },
+      "fallback": {
+        "unbound": "Unbound",
+        "unboundProvider": "Unbound provider",
+        "unknownMetaModel": "Unknown meta model"
+      },
+      "dimensions": {
+        "audioInput": "Audio input",
+        "audioOutput": "Audio output",
+        "cacheInput": "Cache input",
+        "imageInput": "Image input",
+        "imageOutput": "Image output",
+        "textInput": "Text input",
+        "textOutput": "Text output",
+        "videoInput": "Video input",
+        "videoOutput": "Video output"
+      },
+      "billingUnits": {
+        "per1mTokens": "/ 1M tokens",
+        "perGeneration": "/ generation",
+        "perImage": "/ image",
+        "perSecond": "/ second"
+      },
+      "modalities": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "categories": {
+        "manual": "Manual entry",
+        "officialProvider": "Official price",
+        "supplier": "Supplier price",
+        "unknown": "Other"
+      },
+      "sourceMode": {
+        "aggregateSync": "Aggregate sync",
+        "autoCollect": "Auto collect",
+        "dedicatedCollect": "Dedicated collection",
+        "manualMaintenance": "Manual maintenance",
+        "pending": "Pending adapter",
+        "supplierMaintenance": "Supplier maintained"
+      }
+    },
+    "manualPriceEntry": {
+      "title": "Enter Model Price",
+      "description": "Maintain one model price for the current price source. Prefer an existing official model, and create a custom model only when it does not exist.",
+      "sourceContext": "{relation} · default currency {currency}",
+      "sections": {
+        "model": "Select model",
+        "modelHint": "Channels and listings will calculate cost from this model and price source.",
+        "price": "Price details",
+        "priceHint": "Fill prices by supported billing dimension. Empty dimensions will not create price items."
+      },
+      "modelMode": {
+        "custom": "Create custom model",
+        "existing": "Select existing model"
+      },
+      "fields": {
+        "currency": "Currency",
+        "model": "Model",
+        "modelCode": "Model code",
+        "modelName": "Model name",
+        "modality": "Model type",
+        "provider": "Model provider",
+        "sourceUrl": "Source URL"
+      },
+      "placeholders": {
+        "modelCode": "Example: deepseek-v3",
+        "modelName": "Example: DeepSeek V3",
+        "searchModel": "Search model name, code, or provider",
+        "searchProvider": "Search model provider",
+        "selectProvider": "Select model provider",
+        "sourceUrl": "Optional, pricing page or quote URL"
+      },
+      "help": {
+        "existingModel": "Choose from existing system models. Provider and type will be filled automatically."
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "save": "Save price",
+        "saving": "Saving"
+      },
+      "priceFields": {
+        "audioInput": {
+          "help": "Speech recognition or audio understanding input",
+          "label": "Audio input / second"
+        },
+        "audioOutput": {
+          "help": "Text-to-speech or audio generation output",
+          "label": "Audio output / second"
+        },
+        "cacheInput": {
+          "help": "Optional input price after cache hit",
+          "label": "Cache input / million tokens"
+        },
+        "imageOutput": {
+          "help": "Image generation priced per image",
+          "label": "Image output / image"
+        },
+        "textInput": {
+          "help": "Prompt or input token unit price",
+          "label": "Text input / million tokens"
+        },
+        "textOutput": {
+          "help": "Completion or output token unit price",
+          "label": "Text output / million tokens"
+        },
+        "videoInput": {
+          "help": "Video understanding input",
+          "label": "Video input / second"
+        },
+        "videoOutput": {
+          "help": "Video generation output",
+          "label": "Video output / second"
+        }
+      },
+      "modalities": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "currencies": {
+        "cny": "CNY - Chinese yuan",
+        "usd": "USD - US dollar"
+      },
+      "categories": {
+        "manual": "Manual",
+        "officialProvider": "Official",
+        "supplier": "Supplier",
+        "unknown": "Other"
+      },
+      "relation": {
+        "channel": "Forwarding channel {name}",
+        "provider": "Model provider {name}",
+        "unbound": "No model provider bound"
+      },
+      "validation": {
+        "customModelCode": "Enter a custom model code.",
+        "customModelName": "Enter a custom model name.",
+        "customModelProvider": "Select the model provider for the custom model.",
+        "noSource": "Missing price source.",
+        "price": "Enter at least one price dimension.",
+        "selectExistingModel": "Select an existing model."
+      },
+      "groups": {
+        "currentProvider": "Current price source provider",
+        "otherModels": "Other models"
+      },
+      "fallback": {
+        "unknownProvider": "Unknown provider"
+      },
+      "messages": {
+        "saved": "Model price saved"
+      },
+      "errors": {
+        "save": "Failed to save model price"
+      }
+    },
+    "manualPriceImport": {
+      "title": "Import Manual Price Sheet",
+      "description": "For model price sources that cannot be collected automatically. Copy a full table from Excel and paste it here.",
+      "updateModelPrices": "Also update model price source prices after import. When disabled, only the model price source and standard price items are created, without overwriting model master prices.",
+      "supportedFieldsTitle": "Supported fields",
+      "emptyPreview": "Paste a price table with headers to show the preview.",
+      "fields": {
+        "currency": "Default currency",
+        "provider": "Model provider",
+        "sourceName": "Model price source name",
+        "sourceUrl": "Model price source URL",
+        "tableContent": "Excel / CSV content"
+      },
+      "placeholders": {
+        "selectProvider": "Select model owner",
+        "sourceName": "Example: OpenAI 2026-06 manual price sheet",
+        "sourceUrl": "Optional, official site or internal spreadsheet link"
+      },
+      "actions": {
+        "cancel": "Cancel",
+        "close": "Close",
+        "confirmImport": "Confirm import",
+        "importing": "Importing"
+      },
+      "preview": {
+        "needsFix": "Needs fixes",
+        "ready": "Ready to import",
+        "summary": "{valid} valid rows, {errors} errors",
+        "title": "Parse preview"
+      },
+      "table": {
+        "audio": "Audio",
+        "currency": "Currency",
+        "image": "Image",
+        "input": "Input",
+        "model": "Model",
+        "output": "Output",
+        "type": "Type",
+        "video": "Video"
+      },
+      "modalities": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "parseErrors": {
+        "invalidNumber": "Line {line}: {field} is not a valid non-negative number.",
+        "missingModelCode": "Missing required header: model_code.",
+        "needHeaderAndRow": "At least one header row and one data row are required.",
+        "noPrice": "Line {line}: at least one price field is required.",
+        "rowMissingModelCode": "Line {line}: missing model_code.",
+        "unsupportedCurrency": "Line {line}: currency only supports USD or CNY."
+      }
+    },
+    "channelManagement": {
+      "title": "Forwarding Channel Configuration",
+      "description": "Maintain channel details, then manage upstream providers, cost rules, and forwarding capacity from model management.",
+      "searchPlaceholder": "Search channel name, code, or URL",
+      "createChannel": "New channel",
+      "apiConfigured": "API configured",
+      "apiNotConfigured": "API not configured",
+      "currency": "Currency {currency}",
+      "discount": "Discount {ratio}",
+      "enabled": "Enabled",
+      "configured": "Configured",
+      "empty": "No channel configurations match the current filters.",
+      "table": {
+        "channel": "Channel",
+        "defaultConfig": "Default config",
+        "modelManagement": "Model management",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "filters": {
+        "allStatus": "All statuses",
+        "activeOnly": "Active only",
+        "inactiveOnly": "Inactive only"
+      },
+      "status": {
+        "active": "Active",
+        "inactive": "Inactive"
+      },
+      "actions": {
+        "manageModels": "Manage models",
+        "edit": "Edit",
+        "delete": "Delete",
+        "cancel": "Cancel"
+      },
+      "deleteDialog": {
+        "title": "Delete forwarding channel",
+        "description": "Deleting this channel also removes its model configuration, procurement price items, and reconciliation records. Existing listings are kept but no longer linked to this channel.",
+        "confirmation": "Confirm that this channel and its model relationships are no longer needed before deleting it.",
+        "deleting": "Deleting",
+        "confirmDelete": "Confirm delete"
+      },
+      "messages": {
+        "deleted": "{name} deleted",
+        "deleteFailed": "Failed to delete channel"
+      }
+    },
+    "listingBoard": {
+      "title": "Model Listing Board",
+      "subtitle": "Only models in the current platform workflow are shown.",
+      "searchPlaceholder": "Search model / code",
+      "selectedCount": "{count} selected",
+      "createListing": "New listing",
+      "platformFallback": "Resale platform",
+      "filters": {
+        "actionable": "Actionable",
+        "all": "All",
+        "listed": "Listed",
+        "unlisted": "Unlisted"
+      },
+      "pagination": {
+        "pageSize": "Per page",
+        "summary": "Page {current} / {total} · {count} total",
+        "previous": "Previous",
+        "next": "Next"
+      },
+      "table": {
+        "platform": "Resale platform",
+        "model": "Model",
+        "supplyChain": "Supply link",
+        "cost": "Cost",
+        "retail": "Retail",
+        "points": "Points",
+        "margin": "Margin",
+        "status": "Status",
+        "actions": "Actions"
+      },
+      "batch": {
+        "offline": "Batch offline",
+        "price": "Batch reprice",
+        "confirm": "Batch confirm",
+        "confirmSubmit": "Batch confirm submit",
+        "confirmPublish": "Batch confirm publish",
+        "confirmUpdate": "Batch confirm update",
+        "confirmOffline": "Batch confirm offline"
+      },
+      "kpis": {
+        "availableModels": {
+          "label": "Listable models",
+          "hint": "{count} unlisted",
+          "delta": "This period"
+        },
+        "platforms": {
+          "label": "Resale platforms",
+          "hint": "Visible resale platform total",
+          "delta": "Stable"
+        },
+        "listed": {
+          "label": "Listed",
+          "hint": "Currently online on external platforms",
+          "activeDelta": "+ publishing",
+          "pendingDelta": "Pending"
+        },
+        "unlisted": {
+          "label": "Unlisted",
+          "hint": "Can be handled from the workspace",
+          "delta": "Needs action"
+        },
+        "averageMargin": {
+          "label": "Overall average margin",
+          "hint": "Estimated across Input / Output / Cached",
+          "delta": "Reference"
+        }
+      },
+      "empty": {
+        "actionable": "No listing models need action.",
+        "listed": "There are no listed models.",
+        "unlisted": "There are no models ready to list.",
+        "default": "No models match the current filters."
+      },
+      "supply": {
+        "activeLinks": "{count} active listing links",
+        "none": "No supply"
+      },
+      "workflowStatus": {
+        "draft": "Draft",
+        "pendingPublish": "Pending publish",
+        "online": "Listed",
+        "updateDraft": "Update draft",
+        "pendingUpdate": "Pending update",
+        "pendingOffline": "Pending offline",
+        "offlineException": "Offline exception",
+        "offline": "Offline",
+        "deleted": "Invalid"
+      },
+      "rowActions": {
+        "abandonChange": "Abandon changes",
+        "abandonUpdate": "Abandon",
+        "confirmOffline": "Confirm offline",
+        "confirmPublish": "Confirm publish",
+        "confirmSubmit": "Confirm submit",
+        "confirmUpdate": "Confirm update",
+        "continueEdit": "Continue editing",
+        "delete": "Delete",
+        "deleteData": "Delete data",
+        "directOffline": "Direct offline",
+        "edit": "Edit",
+        "goListing": "Go to listing",
+        "markOfflineException": "Mark exception",
+        "rejectOffline": "Reject offline",
+        "republish": "Republish",
+        "requestOffline": "Request offline",
+        "startEdit": "Start editing",
+        "submit": "Submit",
+        "withdraw": "Withdraw",
+        "withdrawChange": "Withdraw changes",
+        "withdrawOffline": "Withdraw offline",
+        "withdrawRequest": "Withdraw request"
+      },
+      "confirm": {
+        "batchOffline": "Request offline for {count} models?",
+        "batchConfirm": "{action} for {count} models?",
+        "batchPrice": "Open batch repricing workspace for {count} models?",
+        "requestOffline": "Request offline? The external platform will remain listed until offline is confirmed.",
+        "confirmOffline": "Confirm that the external platform is offline? This model will move to offline status.",
+        "directOffline": "Directly offline this listing? This means the external platform has already been taken down.",
+        "delete": "Delete this listing data? It will be hidden from the normal business list.",
+        "default": "Confirm this workflow action?"
+      },
+      "messages": {
+        "batchConfirmed": "{action} completed",
+        "batchOfflineRequested": "Batch offline requested",
+        "deleted": "Deleted",
+        "directOfflineDone": "Direct offline completed",
+        "offlineConfirmed": "Offline confirmed",
+        "offlineExceptionMarked": "Exception marked",
+        "offlineRejected": "Offline rejected",
+        "offlineRequested": "Offline requested",
+        "publishConfirmed": "Publish confirmed",
+        "republishSubmitted": "Republish submitted",
+        "statusUpdated": "Status updated",
+        "submitted": "Submitted",
+        "updateAbandoned": "Update abandoned",
+        "updateConfirmed": "Update confirmed",
+        "updateDraftStarted": "Update draft started",
+        "withdrawn": "Withdrawn"
+      },
+      "errors": {
+        "directOfflineFailed": "Direct offline failed",
+        "operationFailed": "Operation failed",
+        "transitionFailed": "Status transition failed"
+      }
+    },
+    "auditLog": {
+      "actions": {
+        "reset": "Reset",
+        "search": "Search"
+      },
+      "actionOptions": {
+        "all": "All actions",
+        "bulkDraft": "Save draft",
+        "bulkReplace": "Batch replace",
+        "bulkUpsert": "Batch submit",
+        "collect": "Collect",
+        "create": "Create",
+        "delete": "Delete",
+        "import": "Import",
+        "offline": "Offline",
+        "restore": "Restore",
+        "sync": "Sync",
+        "transition": "Approval transition",
+        "update": "Update"
+      },
+      "businessCategories": {
+        "all": "All categories",
+        "channelConfig": "Channel configuration",
+        "listing": "Model listing",
+        "metaModel": "Meta model",
+        "modelPrice": "Model price",
+        "priceSource": "Price source configuration",
+        "reconciliation": "Usage reconciliation"
+      },
+      "channelFallback": "Channel #{id}",
+      "channelPrefix": "Channel: {name}",
+      "detail": {
+        "contentChanges": "Content changes",
+        "statusChanges": "Status changes"
+      },
+      "empty": {
+        "description": "Adjust filters, or run a channel, price, listing, or approval operation before searching again.",
+        "noContentChanges": "No content field differences recorded.",
+        "noFieldChanges": "No field changes recorded",
+        "noStatusChanges": "No status changes recorded.",
+        "title": "No audit records"
+      },
+      "errors": {
+        "loadFailed": "Failed to load audit records"
+      },
+      "fields": {
+        "aliases": "Aliases",
+        "apiEndpoint": "API Endpoint",
+        "basePriceItem": "Base price item",
+        "billingUnit": "Billing unit",
+        "capabilities": "Capabilities",
+        "channel": "Channel",
+        "code": "Code",
+        "comparisonStatus": "Price comparison status",
+        "contextWindow": "Context window",
+        "currency": "Currency",
+        "customAudioInput": "Custom audio input price",
+        "customAudioOutput": "Custom audio output price",
+        "customInput": "Custom input price",
+        "customOutput": "Custom output price",
+        "customVideoInput": "Custom video input price",
+        "customVideoOutput": "Custom video output price",
+        "customVideoResolution": "Custom video resolution prices",
+        "deltaAmount": "Delta amount",
+        "deltaPercent": "Delta percent",
+        "dimension": "Billing dimension",
+        "endpointUrl": "Endpoint URL",
+        "family": "Model family",
+        "feeRate": "Fee rate",
+        "isActive": "Active status",
+        "isCurrent": "Current version",
+        "isEnabled": "Collection status",
+        "isListed": "Channel listing status",
+        "latency": "Latency",
+        "maxOutputTokens": "Max output tokens",
+        "metadata": "Metadata",
+        "metaModel": "Meta model",
+        "modality": "Modality",
+        "model": "Model",
+        "name": "Name",
+        "notes": "Notes",
+        "platform": "Platform",
+        "pointName": "Point name",
+        "pointRoundingMode": "Point rounding",
+        "pointsPerCurrencyUnit": "Point conversion",
+        "priceFingerprint": "Price fingerprint",
+        "priceSource": "Price source",
+        "priceSourceType": "Price source type",
+        "provider": "Provider",
+        "publishStatus": "Publish status",
+        "reason": "Reason",
+        "retailAudioInput": "Retail audio input price",
+        "retailAudioOutput": "Retail audio output price",
+        "retailCacheInput": "Retail cache input price",
+        "retailImageOutput": "Retail image output price",
+        "retailInput": "Retail input price",
+        "retailOutput": "Retail output price",
+        "retailVideoInput": "Retail video input price",
+        "retailVideoOutput": "Retail video output price",
+        "retailVideoResolution": "Retail video resolution prices",
+        "rpmLimit": "RPM limit",
+        "serviceFeeRate": "Service fee rate",
+        "settlementRatio": "Settlement ratio",
+        "sourceCategory": "Price source category",
+        "sourceType": "Source type",
+        "sourceUrl": "Source URL",
+        "spec": "Spec",
+        "status": "Status",
+        "tierEnd": "Tier end",
+        "tierStart": "Tier start",
+        "tierType": "Tier type",
+        "tpmLimit": "TPM limit",
+        "unitPrice": "Unit price",
+        "updatesModelPrices": "Updates model prices",
+        "website": "Website",
+        "workflowStatus": "Workflow status"
+      },
+      "filters": {
+        "action": "Action",
+        "actor": "Actor",
+        "actorPlaceholder": "e.g. ops",
+        "category": "Category",
+        "target": "Instance name",
+        "targetPlaceholder": "e.g. DeepSeek R1"
+      },
+      "loading": "Loading audit records...",
+      "moreChanges": "+{count} items",
+      "pagination": {
+        "emptyRange": "0 records",
+        "next": "Next",
+        "pageSize": "Per page",
+        "pageSizeOption": "{size} / page",
+        "previous": "Previous",
+        "range": "{start}-{end} / {count} records"
+      },
+      "recordCount": "{count} records",
+      "table": {
+        "actor": "Actor",
+        "category": "Category",
+        "changes": "Changes",
+        "instance": "Instance",
+        "platform": "Platform",
+        "time": "Time"
+      },
+      "targetTypes": {
+        "channel": "Channel",
+        "channelModelPrice": "Channel model configuration",
+        "channelPriceItem": "Channel price item",
+        "listing": "Model listing",
+        "listingExclusion": "Listing exclusion",
+        "metaModel": "Meta model",
+        "model": "Model",
+        "modelPrice": "Model price",
+        "priceSource": "Price source",
+        "provider": "Meta model provider",
+        "reconciliationRecord": "Reconciliation record",
+        "resalePlatform": "Resale platform"
+      },
+      "values": {
+        "boolean": {
+          "no": "No",
+          "yes": "Yes"
+        },
+        "comparison_status": {
+          "aboveOfficial": "Above upstream price",
+          "belowOfficial": "Below upstream price",
+          "sameAsOfficial": "Same as upstream price",
+          "unknown": "Pending"
+        },
+        "publish_status": {
+          "deleted": "Deleted",
+          "none": "Unpublished",
+          "offline": "Offline",
+          "online": "Published"
+        },
+        "status": {
+          "active": "Active",
+          "draft": "Draft",
+          "failed": "Failed",
+          "inactive": "Inactive",
+          "matched": "Matched",
+          "mismatch": "Mismatch",
+          "pending": "Pending",
+          "retired": "Retired",
+          "unmatched": "Unmatched"
+        },
+        "workflow_status": {
+          "deleted": "Invalid",
+          "draft": "Draft",
+          "offline": "Offline",
+          "offlineException": "Offline exception",
+          "online": "Listed",
+          "pendingOffline": "Pending offline",
+          "pendingPublish": "Pending publish",
+          "pendingUpdate": "Pending update",
+          "updateDraft": "Update draft"
+        }
+      }
     }
   },
   "sals": {

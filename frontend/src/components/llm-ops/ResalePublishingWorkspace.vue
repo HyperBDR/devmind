@@ -8,7 +8,7 @@
     <section class="workspace-section workspace-toolbar">
       <div class="workspace-filter-grid">
         <label class="filter-field">
-          <span>发布平台</span>
+          <span>{{ t('llmOps.publishingWorkspace.filters.platform') }}</span>
           <CompactSelect
             v-model="form.platformId"
             :options="platformSelectOptions"
@@ -18,7 +18,7 @@
           />
         </label>
         <label class="filter-field">
-          <span>元厂商</span>
+          <span>{{ t('llmOps.publishingWorkspace.filters.vendor') }}</span>
           <CompactSelect
             v-model="form.metaVendorId"
             :options="metaVendorSelectOptions"
@@ -30,7 +30,7 @@
           />
         </label>
         <label class="filter-field">
-          <span>元模型</span>
+          <span>{{ t('llmOps.publishingWorkspace.filters.metaModel') }}</span>
           <CompactSelect
             v-model="form.modelId"
             :options="baseModelSelectOptions"
@@ -42,7 +42,7 @@
           />
         </label>
         <label class="filter-field">
-          <span>供货渠道</span>
+          <span>{{ t('llmOps.publishingWorkspace.filters.supplier') }}</span>
           <CompactSelect
             v-model="form.supplierId"
             :disabled="!form.modelId"
@@ -55,13 +55,17 @@
       </div>
       <div class="pricing-context">
         <div class="pricing-segment">
-          <span class="pricing-segment-label">当前平台币种</span>
+          <span class="pricing-segment-label">
+            {{ t('llmOps.publishingWorkspace.context.platformCurrency') }}
+          </span>
           <strong class="pricing-segment-value">
             {{ platformCurrencyLabel }}
           </strong>
         </div>
         <div class="pricing-segment">
-          <span class="pricing-segment-label">汇率</span>
+          <span class="pricing-segment-label">
+            {{ t('llmOps.publishingWorkspace.context.exchangeRate') }}
+          </span>
           <strong class="pricing-segment-value">
             1 USD =
             {{ formatReadonlyNumber(globalPricing.exchangeRate, 4) }}
@@ -69,7 +73,13 @@
           </strong>
         </div>
         <div class="pricing-segment">
-          <span class="pricing-segment-label">{{ pointUnitLabel }}换算</span>
+          <span class="pricing-segment-label">
+            {{
+              t('llmOps.publishingWorkspace.context.pointConversion', {
+                point: pointUnitLabel
+              })
+            }}
+          </span>
           <strong class="pricing-segment-value">
             1 {{ platformCurrencyLabel }} =
             {{ formatReadonlyNumber(globalPricing.creditRatio, 2) }}
@@ -85,41 +95,59 @@
       >
         <h3 class="flex items-center gap-2 text-sm font-bold text-slate-900">
           <span class="inline-block h-2 w-2 rounded-full bg-agione-500" />
-          供应链路甄选
+          {{ t('llmOps.publishingWorkspace.supply.title') }}
         </h3>
         <div class="flex items-center gap-3 text-xs">
           <span
             v-if="!isSupplyChainExpanded"
             class="rounded bg-agione-50 px-2 py-1 font-semibold text-agione-700"
           >
-            已选 {{ selectedChainRows.length }} 条链路
+            {{
+              t('llmOps.publishingWorkspace.supply.selectedCount', {
+                count: selectedChainRows.length
+              })
+            }}
           </span>
-          <span v-else class="text-slate-500"
-            >共 {{ chainRows.length }} 条可用链路</span
-          >
+          <span v-else class="text-slate-500">
+            {{
+              t('llmOps.publishingWorkspace.supply.availableCount', {
+                count: chainRows.length
+              })
+            }}
+          </span>
           <button
             type="button"
             class="btn-secondary btn-action-view !px-2.5 !py-1.5 !text-xs"
             @click="isSupplyChainExpanded = !isSupplyChainExpanded"
           >
-            {{ isSupplyChainExpanded ? '收起' : '展开' }}
+            {{
+              isSupplyChainExpanded
+                ? t('llmOps.publishingWorkspace.supply.collapse')
+                : t('llmOps.publishingWorkspace.supply.expand')
+            }}
           </button>
         </div>
       </header>
 
       <div v-show="isSupplyChainExpanded">
         <div class="supply-grid supply-grid-header">
-          <div>商务及物理链路</div>
-          <div>成本</div>
-          <div>售价</div>
-          <div>最终 {{ pointUnitLabel }}</div>
+          <div>{{ t('llmOps.publishingWorkspace.supply.chain') }}</div>
+          <div>{{ t('llmOps.publishingWorkspace.pricing.cost') }}</div>
+          <div>{{ t('llmOps.publishingWorkspace.pricing.price') }}</div>
+          <div>
+            {{
+              t('llmOps.publishingWorkspace.pricing.finalPoint', {
+                point: pointUnitLabel
+              })
+            }}
+          </div>
         </div>
 
         <div
           v-if="!chainRows.length"
           class="bg-white p-8 text-center text-sm text-slate-500"
         >
-          当前元模型暂无可用供应链路
+          {{ t('llmOps.publishingWorkspace.supply.empty') }}
         </div>
 
         <div
@@ -132,7 +160,11 @@
             class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[13px] font-bold text-slate-700"
           >
             <span class="inline-block h-1.5 w-1.5 rounded-full bg-agione-500" />
-            供货渠道：{{ group.supplierName }}
+            {{
+              t('llmOps.publishingWorkspace.supply.supplierPrefix', {
+                name: group.supplierName
+              })
+            }}
           </div>
           <div
             v-for="srcGroup in group.sources"
@@ -143,7 +175,11 @@
               class="flex items-center gap-2 bg-slate-50/60 px-4 py-1.5 pl-10 text-[12px] font-medium text-slate-500"
             >
               <span class="inline-block h-1 w-1 rounded-full bg-slate-400" />
-              供应源：{{ srcGroup.source }}
+              {{
+                t('llmOps.publishingWorkspace.supply.sourcePrefix', {
+                  name: srcGroup.source
+                })
+              }}
             </div>
             <div
               v-for="row in srcGroup.models"
@@ -171,7 +207,7 @@
                   v-if="row.isLowest"
                   class="rounded-full border border-emerald-100 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
                 >
-                  最低
+                  {{ t('llmOps.publishingWorkspace.supply.lowest') }}
                 </span>
               </label>
 
@@ -191,7 +227,9 @@
               </div>
 
               <div class="supply-metric-column">
-                <span class="text-slate-500 lg:hidden">售价</span>
+                <span class="text-slate-500 lg:hidden">
+                  {{ t('llmOps.publishingWorkspace.pricing.price') }}
+                </span>
                 <template v-if="row.selected">
                   <div
                     v-for="dim in priceDimensions(row)"
@@ -244,7 +282,7 @@
       <aside class="workspace-section performance-sidebar overflow-hidden p-0">
         <header class="performance-sidebar-header">
           <span class="performance-sidebar-dot" />
-          <h3>链路性能全景对标</h3>
+          <h3>{{ t('llmOps.publishingWorkspace.performance.title') }}</h3>
         </header>
         <div class="performance-sidebar-body">
           <section
@@ -276,7 +314,7 @@
                 </div>
               </div>
               <p v-if="!perfCompareRows.length" class="perf-empty">
-                暂无对比数据
+                {{ t('llmOps.publishingWorkspace.performance.empty') }}
               </p>
             </div>
           </section>
@@ -284,7 +322,7 @@
         <button
           type="button"
           class="performance-sidebar-resize"
-          aria-label="调整链路性能全景对标宽度"
+          :aria-label="t('llmOps.publishingWorkspace.performance.resize')"
           @pointerdown="startSidebarResize"
         />
       </aside>
@@ -319,15 +357,15 @@
             <span
               v-if="row.isLowest"
               class="rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700"
-              >最低采购链路</span
-            >
+              >{{ t('llmOps.publishingWorkspace.supply.lowestProcurement') }}
+            </span>
           </header>
           <div class="space-y-6 p-5">
             <div class="unified-margin-row">
               <div>
                 <div class="flex flex-wrap items-center gap-2">
                   <p class="text-[11px] font-semibold text-slate-500">
-                    统一利润期望
+                    {{ t('llmOps.publishingWorkspace.margin.title') }}
                   </p>
                   <span
                     v-if="selectedPlatformAutoApproveLimit !== null"
@@ -342,14 +380,14 @@
                   </span>
                 </div>
                 <p class="mt-0.5 text-[11px] text-slate-400">
-                  Input / Output / Cache 按同一利润率推导各自售价。
+                  {{ t('llmOps.publishingWorkspace.margin.description') }}
                 </p>
               </div>
               <div class="unified-margin-input">
                 <input
                   :value="row.margin"
                   type="number"
-                  aria-label="统一利润率"
+                  :aria-label="t('llmOps.publishingWorkspace.margin.input')"
                   name="unified_margin_rate"
                   step="0.1"
                   min="0"
@@ -362,8 +400,12 @@
 
             <div class="pricing-matrix">
               <div class="pricing-matrix-head pricing-matrix-label" />
-              <div class="pricing-matrix-head">成本</div>
-              <div class="pricing-matrix-head">售价</div>
+              <div class="pricing-matrix-head">
+                {{ t('llmOps.publishingWorkspace.pricing.cost') }}
+              </div>
+              <div class="pricing-matrix-head">
+                {{ t('llmOps.publishingWorkspace.pricing.price') }}
+              </div>
               <div class="pricing-matrix-head">{{ pointUnitLabel }}</div>
               <template
                 v-for="dimension in priceDimensions(row)"
@@ -373,7 +415,9 @@
                   {{ dimension.label }}
                 </div>
                 <div class="pricing-matrix-card cost-formula-cell">
-                  <p class="pricing-card-caption">成本价</p>
+                  <p class="pricing-card-caption">
+                    {{ t('llmOps.publishingWorkspace.pricing.costPrice') }}
+                  </p>
                   <p class="font-mono text-[13px] font-bold text-slate-900">
                     {{ currencySymbol }}{{ dimension.costText }}
                   </p>
@@ -387,7 +431,7 @@
                 <div class="pricing-matrix-card terminal-price-card">
                   <div class="terminal-price-main">
                     <p class="pricing-card-caption text-emerald-600">
-                      终端售卖价
+                      {{ t('llmOps.publishingWorkspace.pricing.retailPrice') }}
                     </p>
                     <div class="terminal-price-control">
                       <span>{{ currencySymbol }}</span>
@@ -412,11 +456,14 @@
                       "
                       :title="referencePriceTitle(dimension)"
                     >
-                      下限 {{ currencySymbol
-                      }}{{ dimension.referencePriceText }}
+                      {{
+                        t('llmOps.publishingWorkspace.pricing.floor', {
+                          value: currencySymbol + dimension.referencePriceText
+                        })
+                      }}
                     </p>
                     <p>
-                      均价
+                      {{ t('llmOps.publishingWorkspace.pricing.average') }}
                       <strong>{{
                         marketAverageText(dimension.marketAverage)
                       }}</strong>
@@ -455,7 +502,13 @@
                   </div>
                 </div>
                 <div class="pricing-matrix-card final-credit-card">
-                  <p class="pricing-card-caption">最终 {{ pointUnitLabel }}</p>
+                  <p class="pricing-card-caption">
+                    {{
+                      t('llmOps.publishingWorkspace.pricing.finalPoint', {
+                        point: pointUnitLabel
+                      })
+                    }}
+                  </p>
                   <p class="font-mono text-[13px] font-bold text-agione-700">
                     {{ formatCredit(dimension.priceRaw) }}
                   </p>
@@ -470,7 +523,11 @@
                 :refs="marketMarginRefsFor(row)"
                 :lower-tooltip="marginPolicyTooltip('min')"
                 :upper-tooltip="marginPolicyTooltip('max')"
-                :label="`统一利润率 ${formatPercent(row.margin)}`"
+                :label="
+                  t('llmOps.publishingWorkspace.margin.axisLabel', {
+                    value: formatPercent(row.margin)
+                  })
+                "
                 value-prefix=""
                 value-suffix="%"
                 :digits="1"
@@ -486,13 +543,15 @@
       v-else-if="form.modelId"
       class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500"
     >
-      请在链路甄选面板中勾选至少一条供应链路，继续定价。
+      {{ t('llmOps.publishingWorkspace.supply.selectRequired') }}
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import BulletChart from '@/components/llm-ops/BulletChart.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import {
@@ -563,6 +622,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['change'])
+const { t } = useI18n()
 
 const form = ref({
   platformId: '',
@@ -694,7 +754,10 @@ const selectedMetaModelProcurements = computed(() => {
 const platformSelectOptions = computed(() =>
   (props.platforms || []).map((item) => ({
     value: String(item.id),
-    label: item.name || item.code || `平台 ${item.id}`
+    label:
+      item.name ||
+      item.code ||
+      t('llmOps.publishingWorkspace.fallback.platform', { id: item.id })
   }))
 )
 
@@ -708,7 +771,10 @@ const metaVendorOptions = computed(() => {
     if (map.has(key)) return
     map.set(key, {
       id,
-      name: model.effective_vendor_name || model.vendor_name || '未归类',
+      name:
+        model.effective_vendor_name ||
+        model.vendor_name ||
+        t('llmOps.publishingWorkspace.fallback.uncategorized'),
       code: model.effective_vendor_code || ''
     })
   })
@@ -718,7 +784,7 @@ const metaVendorOptions = computed(() => {
 })
 
 const metaVendorSelectOptions = computed(() => [
-  { value: '', label: '全部' },
+  { value: '', label: t('llmOps.publishingWorkspace.filters.all') },
   ...metaVendorOptions.value.map((item) => ({
     value: String(item.id),
     label: item.name,
@@ -745,7 +811,10 @@ const baseModelOptions = computed(() => {
 })
 
 const baseModelSelectOptions = computed(() => [
-  { value: '', label: '选择元模型' },
+  {
+    value: '',
+    label: t('llmOps.publishingWorkspace.filters.selectMetaModel')
+  },
   ...baseModelOptions.value.map((item) => ({
     value: String(item.id),
     label: item.name,
@@ -776,10 +845,19 @@ const supplierOptions = computed(() => {
 
 const supplierSelectOptions = computed(() => {
   if (!form.value.modelId) {
-    return [{ value: '', label: '先选择元模型', disabled: true }]
+    return [
+      {
+        value: '',
+        label: t('llmOps.publishingWorkspace.filters.selectMetaModelFirst'),
+        disabled: true
+      }
+    ]
   }
   return [
-    { value: '', label: '全部支持渠道' },
+    {
+      value: '',
+      label: t('llmOps.publishingWorkspace.filters.allSupportedChannels')
+    },
     ...supplierOptions.value.map((item) => ({
       value: String(item.id),
       label: item.name
@@ -792,7 +870,9 @@ const supportedSupplierIds = computed(
 )
 
 const pointUnitLabel = computed(
-  () => props.pointConversion?.point_name || '积分'
+  () =>
+    props.pointConversion?.point_name ||
+    t('llmOps.publishingWorkspace.fallback.points')
 )
 
 const selectedPlatform = computed(() => {
@@ -805,7 +885,9 @@ const selectedPlatform = computed(() => {
 })
 
 const selectedPlatformLabel = computed(
-  () => selectedPlatform.value?.name || '当前平台'
+  () =>
+    selectedPlatform.value?.name ||
+    t('llmOps.publishingWorkspace.fallback.currentPlatform')
 )
 
 const platformCurrencyLabel = computed(() =>
@@ -1045,7 +1127,9 @@ const chainRows = computed(() => {
         metaVendorId: metaVendor.id,
         metaVendorName: metaVendor.name || metaVendor.code,
         metaVendorCode: metaVendor.code,
-        provider: metaVendor.name || '未归类',
+        provider:
+          metaVendor.name ||
+          t('llmOps.publishingWorkspace.fallback.uncategorized'),
         modelId: procurement.model_id,
         skuModelName:
           skuModel?.name || procurement.model_name || procurement.model_code,
@@ -1408,14 +1492,12 @@ function referencePriceText(value) {
 }
 
 function referencePriceTitle(dimension) {
-  return [
-    '最低参考定价 = 成本价 × (1 + 服务费率 + 平台抽佣比例)',
-    `当前服务费率 ${formatRatioPercent(selectedPlatformServiceFeeRate.value)}`,
-    `当前平台抽佣比例 ${formatRatioPercent(selectedPlatformFeeRate.value)}`,
-    `参考价 ${currencySymbol.value}${referencePriceText(
-      dimension.referencePriceRaw
-    )}`
-  ].join('；')
+  return t('llmOps.publishingWorkspace.pricing.referenceTitle', {
+    serviceFee: formatRatioPercent(selectedPlatformServiceFeeRate.value),
+    commission: formatRatioPercent(selectedPlatformFeeRate.value),
+    reference:
+      currencySymbol.value + referencePriceText(dimension.referencePriceRaw)
+  })
 }
 
 function isBelowReferencePrice(price, referencePrice) {
@@ -1429,28 +1511,34 @@ function isBelowReferencePrice(price, referencePrice) {
 
 function autoApproveStatus(margin) {
   if (selectedPlatformAutoApproveLimit.value === null) {
-    return { ok: true, label: '未配置免审利润率' }
+    return {
+      ok: true,
+      label: t('llmOps.publishingWorkspace.margin.noAutoApprove')
+    }
   }
   const isAllowed = isMarginAutoApprovable(
     margin,
     selectedPlatformAutoApproveLimit.value
   )
   if (isAllowed === null) {
-    return { ok: true, label: '免审阈值未生效' }
+    return {
+      ok: true,
+      label: t('llmOps.publishingWorkspace.margin.autoApproveInactive')
+    }
   }
   if (isAllowed) {
     return {
       ok: true,
-      label: `免审范围内（<= ${formatPercent(
-        selectedPlatformAutoApproveLimit.value
-      )}）`
+      label: t('llmOps.publishingWorkspace.margin.withinAutoApprove', {
+        value: formatPercent(selectedPlatformAutoApproveLimit.value)
+      })
     }
   }
   return {
     ok: false,
-    label: `超出免审上限（> ${formatPercent(
-      selectedPlatformAutoApproveLimit.value
-    )}）`
+    label: t('llmOps.publishingWorkspace.margin.aboveAutoApprove', {
+      value: formatPercent(selectedPlatformAutoApproveLimit.value)
+    })
   }
 }
 
@@ -1478,7 +1566,9 @@ function costFormulaText(row, key) {
 }
 
 function costFormulaTitle(row, key) {
-  return `成本价 = 供应商成本价 × 折扣；${costFormulaText(row, key)}`
+  return t('llmOps.publishingWorkspace.pricing.costFormulaTitle', {
+    formula: costFormulaText(row, key)
+  })
 }
 
 function marketAverageText(avg) {
@@ -1490,12 +1580,22 @@ function marketAverageText(avg) {
 function priceDiffText(price, avg) {
   const p = Number(price)
   const a = Number(avg)
-  if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0) return '暂无对账'
+  if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0) {
+    return t('llmOps.publishingWorkspace.pricing.noBenchmark')
+  }
   const diff = p - a
   const pct = Math.abs((diff / a) * 100).toFixed(1)
-  if (diff < -0.00001) return `↓ 低 ${pct}%`
-  if (diff > 0.00001) return `↑ 高 ${pct}%`
-  return '- 持平'
+  if (diff < -0.00001) {
+    return t('llmOps.publishingWorkspace.pricing.lowerThanAverage', {
+      pct
+    })
+  }
+  if (diff > 0.00001) {
+    return t('llmOps.publishingWorkspace.pricing.higherThanAverage', {
+      pct
+    })
+  }
+  return t('llmOps.publishingWorkspace.pricing.sameAsAverage')
 }
 
 function priceDiffAmountText(price, avg) {
@@ -1615,7 +1715,7 @@ function marketMarginRefsFor(row) {
     margins.reduce((total, value) => total + value, 0) / margins.length
   return [
     {
-      source: '市场均价',
+      source: t('llmOps.publishingWorkspace.pricing.marketAverage'),
       price: Number(average.toFixed(2))
     }
   ]
@@ -1646,26 +1746,31 @@ function marginPolicyTooltip(type) {
   const floor = referenceMarginFloor()
   const approveLimit = Number(selectedPlatformAutoApproveLimit.value)
   return {
-    title: isMin ? '最低利润率下限' : '免审利润率上限',
+    title: isMin
+      ? t('llmOps.publishingWorkspace.margin.minTitle')
+      : t('llmOps.publishingWorkspace.margin.autoApproveTitle'),
     source: isMin
-      ? '成本价 × (1 + 服务费率 + 平台抽佣比例)'
-      : '平台配置的自动免审阈值，仅影响审批判断',
+      ? t('llmOps.publishingWorkspace.margin.minSource')
+      : t('llmOps.publishingWorkspace.margin.autoApproveSource'),
     rows: isMin
       ? [
           {
-            label: '平台下限',
+            label: t('llmOps.publishingWorkspace.margin.platformFloor'),
             value: formatPercent(floor),
-            source: `服务费 ${formatRatioPercent(
-              selectedPlatformServiceFeeRate.value
-            )} + 抽佣 ${formatRatioPercent(selectedPlatformFeeRate.value)}`
+            source: t('llmOps.publishingWorkspace.margin.feeBreakdown', {
+              serviceFee: formatRatioPercent(
+                selectedPlatformServiceFeeRate.value
+              ),
+              commission: formatRatioPercent(selectedPlatformFeeRate.value)
+            })
           }
         ]
       : [
           {
-            label: '免审上限',
+            label: t('llmOps.publishingWorkspace.margin.autoApproveLimit'),
             value: Number.isFinite(approveLimit)
               ? formatPercent(approveLimit)
-              : '未配置',
+              : t('llmOps.publishingWorkspace.fallback.notConfigured'),
             source: selectedPlatformLabel.value
           }
         ]
@@ -1685,7 +1790,9 @@ const perfCompareRows = computed(() =>
 function performanceRowName(row) {
   const channelName = row.channelName || row.supplierName || row.source
   const modelName = row.skuModelName || row.modelName
-  if (!channelName) return modelName || '供货链路'
+  if (!channelName) {
+    return modelName || t('llmOps.publishingWorkspace.supply.chainFallback')
+  }
   if (!modelName || modelName === row.modelName) return channelName
   return `${channelName} · ${modelName}`
 }
@@ -1697,21 +1804,21 @@ const perfMetrics = computed(() => {
   return [
     {
       key: 'rpm',
-      label: '并发请求速率 (RPM)',
+      label: t('llmOps.publishingWorkspace.performance.rpm'),
       max: rpmMax,
       format: (v) => formatPerformanceValue(v, 'K', 1000),
       barClass: () => 'bg-violet-500'
     },
     {
       key: 'tpm',
-      label: 'Token 吞吐量 (TPM)',
+      label: t('llmOps.publishingWorkspace.performance.tpm'),
       max: tpmMax,
       format: (v) => formatPerformanceValue(v, 'M', 1000000),
       barClass: () => 'bg-emerald-500'
     },
     {
       key: 'latency',
-      label: '首字延迟 (Latency · 越低越好)',
+      label: t('llmOps.publishingWorkspace.performance.latency'),
       max: latMax,
       format: (v) => (Number.isFinite(v) ? `${v}ms` : '-'),
       barClass: () => 'bg-amber-500'

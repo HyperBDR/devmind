@@ -31,14 +31,18 @@
               :disabled="deleting"
               @click="$emit('delete', source)"
             >
-              {{ deleting ? '删除中' : '删除' }}
+              {{
+                deleting
+                  ? t('llmOps.sourcePriceDrawer.actions.deleting')
+                  : t('llmOps.sourcePriceDrawer.actions.delete')
+              }}
             </button>
             <button
               type="button"
               class="btn-secondary btn-action-cancel"
               @click="$emit('close')"
             >
-              关闭
+              {{ t('llmOps.sourcePriceDrawer.actions.close') }}
             </button>
           </div>
         </div>
@@ -47,34 +51,40 @@
       <div class="space-y-5 px-5 py-5">
         <div class="grid gap-3 md:grid-cols-4">
           <div class="summary-card">
-            <p>覆盖元模型</p>
+            <p>{{ t('llmOps.sourcePriceDrawer.summary.metaModels') }}</p>
             <strong>{{ modelRows.length }}</strong>
           </div>
           <div class="summary-card">
-            <p>当前价格项</p>
+            <p>{{ t('llmOps.sourcePriceDrawer.summary.currentItems') }}</p>
             <strong>{{ sourceItemRows.length }}</strong>
           </div>
           <div class="summary-card">
-            <p>默认币种</p>
+            <p>{{ t('llmOps.sourcePriceDrawer.summary.currency') }}</p>
             <strong>{{ source.currency || '-' }}</strong>
           </div>
           <div class="summary-card">
-            <p>状态</p>
-            <strong>{{ source.is_enabled ? '启用' : '停用' }}</strong>
+            <p>{{ t('llmOps.sourcePriceDrawer.summary.status') }}</p>
+            <strong>
+              {{
+                source.is_enabled
+                  ? t('llmOps.sourcePriceDrawer.status.enabled')
+                  : t('llmOps.sourcePriceDrawer.status.disabled')
+              }}
+            </strong>
           </div>
         </div>
 
         <div class="source-info-grid">
           <div>
-            <span>来源归属</span>
+            <span>{{ t('llmOps.sourcePriceDrawer.info.owner') }}</span>
             <strong>{{ relationName }}</strong>
           </div>
           <div>
-            <span>更新方式</span>
+            <span>{{ t('llmOps.sourcePriceDrawer.info.updateMode') }}</span>
             <strong>{{ sourceConfigSummary }}</strong>
           </div>
           <div>
-            <span>价格地址</span>
+            <span>{{ t('llmOps.sourcePriceDrawer.info.priceUrl') }}</span>
             <a
               v-if="source.endpoint_url"
               class="source-link"
@@ -92,15 +102,14 @@
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
             <div>
-              <h3 class="panel-title">供货商下的元模型价格</h3>
-              <p class="mt-1 text-xs text-slate-500">
-                按元模型直接展示 Input、Output、Cache 三项核心价格。
-              </p>
+              <h3 class="panel-title">
+                {{ t('llmOps.sourcePriceDrawer.title') }}
+              </h3>
             </div>
             <input
               v-model="search"
               class="field-input w-full md:w-72"
-              placeholder="搜索元模型、厂商或 code"
+              :placeholder="t('llmOps.sourcePriceDrawer.searchPlaceholder')"
             />
           </div>
           <div class="overflow-x-auto">
@@ -112,9 +121,13 @@
               </colgroup>
               <thead>
                 <tr>
-                  <th class="table-head">元模型</th>
+                  <th class="table-head">
+                    {{ t('llmOps.sourcePriceDrawer.table.metaModel') }}
+                  </th>
                   <th class="table-head">{{ priceHeaderLabel }}</th>
-                  <th class="table-head">最近更新</th>
+                  <th class="table-head">
+                    {{ t('llmOps.sourcePriceDrawer.table.updatedAt') }}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -146,7 +159,7 @@
                         </div>
                       </div>
                       <span v-else class="text-xs text-slate-400">
-                        暂无价格
+                        {{ t('llmOps.sourcePriceDrawer.empty.noPrice') }}
                       </span>
                     </td>
                     <td class="table-cell">
@@ -156,7 +169,7 @@
                 </template>
                 <tr v-if="!filteredModelRows.length">
                   <td class="table-cell text-slate-500" colspan="3">
-                    当前价格源还没有模型价格记录。
+                    {{ t('llmOps.sourcePriceDrawer.empty.noRows') }}
                   </td>
                 </tr>
               </tbody>
@@ -170,6 +183,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 defineEmits(['close', 'delete', 'refresh'])
 
@@ -192,6 +206,7 @@ const props = defineProps({
   }
 })
 
+const { t, locale } = useI18n()
 const search = ref('')
 
 const tokenPriceDimensions = [
@@ -263,7 +278,7 @@ const filteredModelRows = computed(() => {
 const relationName = computed(() => {
   if (props.source?.provider_name) return props.source.provider_name
   if (props.source?.channel_name) return props.source.channel_name
-  return '未绑定'
+  return t('llmOps.sourcePriceDrawer.fallback.unbound')
 })
 
 const sourceConfigSummary = computed(() =>
@@ -287,7 +302,9 @@ const sourceAddressLabel = computed(() => {
   }
 })
 
-const priceHeaderLabel = computed(() => '价格（原始币种 / 1M tokens）')
+const priceHeaderLabel = computed(() =>
+  t('llmOps.sourcePriceDrawer.table.price')
+)
 
 function buildRawItemRow(item) {
   const model = modelMap.value.get(String(item.model)) || {}
@@ -298,14 +315,16 @@ function buildRawItemRow(item) {
     meta_model_id: item.meta_model || model.meta_model || '',
     raw: item,
     meta_model_name:
-      item.meta_model_name || model.meta_model_name || '未知元模型',
+      item.meta_model_name ||
+      model.meta_model_name ||
+      t('llmOps.sourcePriceDrawer.fallback.unknownMetaModel'),
     meta_model_code: item.meta_model_code || model.meta_model_code || '-',
     provider_name:
       item.meta_model_vendor_name ||
       model.meta_model_vendor_name ||
       item.provider_name ||
       model.provider_name ||
-      '未绑定厂商',
+      t('llmOps.sourcePriceDrawer.fallback.unboundProvider'),
     sku_name: item.model_name || model.name || '',
     sku_code: item.model_code || model.code || '',
     modality_label: modalityLabel(model.modality),
@@ -355,10 +374,15 @@ function buildModelRow(key, rows) {
 function buildFallbackModelRow(model, key) {
   return {
     key,
-    meta_model_name: model.meta_model_name || model.name || '未知元模型',
+    meta_model_name:
+      model.meta_model_name ||
+      model.name ||
+      t('llmOps.sourcePriceDrawer.fallback.unknownMetaModel'),
     meta_model_code: model.meta_model_code || model.code || '-',
     provider_name:
-      model.meta_model_vendor_name || model.provider_name || '未绑定厂商',
+      model.meta_model_vendor_name ||
+      model.provider_name ||
+      t('llmOps.sourcePriceDrawer.fallback.unboundProvider'),
     modality_label: modalityLabel(model.modality),
     token_price_rows: tokenPriceRowsFromModel(model),
     price_count: 0,
@@ -461,45 +485,47 @@ function hasValue(value) {
 
 function dimensionLabel(dimension) {
   const labels = {
-    text_input: '文本输入',
-    text_output: '文本输出',
-    cache_input: '缓存输入',
-    image_input: '图片输入',
-    image_output: '图片输出',
-    audio_input: '音频输入',
-    audio_output: '音频输出',
-    video_input: '视频输入',
-    video_output: '视频输出'
+    text_input: t('llmOps.sourcePriceDrawer.dimensions.textInput'),
+    text_output: t('llmOps.sourcePriceDrawer.dimensions.textOutput'),
+    cache_input: t('llmOps.sourcePriceDrawer.dimensions.cacheInput'),
+    image_input: t('llmOps.sourcePriceDrawer.dimensions.imageInput'),
+    image_output: t('llmOps.sourcePriceDrawer.dimensions.imageOutput'),
+    audio_input: t('llmOps.sourcePriceDrawer.dimensions.audioInput'),
+    audio_output: t('llmOps.sourcePriceDrawer.dimensions.audioOutput'),
+    video_input: t('llmOps.sourcePriceDrawer.dimensions.videoInput'),
+    video_output: t('llmOps.sourcePriceDrawer.dimensions.videoOutput')
   }
   return labels[dimension] || dimension || '-'
 }
 
 function billingUnitLabel(unit) {
   const labels = {
-    per_1m_tokens: '/ 百万 tokens',
-    per_image: '/ 张',
-    per_second: '/ 秒',
-    per_generation: '/ 次'
+    per_1m_tokens: t('llmOps.sourcePriceDrawer.billingUnits.per1mTokens'),
+    per_image: t('llmOps.sourcePriceDrawer.billingUnits.perImage'),
+    per_second: t('llmOps.sourcePriceDrawer.billingUnits.perSecond'),
+    per_generation: t('llmOps.sourcePriceDrawer.billingUnits.perGeneration')
   }
   return labels[unit] || ''
 }
 
 function modalityLabel(modality) {
   const labels = {
-    text: '文本',
-    audio: '音频',
-    video: '视频',
-    multimodal: '多模态'
+    text: t('llmOps.sourcePriceDrawer.modalities.text'),
+    audio: t('llmOps.sourcePriceDrawer.modalities.audio'),
+    video: t('llmOps.sourcePriceDrawer.modalities.video'),
+    multimodal: t('llmOps.sourcePriceDrawer.modalities.multimodal')
   }
   return labels[modality] || modality || ''
 }
 
 function sourceCategoryLabel(category) {
   const labels = {
-    official_provider: '原厂价格',
-    supplier: '供货商价格',
-    manual: '人工录入',
-    unknown: '其他'
+    official_provider: t(
+      'llmOps.sourcePriceDrawer.categories.officialProvider'
+    ),
+    supplier: t('llmOps.sourcePriceDrawer.categories.supplier'),
+    manual: t('llmOps.sourcePriceDrawer.categories.manual'),
+    unknown: t('llmOps.sourcePriceDrawer.categories.unknown')
   }
   return labels[category] || labels.unknown
 }
@@ -513,18 +539,26 @@ function businessSourceCategory(source) {
 function sourceModeLabel(source) {
   const category = source?.source_category || ''
   if (String(source?.endpoint_url || '').includes('models.dev/api.json')) {
-    return '聚合同步'
+    return t('llmOps.sourcePriceDrawer.sourceMode.aggregateSync')
   }
-  if (category === 'official_provider') return '自动采集'
-  if (category === 'supplier') return '供货商维护'
-  if (category === 'manual') return '手动维护'
-  if (source?.source_type === 'yunce') return '专用采集'
-  return '待适配'
+  if (category === 'official_provider') {
+    return t('llmOps.sourcePriceDrawer.sourceMode.autoCollect')
+  }
+  if (category === 'supplier') {
+    return t('llmOps.sourcePriceDrawer.sourceMode.supplierMaintenance')
+  }
+  if (category === 'manual') {
+    return t('llmOps.sourcePriceDrawer.sourceMode.manualMaintenance')
+  }
+  if (source?.source_type === 'yunce') {
+    return t('llmOps.sourcePriceDrawer.sourceMode.dedicatedCollect')
+  }
+  return t('llmOps.sourcePriceDrawer.sourceMode.pending')
 }
 
 function formatDateTime(value) {
   if (!value) return '-'
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat(locale.value, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
