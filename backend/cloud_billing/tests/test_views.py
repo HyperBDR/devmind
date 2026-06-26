@@ -963,12 +963,16 @@ class TestRechargeApprovalEndpoints:
     """
 
     def test_list_recharge_approvals_serializes_llm_usage_id(
-        self, api_client, cloud_provider
+        self, api_client, cloud_provider, mocker
     ):
         """
         List endpoint should serialize approval records without DRF source
         assertion errors.
         """
+        mocked_refresh = mocker.patch(
+            "cloud_billing.views.recharge_approval."
+            "refresh_recharge_approval_record_status"
+        )
         record = RechargeApprovalRecord.objects.create(
             provider=cloud_provider,
             trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
@@ -984,6 +988,57 @@ class TestRechargeApprovalEndpoints:
         assert response.data["results"][0]["id"] == record.id
         assert "latest_llm_usage_id" in response.data["results"][0]
         assert response.data["results"][0]["latest_llm_usage_id"] is None
+        mocked_refresh.assert_called_once_with(record)
+
+    def test_list_recharge_approvals_skips_final_status_refresh(
+        self, api_client, cloud_provider, mocker
+    ):
+        """
+        List endpoint should not re-query Feishu for final records.
+        """
+        mocked_refresh = mocker.patch(
+            "cloud_billing.views.recharge_approval."
+            "refresh_recharge_approval_record_status"
+        )
+        RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188}',
+            request_payload={"amount": 188},
+            status=RechargeApprovalRecord.STATUS_APPROVED,
+        )
+
+        url = "/api/v1/cloud-billing/recharge-approvals/"
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        mocked_refresh.assert_not_called()
+
+    def test_retrieve_recharge_approval_refreshes_ongoing_status(
+        self, api_client, cloud_provider, mocker
+    ):
+        """
+        Detail endpoint should refresh ongoing approval status before
+        serialization.
+        """
+        mocked_refresh = mocker.patch(
+            "cloud_billing.views.recharge_approval."
+            "refresh_recharge_approval_record_status"
+        )
+        record = RechargeApprovalRecord.objects.create(
+            provider=cloud_provider,
+            trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_MANUAL,
+            raw_recharge_info='{"amount": 188}',
+            request_payload={"amount": 188},
+            status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        )
+
+        url = f"/api/v1/cloud-billing/recharge-approvals/{record.id}/"
+        response = api_client.get(url)
+
+        assert response.status_code == 200
+        assert response.data["id"] == record.id
+        mocked_refresh.assert_called_once_with(record)
 
     def test_submit_recharge_approval_endpoint(self, api_client, cloud_provider, mocker):
         """

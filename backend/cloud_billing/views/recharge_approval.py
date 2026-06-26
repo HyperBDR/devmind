@@ -4,22 +4,26 @@ Views for recharge approval callbacks and records.
 
 from __future__ import annotations
 
+import logging
 import os
 from hmac import compare_digest
 
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
+from rest_framework import generics
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework import generics
 
 from ..models import RechargeApprovalRecord
 from ..serializers import RechargeApprovalRecordSerializer
 from ..services.recharge_approval import (
     create_recharge_approval_event,
     normalize_feishu_status,
+    refresh_recharge_approval_record_status,
 )
+
+logger = logging.getLogger(__name__)
 
 # Final statuses that trigger a notification
 FINAL_RECHARGE_STATUSES = {
@@ -28,6 +32,26 @@ FINAL_RECHARGE_STATUSES = {
     RechargeApprovalRecord.STATUS_CANCELED,
     RechargeApprovalRecord.STATUS_FAILED,
 }
+ONGOING_RECHARGE_STATUSES = {
+    RechargeApprovalRecord.STATUS_PENDING,
+    RechargeApprovalRecord.STATUS_SUBMITTED,
+}
+
+
+def _refresh_ongoing_recharge_approvals(records) -> None:
+    for record in records:
+        if record.status not in ONGOING_RECHARGE_STATUSES:
+            continue
+        try:
+            refresh_recharge_approval_record_status(record)
+        except Exception:
+            logger.warning(
+                "Failed to refresh recharge approval status "
+                "(record_id=%s, instance_code=%s).",
+                record.id,
+                record.feishu_instance_code,
+                exc_info=True,
+            )
 
 
 def _get_callback_verification_token() -> str:
@@ -78,6 +102,19 @@ class RechargeApprovalListView(generics.ListAPIView):
             queryset = queryset.filter(provider_id=provider_id)
         return queryset
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            _refresh_ongoing_recharge_approvals(page)
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+
+        records = list(queryset)
+        _refresh_ongoing_recharge_approvals(records)
+        serializer = self.get_serializer(records, many=True)
+        return Response(serializer.data)
+
 
 class RechargeApprovalDetailView(generics.RetrieveAPIView):
     queryset = RechargeApprovalRecord.objects.select_related(
@@ -89,6 +126,12 @@ class RechargeApprovalDetailView(generics.RetrieveAPIView):
     ).prefetch_related("events", "llm_runs")
     serializer_class = RechargeApprovalRecordSerializer
     permission_classes = [IsAuthenticated]
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        _refresh_ongoing_recharge_approvals([instance])
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
 
 
 class RechargeApprovalFeishuCallbackView(APIView):
