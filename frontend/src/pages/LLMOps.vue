@@ -11,9 +11,11 @@
             >
               LLM OPS
             </p>
-            <h1 class="mt-2 text-lg font-semibold">大模型运营管理</h1>
+            <h1 class="mt-2 text-lg font-semibold">
+              {{ t('llmOps.shell.title') }}
+            </h1>
             <p class="mt-2 text-xs leading-5 text-slate-400">
-              价格、渠道、转售与对账的独立运营视图
+              {{ t('llmOps.shell.subtitle') }}
             </p>
           </div>
 
@@ -38,9 +40,13 @@
           <div
             class="border-t border-slate-800 px-5 py-4 text-xs text-slate-500"
           >
-            <p>默认平台：Agione</p>
+            <p>{{ t('llmOps.shell.defaultPlatform', { name: 'Agione' }) }}</p>
             <p class="mt-1">
-              模型价格源：{{ providerCollectionSources.length }}
+              {{
+                t('llmOps.shell.priceSourceCount', {
+                  count: providerCollectionSources.length
+                })
+              }}
             </p>
           </div>
         </aside>
@@ -86,7 +92,7 @@
               <div class="page-hero-actions">
                 <div class="page-hero-group">
                   <div class="currency-control page-toolbar-control">
-                    <span>显示货币</span>
+                    <span>{{ t('llmOps.toolbar.displayCurrency') }}</span>
                     <CompactSelect
                       v-model="displayCurrency"
                       :options="displayCurrencyOptions"
@@ -121,12 +127,12 @@
                       <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
                       <path d="M21 3v5h-5" />
                     </svg>
-                    刷新
+                    {{ t('common.refresh') }}
                   </button>
                 </div>
                 <div v-if="showPlatformControl" class="page-hero-group">
                   <div class="currency-control page-toolbar-control">
-                    <span>挂售平台</span>
+                    <span>{{ t('llmOps.toolbar.resalePlatform') }}</span>
                     <CompactSelect
                       v-model="selectedResalePlatformId"
                       :options="resalePlatformOptions"
@@ -139,14 +145,14 @@
                     class="btn-secondary page-toolbar-button btn-action-config"
                     @click="openPlatformModal(agionePlatform)"
                   >
-                    平台配置
+                    {{ t('llmOps.toolbar.platformConfig') }}
                   </button>
                   <button
                     type="button"
                     class="btn-primary page-toolbar-button btn-action-create"
                     @click="openPlatformModal(null)"
                   >
-                    新建平台
+                    {{ t('llmOps.toolbar.createPlatform') }}
                   </button>
                 </div>
               </div>
@@ -210,7 +216,7 @@
                         Action Queue
                       </p>
                       <h3 class="mt-2 text-lg font-semibold text-slate-900">
-                        今日优先处理
+                        {{ t('llmOps.monitor.actionQueueTitle') }}
                       </h3>
                     </div>
                     <button
@@ -218,7 +224,7 @@
                       class="btn-secondary btn-action-view"
                       @click="activeSection = 'reseller'"
                     >
-                      去挂售
+                      {{ t('llmOps.actions.goResale') }}
                     </button>
                   </div>
                   <div class="space-y-3">
@@ -258,11 +264,15 @@
                         Channel Coverage
                       </p>
                       <h3 class="mt-2 text-lg font-semibold text-slate-900">
-                        渠道覆盖与最低价命中
+                        {{ t('llmOps.monitor.channelCoverageTitle') }}
                       </h3>
                     </div>
                     <span class="text-sm text-slate-500">
-                      {{ channels.length }} 个渠道
+                      {{
+                        t('llmOps.monitor.channelCount', {
+                          count: channels.length
+                        })
+                      }}
                     </span>
                   </div>
                   <div class="space-y-3">
@@ -279,8 +289,12 @@
                             {{ channel.name }}
                           </p>
                           <p class="mt-1 text-xs text-slate-500">
-                            覆盖 {{ channel.covered }} 个模型 · 最低价命中
-                            {{ channel.best_count }} 个
+                            {{
+                              t('llmOps.monitor.channelCoverageMeta', {
+                                covered: channel.covered,
+                                best: channel.best_count
+                              })
+                            }}
                           </p>
                         </div>
                         <span class="font-mono text-sm text-slate-700">
@@ -300,7 +314,7 @@
                       v-if="!channelCoverageRows.length"
                       class="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500"
                     >
-                      暂无渠道覆盖数据。
+                      {{ t('llmOps.monitor.emptyChannelCoverage') }}
                     </div>
                   </div>
                 </div>
@@ -317,7 +331,7 @@
                       Provider Matrix
                     </p>
                     <h3 class="mt-2 text-lg font-semibold text-slate-900">
-                      厂商模型运营覆盖
+                      {{ t('llmOps.monitor.providerMatrixTitle') }}
                     </h3>
                   </div>
                   <button
@@ -325,7 +339,7 @@
                     class="btn-secondary btn-action-config"
                     @click="activeSection = 'providers'"
                   >
-                    管理厂商
+                    {{ t('llmOps.actions.manageProviders') }}
                   </button>
                 </div>
                 <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -342,7 +356,11 @@
                           {{ provider.name }}
                         </p>
                         <p class="mt-1 text-xs text-slate-500">
-                          {{ provider.model_count }} 个模型
+                          {{
+                            t('llmOps.monitor.modelCount', {
+                              count: provider.model_count
+                            })
+                          }}
                         </p>
                       </div>
                       <span
@@ -355,15 +373,15 @@
                     </div>
                     <div class="mt-3 space-y-2">
                       <div class="metric-line">
-                        <span>渠道覆盖</span>
+                        <span>{{ t('llmOps.monitor.channelCoverage') }}</span>
                         <strong>{{ provider.procured_count }}</strong>
                       </div>
                       <div class="metric-line">
-                        <span>Agione 已挂售</span>
+                        <span>{{ t('llmOps.monitor.agioneListed') }}</span>
                         <strong>{{ provider.listed_count }}</strong>
                       </div>
                       <div class="metric-line">
-                        <span>待处理</span>
+                        <span>{{ t('llmOps.monitor.todo') }}</span>
                         <strong>{{ provider.todo_count }}</strong>
                       </div>
                     </div>
@@ -382,9 +400,11 @@
               <div class="panel overflow-hidden p-0">
                 <div class="table-toolbar">
                   <div>
-                    <h3 class="panel-title">重点模型运营表</h3>
+                    <h3 class="panel-title">
+                      {{ t('llmOps.monitor.focusTableTitle') }}
+                    </h3>
                     <p class="mt-1 text-xs text-slate-500">
-                      优先展示缺渠道价、未挂售、非最低价和覆盖偏少的模型
+                      {{ t('llmOps.monitor.focusTableSubtitle') }}
                     </p>
                   </div>
                   <div class="flex flex-col gap-2 sm:flex-row">
@@ -406,20 +426,40 @@
                   <table class="data-table">
                     <thead>
                       <tr>
-                        <th class="table-head">模型</th>
-                        <th class="table-head">服务商</th>
-                        <th class="table-head text-right">渠道覆盖</th>
                         <th class="table-head">
-                          {{ simulation.channel ? '筛选渠道' : '最低采购渠道' }}
+                          {{ t('llmOps.fields.model') }}
+                        </th>
+                        <th class="table-head">
+                          {{ t('llmOps.fields.provider') }}
+                        </th>
+                        <th class="table-head text-right">
+                          {{ t('llmOps.monitor.channelCoverage') }}
+                        </th>
+                        <th class="table-head">
+                          {{
+                            simulation.channel
+                              ? t('llmOps.monitor.filteredChannel')
+                              : t('llmOps.monitor.lowestProcurementChannel')
+                          }}
                         </th>
                         <th class="table-head">Agione</th>
                         <th class="table-head text-right">
-                          {{ simulation.channel ? '输入价' : '最低输入' }}
+                          {{
+                            simulation.channel
+                              ? t('llmOps.price.input')
+                              : t('llmOps.price.lowestInput')
+                          }}
                         </th>
                         <th class="table-head text-right">
-                          {{ simulation.channel ? '输出价' : '最低输出' }}
+                          {{
+                            simulation.channel
+                              ? t('llmOps.price.output')
+                              : t('llmOps.price.lowestOutput')
+                          }}
                         </th>
-                        <th class="table-head">状态</th>
+                        <th class="table-head">
+                          {{ t('llmOps.fields.status') }}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -440,7 +480,10 @@
                           {{ row.coverage_count }} / {{ channels.length }}
                         </td>
                         <td class="table-cell">
-                          {{ row.display_channel?.channel_name || '无供应' }}
+                          {{
+                            row.display_channel?.channel_name ||
+                            t('llmOps.status.noSupply')
+                          }}
                         </td>
                         <td class="table-cell">
                           <span
@@ -448,7 +491,11 @@
                               row.is_agione_listed ? 'badge-ok' : 'badge-muted'
                             "
                           >
-                            {{ row.is_agione_listed ? '已挂售' : '未挂售' }}
+                            {{
+                              row.is_agione_listed
+                                ? t('llmOps.status.listed')
+                                : t('llmOps.status.unlisted')
+                            }}
                           </span>
                         </td>
                         <td class="table-cell text-right font-mono">
@@ -475,7 +522,7 @@
                       </tr>
                       <tr v-if="!monitorTableRows.length">
                         <td class="table-cell text-slate-500" colspan="8">
-                          当前筛选条件下没有需要展示的模型。
+                          {{ t('llmOps.monitor.emptyFocusRows') }}
                         </td>
                       </tr>
                     </tbody>
@@ -586,6 +633,7 @@ import '@/components/llm-ops/llmOpsModals.css'
 import '@/components/llm-ops/llmOpsTables.css'
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
@@ -638,78 +686,88 @@ const editingPlatform = ref(null)
 const resalePublishingDrawerOpen = ref(false)
 const resalePublishingInitialModelId = ref(null)
 const { showSuccess, showError, showInfo } = useToast()
+const { t } = useI18n()
 
 const simulation = ref({
   channel: '',
   status: 'priority'
 })
 
-const displayCurrencyOptions = [
-  { label: '人民币 CNY', value: 'CNY' },
-  { label: '美元 USD', value: 'USD' }
-]
+const displayCurrencyOptions = computed(() => [
+  { label: t('llmOps.currency.cny'), value: 'CNY' },
+  { label: t('llmOps.currency.usd'), value: 'USD' }
+])
 
-const simulationStatusOptions = [
-  { label: '优先处理', value: 'priority' },
-  { label: '全部模型', value: 'all' },
-  { label: '需要汇率', value: 'currency_mismatch' },
-  { label: '缺渠道价', value: 'missing_channel' },
-  { label: '未挂售', value: 'unlisted' },
-  { label: '已就绪', value: 'ready' }
-]
+const simulationStatusOptions = computed(() => [
+  { label: t('llmOps.filters.priority'), value: 'priority' },
+  { label: t('llmOps.filters.allModels'), value: 'all' },
+  { label: t('llmOps.status.currencyMismatch'), value: 'currency_mismatch' },
+  { label: t('llmOps.status.missingChannel'), value: 'missing_channel' },
+  { label: t('llmOps.status.unlisted'), value: 'unlisted' },
+  { label: t('llmOps.status.ready'), value: 'ready' }
+])
+
+const monitorStatusLabelKeys = {
+  currency_mismatch: 'llmOps.status.currencyMismatch',
+  low_coverage: 'llmOps.status.lowCoverage',
+  missing_channel: 'llmOps.status.missingChannel',
+  not_lowest: 'llmOps.status.notLowest',
+  ready: 'llmOps.status.readyShort',
+  unlisted: 'llmOps.status.unlisted'
+}
 
 const navItems = computed(() => [
   {
     key: 'monitor',
-    label: '运营总览',
+    label: t('llmOps.nav.monitor.label'),
     eyebrow: 'Monitor',
-    description: '汇总模型价格、渠道覆盖、采购路径和关键运营指标。',
+    description: t('llmOps.nav.monitor.description'),
     icon: 'M'
   },
   {
     key: 'metaModels',
-    label: '元模型库',
+    label: t('llmOps.nav.metaModels.label'),
     eyebrow: 'Meta Models',
-    description: '管理厂商、模型家族、能力标签和采集归一化后的元模型身份。',
+    description: t('llmOps.nav.metaModels.description'),
     icon: 'M',
     badge: metaModels.value.length
   },
   {
     key: 'providers',
-    label: '模型价格源',
+    label: t('llmOps.nav.providers.label'),
     eyebrow: 'Sources',
-    description: '查看供货商价格源与元模型价格。',
+    description: t('llmOps.nav.providers.description'),
     icon: 'P',
     badge: providerCollectionSources.value.length
   },
   {
     key: 'channels',
-    label: '转发渠道',
+    label: t('llmOps.nav.channels.label'),
     eyebrow: 'Channels',
-    description: '维护渠道，并在渠道内管理可启用转发的服务商模型和价格策略。',
+    description: t('llmOps.nav.channels.description'),
     icon: 'C',
     badge: channels.value.length
   },
   {
     key: 'reseller',
-    label: '挂售平台',
+    label: t('llmOps.nav.reseller.label'),
     eyebrow: 'Reseller',
-    description: '管理挂售定价、积分换算与供货渠道。',
+    description: t('llmOps.nav.reseller.description'),
     icon: 'R',
     badge: agioneListingRows.value.length
   },
   {
     key: 'reconciler',
-    label: '用量对账',
+    label: t('llmOps.nav.reconciler.label'),
     eyebrow: 'Reconciliation',
-    description: '录入生产用量和账单金额，自动计算应付金额与差异。',
+    description: t('llmOps.nav.reconciler.description'),
     icon: 'A'
   },
   {
     key: 'audit',
-    label: '操作记录',
+    label: t('llmOps.nav.audit.label'),
     eyebrow: 'Audit',
-    description: '查询渠道配置、价格调整、模型上架和审批流转的审计记录。',
+    description: t('llmOps.nav.audit.description'),
     icon: 'L'
   }
 ])
@@ -732,7 +790,7 @@ const resalePlatformOptions = computed(() =>
 )
 
 const simulationChannelOptions = computed(() => [
-  { label: '全部渠道', value: '' },
+  { label: t('llmOps.filters.allChannels'), value: '' },
   ...channels.value.map((channel) => ({
     label: channel.name,
     value: channel.id
@@ -824,7 +882,7 @@ const enrichedProcurementRows = computed(() =>
         has_lowest_listing: Boolean(row.has_lowest_listing),
         requires_currency_conversion: Boolean(row.requires_currency_conversion),
         status_priority: row.status_priority || 5,
-        status_label: row.status_label || '就绪',
+        status_label: localizedMonitorStatusLabel(row.status),
         status_tone: monitorStatusTone(row.status)
       }
     }
@@ -892,47 +950,57 @@ const kpiCards = computed(() => {
   const readyRate = percentage(readyRows.value.length, modelCount)
   return [
     {
-      label: '运营就绪',
+      label: t('llmOps.kpi.ready.label'),
       value: `${readyRows.value.length}/${modelCount}`,
       badge: `${readyRate}%`,
-      hint: `${readyRows.value.length} 个模型渠道覆盖、挂售和最低价状态均就绪`,
+      hint: t('llmOps.kpi.ready.hint', { count: readyRows.value.length }),
       progress: readyRate,
       tone: readyRate >= 80 ? 'good' : 'warn',
       barClass: 'bg-emerald-500'
     },
     {
-      label: '渠道覆盖',
+      label: t('llmOps.kpi.procurement.label'),
       value: `${procuredCount.value}/${modelCount}`,
       badge: `${procurementRate}%`,
-      hint: `${missingChannelRows.value.length} 个缺渠道价 · ${currencyMismatchRows.value.length} 个需要汇率`,
+      hint: t('llmOps.kpi.procurement.hint', {
+        missing: missingChannelRows.value.length,
+        currency: currencyMismatchRows.value.length
+      }),
       progress: procurementRate,
       tone: procurementRate >= 80 ? 'good' : 'warn',
       barClass: 'bg-agione-500'
     },
     {
-      label: '平台挂售',
+      label: t('llmOps.kpi.listing.label'),
       value: `${listedCount.value}/${modelCount}`,
       badge: `${listingRate}%`,
-      hint: `${unlistedRows.value.length} 个未上架 · ${nonLowestRows.value.length} 个非最低价`,
+      hint: t('llmOps.kpi.listing.hint', {
+        unlisted: unlistedRows.value.length,
+        nonLowest: nonLowestRows.value.length
+      }),
       progress: listingRate,
       tone: listingRate >= 80 ? 'good' : 'warn',
       barClass: 'bg-cyan-500'
     },
     {
-      label: '渠道数',
+      label: t('llmOps.kpi.channels.label'),
       value: channelCount,
-      badge: `${providerCollectionSources.value.length} 源`,
-      hint: '转发渠道和模型价格源配置情况',
+      badge: t('llmOps.kpi.channels.badge', {
+        count: providerCollectionSources.value.length
+      }),
+      hint: t('llmOps.kpi.channels.hint'),
       progress: channelCount ? 100 : 0,
       tone: channelCount ? 'good' : 'danger',
       barClass: 'bg-violet-500'
     },
     {
-      label: '对账异常',
+      label: t('llmOps.kpi.reconciliation.label'),
       value: summary.value.kpis?.reconciliation_anomalies || 0,
       badge:
-        summary.value.kpis?.reconciliation_anomalies || 0 ? '需处理' : '正常',
-      hint: '生产用量与账单金额的差异记录',
+        summary.value.kpis?.reconciliation_anomalies || 0
+          ? t('llmOps.status.needsHandling')
+          : t('llmOps.status.normal'),
+      hint: t('llmOps.kpi.reconciliation.hint'),
       progress: summary.value.kpis?.reconciliation_anomalies || 0 ? 100 : 0,
       tone:
         summary.value.kpis?.reconciliation_anomalies || 0 ? 'danger' : 'good',
@@ -946,55 +1014,58 @@ const kpiCards = computed(() => {
 
 const actionItems = computed(() => [
   {
-    label: '补齐渠道采购价',
-    hint: '没有渠道价的模型无法进行可靠挂售和成本计算',
+    label: t('llmOps.queue.fillChannelPrice.label'),
+    hint: t('llmOps.queue.fillChannelPrice.hint'),
     value: missingChannelRows.value.length,
     tone: missingChannelRows.value.length ? 'danger' : 'good',
     section: 'channels'
   },
   {
-    label: '配置汇率',
-    hint: '同一模型存在不同采购币种，需要汇率后才能判断最低价',
+    label: t('llmOps.queue.configureExchange.label'),
+    hint: t('llmOps.queue.configureExchange.hint'),
     value: currencyMismatchRows.value.length,
     tone: currencyMismatchRows.value.length ? 'warn' : 'good',
     section: 'channels'
   },
   {
-    label: '上架挂售平台',
-    hint: '已有模型主数据但尚未进入当前挂售平台',
+    label: t('llmOps.queue.publishToPlatform.label'),
+    hint: t('llmOps.queue.publishToPlatform.hint'),
     value: unlistedRows.value.length,
     tone: unlistedRows.value.length ? 'warn' : 'good',
     section: 'reseller'
   },
   {
-    label: '切换最低价渠道',
-    hint: '已上架但当前渠道不是最低采购价，需要评估切换',
+    label: t('llmOps.queue.switchLowestChannel.label'),
+    hint: t('llmOps.queue.switchLowestChannel.hint'),
     value: nonLowestRows.value.length,
     tone: nonLowestRows.value.length ? 'warn' : 'good',
     section: 'reseller'
   },
   {
-    label: '补充渠道覆盖',
-    hint: '只有一个可用渠道的模型缺少采购备选，价格稳定性较弱',
+    label: t('llmOps.queue.addChannelCoverage.label'),
+    hint: t('llmOps.queue.addChannelCoverage.hint'),
     value: lowCoverageRows.value.length,
     tone: lowCoverageRows.value.length ? 'warn' : 'good',
     section: 'channels'
   },
   {
-    label: '检查模型价格源',
+    label: t('llmOps.queue.checkPriceSource.label'),
     hint: latestCollectionRun.value
-      ? `${latestCollectionRun.value.status || '-'} · ${formatDateTime(
-          latestCollectionRun.value.finished_at ||
-            latestCollectionRun.value.started_at
-        )}`
-      : '还没有模型价格源记录',
+      ? t('llmOps.queue.checkPriceSource.latestRun', {
+          status: latestCollectionRun.value.status || '-',
+          time: formatDateTime(
+            latestCollectionRun.value.finished_at ||
+              latestCollectionRun.value.started_at
+          )
+        })
+      : t('llmOps.queue.checkPriceSource.empty'),
     value: collectionAttentionCount.value,
     tone: collectionAttentionCount.value ? 'danger' : 'good',
     section: 'providers'
   },
   {
-    label: '处理对账差异',
-    hint: '对账异常会影响渠道结算和毛利判断',
+    label: t('llmOps.queue.handleReconciliation.label'),
+    hint: t('llmOps.queue.handleReconciliation.hint'),
     value: summary.value.kpis?.reconciliation_anomalies || 0,
     tone: summary.value.kpis?.reconciliation_anomalies || 0 ? 'danger' : 'good',
     section: 'reconciler'
@@ -1218,41 +1289,41 @@ function resolveMonitorStatus({
 }) {
   if (requiresCurrencyConversion) {
     return {
-      status_label: '需要汇率',
+      status_label: t('llmOps.status.currencyMismatch'),
       status_tone: 'info',
       status_priority: 1
     }
   }
   if (!bestChannel) {
     return {
-      status_label: '缺渠道价',
+      status_label: t('llmOps.status.missingChannel'),
       status_tone: 'danger',
       status_priority: 1
     }
   }
   if (!isAgioneListed) {
     return {
-      status_label: '可上架',
+      status_label: t('llmOps.status.readyToList'),
       status_tone: 'warn',
       status_priority: 2
     }
   }
   if (!hasLowestListing) {
     return {
-      status_label: '非最低价',
+      status_label: t('llmOps.status.notLowest'),
       status_tone: 'warn',
       status_priority: 3
     }
   }
   if (coverageCount <= 1) {
     return {
-      status_label: '覆盖偏少',
+      status_label: t('llmOps.status.lowCoverage'),
       status_tone: 'info',
       status_priority: 4
     }
   }
   return {
-    status_label: '已就绪',
+    status_label: t('llmOps.status.ready'),
     status_tone: 'success',
     status_priority: 5
   }
@@ -1261,12 +1332,18 @@ function resolveMonitorStatus({
 function monitorStatusTone(status) {
   const tones = {
     currency_mismatch: 'info',
+    not_lowest: 'warn',
     missing_channel: 'danger',
     unlisted: 'warn',
     low_coverage: 'info',
     ready: 'success'
   }
   return tones[status] || 'success'
+}
+
+function localizedMonitorStatusLabel(status) {
+  const labelKey = monitorStatusLabelKeys[status]
+  return labelKey ? t(labelKey) : t('llmOps.status.readyShort')
 }
 
 function money(value, currency = 'USD') {
@@ -1370,11 +1447,11 @@ function mergeResaleListings(updatedItems) {
 function openListingActionDrawer({ modelId, kind }) {
   if (kind === 'configure-channel') {
     activeSection.value = 'channels'
-    showError('请先在转发渠道中为该模型配置采购价，再返回挂售平台。')
+    showError(t('llmOps.messages.configureChannelFirst'))
     return
   }
   if (!agionePlatform.value) {
-    showError('请先配置挂售平台后再编辑挂售。')
+    showError(t('llmOps.messages.configurePlatformFirst'))
     return
   }
   // Direct row actions (remove / restore / offline) are handled by
@@ -1409,19 +1486,19 @@ function mapWorkspaceListingToPayload(item) {
 
 async function handleResaleWorkspacePublished(payload) {
   if (!payload || !payload.listings || !payload.listings.length) {
-    showInfo('没有需要上架的链路')
+    showInfo(t('llmOps.messages.noListingsToPublish'))
     return
   }
   const items = payload.listings
     .filter((item) => Number(item.priceIn) > 0 && Number(item.priceOut) > 0)
     .map(mapWorkspaceListingToPayload)
   if (!items.length) {
-    showError('请为每条链路填写有效的 In/Out 售价后再发布')
+    showError(t('llmOps.messages.invalidListingPrices'))
     return
   }
   try {
     await llmOpsApi.bulkUpsertResaleListings(items)
-    showSuccess(`已提交 ${items.length} 条发布申请`)
+    showSuccess(t('llmOps.messages.publishSubmitted', { count: items.length }))
     resalePublishingDrawerOpen.value = false
     refreshLight()
   } catch (error) {
@@ -1430,29 +1507,29 @@ async function handleResaleWorkspacePublished(payload) {
       error?.response?.data?.message ||
       error?.message ||
       ''
-    showError(message || '提交失败')
+    showError(message || t('llmOps.messages.submitFailed'))
   }
 }
 
 async function handleResaleWorkspaceDraft(payload) {
   if (!payload || !payload.listings || !payload.listings.length) {
-    showInfo('没有需要保存的草稿')
+    showInfo(t('llmOps.messages.noDraftsToSave'))
     return
   }
   if (!payload.hasChanges) {
-    showInfo('没有检测到需要保存的修改')
+    showInfo(t('llmOps.messages.noChangesToSave'))
     return
   }
   const items = payload.listings
     .filter((item) => item.hasChanges !== false)
     .map(mapWorkspaceListingToPayload)
   if (!items.length) {
-    showInfo('没有检测到需要保存的修改')
+    showInfo(t('llmOps.messages.noChangesToSave'))
     return
   }
   try {
     await llmOpsApi.bulkDraftResaleListings(items)
-    showSuccess(`已保存 ${items.length} 条草稿`)
+    showSuccess(t('llmOps.messages.draftsSaved', { count: items.length }))
     resalePublishingDrawerOpen.value = false
     refreshLight()
   } catch (error) {
@@ -1461,7 +1538,7 @@ async function handleResaleWorkspaceDraft(payload) {
       error?.response?.data?.message ||
       error?.message ||
       ''
-    showError(message || '保存失败')
+    showError(message || t('llmOps.messages.saveFailed'))
   }
 }
 
