@@ -270,6 +270,9 @@ class ResalePlatformAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "code",
+        "platform_type",
+        "region_code",
+        "environment",
         "currency",
         "has_api_key",
         "points_per_currency_unit",
@@ -278,8 +281,8 @@ class ResalePlatformAdmin(admin.ModelAdmin):
         "auto_approve_max_margin_rate",
         "is_active",
     )
-    list_filter = ("currency", "is_active")
-    search_fields = ("name", "code")
+    list_filter = ("platform_type", "environment", "currency", "is_active")
+    search_fields = ("name", "code", "region_code", "region_name")
 
     def has_api_key(self, obj):
         return bool(obj.api_key)

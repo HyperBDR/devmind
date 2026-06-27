@@ -983,6 +983,7 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
     """Serializer for downstream resale platforms."""
 
     listing_count = serializers.IntegerField(read_only=True, required=False)
+    metadata = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = ResalePlatform
@@ -1016,6 +1017,13 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "points_per_currency_unit must be > 0."
             )
+        return value
+
+    def validate_metadata(self, value):
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("metadata must be an object.")
         return value
 
 

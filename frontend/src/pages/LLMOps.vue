@@ -147,7 +147,8 @@
                     <CompactSelect
                       v-model="selectedResalePlatformId"
                       :options="resalePlatformOptions"
-                      class-name="w-28"
+                      class-name="w-56"
+                      :menu-min-width="260"
                       size="sm"
                     />
                   </div>
@@ -812,10 +813,40 @@ const activeResalePlatforms = computed(() =>
 
 const resalePlatformOptions = computed(() =>
   activeResalePlatforms.value.map((platform) => ({
-    label: platform.name,
+    label: resalePlatformOptionLabel(platform),
     value: String(platform.id)
   }))
 )
+
+const platformTypeLabels = {
+  agione: 'Agione',
+  api_gateway: 'API 网关',
+  cloud_marketplace: '云市场',
+  internal: '内部平台',
+  other: '其他平台',
+  reseller: '代理商平台'
+}
+
+const environmentLabels = {
+  production: '生产',
+  sandbox: '沙箱',
+  staging: '预发',
+  test: '测试'
+}
+
+function resalePlatformOptionLabel(platform) {
+  const typeLabel =
+    platformTypeLabels[platform.platform_type] || platform.platform_type
+  const regionLabel = platform.region_name || platform.region_code
+  const meta = [
+    typeLabel,
+    regionLabel,
+    environmentLabels[platform.environment]
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  return meta ? `${platform.name} · ${meta}` : platform.name
+}
 
 const simulationChannelOptions = computed(() => [
   { label: t('llmOps.filters.allChannels'), value: '' },
