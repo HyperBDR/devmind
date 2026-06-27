@@ -99,6 +99,7 @@
                 :point-conversion="pointConversion"
                 :display-currency="displayCurrency"
                 :exchange-rate="exchangeRate"
+                :workflow-config="workflowConfig"
                 @change="onWorkspaceChange"
               />
             </div>
@@ -176,6 +177,10 @@ const props = defineProps({
   exchangeRate: {
     type: Number,
     default: 7.15
+  },
+  workflowConfig: {
+    type: Object,
+    default: null
   }
 })
 

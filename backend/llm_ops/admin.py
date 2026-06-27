@@ -18,6 +18,7 @@ from .models import (
     ResaleListingExclusion,
     ResaleListingPriceHistory,
     ResalePlatform,
+    ResaleWorkflowConfig,
     UsageReconciliationRecord,
 )
 
@@ -289,6 +290,13 @@ class ResalePlatformAdmin(admin.ModelAdmin):
 
     has_api_key.boolean = True
     has_api_key.short_description = "API Key"
+
+
+@admin.register(ResaleWorkflowConfig)
+class ResaleWorkflowConfigAdmin(admin.ModelAdmin):
+    list_display = ("platform", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("platform__name", "platform__code", "notes")
 
 
 @admin.register(ResaleListing)
