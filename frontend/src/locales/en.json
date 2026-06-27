@@ -1632,6 +1632,28 @@
         "previous": "Previous",
         "next": "Next"
       },
+      "export": {
+        "action": "Export",
+        "csv": "CSV",
+        "excel": "Excel",
+        "formatLabel": "Export format",
+        "metricColumn": "{metric} {field}",
+        "columns": {
+          "channel": "Listing channel",
+          "cost": "Cost",
+          "currency": "Currency",
+          "margin": "Margin",
+          "metaModel": "Meta model",
+          "model": "Model",
+          "modelCode": "Model code",
+          "platform": "Resale platform",
+          "points": "Points",
+          "provider": "Supplier",
+          "retail": "Retail",
+          "status": "Status",
+          "updatedAt": "Updated at"
+        }
+      },
       "table": {
         "platform": "Resale platform",
         "model": "Model",
@@ -1685,6 +1707,12 @@
         "listed": "There are no listed models.",
         "unlisted": "There are no models ready to list.",
         "default": "No models match the current filters."
+      },
+      "marginTone": {
+        "high": "Too high: current {value}, above auto-approval limit {limit}",
+        "low": "Too low: current {value}, below platform cost floor {floor}",
+        "muted": "No margin available",
+        "ok": "Suitable: current {value}, platform floor {floor}, auto-approval limit {limit}"
       },
       "supply": {
         "activeLinks": "{count} active listing links",
