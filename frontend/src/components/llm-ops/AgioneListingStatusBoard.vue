@@ -79,6 +79,31 @@
             {{ filteredListingRows.length }} /
             {{ visibleListingRows.length }}
           </span>
+          <div class="export-control-group">
+            <label class="sr-only" for="listing-export-format">
+              {{ t('llmOps.listingBoard.export.formatLabel') }}
+            </label>
+            <select
+              id="listing-export-format"
+              v-model="exportFormat"
+              class="export-format-select"
+            >
+              <option value="csv">
+                {{ t('llmOps.listingBoard.export.csv') }}
+              </option>
+              <option value="excel">
+                {{ t('llmOps.listingBoard.export.excel') }}
+              </option>
+            </select>
+            <button
+              type="button"
+              class="export-listing-button"
+              :disabled="!exportableRows.length"
+              @click="exportListings"
+            >
+              {{ t('llmOps.listingBoard.export.action') }}
+            </button>
+          </div>
           <template v-if="selectedRows.length">
             <span class="listing-selected-count">
               {{
@@ -260,6 +285,9 @@
                 <span
                   v-if="listingUnifiedMarginRate(row) !== null"
                   class="margin-pill"
+                  :class="marginPillTone(row)"
+                  :title="marginPillTitle(row)"
+                  :aria-label="marginPillTitle(row)"
                 >
                   {{ Number(listingUnifiedMarginRate(row)).toFixed(1) }}%
                 </span>
@@ -399,6 +427,7 @@ const pageSize = ref(10)
 const currentPage = ref(1)
 const savingListings = ref(false)
 const selectedModelIds = ref(new Set())
+const exportFormat = ref('csv')
 const pageSizeOptions = [10, 20, 50]
 
 const listingStatusOptions = computed(() => [
@@ -482,6 +511,12 @@ const selectableRows = computed(() =>
 const selectedRows = computed(() =>
   filteredListingRows.value.filter((row) =>
     selectedModelIds.value.has(rowSelectionKey(row))
+  )
+)
+
+const exportableRows = computed(() =>
+  filteredListingRows.value.filter(
+    (row) => row.status_listing && !isHiddenRow(row)
   )
 )
 
@@ -743,6 +778,198 @@ function listingPointText(value, currency) {
   return String(Math.round(converted * rate))
 }
 
+function listingCurrency(row) {
+  return row.status_listing?.currency || props.displayCurrency || 'CNY'
+}
+
+function metricCostValue(row, spec) {
+  return formatExportAmount(row.lowest_option?.[spec.costField])
+}
+
+function metricRetailValue(row, spec) {
+  return formatExportAmount(row.status_listing?.[spec.retailField])
+}
+
+function metricPointValue(row, spec) {
+  const points = listingPointText(
+    row.status_listing?.[spec.retailField],
+    row.status_listing?.currency
+  )
+  return points === '-' ? '' : points
+}
+
+function formatExportAmount(value) {
+  if (value === null || value === undefined || value === '') return ''
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return ''
+  return amount.toFixed(6)
+}
+
+function formatExportPercent(value) {
+  if (value === null || value === undefined || value === '') return ''
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return ''
+  return `${amount.toFixed(2)}%`
+}
+
+function exportColumnLabel(key) {
+  return t(`llmOps.listingBoard.export.columns.${key}`)
+}
+
+function exportMetricColumnLabel(spec, key) {
+  return t('llmOps.listingBoard.export.metricColumn', {
+    metric: spec.label,
+    field: exportColumnLabel(key)
+  })
+}
+
+function listingExportColumns() {
+  const baseColumns = [
+    { key: 'platform', label: exportColumnLabel('platform') },
+    { key: 'model', label: exportColumnLabel('model') },
+    { key: 'modelCode', label: exportColumnLabel('modelCode') },
+    { key: 'metaModel', label: exportColumnLabel('metaModel') },
+    { key: 'provider', label: exportColumnLabel('provider') },
+    { key: 'channel', label: exportColumnLabel('channel') },
+    { key: 'status', label: exportColumnLabel('status') },
+    { key: 'currency', label: exportColumnLabel('currency') }
+  ]
+  const metricColumns = RESALE_PRICE_DIMENSION_SPECS.flatMap((spec) => [
+    {
+      key: `${spec.key}_cost`,
+      label: exportMetricColumnLabel(spec, 'cost')
+    },
+    {
+      key: `${spec.key}_retail`,
+      label: exportMetricColumnLabel(spec, 'retail')
+    },
+    {
+      key: `${spec.key}_points`,
+      label: exportMetricColumnLabel(spec, 'points')
+    }
+  ])
+  return [
+    ...baseColumns,
+    ...metricColumns,
+    { key: 'margin', label: exportColumnLabel('margin') },
+    { key: 'updatedAt', label: exportColumnLabel('updatedAt') }
+  ]
+}
+
+function listingExportRecord(row) {
+  const listing = row.status_listing || {}
+  const record = {
+    platform: platformLabel.value,
+    model: rows.modelDisplayName(row.model),
+    modelCode: row.model?.code || listing.model_code || '',
+    metaModel: listing.meta_model_name || row.model?.meta_model_name || '',
+    provider: row.provider_name || row.procurement?.provider_name || '',
+    channel: listing.channel_name || activeListingChannelLabel(row),
+    status: statusPillLabel(row),
+    currency: listingCurrency(row),
+    margin: formatExportPercent(listingUnifiedMarginRate(row)),
+    updatedAt: listing.updated_at || listing.created_at || ''
+  }
+  RESALE_PRICE_DIMENSION_SPECS.forEach((spec) => {
+    record[`${spec.key}_cost`] = metricCostValue(row, spec)
+    record[`${spec.key}_retail`] = metricRetailValue(row, spec)
+    record[`${spec.key}_points`] = metricPointValue(row, spec)
+  })
+  return record
+}
+
+function exportListings() {
+  const columns = listingExportColumns()
+  const records = exportableRows.value.map(listingExportRecord)
+  if (!records.length) return
+  if (exportFormat.value === 'excel') {
+    downloadExcelExport(columns, records)
+    return
+  }
+  downloadCsvExport(columns, records)
+}
+
+function downloadCsvExport(columns, records) {
+  const lines = [
+    columns.map((column) => csvCell(column.label)).join(','),
+    ...records.map((record) =>
+      columns.map((column) => csvCell(record[column.key])).join(',')
+    )
+  ]
+  downloadExportFile(
+    ['\uFEFF', lines.join('\n')],
+    exportFileName('csv'),
+    'text/csv;charset=utf-8;'
+  )
+}
+
+function downloadExcelExport(columns, records) {
+  const thead = columns
+    .map((column) => `<th>${htmlCell(column.label)}</th>`)
+    .join('')
+  const tbody = records
+    .map((record) => {
+      const cells = columns
+        .map(
+          (column) =>
+            `<td style="mso-number-format:'\\@';">` +
+            `${htmlCell(record[column.key])}</td>`
+        )
+        .join('')
+      return `<tr>${cells}</tr>`
+    })
+    .join('')
+  const html = [
+    '<html><head><meta charset="UTF-8"></head><body>',
+    '<table border="1">',
+    `<thead><tr>${thead}</tr></thead>`,
+    `<tbody>${tbody}</tbody>`,
+    '</table></body></html>'
+  ].join('')
+  downloadExportFile(
+    ['\uFEFF', html],
+    exportFileName('xls'),
+    'application/vnd.ms-excel;charset=utf-8;'
+  )
+}
+
+function exportFileName(extension) {
+  const date = new Date().toISOString().slice(0, 10)
+  return `agione-listings-${date}.${extension}`
+}
+
+function downloadExportFile(parts, filename, type) {
+  const blob = new Blob(parts, { type })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function csvCell(value) {
+  const text = spreadsheetSafeText(value)
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function htmlCell(value) {
+  const text = spreadsheetSafeText(value)
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function spreadsheetSafeText(value) {
+  const text = value === null || value === undefined ? '' : String(value)
+  return /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
+}
+
 function convertPointCurrencyAmount(value, sourceCurrency, targetCurrency) {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return null
@@ -771,6 +998,56 @@ function listingUnifiedMarginRate(row) {
       cost: row.lowest_option?.[spec.costField]
     }))
   )
+}
+
+function normalizeMargin(value) {
+  const margin = Number(value)
+  if (!Number.isFinite(margin)) return null
+  return Number(margin.toFixed(1))
+}
+
+function platformMarginFloor() {
+  const feeRate = Number(props.agionePlatform?.fee_rate)
+  const serviceFeeRate = Number(props.agionePlatform?.service_fee_rate)
+  const fee = Number.isFinite(feeRate) && feeRate > 0 ? feeRate : 0
+  const service =
+    Number.isFinite(serviceFeeRate) && serviceFeeRate > 0 ? serviceFeeRate : 0
+  return normalizeMargin((fee + service) * 100) ?? 0
+}
+
+function platformMarginLimit() {
+  const limit = Number(props.agionePlatform?.auto_approve_max_margin_rate)
+  return Number.isFinite(limit) ? limit : null
+}
+
+function marginToneKey(row) {
+  const margin = listingUnifiedMarginRate(row)
+  if (margin === null) return 'muted'
+  const floor = platformMarginFloor()
+  if (margin < floor) return 'low'
+  const limit = platformMarginLimit()
+  if (limit !== null && margin > limit) return 'high'
+  return 'ok'
+}
+
+function marginPillTone(row) {
+  return `margin-pill-${marginToneKey(row)}`
+}
+
+function marginPillTitle(row) {
+  const margin = listingUnifiedMarginRate(row)
+  const tone = marginToneKey(row)
+  return t(`llmOps.listingBoard.marginTone.${tone}`, {
+    value: formatMarginText(margin),
+    floor: formatMarginText(platformMarginFloor()),
+    limit: formatMarginText(platformMarginLimit())
+  })
+}
+
+function formatMarginText(value) {
+  const margin = Number(value)
+  if (!Number.isFinite(margin)) return '-'
+  return `${margin.toFixed(1).replace(/\.0$/, '')}%`
 }
 
 function statusPillLabel(row) {
@@ -1687,6 +1964,63 @@ function workflowSuccessText(kind) {
   white-space: nowrap;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.export-control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.export-format-select {
+  height: 2rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  outline: none;
+  padding: 0 1.5rem 0 0.5rem;
+}
+
+.export-format-select:focus {
+  border-color: #8b7dd1;
+  box-shadow: 0 0 0 2px #ece9f9;
+}
+
+.export-listing-button {
+  height: 2rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0 0.75rem;
+  white-space: nowrap;
+}
+
+.export-listing-button:hover:not(:disabled) {
+  border-color: #8b7dd1;
+  color: #4a3eb0;
+}
+
+.export-listing-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .pagination-select {
   height: 2rem;
   border: 1px solid #e2e8f0;
@@ -1862,14 +2196,39 @@ function workflowSuccessText(kind) {
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  background-color: #ece9f9;
+  border: 1px solid transparent;
+  background-color: #f8fafc;
   padding: 0.25rem 0.625rem;
-  color: #4a3eb0;
+  color: #475569;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
   font-size: 12px;
   font-weight: 700;
+}
+
+.margin-pill-low {
+  border-color: #fde68a;
+  background-color: #fffbeb;
+  color: #b45309;
+}
+
+.margin-pill-ok {
+  border-color: #a7f3d0;
+  background-color: #ecfdf5;
+  color: #047857;
+}
+
+.margin-pill-high {
+  border-color: #fecdd3;
+  background-color: #fff1f2;
+  color: #be123c;
+}
+
+.margin-pill-muted {
+  border-color: #e2e8f0;
+  background-color: #f8fafc;
+  color: #64748b;
 }
 
 .status-pill {

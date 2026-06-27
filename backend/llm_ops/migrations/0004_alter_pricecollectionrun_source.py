@@ -5,7 +5,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("llm_ops", "0002_resaleplatform_metadata"),
+        ("llm_ops", "0003_resale_workflow_config"),
     ]
 
     operations = [

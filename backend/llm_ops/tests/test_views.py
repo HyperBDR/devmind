@@ -21,6 +21,7 @@ from llm_ops.models import (
     ResaleListingExclusion,
     ResaleListingPriceHistory,
     ResalePlatform,
+    ResaleWorkflowConfig,
 )
 
 
@@ -1459,6 +1460,118 @@ class LLMOpsViewTests(TestCase):
             listing.workflow_status,
             ResaleListing.WORKFLOW_DRAFT,
         )
+
+    def test_resale_workflow_config_effective_returns_platform_runtime(self):
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+            auto_approve_max_margin_rate="25.50",
+        )
+
+        response = self.client.get(
+            reverse("resale-workflow-config-effective"),
+            {"platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config = response.data["config"]
+        self.assertEqual(response.data["platform"], platform.id)
+        self.assertTrue(config["policies"]["auto_approve_enabled"])
+        self.assertEqual(
+            config["runtime"]["auto_approve_max_margin_rate"],
+            25.5,
+        )
+        self.assertIn(
+            "confirm_publish",
+            config["runtime"]["transition_actions"],
+        )
+
+    def test_resale_workflow_config_effective_persists_edits(self):
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+        )
+        response = self.client.get(
+            reverse("resale-workflow-config-effective"),
+            {"platform": platform.id},
+        )
+        config = response.data["config"]
+        config["policies"]["auto_approve_enabled"] = False
+        config["nodes"][3]["enabled"] = False
+
+        patch_response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            {"config": config, "notes": "disable auto approval"},
+            format="json",
+        )
+
+        self.assertEqual(patch_response.status_code, 200)
+        saved = ResaleWorkflowConfig.objects.get(platform=platform)
+        self.assertFalse(saved.config["policies"]["auto_approve_enabled"])
+        self.assertFalse(
+            patch_response.data["config"]["policies"][
+                "auto_approve_enabled"
+            ]
+        )
+        self.assertEqual(patch_response.data["notes"], "disable auto approval")
+        self.assertIn("runtime", patch_response.data["config"])
+
+    def test_resale_workflow_config_patch_requires_config(self):
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+        )
+
+        response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            {"notes": "missing config"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "config is required.")
+        self.assertFalse(
+            ResaleWorkflowConfig.objects.filter(platform=platform).exists()
+        )
+
+    def test_resale_workflow_config_rejects_unknown_edge_node(self):
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+        )
+        payload = {
+            "config": {
+                "version": 1,
+                "policies": {},
+                "nodes": [
+                    {
+                        "id": "start",
+                        "label": "Start",
+                        "enabled": True,
+                    }
+                ],
+                "edges": [
+                    {
+                        "id": "bad",
+                        "from": "start",
+                        "to": "missing",
+                        "enabled": True,
+                    }
+                ],
+            }
+        }
+
+        response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("unknown node", str(response.data))
 
     def test_resale_listing_bulk_transition_publish_and_offline(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")

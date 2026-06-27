@@ -21,6 +21,7 @@ from .models import (
     ResaleListing,
     ResaleListingPriceHistory,
     ResalePlatform,
+    ResaleWorkflowConfig,
     UsageReconciliationRecord,
 )
 from .services import (
@@ -30,6 +31,7 @@ from .services import (
     price_role_for_source,
     stable_fingerprint,
 )
+from .workflow_config import validate_resale_workflow_config
 
 
 class PriceCollectionSourceSerializer(serializers.ModelSerializer):
@@ -1162,6 +1164,23 @@ class ResaleListingPriceHistorySerializer(serializers.ModelSerializer):
             "is_current",
             "created_at",
         )
+
+
+class ResaleWorkflowConfigSerializer(serializers.ModelSerializer):
+    """Serializer for resale workflow visual configuration."""
+
+    platform_name = serializers.CharField(
+        source="platform.name",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ResaleWorkflowConfig
+        fields = "__all__"
+        read_only_fields = ("created_at", "updated_at")
+
+    def validate_config(self, value):
+        return validate_resale_workflow_config(value)
 
 
 class UsageReconciliationRecordSerializer(serializers.ModelSerializer):

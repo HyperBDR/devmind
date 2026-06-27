@@ -20,6 +20,7 @@ from .views import (
     ResaleListingPriceHistoryViewSet,
     ResaleListingViewSet,
     ResalePlatformViewSet,
+    ResaleWorkflowConfigViewSet,
     SummaryAPIView,
     UsageReconciliationRecordViewSet,
     YunceCollectionAPIView,
@@ -90,6 +91,11 @@ router.register(
     r"resale-listing-price-history",
     ResaleListingPriceHistoryViewSet,
     basename="resale-listing-price-history",
+)
+router.register(
+    r"resale-workflow-configs",
+    ResaleWorkflowConfigViewSet,
+    basename="resale-workflow-config",
 )
 router.register(
     r"reconciliation-records",
