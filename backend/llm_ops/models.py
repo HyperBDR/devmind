@@ -84,6 +84,77 @@ class PriceCollectionSource(models.Model):
         return f"{self.name} ({self.slug})"
 
 
+class LLMOpsGlobalConfig(models.Model):
+    """Singleton runtime configuration for LLM operations."""
+
+    DEFAULT_META_MODEL_SYNC_CRON = "35 2 * * *"
+    DEFAULT_PRICE_COLLECTION_CRON = "15 1,7,13,19 * * *"
+    DEFAULT_META_MODEL_SOURCE_URL = "https://models.dev/api.json"
+
+    singleton_key = models.CharField(
+        max_length=50,
+        unique=True,
+        default="default",
+        editable=False,
+    )
+    meta_model_sync_enabled = models.BooleanField(default=True)
+    meta_model_sync_source_url = models.URLField(
+        max_length=1000,
+        default=DEFAULT_META_MODEL_SOURCE_URL,
+    )
+    meta_model_sync_cron = models.CharField(
+        max_length=100,
+        default=DEFAULT_META_MODEL_SYNC_CRON,
+    )
+    price_collection_enabled = models.BooleanField(default=True)
+    price_collection_source_ids = models.JSONField(blank=True, default=list)
+    price_collection_cron = models.CharField(
+        max_length=100,
+        default=DEFAULT_PRICE_COLLECTION_CRON,
+    )
+    feishu_app_id = models.CharField(max_length=255, blank=True, default="")
+    feishu_app_secret = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+    )
+    feishu_approval_code = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    feishu_tenant_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    notes = models.TextField(blank=True, default="")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_global_config_updates",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "LLM Ops Global Config"
+        verbose_name_plural = "LLM Ops Global Config"
+
+    def __str__(self) -> str:
+        return "LLM Ops global config"
+
+    @classmethod
+    def get_solo(cls):
+        """Return the singleton config row."""
+        instance, _created = cls.objects.get_or_create(
+            singleton_key="default"
+        )
+        return instance
+
+
 class LLMProvider(models.Model):
     """Original model vendor, such as OpenAI, Anthropic, or DeepSeek."""
 

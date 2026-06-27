@@ -7,6 +7,7 @@ from .models import (
     ChannelPriceItem,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
+    LLMOpsGlobalConfig,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -21,6 +22,19 @@ from .models import (
     ResaleWorkflowConfig,
     UsageReconciliationRecord,
 )
+
+
+@admin.register(LLMOpsGlobalConfig)
+class LLMOpsGlobalConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "singleton_key",
+        "meta_model_sync_enabled",
+        "price_collection_enabled",
+        "updated_by",
+        "updated_at",
+    )
+    readonly_fields = ("singleton_key", "created_at", "updated_at")
+    search_fields = ("notes", "feishu_app_id", "feishu_approval_code")
 
 
 @admin.register(AuditLog)

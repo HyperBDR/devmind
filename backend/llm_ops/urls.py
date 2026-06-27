@@ -8,6 +8,7 @@ from .views import (
     ChannelPriceItemViewSet,
     CollectedModelPriceHistoryViewSet,
     CollectedModelPriceSnapshotViewSet,
+    LLMOpsGlobalConfigAPIView,
     LLMModelViewSet,
     LLMProviderViewSet,
     ManualPriceImportAPIView,
@@ -105,6 +106,11 @@ router.register(
 
 urlpatterns = [
     path("", include(router.urls)),
+    path(
+        "global-config/",
+        LLMOpsGlobalConfigAPIView.as_view(),
+        name="llm-ops-global-config",
+    ),
     path("summary/", SummaryAPIView.as_view(), name="llm-ops-summary"),
     path(
         "collect/yunce/",
