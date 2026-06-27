@@ -49,6 +49,40 @@ class ResalePlatformSerializerTests(TestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
+    def test_accepts_platform_metadata(self):
+        serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Singapore",
+                "code": "agione-sg",
+                "platform_type": "agione",
+                "region_code": "ap-southeast-1",
+                "region_name": "Singapore",
+                "environment": "production",
+                "currency": "CNY",
+                "points_per_currency_unit": "100",
+                "metadata": {
+                    "tenant_id": "tenant-001",
+                    "settlement_cycle": "monthly",
+                },
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+    def test_rejects_non_object_metadata(self):
+        serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Test",
+                "code": "agione-test",
+                "currency": "CNY",
+                "points_per_currency_unit": "100",
+                "metadata": ["tenant-001"],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("metadata", serializer.errors)
+
     def test_rejects_non_positive_point_rate(self):
         serializer = ResalePlatformSerializer(
             data={

@@ -1090,9 +1090,37 @@ class ChannelModelPriceHistory(models.Model):
 class ResalePlatform(models.Model):
     """Downstream resale platform such as Agione."""
 
+    PLATFORM_TYPE_AGIONE = "agione"
+    PLATFORM_TYPE_CLOUD_MARKETPLACE = "cloud_marketplace"
+    PLATFORM_TYPE_API_GATEWAY = "api_gateway"
+    PLATFORM_TYPE_RESELLER = "reseller"
+    PLATFORM_TYPE_INTERNAL = "internal"
+    PLATFORM_TYPE_OTHER = "other"
+
+    ENV_PRODUCTION = "production"
+    ENV_STAGING = "staging"
+    ENV_SANDBOX = "sandbox"
+    ENV_TEST = "test"
+
     ROUND_HALF_UP = "half_up"
     ROUND_UP = "up"
     ROUND_DOWN = "down"
+
+    PLATFORM_TYPE_CHOICES = (
+        (PLATFORM_TYPE_AGIONE, "Agione"),
+        (PLATFORM_TYPE_CLOUD_MARKETPLACE, "Cloud Marketplace"),
+        (PLATFORM_TYPE_API_GATEWAY, "API Gateway"),
+        (PLATFORM_TYPE_RESELLER, "Reseller"),
+        (PLATFORM_TYPE_INTERNAL, "Internal"),
+        (PLATFORM_TYPE_OTHER, "Other"),
+    )
+
+    ENVIRONMENT_CHOICES = (
+        (ENV_PRODUCTION, "Production"),
+        (ENV_STAGING, "Staging"),
+        (ENV_SANDBOX, "Sandbox"),
+        (ENV_TEST, "Test"),
+    )
 
     ROUNDING_CHOICES = (
         (ROUND_HALF_UP, "Half Up"),
@@ -1102,6 +1130,19 @@ class ResalePlatform(models.Model):
 
     name = models.CharField(max_length=255)
     code = models.SlugField(max_length=100, unique=True, db_index=True)
+    platform_type = models.CharField(
+        max_length=50,
+        choices=PLATFORM_TYPE_CHOICES,
+        default=PLATFORM_TYPE_AGIONE,
+        db_index=True,
+    )
+    region_code = models.CharField(max_length=80, blank=True, default="")
+    region_name = models.CharField(max_length=120, blank=True, default="")
+    environment = models.CharField(
+        max_length=30,
+        choices=ENVIRONMENT_CHOICES,
+        default=ENV_PRODUCTION,
+    )
     website = models.URLField(max_length=1000, blank=True, default="")
     api_endpoint = models.URLField(max_length=1000, blank=True, default="")
     api_key = models.CharField(max_length=512, blank=True, default="")
@@ -1129,6 +1170,7 @@ class ResalePlatform(models.Model):
         default=100,
     )
     is_active = models.BooleanField(default=True)
+    metadata = models.JSONField(blank=True, default=dict)
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

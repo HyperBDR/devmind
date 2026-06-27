@@ -1018,6 +1018,13 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_metadata(self, value):
+        if value in (None, ""):
+            return {}
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("metadata must be an object.")
+        return value
+
 
 class ResaleListingSerializer(serializers.ModelSerializer):
     """Serializer for downstream resale listing prices."""
