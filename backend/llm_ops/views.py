@@ -34,6 +34,7 @@ from .models import (
     ResaleListingExclusion,
     ResaleListingPriceHistory,
     ResalePlatform,
+    ResaleWorkflowConfig,
     UsageReconciliationRecord,
 )
 from .serializers import (
@@ -55,6 +56,7 @@ from .serializers import (
     ResaleListingSerializer,
     ResaleListingPriceHistorySerializer,
     ResalePlatformSerializer,
+    ResaleWorkflowConfigSerializer,
     UsageReconciliationRecordSerializer,
     YunceCollectionRequestSerializer,
 )
@@ -72,6 +74,11 @@ from .services import (
     sync_channel_price_items,
 )
 from .tasks import collect_price_source_prices
+from .workflow_config import (
+    default_resale_workflow_config,
+    merge_resale_workflow_config,
+    validate_resale_workflow_config,
+)
 
 
 FEATURE_KEY = "llm_ops"
@@ -830,6 +837,95 @@ class ResalePlatformViewSet(
         return ResalePlatform.objects.annotate(
             listing_count=Count("listings"),
         ).order_by("name", "id")
+
+
+class ResaleWorkflowConfigViewSet(
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
+    """API for configuring resale listing workflows by platform."""
+
+    serializer_class = ResaleWorkflowConfigSerializer
+
+    def get_queryset(self):
+        queryset = ResaleWorkflowConfig.objects.select_related("platform")
+        platform = self.request.query_params.get("platform")
+        if platform:
+            queryset = queryset.filter(platform_id=platform)
+        return queryset.order_by("platform__name", "id")
+
+    @action(detail=False, methods=["get", "patch", "delete"])
+    def effective(self, request):
+        """Load, save, or reset the effective workflow config."""
+
+        platform_id = request.query_params.get("platform")
+        if not platform_id:
+            return Response(
+                {"detail": "platform is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        platform = ResalePlatform.objects.filter(id=platform_id).first()
+        if platform is None:
+            return Response(
+                {"detail": "platform was not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        instance = ResaleWorkflowConfig.objects.filter(
+            platform=platform,
+        ).first()
+        if request.method == "DELETE":
+            if instance is not None:
+                instance.delete()
+            return Response(
+                self._effective_payload(platform, None),
+                status=status.HTTP_200_OK,
+            )
+
+        if request.method == "PATCH":
+            raw_config = request.data.get("config")
+            if raw_config is None:
+                raw_config = default_resale_workflow_config(platform)
+            config = self._editable_config(
+                validate_resale_workflow_config(raw_config)
+            )
+            instance, _created = ResaleWorkflowConfig.objects.update_or_create(
+                platform=platform,
+                defaults={
+                    "config": config,
+                    "is_active": request.data.get("is_active", True),
+                    "notes": request.data.get("notes", ""),
+                },
+            )
+
+        return Response(
+            self._effective_payload(platform, instance),
+            status=status.HTTP_200_OK,
+        )
+
+    def _effective_payload(self, platform, instance):
+        saved_config = (
+            instance.config
+            if instance and instance.is_active
+            else None
+        )
+        return {
+            "id": instance.id if instance else None,
+            "platform": platform.id,
+            "platform_name": platform.name,
+            "is_active": instance.is_active if instance else True,
+            "notes": instance.notes if instance else "",
+            "config": merge_resale_workflow_config(platform, saved_config),
+            "updated_at": instance.updated_at if instance else None,
+        }
+
+    def _editable_config(self, config):
+        return {
+            "version": config.get("version", 1),
+            "policies": config.get("policies", {}),
+            "nodes": config.get("nodes", []),
+            "edges": config.get("edges", []),
+        }
 
 
 class ResaleListingViewSet(

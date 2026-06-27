@@ -561,6 +561,13 @@
               @open-workspace="openResalePublishingWorkspace"
             />
 
+            <ResaleWorkflowConfigPanel
+              v-else-if="activeSection === 'workflow'"
+              v-model:platform-id="selectedResalePlatformId"
+              :platforms="activeResalePlatforms"
+              @saved="handleWorkflowConfigSaved"
+            />
+
             <ProviderManagement
               v-else-if="activeSection === 'providers'"
               :providers="providers"
@@ -633,6 +640,7 @@
       :point-conversion="pointConversion"
       :display-currency="displayCurrency"
       :exchange-rate="exchangeRate"
+      :workflow-config="workflowConfigForWorkspace"
       @saved="handleResaleWorkspacePublished"
       @draft="handleResaleWorkspaceDraft"
     />
@@ -656,6 +664,7 @@ import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
 import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
 import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
 import ResalePublishingDrawer from '@/components/llm-ops/ResalePublishingDrawer.vue'
+import ResaleWorkflowConfigPanel from '@/components/llm-ops/ResaleWorkflowConfigPanel.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { llmOpsApi } from '@/api/llmOps'
@@ -667,6 +676,7 @@ const sectionKeys = new Set([
   'providers',
   'channels',
   'reseller',
+  'workflow',
   'reconciler',
   'audit'
 ])
@@ -683,6 +693,7 @@ const channelPrices = ref([])
 const channelPriceItems = ref([])
 const modelPriceItems = ref([])
 const resalePlatforms = ref([])
+const resaleWorkflowConfig = ref(null)
 const listings = ref([])
 const records = ref([])
 const summary = ref({})
@@ -742,7 +753,17 @@ const navIcons = {
     'M9 17h1',
     'M14 17h1'
   ],
-  reseller: ['M6 8h12l-1 12H7L6 8Z', 'M9 8a3 3 0 0 1 6 0']
+  reseller: ['M6 8h12l-1 12H7L6 8Z', 'M9 8a3 3 0 0 1 6 0'],
+  workflow: [
+    'M4 6h7',
+    'M13 6h7',
+    'M11 6l2 2-2 2',
+    'M4 18h7',
+    'M13 18h7',
+    'M11 18l2-2-2-2',
+    'M6 8v8',
+    'M18 8v8'
+  ]
 }
 
 const navItems = computed(() => [
@@ -784,6 +805,13 @@ const navItems = computed(() => [
     description: t('llmOps.nav.reseller.description'),
     icon: navIcons.reseller,
     badge: agioneListingRows.value.length
+  },
+  {
+    key: 'workflow',
+    label: '流程配置',
+    eyebrow: 'Workflow',
+    description: '配置上架、免审、审批和下架路径，并按平台动态生效。',
+    icon: navIcons.workflow
   },
   {
     key: 'reconciler',
@@ -867,7 +895,11 @@ const agionePlatform = computed(
 )
 
 const showPlatformControl = computed(() =>
-  ['monitor', 'reseller'].includes(activeSection.value)
+  ['monitor', 'reseller', 'workflow'].includes(activeSection.value)
+)
+
+const workflowConfigForWorkspace = computed(
+  () => resaleWorkflowConfig.value?.config || null
 )
 
 const providerCollectionSources = computed(() =>
@@ -1301,6 +1333,7 @@ async function refreshAll() {
     listings.value = extract(listingRes)
     records.value = extract(recordRes)
     summary.value = extract(summaryRes)
+    await loadResaleWorkflowConfig()
   } finally {
     loading.value = false
   }
@@ -1323,6 +1356,23 @@ async function refreshLight() {
   listings.value = extract(listingRes)
   records.value = extract(recordRes)
   summary.value = extract(summaryRes)
+}
+
+async function loadResaleWorkflowConfig(
+  platformId = selectedResalePlatformId.value
+) {
+  if (!platformId) {
+    resaleWorkflowConfig.value = null
+    return
+  }
+  try {
+    const response = await llmOpsApi.getResaleWorkflowConfig(platformId)
+    if (String(platformId) === String(selectedResalePlatformId.value)) {
+      resaleWorkflowConfig.value = response.data
+    }
+  } catch (error) {
+    resaleWorkflowConfig.value = null
+  }
 }
 
 function percentage(value, total) {
@@ -1440,6 +1490,7 @@ watch(selectedResalePlatformId, (platformId) => {
   if (platformId) {
     localStorage.setItem('llm_ops_resale_platform', platformId)
   }
+  loadResaleWorkflowConfig(platformId)
   if (!loading.value) {
     refreshLight()
   }
@@ -1487,6 +1538,10 @@ function openPlatformModal(platform) {
 function closePlatformModal() {
   showPlatformModal.value = false
   editingPlatform.value = null
+}
+
+function handleWorkflowConfigSaved(payload) {
+  resaleWorkflowConfig.value = payload
 }
 
 function handlePlatformSaved() {

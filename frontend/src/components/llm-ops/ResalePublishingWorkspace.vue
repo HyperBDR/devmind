@@ -618,6 +618,10 @@ const props = defineProps({
   exchangeRate: {
     type: Number,
     default: 7.15
+  },
+  workflowConfig: {
+    type: Object,
+    default: null
   }
 })
 
@@ -912,8 +916,18 @@ const selectedPlatformServiceFeeRate = computed(() => {
 })
 
 const selectedPlatformAutoApproveLimit = computed(() => {
+  if (!workflowAutoApproveEnabled.value) return null
+  const runtimeValue = Number(
+    props.workflowConfig?.runtime?.auto_approve_max_margin_rate
+  )
+  if (Number.isFinite(runtimeValue)) return runtimeValue
   const value = Number(selectedPlatform.value?.auto_approve_max_margin_rate)
   return Number.isFinite(value) ? value : null
+})
+
+const workflowAutoApproveEnabled = computed(() => {
+  const value = props.workflowConfig?.policies?.auto_approve_enabled
+  return value !== false
 })
 
 watch(
@@ -1510,6 +1524,12 @@ function isBelowReferencePrice(price, referencePrice) {
 }
 
 function autoApproveStatus(margin) {
+  if (!workflowAutoApproveEnabled.value) {
+    return {
+      ok: true,
+      label: '免审路径已关闭'
+    }
+  }
   if (selectedPlatformAutoApproveLimit.value === null) {
     return {
       ok: true,

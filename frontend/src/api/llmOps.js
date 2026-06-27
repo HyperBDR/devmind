@@ -153,6 +153,26 @@ export const llmOpsApi = {
     return apiClient.patch(`${base}/resale-platforms/${id}/`, payload)
   },
 
+  getResaleWorkflowConfig(platformId) {
+    return apiClient.get(`${base}/resale-workflow-configs/effective/`, {
+      params: { platform: platformId }
+    })
+  },
+
+  updateResaleWorkflowConfig(platformId, payload) {
+    return apiClient.patch(
+      `${base}/resale-workflow-configs/effective/`,
+      payload,
+      { params: { platform: platformId } }
+    )
+  },
+
+  resetResaleWorkflowConfig(platformId) {
+    return apiClient.delete(`${base}/resale-workflow-configs/effective/`, {
+      params: { platform: platformId }
+    })
+  },
+
   listResaleListings(params) {
     return apiClient.get(`${base}/resale-listings/`, paramsOrEmpty(params))
   },

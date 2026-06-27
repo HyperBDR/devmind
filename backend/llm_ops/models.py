@@ -1484,6 +1484,27 @@ class ResaleListingPriceHistory(models.Model):
         super().save(*args, **kwargs)
 
 
+class ResaleWorkflowConfig(models.Model):
+    """Visual workflow configuration for a resale platform."""
+
+    platform = models.OneToOneField(
+        ResalePlatform,
+        related_name="workflow_config",
+        on_delete=models.CASCADE,
+    )
+    config = models.JSONField(default=dict, blank=True)
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["platform__name", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.platform.name} workflow"
+
+
 class UsageReconciliationRecord(models.Model):
     """Manual reconciliation record for production usage and billing."""
 
