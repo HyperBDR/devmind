@@ -461,7 +461,9 @@ class PriceCollectionRun(models.Model):
     source = models.ForeignKey(
         PriceCollectionSource,
         related_name="collection_runs",
-        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
     )
     status = models.CharField(
         max_length=20,
@@ -482,7 +484,8 @@ class PriceCollectionRun(models.Model):
         ordering = ["-started_at", "-id"]
 
     def __str__(self) -> str:
-        return f"{self.source.name} / {self.started_at:%Y-%m-%d %H:%M:%S}"
+        source_name = self.source.name if self.source_id else "Deleted source"
+        return f"{source_name} / {self.started_at:%Y-%m-%d %H:%M:%S}"
 
 
 class CollectedModelPriceSnapshot(models.Model):
