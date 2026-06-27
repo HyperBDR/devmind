@@ -273,6 +273,7 @@
               :placeholder="
                 t('notificationManagement.channels.namePlaceholder')
               "
+              required
             />
           </div>
           <template v-if="form.channel_type === 'webhook'">
@@ -459,6 +460,95 @@
                   }}
                 </p>
               </div>
+              <div class="mt-4 border-t border-gray-200 pt-4">
+                <label class="flex cursor-pointer items-center gap-3">
+                  <input
+                    v-model="form.config.silence_time_window.enabled"
+                    type="checkbox"
+                    class="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                  />
+                  <span class="text-sm font-medium text-gray-700">{{
+                    t('notificationManagement.channels.silenceTimeEnabled')
+                  }}</span>
+                </label>
+                <p class="mt-1.5 ml-7 text-xs text-gray-500">
+                  {{ t('notificationManagement.channels.silenceTimeDesc') }}
+                </p>
+                <div
+                  v-if="form.config.silence_time_window.enabled"
+                  class="mt-4 space-y-4"
+                >
+                  <div>
+                    <div class="mb-2 text-xs font-medium text-gray-600">
+                      {{ t('notificationManagement.channels.silenceWeekdays') }}
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <label
+                        v-for="day in weekdayOptions"
+                        :key="day.value"
+                        class="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700"
+                      >
+                        <input
+                          v-model="form.config.silence_time_window.weekdays"
+                          type="checkbox"
+                          :value="day.value"
+                          class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span>{{ t(day.labelKey) }}</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label
+                        class="block text-xs font-medium text-gray-600 mb-1"
+                        >{{
+                          t('notificationManagement.channels.silenceStartHour')
+                        }}</label
+                      >
+                      <select
+                        v-model.number="
+                          form.config.silence_time_window.start_hour
+                        "
+                        class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                      >
+                        <option
+                          v-for="hour in startHourOptions"
+                          :key="hour"
+                          :value="hour"
+                        >
+                          {{ formatHour(hour) }}
+                        </option>
+                      </select>
+                    </div>
+                    <div>
+                      <label
+                        class="block text-xs font-medium text-gray-600 mb-1"
+                        >{{
+                          t('notificationManagement.channels.silenceEndHour')
+                        }}</label
+                      >
+                      <select
+                        v-model.number="
+                          form.config.silence_time_window.end_hour
+                        "
+                        class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                      >
+                        <option
+                          v-for="hour in endHourOptions"
+                          :key="hour"
+                          :value="hour"
+                        >
+                          {{ formatHour(hour) }}
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+                  <p class="text-xs text-gray-500">
+                    {{ t('notificationManagement.channels.silenceHourHelp') }}
+                  </p>
+                </div>
+              </div>
             </div>
           </template>
           <template v-if="form.channel_type === 'email'">
@@ -615,6 +705,133 @@
               </div>
             </div>
           </template>
+          <div
+            v-if="form.channel_type === 'email'"
+            class="rounded-xl border border-gray-200 bg-gray-50/80 p-4"
+          >
+            <h3
+              class="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700"
+            >
+              <svg
+                class="h-4 w-4 text-gray-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                />
+              </svg>
+              {{ t('notificationManagement.channels.silenceOptions') }}
+            </h3>
+            <div>
+              <label class="block text-xs font-medium text-gray-600 mb-1">{{
+                t('notificationManagement.channels.silenceWindowMinutes')
+              }}</label>
+              <input
+                v-model.number="form.config.silence_window_minutes"
+                type="number"
+                min="0"
+                max="1440"
+                class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+              />
+              <p class="mt-1 text-xs text-gray-500">
+                {{
+                  t('notificationManagement.channels.silenceWindowMinutesDesc')
+                }}
+              </p>
+            </div>
+            <div class="mt-4 border-t border-gray-200 pt-4">
+              <label class="flex cursor-pointer items-center gap-3">
+                <input
+                  v-model="form.config.silence_time_window.enabled"
+                  type="checkbox"
+                  class="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span class="text-sm font-medium text-gray-700">{{
+                  t('notificationManagement.channels.silenceTimeEnabled')
+                }}</span>
+              </label>
+              <p class="mt-1.5 ml-7 text-xs text-gray-500">
+                {{ t('notificationManagement.channels.silenceTimeDesc') }}
+              </p>
+              <div
+                v-if="form.config.silence_time_window.enabled"
+                class="mt-4 space-y-4"
+              >
+                <div>
+                  <div class="mb-2 text-xs font-medium text-gray-600">
+                    {{ t('notificationManagement.channels.silenceWeekdays') }}
+                  </div>
+                  <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <label
+                      v-for="day in weekdayOptions"
+                      :key="day.value"
+                      class="flex items-center gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700"
+                    >
+                      <input
+                        v-model="form.config.silence_time_window.weekdays"
+                        type="checkbox"
+                        :value="day.value"
+                        class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span>{{ t(day.labelKey) }}</span>
+                    </label>
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label
+                      class="block text-xs font-medium text-gray-600 mb-1"
+                      >{{
+                        t('notificationManagement.channels.silenceStartHour')
+                      }}</label
+                    >
+                    <select
+                      v-model.number="
+                        form.config.silence_time_window.start_hour
+                      "
+                      class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                    >
+                      <option
+                        v-for="hour in startHourOptions"
+                        :key="hour"
+                        :value="hour"
+                      >
+                        {{ formatHour(hour) }}
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      class="block text-xs font-medium text-gray-600 mb-1"
+                      >{{
+                        t('notificationManagement.channels.silenceEndHour')
+                      }}</label
+                    >
+                    <select
+                      v-model.number="form.config.silence_time_window.end_hour"
+                      class="block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-primary-500 focus:ring-1 focus:ring-primary-500"
+                    >
+                      <option
+                        v-for="hour in endHourOptions"
+                        :key="hour"
+                        :value="hour"
+                      >
+                        {{ formatHour(hour) }}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+                <p class="text-xs text-gray-500">
+                  {{ t('notificationManagement.channels.silenceHourHelp') }}
+                </p>
+              </div>
+            </div>
+          </div>
           <div class="rounded-xl border border-gray-200 bg-gray-50/80 p-4">
             <h3
               class="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700"
@@ -792,6 +1009,13 @@ const showValidateEmailModal = ref(false)
 const validateModalRecipient = ref('')
 const isOpeningEdit = ref(false)
 
+const allWeekdays = () => [0, 1, 2, 3, 4, 5, 6]
+const defaultSilenceTimeWindow = () => ({
+  enabled: false,
+  weekdays: allWeekdays(),
+  start_hour: 22,
+  end_hour: 8
+})
 const defaultWebhookConfig = () => ({
   provider_type: 'feishu',
   url: '',
@@ -800,7 +1024,8 @@ const defaultWebhookConfig = () => ({
   sign_secret: '',
   merge_enabled: false,
   merge_window_minutes: 0,
-  silence_window_minutes: 0
+  silence_window_minutes: 0,
+  silence_time_window: defaultSilenceTimeWindow()
 })
 const defaultEmailConfig = () => ({
   smtp_host: '',
@@ -811,7 +1036,9 @@ const defaultEmailConfig = () => ({
   smtp_password: '',
   from_email: '',
   from_name: '',
-  subject_prefix: ''
+  subject_prefix: '',
+  silence_window_minutes: 0,
+  silence_time_window: defaultSilenceTimeWindow()
 })
 
 const form = reactive({
@@ -826,9 +1053,77 @@ const channelTypeLabels = {
   email: 'notificationManagement.channels.typeEmail'
 }
 const providerLabels = { feishu: '飞书', wecom: 'WeCom', wechat: '企业微信' }
+const weekdayOptions = [
+  { value: 0, labelKey: 'notificationManagement.channels.weekdayMon' },
+  { value: 1, labelKey: 'notificationManagement.channels.weekdayTue' },
+  { value: 2, labelKey: 'notificationManagement.channels.weekdayWed' },
+  { value: 3, labelKey: 'notificationManagement.channels.weekdayThu' },
+  { value: 4, labelKey: 'notificationManagement.channels.weekdayFri' },
+  { value: 5, labelKey: 'notificationManagement.channels.weekdaySat' },
+  { value: 6, labelKey: 'notificationManagement.channels.weekdaySun' }
+]
+const startHourOptions = Array.from({ length: 24 }, (_, index) => index)
+const endHourOptions = Array.from({ length: 25 }, (_, index) => index)
 
 function channelTypeLabel(type) {
   return t(channelTypeLabels[type] || type || '–')
+}
+
+function formatHour(hour) {
+  return `${String(hour).padStart(2, '0')}:00`
+}
+
+function clampNumber(value, min, max, fallback) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return fallback
+  return Math.max(min, Math.min(max, numeric))
+}
+
+function normalizeWeekdays(rawWeekdays) {
+  if (!Array.isArray(rawWeekdays)) return allWeekdays()
+  const days = rawWeekdays
+    .map((day) => Number(day))
+    .filter((day) => Number.isInteger(day) && day >= 0 && day <= 6)
+  const uniqueDays = [...new Set(days)]
+  return uniqueDays.length ? uniqueDays : allWeekdays()
+}
+
+function normalizeSilenceTimeWindow(config = {}) {
+  let windows = []
+  if (Array.isArray(config.silence_time_windows)) {
+    windows = config.silence_time_windows
+  } else if (
+    config.silence_time_window &&
+    typeof config.silence_time_window === 'object'
+  ) {
+    windows = [config.silence_time_window]
+  }
+  const raw = windows.find((item) => item && typeof item === 'object') || {}
+  return {
+    ...defaultSilenceTimeWindow(),
+    enabled: raw.enabled === true,
+    weekdays: normalizeWeekdays(raw.weekdays),
+    start_hour: clampNumber(raw.start_hour, 0, 23, 22),
+    end_hour: clampNumber(raw.end_hour, 0, 24, 8)
+  }
+}
+
+function buildSilenceConfig(config = {}) {
+  const minutes = Math.max(
+    0,
+    Math.min(1440, Number(config.silence_window_minutes) || 0)
+  )
+  const window = normalizeSilenceTimeWindow(config)
+  const silenceWindow = {
+    enabled: !!window.enabled,
+    weekdays: normalizeWeekdays(window.weekdays),
+    start_hour: clampNumber(window.start_hour, 0, 23, 22),
+    end_hour: clampNumber(window.end_hour, 0, 24, 8)
+  }
+  return {
+    silence_window_minutes: minutes,
+    silence_time_windows: silenceWindow.enabled ? [silenceWindow] : []
+  }
 }
 
 function normalizeConfig(rawConfig) {
@@ -849,7 +1144,7 @@ function normalizeConfig(rawConfig) {
 }
 
 const submitDisabled = computed(() => {
-  return !validationSuccess.value
+  return !validationSuccess.value || !(form.name || '').trim()
 })
 
 watch(
@@ -1021,6 +1316,46 @@ async function confirmValidateEmail() {
 }
 
 const languageLabels = { 'zh-hans': '简体中文', en: 'English' }
+
+function weekdaySummary(weekdays) {
+  const days = normalizeWeekdays(weekdays).sort((a, b) => a - b)
+  if (days.length === 7) {
+    return t('notificationManagement.channels.weekdayAll')
+  }
+  if (days.join(',') === '0,1,2,3,4') {
+    return t('notificationManagement.channels.weekdayWorkdays')
+  }
+  return days
+    .map((day) => {
+      const option = weekdayOptions.find((item) => item.value === day)
+      return option ? t(option.labelKey) : String(day)
+    })
+    .join('/')
+}
+
+function silenceSummary(config = {}) {
+  const parts = []
+  const minutes = Number(config.silence_window_minutes) || 0
+  if (minutes > 0) {
+    parts.push(
+      t('notificationManagement.channels.silenceMinutesSummary', {
+        minutes
+      })
+    )
+  }
+  const window = normalizeSilenceTimeWindow(config)
+  if (window.enabled) {
+    parts.push(
+      t('notificationManagement.channels.silenceTimeSummary', {
+        weekdays: weekdaySummary(window.weekdays),
+        start: formatHour(window.start_hour),
+        end: formatHour(window.end_hour)
+      })
+    )
+  }
+  return parts.join(' · ')
+}
+
 function configSummary(row) {
   if (!row.config || typeof row.config !== 'object') return '–'
   if (row.channel_type === 'webhook') {
@@ -1034,13 +1369,17 @@ function configSummary(row) {
       : ''
     const parts = [label, url].filter(Boolean)
     if (lang) parts.push(lang)
+    const silence = silenceSummary(row.config)
+    if (silence) parts.push(silence)
     return parts.length ? parts.join(' · ') : '–'
   }
   if (row.channel_type === 'email') {
     const host = row.config.smtp_host || ''
     const from = row.config.from_email || ''
-    if (host && from) return `${host} · ${from}`
-    return host || from || '–'
+    const parts = [host, from].filter(Boolean)
+    const silence = silenceSummary(row.config)
+    if (silence) parts.push(silence)
+    return parts.length ? parts.join(' · ') : '–'
   }
   const str = JSON.stringify(row.config)
   return str.length > 60 ? str.slice(0, 60) + '…' : str || '–'
@@ -1104,7 +1443,8 @@ function openEditModal(row) {
       silence_window_minutes: Math.max(
         0,
         Math.min(1440, Number(c.silence_window_minutes) ?? 0)
-      )
+      ),
+      silence_time_window: normalizeSilenceTimeWindow(c)
     }
   } else if (row.channel_type === 'email') {
     const c = config
@@ -1113,7 +1453,12 @@ function openEditModal(row) {
       ...c,
       smtp_port: c.smtp_port ?? 587,
       use_tls: c.use_tls !== false,
-      use_ssl: c.use_ssl === true
+      use_ssl: c.use_ssl === true,
+      silence_window_minutes: Math.max(
+        0,
+        Math.min(1440, Number(c.silence_window_minutes) ?? 0)
+      ),
+      silence_time_window: normalizeSilenceTimeWindow(c)
     }
   } else {
     form.config = config
@@ -1151,6 +1496,13 @@ async function loadList() {
 }
 
 async function submitForm() {
+  const name = (form.name || '').trim()
+  if (!name) {
+    formMessage.value = t('notificationManagement.channels.nameRequired')
+    formMessageSuccess.value = false
+    showError(formMessage.value)
+    return
+  }
   saving.value = true
   formMessage.value = ''
   try {
@@ -1167,10 +1519,7 @@ async function submitForm() {
           0,
           Math.min(1440, Number(form.config.merge_window_minutes) || 0)
         ),
-        silence_window_minutes: Math.max(
-          0,
-          Math.min(1440, Number(form.config.silence_window_minutes) ?? 0)
-        )
+        ...buildSilenceConfig(form.config)
       }
     } else if (form.channel_type === 'email') {
       config = {
@@ -1185,14 +1534,15 @@ async function submitForm() {
         smtp_password: (form.config.smtp_password || '').trim(),
         from_email: (form.config.from_email || '').trim(),
         from_name: (form.config.from_name || '').trim(),
-        subject_prefix: (form.config.subject_prefix || '').trim()
+        subject_prefix: (form.config.subject_prefix || '').trim(),
+        ...buildSilenceConfig(form.config)
       }
     } else {
       config = form.config && typeof form.config === 'object' ? form.config : {}
     }
     const payload = {
       channel_type: form.channel_type,
-      name: form.name.trim(),
+      name,
       is_active: form.is_active,
       config
     }
