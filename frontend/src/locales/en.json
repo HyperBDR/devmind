@@ -895,6 +895,7 @@
       "noListingsToPublish": "No links need to be listed",
       "invalidListingPrices": "Enter valid In/Out listing prices for every link before publishing",
       "publishSubmitted": "Submitted {count} publishing requests",
+      "publishAutoConfirmed": "Submitted {count} publishing requests; {confirmed} were auto-approved and published",
       "submitFailed": "Submit failed",
       "noDraftsToSave": "No drafts need to be saved",
       "noChangesToSave": "No changes need to be saved",
