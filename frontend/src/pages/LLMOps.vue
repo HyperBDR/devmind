@@ -866,11 +866,7 @@ function resalePlatformOptionLabel(platform) {
   const typeLabel =
     platformTypeLabels[platform.platform_type] || platform.platform_type
   const regionLabel = platform.region_name || platform.region_code
-  const meta = [
-    typeLabel,
-    regionLabel,
-    environmentLabels[platform.environment]
-  ]
+  const meta = [typeLabel, regionLabel, environmentLabels[platform.environment]]
     .filter(Boolean)
     .join(' · ')
   return meta ? `${platform.name} · ${meta}` : platform.name

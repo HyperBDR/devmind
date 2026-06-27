@@ -410,7 +410,12 @@ function normalizePayload(payload) {
 function parseMetadata(value) {
   const text = String(value || '').trim()
   if (!text) return {}
-  const parsed = JSON.parse(text)
+  let parsed
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error('扩展元数据不是有效的 JSON。')
+  }
   if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
     throw new Error('扩展元数据必须是 JSON 对象。')
   }
@@ -439,6 +444,10 @@ async function save() {
   } catch (error) {
     if (error instanceof SyntaxError) {
       metadataError.value = '扩展元数据不是有效的 JSON。'
+      return
+    }
+    if (error?.message === '扩展元数据不是有效的 JSON。') {
+      metadataError.value = error.message
       return
     }
     if (error?.message === '扩展元数据必须是 JSON 对象。') {
