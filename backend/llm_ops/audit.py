@@ -24,6 +24,18 @@ AUDIT_FIELD_ALLOWLIST: dict[str, tuple[str, ...]] = {
         "updates_model_prices",
         "notes",
     ),
+    "llm_ops.LLMOpsGlobalConfig": (
+        "meta_model_sync_enabled",
+        "meta_model_sync_source_url",
+        "meta_model_sync_cron",
+        "price_collection_enabled",
+        "price_collection_source_ids",
+        "price_collection_cron",
+        "feishu_app_id",
+        "feishu_approval_code",
+        "feishu_tenant_key",
+        "notes",
+    ),
     "llm_ops.LLMProvider": (
         "name",
         "code",

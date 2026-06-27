@@ -35,6 +35,18 @@ export const llmOpsApi = {
     return apiClient.post(`${base}/collection-sources/${id}/collect/`)
   },
 
+  getGlobalConfig() {
+    return apiClient.get(`${base}/global-config/`)
+  },
+
+  updateGlobalConfig(payload) {
+    return apiClient.patch(`${base}/global-config/`, payload)
+  },
+
+  resetGlobalConfig() {
+    return apiClient.delete(`${base}/global-config/`)
+  },
+
   listCollectionRuns(params) {
     return apiClient.get(`${base}/collection-runs/`, paramsOrEmpty(params))
   },

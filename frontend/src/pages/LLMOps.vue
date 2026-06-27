@@ -568,6 +568,12 @@
               @saved="handleWorkflowConfigSaved"
             />
 
+            <GlobalConfigPanel
+              v-else-if="activeSection === 'globalConfig'"
+              :sources="providerCollectionSources"
+              @saved="refreshLight"
+            />
+
             <ProviderManagement
               v-else-if="activeSection === 'providers'"
               :providers="providers"
@@ -659,6 +665,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
 import AuditLogPanel from '@/components/llm-ops/AuditLogPanel.vue'
 import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
+import GlobalConfigPanel from '@/components/llm-ops/GlobalConfigPanel.vue'
 import MetaModelManagement from '@/components/llm-ops/MetaModelManagement.vue'
 import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
 import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
@@ -675,6 +682,7 @@ const sectionKeys = new Set([
   'metaModels',
   'providers',
   'channels',
+  'globalConfig',
   'reseller',
   'workflow',
   'reconciler',
@@ -742,6 +750,13 @@ const monitorStatusLabelKeys = {
 const navIcons = {
   audit: ['M4 5h16', 'M4 12h16', 'M4 19h10'],
   channels: ['M4 7h16', 'M7 7v10', 'M17 7v10', 'M4 17h16'],
+  globalConfig: [
+    'M4 7h16',
+    'M7 7v10',
+    'M17 7v10',
+    'M4 17h16',
+    'M9 12h6'
+  ],
   metaModels: ['M12 3l8 4-8 4-8-4 8-4Z', 'M4 12l8 4 8-4', 'M4 17l8 4 8-4'],
   monitor: ['M4 19V5', 'M8 19v-6', 'M12 19v-9', 'M16 19v-4', 'M20 19V8'],
   providers: ['M5 5h14v14H5Z', 'M9 9h6', 'M9 13h6', 'M9 17h3'],
@@ -812,6 +827,13 @@ const navItems = computed(() => [
     eyebrow: 'Workflow',
     description: '配置上架、免审、审批和下架路径，并按平台动态生效。',
     icon: navIcons.workflow
+  },
+  {
+    key: 'globalConfig',
+    label: '全局配置',
+    eyebrow: 'Global Config',
+    description: '配置元模型同步、模型价格采集和飞书审核认证。',
+    icon: navIcons.globalConfig
   },
   {
     key: 'reconciler',

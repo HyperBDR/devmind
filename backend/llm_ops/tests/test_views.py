@@ -11,6 +11,7 @@ from llm_ops.models import (
     ChannelModelPriceHistory,
     ChannelPriceItem,
     CollectedModelPriceSnapshot,
+    LLMOpsGlobalConfig,
     LLMModel,
     LLMProvider,
     ModelPriceItem,
@@ -104,6 +105,69 @@ class LLMOpsViewTests(TestCase):
             source=source,
             base_url="https://example.com/admin/api",
         )
+
+    def test_global_config_patch_syncs_periodic_tasks(self):
+        from django_celery_beat.models import PeriodicTask
+
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://models.dev/api.json",
+            updates_model_prices=True,
+        )
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "meta_model_sync_enabled": True,
+                "meta_model_sync_source_url": "https://models.dev/api.json",
+                "meta_model_sync_cron": "5 3 * * *",
+                "price_collection_enabled": True,
+                "price_collection_source_ids": [source.id],
+                "price_collection_cron": "10 */6 * * *",
+                "feishu_app_id": "cli_xxx",
+                "feishu_app_secret": "secret",
+                "feishu_approval_code": "approval_code",
+                "feishu_tenant_key": "tenant",
+                "notes": "global runtime config",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config = LLMOpsGlobalConfig.objects.get()
+        self.assertEqual(config.updated_by, self.user)
+        self.assertEqual(config.price_collection_source_ids, [source.id])
+        self.assertNotIn("feishu_app_secret", response.data)
+        self.assertTrue(response.data["feishu_app_secret_configured"])
+
+        meta_task = PeriodicTask.objects.get(
+            name="llm_ops_meta_models_dev_sync"
+        )
+        price_task = PeriodicTask.objects.get(
+            name=f"llm_ops_price_source_collect_{source.id}"
+        )
+        self.assertEqual(meta_task.crontab.minute, "5")
+        self.assertEqual(meta_task.crontab.hour, "3")
+        self.assertIn("models.dev", meta_task.kwargs)
+        self.assertEqual(price_task.crontab.minute, "10")
+        self.assertEqual(price_task.crontab.hour, "*/6")
+        self.assertIn(str(source.id), price_task.kwargs)
+
+    def test_global_config_rejects_invalid_cron(self):
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {"meta_model_sync_cron": "invalid"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("meta_model_sync_cron", response.data)
 
     @patch("llm_ops.views.import_manual_model_prices")
     def test_manual_price_import_records_pricing_audit(self, mock_import):
