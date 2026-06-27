@@ -1642,6 +1642,28 @@
         "previous": "上一页",
         "next": "下一页"
       },
+      "export": {
+        "action": "导出",
+        "csv": "CSV",
+        "excel": "Excel",
+        "formatLabel": "导出格式",
+        "metricColumn": "{metric} {field}",
+        "columns": {
+          "channel": "上架渠道",
+          "cost": "成本",
+          "currency": "币种",
+          "margin": "利润率",
+          "metaModel": "元模型",
+          "model": "模型",
+          "modelCode": "模型 Code",
+          "platform": "挂售平台",
+          "points": "积分",
+          "provider": "供货方",
+          "retail": "售价",
+          "status": "状态",
+          "updatedAt": "更新时间"
+        }
+      },
       "table": {
         "platform": "挂售平台",
         "model": "模型",
@@ -1695,6 +1717,12 @@
         "listed": "当前没有已上架的模型。",
         "unlisted": "当前没有可上架的模型。",
         "default": "没有符合筛选条件的模型。"
+      },
+      "marginTone": {
+        "high": "太高：当前 {value}，高于自动审批上限 {limit}",
+        "low": "太低：当前 {value}，低于平台成本下限 {floor}",
+        "muted": "暂无利润率",
+        "ok": "合适：当前 {value}，平台下限 {floor}，自动审批上限 {limit}"
       },
       "supply": {
         "activeLinks": "{count} 条上架链路",

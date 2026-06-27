@@ -29,7 +29,7 @@ export function useAgioneListingRows({
 }) {
   const listingRows = computed(() => {
     const procurementByModel = new Map(
-      ((unref(summaryRef)?.procurement) || []).map((row) => [
+      (unref(summaryRef)?.procurement || []).map((row) => [
         String(row.model_id),
         row
       ])
@@ -40,8 +40,7 @@ export function useAgioneListingRows({
     listings
       .filter(
         (listing) =>
-          !platform ||
-          String(listing.platform) === String(platform.id)
+          !platform || String(listing.platform) === String(platform.id)
       )
       .forEach((listing) => {
         const key = String(listing.model)
@@ -72,9 +71,8 @@ export function useAgioneListingRows({
           lowestOption,
           options
         )
-        const cheapestActiveOption = isActive && listingOptionData
-          ? listingOptionData
-          : null
+        const cheapestActiveOption =
+          isActive && listingOptionData ? listingOptionData : null
         return {
           model,
           procurement,
@@ -93,7 +91,7 @@ export function useAgioneListingRows({
             isActive &&
             lowestOption &&
             String(listing.channel) === String(lowestOption.channel_id),
-          price_gap: listingPriceGap(cheapestActiveOption, lowestOption),
+          price_gap: listingPriceGap(cheapestActiveOption, lowestOption)
         }
       })
     })
@@ -263,7 +261,8 @@ export function useAgioneListingRows({
       value: option.channel_id,
       description: metricPriceSummary(option.metric_values),
       badge:
-        String(option.channel_id) === String(lowestChannelPrice.value?.channel_id)
+        String(option.channel_id) ===
+        String(lowestChannelPrice.value?.channel_id)
           ? '最低'
           : '',
       searchText: [
@@ -288,15 +287,15 @@ export function useAgioneListingRows({
       type: 'group'
     },
     ...actionableTrendRows.value.map((row) => trendModelOption(row)),
-    ...(
-      unavailableTrendRows.value.length
-        ? [{
+    ...(unavailableTrendRows.value.length
+      ? [
+          {
             label: `不可选模型（暂无渠道 ${unavailableTrendRows.value.length}）`,
             value: '__group_unavailable_models',
             type: 'group'
-          }]
-        : []
-    ),
+          }
+        ]
+      : []),
     ...unavailableTrendRows.value.map((row) => ({
       ...trendModelOption(row),
       disabled: true,
@@ -344,13 +343,14 @@ export function useAgioneListingRows({
       const costValue = Number(option.value || 0)
       const proposedValue =
         proposedValues.find((item) => item.key === primaryMetricKey.value)
-          ?.value ?? proposedValues[0]?.value ?? 0
+          ?.value ??
+        proposedValues[0]?.value ??
+        0
       const activeListing = selectedTrendRow.value?.active_listings.find(
         (listing) => String(listing.channel) === String(option.channel_id)
       )
       const gapValue = Math.max(0, costValue - lowestValue)
-      const gapPercent =
-        lowestValue > 0 ? (gapValue / lowestValue) * 100 : 0
+      const gapPercent = lowestValue > 0 ? (gapValue / lowestValue) * 100 : 0
       return {
         ...option,
         key: `channel-${option.channel_id}`,
@@ -368,10 +368,14 @@ export function useAgioneListingRows({
           String(lowestChannelPrice.value?.channel_id),
         is_listed: Boolean(activeListing),
         is_selected:
-          String(option.channel_id) === String(unref(selectedTrendChannelIdRef)),
+          String(option.channel_id) ===
+          String(unref(selectedTrendChannelIdRef)),
         gap_label:
           gapValue > 0
-            ? `高 ${money(gapValue, selectedTrendCurrency.value)} · ${gapPercent.toFixed(1)}%`
+            ? `高 ${money(
+                gapValue,
+                selectedTrendCurrency.value
+              )} · ${gapPercent.toFixed(1)}%`
             : ''
       }
     })
@@ -389,8 +393,7 @@ export function useAgioneListingRows({
     if (!selectedTrendOption.value || !selectedTrendRow.value) return false
     return selectedTrendRow.value.active_listings.some(
       (listing) =>
-        String(listing.channel) ===
-        String(selectedTrendOption.value.channel_id)
+        String(listing.channel) === String(selectedTrendOption.value.channel_id)
     )
   })
 
@@ -491,31 +494,6 @@ export function useAgioneListingRows({
       0,
       Number(activeOption.estimated_cost || 0) -
         Number(lowestOption.estimated_cost || 0)
-    )
-  }
-
-  function primaryStatusListing(modelListings, activeListings) {
-    const pendingListing = modelListings.find((listing) =>
-      [
-        'draft',
-        'pending_publish',
-        'update_draft',
-        'pending_update',
-        'pending_offline',
-        'offline_exception',
-        'offline',
-      ].includes(listing.workflow_status)
-    )
-    if (pendingListing) return pendingListing
-    if (activeListings.length) return activeListings[0]
-    return (
-      modelListings
-        .slice()
-        .sort((left, right) => {
-          const leftTime = new Date(left.updated_at || left.created_at || 0)
-          const rightTime = new Date(right.updated_at || right.created_at || 0)
-          return rightTime.getTime() - leftTime.getTime()
-        })[0] || null
     )
   }
 
@@ -647,7 +625,10 @@ export function useAgioneListingRows({
   function metricPriceSummary(items, emptyLabel = '-') {
     if (!items?.length) return emptyLabel
     return items
-      .map((item) => `${item.label} ${money(item.value, selectedTrendCurrency.value)}`)
+      .map(
+        (item) =>
+          `${item.label} ${money(item.value, selectedTrendCurrency.value)}`
+      )
       .join(' / ')
   }
 
@@ -663,7 +644,9 @@ export function useAgioneListingRows({
           : 1
         return [
           item.label,
-          `${money(baseValue, selectedTrendCurrency.value)} × ${ratioLabel(ratio)}`,
+          `${money(baseValue, selectedTrendCurrency.value)} × ${ratioLabel(
+            ratio
+          )}`,
           `= ${money(item.value, selectedTrendCurrency.value)}`
         ].join(' ')
       })
@@ -704,7 +687,9 @@ export function useAgioneListingRows({
       resaleListingMetricFields(),
       listing.currency
     )
-    const rate = Number(unref(pointConversionRef)?.points_per_currency_unit || 0)
+    const rate = Number(
+      unref(pointConversionRef)?.points_per_currency_unit || 0
+    )
     if (!values.length || !Number.isFinite(rate) || rate <= 0) return ''
     return values
       .map((item) => {
@@ -725,15 +710,18 @@ export function useAgioneListingRows({
   function modelCodeDescription(model) {
     const name = String(modelDisplayName(model) || '').trim()
     const code = String(model?.meta_model_code || model?.code || '').trim()
-    return code && code !== name ? code : ''
+    return code && normalizeModelIdentity(code) !== normalizeModelIdentity(name)
+      ? code
+      : ''
   }
 
   function listingModelSubtitle(row) {
     const model = row?.model || {}
+    const name = String(modelDisplayName(model) || '')
     const code = modelCodeDescription(model)
     const vendorName = metaVendorName(model)
     return [
-      vendorName,
+      modelNameIncludesVendor(name, vendorName) ? '' : vendorName,
       code,
       row.source_count ? `${row.source_count} 个价格源` : ''
     ]
@@ -744,6 +732,20 @@ export function useAgioneListingRows({
   function metaVendorName(model) {
     const vendor = resolveCanonicalMetaVendor(model, unref(providersRef) || [])
     return vendor.name || ''
+  }
+
+  function normalizeModelIdentity(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '')
+  }
+
+  function modelNameIncludesVendor(name, vendorName) {
+    const normalizedName = normalizeModelIdentity(name)
+    const normalizedVendor = normalizeModelIdentity(vendorName)
+    return Boolean(
+      normalizedVendor && normalizedName.includes(normalizedVendor)
+    )
   }
 
   function trendModelOption(row) {
@@ -807,7 +809,9 @@ export function useAgioneListingRows({
         clean[key] = null
       }
     })
-    clean.currency = String(clean.currency || '').trim().toUpperCase()
+    clean.currency = String(clean.currency || '')
+      .trim()
+      .toUpperCase()
     delete clean.id
     return clean
   }
