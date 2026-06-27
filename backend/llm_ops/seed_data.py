@@ -35,6 +35,7 @@ from .models import (
     LLMProvider,
     MetaModel,
     ModelPriceItem,
+    PriceCollectionRun,
     PriceCollectionSource,
     ProcurementChannel,
     ResaleListing,
@@ -2449,6 +2450,9 @@ def seed_initial_catalog_from_official_sources(
         "models": LLMModel.objects.count(),
         "model_price_items": ModelPriceItem.objects.count(),
     }
+    before_source_ids = set(
+        PriceCollectionSource.objects.values_list("id", flat=True)
+    )
     provider_codes = []
     created_provider_codes = []
     for provider_code, config in OFFICIAL_PROVIDER_CONFIGS.items():
@@ -2481,6 +2485,17 @@ def seed_initial_catalog_from_official_sources(
         "model_price_items": ModelPriceItem.objects.count(),
     }
     if after["models"] == before["models"] and created_provider_codes:
+        created_source_ids = list(
+            PriceCollectionSource.objects.exclude(
+                id__in=before_source_ids,
+            ).values_list("id", flat=True)
+        )
+        PriceCollectionRun.objects.filter(
+            source_id__in=created_source_ids,
+        ).delete()
+        PriceCollectionSource.objects.filter(
+            id__in=created_source_ids,
+        ).delete()
         LLMProvider.objects.filter(code__in=created_provider_codes).delete()
         after = {
             "providers": LLMProvider.objects.count(),

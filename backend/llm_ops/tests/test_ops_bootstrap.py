@@ -27,6 +27,7 @@ from llm_ops.models import (
     LLMProvider,
     MetaModel,
     ModelPriceItem,
+    PriceCollectionRun,
     PriceCollectionSource,
     ProcurementChannel,
 )
@@ -34,15 +35,16 @@ from llm_ops.periodic_tasks import register_periodic_tasks
 from llm_ops.seed_data import (
     REAL_RESOURCE_CHANNEL_CODE,
     clean_mock_llm_ops_seed_data,
-    is_llm_ops_database_empty,
-    seed_initial_price_sheet,
-    seed_agione_price_trend_demo,
-    seed_initial_price_sheet_if_empty,
-    seed_initial_price_sheet_safely,
     cleanup_orphan_meta_models,
+    is_llm_ops_database_empty,
     normalize_meta_model_catalog,
     reset_meta_models_canonical,
     resolve_orphan_meta_models,
+    seed_agione_price_trend_demo,
+    seed_initial_catalog_from_official_sources,
+    seed_initial_price_sheet,
+    seed_initial_price_sheet_if_empty,
+    seed_initial_price_sheet_safely,
     seed_yunce_supplier_price_demo,
 )
 from llm_ops.views import LLMProviderViewSet, MetaModelViewSet
@@ -66,6 +68,22 @@ class LLMOpsBootstrapGuardsTests(TestCase):
             code=REAL_RESOURCE_CHANNEL_CODE,
         )
         self.assertTrue(is_llm_ops_database_empty())
+
+    def test_deleting_source_preserves_collection_run_audit(self):
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+        run = PriceCollectionRun.objects.create(source=source)
+
+        source.delete()
+
+        run.refresh_from_db()
+        self.assertIsNone(run.source_id)
 
 
 class LLMOpsSeedSafelyTests(TestCase):
@@ -240,6 +258,43 @@ class LLMOpsSeedIfEmptyTests(TestCase):
         self.assertIsNone(result)
         # The provider we just created must not be touched.
         self.assertEqual(LLMProvider.objects.filter(code="openai").count(), 1)
+
+    @mock.patch("llm_ops.seed_data.sync_configured_official_model_prices")
+    def test_rolls_back_created_sources_and_runs_when_no_models_imported(
+        self,
+        mock_sync,
+    ):
+        def fake_sync(provider_codes, verify_source=True):
+            provider = LLMProvider.objects.get(code="openai")
+            source = PriceCollectionSource.objects.create(
+                name="OpenAI / GPT Test 官方价格",
+                slug="openai-gpt-test-official",
+                provider=provider,
+                source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                source_category=(
+                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+                ),
+                endpoint_url="https://models.dev/api.json",
+                currency="USD",
+                updates_model_prices=True,
+            )
+            PriceCollectionRun.objects.create(
+                source=source,
+                status=PriceCollectionRun.STATUS_FAILED,
+                error_message="no models",
+            )
+            return {"openai": {"models": 0, "error": "no models"}}
+
+        mock_sync.side_effect = fake_sync
+
+        result = seed_initial_catalog_from_official_sources()
+
+        self.assertEqual(result["providers"], 0)
+        self.assertEqual(result["sources"], 0)
+        self.assertEqual(result["models"], 0)
+        self.assertFalse(LLMProvider.objects.exists())
+        self.assertFalse(PriceCollectionSource.objects.exists())
+        self.assertFalse(PriceCollectionRun.objects.exists())
 
 
 class LLMOpsPeriodicTasksTests(TestCase):

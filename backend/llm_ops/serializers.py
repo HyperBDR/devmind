@@ -76,7 +76,11 @@ class AuditLogSerializer(serializers.ModelSerializer):
 class PriceCollectionRunSerializer(serializers.ModelSerializer):
     """Serializer for external pricing collection runs."""
 
-    source_name = serializers.CharField(source="source.name", read_only=True)
+    source_name = serializers.CharField(
+        source="source.name",
+        read_only=True,
+        allow_null=True,
+    )
     source_provider_name = serializers.CharField(
         source="source.provider.name",
         read_only=True,
