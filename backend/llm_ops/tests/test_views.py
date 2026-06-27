@@ -1517,6 +1517,25 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(patch_response.data["notes"], "disable auto approval")
         self.assertIn("runtime", patch_response.data["config"])
 
+    def test_resale_workflow_config_patch_requires_config(self):
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+        )
+
+        response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            {"notes": "missing config"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data["detail"], "config is required.")
+        self.assertFalse(
+            ResaleWorkflowConfig.objects.filter(platform=platform).exists()
+        )
+
     def test_resale_workflow_config_rejects_unknown_edge_node(self):
         platform = ResalePlatform.objects.create(
             name="Agione",

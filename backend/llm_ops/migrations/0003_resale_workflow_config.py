@@ -5,7 +5,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("llm_ops", "0001_initial"),
+        ("llm_ops", "0002_resaleplatform_metadata"),
     ]
 
     operations = [

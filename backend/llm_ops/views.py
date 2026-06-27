@@ -75,7 +75,6 @@ from .services import (
 )
 from .tasks import collect_price_source_prices
 from .workflow_config import (
-    default_resale_workflow_config,
     merge_resale_workflow_config,
     validate_resale_workflow_config,
 )
@@ -885,7 +884,10 @@ class ResaleWorkflowConfigViewSet(
         if request.method == "PATCH":
             raw_config = request.data.get("config")
             if raw_config is None:
-                raw_config = default_resale_workflow_config(platform)
+                return Response(
+                    {"detail": "config is required."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             config = self._editable_config(
                 validate_resale_workflow_config(raw_config)
             )
