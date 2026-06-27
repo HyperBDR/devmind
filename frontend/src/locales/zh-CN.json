@@ -905,6 +905,7 @@
       "noListingsToPublish": "没有需要上架的链路",
       "invalidListingPrices": "请为每条链路填写有效的 In/Out 售价后再发布",
       "publishSubmitted": "已提交 {count} 条发布申请",
+      "publishAutoConfirmed": "已提交 {count} 条发布申请，其中 {confirmed} 条命中免审并自动上线",
       "submitFailed": "提交失败",
       "noDraftsToSave": "没有需要保存的草稿",
       "noChangesToSave": "没有检测到需要保存的修改",

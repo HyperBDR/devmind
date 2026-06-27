@@ -261,6 +261,26 @@ def validate_resale_workflow_config(value: Any) -> dict[str, Any]:
         raise serializers.ValidationError("config.edges must be a list.")
     if not isinstance(policies, dict):
         raise serializers.ValidationError("config.policies must be an object.")
+    merged_policies = deepcopy(DEFAULT_POLICIES)
+    merged_policies.update(
+        {
+            key: value
+            for key, value in policies.items()
+            if key in DEFAULT_POLICIES
+        }
+    )
+    has_publish_path = any(
+        bool(merged_policies[key])
+        for key in (
+            "auto_approve_enabled",
+            "manual_confirm_required",
+            "feishu_approval_enabled",
+        )
+    )
+    if not has_publish_path:
+        raise serializers.ValidationError(
+            "At least one publishing path must be enabled."
+        )
 
     node_ids: set[str] = set()
     for node in nodes:
