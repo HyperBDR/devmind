@@ -8,7 +8,15 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.text import slugify
 
-from .collection_services import ensure_official_source
+from .collection_services import (
+    ensure_official_source,
+    sync_configured_official_model_prices,
+)
+from .collectors.official import (
+    MODELS_DEV_API_URL,
+    MODELS_DEV_PROVIDER_KEYS,
+    OFFICIAL_PROVIDER_CONFIGS,
+)
 from .constants import (
     SUPPLIER_SOURCE_VENDOR_ALIASES,
     canonical_meta_model_identity,
@@ -1381,7 +1389,9 @@ def create_missing_sheet_price_items(
     return created_count
 
 
-def sheet_model_item_specs(model: LLMModel) -> tuple[tuple[str, str, object], ...]:
+def sheet_model_item_specs(
+    model: LLMModel,
+) -> tuple[tuple[str, str, object], ...]:
     """Return normalized price dimensions backed by LLMModel fields."""
     return (
         (
@@ -2417,12 +2427,87 @@ def seed_initial_price_sheet_safely() -> dict[str, int]:
 
 
 def seed_initial_price_sheet_if_empty() -> dict[str, int] | None:
-    """Run :func:`seed_initial_price_sheet_safely` only on a fresh database.
+    """Collect official model prices only on a fresh database.
 
-    Returns the import stats when seeding actually happened, or ``None``
-    when the database already contains llm_ops canonical rows. Safe to
-    call from management commands and deployment scripts.
+    Returns import stats when bootstrap actually happened, or ``None`` when
+    the database already contains llm_ops canonical rows. Safe to call from
+    management commands and deployment scripts.
     """
     if not is_llm_ops_database_empty():
         return None
-    return seed_initial_price_sheet_safely()
+    return seed_initial_catalog_from_official_sources()
+
+
+def seed_initial_catalog_from_official_sources(
+    *,
+    verify_source: bool = True,
+) -> dict[str, int]:
+    """Bootstrap the model catalog by collecting official source data."""
+    before = {
+        "providers": LLMProvider.objects.count(),
+        "sources": PriceCollectionSource.objects.count(),
+        "models": LLMModel.objects.count(),
+        "model_price_items": ModelPriceItem.objects.count(),
+    }
+    provider_codes = []
+    created_provider_codes = []
+    for provider_code, config in OFFICIAL_PROVIDER_CONFIGS.items():
+        source_url = official_bootstrap_source_url(provider_code)
+        provider, created = LLMProvider.objects.update_or_create(
+            code=provider_code,
+            defaults={
+                "name": config.provider_label,
+                "website": source_url,
+                "is_active": True,
+                "notes": "官方价格采集自动初始化。",
+            },
+        )
+        source = ensure_official_source(provider=provider)
+        if source.endpoint_url != source_url:
+            source.endpoint_url = source_url
+            source.save(update_fields=["endpoint_url", "updated_at"])
+        if created:
+            created_provider_codes.append(provider.code)
+        provider_codes.append(provider.code)
+
+    results = sync_configured_official_model_prices(
+        provider_codes=provider_codes,
+        verify_source=verify_source,
+    )
+    after = {
+        "providers": LLMProvider.objects.count(),
+        "sources": PriceCollectionSource.objects.count(),
+        "models": LLMModel.objects.count(),
+        "model_price_items": ModelPriceItem.objects.count(),
+    }
+    if after["models"] == before["models"] and created_provider_codes:
+        LLMProvider.objects.filter(code__in=created_provider_codes).delete()
+        after = {
+            "providers": LLMProvider.objects.count(),
+            "sources": PriceCollectionSource.objects.count(),
+            "models": LLMModel.objects.count(),
+            "model_price_items": ModelPriceItem.objects.count(),
+        }
+    return {
+        "providers": after["providers"] - before["providers"],
+        "sources": after["sources"] - before["sources"],
+        "models": after["models"] - before["models"],
+        "model_price_items": (
+            after["model_price_items"] - before["model_price_items"]
+        ),
+        "channel_model_prices": 0,
+        "yunce_supplier_sources": 0,
+        "yunce_supplier_prices": 0,
+        "yunce_supplier_price_items": 0,
+        "trend_channels": 0,
+        "trend_histories": 0,
+        "trend_listings": 0,
+        "official_collect_results": results,
+    }
+
+
+def official_bootstrap_source_url(provider_code: str) -> str:
+    """Return the external source URL used for initial bootstrap."""
+    if provider_code in MODELS_DEV_PROVIDER_KEYS:
+        return MODELS_DEV_API_URL
+    return OFFICIAL_PROVIDER_CONFIGS[provider_code].source_url

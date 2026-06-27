@@ -5,6 +5,7 @@ from django.test import TestCase
 
 from llm_ops.collection_services import (
     ensure_official_source,
+    official_model_source_slug as build_official_model_source_slug,
     sync_configured_official_model_prices,
     sync_meta_models_from_models_dev,
     sync_official_provider_model_prices,
@@ -44,6 +45,9 @@ class OfficialCollectionSyncTests(TestCase):
     def setUp(self):
         seed_initial_price_sheet()
 
+    def official_model_source_slug(self, provider_code, model_code):
+        return build_official_model_source_slug(provider_code, model_code)
+
     def test_sync_openai_official_prices_updates_usd_models(self):
         provider = LLMProvider.objects.get(code="openai")
 
@@ -54,7 +58,10 @@ class OfficialCollectionSyncTests(TestCase):
 
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="openai-official",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
             code="gpt-4o-mini",
         )
         self.assertEqual(model.currency, "USD")
@@ -64,7 +71,10 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertGreater(stats["skipped"], 0)
 
         snapshot = CollectedModelPriceSnapshot.objects.get(
-            source__slug="openai-official",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
             source_platform_id="gpt-4o-mini",
         )
         self.assertEqual(snapshot.currency, "USD")
@@ -77,6 +87,45 @@ class OfficialCollectionSyncTests(TestCase):
         )
         self.assertEqual(price_item.billing_unit, "per_1m_tokens")
         self.assertEqual(price_item.unit_price, Decimal("0.150000"))
+
+    def test_sync_openai_official_prices_uses_one_source_per_model(self):
+        provider = LLMProvider.objects.get(code="openai")
+
+        sync_official_provider_model_prices(
+            provider=provider,
+            verify_source=False,
+        )
+
+        mini = LLMModel.objects.get(
+            provider=provider,
+            code="gpt-4o-mini",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
+        )
+        gpt4o = LLMModel.objects.get(
+            provider=provider,
+            code="gpt-4o",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o",
+            ),
+        )
+        self.assertNotEqual(mini.source_id, gpt4o.source_id)
+        self.assertTrue(
+            CollectedModelPriceSnapshot.objects.filter(
+                source=mini.source,
+                source_platform_id="gpt-4o-mini",
+            ).exists()
+        )
+        self.assertTrue(
+            ModelPriceItem.objects.filter(
+                source=mini.source,
+                model=mini,
+                is_current=True,
+            ).exists()
+        )
 
     @patch("llm_ops.collectors.official.requests.get")
     def test_sync_official_prices_reads_configured_source_content(
@@ -100,7 +149,10 @@ class OfficialCollectionSyncTests(TestCase):
 
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="openai-official",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
             code="gpt-4o-mini",
         )
         self.assertEqual(model.input_price_per_million, Decimal("0.110000"))
@@ -169,7 +221,10 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(run.status, PriceCollectionRun.STATUS_SUCCEEDED)
         self.assertGreater(stats["models"], 0)
         snapshot = CollectedModelPriceSnapshot.objects.get(
-            source__slug="openai-official",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
             source_platform_id="gpt-4o-mini",
         )
         self.assertIn(
@@ -215,7 +270,10 @@ class OfficialCollectionSyncTests(TestCase):
 
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="openai-official",
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
             code="gpt-4o-mini",
         )
         source.refresh_from_db()
@@ -235,7 +293,10 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(cache_item.unit_price, Decimal("0.060000"))
         self.assertEqual(stats["models"], 1)
         snapshot = CollectedModelPriceSnapshot.objects.get(
-            source=source,
+            source__slug=self.official_model_source_slug(
+                "openai",
+                "gpt-4o-mini",
+            ),
             source_platform_id="gpt-4o-mini",
         )
         self.assertEqual(
@@ -287,7 +348,10 @@ class OfficialCollectionSyncTests(TestCase):
         source.refresh_from_db()
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="aliyun-official",
+            source__slug=self.official_model_source_slug(
+                "aliyun",
+                "qwen-plus",
+            ),
             code="qwen-plus",
         )
         self.assertEqual(source.currency, "USD")
@@ -486,17 +550,26 @@ class OfficialCollectionSyncTests(TestCase):
 
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="aliyun-official",
+            source__slug=self.official_model_source_slug(
+                "aliyun",
+                "qwen-plus",
+            ),
             code="qwen-plus",
         )
         deepseek = LLMModel.objects.get(
             provider=provider,
-            source__slug="aliyun-official",
+            source__slug=self.official_model_source_slug(
+                "aliyun",
+                "deepseek-r1",
+            ),
             code="deepseek-r1",
         )
         qwen3 = LLMModel.objects.get(
             provider=provider,
-            source__slug="aliyun-official",
+            source__slug=self.official_model_source_slug(
+                "aliyun",
+                "qwen3-235b-a22b-instruct-2507",
+            ),
             code="qwen3-235b-a22b-instruct-2507",
         )
         self.assertEqual(model.currency, "CNY")
@@ -526,7 +599,10 @@ class OfficialCollectionSyncTests(TestCase):
 
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="volcengine-official",
+            source__slug=self.official_model_source_slug(
+                "volcengine",
+                "deepseek-r1-250528",
+            ),
             code="deepseek-r1-250528",
         )
         self.assertEqual(stats["models"], 1)
@@ -548,7 +624,9 @@ class OfficialCollectionSyncTests(TestCase):
             verify_source=False,
         )
 
-        source = PriceCollectionSource.objects.get(slug="deepseek-official")
+        source = PriceCollectionSource.objects.get(
+            slug=self.official_model_source_slug("deepseek", "deepseek-v3"),
+        )
         input_item = ModelPriceItem.objects.get(
             source=source,
             model__code="deepseek-v3",
@@ -580,12 +658,18 @@ class OfficialCollectionSyncTests(TestCase):
 
         image_model = LLMModel.objects.get(
             provider=provider,
-            source__slug="aliyun-wanx-official",
+            source__slug=self.official_model_source_slug(
+                "aliyun-wanx",
+                "qwen-image",
+            ),
             code="qwen-image",
         )
         video_model = LLMModel.objects.get(
             provider=provider,
-            source__slug="aliyun-wanx-official",
+            source__slug=self.official_model_source_slug(
+                "aliyun-wanx",
+                "wan2.5-t2v-preview",
+            ),
             code="wan2.5-t2v-preview",
         )
         self.assertEqual(stats["models"], 12)
@@ -629,22 +713,34 @@ class OfficialCollectionSyncTests(TestCase):
 
         model = LLMModel.objects.get(
             provider=provider,
-            source__slug="anthropic-official",
+            source__slug=self.official_model_source_slug(
+                "anthropic",
+                "claude-sonnet-4-6-20260218",
+            ),
             code="claude-sonnet-4-6-20260218",
         )
         sonnet_45 = LLMModel.objects.get(
             provider=provider,
-            source__slug="anthropic-official",
+            source__slug=self.official_model_source_slug(
+                "anthropic",
+                "claude-sonnet-4-5-20250929",
+            ),
             code="claude-sonnet-4-5-20250929",
         )
         sonnet_4 = LLMModel.objects.get(
             provider=provider,
-            source__slug="anthropic-official",
+            source__slug=self.official_model_source_slug(
+                "anthropic",
+                "claude-sonnet-4-20250514",
+            ),
             code="claude-sonnet-4-20250514",
         )
         haiku_45 = LLMModel.objects.get(
             provider=provider,
-            source__slug="anthropic-official",
+            source__slug=self.official_model_source_slug(
+                "anthropic",
+                "claude-haiku-4-5-20251001",
+            ),
             code="claude-haiku-4-5-20251001",
         )
         self.assertEqual(model.currency, "USD")
@@ -710,7 +806,10 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(run.skipped_count, 0)
         model = LLMModel.objects.get(
             provider__code="google",
-            source__slug="google-official",
+            source__slug=self.official_model_source_slug(
+                "google",
+                "gemini-3-pro-preview",
+            ),
             code="gemini-3-pro-preview",
         )
         self.assertEqual(model.name, "Gemini 3 Pro Preview")

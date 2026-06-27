@@ -325,25 +325,56 @@ def sync_official_provider_model_prices(
         skipped_codes = sorted(configured_codes - collected_codes)
         with transaction.atomic():
             for item in catalog.models:
+                model_source = ensure_official_model_source(
+                    provider=provider,
+                    model_code=collected_model_code(item),
+                    display_name=item.name or item.model_id,
+                    source_url=catalog.source_url,
+                    currency=(
+                        item.currency
+                        or collected_currency
+                        or source.currency
+                    ),
+                )
+                if not model_source.is_enabled:
+                    skipped_codes.append(collected_model_code(item))
+                    continue
+                model_run = PriceCollectionRun.objects.create(
+                    source=model_source,
+                )
                 model, created = upsert_collected_model(
                     item,
-                    source=source,
+                    source=model_source,
                     source_url=catalog.source_url,
                 )
                 _, changed = upsert_collected_snapshot(
                     item,
-                    source=source,
-                    run=run,
+                    source=model_source,
+                    run=model_run,
                     model=model,
                     provider=model.provider,
                 )
                 sync_model_price_items(
                     item,
-                    source=source,
+                    source=model_source,
                     model=model,
                     provider=model.provider,
                     source_url=catalog.source_url,
                 )
+                model_run.status = PriceCollectionRun.STATUS_SUCCEEDED
+                model_run.finished_at = timezone.now()
+                model_run.collected_count = 1
+                model_run.created_count = 1 if created else 0
+                model_run.updated_count = 0 if created else 1
+                model_run.skipped_count = 0
+                model_run.metadata = {
+                    "source_url": catalog.source_url,
+                    "currency": item.currency or collected_currency,
+                    "provider_source_slug": source.slug,
+                    "source_model_id": collected_model_code(item),
+                    "changed": changed,
+                }
+                model_run.save()
                 stats["models"] = int(stats["models"]) + 1
                 key = "created" if created else "updated"
                 stats[key] = int(stats[key]) + 1
@@ -424,6 +455,79 @@ def sync_configured_official_model_prices(
                 "error": str(exc),
             }
     return results
+
+
+def ensure_official_model_source(
+    *,
+    provider: LLMProvider,
+    model_code: str,
+    display_name: str,
+    source_url: str,
+    currency: str,
+) -> PriceCollectionSource:
+    """Ensure an independent official source exists for one model."""
+    normalized_code = collected_model_code_from_value(model_code)
+    slug = official_model_source_slug(provider.code, normalized_code)
+    source, created = PriceCollectionSource.objects.get_or_create(
+        slug=slug,
+        defaults={
+            "provider": provider,
+            "name": (
+                f"{provider.name} / "
+                f"{display_name or normalized_code} 官方价格"
+            ),
+            "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            "source_category": (
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            "endpoint_url": source_url,
+            "currency": currency or "USD",
+            "is_enabled": True,
+            "updates_model_prices": True,
+            "notes": "官方公开价格采集源；该来源只对应一个模型。",
+        },
+    )
+    if created:
+        return source
+
+    desired_fields = {
+        "provider": provider,
+        "name": f"{provider.name} / {display_name or normalized_code} 官方价格",
+        "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+        "source_category": (
+            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        ),
+        "currency": currency or source.currency or "USD",
+        "updates_model_prices": True,
+        "notes": "官方公开价格采集源；该来源只对应一个模型。",
+    }
+    if not source.endpoint_url:
+        desired_fields["endpoint_url"] = source_url
+    changed_fields = []
+    for field, value in desired_fields.items():
+        if getattr(source, field) != value:
+            setattr(source, field, value)
+            changed_fields.append(field)
+    if changed_fields:
+        changed_fields.append("updated_at")
+        source.save(update_fields=changed_fields)
+    return source
+
+
+def official_model_source_slug(provider_code: str, model_code: str) -> str:
+    """Return a stable slug for a model-specific official source."""
+    value = f"{provider_code}-{model_code}-official".lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
+    if len(slug) <= 100:
+        return slug
+    digest = hashlib.sha1(slug.encode("utf-8")).hexdigest()[:10]
+    prefix = slug[: 100 - len(digest) - 1].rstrip("-")
+    return f"{prefix}-{digest}"
+
+
+def collected_model_code_from_value(value: str) -> str:
+    """Normalize a collected model code for source identity."""
+    return str(value or "").strip() or "unknown"
 
 
 def sync_meta_models_from_models_dev(

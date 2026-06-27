@@ -177,13 +177,62 @@ class LLMOpsSeedLegacyTests(TestCase):
 class LLMOpsSeedIfEmptyTests(TestCase):
     """``seed_initial_price_sheet_if_empty`` gates explicit bootstrap."""
 
-    def test_runs_seed_on_empty_database(self):
+    @mock.patch("llm_ops.seed_data.sync_configured_official_model_prices")
+    def test_runs_seed_on_empty_database(self, mock_sync):
+        def fake_sync(provider_codes, verify_source=True):
+            provider = LLMProvider.objects.get(code="openai")
+            source = PriceCollectionSource.objects.create(
+                name="OpenAI / GPT Test 官方价格",
+                slug="openai-gpt-test-official",
+                provider=provider,
+                source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                source_category=(
+                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+                ),
+                endpoint_url="https://models.dev/api.json",
+                currency="USD",
+                updates_model_prices=True,
+            )
+            meta = MetaModel.objects.create(
+                name="GPT Test",
+                code="gpt-test",
+                vendor=provider,
+            )
+            model = LLMModel.objects.create(
+                provider=provider,
+                source=source,
+                meta_model=meta,
+                name="GPT Test",
+                code="gpt-test",
+                input_price_per_million=Decimal("1"),
+                output_price_per_million=Decimal("2"),
+                currency="USD",
+            )
+            ModelPriceItem.objects.create(
+                provider=provider,
+                model=model,
+                meta_model=meta,
+                source=source,
+                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="USD",
+                unit_price=Decimal("1"),
+                price_fingerprint="test-fingerprint",
+            )
+            return {"openai": {"models": 1}}
+
+        mock_sync.side_effect = fake_sync
+
         result = seed_initial_price_sheet_if_empty()
+
         self.assertIsNotNone(result)
         self.assertGreater(result["providers"], 0)
+        self.assertGreater(result["models"], 0)
         self.assertTrue(
             LLMProvider.objects.filter(code="openai").exists()
         )
+        mock_sync.assert_called_once()
+        self.assertTrue(mock_sync.call_args.kwargs["verify_source"])
 
     def test_returns_none_when_database_is_populated(self):
         LLMProvider.objects.create(name="OpenAI", code="openai")
