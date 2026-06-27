@@ -983,6 +983,7 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
     """Serializer for downstream resale platforms."""
 
     listing_count = serializers.IntegerField(read_only=True, required=False)
+    metadata = serializers.JSONField(required=False, allow_null=True)
 
     class Meta:
         model = ResalePlatform
