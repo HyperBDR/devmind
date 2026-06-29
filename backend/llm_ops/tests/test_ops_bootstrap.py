@@ -1,10 +1,9 @@
-"""Tests for the llm_ops deployment bootstrap and periodic tasks.
+"""Tests for llm_ops catalog maintenance helpers and periodic tasks.
 
 These tests cover the deployment guarantees that the pipeline
 relies on:
 
-1. ``seed_initial_price_sheet_if_empty`` runs the import on a fresh
-   database, but is a no-op when canonical rows already exist.
+1. Seed helper functions remain isolated from product startup paths.
 2. ``seed_initial_price_sheet_safely`` never overwrites manually
    maintained overrides (``ChannelModelPrice.custom_*``,
    ``LLMModel.is_active``, ``PriceCollectionSource.is_enabled``).
@@ -51,8 +50,8 @@ from llm_ops.seed_data import (
 from llm_ops.views import LLMProviderViewSet, MetaModelViewSet
 
 
-class LLMOpsBootstrapGuardsTests(TestCase):
-    """Validate the helper functions that gate auto-bootstrap."""
+class LLMOpsCatalogStateHelperTests(TestCase):
+    """Validate helper functions that inspect catalogue state."""
 
     def test_is_llm_ops_database_empty_on_fresh_db(self):
         self.assertTrue(is_llm_ops_database_empty())
@@ -163,10 +162,8 @@ class LLMOpsSeedSafelyTests(TestCase):
 class LLMOpsSeedLegacyTests(TestCase):
     """``seed_initial_price_sheet`` keeps its overwrite semantics.
 
-    The explicit ``manage.py seed_llm_ops_price_sheet`` command still
-    re-applies the canonical defaults so operators can re-import after
-    editing the price sheet source. This test pins the behaviour and
-    documents that it is intentional and distinct from the safe path.
+    The helper remains for isolated legacy fixture tests only. Product
+    synchronization no longer exposes a seed management command.
     """
 
     def test_legacy_seed_overwrites_seed_managed_source_fields(self):
@@ -804,7 +801,7 @@ class LLMOpsMockSeedCleanupTests(TestCase):
         )
         self.assertGreaterEqual(stats["meta_models_deleted"], 1)
 
-    def test_reset_meta_models_canonical_rebuilds_from_sheet(self):
+    def test_reset_meta_models_canonical_clears_catalog(self):
         """Full reset removes every meta model and supplier alias."""
         seed_initial_price_sheet_safely()
         LLMProvider.objects.create(
@@ -1020,104 +1017,3 @@ class LLMOpsSupplierAliasApiTests(TestCase):
 
         self.assertIn("deepseek-v3", meta_codes)
         self.assertNotIn("legacy-siliconflow-model", meta_codes)
-
-
-class LLMOpsSeedCommandSafeFlagTests(TestCase):
-    """The management command exposes a ``--safe`` flag."""
-
-    def test_default_command_overwrites(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        seed_initial_price_sheet_safely()
-        source = PriceCollectionSource.objects.get(slug="aliyun-sheet")
-        source.name = "人工改名价格源"
-        source.currency = "USD"
-        source.save()
-
-        out = StringIO()
-        call_command("seed_llm_ops_price_sheet", stdout=out)
-
-        source.refresh_from_db()
-        self.assertNotEqual(source.name, "人工改名价格源")
-        self.assertEqual(source.currency, "CNY")
-        self.assertIsNone(source.channel_id)
-        self.assertIn("[overwrite]", out.getvalue())
-
-    def test_safe_flag_preserves_manual_prices(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        seed_initial_price_sheet_safely()
-        source = PriceCollectionSource.objects.filter(
-            slug__endswith="-sheet",
-        ).first()
-        source.name = "人工改名价格源"
-        source.is_enabled = False
-        source.save()
-
-        out = StringIO()
-        call_command("seed_llm_ops_price_sheet", "--safe", stdout=out)
-        source.refresh_from_db()
-        self.assertEqual(source.name, "人工改名价格源")
-        self.assertFalse(source.is_enabled)
-        self.assertIn("[safe]", out.getvalue())
-
-    def test_clean_mock_flag_removes_legacy_demo_rows(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        seed_initial_price_sheet_safely()
-        seed_yunce_supplier_price_demo()
-        seed_agione_price_trend_demo()
-
-        out = StringIO()
-        call_command("seed_llm_ops_price_sheet", "--clean-mock", stdout=out)
-
-        self.assertFalse(
-            PriceCollectionSource.objects.filter(
-                slug__startswith="yunce-",
-            ).exists()
-        )
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code="demo-premium-supplier",
-            ).exists()
-        )
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code=REAL_RESOURCE_CHANNEL_CODE,
-            ).exists()
-        )
-        self.assertIn("Cleaned legacy mock", out.getvalue())
-
-
-class LLMOpsBootstrapCommandTests(TestCase):
-    """The explicit bootstrap command seeds only on a fresh database."""
-
-    def test_bootstrap_command_seeds_empty_database(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        out = StringIO()
-        call_command("bootstrap_llm_ops_catalog", stdout=out)
-
-        self.assertTrue(LLMProvider.objects.filter(code="openai").exists())
-        self.assertIn("Bootstrapped LLM Ops catalog", out.getvalue())
-
-    def test_bootstrap_command_skips_populated_database(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        LLMProvider.objects.create(name="OpenAI", code="openai")
-
-        out = StringIO()
-        call_command("bootstrap_llm_ops_catalog", stdout=out)
-
-        self.assertEqual(LLMProvider.objects.count(), 1)
-        self.assertIn("already initialized", out.getvalue())

@@ -1,34 +1,30 @@
-"""Reset the LLM Ops meta-model catalogue and rebuild it from scratch.
+"""Reset the LLM Ops meta-model catalogue.
 
 This command is intentionally destructive: it deletes every row in
 ``llm_ops_metamodel`` and cascades through ``LLMModel`` to the
 channel prices. Manual price sources, supplier price sources and
-procurement channels are preserved. After the reset the
-``seed_llm_ops_price_sheet`` command is invoked so the meta-model
-library is repopulated from the canonical price sheet without any
-mock or supplier-vendor contamination.
+procurement channels are preserved. It does not repopulate price data;
+operators should run the Agent sync or add records manually afterwards.
 
 Use ``--yes`` to confirm. The command refuses to run interactively
 to avoid accidental data loss.
 """
 from __future__ import annotations
 
-from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 
 from llm_ops.seed_data import (
     cleanup_orphan_meta_models,
     reset_meta_models_canonical,
-    seed_initial_price_sheet,
 )
 
 
 class Command(BaseCommand):
-    """Wipe the meta-model library and resync from the canonical sheet."""
+    """Wipe the meta-model library without seeding replacement data."""
 
     help = (
-        "Reset MetaModel catalogue and resync from the price sheet. "
-        "Manual and supplier price sources are kept."
+        "Reset MetaModel catalogue without seed repopulation. Manual and "
+        "supplier price sources are kept."
     )
 
     def add_arguments(self, parser):
@@ -61,16 +57,13 @@ class Command(BaseCommand):
             )
             return
         reset_stats = reset_meta_models_canonical()
-        seed_stats = seed_initial_price_sheet()
         self.stdout.write(
             self.style.SUCCESS(
                 "Reset complete: "
                 f"meta_models_deleted={reset_stats['meta_models_deleted']}, "
                 f"manual_sources_kept={reset_stats['manual_sources_kept']}, "
                 f"supplier_sources_kept="
-                f"{reset_stats['supplier_sources_kept']}, "
-                f"providers={seed_stats['providers']}, "
-                f"sources={seed_stats['sources']}, "
-                f"models={seed_stats['models']}"
+                f"{reset_stats['supplier_sources_kept']}. "
+                "Run Agent sync or add model prices manually to repopulate."
             )
         )

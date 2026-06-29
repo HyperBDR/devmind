@@ -1320,9 +1320,10 @@
       }
     },
     "providerManagement": {
-      "title": "Supplier Price Sources",
+      "title": "Provider Model Prices",
       "modelsCount": "{count} meta models",
-      "empty": "No supplier price sources match the current filters.",
+      "sourcesCount": "{count} price sources",
+      "empty": "No providers match the current filters.",
       "actions": {
         "bulkImport": "Bulk import",
         "createSource": "New price source",
@@ -1341,14 +1342,14 @@
         "allStatuses": "All statuses",
         "allTypes": "All types",
         "inactiveOnly": "Inactive only",
-        "searchPlaceholder": "Search supplier, price source, provider, or URL"
+        "searchPlaceholder": "Search provider, model, price source, or URL"
       },
       "table": {
         "actions": "Actions",
         "metaModels": "Linked meta models",
-        "source": "Supplier / price source",
+        "source": "Provider",
         "status": "Status",
-        "type": "Type"
+        "type": "Price source"
       },
       "metrics": {
         "metaModels": {
@@ -1360,8 +1361,8 @@
           "label": "Official sources"
         },
         "sources": {
-          "hint": "Supplier and official price catalogs",
-          "label": "Price sources"
+          "hint": "Meta model providers with price data",
+          "label": "Providers"
         },
         "supplierManual": {
           "hint": "Supplier {supplier} · manual {manual}",
@@ -1379,6 +1380,10 @@
         "metaProvider": "Meta model provider",
         "needsOwner": "Ownership needs completion",
         "unbound": "Unbound source"
+      },
+      "unboundSources": {
+        "hint": "Price sources not yet linked to a provider, model, or price item",
+        "name": "Unbound price sources"
       },
       "sourceMode": {
         "aggregateSync": "Aggregate sync",
@@ -1431,6 +1436,7 @@
       },
       "errors": {
         "deleteFailed": "Failed to delete model price source",
+        "saveFailed": "Failed to save model price source",
         "syncAllFailed": "Failed to submit model price source sync task",
         "syncFailed": "Failed to submit price sync task"
       }
