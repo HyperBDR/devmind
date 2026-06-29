@@ -8,6 +8,7 @@ from .global_config import (
     normalize_source_ids,
     validate_price_collection_source_ids,
 )
+from .llm_config import get_llm_config_reference
 from .models import (
     AuditLog,
     ChannelModelPrice,
@@ -53,6 +54,11 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    provider_code = serializers.CharField(
+        source="provider.code",
+        read_only=True,
+        allow_null=True,
+    )
     business_source_category = serializers.SerializerMethodField()
 
     class Meta:
@@ -68,6 +74,7 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
     """Serializer for singleton LLM operations runtime configuration."""
 
     selected_price_collection_sources = serializers.SerializerMethodField()
+    price_sync_llm_config = serializers.SerializerMethodField()
 
     class Meta:
         model = LLMOpsGlobalConfig
@@ -101,8 +108,21 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
         return value
 
     def validate_price_collection_source_ids(self, value):
+        existing_source_ids = []
+        if self.instance is not None:
+            existing_source_ids = normalize_source_ids(
+                self.instance.price_collection_source_ids
+            )
+            existing_source_ids.extend(
+                source_id
+                for source_id in self.instance.price_collection_source_ids
+                if isinstance(source_id, int)
+            )
         try:
-            return validate_price_collection_source_ids(value)
+            return validate_price_collection_source_ids(
+                value,
+                existing_source_ids=existing_source_ids,
+            )
         except ValueError as exc:
             raise serializers.ValidationError(str(exc)) from exc
 
@@ -131,6 +151,11 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
             queryset.order_by("name", "id"),
             many=True,
         ).data
+
+    def get_price_sync_llm_config(self, instance):
+        return get_llm_config_reference(
+            str(instance.price_sync_llm_config_uuid or "")
+        )
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

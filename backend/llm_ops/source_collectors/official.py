@@ -6,6 +6,8 @@ from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult
 
+SUPPORTED_OFFICIAL_PROVIDER_CODES = ("aliyun", "aliyun-wanx")
+
 
 class OfficialProviderPriceSourceCollector:
     """Collect prices from one model vendor's official source."""
@@ -42,28 +44,6 @@ class OfficialProviderPriceSourceCollector:
         )
 
 
-class OpenAIOfficialPriceSourceCollector(OfficialProviderPriceSourceCollector):
-    """Collect prices from OpenAI's official pricing source."""
-
-    provider_code = "openai"
-
-
-class AnthropicOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from Anthropic's official pricing source."""
-
-    provider_code = "anthropic"
-
-
-class GoogleOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from Google's official pricing source."""
-
-    provider_code = "google"
-
-
 class AliyunOfficialPriceSourceCollector(
     OfficialProviderPriceSourceCollector,
 ):
@@ -80,30 +60,9 @@ class AliyunWanxOfficialPriceSourceCollector(
     provider_code = "aliyun-wanx"
 
 
-class VolcengineOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from Volcengine's official pricing source."""
-
-    provider_code = "volcengine"
-
-
-class DeepSeekOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from DeepSeek's official pricing source."""
-
-    provider_code = "deepseek"
-
-
 OFFICIAL_COLLECTOR_CLASSES = {
     "aliyun": AliyunOfficialPriceSourceCollector,
     "aliyun-wanx": AliyunWanxOfficialPriceSourceCollector,
-    "anthropic": AnthropicOfficialPriceSourceCollector,
-    "deepseek": DeepSeekOfficialPriceSourceCollector,
-    "google": GoogleOfficialPriceSourceCollector,
-    "openai": OpenAIOfficialPriceSourceCollector,
-    "volcengine": VolcengineOfficialPriceSourceCollector,
 }
 
 
@@ -113,7 +72,9 @@ def build_official_provider_collectors() -> tuple[
 ]:
     """Build one collector per supported official provider."""
     collectors = []
-    for provider_code in sorted(OFFICIAL_PROVIDER_CONFIGS):
+    for provider_code in SUPPORTED_OFFICIAL_PROVIDER_CODES:
+        if provider_code not in OFFICIAL_PROVIDER_CONFIGS:
+            continue
         collector_class = OFFICIAL_COLLECTOR_CLASSES[provider_code]
         collectors.append(collector_class())
     return tuple(collectors)

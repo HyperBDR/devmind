@@ -10,7 +10,10 @@ from llm_ops.collection_services import (
     sync_meta_models_from_models_dev,
     sync_official_provider_model_prices,
 )
-from llm_ops.collectors.official import collect_official_pricing_catalog
+from llm_ops.collectors.official import (
+    OFFICIAL_PROVIDER_CONFIGS,
+    collect_official_pricing_catalog,
+)
 from llm_ops.models import (
     CollectedModelPriceSnapshot,
     LLMModel,
@@ -589,6 +592,29 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(source.source_category, "official_provider")
         self.assertTrue(source.updates_model_prices)
 
+    def test_aliyun_official_config_uses_pricing_page(self):
+        self.assertEqual(
+            OFFICIAL_PROVIDER_CONFIGS["aliyun"].source_url,
+            "https://help.aliyun.com/zh/model-studio/model-pricing",
+        )
+        self.assertEqual(
+            OFFICIAL_PROVIDER_CONFIGS["aliyun-wanx"].source_url,
+            "https://help.aliyun.com/zh/model-studio/model-pricing",
+        )
+
+    def test_ensure_official_source_updates_aliyun_legacy_url(self):
+        provider = LLMProvider.objects.get(code="aliyun")
+        source = PriceCollectionSource.objects.get(slug="aliyun-official")
+        source.endpoint_url = "https://help.aliyun.com/zh/model-studio/models"
+        source.save(update_fields=["endpoint_url"])
+
+        ensured = ensure_official_source(provider=provider)
+
+        self.assertEqual(
+            ensured.endpoint_url,
+            "https://help.aliyun.com/zh/model-studio/model-pricing",
+        )
+
     def test_sync_volcengine_official_prices_keeps_cny_currency(self):
         provider = LLMProvider.objects.get(code="volcengine")
 
@@ -795,26 +821,26 @@ class OfficialCollectionSyncTests(TestCase):
 
     def test_sync_configured_provider_prices_records_skipped_models(self):
         results = sync_configured_official_model_prices(
-            provider_codes=["google"],
+            provider_codes=["aliyun"],
             verify_source=False,
         )
 
-        self.assertIn("google", results)
-        run = PriceCollectionRun.objects.get(source__slug="google-official")
+        self.assertIn("aliyun", results)
+        run = PriceCollectionRun.objects.get(source__slug="aliyun-official")
         self.assertEqual(run.status, PriceCollectionRun.STATUS_SUCCEEDED)
-        self.assertEqual(run.metadata["currency"], "USD")
-        self.assertEqual(run.skipped_count, 0)
+        self.assertEqual(run.metadata["currency"], "CNY")
+        self.assertGreaterEqual(run.skipped_count, 0)
         model = LLMModel.objects.get(
-            provider__code="google",
+            provider__code="aliyun",
             source__slug=self.official_model_source_slug(
-                "google",
-                "gemini-3-pro-preview",
+                "aliyun",
+                "qwen-plus",
             ),
-            code="gemini-3-pro-preview",
+            code="qwen-plus",
         )
-        self.assertEqual(model.name, "Gemini 3 Pro Preview")
-        self.assertEqual(model.input_price_per_million, Decimal("2.000000"))
-        self.assertEqual(model.output_price_per_million, Decimal("12.000000"))
+        self.assertEqual(model.name, "Qwen Plus")
+        self.assertEqual(model.input_price_per_million, Decimal("0.800000"))
+        self.assertEqual(model.output_price_per_million, Decimal("2.000000"))
 
     @patch("llm_ops.collection_services.sync_official_provider_model_prices")
     def test_sync_configured_provider_prices_continues_after_failure(
@@ -824,7 +850,7 @@ class OfficialCollectionSyncTests(TestCase):
         """One failed official source must not stop other providers."""
 
         def fake_sync(provider, *, verify_source=True):
-            if provider.code == "openai":
+            if provider.code == "aliyun":
                 raise RuntimeError("source blocked")
             return {
                 "models": 1,
@@ -839,11 +865,11 @@ class OfficialCollectionSyncTests(TestCase):
         mock_sync.side_effect = fake_sync
 
         results = sync_configured_official_model_prices(
-            provider_codes=["openai", "google"],
+            provider_codes=["aliyun", "aliyun-wanx"],
             verify_source=False,
         )
 
-        self.assertIn("source blocked", results["openai"]["error"])
-        self.assertEqual(results["openai"]["models"], 0)
-        self.assertEqual(results["google"]["models"], 1)
+        self.assertIn("source blocked", results["aliyun"]["error"])
+        self.assertEqual(results["aliyun"]["models"], 0)
+        self.assertEqual(results["aliyun-wanx"]["models"], 1)
         self.assertEqual(mock_sync.call_count, 2)

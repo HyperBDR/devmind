@@ -105,6 +105,27 @@
               placeholder="15 1,7,13,19 * * *"
             />
           </label>
+          <label class="config-field">
+            <span>{{ t('llmOps.globalConfigPanel.fields.llmConfig') }}</span>
+            <select
+              v-model="form.price_sync_llm_config_uuid"
+              :disabled="llmConfigLoading"
+            >
+              <option value="">
+                {{ t('llmOps.globalConfigPanel.llmConfig.default') }}
+              </option>
+              <option
+                v-for="option in llmConfigOptions"
+                :key="option.uuid"
+                :value="option.uuid"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+            <small>
+              {{ t('llmOps.globalConfigPanel.llmConfig.description') }}
+            </small>
+          </label>
 
           <div class="source-mode-group" role="radiogroup">
             <label
@@ -227,6 +248,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import BaseLoading from '@/components/ui/BaseLoading.vue'
+import { llmAdminApi } from '@/admin/api'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 
@@ -244,7 +266,11 @@ const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const config = ref(null)
+const llmConfigLoading = ref(false)
+const llmConfigs = ref([])
 const sourceMode = ref('all')
+
+const supportedPriceSyncProviderCodes = new Set(['aliyun', 'aliyun-wanx'])
 
 const form = reactive({
   meta_model_sync_enabled: true,
@@ -253,6 +279,7 @@ const form = reactive({
   price_collection_enabled: true,
   price_collection_source_ids: [],
   price_collection_cron: '15 1,7,13,19 * * *',
+  price_sync_llm_config_uuid: '',
   feishu_app_id: '',
   feishu_app_secret: '',
   feishu_approval_code: '',
@@ -272,11 +299,25 @@ const sourceModes = computed(() => [
 ])
 
 const priceSourceOptions = computed(() =>
-  props.sources.filter((source) => source.updates_model_prices)
+  props.sources.filter((source) => sourceSupportsRuntimePriceSync(source))
 )
+
+const llmConfigOptions = computed(() => {
+  const options = new Map()
+  for (const row of llmConfigs.value) {
+    const option = normalizeLLMConfigOption(row)
+    if (option.uuid) options.set(option.uuid, option)
+  }
+  const selected = config.value?.price_sync_llm_config
+  if (selected?.uuid && !options.has(selected.uuid)) {
+    options.set(selected.uuid, selected)
+  }
+  return Array.from(options.values())
+})
 
 onMounted(() => {
   loadConfig()
+  loadLLMConfigs()
 })
 
 async function loadConfig() {
@@ -290,6 +331,21 @@ async function loadConfig() {
     )
   } finally {
     loading.value = false
+  }
+}
+
+async function loadLLMConfigs() {
+  llmConfigLoading.value = true
+  try {
+    const response = await llmAdminApi.getLLMConfig()
+    const payload = extract(response)
+    llmConfigs.value = Array.isArray(payload) ? payload : []
+  } catch (error) {
+    showError(
+      errorMessage(error, t('llmOps.globalConfigPanel.errors.llmConfigLoad'))
+    )
+  } finally {
+    llmConfigLoading.value = false
   }
 }
 
@@ -310,6 +366,7 @@ async function saveConfig() {
       price_collection_source_ids:
         sourceMode.value === 'all' ? [] : form.price_collection_source_ids,
       price_collection_cron: form.price_collection_cron,
+      price_sync_llm_config_uuid: form.price_sync_llm_config_uuid || null,
       feishu_app_id: form.feishu_app_id,
       feishu_approval_code: form.feishu_approval_code,
       feishu_tenant_key: form.feishu_tenant_key,
@@ -358,6 +415,10 @@ function applyConfig(nextConfig) {
     ...(nextConfig.price_collection_source_ids || [])
   ]
   form.price_collection_cron = nextConfig.price_collection_cron
+  form.price_sync_llm_config_uuid =
+    nextConfig.price_sync_llm_config?.uuid ||
+    nextConfig.price_sync_llm_config_uuid ||
+    ''
   form.feishu_app_id = nextConfig.feishu_app_id || ''
   form.feishu_app_secret = ''
   form.feishu_approval_code = nextConfig.feishu_approval_code || ''
@@ -366,6 +427,27 @@ function applyConfig(nextConfig) {
   sourceMode.value = form.price_collection_source_ids.length
     ? 'selected'
     : 'all'
+}
+
+function sourceSupportsRuntimePriceSync(source) {
+  const providerCode = source.provider_code || source.provider?.code || ''
+  return (
+    source.updates_model_prices &&
+    supportedPriceSyncProviderCodes.has(providerCode) &&
+    source.source_category === 'official_provider'
+  )
+}
+
+function normalizeLLMConfigOption(row) {
+  const configPayload = row.config || {}
+  const uuid = row.uuid || row.id || ''
+  const model = configPayload.model || row.model || ''
+  const provider = row.provider || ''
+  const label = row.label || [model, provider].filter(Boolean).join(' · ')
+  return {
+    uuid: String(uuid),
+    label: label || String(uuid)
+  }
 }
 
 function sourceMeta(source) {
@@ -508,6 +590,7 @@ function errorMessage(error, fallback) {
 }
 
 .config-field input,
+.config-field select,
 .config-section textarea {
   border: 1px solid #cbd5e1;
   border-radius: 0.5rem;
@@ -520,9 +603,16 @@ function errorMessage(error, fallback) {
 }
 
 .config-field input:focus,
+.config-field select:focus,
 .config-section textarea:focus {
   border-color: #059669;
   box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+}
+
+.config-field small {
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .source-mode-group {

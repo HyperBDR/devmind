@@ -1,7 +1,9 @@
 from django.core.management.base import BaseCommand
 
-from llm_ops.collection_services import sync_configured_official_model_prices
-from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
+from llm_ops.collection_services import (
+    SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
+    sync_configured_official_model_prices,
+)
 
 
 class Command(BaseCommand):
@@ -13,7 +15,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--provider",
             action="append",
-            choices=sorted(OFFICIAL_PROVIDER_CONFIGS.keys()),
+            choices=sorted(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES),
             dest="providers",
             help="Provider code to collect. Can be provided multiple times.",
         )

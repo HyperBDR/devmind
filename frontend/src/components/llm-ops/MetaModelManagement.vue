@@ -28,6 +28,33 @@
             </p>
           </div>
           <div class="vendor-toolbar-summary">
+            <button
+              class="btn-secondary btn-action-sync"
+              type="button"
+              :aria-busy="syncingMetaModels"
+              :disabled="syncingMetaModels"
+              @click="syncMetaModels"
+            >
+              <svg
+                aria-hidden="true"
+                :class="[
+                  'sync-action-icon',
+                  { 'is-spinning': syncingMetaModels }
+                ]"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                <path d="M3 16v5h5" />
+                <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+              {{ syncActionLabel }}
+            </button>
             <input
               v-model="vendorSearchKeyword"
               class="control-field vendor-search"
@@ -75,9 +102,42 @@
           </button>
           <div
             v-if="!filteredVendorRows.length"
-            class="px-4 py-6 text-sm text-slate-500"
+            class="empty-state"
           >
-            {{ t('llmOps.metaModelManagement.empty.vendors') }}
+            <h4 class="empty-title">
+              {{ vendorEmptyTitle }}
+            </h4>
+            <p class="empty-copy">
+              {{ vendorEmptyDescription }}
+            </p>
+            <button
+              v-if="!vendorRows.length"
+              class="btn-secondary btn-action-sync"
+              type="button"
+              :aria-busy="syncingMetaModels"
+              :disabled="syncingMetaModels"
+              @click="syncMetaModels"
+            >
+              <svg
+                aria-hidden="true"
+                :class="[
+                  'sync-action-icon',
+                  { 'is-spinning': syncingMetaModels }
+                ]"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+              >
+                <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                <path d="M3 16v5h5" />
+                <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                <path d="M21 3v5h-5" />
+              </svg>
+              {{ syncActionLabel }}
+            </button>
           </div>
         </div>
       </article>
@@ -114,11 +174,7 @@
               :disabled="syncingMetaModels"
               @click="syncMetaModels"
             >
-              {{
-                syncingMetaModels
-                  ? t('llmOps.metaModelManagement.actions.syncing')
-                  : t('llmOps.metaModelManagement.actions.sync')
-              }}
+              {{ syncActionLabel }}
             </button>
             <button
               class="btn-secondary btn-action-cancel"
@@ -561,6 +617,24 @@ const selectedVendorActiveCount = computed(
   () => vendorMetaRows.value.filter((item) => item.status === 'active').length
 )
 
+const syncActionLabel = computed(() =>
+  syncingMetaModels.value
+    ? t('llmOps.metaModelManagement.actions.syncing')
+    : t('llmOps.metaModelManagement.actions.sync')
+)
+
+const vendorEmptyTitle = computed(() =>
+  vendorRows.value.length
+    ? t('llmOps.metaModelManagement.empty.filteredVendorsTitle')
+    : t('llmOps.metaModelManagement.empty.vendorsTitle')
+)
+
+const vendorEmptyDescription = computed(() =>
+  vendorRows.value.length
+    ? t('llmOps.metaModelManagement.empty.filteredVendorsDescription')
+    : t('llmOps.metaModelManagement.empty.vendorsDescription')
+)
+
 function openVendorModelsDrawer(row) {
   selectedVendorId.value = row?.id ? String(row.id) : ''
   currentPage.value = 1
@@ -885,6 +959,40 @@ function errorMessage(error, fallback) {
 
 .vendor-search {
   @apply min-w-[10rem] sm:w-44;
+}
+
+.vendor-toolbar-summary {
+  @apply flex flex-wrap items-center gap-2 sm:justify-end;
+}
+
+.empty-state {
+  @apply flex flex-col items-center gap-3 px-4 py-10 text-center;
+}
+
+.empty-title {
+  @apply text-sm font-semibold text-slate-900;
+}
+
+.empty-copy {
+  @apply max-w-xl text-sm leading-6 text-slate-500;
+}
+
+.sync-action-icon {
+  @apply h-4 w-4;
+}
+
+.sync-action-icon.is-spinning {
+  animation: meta-sync-spin 0.9s linear infinite;
+}
+
+@keyframes meta-sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .summary-pill {

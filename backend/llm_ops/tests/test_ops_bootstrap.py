@@ -9,11 +9,12 @@ relies on:
    maintained overrides (``ChannelModelPrice.custom_*``,
    ``LLMModel.is_active``, ``PriceCollectionSource.is_enabled``).
 3. ``register_periodic_tasks`` exposes a single
-   ``llm_ops_official_collect`` entry, and the corresponding Celery
-   task is registered with the worker.
+   ``llm_ops_model_price_sync_agent`` entry, and the corresponding
+   Celery task is registered with the worker.
 """
 from __future__ import annotations
 
+import importlib
 from decimal import Decimal
 from unittest import mock
 
@@ -309,18 +310,18 @@ class LLMOpsPeriodicTasksTests(TestCase):
         self.assertEqual(
             names,
             [
-                "llm_ops_official_collect",
+                "llm_ops_model_price_sync_agent",
                 "llm_ops_meta_models_dev_sync",
             ],
         )
-        entry = TASK_REGISTRY._entries["llm_ops_official_collect"]
+        entry = TASK_REGISTRY._entries["llm_ops_model_price_sync_agent"]
         self.assertEqual(
-            entry["task"], "llm_ops.tasks.collect_official_model_prices"
+            entry["task"], "llm_ops.tasks.run_model_price_sync_agent"
         )
         self.assertTrue(entry["enabled"])
         self.assertEqual(
             entry["kwargs"],
-            {"provider_codes": None, "verify_source": True},
+            {"source_ids": None, "verify_source": True},
         )
         meta_entry = TASK_REGISTRY._entries["llm_ops_meta_models_dev_sync"]
         self.assertEqual(
@@ -346,15 +347,157 @@ class LLMOpsPeriodicTasksTests(TestCase):
             len(TASK_REGISTRY._entries), 2
         )
 
-    def test_collect_official_model_prices_task_is_registered(self):
+    def test_migration_preserves_disabled_legacy_price_sync_task(self):
+        from django.apps import apps
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        migration = importlib.import_module(
+            "llm_ops.migrations."
+            "0007_llmopsglobalconfig_price_sync_llm_config_uuid"
+        )
+        crontab = CrontabSchedule.objects.create(
+            minute="15",
+            hour="1,7,13,19",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_official_collect",
+            task="llm_ops.tasks.collect_official_model_prices",
+            crontab=crontab,
+            enabled=False,
+        )
+
+        migration.migrate_legacy_price_sync_beat_tasks(apps, None)
+
+        legacy = PeriodicTask.objects.get(name="llm_ops_official_collect")
+        migrated = PeriodicTask.objects.get(
+            name="llm_ops_model_price_sync_agent"
+        )
+        self.assertFalse(legacy.enabled)
+        self.assertFalse(migrated.enabled)
+        self.assertEqual(
+            migrated.task,
+            "llm_ops.tasks.run_model_price_sync_agent",
+        )
+        self.assertEqual(migrated.crontab_id, crontab.id)
+
+    def test_migration_preserves_enabled_legacy_price_sync_schedule(self):
+        from django.apps import apps
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        migration = importlib.import_module(
+            "llm_ops.migrations."
+            "0007_llmopsglobalconfig_price_sync_llm_config_uuid"
+        )
+        crontab = CrontabSchedule.objects.create(
+            minute="45",
+            hour="*/8",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_official_collect",
+            task="llm_ops.tasks.collect_official_model_prices",
+            crontab=crontab,
+            queue="pricing",
+            enabled=True,
+        )
+
+        migration.migrate_legacy_price_sync_beat_tasks(apps, None)
+
+        legacy = PeriodicTask.objects.get(name="llm_ops_official_collect")
+        migrated = PeriodicTask.objects.get(
+            name="llm_ops_model_price_sync_agent"
+        )
+        self.assertFalse(legacy.enabled)
+        self.assertTrue(migrated.enabled)
+        self.assertEqual(migrated.queue, "pricing")
+        self.assertEqual(migrated.crontab_id, crontab.id)
+
+    def test_migration_deletes_legacy_per_source_price_sync_tasks(self):
+        from django.apps import apps
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        migration = importlib.import_module(
+            "llm_ops.migrations."
+            "0007_llmopsglobalconfig_price_sync_llm_config_uuid"
+        )
+        crontab = CrontabSchedule.objects.create(
+            minute="0",
+            hour="*/6",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_price_source_collect_123",
+            task="llm_ops.tasks.collect_price_source_prices",
+            crontab=crontab,
+            enabled=True,
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_price_source_collect_custom",
+            task="llm_ops.tasks.collect_price_source_prices",
+            crontab=crontab,
+            enabled=True,
+        )
+
+        migration.migrate_legacy_price_sync_beat_tasks(apps, None)
+
+        self.assertFalse(
+            PeriodicTask.objects.filter(
+                name="llm_ops_price_source_collect_123",
+            ).exists()
+        )
+        self.assertTrue(
+            PeriodicTask.objects.filter(
+                name="llm_ops_price_source_collect_custom",
+            ).exists()
+        )
+
+    def test_model_price_sync_agent_task_is_registered(self):
         from core.celery import _lazy_autodiscover, app
 
         _lazy_autodiscover()
-        task = app.tasks.get("llm_ops.tasks.collect_official_model_prices")
+        task = app.tasks.get("llm_ops.tasks.run_model_price_sync_agent")
         self.assertIsNotNone(task)
-        expected_name = "llm_ops.tasks.collect_official_model_prices"
+        expected_name = "llm_ops.tasks.run_model_price_sync_agent"
         self.assertEqual(task.name, expected_name)
         self.assertTrue(task.acks_late)
+
+    def test_model_price_sync_agent_task_delegates_to_agent(self):
+        from llm_ops.tasks import run_model_price_sync_agent
+
+        with mock.patch(
+            "llm_ops.agents.model_price_sync.execute_model_price_sync_agent"
+        ) as mock_execute:
+            mock_execute.return_value = {"success": True, "succeeded": 1}
+            result = run_model_price_sync_agent(
+                source_ids=[1],
+                verify_source=False,
+            )
+        mock_execute.assert_called_once()
+        self.assertEqual(mock_execute.call_args.kwargs["source_ids"], [1])
+        self.assertFalse(mock_execute.call_args.kwargs["verify_source"])
+        self.assertEqual(result, {"success": True, "succeeded": 1})
+
+    def test_model_price_sync_agent_task_preserves_empty_source_ids(self):
+        from llm_ops.tasks import run_model_price_sync_agent
+
+        with mock.patch(
+            "llm_ops.agents.model_price_sync.execute_model_price_sync_agent"
+        ) as mock_execute:
+            mock_execute.return_value = {"success": True, "sources": 0}
+            result = run_model_price_sync_agent(
+                source_ids=[],
+                verify_source=True,
+            )
+        mock_execute.assert_called_once()
+        self.assertEqual(mock_execute.call_args.kwargs["source_ids"], [])
+        self.assertEqual(result, {"success": True, "sources": 0})
 
     def test_collect_official_model_prices_delegates_to_service(self):
         from llm_ops.tasks import collect_official_model_prices
@@ -376,16 +519,18 @@ class LLMOpsPeriodicTasksTests(TestCase):
     def test_collect_price_source_prices_delegates_to_code_sync(self):
         from llm_ops.tasks import collect_price_source_prices
 
-        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
+            name="Aliyun Official",
+            slug="aliyun-official",
             provider=provider,
             source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://openai.com/api/pricing/",
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -437,11 +582,11 @@ class LLMOpsPeriodicApplyTests(TestCase):
         discover_and_register()
         self.assertTrue(
             PeriodicTask.objects.filter(
-                name="llm_ops_official_collect"
+                name="llm_ops_model_price_sync_agent"
             ).exists()
         )
         original = PeriodicTask.objects.get(
-            name="llm_ops_official_collect"
+            name="llm_ops_model_price_sync_agent"
         )
         original.enabled = False
         original.save()
@@ -455,7 +600,10 @@ class LLMOpsPeriodicApplyTests(TestCase):
             "PeriodicTask.enabled must be preserved across re-registrations",
         )
         # Also confirm the registry was cleared and re-populated.
-        self.assertIn("llm_ops_official_collect", TASK_REGISTRY._entries)
+        self.assertIn(
+            "llm_ops_model_price_sync_agent",
+            TASK_REGISTRY._entries,
+        )
 
 
 class LLMOpsMockSeedCleanupTests(TestCase):

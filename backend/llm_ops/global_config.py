@@ -14,8 +14,11 @@ CRON_FIELD_PATTERN = re.compile(r"^[0-9*,/\-]+$")
 META_MODEL_SYNC_TASK_NAME = "llm_ops_meta_models_dev_sync"
 META_MODEL_SYNC_TASK = "llm_ops.tasks.sync_meta_models_from_models_dev"
 LEGACY_OFFICIAL_COLLECT_TASK_NAME = "llm_ops_official_collect"
+MODEL_PRICE_SYNC_AGENT_TASK_NAME = "llm_ops_model_price_sync_agent"
+MODEL_PRICE_SYNC_AGENT_TASK = "llm_ops.tasks.run_model_price_sync_agent"
 PRICE_SOURCE_TASK_PREFIX = "llm_ops_price_source_collect_"
 PRICE_SOURCE_TASK = "llm_ops.tasks.collect_price_source_prices"
+SUPPORTED_PRICE_SYNC_PROVIDER_CODES = ("aliyun", "aliyun-wanx")
 
 
 def price_source_task_name(source_id: int) -> str:
@@ -74,19 +77,23 @@ def normalize_source_ids(source_ids) -> list[int]:
     if not normalized:
         return []
     allowed_ids = set(
-        PriceCollectionSource.objects.filter(
-            id__in=normalized,
-            updates_model_prices=True,
-        ).values_list("id", flat=True)
+        price_sync_source_queryset()
+        .filter(id__in=normalized)
+        .values_list("id", flat=True)
     )
     return [source_id for source_id in normalized if source_id in allowed_ids]
 
 
-def validate_price_collection_source_ids(source_ids) -> list[int]:
+def validate_price_collection_source_ids(
+    source_ids,
+    *,
+    existing_source_ids: list[int] | None = None,
+) -> list[int]:
     """Validate and normalize user-selected source ids."""
     if not isinstance(source_ids, list):
         raise ValueError("Expected a list of source ids.")
 
+    existing_ids = set(existing_source_ids or [])
     normalized = []
     invalid_values = []
     for value in source_ids:
@@ -103,13 +110,14 @@ def validate_price_collection_source_ids(source_ids) -> list[int]:
         return []
 
     allowed_ids = set(
-        PriceCollectionSource.objects.filter(
-            id__in=normalized,
-            updates_model_prices=True,
-        ).values_list("id", flat=True)
+        price_sync_source_queryset()
+        .filter(id__in=normalized)
+        .values_list("id", flat=True)
     )
     missing_ids = [
-        source_id for source_id in normalized if source_id not in allowed_ids
+        source_id
+        for source_id in normalized
+        if source_id not in allowed_ids and source_id not in existing_ids
     ]
     if missing_ids:
         raise ValueError(
@@ -129,15 +137,46 @@ def validate_price_collection_source_ids(source_ids) -> list[int]:
 
 def selected_price_collection_sources(config):
     """Return sources selected by config, falling back to enabled sources."""
-    queryset = PriceCollectionSource.objects.filter(
-        updates_model_prices=True,
-    ).select_related("provider", "channel")
-    source_ids = normalize_source_ids(config.price_collection_source_ids)
+    queryset = price_sync_source_queryset().select_related(
+        "provider",
+        "channel",
+    )
+    raw_source_ids = config.price_collection_source_ids
+    source_ids = normalize_source_ids(raw_source_ids)
     if source_ids:
         queryset = queryset.filter(id__in=source_ids)
+    elif isinstance(raw_source_ids, list) and raw_source_ids:
+        queryset = queryset.none()
     else:
         queryset = queryset.filter(is_enabled=True)
     return list(queryset.order_by("source_category", "name", "id"))
+
+
+def price_sync_task_source_ids(config: LLMOpsGlobalConfig) -> list[int] | None:
+    """Return source ids for the Agent beat task.
+
+    ``None`` means "sync all enabled supported sources". An empty list means
+    a persisted explicit selection no longer contains supported sources, so
+    the scheduled Agent should do no work instead of broadening the scope.
+    """
+    raw_source_ids = config.price_collection_source_ids
+    source_ids = normalize_source_ids(raw_source_ids)
+    if source_ids:
+        return source_ids
+    if isinstance(raw_source_ids, list) and raw_source_ids:
+        return []
+    return None
+
+
+def price_sync_source_queryset():
+    """Return sources currently supported by runtime price sync."""
+    return PriceCollectionSource.objects.filter(
+        provider__code__in=SUPPORTED_PRICE_SYNC_PROVIDER_CODES,
+        source_category=(
+            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        ),
+        updates_model_prices=True,
+    )
 
 
 def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
@@ -147,9 +186,9 @@ def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
     path for code-defined default tasks, and they skip existing rows to
     preserve admin changes during deploy. This runtime sync is narrower:
     it only updates task names owned by ``LLMOpsGlobalConfig`` after an
-    explicit API/admin config save. Legacy registry tasks, including
-    ``llm_ops_official_collect``, are left untouched so operator-managed
-    schedules are not disabled or overwritten implicitly.
+    explicit API/admin config save. The legacy official collector task
+    is disabled on this explicit sync path so the new Agent cadence is
+    the single active price collection schedule.
     """
     from django_celery_beat.models import PeriodicTask, PeriodicTasks
 
@@ -173,39 +212,37 @@ def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
         },
     )
 
-    selected_sources = selected_price_collection_sources(config)
-    selected_source_ids = {source.id for source in selected_sources}
-    existing_source_task_names = PeriodicTask.objects.filter(
+    PeriodicTask.objects.update_or_create(
+        name=MODEL_PRICE_SYNC_AGENT_TASK_NAME,
+        defaults={
+            "task": MODEL_PRICE_SYNC_AGENT_TASK,
+            "args": json.dumps([]),
+            "kwargs": json.dumps(
+                {
+                    "source_ids": price_sync_task_source_ids(config),
+                    "verify_source": True,
+                }
+            ),
+            "crontab": price_crontab,
+            "interval": None,
+            "enabled": config.price_collection_enabled,
+        },
+    )
+
+    legacy_source_task_names = PeriodicTask.objects.filter(
         name__startswith=PRICE_SOURCE_TASK_PREFIX
     ).values_list("name", flat=True)
-    obsolete_task_names = []
-    for task_name in existing_source_task_names:
-        source_id = extract_price_source_id(task_name)
-        if source_id is None:
-            continue
-        if source_id not in selected_source_ids:
-            obsolete_task_names.append(task_name)
-
+    obsolete_task_names = [
+        task_name
+        for task_name in legacy_source_task_names
+        if extract_price_source_id(task_name) is not None
+    ]
     if obsolete_task_names:
         PeriodicTask.objects.filter(name__in=obsolete_task_names).delete()
 
-    for source in selected_sources:
-        PeriodicTask.objects.update_or_create(
-            name=price_source_task_name(source.id),
-            defaults={
-                "task": PRICE_SOURCE_TASK,
-                "args": json.dumps([]),
-                "kwargs": json.dumps(
-                    {"source_id": source.id, "verify_source": True}
-                ),
-                "crontab": price_crontab,
-                "interval": None,
-                "enabled": (
-                    config.price_collection_enabled
-                    and source.is_enabled
-                    and source.updates_model_prices
-                ),
-            },
-        )
+    PeriodicTask.objects.filter(
+        name=LEGACY_OFFICIAL_COLLECT_TASK_NAME,
+        task="llm_ops.tasks.collect_official_model_prices",
+    ).update(enabled=False)
 
     PeriodicTasks.update_changed()
