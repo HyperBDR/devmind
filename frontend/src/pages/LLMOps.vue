@@ -3,7 +3,7 @@
     <div class="h-full min-h-[calc(100vh-4rem)] bg-slate-50">
       <div class="flex h-full min-h-[calc(100vh-4rem)] w-full gap-0">
         <aside
-          class="fixed bottom-0 left-0 top-16 z-20 hidden w-72 overflow-hidden bg-slate-950 text-white shadow-sm lg:block"
+          class="fixed bottom-0 left-0 top-16 z-20 hidden w-72 flex-col overflow-hidden bg-slate-950 text-white shadow-sm lg:flex"
         >
           <div class="border-b border-slate-800 px-5 py-5">
             <p
@@ -19,47 +19,43 @@
             </p>
           </div>
 
-          <nav class="space-y-1 px-3 py-4">
-            <button
-              v-for="item in navItems"
-              :key="item.key"
-              type="button"
-              class="flex w-full items-center gap-2.5 rounded-lg py-2.5 pl-7 pr-3 text-left text-sm font-medium transition"
-              :class="
-                activeSection === item.key
-                  ? 'bg-agione-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:bg-slate-900 hover:text-white'
-              "
-              @click="activeSection = item.key"
-            >
-              <svg
-                class="nav-icon"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                viewBox="0 0 24 24"
+          <nav class="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+            <section v-for="group in navGroups" :key="group.key">
+              <p
+                class="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500"
               >
-                <path v-for="path in item.icon" :key="path" :d="path" />
-              </svg>
-              <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
-            </button>
+                {{ group.label }}
+              </p>
+              <div class="mt-2 space-y-1">
+                <button
+                  v-for="item in group.items"
+                  :key="item.key"
+                  type="button"
+                  class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition"
+                  :class="
+                    activeSection === item.key
+                      ? 'bg-agione-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:bg-slate-900 hover:text-white'
+                  "
+                  @click="activeSection = item.key"
+                >
+                  <svg
+                    class="nav-icon"
+                    aria-hidden="true"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    viewBox="0 0 24 24"
+                  >
+                    <path v-for="path in item.icon" :key="path" :d="path" />
+                  </svg>
+                  <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+                </button>
+              </div>
+            </section>
           </nav>
-
-          <div
-            class="border-t border-slate-800 px-5 py-4 text-xs text-slate-500"
-          >
-            <p>{{ t('llmOps.shell.defaultPlatform', { name: 'Agione' }) }}</p>
-            <p class="mt-1">
-              {{
-                t('llmOps.shell.priceSourceCount', {
-                  count: providerCollectionSources.length
-                })
-              }}
-            </p>
-          </div>
         </aside>
 
         <main
@@ -68,21 +64,30 @@
           <header class="border-b border-slate-200 px-5 py-3 lg:px-7">
             <div class="page-hero">
               <div class="page-hero-copy">
-                <div class="flex flex-wrap gap-2 lg:hidden">
-                  <button
-                    v-for="item in navItems"
-                    :key="item.key"
-                    type="button"
-                    class="rounded-lg px-3 py-2 text-xs font-semibold"
-                    :class="
-                      activeSection === item.key
-                        ? 'bg-agione-600 text-white'
-                        : 'bg-slate-100 text-slate-600'
-                    "
-                    @click="activeSection = item.key"
-                  >
-                    {{ item.label }}
-                  </button>
+                <div class="space-y-3 lg:hidden">
+                  <section v-for="group in navGroups" :key="group.key">
+                    <p
+                      class="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400"
+                    >
+                      {{ group.label }}
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                      <button
+                        v-for="item in group.items"
+                        :key="item.key"
+                        type="button"
+                        class="rounded-lg px-3 py-2 text-xs font-semibold"
+                        :class="
+                          activeSection === item.key
+                            ? 'bg-agione-600 text-white'
+                            : 'bg-slate-100 text-slate-600'
+                        "
+                        @click="activeSection = item.key"
+                      >
+                        {{ item.label }}
+                      </button>
+                    </div>
+                  </section>
                 </div>
                 <p
                   class="page-hero-eyebrow mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-agione-600 lg:mt-0"
@@ -789,32 +794,28 @@ const navItems = computed(() => [
     label: t('llmOps.nav.metaModels.label'),
     eyebrow: 'Meta Models',
     description: t('llmOps.nav.metaModels.description'),
-    icon: navIcons.metaModels,
-    badge: metaModels.value.length
+    icon: navIcons.metaModels
   },
   {
     key: 'providers',
     label: t('llmOps.nav.providers.label'),
     eyebrow: 'Sources',
     description: t('llmOps.nav.providers.description'),
-    icon: navIcons.providers,
-    badge: providerCollectionSources.value.length
+    icon: navIcons.providers
   },
   {
     key: 'channels',
     label: t('llmOps.nav.channels.label'),
     eyebrow: 'Channels',
     description: t('llmOps.nav.channels.description'),
-    icon: navIcons.channels,
-    badge: channels.value.length
+    icon: navIcons.channels
   },
   {
     key: 'reseller',
     label: t('llmOps.nav.reseller.label'),
     eyebrow: 'Reseller',
     description: t('llmOps.nav.reseller.description'),
-    icon: navIcons.reseller,
-    badge: agioneListingRows.value.length
+    icon: navIcons.reseller
   },
   {
     key: 'workflow',
@@ -845,6 +846,38 @@ const navItems = computed(() => [
     icon: navIcons.audit
   }
 ])
+
+function findNavItem(key) {
+  return navItems.value.find((item) => item.key === key)
+}
+
+function createNavGroup(key, labelKey, itemKeys) {
+  return {
+    key,
+    label: t(labelKey),
+    items: itemKeys.map(findNavItem).filter(Boolean)
+  }
+}
+
+const navGroups = computed(() =>
+  [
+    createNavGroup('overview', 'llmOps.navGroups.overview', ['monitor']),
+    createNavGroup('catalog', 'llmOps.navGroups.catalog', [
+      'metaModels',
+      'providers'
+    ]),
+    createNavGroup('distribution', 'llmOps.navGroups.distribution', [
+      'channels',
+      'reseller',
+      'workflow'
+    ]),
+    createNavGroup('governance', 'llmOps.navGroups.governance', [
+      'reconciler',
+      'audit',
+      'globalConfig'
+    ])
+  ].filter((group) => group.items.length > 0)
+)
 
 const activeNav = computed(
   () =>
