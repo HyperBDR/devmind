@@ -179,7 +179,8 @@
             </div>
 
             <div class="workflow-flow-join" aria-hidden="true">
-              <span></span>
+              <span class="workflow-flow-join-horizontal"></span>
+              <span class="workflow-flow-join-trunk"></span>
             </div>
 
             <div class="workflow-flow-split">
@@ -595,6 +596,16 @@ function errorMessage(error) {
 }
 
 .workflow-flowchart-body {
+  --workflow-arrow-width: 5.5rem;
+  --workflow-branch-gap: 4.5rem;
+  --workflow-branch-width: 28rem;
+  --workflow-elbow-offset: 16rem;
+  --workflow-flow-gap: 0.75rem;
+  --workflow-line-color: #bfdbfe;
+  --workflow-policy-node-half: 5.875rem;
+  --workflow-policy-node-width: 11.75rem;
+  --workflow-top-node-width: 9rem;
+  --workflow-top-row-width: 41rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
@@ -605,10 +616,15 @@ function errorMessage(error) {
   align-items: stretch;
   display: grid;
   grid-template-columns:
-    minmax(8rem, 9rem) auto minmax(8rem, 9rem) auto
-    minmax(8rem, 9rem);
-  gap: 0.75rem;
+    var(--workflow-top-node-width) var(--workflow-arrow-width)
+    var(--workflow-top-node-width) var(--workflow-arrow-width)
+    var(--workflow-top-node-width);
+  gap: var(--workflow-flow-gap);
   justify-content: center;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: var(--workflow-top-row-width);
+  width: 100%;
 }
 
 .workflow-flow-row.is-two {
@@ -626,7 +642,7 @@ function errorMessage(error) {
 
 .workflow-flow-split::before,
 .workflow-flow-split::after {
-  background: #bfdbfe;
+  background: var(--workflow-line-color);
   content: '';
   height: 1rem;
   left: 50%;
@@ -648,7 +664,7 @@ function errorMessage(error) {
 }
 
 .workflow-flow-split .workflow-flow-node {
-  max-width: 11.75rem;
+  max-width: var(--workflow-policy-node-width);
   width: 100%;
 }
 
@@ -656,11 +672,14 @@ function errorMessage(error) {
   display: none;
 }
 
+.workflow-flow-split.is-submit {
+  margin-bottom: 1rem;
+}
+
 .workflow-flow-elbow {
-  --workflow-elbow-offset: 16rem;
   height: 2rem;
   margin: -1rem auto;
-  max-width: 41rem;
+  max-width: var(--workflow-top-row-width);
   position: relative;
   width: 100%;
 }
@@ -668,7 +687,7 @@ function errorMessage(error) {
 .workflow-flow-elbow::before,
 .workflow-flow-elbow::after,
 .workflow-flow-elbow span {
-  background: #bfdbfe;
+  background: var(--workflow-line-color);
   content: '';
   position: absolute;
 }
@@ -696,70 +715,91 @@ function errorMessage(error) {
   width: 2px;
 }
 
+.workflow-flow-elbow span::after {
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid #2563eb;
+  bottom: -1px;
+  content: '';
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+}
+
 .workflow-flow-branches {
   display: grid;
-  gap: 4.5rem;
-  grid-template-columns: repeat(2, minmax(10.25rem, 11.75rem));
+  gap: var(--workflow-branch-gap);
+  grid-template-columns: repeat(
+    2,
+    minmax(0, var(--workflow-policy-node-width))
+  );
   justify-content: center;
-  position: relative;
-}
-
-.workflow-flow-branches::before {
-  background: #bfdbfe;
-  content: '';
-  height: 2px;
-  left: 22%;
-  position: absolute;
-  right: 22%;
-  top: -0.5rem;
-}
-
-.workflow-flow-join {
-  --workflow-join-offset: 11.25rem;
-  height: 2rem;
-  margin: -1rem auto;
-  max-width: 32rem;
+  margin-left: auto;
+  margin-right: auto;
+  max-width: var(--workflow-branch-width);
   position: relative;
   width: 100%;
 }
 
-.workflow-flow-join::before,
-.workflow-flow-join::after,
-.workflow-flow-join span,
-.workflow-flow-join span::before {
-  background: #bfdbfe;
+.workflow-flow-branches::before {
+  background: var(--workflow-line-color);
   content: '';
+  height: 2px;
+  left: var(--workflow-policy-node-half);
+  position: absolute;
+  right: var(--workflow-policy-node-half);
+  top: -1rem;
+}
+
+.workflow-flow-branches .workflow-flow-node {
+  position: relative;
+}
+
+.workflow-flow-branches .workflow-flow-node::before,
+.workflow-flow-branches .workflow-flow-node::after {
+  background: var(--workflow-line-color);
+  content: '';
+  height: 1rem;
+  left: 50%;
+  position: absolute;
+  transform: translateX(-50%);
+  width: 2px;
+}
+
+.workflow-flow-branches .workflow-flow-node::before {
+  top: -1rem;
+}
+
+.workflow-flow-branches .workflow-flow-node::after {
+  bottom: -1rem;
+}
+
+.workflow-flow-join {
+  height: 2rem;
+  margin: 0 auto;
+  max-width: var(--workflow-branch-width);
+  position: relative;
+  width: 100%;
+}
+
+.workflow-flow-join > span {
+  background: var(--workflow-line-color);
   position: absolute;
 }
 
-.workflow-flow-join::before {
+.workflow-flow-join-horizontal {
   height: 2px;
-  left: calc(50% - var(--workflow-join-offset));
-  right: calc(50% - var(--workflow-join-offset));
+  left: var(--workflow-policy-node-half);
+  right: var(--workflow-policy-node-half);
   top: 0;
 }
 
-.workflow-flow-join::after {
+.workflow-flow-join-trunk {
   bottom: 0;
   left: 50%;
   top: 0;
   transform: translateX(-50%);
   width: 2px;
-}
-
-.workflow-flow-join span,
-.workflow-flow-join span::before {
-  height: 0.75rem;
-  top: 0;
-  width: 2px;
-}
-
-.workflow-flow-join span {
-  left: calc(50% - var(--workflow-join-offset));
-}
-
-.workflow-flow-join span::before {
-  left: calc(var(--workflow-join-offset) + var(--workflow-join-offset));
 }
 
 .workflow-flow-node {
@@ -882,8 +922,9 @@ function errorMessage(error) {
   font-size: 0;
   font-weight: 900;
   justify-content: center;
-  min-width: 5.5rem;
+  min-width: 0;
   position: relative;
+  width: var(--workflow-arrow-width);
 }
 
 .workflow-flow-arrow::before {
@@ -904,19 +945,11 @@ function errorMessage(error) {
 
 @media (max-width: 1180px) {
   .workflow-flowchart-body {
+    --workflow-arrow-width: 4.75rem;
+    --workflow-elbow-offset: 15.25rem;
+    --workflow-top-row-width: 39.5rem;
     padding-left: 1rem;
     padding-right: 1rem;
-  }
-
-  .workflow-flow-elbow {
-    --workflow-elbow-offset: 15rem;
-    max-width: 39.5rem;
-  }
-
-  .workflow-flow-row {
-    grid-template-columns:
-      minmax(8rem, 9rem) auto minmax(8rem, 9rem) auto
-      minmax(8rem, 9rem);
   }
 
   .workflow-flow-row.is-two {
@@ -924,14 +957,6 @@ function errorMessage(error) {
         9.75rem,
         11.75rem
       );
-  }
-
-  .workflow-flow-branches {
-    grid-template-columns: repeat(2, minmax(10.25rem, 11.75rem));
-  }
-
-  .workflow-flow-arrow {
-    min-width: 4.75rem;
   }
 
   .workflow-toolbar {
@@ -981,6 +1006,10 @@ function errorMessage(error) {
 
   .workflow-flow-split .workflow-flow-node {
     max-width: 14rem;
+  }
+
+  .workflow-flow-split.is-submit {
+    margin-bottom: 0;
   }
 
   .workflow-flow-node {
