@@ -740,9 +740,7 @@
   "llmOps": {
     "shell": {
       "title": "LLM Operations",
-      "subtitle": "A dedicated view for pricing, channels, resale, and reconciliation",
-      "defaultPlatform": "Default platform: {name}",
-      "priceSourceCount": "Model price sources: {count}"
+      "subtitle": "A dedicated view for pricing, channels, resale, and reconciliation"
     },
     "toolbar": {
       "displayCurrency": "Display currency",
@@ -753,6 +751,12 @@
     "currency": {
       "cny": "CNY",
       "usd": "USD"
+    },
+    "navGroups": {
+      "overview": "Overview",
+      "catalog": "Models & Sources",
+      "distribution": "Channels & Resale",
+      "governance": "Governance"
     },
     "nav": {
       "monitor": {

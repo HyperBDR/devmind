@@ -750,9 +750,7 @@
   "llmOps": {
     "shell": {
       "title": "大模型运营管理",
-      "subtitle": "价格、渠道、转售与对账的独立运营视图",
-      "defaultPlatform": "默认平台：{name}",
-      "priceSourceCount": "模型价格源：{count}"
+      "subtitle": "价格、渠道、转售与对账的独立运营视图"
     },
     "toolbar": {
       "displayCurrency": "显示货币",
@@ -763,6 +761,12 @@
     "currency": {
       "cny": "CNY",
       "usd": "USD"
+    },
+    "navGroups": {
+      "overview": "运营概览",
+      "catalog": "模型与价格源",
+      "distribution": "渠道与挂售",
+      "governance": "治理与对账"
     },
     "nav": {
       "monitor": {
