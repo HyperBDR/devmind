@@ -144,13 +144,18 @@ def collect_price_source_prices(
     default_retry_delay=300,
     acks_late=True,
 )
-def sync_meta_models_from_models_dev_task(self) -> dict[str, int]:
+def sync_meta_models_from_models_dev_task(
+    self,
+    *,
+    source_url: str | None = None,
+) -> dict[str, int]:
     """Refresh canonical meta models from models.dev."""
     from .collection_services import sync_meta_models_from_models_dev
 
     logger.info("llm_ops.sync_meta_models_from_models_dev start")
     try:
-        results = sync_meta_models_from_models_dev()
+        kwargs = {"source_url": source_url} if source_url else {}
+        results = sync_meta_models_from_models_dev(**kwargs)
     except Exception as exc:
         logger.exception("llm_ops.sync_meta_models_from_models_dev failed")
         if self.request.retries < self.max_retries:

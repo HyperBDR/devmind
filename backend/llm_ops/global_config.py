@@ -1,0 +1,211 @@
+"""Runtime configuration helpers for LLM operations."""
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Optional
+
+from .models import LLMOpsGlobalConfig, PriceCollectionSource
+
+logger = logging.getLogger(__name__)
+
+CRON_FIELD_PATTERN = re.compile(r"^[0-9*,/\-]+$")
+META_MODEL_SYNC_TASK_NAME = "llm_ops_meta_models_dev_sync"
+META_MODEL_SYNC_TASK = "llm_ops.tasks.sync_meta_models_from_models_dev"
+LEGACY_OFFICIAL_COLLECT_TASK_NAME = "llm_ops_official_collect"
+PRICE_SOURCE_TASK_PREFIX = "llm_ops_price_source_collect_"
+PRICE_SOURCE_TASK = "llm_ops.tasks.collect_price_source_prices"
+
+
+def price_source_task_name(source_id: int) -> str:
+    """Return the beat task name for a price source."""
+    return f"{PRICE_SOURCE_TASK_PREFIX}{source_id}"
+
+
+def extract_price_source_id(task_name: str) -> Optional[int]:
+    """Return the source id encoded in a managed price task name."""
+    if not task_name.startswith(PRICE_SOURCE_TASK_PREFIX):
+        return None
+
+    suffix = task_name[len(PRICE_SOURCE_TASK_PREFIX) :]
+    try:
+        return int(suffix)
+    except ValueError:
+        return None
+
+
+def parse_cron(cron_expr: str):
+    """Parse a five-field cron expression into a CrontabSchedule."""
+    from django_celery_beat.models import CrontabSchedule
+
+    parts = (cron_expr or "").strip().split()
+    if len(parts) != 5:
+        return None
+    minute, hour, day_of_month, month_of_year, day_of_week = parts
+    obj, _created = CrontabSchedule.objects.get_or_create(
+        minute=minute,
+        hour=hour,
+        day_of_week=day_of_week,
+        day_of_month=day_of_month,
+        month_of_year=month_of_year,
+    )
+    return obj
+
+
+def is_valid_cron(cron_expr: str) -> bool:
+    """Return whether a five-field cron expression is structurally valid."""
+    parts = (cron_expr or "").strip().split()
+    if len(parts) != 5:
+        return False
+    return all(CRON_FIELD_PATTERN.match(part) for part in parts)
+
+
+def normalize_source_ids(source_ids) -> list[int]:
+    """Return enabled source ids that support model price updates."""
+    if not isinstance(source_ids, list):
+        return []
+    normalized = []
+    for value in source_ids:
+        try:
+            normalized.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if not normalized:
+        return []
+    allowed_ids = set(
+        PriceCollectionSource.objects.filter(
+            id__in=normalized,
+            updates_model_prices=True,
+        ).values_list("id", flat=True)
+    )
+    return [source_id for source_id in normalized if source_id in allowed_ids]
+
+
+def validate_price_collection_source_ids(source_ids) -> list[int]:
+    """Validate and normalize user-selected source ids."""
+    if not isinstance(source_ids, list):
+        raise ValueError("Expected a list of source ids.")
+
+    normalized = []
+    invalid_values = []
+    for value in source_ids:
+        try:
+            normalized.append(int(value))
+        except (TypeError, ValueError):
+            invalid_values.append(value)
+    if invalid_values:
+        raise ValueError(
+            "Invalid source id values: "
+            + ", ".join(str(value) for value in invalid_values)
+        )
+    if not normalized:
+        return []
+
+    allowed_ids = set(
+        PriceCollectionSource.objects.filter(
+            id__in=normalized,
+            updates_model_prices=True,
+        ).values_list("id", flat=True)
+    )
+    missing_ids = [
+        source_id for source_id in normalized if source_id not in allowed_ids
+    ]
+    if missing_ids:
+        raise ValueError(
+            "Unknown or unsupported source ids: "
+            + ", ".join(str(source_id) for source_id in missing_ids)
+        )
+
+    result = []
+    seen = set()
+    for source_id in normalized:
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        result.append(source_id)
+    return result
+
+
+def selected_price_collection_sources(config):
+    """Return sources selected by config, falling back to enabled sources."""
+    queryset = PriceCollectionSource.objects.filter(
+        updates_model_prices=True,
+    ).select_related("provider", "channel")
+    source_ids = normalize_source_ids(config.price_collection_source_ids)
+    if source_ids:
+        queryset = queryset.filter(id__in=source_ids)
+    else:
+        queryset = queryset.filter(is_enabled=True)
+    return list(queryset.order_by("source_category", "name", "id"))
+
+
+def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
+    """Create or update beat rows owned by the global config UI.
+
+    ``register_periodic_tasks`` and ``TASK_REGISTRY`` remain the bootstrap
+    path for code-defined default tasks, and they skip existing rows to
+    preserve admin changes during deploy. This runtime sync is narrower:
+    it only updates task names owned by ``LLMOpsGlobalConfig`` after an
+    explicit API/admin config save. Legacy registry tasks, including
+    ``llm_ops_official_collect``, are left untouched so operator-managed
+    schedules are not disabled or overwritten implicitly.
+    """
+    from django_celery_beat.models import PeriodicTask, PeriodicTasks
+
+    meta_crontab = parse_cron(config.meta_model_sync_cron)
+    price_crontab = parse_cron(config.price_collection_cron)
+    if meta_crontab is None or price_crontab is None:
+        logger.warning("llm_ops: skipped beat sync due to invalid cron")
+        return
+
+    PeriodicTask.objects.update_or_create(
+        name=META_MODEL_SYNC_TASK_NAME,
+        defaults={
+            "task": META_MODEL_SYNC_TASK,
+            "args": json.dumps([]),
+            "kwargs": json.dumps(
+                {"source_url": config.meta_model_sync_source_url}
+            ),
+            "crontab": meta_crontab,
+            "interval": None,
+            "enabled": config.meta_model_sync_enabled,
+        },
+    )
+
+    selected_sources = selected_price_collection_sources(config)
+    selected_source_ids = {source.id for source in selected_sources}
+    existing_source_task_names = PeriodicTask.objects.filter(
+        name__startswith=PRICE_SOURCE_TASK_PREFIX
+    ).values_list("name", flat=True)
+    obsolete_task_names = []
+    for task_name in existing_source_task_names:
+        source_id = extract_price_source_id(task_name)
+        if source_id is None:
+            continue
+        if source_id not in selected_source_ids:
+            obsolete_task_names.append(task_name)
+
+    if obsolete_task_names:
+        PeriodicTask.objects.filter(name__in=obsolete_task_names).delete()
+
+    for source in selected_sources:
+        PeriodicTask.objects.update_or_create(
+            name=price_source_task_name(source.id),
+            defaults={
+                "task": PRICE_SOURCE_TASK,
+                "args": json.dumps([]),
+                "kwargs": json.dumps(
+                    {"source_id": source.id, "verify_source": True}
+                ),
+                "crontab": price_crontab,
+                "interval": None,
+                "enabled": (
+                    config.price_collection_enabled
+                    and source.is_enabled
+                    and source.updates_model_prices
+                ),
+            },
+        )
+
+    PeriodicTasks.update_changed()

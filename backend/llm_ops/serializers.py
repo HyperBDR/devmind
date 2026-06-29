@@ -3,12 +3,18 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from .collectors.official import OFFICIAL_PROVIDER_CONFIGS
+from .global_config import (
+    is_valid_cron,
+    normalize_source_ids,
+    validate_price_collection_source_ids,
+)
 from .models import (
     AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
+    LLMOpsGlobalConfig,
     LLMModel,
     ModelPriceItem,
     LLMProvider,
@@ -56,6 +62,75 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
 
     def get_business_source_category(self, instance):
         return business_source_category_for_catalog(instance)
+
+
+class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
+    """Serializer for singleton LLM operations runtime configuration."""
+
+    selected_price_collection_sources = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LLMOpsGlobalConfig
+        fields = "__all__"
+        read_only_fields = (
+            "singleton_key",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        )
+        extra_kwargs = {
+            "feishu_app_secret": {
+                "write_only": True,
+                "required": False,
+                "allow_blank": True,
+            }
+        }
+
+    def validate_meta_model_sync_cron(self, value):
+        if not is_valid_cron(value):
+            raise serializers.ValidationError(
+                "Use a five-field cron expression."
+            )
+        return value
+
+    def validate_price_collection_cron(self, value):
+        if not is_valid_cron(value):
+            raise serializers.ValidationError(
+                "Use a five-field cron expression."
+            )
+        return value
+
+    def validate_price_collection_source_ids(self, value):
+        try:
+            return validate_price_collection_source_ids(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
+
+    def update(self, instance, validated_data):
+        secret_marker = object()
+        secret = validated_data.pop("feishu_app_secret", secret_marker)
+        if secret not in (secret_marker, ""):
+            instance.set_feishu_app_secret(secret)
+        return super().update(instance, validated_data)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["feishu_app_secret_configured"] = bool(
+            instance.feishu_app_secret
+        )
+        return data
+
+    def get_selected_price_collection_sources(self, instance):
+        source_ids = normalize_source_ids(
+            instance.price_collection_source_ids
+        )
+        if not source_ids:
+            return []
+        queryset = PriceCollectionSource.objects.filter(id__in=source_ids)
+        return PriceCollectionSourceSerializer(
+            queryset.order_by("name", "id"),
+            many=True,
+        ).data
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

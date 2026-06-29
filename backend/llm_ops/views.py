@@ -16,6 +16,7 @@ from .collection_services import (
     sync_yunce_model_prices,
 )
 from .constants import SUPPLIER_SOURCE_VENDOR_ALIASES
+from .global_config import sync_global_config_to_beat
 from .models import (
     AuditLog,
     ChannelModelPrice,
@@ -23,6 +24,7 @@ from .models import (
     ChannelPriceItem,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
+    LLMOpsGlobalConfig,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -44,6 +46,7 @@ from .serializers import (
     ChannelPriceItemSerializer,
     CollectedModelPriceHistorySerializer,
     CollectedModelPriceSnapshotSerializer,
+    LLMOpsGlobalConfigSerializer,
     LLMModelSerializer,
     LLMProviderSerializer,
     ManualPriceImportRequestSerializer,
@@ -253,6 +256,58 @@ class PriceCollectionSourceViewSet(
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class LLMOpsGlobalConfigAPIView(LLMOpsPermissionMixin, APIView):
+    """Read and update the singleton global LLM Ops configuration."""
+
+    def get(self, request):
+        config = LLMOpsGlobalConfig.get_solo()
+        serializer = LLMOpsGlobalConfigSerializer(config)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        config = LLMOpsGlobalConfig.get_solo()
+        before = snapshot_instance(config)
+        serializer = LLMOpsGlobalConfigSerializer(
+            config,
+            data=request.data,
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            instance = serializer.save(updated_by=request.user)
+            sync_global_config_to_beat(instance)
+            record_audit_log(
+                request=request,
+                action=AuditLog.ACTION_UPDATE,
+                category=AuditLog.CATEGORY_CONFIGURATION,
+                target=instance,
+                summary="Updated LLM Ops global configuration",
+                before=before,
+                after=snapshot_instance(instance),
+            )
+        output = LLMOpsGlobalConfigSerializer(instance)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        config = LLMOpsGlobalConfig.get_solo()
+        before = snapshot_instance(config)
+        with transaction.atomic():
+            config.delete()
+            instance = LLMOpsGlobalConfig.get_solo()
+            sync_global_config_to_beat(instance)
+            record_audit_log(
+                request=request,
+                action=AuditLog.ACTION_RESTORE,
+                category=AuditLog.CATEGORY_CONFIGURATION,
+                target=instance,
+                summary="Reset LLM Ops global configuration",
+                before=before,
+                after=snapshot_instance(instance),
+            )
+        serializer = LLMOpsGlobalConfigSerializer(instance)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class AuditLogViewSet(LLMOpsPermissionMixin, viewsets.ReadOnlyModelViewSet):

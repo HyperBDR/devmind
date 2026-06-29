@@ -11,6 +11,7 @@ from llm_ops.models import (
     ChannelModelPriceHistory,
     ChannelPriceItem,
     CollectedModelPriceSnapshot,
+    LLMOpsGlobalConfig,
     LLMModel,
     LLMProvider,
     ModelPriceItem,
@@ -104,6 +105,208 @@ class LLMOpsViewTests(TestCase):
             source=source,
             base_url="https://example.com/admin/api",
         )
+
+    def test_global_config_patch_syncs_periodic_tasks(self):
+        from django_celery_beat.models import PeriodicTask
+
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://models.dev/api.json",
+            updates_model_prices=True,
+        )
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "meta_model_sync_enabled": True,
+                "meta_model_sync_source_url": "https://models.dev/api.json",
+                "meta_model_sync_cron": "5 3 * * *",
+                "price_collection_enabled": True,
+                "price_collection_source_ids": [source.id],
+                "price_collection_cron": "10 */6 * * *",
+                "feishu_app_id": "cli_xxx",
+                "feishu_app_secret": "secret",
+                "feishu_approval_code": "approval_code",
+                "feishu_tenant_key": "tenant",
+                "notes": "global runtime config",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config = LLMOpsGlobalConfig.objects.get()
+        self.assertEqual(config.updated_by, self.user)
+        self.assertEqual(config.price_collection_source_ids, [source.id])
+        self.assertNotEqual(config.feishu_app_secret, "secret")
+        self.assertTrue(
+            config.feishu_app_secret.startswith(
+                LLMOpsGlobalConfig.ENCRYPTED_SECRET_PREFIX
+            )
+        )
+        self.assertEqual(config.get_feishu_app_secret(), "secret")
+        self.assertNotIn("feishu_app_secret", response.data)
+        self.assertTrue(response.data["feishu_app_secret_configured"])
+
+        meta_task = PeriodicTask.objects.get(
+            name="llm_ops_meta_models_dev_sync"
+        )
+        price_task = PeriodicTask.objects.get(
+            name=f"llm_ops_price_source_collect_{source.id}"
+        )
+        self.assertEqual(meta_task.crontab.minute, "5")
+        self.assertEqual(meta_task.crontab.hour, "3")
+        self.assertIn("models.dev", meta_task.kwargs)
+        self.assertEqual(price_task.crontab.minute, "10")
+        self.assertEqual(price_task.crontab.hour, "*/6")
+        self.assertIn(str(source.id), price_task.kwargs)
+
+    def test_global_config_blank_secret_preserves_existing_secret(self):
+        config = LLMOpsGlobalConfig.get_solo()
+        config.set_feishu_app_secret("existing-secret")
+        config.save()
+        stored_secret = config.feishu_app_secret
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "feishu_app_secret": "",
+                "notes": "updated without rotating the secret",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config.refresh_from_db()
+        self.assertEqual(config.feishu_app_secret, stored_secret)
+        self.assertEqual(config.get_feishu_app_secret(), "existing-secret")
+
+    def test_global_config_rejects_unknown_price_source_ids(self):
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {"price_collection_source_ids": [99999]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("price_collection_source_ids", response.data)
+
+    def test_global_config_sync_preserves_legacy_periodic_task(self):
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        legacy_crontab = CrontabSchedule.objects.create(
+            minute="0",
+            hour="4",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_official_collect",
+            task="llm_ops.tasks.collect_official_model_prices",
+            crontab=legacy_crontab,
+            kwargs='{"provider_codes": null, "verify_source": true}',
+            enabled=True,
+        )
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "price_collection_enabled": False,
+                "price_collection_cron": "10 */6 * * *",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        legacy_task = PeriodicTask.objects.get(
+            name="llm_ops_official_collect"
+        )
+        self.assertTrue(legacy_task.enabled)
+        self.assertEqual(legacy_task.crontab_id, legacy_crontab.id)
+
+    def test_global_config_sync_only_deletes_obsolete_source_tasks(self):
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        current_source = PriceCollectionSource.objects.create(
+            name="Current Source",
+            slug="current-source",
+            endpoint_url="https://current.example.com",
+            updates_model_prices=True,
+        )
+        obsolete_source = PriceCollectionSource.objects.create(
+            name="Obsolete Source",
+            slug="obsolete-source",
+            endpoint_url="https://obsolete.example.com",
+            updates_model_prices=True,
+        )
+        custom_crontab = CrontabSchedule.objects.create(
+            minute="0",
+            hour="8",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name=f"llm_ops_price_source_collect_{obsolete_source.id}",
+            task="llm_ops.tasks.collect_price_source_prices",
+            crontab=custom_crontab,
+            kwargs=f'{{"source_id": {obsolete_source.id}}}',
+            enabled=True,
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_price_source_collect_custom",
+            task="llm_ops.tasks.collect_price_source_prices",
+            crontab=custom_crontab,
+            kwargs='{"source_id": "custom"}',
+            enabled=True,
+        )
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "price_collection_enabled": True,
+                "price_collection_source_ids": [current_source.id],
+                "price_collection_cron": "10 */6 * * *",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            PeriodicTask.objects.filter(
+                name=(
+                    f"llm_ops_price_source_collect_{current_source.id}"
+                )
+            ).exists()
+        )
+        self.assertFalse(
+            PeriodicTask.objects.filter(
+                name=(
+                    f"llm_ops_price_source_collect_{obsolete_source.id}"
+                )
+            ).exists()
+        )
+        self.assertTrue(
+            PeriodicTask.objects.filter(
+                name="llm_ops_price_source_collect_custom"
+            ).exists()
+        )
+
+    def test_global_config_rejects_invalid_cron(self):
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {"meta_model_sync_cron": "invalid"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("meta_model_sync_cron", response.data)
 
     @patch("llm_ops.views.import_manual_model_prices")
     def test_manual_price_import_records_pricing_audit(self, mock_import):

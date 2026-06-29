@@ -1,6 +1,8 @@
 from django.conf import settings
 from django.db import models
 
+from hyperbdr_dashboard.encryption import encryption_service
+
 
 def _ensure_meta_model_from_model(instance, kwargs):
     """Copy the canonical model reference from the selected model."""
@@ -82,6 +84,110 @@ class PriceCollectionSource(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.slug})"
+
+
+class LLMOpsGlobalConfig(models.Model):
+    """Singleton runtime configuration for LLM operations."""
+
+    DEFAULT_META_MODEL_SYNC_CRON = "35 2 * * *"
+    DEFAULT_PRICE_COLLECTION_CRON = "15 1,7,13,19 * * *"
+    DEFAULT_META_MODEL_SOURCE_URL = "https://models.dev/api.json"
+    ENCRYPTED_SECRET_PREFIX = "fernet:"
+
+    singleton_key = models.CharField(
+        max_length=50,
+        unique=True,
+        default="default",
+        editable=False,
+    )
+    meta_model_sync_enabled = models.BooleanField(default=True)
+    meta_model_sync_source_url = models.URLField(
+        max_length=1000,
+        default=DEFAULT_META_MODEL_SOURCE_URL,
+    )
+    meta_model_sync_cron = models.CharField(
+        max_length=100,
+        default=DEFAULT_META_MODEL_SYNC_CRON,
+    )
+    price_collection_enabled = models.BooleanField(default=True)
+    price_collection_source_ids = models.JSONField(blank=True, default=list)
+    price_collection_cron = models.CharField(
+        max_length=100,
+        default=DEFAULT_PRICE_COLLECTION_CRON,
+    )
+    feishu_app_id = models.CharField(max_length=255, blank=True, default="")
+    feishu_app_secret = models.TextField(blank=True, default="")
+    feishu_approval_code = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    feishu_tenant_key = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    notes = models.TextField(blank=True, default="")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_global_config_updates",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "LLM Ops Global Config"
+        verbose_name_plural = "LLM Ops Global Config"
+
+    def __str__(self) -> str:
+        return "LLM Ops global config"
+
+    @classmethod
+    def encrypt_secret(cls, value: str) -> str:
+        """Encrypt a secret unless it already uses the storage format."""
+        if not value:
+            return ""
+        if value.startswith(cls.ENCRYPTED_SECRET_PREFIX):
+            return value
+        encrypted = encryption_service.encrypt(value)
+        return f"{cls.ENCRYPTED_SECRET_PREFIX}{encrypted}"
+
+    @classmethod
+    def decrypt_secret(cls, value: str) -> str:
+        """Decrypt a stored secret with plaintext fallback."""
+        if not value:
+            return ""
+        if value.startswith(cls.ENCRYPTED_SECRET_PREFIX):
+            encrypted = value[len(cls.ENCRYPTED_SECRET_PREFIX) :]
+            return encryption_service.decrypt(encrypted)
+        return encryption_service.decrypt(value)
+
+    def set_feishu_app_secret(self, value: str) -> None:
+        """Store the Feishu app secret in encrypted form."""
+        self.feishu_app_secret = self.encrypt_secret(value)
+
+    def get_feishu_app_secret(self) -> str:
+        """Return the decrypted Feishu app secret."""
+        return self.decrypt_secret(self.feishu_app_secret)
+
+    def save(self, *args, **kwargs):
+        """Encrypt sensitive credentials before writing to the database."""
+        if self.feishu_app_secret:
+            self.feishu_app_secret = self.encrypt_secret(
+                self.feishu_app_secret
+            )
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls):
+        """Return the singleton config row."""
+        instance, _created = cls.objects.get_or_create(
+            singleton_key="default"
+        )
+        return instance
 
 
 class LLMProvider(models.Model):
