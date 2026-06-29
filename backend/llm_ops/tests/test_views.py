@@ -1573,6 +1573,30 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("unknown node", str(response.data))
 
+    def test_resale_workflow_config_rejects_missing_publish_path(self):
+        platform = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione",
+        )
+        response = self.client.get(
+            reverse("resale-workflow-config-effective"),
+            {"platform": platform.id},
+        )
+        config = response.data["config"]
+        config["policies"]["auto_approve_enabled"] = False
+        config["policies"]["manual_confirm_required"] = False
+        config["policies"]["feishu_approval_enabled"] = False
+
+        patch_response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            {"config": config},
+            format="json",
+        )
+
+        self.assertEqual(patch_response.status_code, 400)
+        self.assertIn("publishing path", str(patch_response.data))
+
     def test_resale_listing_bulk_transition_publish_and_offline(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(

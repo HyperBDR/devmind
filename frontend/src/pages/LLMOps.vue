@@ -100,8 +100,8 @@
                   {{ activeNav.description }}
                 </p>
               </div>
-              <div class="page-hero-actions">
-                <div class="page-hero-group">
+              <div v-if="showHeroActions" class="page-hero-actions">
+                <div v-if="showGlobalToolbar" class="page-hero-group">
                   <div class="currency-control page-toolbar-control">
                     <span>{{ t('llmOps.toolbar.displayCurrency') }}</span>
                     <CompactSelect
@@ -668,6 +668,7 @@ import ResaleWorkflowConfigPanel from '@/components/llm-ops/ResaleWorkflowConfig
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { llmOpsApi } from '@/api/llmOps'
+import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 
 const FULL_LIST_PARAMS = { page_size: 10000 }
 const sectionKeys = new Set([
@@ -866,11 +867,7 @@ function resalePlatformOptionLabel(platform) {
   const typeLabel =
     platformTypeLabels[platform.platform_type] || platform.platform_type
   const regionLabel = platform.region_name || platform.region_code
-  const meta = [
-    typeLabel,
-    regionLabel,
-    environmentLabels[platform.environment]
-  ]
+  const meta = [typeLabel, regionLabel, environmentLabels[platform.environment]]
     .filter(Boolean)
     .join(' · ')
   return meta ? `${platform.name} · ${meta}` : platform.name
@@ -895,7 +892,11 @@ const agionePlatform = computed(
 )
 
 const showPlatformControl = computed(() =>
-  ['monitor', 'reseller', 'workflow'].includes(activeSection.value)
+  ['monitor', 'reseller'].includes(activeSection.value)
+)
+const showGlobalToolbar = computed(() => activeSection.value !== 'workflow')
+const showHeroActions = computed(
+  () => showGlobalToolbar.value || showPlatformControl.value
 )
 
 const workflowConfigForWorkspace = computed(
@@ -1368,7 +1369,7 @@ async function loadResaleWorkflowConfig(
   try {
     const response = await llmOpsApi.getResaleWorkflowConfig(platformId)
     if (String(platformId) === String(selectedResalePlatformId.value)) {
-      resaleWorkflowConfig.value = response.data
+      resaleWorkflowConfig.value = response.data?.data || response.data
     }
   } catch (error) {
     resaleWorkflowConfig.value = null
@@ -1603,16 +1604,30 @@ async function handleResaleWorkspacePublished(payload) {
     showInfo(t('llmOps.messages.noListingsToPublish'))
     return
   }
-  const items = payload.listings
-    .filter((item) => Number(item.priceIn) > 0 && Number(item.priceOut) > 0)
-    .map(mapWorkspaceListingToPayload)
+  const publishListings = payload.listings.filter(
+    (item) => Number(item.priceIn) > 0 && Number(item.priceOut) > 0
+  )
+  const items = publishListings.map(mapWorkspaceListingToPayload)
   if (!items.length) {
     showError(t('llmOps.messages.invalidListingPrices'))
     return
   }
   try {
-    await llmOpsApi.bulkUpsertResaleListings(items)
-    showSuccess(t('llmOps.messages.publishSubmitted', { count: items.length }))
+    const response = await llmOpsApi.bulkUpsertResaleListings(items)
+    const submittedListings = extract(response)
+    const autoConfirmedCount = await confirmAutoApprovedListings(
+      submittedListings,
+      publishListings
+    )
+    const messageKey = autoConfirmedCount
+      ? 'llmOps.messages.publishAutoConfirmed'
+      : 'llmOps.messages.publishSubmitted'
+    showSuccess(
+      t(messageKey, {
+        count: items.length,
+        confirmed: autoConfirmedCount
+      })
+    )
     resalePublishingDrawerOpen.value = false
     refreshLight()
   } catch (error) {
@@ -1622,6 +1637,53 @@ async function handleResaleWorkspacePublished(payload) {
       error?.message ||
       ''
     showError(message || t('llmOps.messages.submitFailed'))
+  }
+}
+
+async function confirmAutoApprovedListings(submittedListings, sourceListings) {
+  const policies = currentWorkflowPolicies()
+  if (!policies.auto_approve_enabled || !policies.auto_apply_after_approval) {
+    return 0
+  }
+  const limit = Number(
+    resaleWorkflowConfig.value?.config?.runtime?.auto_approve_max_margin_rate
+  )
+  if (!Number.isFinite(limit)) return 0
+
+  const publishIds = []
+  const updateIds = []
+  submittedListings.forEach((listing, index) => {
+    const source = sourceListings[index]
+    const margin = Number(source?.margin)
+    if (!Number.isFinite(margin) || margin > limit) return
+    if (listing.workflow_status === 'pending_publish') {
+      publishIds.push(listing.id)
+    } else if (listing.workflow_status === 'pending_update') {
+      updateIds.push(listing.id)
+    }
+  })
+
+  const actions = [
+    { ids: publishIds, action: 'confirm_publish' },
+    { ids: updateIds, action: 'confirm_update' }
+  ].filter((item) => item.ids.length)
+
+  await Promise.all(
+    actions.map((item) =>
+      llmOpsApi.bulkTransitionResaleListings({
+        platform: agionePlatform.value?.id,
+        listings: item.ids,
+        action: item.action
+      })
+    )
+  )
+  return publishIds.length + updateIds.length
+}
+
+function currentWorkflowPolicies() {
+  return {
+    ...DEFAULT_WORKFLOW_POLICIES,
+    ...(resaleWorkflowConfig.value?.config?.policies || {})
   }
 }
 
