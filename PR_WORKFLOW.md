@@ -101,6 +101,32 @@ Agent 必须避免重复评论。
 “合并建议”中写明 `可合并但验证不足`，列出需要 reviewer 重点确认的
 测试或运行结果。
 
+## 自动合并规则
+
+Agent 不应仅凭“Review 未发现异常”直接合并 PR。Review 结果只能说明
+审查未发现阻塞问题，不能替代 CI、测试、分支保护、CODEOWNERS 或必要
+的人类审批。
+
+当以下条件全部满足时，Agent 可以启用 auto-merge，或将 PR 标记为可
+自动合并：
+
+- Review 结果为 `APPROVE`。
+- 未发现 Critical 或 Important 问题。
+- CI、必需测试、lint、type check 和 build 全部通过。
+- 分支保护、CODEOWNERS 和必需审批均已满足。
+- PR 不涉及需要人工确认的高风险变更，例如权限、安全、数据库迁移、
+  生产部署、Celery 调度、账单采集或核心数据写入。
+
+以下情况禁止自动合并：
+
+- Review 结果为 `REQUEST_CHANGES` 或 `COMMENT`。
+- 验证信息不足，合并建议为 `可合并但验证不足`。
+- CI 或必需检查未完成、失败或被跳过。
+- 存在未解决评论，或 reviewer 明确要求人工确认。
+
+如果平台支持 GitHub auto-merge 或 merge queue，应优先启用平台能力，
+由分支保护决定最终是否合并，而不是由 Agent 绕过保护直接 merge。
+
 ## 审查目标
 
 1. 判断 PR 是否符合项目现有架构和编码规范。
