@@ -142,21 +142,28 @@
           </thead>
           <tbody>
             <tr
-              v-for="source in filteredSourceRows"
-              :key="source.id"
+              v-for="provider in filteredProviderRows"
+              :key="provider.id"
               class="cursor-pointer"
-              @click="selectedSource = source"
+              @click="selectedProvider = provider"
             >
               <td class="table-cell">
                 <p class="truncate font-medium text-slate-900">
-                  {{ source.name }}
+                  {{ provider.name }}
+                </p>
+                <p class="mt-1 truncate font-mono text-xs text-slate-400">
+                  {{ provider.code }}
                 </p>
               </td>
 
               <td class="table-cell">
-                <div class="flex justify-center">
-                  <span :class="['source-badge', source.category_tone]">
-                    {{ source.category_label }}
+                <div class="flex flex-wrap justify-center gap-1.5">
+                  <span
+                    v-for="category in provider.category_badges"
+                    :key="category.key"
+                    :class="['source-badge', category.tone]"
+                  >
+                    {{ category.label }}
                   </span>
                 </div>
               </td>
@@ -165,18 +172,25 @@
                 <p class="font-medium text-slate-900">
                   {{
                     t('llmOps.providerManagement.modelsCount', {
-                      count: source.covered_model_count
+                      count: provider.covered_model_count
+                    })
+                  }}
+                </p>
+                <p class="mt-1 text-xs text-slate-400">
+                  {{
+                    t('llmOps.providerManagement.sourcesCount', {
+                      count: provider.source_count
                     })
                   }}
                 </p>
               </td>
 
               <td class="table-cell">
-                <span :class="['status-pill', source.status_tone]">
-                  {{ source.status_label }}
+                <span :class="['status-pill', provider.status_tone]">
+                  {{ provider.status_label }}
                 </span>
                 <p class="mt-1 text-xs text-slate-400">
-                  {{ source.status_hint }}
+                  {{ provider.status_hint }}
                 </p>
               </td>
 
@@ -185,51 +199,12 @@
                   <OperationIconButton
                     icon="view"
                     :label="t('llmOps.providerManagement.actions.viewModels')"
-                    @click.stop="selectedSource = source"
-                  />
-                  <OperationIconButton
-                    v-if="source.can_manual_entry"
-                    icon="manual"
-                    :label="
-                      t('llmOps.providerManagement.actions.manualPricing')
-                    "
-                    tone="success"
-                    @click.stop="priceEntrySource = source"
-                  />
-                  <OperationIconButton
-                    icon="edit"
-                    :label="t('llmOps.providerManagement.actions.edit')"
-                    @click.stop="editingSource = source"
-                  />
-                  <OperationIconButton
-                    v-if="source.can_collect"
-                    :disabled="
-                      collectingSourceId === source.id || !source.is_enabled
-                    "
-                    icon="collect"
-                    :label="
-                      collectingSourceId === source.id
-                        ? t('llmOps.providerManagement.actions.submitting')
-                        : source.collect_action_label
-                    "
-                    tone="primary"
-                    @click.stop="collectSource(source)"
-                  />
-                  <OperationIconButton
-                    :disabled="deletingSourceId === source.id"
-                    icon="delete"
-                    :label="
-                      deletingSourceId === source.id
-                        ? t('llmOps.providerManagement.actions.deleting')
-                        : t('llmOps.providerManagement.actions.delete')
-                    "
-                    tone="danger"
-                    @click.stop="deleteSource(source)"
+                    @click.stop="selectedProvider = provider"
                   />
                 </div>
               </td>
             </tr>
-            <tr v-if="!filteredSourceRows.length">
+            <tr v-if="!filteredProviderRows.length">
               <td class="table-cell text-slate-500" colspan="5">
                 {{ t('llmOps.providerManagement.empty') }}
               </td>
@@ -270,6 +245,22 @@
       @delete="deleteSource"
       @refresh="emit('refresh')"
     />
+    <ProviderPricingDrawer
+      :provider="selectedProvider"
+      :models="selectedProviderModels"
+      :sources="selectedProviderSources"
+      :price-items="selectedProviderPriceItems"
+      :display-currency="displayCurrency"
+      :exchange-rate="exchangeRate"
+      :collecting-source-id="collectingSourceId"
+      @close="selectedProvider = null"
+      @view-source="openSourceFromProvider"
+      @manual-entry-source="priceEntrySource = $event"
+      @edit-source="editingSource = $event"
+      @toggle-source="toggleSource"
+      @collect-source="collectSource"
+      @delete-source="deleteSource"
+    />
   </section>
 </template>
 
@@ -281,6 +272,7 @@ import { useToast } from '@/composables/useToast'
 import ManualPriceImportModal from '@/components/llm-ops/ManualPriceImportModal.vue'
 import ManualPriceEntryModal from '@/components/llm-ops/ManualPriceEntryModal.vue'
 import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
+import ProviderPricingDrawer from '@/components/llm-ops/ProviderPricingDrawer.vue'
 import SourcePriceDrawer from '@/components/llm-ops/SourcePriceDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
@@ -320,6 +312,7 @@ const { showSuccess, showError } = useToast()
 const { t } = useI18n()
 
 const selectedSource = ref(null)
+const selectedProvider = ref(null)
 const editingSource = ref(null)
 const priceEntrySource = ref(null)
 const showPriceSourceModal = ref(false)
@@ -382,10 +375,78 @@ const sourceRows = computed(() =>
     })
 )
 
+const providerRows = computed(() =>
+  props.providers
+    .map((provider) => buildProviderRow(provider))
+    .filter(
+      (provider) =>
+        provider.covered_model_count > 0 ||
+        provider.source_count > 0 ||
+        provider.price_item_count > 0
+    )
+    .sort((left, right) => String(left.name).localeCompare(String(right.name)))
+)
+
+const unboundSourceRows = computed(() => {
+  const assignedSourceIds = new Set(
+    providerRows.value.flatMap((provider) => provider.source_ids)
+  )
+  return sourceRows.value.filter(
+    (source) => !assignedSourceIds.has(String(source.id))
+  )
+})
+
+const unboundProviderRow = computed(() => {
+  const sources = unboundSourceRows.value
+  if (!sources.length) return null
+
+  const provider = {
+    id: '__unbound_price_sources__',
+    code: 'unbound-price-sources',
+    name: t('llmOps.providerManagement.unboundSources.name'),
+    is_active: sources.some((source) => source.is_enabled),
+    is_unbound_sources: true
+  }
+  const categoryKeys = sourceCategoryKeysForProvider(provider, sources, [])
+  const status = providerStatus(provider, sources)
+
+  return {
+    ...provider,
+    category_badges: categoryKeys.map((key) => ({
+      key,
+      ...sourceCategory(key)
+    })),
+    category_keys: categoryKeys,
+    covered_model_count: 0,
+    meta_model_ids: [],
+    price_item_count: 0,
+    source_count: sources.length,
+    source_ids: sources.map((source) => String(source.id)),
+    status_label: status.label,
+    status_tone: status.tone,
+    status_hint: status.hint,
+    filter_is_active: status.filterActive,
+    search_text: [
+      provider.name,
+      provider.code,
+      t('llmOps.providerManagement.unboundSources.hint'),
+      ...sources.map((source) => source.search_text)
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+  }
+})
+
+const tableProviderRows = computed(() => [
+  ...providerRows.value,
+  ...(unboundProviderRow.value ? [unboundProviderRow.value] : [])
+])
+
 const sourceMetrics = computed(() => {
   const coveredMetaModelIds = new Set()
-  sourceRows.value.forEach((source) => {
-    source.meta_model_ids.forEach((id) => coveredMetaModelIds.add(id))
+  providerRows.value.forEach((provider) => {
+    provider.meta_model_ids.forEach((id) => coveredMetaModelIds.add(id))
   })
 
   const official = sourceRows.value.filter(
@@ -401,7 +462,7 @@ const sourceMetrics = computed(() => {
   return [
     {
       label: t('llmOps.providerManagement.metrics.sources.label'),
-      value: sourceRows.value.length,
+      value: providerRows.value.length,
       hint: t('llmOps.providerManagement.metrics.sources.hint')
     },
     {
@@ -425,29 +486,230 @@ const sourceMetrics = computed(() => {
   ]
 })
 
-const filteredSourceRows = computed(() => {
+const filteredProviderRows = computed(() => {
   const keyword = sourceSearch.value.trim().toLowerCase()
-  return sourceRows.value.filter((source) => {
-    if (sourceStatusFilter.value === 'active' && !source.is_enabled) {
+  return tableProviderRows.value.filter((provider) => {
+    if (sourceStatusFilter.value === 'active' && !provider.filter_is_active) {
       return false
     }
-    if (sourceStatusFilter.value === 'inactive' && source.is_enabled) {
+    if (sourceStatusFilter.value === 'inactive' && provider.filter_is_active) {
       return false
     }
     if (
       sourceCategoryFilter.value !== 'all' &&
-      source.business_source_category !== sourceCategoryFilter.value
+      !provider.category_keys.includes(sourceCategoryFilter.value)
     ) {
       return false
     }
     if (!keyword) return true
-    return source.search_text.includes(keyword)
+    return provider.search_text.includes(keyword)
   })
 })
 
 const hasSyncablePriceSources = computed(() =>
   sourceRows.value.some((source) => source.can_collect && source.is_enabled)
 )
+
+const selectedProviderModels = computed(() => {
+  if (!selectedProvider.value) return []
+  if (selectedProvider.value.is_unbound_sources) return []
+  return modelsForProvider(selectedProvider.value)
+})
+
+const selectedProviderPriceItems = computed(() => {
+  if (!selectedProvider.value) return []
+  if (selectedProvider.value.is_unbound_sources) return []
+  return priceItemsForProvider(selectedProvider.value)
+})
+
+const selectedProviderSources = computed(() => {
+  if (!selectedProvider.value) return []
+  if (selectedProvider.value.is_unbound_sources) {
+    return unboundSourceRows.value
+  }
+  const sourceIds = new Set(
+    selectedProviderPriceItems.value
+      .map((item) => String(item.source || ''))
+      .filter(Boolean)
+  )
+  return sourceRows.value.filter(
+    (source) =>
+      sourceMatchesProvider(source, selectedProvider.value) ||
+      sourceIds.has(String(source.id))
+  )
+})
+
+function buildProviderRow(provider) {
+  const models = modelsForProvider(provider)
+  const priceItems = priceItemsForProvider(provider)
+  const sources = sourcesForProvider(provider, priceItems)
+  const metaModelIds = metaModelIdsForProvider(models, priceItems)
+  const categoryKeys = sourceCategoryKeysForProvider(
+    provider,
+    sources,
+    priceItems
+  )
+  const status = providerStatus(provider, sources)
+
+  return {
+    ...provider,
+    category_badges: categoryKeys.map((key) => ({
+      key,
+      ...sourceCategory(key)
+    })),
+    category_keys: categoryKeys,
+    covered_model_count: metaModelIds.length,
+    meta_model_ids: metaModelIds,
+    price_item_count: priceItems.length,
+    source_count: sources.length,
+    source_ids: sources.map((source) => String(source.id)),
+    status_label: status.label,
+    status_tone: status.tone,
+    status_hint: status.hint,
+    filter_is_active: status.filterActive,
+    search_text: buildProviderSearchText(provider, models, sources, priceItems)
+  }
+}
+
+function modelsForProvider(provider) {
+  return props.models.filter((model) =>
+    recordMatchesModelVendor(model, provider)
+  )
+}
+
+function priceItemsForProvider(provider) {
+  const modelIds = new Set(
+    modelsForProvider(provider).map((model) => String(model.id))
+  )
+  return props.priceItems.filter(
+    (item) =>
+      item.is_current !== false &&
+      (modelIds.has(String(item.model)) ||
+        recordMatchesModelVendor(item, provider))
+  )
+}
+
+function recordMatchesModelVendor(record, provider) {
+  const vendorId = String(record.meta_model_vendor || '')
+  const vendorCode = String(record.meta_model_vendor_code || '')
+  if (vendorId || vendorCode) {
+    return (
+      vendorId === String(provider.id) ||
+      vendorCode === String(provider.code)
+    )
+  }
+  return (
+    String(record.provider || '') === String(provider.id) ||
+    String(record.provider_code || '') === String(provider.code)
+  )
+}
+
+function sourcesForProvider(provider, priceItems) {
+  const sourceIds = new Set(
+    priceItems.map((item) => String(item.source || '')).filter(Boolean)
+  )
+  return sourceRows.value.filter(
+    (source) =>
+      sourceMatchesProvider(source, provider) || sourceIds.has(String(source.id))
+  )
+}
+
+function sourceMatchesProvider(source, provider) {
+  return (
+    String(source.provider || '') === String(provider.id) ||
+    String(source.provider_code || '') === String(provider.code)
+  )
+}
+
+function metaModelIdsForProvider(models, priceItems) {
+  const ids = [
+    ...models.map((model) => model.meta_model || model.meta_model_code),
+    ...priceItems.map((item) => item.meta_model || item.meta_model_code)
+  ]
+    .map((id) => String(id || ''))
+    .filter(Boolean)
+  return Array.from(new Set(ids))
+}
+
+function sourceCategoryKeysForProvider(provider, sources, priceItems) {
+  const sourceKeys = sources
+    .filter(
+      (source) =>
+        provider?.is_unbound_sources || sourceMatchesProvider(source, provider)
+    )
+    .map((source) => source.business_source_category)
+  const keys = [
+    ...sourceKeys,
+    ...priceItems.map((item) => businessSourceCategory(item))
+  ].filter(Boolean)
+  const uniqueKeys = Array.from(new Set(keys))
+  return uniqueKeys.length
+    ? uniqueKeys.sort((left, right) => categoryRank(left) - categoryRank(right))
+    : ['unknown']
+}
+
+function providerStatus(provider, sources) {
+  const hasEnabledSource = sources.some((source) => source.is_enabled)
+  if (!provider.is_active || (sources.length > 0 && !hasEnabledSource)) {
+    return {
+      label: t('llmOps.providerManagement.sourceStatus.inactive.label'),
+      tone: 'muted',
+      hint: t('llmOps.providerManagement.sourceStatus.inactive.hint'),
+      filterActive: false
+    }
+  }
+  if (!sources.length) {
+    return {
+      label: t('llmOps.providerManagement.sourceStatus.pending.label'),
+      tone: 'warn',
+      hint: t('llmOps.providerManagement.sourcesCount', { count: 0 }),
+      filterActive: true
+    }
+  }
+  return {
+    label: t('llmOps.providerManagement.sourceStatus.active.label'),
+    tone: 'ok',
+    hint: t('llmOps.providerManagement.sourcesCount', {
+      count: sources.length
+    }),
+    filterActive: true
+  }
+}
+
+function buildProviderSearchText(provider, models, sources, priceItems) {
+  return [
+    provider.name,
+    provider.code,
+    provider.website,
+    ...sources.map((source) => source.search_text),
+    ...models.map((model) =>
+      [
+        model.name,
+        model.code,
+        model.meta_model_name,
+        model.meta_model_code,
+        model.provider_name,
+        model.meta_model_vendor_name
+      ]
+        .filter(Boolean)
+        .join(' ')
+    ),
+    ...priceItems.map((item) =>
+      [
+        item.meta_model_name,
+        item.meta_model_code,
+        item.source_name,
+        item.source_channel_name,
+        item.source_provider_name
+      ]
+        .filter(Boolean)
+        .join(' ')
+    )
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
 
 function buildSourceRow(source) {
   const relation = sourceRelation(source)
@@ -556,8 +818,28 @@ function handlePriceEntrySaved() {
   emit('refresh')
 }
 
+function openSourceFromProvider(source) {
+  selectedProvider.value = null
+  selectedSource.value = source
+}
+
+async function toggleSource(source) {
+  if (!source?.id) return
+  try {
+    await llmOpsApi.updateCollectionSource(source.id, {
+      is_enabled: !source.is_enabled
+    })
+    emit('refresh')
+  } catch (error) {
+    showError(
+      errorMessage(error, t('llmOps.providerManagement.errors.saveFailed'))
+    )
+  }
+}
+
 async function collectSource(source) {
-  if (!source.can_collect || !source.is_enabled) return
+  if (!source?.id || !source.can_collect || !source.is_enabled) return
+  if (String(collectingSourceId.value || '') === String(source.id)) return
   collectingSourceId.value = source.id
   try {
     const response = await llmOpsApi.collectCollectionSource(source.id)

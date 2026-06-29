@@ -1447,9 +1447,7 @@ def seed_yunce_supplier_price_demo(
     are left untouched: the supplier channel, sources and channel
     model prices are created with :func:`get_or_create` and never
     re-applied. In legacy mode the function falls back to
-    ``update_or_create`` so the explicit ``manage.py
-    seed_llm_ops_price_sheet`` command keeps its overwrite
-    semantics.
+    ``update_or_create`` for isolated fixture rebuilds.
     """
     stats = {
         "yunce_supplier_sources": 0,
@@ -2207,15 +2205,15 @@ def cleanup_orphan_meta_models() -> dict[str, int]:
 
 
 def reset_meta_models_canonical() -> dict[str, int]:
-    """Wipe meta models and rebuild them from the price sheet.
+    """Wipe meta models without repopulating replacement data.
 
     The reset is destructive: it deletes every ``MetaModel`` and
     cascades through ``LLMModel`` to ``ChannelModelPrice``,
     ``ChannelPriceItem`` and ``ChannelModelPriceHistory``. Manual
     price sources and supplier sources are kept by default so
-    operator-maintained catalogues survive. The canonical vendor
-    lookup is reapplied after the wipe so the rebuild never
-    reintroduces a supplier as a model vendor.
+    operator-maintained catalogues survive. Supplier-only aliases are
+    removed so future Agent sync or manual imports cannot reuse them as
+    model vendors.
     """
     stats = {
         "manual_sources_kept": 0,
@@ -2280,11 +2278,11 @@ def _delete_count(queryset) -> int:
 def is_llm_ops_database_empty() -> bool:
     """Return True when no llm_ops canonical rows exist yet.
 
-    Used by explicit bootstrap flows to decide whether the initial
-    price sheet still needs to run. Returns ``True`` only when every
-    canonical anchor (providers and models) is missing. Procurement
-    channels are operator-maintained resources and must not decide
-    whether the canonical model catalogue should be bootstrapped.
+    This is retained for isolated maintenance helpers and tests. It
+    returns ``True`` only when every canonical anchor (providers and
+    models) is missing. Procurement channels are operator-maintained
+    resources and must not decide whether the canonical model catalogue
+    is empty.
     """
     if LLMProvider.objects.exists():
         return False
@@ -2401,11 +2399,9 @@ def seed_initial_price_sheet() -> dict[str, int]:
     """Import the initial operations price sheet into LLM Ops tables.
 
     Backwards-compatible wrapper that historically called
-    ``update_or_create`` and overwrote all defaults. Existing
-    ``seed_llm_ops_price_sheet`` management command and downstream
-    callers continue to receive the same overwrite semantics. The
-    explicit bootstrap path can use
-    :func:`seed_initial_price_sheet_safely` instead.
+    ``update_or_create`` and overwrote all defaults. This helper is
+    kept for isolated tests and internal maintenance utilities; product
+    synchronization must use Agent sync or manual import instead.
     """
     return _seed_initial_price_sheet_core(preserve_manual_overrides=False)
 
@@ -2413,8 +2409,10 @@ def seed_initial_price_sheet() -> dict[str, int]:
 def seed_initial_price_sheet_safely() -> dict[str, int]:
     """Idempotent seed that preserves manually-maintained overrides.
 
-    Intended for explicit bootstrap commands on a fresh deploy.
-    Differs from :func:`seed_initial_price_sheet` in two ways:
+    This helper is retained for isolated tests and maintenance scripts.
+    Product startup paths must use Agent sync, manual entry or bulk
+    import instead. It differs from :func:`seed_initial_price_sheet` in
+    two ways:
 
     1. Models, sources and channel prices are created with
        :func:`~django.db.models.Manager.get_or_create` rather than
@@ -2430,9 +2428,9 @@ def seed_initial_price_sheet_safely() -> dict[str, int]:
 def seed_initial_price_sheet_if_empty() -> dict[str, int] | None:
     """Collect official model prices only on a fresh database.
 
-    Returns import stats when bootstrap actually happened, or ``None`` when
-    the database already contains llm_ops canonical rows. Safe to call from
-    management commands and deployment scripts.
+    Returns import stats when collection actually happened, or ``None``
+    when the database already contains llm_ops canonical rows. This is a
+    maintenance helper, not a product startup hook.
     """
     if not is_llm_ops_database_empty():
         return None
@@ -2443,7 +2441,7 @@ def seed_initial_catalog_from_official_sources(
     *,
     verify_source: bool = True,
 ) -> dict[str, int]:
-    """Bootstrap the model catalog by collecting official source data."""
+    """Collect official source data into an empty model catalogue."""
     before = {
         "providers": LLMProvider.objects.count(),
         "sources": PriceCollectionSource.objects.count(),

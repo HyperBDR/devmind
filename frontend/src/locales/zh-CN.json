@@ -1330,9 +1330,10 @@
       }
     },
     "providerManagement": {
-      "title": "供货商价格列表",
+      "title": "厂商模型价格",
       "modelsCount": "{count} 个元模型",
-      "empty": "暂无匹配的供货商价格源。",
+      "sourcesCount": "{count} 个价格源",
+      "empty": "暂无匹配的厂商。",
       "actions": {
         "bulkImport": "批量导入",
         "createSource": "新建价格源",
@@ -1351,14 +1352,14 @@
         "allStatuses": "全部状态",
         "allTypes": "全部类型",
         "inactiveOnly": "仅停用",
-        "searchPlaceholder": "搜索供货商、价格源、厂商或地址"
+        "searchPlaceholder": "搜索厂商、模型、价格源或地址"
       },
       "table": {
         "actions": "操作",
         "metaModels": "关联元模型",
-        "source": "供货商 / 价格源",
+        "source": "厂商",
         "status": "状态",
-        "type": "类型"
+        "type": "价格来源"
       },
       "metrics": {
         "metaModels": {
@@ -1370,8 +1371,8 @@
           "label": "原厂源"
         },
         "sources": {
-          "hint": "供货商与原厂价格目录",
-          "label": "价格源"
+          "hint": "已接入模型价格的元模型厂商",
+          "label": "厂商"
         },
         "supplierManual": {
           "hint": "供货商 {supplier} · 人工 {manual}",
@@ -1389,6 +1390,10 @@
         "metaProvider": "元模型厂商",
         "needsOwner": "待补充归属",
         "unbound": "未绑定来源"
+      },
+      "unboundSources": {
+        "hint": "尚未绑定厂商、模型或价格项的价格源",
+        "name": "未绑定价格源"
       },
       "sourceMode": {
         "aggregateSync": "聚合同步",
@@ -1441,6 +1446,7 @@
       },
       "errors": {
         "deleteFailed": "删除模型价格源失败",
+        "saveFailed": "保存模型价格源失败",
         "syncAllFailed": "提交全部价格源同步任务失败",
         "syncFailed": "提交价格同步任务失败"
       }

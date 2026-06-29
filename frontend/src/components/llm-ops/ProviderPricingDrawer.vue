@@ -260,6 +260,9 @@
                   icon="collect"
                   :label="source.collect_action_label || '采集价格'"
                   tone="primary"
+                  :disabled="
+                    String(collectingSourceId || '') === String(source.id)
+                  "
                   @click="$emit('collect-source', source)"
                 />
                 <OperationIconButton
@@ -315,6 +318,10 @@ const props = defineProps({
   exchangeRate: {
     type: Number,
     default: 7.15
+  },
+  collectingSourceId: {
+    type: [Number, String],
+    default: null
   }
 })
 
@@ -327,7 +334,7 @@ const priceSourceUrl = computed(() => {
 })
 
 const modelRows = computed(() =>
-  props.models.map((model) => buildModelRow(model))
+  props.models.flatMap((model) => buildModelRows(model))
 )
 
 const filteredModelRows = computed(() => {
@@ -356,7 +363,12 @@ const supplierModelCount = computed(
 )
 
 const pricedModelCount = computed(
-  () => modelRows.value.filter((row) => row.price_summary.length > 0).length
+  () =>
+    new Set(
+      modelRows.value
+        .filter((row) => row.price_summary.length > 0)
+        .map((row) => String(row.model.id))
+    ).size
 )
 
 function convertCurrencyAmount(value, sourceCurrency = 'USD') {
@@ -388,30 +400,55 @@ function hasValue(value) {
   return value !== null && value !== undefined && value !== ''
 }
 
-function buildModelRow(model) {
+function buildModelRows(model) {
   const items = currentPriceItemsForModel(model)
-  const fallbackSource = items[0] ? sourceForItem(items[0]) : null
-  const source = sourceForModel(model) || fallbackSource || {}
-  const relation = sourceRelation({
-    ...source,
-    provider_name: items[0]?.source_provider_name || source.provider_name,
-    channel_name: items[0]?.source_channel_name || source.channel_name
+  if (!items.length) {
+    return [buildModelRow(model, [], sourceForModel(model), 'model-source')]
+  }
+  const groupedItems = new Map()
+  items.forEach((item) => {
+    const key = String(item.source || item.source_name || 'unbound-source')
+    if (!groupedItems.has(key)) groupedItems.set(key, [])
+    groupedItems.get(key).push(item)
   })
-  const category = businessSourceCategory(items[0] || model, model, source)
+  return Array.from(groupedItems.entries()).map(([sourceKey, sourceItems]) =>
+    buildModelRow(
+      model,
+      sourceItems,
+      sourceForItem(sourceItems[0]) || sourceForModel(model),
+      sourceKey
+    )
+  )
+}
+
+function buildModelRow(model, items, source = null, sourceKey = 'source') {
+  const resolvedSource = source || {}
+  const relation = sourceRelation({
+    ...resolvedSource,
+    provider_name:
+      items[0]?.source_provider_name || resolvedSource.provider_name,
+    channel_name:
+      items[0]?.source_channel_name || resolvedSource.channel_name
+  })
+  const category = businessSourceCategory(
+    items[0] || resolvedSource || model,
+    model,
+    resolvedSource
+  )
   const priceSummary = summarizeModelPrices(model, items)
   const updatedAt = latestModelUpdatedAt(model, items)
   return {
-    key: `model-${model.id}`,
+    key: `model-${model.id}-${sourceKey}`,
     model,
     source_name:
       items[0]?.source_name ||
       model.source_name ||
-      source.name ||
+      resolvedSource.name ||
       '未绑定价格源',
     source_url:
       items[0]?.source_endpoint_url ||
       model.source_endpoint_url ||
-      source.endpoint_url ||
+      resolvedSource.endpoint_url ||
       '',
     source_relation: relation,
     source_category: category,
@@ -423,7 +460,7 @@ function buildModelRow(model) {
       model.name,
       model.code,
       modalityLabel(model.modality),
-      items[0]?.source_name || model.source_name || source.name,
+      items[0]?.source_name || model.source_name || resolvedSource.name,
       relation,
       category
     ]

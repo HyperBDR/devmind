@@ -5,9 +5,6 @@ and exercise the serializer + view queryset directly. This still
 verifies the data contract: every meta model returned to the UI is
 attributed to the company that built it.
 """
-from io import StringIO
-
-from django.core.management import call_command
 from django.test import TestCase
 
 from llm_ops.models import LLMProvider, MetaModel
@@ -19,8 +16,30 @@ class LLMOpsMetaModelsApiTests(TestCase):
     """The /v1/llm-ops/meta-models/ endpoint stays correct end-to-end."""
 
     def setUp(self):
-        out = StringIO()
-        call_command("reset_llm_ops_meta_models", "--yes", stdout=out)
+        aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
+        deepseek = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        siliconflow = LLMProvider.objects.create(
+            name="硅基流动",
+            code="siliconflow",
+        )
+        MetaModel.objects.create(
+            name="Qwen Plus",
+            code="qwen-plus",
+            vendor=aliyun,
+        )
+        MetaModel.objects.create(
+            name="DeepSeek V3",
+            code="deepseek-v3",
+            vendor=deepseek,
+        )
+        MetaModel.objects.create(
+            name="Legacy SiliconFlow Model",
+            code="legacy-siliconflow-model",
+            vendor=siliconflow,
+        )
 
     def _serialize(self, queryset):
         return list(MetaModelSerializer(queryset, many=True).data)
