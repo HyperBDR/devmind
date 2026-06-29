@@ -228,6 +228,98 @@ class YunceCollectionSyncTests(TestCase):
         )
 
     @patch("llm_ops.collection_services.collect_yunce_pricing_catalog")
+    def test_sync_model_prices_persists_usage_range_price_items(
+        self,
+        mock_collect,
+    ):
+        mock_collect.return_value = CollectedPricingCatalog(
+            source_url="https://llm.guohe-sh.com/",
+            total_models=1,
+            models=[
+                CollectedModelPricing(
+                    model_source="阿里云",
+                    model_type="文本模型",
+                    source_model_type="Text",
+                    name="Qwen Range",
+                    model_id="qwen-range",
+                    platform_id=101,
+                    mode="normal",
+                    provider="阿里云",
+                    billing_type="按量计费",
+                    billing_unit="CNY",
+                    currency="CNY",
+                    unit=1000000,
+                    billing_mode="",
+                    price_rows=[
+                        NormalizedPriceRow(
+                            kind="text_token",
+                            values={
+                                "input_token_range": "0-1000000",
+                                "output_token_range": "0-1000000",
+                                "input_price": 0.8,
+                                "output_price": 2,
+                            },
+                            raw={},
+                        ),
+                        NormalizedPriceRow(
+                            kind="text_token",
+                            values={
+                                "input_token_range": "1000000-2000000",
+                                "output_token_range": "1000000-2000000",
+                                "input_price": 1.6,
+                                "output_price": 4,
+                            },
+                            raw={},
+                        ),
+                    ],
+                    raw_price_info={},
+                    raw_detail={},
+                )
+            ],
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Range Source",
+            slug="aliyun-range-source",
+            source_type=PriceCollectionSource.SOURCE_TYPE_YUNCE,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            currency="CNY",
+            updates_model_prices=True,
+        )
+
+        sync_yunce_text_model_prices(
+            username="user",
+            password="secret",
+            source=source,
+        )
+
+        model = LLMModel.objects.get(code="qwen-range")
+        input_items = ModelPriceItem.objects.filter(
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            is_current=True,
+        ).order_by("tier_start")
+        output_items = ModelPriceItem.objects.filter(
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            is_current=True,
+        ).order_by("tier_start")
+        self.assertEqual(input_items.count(), 2)
+        self.assertEqual(output_items.count(), 2)
+        self.assertEqual(
+            input_items[0].tier_type,
+            ModelPriceItem.TIER_USAGE_RANGE,
+        )
+        self.assertEqual(input_items[0].tier_start, Decimal("0.000000"))
+        self.assertEqual(
+            input_items[0].tier_end,
+            Decimal("1000000.000000"),
+        )
+        self.assertEqual(input_items[1].unit_price, Decimal("1.600000"))
+        self.assertEqual(output_items[1].unit_price, Decimal("4.000000"))
+
+    @patch("llm_ops.collection_services.collect_yunce_pricing_catalog")
     def test_sync_model_prices_can_collect_without_promoting_prices(
         self,
         mock_collect,

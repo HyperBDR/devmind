@@ -1,15 +1,14 @@
 """Celery tasks for llm_ops background work.
 
-Exposes a single periodic-friendly task that wraps
-:func:`llm_ops.collection_services.sync_configured_official_model_prices`
-(the same routine used by the ``collect_llm_ops_official_prices``
-management command) so it can be scheduled by django_celery_beat.
+Exposes periodic-friendly tasks for model price collection. The global
+price sync task runs the service-runtime DeepAgent, which delegates
+fetching, parsing, validation, and persistence to platform collectors.
 
 The task is intentionally thin: it converts any exception into a
 logged failure and re-raises so Celery records the task as
 ``FAILURE``. Operators should rely on the ``PriceCollectionRun`` rows
-that ``sync_configured_official_model_prices`` writes for the
-authoritative per-source history.
+that platform collectors write for the authoritative per-source
+history.
 """
 from __future__ import annotations
 
@@ -18,6 +17,52 @@ import logging
 from celery import shared_task
 
 logger = logging.getLogger(__name__)
+
+
+@shared_task(
+    name="llm_ops.tasks.run_model_price_sync_agent",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
+)
+def run_model_price_sync_agent(
+    self,
+    *,
+    source_ids: list[int] | None = None,
+    verify_source: bool = True,
+) -> dict:
+    """Run the runtime Agent that syncs configured model price sources."""
+    from .agents.model_price_sync import execute_model_price_sync_agent
+
+    normalized_source_ids = (
+        None if source_ids is None else list(source_ids)
+    )
+    log_extra = {
+        "source_ids": normalized_source_ids,
+        "verify_source": verify_source,
+    }
+    logger.info("llm_ops.run_model_price_sync_agent start", extra=log_extra)
+    try:
+        result = execute_model_price_sync_agent(
+            source_ids=normalized_source_ids,
+            verify_source=verify_source,
+            source_task_id=getattr(self.request, "id", None),
+        )
+    except Exception as exc:
+        logger.exception(
+            "llm_ops.run_model_price_sync_agent failed",
+            extra=log_extra,
+        )
+        if verify_source and self.request.retries < self.max_retries:
+            raise self.retry(exc=exc) from exc
+        raise
+    logger.info(
+        "llm_ops.run_model_price_sync_agent done: %s",
+        result,
+        extra=log_extra,
+    )
+    return result
 
 
 @shared_task(

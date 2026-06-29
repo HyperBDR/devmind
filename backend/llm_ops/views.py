@@ -16,7 +16,10 @@ from .collection_services import (
     sync_yunce_model_prices,
 )
 from .constants import SUPPLIER_SOURCE_VENDOR_ALIASES
-from .global_config import sync_global_config_to_beat
+from .global_config import (
+    price_sync_source_queryset,
+    sync_global_config_to_beat,
+)
 from .models import (
     AuditLog,
     ChannelModelPrice,
@@ -76,7 +79,7 @@ from .services import (
     resolve_resale_listing_currency,
     sync_channel_price_items,
 )
-from .tasks import collect_price_source_prices
+from .tasks import collect_price_source_prices, run_model_price_sync_agent
 from .workflow_config import (
     merge_resale_workflow_config,
     validate_resale_workflow_config,
@@ -255,6 +258,50 @@ class PriceCollectionSourceViewSet(
                 )
             },
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    @action(detail=False, methods=["post"], url_path="sync-all")
+    def sync_all(self, request):
+        """Schedule the runtime Agent to sync all supported price sources."""
+        source_ids = list(
+            price_sync_source_queryset()
+            .filter(is_enabled=True)
+            .values_list("id", flat=True)
+        )
+        if not source_ids:
+            return Response(
+                {
+                    "detail": (
+                        "No enabled supported model price sources found."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        task = run_model_price_sync_agent.delay(
+            source_ids=source_ids,
+            verify_source=True,
+        )
+        record_audit_log(
+            request=request,
+            action=AuditLog.ACTION_SYNC,
+            category=AuditLog.CATEGORY_COLLECTION,
+            target="llm_ops.PriceCollectionSource",
+            summary="Scheduled model price source sync",
+            metadata={
+                "task_id": task.id,
+                "source_ids": source_ids,
+                "source_count": len(source_ids),
+            },
+        )
+        return Response(
+            {
+                "detail": "Model price source sync task scheduled.",
+                "task_id": task.id,
+                "source_ids": source_ids,
+                "source_count": len(source_ids),
+            },
+            status=status.HTTP_202_ACCEPTED,
         )
 
 

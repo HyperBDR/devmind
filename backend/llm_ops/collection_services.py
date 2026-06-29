@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from .collectors import CollectedModelPricing, CollectedPricingCatalog
 from .collectors.official import (
+    ALIYUN_LEGACY_PRICING_SOURCE_URLS,
     MODELS_DEV_API_URL,
     OFFICIAL_PROVIDER_CONFIGS,
     collect_official_pricing_catalog,
@@ -34,6 +35,8 @@ from .services import (
     price_role_for_source,
     update_aggregated_model_identity,
 )
+
+SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = ("aliyun", "aliyun-wanx")
 
 MODELS_DEV_META_SOURCE_PROVIDERS = {
     "alibaba",
@@ -432,8 +435,16 @@ def sync_configured_official_model_prices(
     verify_source: bool = True,
 ) -> dict[str, dict[str, int | str | list[str]]]:
     """Collect official prices for configured supported providers."""
+    selected_provider_codes = (
+        provider_codes or list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    )
+    selected_provider_codes = [
+        code
+        for code in selected_provider_codes
+        if code in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES
+    ]
     queryset = LLMProvider.objects.filter(
-        code__in=provider_codes or OFFICIAL_PROVIDER_CONFIGS.keys(),
+        code__in=selected_provider_codes,
         is_active=True,
     ).order_by("code")
     results = {}
@@ -842,14 +853,16 @@ def official_source_url(
 ) -> str:
     """Return the effective official source URL for collection."""
     endpoint_url = source.endpoint_url or config.source_url
-    broken_urls = {
-        "aliyun-wanx": {
-            "https://help.aliyun.com/zh/model-studio/model-price",
-        },
-    }
-    if endpoint_url in broken_urls.get(provider.code, set()):
+    if is_legacy_aliyun_pricing_url(provider.code, endpoint_url):
         return config.source_url
     return endpoint_url
+
+
+def is_legacy_aliyun_pricing_url(provider_code: str, url: str) -> bool:
+    """Return whether a persisted Aliyun URL should follow current config."""
+    if provider_code not in {"aliyun", "aliyun-wanx"}:
+        return False
+    return url in ALIYUN_LEGACY_PRICING_SOURCE_URLS
 
 
 def upsert_collected_model(
@@ -1731,7 +1744,10 @@ def ensure_official_source(*, provider: LLMProvider):
             "不做跨币种换算。"
         ),
     }
-    if not source.endpoint_url:
+    if not source.endpoint_url or is_legacy_aliyun_pricing_url(
+        provider.code,
+        source.endpoint_url,
+    ):
         desired_fields["endpoint_url"] = config.source_url
     for field, value in desired_fields.items():
         if getattr(source, field) != value:

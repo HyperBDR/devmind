@@ -35,6 +35,10 @@ export const llmOpsApi = {
     return apiClient.post(`${base}/collection-sources/${id}/collect/`)
   },
 
+  syncAllCollectionSources() {
+    return apiClient.post(`${base}/collection-sources/sync-all/`)
+  },
+
   getGlobalConfig() {
     return apiClient.get(`${base}/global-config/`)
   },

@@ -16,10 +16,10 @@ from celery.schedules import crontab
 from core.periodic_registry import TASK_REGISTRY
 
 
-# Cadence for the official price collector. The defaults are
-# deliberately conservative: 4 times a day is enough for LLM
-# providers whose prices change at most weekly, and a single nightly
-# run is plenty for the supplementary snapshots used by the UI.
+# Cadence for the model price sync Agent. The defaults are deliberately
+# conservative: 4 times a day is enough for LLM providers whose prices
+# change at most weekly, and a single nightly run is plenty for the
+# supplementary snapshots used by the UI.
 DEFAULT_OFFICIAL_COLLECT_HOUR = os.getenv(
     "LLM_OPS_OFFICIAL_COLLECT_HOURS",
     "1,7,13,19",
@@ -50,12 +50,13 @@ def _parse_int_list(raw: str, fallback: list[int]) -> list[int]:
 def register_periodic_tasks() -> None:
     """Add llm_ops periodic tasks to the global registry.
 
-    Adds a single ``llm_ops_official_collect`` task that calls
-    :func:`llm_ops.tasks.collect_official_model_prices` with no
-    provider filter and ``verify_source=True``. The schedule is a
-    crontab; cadence is read from the ``LLM_OPS_OFFICIAL_COLLECT_HOURS``
-    and ``LLM_OPS_OFFICIAL_COLLECT_MINUTE`` env vars so operators can
-    tune it without a code change.
+    Adds a single ``llm_ops_model_price_sync_agent`` task that calls
+    :func:`llm_ops.tasks.run_model_price_sync_agent`. The Agent reads
+    ``LLMOpsGlobalConfig`` at runtime and delegates persistence to the
+    platform collectors. The schedule is a crontab; cadence is read
+    from the ``LLM_OPS_OFFICIAL_COLLECT_HOURS`` and
+    ``LLM_OPS_OFFICIAL_COLLECT_MINUTE`` env vars so operators can tune
+    it without a code change.
     """
     hours = _parse_int_list(
         DEFAULT_OFFICIAL_COLLECT_HOUR,
@@ -68,11 +69,11 @@ def register_periodic_tasks() -> None:
     minute = max(0, min(minute, 59))
 
     TASK_REGISTRY.add(
-        name="llm_ops_official_collect",
-        task="llm_ops.tasks.collect_official_model_prices",
+        name="llm_ops_model_price_sync_agent",
+        task="llm_ops.tasks.run_model_price_sync_agent",
         schedule=crontab(hour=",".join(str(h) for h in hours), minute=minute),
         args=(),
-        kwargs={"provider_codes": None, "verify_source": True},
+        kwargs={"source_ids": None, "verify_source": True},
         queue=None,
         enabled=True,
     )

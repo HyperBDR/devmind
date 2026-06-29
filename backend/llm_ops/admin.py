@@ -30,6 +30,7 @@ class LLMOpsGlobalConfigAdmin(admin.ModelAdmin):
         "singleton_key",
         "meta_model_sync_enabled",
         "price_collection_enabled",
+        "price_sync_llm_config_uuid",
         "updated_by",
         "updated_at",
     )

@@ -1040,6 +1040,7 @@
         "noPriceSources": "暂无可用于自动采集的模型价格源。"
       },
       "errors": {
+        "llmConfigLoad": "加载 LLM 配置失败",
         "loadFailed": "加载全局配置失败",
         "resetFailed": "恢复默认配置失败",
         "saveFailed": "保存全局配置失败",
@@ -1048,6 +1049,7 @@
       "fields": {
         "approvalCode": "审批定义 Code",
         "cron": "执行周期",
+        "llmConfig": "Agent 使用的 LLM 配置",
         "sourceUrl": "数据源 URL",
         "updatedAt": "最近更新"
       },
@@ -1061,6 +1063,10 @@
       "messages": {
         "reset": "全局配置已恢复默认值",
         "saved": "全局配置已保存，采集任务已同步"
+      },
+      "llmConfig": {
+        "default": "使用默认启用的管理员 LLM 配置",
+        "description": "模型价格同步 Agent 需要 LLM 辅助抽取时使用该配置。"
       },
       "metaSync": {
         "description": "同步模型厂商、模型族和能力标签。",
@@ -1180,8 +1186,12 @@
         "fallbackTitle": "厂商元模型"
       },
       "empty": {
+        "filteredVendorsDescription": "调整搜索条件后再查看匹配的元模型厂商。",
+        "filteredVendorsTitle": "没有匹配的厂商",
         "models": "当前厂商下暂无符合条件的元模型。",
-        "vendors": "暂无符合条件的元模型厂商。"
+        "vendors": "暂无符合条件的元模型厂商。",
+        "vendorsDescription": "点击同步后，平台会从 models.dev 拉取真实元模型并写入元模型库。",
+        "vendorsTitle": "暂无元模型厂商"
       },
       "errors": {
         "sync": "同步元模型失败"
@@ -1328,6 +1338,7 @@
         "manualPricing": "手工录价",
         "notSupported": "暂不支持",
         "submitting": "提交中",
+        "syncAllPrices": "同步全部价格源",
         "syncPrice": "同步价格",
         "viewModels": "查看元模型"
       },
@@ -1420,11 +1431,13 @@
       },
       "messages": {
         "deleted": "模型价格源已删除",
+        "syncAllSubmitted": "{count} 个价格源同步任务已提交{taskId}",
         "syncSubmitted": "{name} 同步任务已提交{taskId}",
         "taskId": "（{taskId}）"
       },
       "errors": {
         "deleteFailed": "删除模型价格源失败",
+        "syncAllFailed": "提交全部价格源同步任务失败",
         "syncFailed": "提交价格同步任务失败"
       }
     },

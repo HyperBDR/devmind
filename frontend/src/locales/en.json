@@ -1030,6 +1030,7 @@
         "noPriceSources": "No model price sources are available for automatic collection."
       },
       "errors": {
+        "llmConfigLoad": "Failed to load LLM configurations",
         "loadFailed": "Failed to load global settings",
         "resetFailed": "Failed to restore default settings",
         "saveFailed": "Failed to save global settings",
@@ -1038,6 +1039,7 @@
       "fields": {
         "approvalCode": "Approval definition code",
         "cron": "Schedule",
+        "llmConfig": "Agent LLM configuration",
         "sourceUrl": "Source URL",
         "updatedAt": "Last updated"
       },
@@ -1051,6 +1053,10 @@
       "messages": {
         "reset": "Global settings restored to defaults",
         "saved": "Global settings saved and collection tasks synced"
+      },
+      "llmConfig": {
+        "default": "Use default active admin LLM config",
+        "description": "Used by the model price sync Agent when it needs LLM-assisted extraction."
       },
       "metaSync": {
         "description": "Sync model providers, model families, and capability tags.",
@@ -1170,8 +1176,12 @@
         "fallbackTitle": "Provider meta models"
       },
       "empty": {
+        "filteredVendorsDescription": "Adjust the search filters to find matching meta model providers.",
+        "filteredVendorsTitle": "No matching providers",
         "models": "No meta models match the current filters for this provider.",
-        "vendors": "No meta model providers match the current filters."
+        "vendors": "No meta model providers match the current filters.",
+        "vendorsDescription": "Sync from models.dev to populate the platform meta model library.",
+        "vendorsTitle": "No meta model providers yet"
       },
       "errors": {
         "sync": "Failed to sync meta models"
@@ -1318,6 +1328,7 @@
         "manualPricing": "Manual pricing",
         "notSupported": "Not supported",
         "submitting": "Submitting",
+        "syncAllPrices": "Sync all prices",
         "syncPrice": "Sync prices",
         "viewModels": "View meta models"
       },
@@ -1410,11 +1421,13 @@
       },
       "messages": {
         "deleted": "Model price source deleted",
+        "syncAllSubmitted": "{count} price source sync tasks submitted{taskId}",
         "syncSubmitted": "{name} sync task submitted{taskId}",
         "taskId": " ({taskId})"
       },
       "errors": {
         "deleteFailed": "Failed to delete model price source",
+        "syncAllFailed": "Failed to submit model price source sync task",
         "syncFailed": "Failed to submit price sync task"
       }
     },

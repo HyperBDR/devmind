@@ -25,6 +25,34 @@
         </div>
         <div class="provider-toolbar-actions">
           <button
+            class="btn-secondary btn-action-sync"
+            type="button"
+            :disabled="syncingAllSources || !hasSyncablePriceSources"
+            @click="syncAllPriceSources"
+          >
+            <svg
+              class="source-primary-icon"
+              aria-hidden="true"
+              :class="{ 'is-spinning': syncingAllSources }"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+              <path d="M3 16v5h5" />
+              <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+            {{
+              syncingAllSources
+                ? t('llmOps.providerManagement.actions.submitting')
+                : t('llmOps.providerManagement.actions.syncAllPrices')
+            }}
+          </button>
+          <button
             class="btn-secondary btn-action-import"
             type="button"
             @click="showManualImportModal = true"
@@ -297,10 +325,13 @@ const priceEntrySource = ref(null)
 const showPriceSourceModal = ref(false)
 const showManualImportModal = ref(false)
 const collectingSourceId = ref(null)
+const syncingAllSources = ref(false)
 const deletingSourceId = ref(null)
 const sourceSearch = ref('')
 const sourceCategoryFilter = ref('all')
 const sourceStatusFilter = ref('all')
+
+const supportedPriceSyncProviderCodes = new Set(['aliyun', 'aliyun-wanx'])
 
 const sourceCategoryFilterOptions = computed(() => [
   {
@@ -413,6 +444,10 @@ const filteredSourceRows = computed(() => {
     return source.search_text.includes(keyword)
   })
 })
+
+const hasSyncablePriceSources = computed(() =>
+  sourceRows.value.some((source) => source.can_collect && source.is_enabled)
+)
 
 function buildSourceRow(source) {
   const relation = sourceRelation(source)
@@ -542,6 +577,31 @@ async function collectSource(source) {
     )
   } finally {
     collectingSourceId.value = null
+  }
+}
+
+async function syncAllPriceSources() {
+  if (!hasSyncablePriceSources.value) return
+  syncingAllSources.value = true
+  try {
+    const response = await llmOpsApi.syncAllCollectionSources()
+    const taskId = response?.data?.task_id
+    const count = response?.data?.source_count || 0
+    showSuccess(
+      t('llmOps.providerManagement.messages.syncAllSubmitted', {
+        count,
+        taskId: taskId
+          ? t('llmOps.providerManagement.messages.taskId', { taskId })
+          : ''
+      })
+    )
+    emit('refresh')
+  } catch (error) {
+    showError(
+      errorMessage(error, t('llmOps.providerManagement.errors.syncAllFailed'))
+    )
+  } finally {
+    syncingAllSources.value = false
   }
 }
 
@@ -705,8 +765,11 @@ function sourceStatus(source, latestRun) {
 }
 
 function canCollectSource(source) {
+  const providerCode = source.provider_code || source.provider?.code || ''
   return Boolean(
-    source.provider && source.source_category === 'official_provider'
+    source.provider &&
+      source.source_category === 'official_provider' &&
+      supportedPriceSyncProviderCodes.has(providerCode)
   )
 }
 
@@ -859,6 +922,20 @@ function errorMessage(error, fallback) {
 
 .source-primary-icon {
   @apply h-4 w-4 shrink-0;
+}
+
+.source-primary-icon.is-spinning {
+  animation: source-sync-spin 0.9s linear infinite;
+}
+
+@keyframes source-sync-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .btn-secondary {

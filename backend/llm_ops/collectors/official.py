@@ -33,6 +33,13 @@ MODELS_DEV_PROVIDER_KEYS = {
     "google": ("google",),
     "openai": ("openai",),
 }
+ALIYUN_PRICING_SOURCE_URL = (
+    "https://help.aliyun.com/zh/model-studio/model-pricing"
+)
+ALIYUN_LEGACY_PRICING_SOURCE_URLS = {
+    "https://help.aliyun.com/zh/model-studio/model-price",
+    "https://help.aliyun.com/zh/model-studio/models",
+}
 
 CACHE_INPUT_COST_KEYS = (
     "cache_input",
@@ -407,7 +414,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
     "aliyun": OfficialProviderConfig(
         provider_code="aliyun",
         provider_label="阿里云百炼",
-        source_url="https://help.aliyun.com/zh/model-studio/models",
+        source_url=ALIYUN_PRICING_SOURCE_URL,
         currency="CNY",
         models=(
             OfficialPriceSpec(
@@ -498,7 +505,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
     "aliyun-wanx": OfficialProviderConfig(
         provider_code="aliyun-wanx",
         provider_label="阿里云通义万相",
-        source_url="https://help.aliyun.com/zh/model-studio/models",
+        source_url=ALIYUN_PRICING_SOURCE_URL,
         currency="CNY",
         models=(
             OfficialPriceSpec(

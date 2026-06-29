@@ -115,6 +115,11 @@ class LLMOpsGlobalConfig(models.Model):
         max_length=100,
         default=DEFAULT_PRICE_COLLECTION_CRON,
     )
+    price_sync_llm_config_uuid = models.UUIDField(
+        blank=True,
+        null=True,
+        db_index=True,
+    )
     feishu_app_id = models.CharField(max_length=255, blank=True, default="")
     feishu_app_secret = models.TextField(blank=True, default="")
     feishu_approval_code = models.CharField(
