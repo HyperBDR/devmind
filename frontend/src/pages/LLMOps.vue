@@ -668,14 +668,9 @@ import ResaleWorkflowConfigPanel from '@/components/llm-ops/ResaleWorkflowConfig
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { useToast } from '@/composables/useToast'
 import { llmOpsApi } from '@/api/llmOps'
+import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 
 const FULL_LIST_PARAMS = { page_size: 10000 }
-const DEFAULT_WORKFLOW_POLICIES = {
-  auto_approve_enabled: true,
-  manual_confirm_required: true,
-  feishu_approval_enabled: false,
-  auto_apply_after_approval: true
-}
 const sectionKeys = new Set([
   'monitor',
   'metaModels',
@@ -1673,13 +1668,15 @@ async function confirmAutoApprovedListings(submittedListings, sourceListings) {
     { ids: updateIds, action: 'confirm_update' }
   ].filter((item) => item.ids.length)
 
-  for (const item of actions) {
-    await llmOpsApi.bulkTransitionResaleListings({
-      platform: agionePlatform.value?.id,
-      listings: item.ids,
-      action: item.action
-    })
-  }
+  await Promise.all(
+    actions.map((item) =>
+      llmOpsApi.bulkTransitionResaleListings({
+        platform: agionePlatform.value?.id,
+        listings: item.ids,
+        action: item.action
+      })
+    )
+  )
   return publishIds.length + updateIds.length
 }
 

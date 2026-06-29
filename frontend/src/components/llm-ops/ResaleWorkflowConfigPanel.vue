@@ -184,6 +184,7 @@ import { computed, ref, watch } from 'vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { llmOpsApi } from '@/api/llmOps'
+import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps({
@@ -204,14 +205,6 @@ const loading = ref(false)
 const saving = ref(false)
 const workflow = ref(null)
 const localPlatformId = ref(props.platformId || '')
-
-const DEFAULT_POLICIES = {
-  auto_approve_enabled: true,
-  manual_confirm_required: true,
-  feishu_approval_enabled: false,
-  auto_apply_after_approval: true,
-  offline_approval_enabled: false
-}
 
 const platformOptions = computed(() =>
   props.platforms.map((platform) => ({
@@ -423,7 +416,7 @@ function normalizeWorkflowPayload(payload) {
   next.config = {
     ...config,
     policies: {
-      ...DEFAULT_POLICIES,
+      ...DEFAULT_WORKFLOW_POLICIES,
       ...(isPlainObject(config.policies) ? config.policies : {})
     },
     nodes: Array.isArray(config.nodes) ? config.nodes : [],
