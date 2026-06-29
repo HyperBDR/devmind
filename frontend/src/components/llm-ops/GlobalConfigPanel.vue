@@ -3,8 +3,8 @@
     <div class="global-config-toolbar">
       <div>
         <p class="global-config-eyebrow">Global Config</p>
-        <h3>全局配置</h3>
-        <p>统一管理元模型同步、模型价格采集和审核集成参数。</p>
+        <h3>{{ t('llmOps.globalConfigPanel.title') }}</h3>
+        <p>{{ t('llmOps.globalConfigPanel.description') }}</p>
       </div>
       <div class="global-config-actions">
         <button
@@ -13,7 +13,7 @@
           :disabled="loading || saving"
           @click="loadConfig"
         >
-          重新加载
+          {{ t('llmOps.globalConfigPanel.actions.reload') }}
         </button>
         <button
           type="button"
@@ -21,7 +21,7 @@
           :disabled="loading || saving"
           @click="resetConfig"
         >
-          恢复默认
+          {{ t('llmOps.globalConfigPanel.actions.reset') }}
         </button>
         <button
           type="button"
@@ -29,7 +29,11 @@
           :disabled="loading || saving"
           @click="saveConfig"
         >
-          {{ saving ? '保存中' : '保存并同步任务' }}
+          {{
+            saving
+              ? t('llmOps.globalConfigPanel.actions.saving')
+              : t('llmOps.globalConfigPanel.actions.save')
+          }}
         </button>
       </div>
     </div>
@@ -41,17 +45,21 @@
         <section class="config-section">
           <div class="config-section-header">
             <div>
-              <h4>元模型采集</h4>
-              <p>同步模型厂商、模型族和能力标签。</p>
+              <h4>{{ t('llmOps.globalConfigPanel.metaSync.title') }}</h4>
+              <p>{{ t('llmOps.globalConfigPanel.metaSync.description') }}</p>
             </div>
             <label class="config-switch">
-              <span>{{ form.meta_model_sync_enabled ? '启用' : '停用' }}</span>
+              <span>{{
+                form.meta_model_sync_enabled
+                  ? t('llmOps.globalConfigPanel.status.enabled')
+                  : t('llmOps.globalConfigPanel.status.disabled')
+              }}</span>
               <input v-model="form.meta_model_sync_enabled" type="checkbox" />
             </label>
           </div>
 
           <label class="config-field">
-            <span>数据源 URL</span>
+            <span>{{ t('llmOps.globalConfigPanel.fields.sourceUrl') }}</span>
             <input
               v-model.trim="form.meta_model_sync_source_url"
               type="url"
@@ -60,7 +68,7 @@
             />
           </label>
           <label class="config-field">
-            <span>执行周期</span>
+            <span>{{ t('llmOps.globalConfigPanel.fields.cron') }}</span>
             <input
               v-model.trim="form.meta_model_sync_cron"
               type="text"
@@ -73,17 +81,23 @@
         <section class="config-section">
           <div class="config-section-header">
             <div>
-              <h4>模型价格采集</h4>
-              <p>同步官方或供货商模型价格数据。</p>
+              <h4>{{ t('llmOps.globalConfigPanel.priceCollection.title') }}</h4>
+              <p>
+                {{ t('llmOps.globalConfigPanel.priceCollection.description') }}
+              </p>
             </div>
             <label class="config-switch">
-              <span>{{ form.price_collection_enabled ? '启用' : '停用' }}</span>
+              <span>{{
+                form.price_collection_enabled
+                  ? t('llmOps.globalConfigPanel.status.enabled')
+                  : t('llmOps.globalConfigPanel.status.disabled')
+              }}</span>
               <input v-model="form.price_collection_enabled" type="checkbox" />
             </label>
           </div>
 
           <label class="config-field">
-            <span>执行周期</span>
+            <span>{{ t('llmOps.globalConfigPanel.fields.cron') }}</span>
             <input
               v-model.trim="form.price_collection_cron"
               type="text"
@@ -126,7 +140,7 @@
               </span>
             </label>
             <div v-if="!priceSourceOptions.length" class="empty-source">
-              暂无可用于自动采集的模型价格源。
+              {{ t('llmOps.globalConfigPanel.empty.noPriceSources') }}
             </div>
           </div>
         </section>
@@ -136,15 +150,17 @@
         <section class="config-section">
           <div class="config-section-header">
             <div>
-              <h4>飞书审核认证</h4>
-              <p>用于模型上架审核流程提交审批实例。</p>
+              <h4>{{ t('llmOps.globalConfigPanel.feishu.title') }}</h4>
+              <p>{{ t('llmOps.globalConfigPanel.feishu.description') }}</p>
             </div>
             <span
               class="secret-status"
               :class="{ active: config?.feishu_app_secret_configured }"
             >
               {{
-                config?.feishu_app_secret_configured ? '密钥已配置' : '未配置'
+                config?.feishu_app_secret_configured
+                  ? t('llmOps.globalConfigPanel.feishu.secretConfigured')
+                  : t('llmOps.globalConfigPanel.feishu.secretMissing')
               }}
             </span>
           </div>
@@ -165,13 +181,13 @@
               autocomplete="new-password"
               :placeholder="
                 config?.feishu_app_secret_configured
-                  ? '留空则保留当前密钥'
+                  ? t('llmOps.globalConfigPanel.feishu.secretPlaceholder')
                   : ''
               "
             />
           </label>
           <label class="config-field">
-            <span>审批定义 Code</span>
+            <span>{{ t('llmOps.globalConfigPanel.fields.approvalCode') }}</span>
             <input
               v-model.trim="form.feishu_approval_code"
               type="text"
@@ -191,13 +207,13 @@
         <section class="config-section">
           <div class="config-section-header">
             <div>
-              <h4>备注</h4>
-              <p>记录配置变更背景或外部系统关联信息。</p>
+              <h4>{{ t('llmOps.globalConfigPanel.notes.title') }}</h4>
+              <p>{{ t('llmOps.globalConfigPanel.notes.description') }}</p>
             </div>
           </div>
           <textarea v-model.trim="form.notes" rows="5" />
           <div class="config-runtime">
-            <span>最近更新</span>
+            <span>{{ t('llmOps.globalConfigPanel.fields.updatedAt') }}</span>
             <strong>{{ formatDateTime(config?.updated_at) }}</strong>
           </div>
         </section>
@@ -208,6 +224,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { llmOpsApi } from '@/api/llmOps'
@@ -222,6 +239,7 @@ const props = defineProps({
 
 const emit = defineEmits(['saved'])
 const { showSuccess, showError } = useToast()
+const { t } = useI18n()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -242,10 +260,16 @@ const form = reactive({
   notes: ''
 })
 
-const sourceModes = [
-  { label: '全部启用的数据源', value: 'all' },
-  { label: '指定数据源', value: 'selected' }
-]
+const sourceModes = computed(() => [
+  {
+    label: t('llmOps.globalConfigPanel.sourceModes.all'),
+    value: 'all'
+  },
+  {
+    label: t('llmOps.globalConfigPanel.sourceModes.selected'),
+    value: 'selected'
+  }
+])
 
 const priceSourceOptions = computed(() =>
   props.sources.filter((source) => source.updates_model_prices)
@@ -261,7 +285,9 @@ async function loadConfig() {
     const response = await llmOpsApi.getGlobalConfig()
     applyConfig(extract(response))
   } catch (error) {
-    showError(errorMessage(error, '加载全局配置失败'))
+    showError(
+      errorMessage(error, t('llmOps.globalConfigPanel.errors.loadFailed'))
+    )
   } finally {
     loading.value = false
   }
@@ -269,10 +295,9 @@ async function loadConfig() {
 
 async function saveConfig() {
   const missingSelectedSource =
-    sourceMode.value === 'selected' &&
-    !form.price_collection_source_ids.length
+    sourceMode.value === 'selected' && !form.price_collection_source_ids.length
   if (missingSelectedSource) {
-    showError('请至少选择一个模型价格源')
+    showError(t('llmOps.globalConfigPanel.errors.sourceRequired'))
     return
   }
   saving.value = true
@@ -283,9 +308,7 @@ async function saveConfig() {
       meta_model_sync_cron: form.meta_model_sync_cron,
       price_collection_enabled: form.price_collection_enabled,
       price_collection_source_ids:
-        sourceMode.value === 'all'
-          ? []
-          : form.price_collection_source_ids,
+        sourceMode.value === 'all' ? [] : form.price_collection_source_ids,
       price_collection_cron: form.price_collection_cron,
       feishu_app_id: form.feishu_app_id,
       feishu_approval_code: form.feishu_approval_code,
@@ -297,25 +320,29 @@ async function saveConfig() {
     }
     const response = await llmOpsApi.updateGlobalConfig(payload)
     applyConfig(extract(response))
-    showSuccess('全局配置已保存，采集任务已同步')
+    showSuccess(t('llmOps.globalConfigPanel.messages.saved'))
     emit('saved')
   } catch (error) {
-    showError(errorMessage(error, '保存全局配置失败'))
+    showError(
+      errorMessage(error, t('llmOps.globalConfigPanel.errors.saveFailed'))
+    )
   } finally {
     saving.value = false
   }
 }
 
 async function resetConfig() {
-  if (!window.confirm('确认恢复 LLM Ops 全局配置默认值？')) return
+  if (!window.confirm(t('llmOps.globalConfigPanel.confirm.reset'))) return
   saving.value = true
   try {
     const response = await llmOpsApi.resetGlobalConfig()
     applyConfig(extract(response))
-    showSuccess('全局配置已恢复默认值')
+    showSuccess(t('llmOps.globalConfigPanel.messages.reset'))
     emit('saved')
   } catch (error) {
-    showError(errorMessage(error, '恢复默认配置失败'))
+    showError(
+      errorMessage(error, t('llmOps.globalConfigPanel.errors.resetFailed'))
+    )
   } finally {
     saving.value = false
   }
@@ -343,7 +370,9 @@ function applyConfig(nextConfig) {
 
 function sourceMeta(source) {
   return [
-    source.is_enabled === false ? '已停用' : '已启用',
+    source.is_enabled === false
+      ? t('llmOps.globalConfigPanel.status.disabled')
+      : t('llmOps.globalConfigPanel.status.enabled'),
     source.provider_name,
     source.channel_name,
     source.currency,

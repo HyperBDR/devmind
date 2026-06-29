@@ -785,6 +785,14 @@
         "label": "挂售平台",
         "description": "管理挂售定价、积分换算与供货渠道。"
       },
+      "workflow": {
+        "label": "流程配置",
+        "description": "配置上架、免审、审批和下架路径，并按平台动态生效。"
+      },
+      "globalConfig": {
+        "label": "全局配置",
+        "description": "配置元模型同步、模型价格采集和飞书审核认证。"
+      },
       "reconciler": {
         "label": "用量对账",
         "description": "录入生产用量和账单金额，自动计算应付金额与差异。"
@@ -999,6 +1007,158 @@
         "points": "积分",
         "currentPlatform": "当前平台",
         "notConfigured": "未配置"
+      }
+    },
+    "resalePlatform": {
+      "types": {
+        "agione": "Agione",
+        "apiGateway": "API 网关",
+        "cloudMarketplace": "云市场",
+        "internal": "内部平台",
+        "other": "其他平台",
+        "reseller": "代理商平台"
+      },
+      "environments": {
+        "production": "生产",
+        "sandbox": "沙箱",
+        "staging": "预发",
+        "test": "测试"
+      }
+    },
+    "globalConfigPanel": {
+      "actions": {
+        "reload": "重新加载",
+        "reset": "恢复默认",
+        "save": "保存并同步任务",
+        "saving": "保存中"
+      },
+      "confirm": {
+        "reset": "确认恢复 LLM Ops 全局配置默认值？"
+      },
+      "description": "统一管理元模型同步、模型价格采集和审核集成参数。",
+      "empty": {
+        "noPriceSources": "暂无可用于自动采集的模型价格源。"
+      },
+      "errors": {
+        "loadFailed": "加载全局配置失败",
+        "resetFailed": "恢复默认配置失败",
+        "saveFailed": "保存全局配置失败",
+        "sourceRequired": "请至少选择一个模型价格源"
+      },
+      "fields": {
+        "approvalCode": "审批定义 Code",
+        "cron": "执行周期",
+        "sourceUrl": "数据源 URL",
+        "updatedAt": "最近更新"
+      },
+      "feishu": {
+        "description": "用于模型上架审核流程提交审批实例。",
+        "secretConfigured": "密钥已配置",
+        "secretMissing": "未配置",
+        "secretPlaceholder": "留空则保留当前密钥",
+        "title": "飞书审核认证"
+      },
+      "messages": {
+        "reset": "全局配置已恢复默认值",
+        "saved": "全局配置已保存，采集任务已同步"
+      },
+      "metaSync": {
+        "description": "同步模型厂商、模型族和能力标签。",
+        "title": "元模型采集"
+      },
+      "notes": {
+        "description": "记录配置变更背景或外部系统关联信息。",
+        "title": "备注"
+      },
+      "priceCollection": {
+        "description": "同步官方或供货商模型价格数据。",
+        "title": "模型价格采集"
+      },
+      "sourceModes": {
+        "all": "全部启用的数据源",
+        "selected": "指定数据源"
+      },
+      "status": {
+        "disabled": "已停用",
+        "enabled": "已启用"
+      },
+      "title": "全局配置"
+    },
+    "workflowConfig": {
+      "actions": {
+        "reload": "重新加载",
+        "reset": "恢复默认",
+        "save": "保存并生效"
+      },
+      "approvalModes": {
+        "both": "内部 + 外部审核",
+        "disabled": "仅保留免审路径",
+        "disabledState": "审核路径停用",
+        "external": "外部飞书审核",
+        "internal": "内部人工确认"
+      },
+      "confirm": {
+        "reset": "恢复默认流程配置？当前平台的自定义配置会被删除。"
+      },
+      "empty": {
+        "noPlatform": "请先创建或选择一个上架平台。"
+      },
+      "errors": {
+        "loadFailed": "加载上架流程配置失败",
+        "noPublishPath": "至少需要保留免审、内部确认或外部审核中的一种上架路径",
+        "resetFailed": "恢复默认流程失败",
+        "saveFailed": "保存上架流程配置失败"
+      },
+      "flowchart": {
+        "badge": "只读主干",
+        "description": "主干流程固定只读，仅策略分支可配置。",
+        "title": "上架流程图"
+      },
+      "messages": {
+        "reset": "已恢复默认上架流程",
+        "saved": "上架流程配置已生效"
+      },
+      "nodes": {
+        "selectChannel": {
+          "subtitle": "渠道与成本",
+          "title": "选择采购渠道"
+        },
+        "selectModel": {
+          "subtitle": "模型与版本",
+          "title": "选择元模型"
+        },
+        "setMargin": {
+          "subtitle": "生成上架价格",
+          "title": "设置利润率"
+        },
+        "submit": {
+          "subtitle": "进入判断",
+          "title": "提交上架"
+        },
+        "terminal": {
+          "subtitle": "确认 / 驳回 / 异常",
+          "title": "下架/异常处理"
+        }
+      },
+      "policy": {
+        "approvalPath": "审核路径",
+        "autoApproveThreshold": "利润率 <= {rate}",
+        "autoPath": "免审路径",
+        "directConfirm": "直接确认",
+        "publishPolicy": "发布策略",
+        "reviewOverLimit": "超阈值复核"
+      },
+      "publishDescriptions": {
+        "auto": "免审命中后确认发布",
+        "manual": "保留人工确认"
+      },
+      "publishModes": {
+        "auto": "免审后自动上线",
+        "manual": "提交后待确认"
+      },
+      "status": {
+        "disabled": "停用",
+        "enabled": "启用"
       }
     },
     "metaModelManagement": {

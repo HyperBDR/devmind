@@ -751,13 +751,7 @@ const monitorStatusLabelKeys = {
 const navIcons = {
   audit: ['M4 5h16', 'M4 12h16', 'M4 19h10'],
   channels: ['M4 7h16', 'M7 7v10', 'M17 7v10', 'M4 17h16'],
-  globalConfig: [
-    'M4 7h16',
-    'M7 7v10',
-    'M17 7v10',
-    'M4 17h16',
-    'M9 12h6'
-  ],
+  globalConfig: ['M4 7h16', 'M7 7v10', 'M17 7v10', 'M4 17h16', 'M9 12h6'],
   metaModels: ['M12 3l8 4-8 4-8-4 8-4Z', 'M4 12l8 4 8-4', 'M4 17l8 4 8-4'],
   monitor: ['M4 19V5', 'M8 19v-6', 'M12 19v-9', 'M16 19v-4', 'M20 19V8'],
   providers: ['M5 5h14v14H5Z', 'M9 9h6', 'M9 13h6', 'M9 17h3'],
@@ -824,16 +818,16 @@ const navItems = computed(() => [
   },
   {
     key: 'workflow',
-    label: '流程配置',
+    label: t('llmOps.nav.workflow.label'),
     eyebrow: 'Workflow',
-    description: '配置上架、免审、审批和下架路径，并按平台动态生效。',
+    description: t('llmOps.nav.workflow.description'),
     icon: navIcons.workflow
   },
   {
     key: 'globalConfig',
-    label: '全局配置',
+    label: t('llmOps.nav.globalConfig.label'),
     eyebrow: 'Global Config',
-    description: '配置元模型同步、模型价格采集和飞书审核认证。',
+    description: t('llmOps.nav.globalConfig.description'),
     icon: navIcons.globalConfig
   },
   {
@@ -869,27 +863,29 @@ const resalePlatformOptions = computed(() =>
   }))
 )
 
-const platformTypeLabels = {
-  agione: 'Agione',
-  api_gateway: 'API 网关',
-  cloud_marketplace: '云市场',
-  internal: '内部平台',
-  other: '其他平台',
-  reseller: '代理商平台'
+const platformTypeLabelKeys = {
+  agione: 'llmOps.resalePlatform.types.agione',
+  api_gateway: 'llmOps.resalePlatform.types.apiGateway',
+  cloud_marketplace: 'llmOps.resalePlatform.types.cloudMarketplace',
+  internal: 'llmOps.resalePlatform.types.internal',
+  other: 'llmOps.resalePlatform.types.other',
+  reseller: 'llmOps.resalePlatform.types.reseller'
 }
 
-const environmentLabels = {
-  production: '生产',
-  sandbox: '沙箱',
-  staging: '预发',
-  test: '测试'
+const environmentLabelKeys = {
+  production: 'llmOps.resalePlatform.environments.production',
+  sandbox: 'llmOps.resalePlatform.environments.sandbox',
+  staging: 'llmOps.resalePlatform.environments.staging',
+  test: 'llmOps.resalePlatform.environments.test'
 }
 
 function resalePlatformOptionLabel(platform) {
-  const typeLabel =
-    platformTypeLabels[platform.platform_type] || platform.platform_type
+  const typeLabelKey = platformTypeLabelKeys[platform.platform_type]
+  const typeLabel = typeLabelKey ? t(typeLabelKey) : platform.platform_type
+  const environmentLabelKey = environmentLabelKeys[platform.environment]
   const regionLabel = platform.region_name || platform.region_code
-  const meta = [typeLabel, regionLabel, environmentLabels[platform.environment]]
+  const environmentLabel = environmentLabelKey ? t(environmentLabelKey) : ''
+  const meta = [typeLabel, regionLabel, environmentLabel]
     .filter(Boolean)
     .join(' · ')
   return meta ? `${platform.name} · ${meta}` : platform.name

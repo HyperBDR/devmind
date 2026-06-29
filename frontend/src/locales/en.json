@@ -775,6 +775,14 @@
         "label": "Resale Platforms",
         "description": "Manage listing prices, credit conversion, and procurement channels."
       },
+      "workflow": {
+        "label": "Workflow Settings",
+        "description": "Configure listing, auto-approval, approval, and offline paths per platform."
+      },
+      "globalConfig": {
+        "label": "Global Settings",
+        "description": "Configure meta-model sync, model price collection, and Feishu approval authentication."
+      },
       "reconciler": {
         "label": "Usage Reconciliation",
         "description": "Enter production usage and billing amounts to calculate payables and variances."
@@ -989,6 +997,158 @@
         "points": "points",
         "currentPlatform": "Current platform",
         "notConfigured": "Not configured"
+      }
+    },
+    "resalePlatform": {
+      "types": {
+        "agione": "Agione",
+        "apiGateway": "API Gateway",
+        "cloudMarketplace": "Cloud marketplace",
+        "internal": "Internal platform",
+        "other": "Other platform",
+        "reseller": "Reseller platform"
+      },
+      "environments": {
+        "production": "Production",
+        "sandbox": "Sandbox",
+        "staging": "Staging",
+        "test": "Test"
+      }
+    },
+    "globalConfigPanel": {
+      "actions": {
+        "reload": "Reload",
+        "reset": "Restore defaults",
+        "save": "Save and sync tasks",
+        "saving": "Saving"
+      },
+      "confirm": {
+        "reset": "Restore default LLM Ops global settings?"
+      },
+      "description": "Manage meta-model sync, model price collection, and approval integration settings in one place.",
+      "empty": {
+        "noPriceSources": "No model price sources are available for automatic collection."
+      },
+      "errors": {
+        "loadFailed": "Failed to load global settings",
+        "resetFailed": "Failed to restore default settings",
+        "saveFailed": "Failed to save global settings",
+        "sourceRequired": "Select at least one model price source"
+      },
+      "fields": {
+        "approvalCode": "Approval definition code",
+        "cron": "Schedule",
+        "sourceUrl": "Source URL",
+        "updatedAt": "Last updated"
+      },
+      "feishu": {
+        "description": "Used to submit approval instances for model listing workflows.",
+        "secretConfigured": "Secret configured",
+        "secretMissing": "Not configured",
+        "secretPlaceholder": "Leave blank to keep the current secret",
+        "title": "Feishu Approval Authentication"
+      },
+      "messages": {
+        "reset": "Global settings restored to defaults",
+        "saved": "Global settings saved and collection tasks synced"
+      },
+      "metaSync": {
+        "description": "Sync model providers, model families, and capability tags.",
+        "title": "Meta-model Collection"
+      },
+      "notes": {
+        "description": "Record configuration background or external system references.",
+        "title": "Notes"
+      },
+      "priceCollection": {
+        "description": "Sync official or supplier model price data.",
+        "title": "Model Price Collection"
+      },
+      "sourceModes": {
+        "all": "All enabled sources",
+        "selected": "Selected sources"
+      },
+      "status": {
+        "disabled": "Disabled",
+        "enabled": "Enabled"
+      },
+      "title": "Global Settings"
+    },
+    "workflowConfig": {
+      "actions": {
+        "reload": "Reload",
+        "reset": "Restore defaults",
+        "save": "Save and apply"
+      },
+      "approvalModes": {
+        "both": "Internal + external approval",
+        "disabled": "Auto-approval path only",
+        "disabledState": "Approval path disabled",
+        "external": "External Feishu approval",
+        "internal": "Internal manual confirmation"
+      },
+      "confirm": {
+        "reset": "Restore the default workflow configuration? Custom configuration for the current platform will be deleted."
+      },
+      "empty": {
+        "noPlatform": "Create or select a resale platform first."
+      },
+      "errors": {
+        "loadFailed": "Failed to load listing workflow configuration",
+        "noPublishPath": "Keep at least one listing path: auto-approval, internal confirmation, or external approval.",
+        "resetFailed": "Failed to restore default workflow",
+        "saveFailed": "Failed to save listing workflow configuration"
+      },
+      "flowchart": {
+        "badge": "Read-only main flow",
+        "description": "The main workflow is fixed and read-only; only policy branches can be configured.",
+        "title": "Listing Workflow"
+      },
+      "messages": {
+        "reset": "Default listing workflow restored",
+        "saved": "Listing workflow configuration is now active"
+      },
+      "nodes": {
+        "selectChannel": {
+          "subtitle": "Channel and cost",
+          "title": "Select procurement channel"
+        },
+        "selectModel": {
+          "subtitle": "Model and version",
+          "title": "Select meta model"
+        },
+        "setMargin": {
+          "subtitle": "Generate listing price",
+          "title": "Set margin"
+        },
+        "submit": {
+          "subtitle": "Enter decision gate",
+          "title": "Submit listing"
+        },
+        "terminal": {
+          "subtitle": "Confirm / reject / exception",
+          "title": "Offline / exception handling"
+        }
+      },
+      "policy": {
+        "approvalPath": "Approval path",
+        "autoApproveThreshold": "Margin <= {rate}",
+        "autoPath": "Auto-approval path",
+        "directConfirm": "Direct confirmation",
+        "publishPolicy": "Publishing policy",
+        "reviewOverLimit": "Review over threshold"
+      },
+      "publishDescriptions": {
+        "auto": "Confirm publishing after auto-approval hits",
+        "manual": "Keep manual confirmation"
+      },
+      "publishModes": {
+        "auto": "Auto-publish after auto-approval",
+        "manual": "Pending confirmation after submission"
+      },
+      "status": {
+        "disabled": "Disabled",
+        "enabled": "Enabled"
       }
     },
     "metaModelManagement": {
