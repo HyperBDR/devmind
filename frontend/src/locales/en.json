@@ -775,6 +775,10 @@
         "label": "Resale Platforms",
         "description": "Manage listing prices, credit conversion, and procurement channels."
       },
+      "workflow": {
+        "label": "Workflow Settings",
+        "description": "Configure listing, auto-approval, approval, and offline paths per platform."
+      },
       "reconciler": {
         "label": "Usage Reconciliation",
         "description": "Enter production usage and billing amounts to calculate payables and variances."
@@ -989,6 +993,99 @@
         "points": "points",
         "currentPlatform": "Current platform",
         "notConfigured": "Not configured"
+      }
+    },
+    "resalePlatform": {
+      "types": {
+        "agione": "Agione",
+        "apiGateway": "API Gateway",
+        "cloudMarketplace": "Cloud marketplace",
+        "internal": "Internal platform",
+        "other": "Other platform",
+        "reseller": "Reseller platform"
+      },
+      "environments": {
+        "production": "Production",
+        "sandbox": "Sandbox",
+        "staging": "Staging",
+        "test": "Test"
+      }
+    },
+    "workflowConfig": {
+      "actions": {
+        "reload": "Reload",
+        "reset": "Restore defaults",
+        "save": "Save and apply"
+      },
+      "approvalModes": {
+        "both": "Internal + external approval",
+        "disabled": "Auto-approval path only",
+        "disabledState": "Approval path disabled",
+        "external": "External Feishu approval",
+        "internal": "Internal manual confirmation"
+      },
+      "confirm": {
+        "reset": "Restore the default workflow configuration? Custom configuration for the current platform will be deleted."
+      },
+      "empty": {
+        "noPlatform": "Create or select a resale platform first."
+      },
+      "errors": {
+        "loadFailed": "Failed to load listing workflow configuration",
+        "noPublishPath": "Keep at least one listing path: auto-approval, internal confirmation, or external approval.",
+        "resetFailed": "Failed to restore default workflow",
+        "saveFailed": "Failed to save listing workflow configuration"
+      },
+      "flowchart": {
+        "badge": "Read-only main flow",
+        "description": "The main workflow is fixed and read-only; only policy branches can be configured.",
+        "title": "Listing Workflow"
+      },
+      "messages": {
+        "reset": "Default listing workflow restored",
+        "saved": "Listing workflow configuration is now active"
+      },
+      "nodes": {
+        "selectChannel": {
+          "subtitle": "Channel and cost",
+          "title": "Select procurement channel"
+        },
+        "selectModel": {
+          "subtitle": "Model and version",
+          "title": "Select meta model"
+        },
+        "setMargin": {
+          "subtitle": "Generate listing price",
+          "title": "Set margin"
+        },
+        "submit": {
+          "subtitle": "Enter decision gate",
+          "title": "Submit listing"
+        },
+        "terminal": {
+          "subtitle": "Confirm / reject / exception",
+          "title": "Offline / exception handling"
+        }
+      },
+      "policy": {
+        "approvalPath": "Approval path",
+        "autoApproveThreshold": "Margin <= {rate}",
+        "autoPath": "Auto-approval path",
+        "directConfirm": "Direct confirmation",
+        "publishPolicy": "Publishing policy",
+        "reviewOverLimit": "Review over threshold"
+      },
+      "publishDescriptions": {
+        "auto": "Confirm publishing after auto-approval hits",
+        "manual": "Keep manual confirmation"
+      },
+      "publishModes": {
+        "auto": "Auto-publish after auto-approval",
+        "manual": "Pending confirmation after submission"
+      },
+      "status": {
+        "disabled": "Disabled",
+        "enabled": "Enabled"
       }
     },
     "metaModelManagement": {

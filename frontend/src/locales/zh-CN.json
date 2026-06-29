@@ -785,6 +785,10 @@
         "label": "挂售平台",
         "description": "管理挂售定价、积分换算与供货渠道。"
       },
+      "workflow": {
+        "label": "流程配置",
+        "description": "配置上架、免审、审批和下架路径，并按平台动态生效。"
+      },
       "reconciler": {
         "label": "用量对账",
         "description": "录入生产用量和账单金额，自动计算应付金额与差异。"
@@ -999,6 +1003,99 @@
         "points": "积分",
         "currentPlatform": "当前平台",
         "notConfigured": "未配置"
+      }
+    },
+    "resalePlatform": {
+      "types": {
+        "agione": "Agione",
+        "apiGateway": "API 网关",
+        "cloudMarketplace": "云市场",
+        "internal": "内部平台",
+        "other": "其他平台",
+        "reseller": "代理商平台"
+      },
+      "environments": {
+        "production": "生产",
+        "sandbox": "沙箱",
+        "staging": "预发",
+        "test": "测试"
+      }
+    },
+    "workflowConfig": {
+      "actions": {
+        "reload": "重新加载",
+        "reset": "恢复默认",
+        "save": "保存并生效"
+      },
+      "approvalModes": {
+        "both": "内部 + 外部审核",
+        "disabled": "仅保留免审路径",
+        "disabledState": "审核路径停用",
+        "external": "外部飞书审核",
+        "internal": "内部人工确认"
+      },
+      "confirm": {
+        "reset": "恢复默认流程配置？当前平台的自定义配置会被删除。"
+      },
+      "empty": {
+        "noPlatform": "请先创建或选择一个上架平台。"
+      },
+      "errors": {
+        "loadFailed": "加载上架流程配置失败",
+        "noPublishPath": "至少需要保留免审、内部确认或外部审核中的一种上架路径",
+        "resetFailed": "恢复默认流程失败",
+        "saveFailed": "保存上架流程配置失败"
+      },
+      "flowchart": {
+        "badge": "只读主干",
+        "description": "主干流程固定只读，仅策略分支可配置。",
+        "title": "上架流程图"
+      },
+      "messages": {
+        "reset": "已恢复默认上架流程",
+        "saved": "上架流程配置已生效"
+      },
+      "nodes": {
+        "selectChannel": {
+          "subtitle": "渠道与成本",
+          "title": "选择采购渠道"
+        },
+        "selectModel": {
+          "subtitle": "模型与版本",
+          "title": "选择元模型"
+        },
+        "setMargin": {
+          "subtitle": "生成上架价格",
+          "title": "设置利润率"
+        },
+        "submit": {
+          "subtitle": "进入判断",
+          "title": "提交上架"
+        },
+        "terminal": {
+          "subtitle": "确认 / 驳回 / 异常",
+          "title": "下架/异常处理"
+        }
+      },
+      "policy": {
+        "approvalPath": "审核路径",
+        "autoApproveThreshold": "利润率 <= {rate}",
+        "autoPath": "免审路径",
+        "directConfirm": "直接确认",
+        "publishPolicy": "发布策略",
+        "reviewOverLimit": "超阈值复核"
+      },
+      "publishDescriptions": {
+        "auto": "免审命中后确认发布",
+        "manual": "保留人工确认"
+      },
+      "publishModes": {
+        "auto": "免审后自动上线",
+        "manual": "提交后待确认"
+      },
+      "status": {
+        "disabled": "停用",
+        "enabled": "启用"
       }
     },
     "metaModelManagement": {
