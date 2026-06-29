@@ -143,6 +143,13 @@ class LLMOpsViewTests(TestCase):
         config = LLMOpsGlobalConfig.objects.get()
         self.assertEqual(config.updated_by, self.user)
         self.assertEqual(config.price_collection_source_ids, [source.id])
+        self.assertNotEqual(config.feishu_app_secret, "secret")
+        self.assertTrue(
+            config.feishu_app_secret.startswith(
+                LLMOpsGlobalConfig.ENCRYPTED_SECRET_PREFIX
+            )
+        )
+        self.assertEqual(config.get_feishu_app_secret(), "secret")
         self.assertNotIn("feishu_app_secret", response.data)
         self.assertTrue(response.data["feishu_app_secret_configured"])
 
@@ -158,6 +165,70 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(price_task.crontab.minute, "10")
         self.assertEqual(price_task.crontab.hour, "*/6")
         self.assertIn(str(source.id), price_task.kwargs)
+
+    def test_global_config_blank_secret_preserves_existing_secret(self):
+        config = LLMOpsGlobalConfig.get_solo()
+        config.set_feishu_app_secret("existing-secret")
+        config.save()
+        stored_secret = config.feishu_app_secret
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "feishu_app_secret": "",
+                "notes": "updated without rotating the secret",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config.refresh_from_db()
+        self.assertEqual(config.feishu_app_secret, stored_secret)
+        self.assertEqual(config.get_feishu_app_secret(), "existing-secret")
+
+    def test_global_config_rejects_unknown_price_source_ids(self):
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {"price_collection_source_ids": [99999]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("price_collection_source_ids", response.data)
+
+    def test_global_config_sync_preserves_legacy_periodic_task(self):
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        legacy_crontab = CrontabSchedule.objects.create(
+            minute="0",
+            hour="4",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_official_collect",
+            task="llm_ops.tasks.collect_official_model_prices",
+            crontab=legacy_crontab,
+            kwargs='{"provider_codes": null, "verify_source": true}',
+            enabled=True,
+        )
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "price_collection_enabled": False,
+                "price_collection_cron": "10 */6 * * *",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        legacy_task = PeriodicTask.objects.get(
+            name="llm_ops_official_collect"
+        )
+        self.assertTrue(legacy_task.enabled)
+        self.assertEqual(legacy_task.crontab_id, legacy_crontab.id)
 
     def test_global_config_rejects_invalid_cron(self):
         response = self.client.patch(

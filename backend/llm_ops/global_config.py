@@ -64,6 +64,51 @@ def normalize_source_ids(source_ids) -> list[int]:
     return [source_id for source_id in normalized if source_id in allowed_ids]
 
 
+def validate_price_collection_source_ids(source_ids) -> list[int]:
+    """Validate and normalize user-selected source ids."""
+    if not isinstance(source_ids, list):
+        raise ValueError("Expected a list of source ids.")
+
+    normalized = []
+    invalid_values = []
+    for value in source_ids:
+        try:
+            normalized.append(int(value))
+        except (TypeError, ValueError):
+            invalid_values.append(value)
+    if invalid_values:
+        raise ValueError(
+            "Invalid source id values: "
+            + ", ".join(str(value) for value in invalid_values)
+        )
+    if not normalized:
+        return []
+
+    allowed_ids = set(
+        PriceCollectionSource.objects.filter(
+            id__in=normalized,
+            updates_model_prices=True,
+        ).values_list("id", flat=True)
+    )
+    missing_ids = [
+        source_id for source_id in normalized if source_id not in allowed_ids
+    ]
+    if missing_ids:
+        raise ValueError(
+            "Unknown or unsupported source ids: "
+            + ", ".join(str(source_id) for source_id in missing_ids)
+        )
+
+    result = []
+    seen = set()
+    for source_id in normalized:
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        result.append(source_id)
+    return result
+
+
 def selected_price_collection_sources(config):
     """Return sources selected by config, falling back to enabled sources."""
     queryset = PriceCollectionSource.objects.filter(
@@ -78,7 +123,16 @@ def selected_price_collection_sources(config):
 
 
 def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
-    """Create or update django-celery-beat rows for global LLM Ops config."""
+    """Create or update beat rows owned by the global config UI.
+
+    ``register_periodic_tasks`` and ``TASK_REGISTRY`` remain the bootstrap
+    path for code-defined default tasks, and they skip existing rows to
+    preserve admin changes during deploy. This runtime sync is narrower:
+    it only updates task names owned by ``LLMOpsGlobalConfig`` after an
+    explicit API/admin config save. Legacy registry tasks, including
+    ``llm_ops_official_collect``, are left untouched so operator-managed
+    schedules are not disabled or overwritten implicitly.
+    """
     from django_celery_beat.models import PeriodicTask, PeriodicTasks
 
     meta_crontab = parse_cron(config.meta_model_sync_cron)
@@ -86,10 +140,6 @@ def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
     if meta_crontab is None or price_crontab is None:
         logger.warning("llm_ops: skipped beat sync due to invalid cron")
         return
-
-    PeriodicTask.objects.filter(
-        name=LEGACY_OFFICIAL_COLLECT_TASK_NAME
-    ).update(enabled=False)
 
     PeriodicTask.objects.update_or_create(
         name=META_MODEL_SYNC_TASK_NAME,

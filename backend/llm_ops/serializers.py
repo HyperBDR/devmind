@@ -3,7 +3,11 @@ from decimal import Decimal
 from rest_framework import serializers
 
 from .collectors.official import OFFICIAL_PROVIDER_CONFIGS
-from .global_config import is_valid_cron, normalize_source_ids
+from .global_config import (
+    is_valid_cron,
+    normalize_source_ids,
+    validate_price_collection_source_ids,
+)
 from .models import (
     AuditLog,
     ChannelModelPrice,
@@ -97,14 +101,16 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
         return value
 
     def validate_price_collection_source_ids(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Expected a list of source ids.")
-        return normalize_source_ids(value)
+        try:
+            return validate_price_collection_source_ids(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc)) from exc
 
     def update(self, instance, validated_data):
-        secret = validated_data.get("feishu_app_secret")
-        if secret == "":
-            validated_data.pop("feishu_app_secret", None)
+        secret_marker = object()
+        secret = validated_data.pop("feishu_app_secret", secret_marker)
+        if secret not in (secret_marker, ""):
+            instance.set_feishu_app_secret(secret)
         return super().update(instance, validated_data)
 
     def to_representation(self, instance):
