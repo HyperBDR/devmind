@@ -230,6 +230,74 @@ class LLMOpsViewTests(TestCase):
         self.assertTrue(legacy_task.enabled)
         self.assertEqual(legacy_task.crontab_id, legacy_crontab.id)
 
+    def test_global_config_sync_only_deletes_obsolete_source_tasks(self):
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        current_source = PriceCollectionSource.objects.create(
+            name="Current Source",
+            slug="current-source",
+            endpoint_url="https://current.example.com",
+            updates_model_prices=True,
+        )
+        obsolete_source = PriceCollectionSource.objects.create(
+            name="Obsolete Source",
+            slug="obsolete-source",
+            endpoint_url="https://obsolete.example.com",
+            updates_model_prices=True,
+        )
+        custom_crontab = CrontabSchedule.objects.create(
+            minute="0",
+            hour="8",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+        )
+        PeriodicTask.objects.create(
+            name=f"llm_ops_price_source_collect_{obsolete_source.id}",
+            task="llm_ops.tasks.collect_price_source_prices",
+            crontab=custom_crontab,
+            kwargs=f'{{"source_id": {obsolete_source.id}}}',
+            enabled=True,
+        )
+        PeriodicTask.objects.create(
+            name="llm_ops_price_source_collect_custom",
+            task="llm_ops.tasks.collect_price_source_prices",
+            crontab=custom_crontab,
+            kwargs='{"source_id": "custom"}',
+            enabled=True,
+        )
+
+        response = self.client.patch(
+            reverse("llm-ops-global-config"),
+            {
+                "price_collection_enabled": True,
+                "price_collection_source_ids": [current_source.id],
+                "price_collection_cron": "10 */6 * * *",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            PeriodicTask.objects.filter(
+                name=(
+                    f"llm_ops_price_source_collect_{current_source.id}"
+                )
+            ).exists()
+        )
+        self.assertFalse(
+            PeriodicTask.objects.filter(
+                name=(
+                    f"llm_ops_price_source_collect_{obsolete_source.id}"
+                )
+            ).exists()
+        )
+        self.assertTrue(
+            PeriodicTask.objects.filter(
+                name="llm_ops_price_source_collect_custom"
+            ).exists()
+        )
+
     def test_global_config_rejects_invalid_cron(self):
         response = self.client.patch(
             reverse("llm-ops-global-config"),

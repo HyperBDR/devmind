@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import Optional
 
 from .models import LLMOpsGlobalConfig, PriceCollectionSource
 
@@ -15,6 +16,23 @@ META_MODEL_SYNC_TASK = "llm_ops.tasks.sync_meta_models_from_models_dev"
 LEGACY_OFFICIAL_COLLECT_TASK_NAME = "llm_ops_official_collect"
 PRICE_SOURCE_TASK_PREFIX = "llm_ops_price_source_collect_"
 PRICE_SOURCE_TASK = "llm_ops.tasks.collect_price_source_prices"
+
+
+def price_source_task_name(source_id: int) -> str:
+    """Return the beat task name for a price source."""
+    return f"{PRICE_SOURCE_TASK_PREFIX}{source_id}"
+
+
+def extract_price_source_id(task_name: str) -> Optional[int]:
+    """Return the source id encoded in a managed price task name."""
+    if not task_name.startswith(PRICE_SOURCE_TASK_PREFIX):
+        return None
+
+    suffix = task_name[len(PRICE_SOURCE_TASK_PREFIX) :]
+    try:
+        return int(suffix)
+    except ValueError:
+        return None
 
 
 def parse_cron(cron_expr: str):
@@ -155,12 +173,25 @@ def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
         },
     )
 
-    PeriodicTask.objects.filter(
+    selected_sources = selected_price_collection_sources(config)
+    selected_source_ids = {source.id for source in selected_sources}
+    existing_source_task_names = PeriodicTask.objects.filter(
         name__startswith=PRICE_SOURCE_TASK_PREFIX
-    ).delete()
-    for source in selected_price_collection_sources(config):
+    ).values_list("name", flat=True)
+    obsolete_task_names = []
+    for task_name in existing_source_task_names:
+        source_id = extract_price_source_id(task_name)
+        if source_id is None:
+            continue
+        if source_id not in selected_source_ids:
+            obsolete_task_names.append(task_name)
+
+    if obsolete_task_names:
+        PeriodicTask.objects.filter(name__in=obsolete_task_names).delete()
+
+    for source in selected_sources:
         PeriodicTask.objects.update_or_create(
-            name=f"{PRICE_SOURCE_TASK_PREFIX}{source.id}",
+            name=price_source_task_name(source.id),
             defaults={
                 "task": PRICE_SOURCE_TASK,
                 "args": json.dumps([]),
