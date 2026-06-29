@@ -1440,10 +1440,7 @@ function openEditModal(row) {
       language: c.language || 'zh-hans',
       sign_secret: (c.sign_secret || '').trim(),
       merge_window_minutes: c.merge_window_minutes ?? 0,
-      silence_window_minutes: Math.max(
-        0,
-        Math.min(1440, Number(c.silence_window_minutes) ?? 0)
-      ),
+      silence_window_minutes: clampNumber(c.silence_window_minutes, 0, 1440, 0),
       silence_time_window: normalizeSilenceTimeWindow(c)
     }
   } else if (row.channel_type === 'email') {
@@ -1454,10 +1451,7 @@ function openEditModal(row) {
       smtp_port: c.smtp_port ?? 587,
       use_tls: c.use_tls !== false,
       use_ssl: c.use_ssl === true,
-      silence_window_minutes: Math.max(
-        0,
-        Math.min(1440, Number(c.silence_window_minutes) ?? 0)
-      ),
+      silence_window_minutes: clampNumber(c.silence_window_minutes, 0, 1440, 0),
       silence_time_window: normalizeSilenceTimeWindow(c)
     }
   } else {
