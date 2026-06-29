@@ -15,7 +15,7 @@
           :disabled="loading || !localPlatformId"
           @click="loadConfig"
         >
-          重新加载
+          {{ t('llmOps.workflowConfig.actions.reload') }}
         </button>
         <button
           type="button"
@@ -23,7 +23,7 @@
           :disabled="saving || loading || !workflow"
           @click="resetConfig"
         >
-          恢复默认
+          {{ t('llmOps.workflowConfig.actions.reset') }}
         </button>
         <button
           type="button"
@@ -31,7 +31,7 @@
           :disabled="saving || loading || !workflow"
           @click="saveConfig"
         >
-          保存并生效
+          {{ t('llmOps.workflowConfig.actions.save') }}
         </button>
       </div>
     </div>
@@ -39,38 +39,53 @@
     <BaseLoading v-if="loading" />
 
     <div v-else-if="!localPlatformId" class="workflow-empty">
-      请先创建或选择一个上架平台。
+      {{ t('llmOps.workflowConfig.empty.noPlatform') }}
     </div>
 
     <div v-else-if="workflow" class="workflow-blueprint-layout">
       <div class="workflow-blueprint-main">
-        <section class="workflow-flowchart" aria-label="上架流程图">
+        <section
+          class="workflow-flowchart"
+          :aria-label="t('llmOps.workflowConfig.flowchart.title')"
+        >
           <header class="workflow-flowchart-header">
             <div>
-              <h4>上架流程图</h4>
-              <p>主干流程固定只读，仅策略分支可配置。</p>
+              <h4>{{ t('llmOps.workflowConfig.flowchart.title') }}</h4>
+              <p>{{ t('llmOps.workflowConfig.flowchart.description') }}</p>
             </div>
-            <span>只读主干</span>
+            <span>{{ t('llmOps.workflowConfig.flowchart.badge') }}</span>
           </header>
 
           <div class="workflow-flowchart-body">
             <div class="workflow-flow-row">
               <article class="workflow-flow-node is-fixed">
                 <small>01</small>
-                <strong>选择元模型</strong>
-                <span>模型与版本</span>
+                <strong>{{
+                  t('llmOps.workflowConfig.nodes.selectModel.title')
+                }}</strong>
+                <span>{{
+                  t('llmOps.workflowConfig.nodes.selectModel.subtitle')
+                }}</span>
               </article>
               <span class="workflow-flow-arrow">→</span>
               <article class="workflow-flow-node is-fixed">
                 <small>02</small>
-                <strong>选择采购渠道</strong>
-                <span>渠道与成本</span>
+                <strong>{{
+                  t('llmOps.workflowConfig.nodes.selectChannel.title')
+                }}</strong>
+                <span>{{
+                  t('llmOps.workflowConfig.nodes.selectChannel.subtitle')
+                }}</span>
               </article>
               <span class="workflow-flow-arrow">→</span>
               <article class="workflow-flow-node is-fixed">
                 <small>03</small>
-                <strong>设置利润率</strong>
-                <span>生成上架价格</span>
+                <strong>{{
+                  t('llmOps.workflowConfig.nodes.setMargin.title')
+                }}</strong>
+                <span>{{
+                  t('llmOps.workflowConfig.nodes.setMargin.subtitle')
+                }}</span>
               </article>
             </div>
 
@@ -81,8 +96,12 @@
             <div class="workflow-flow-split is-submit">
               <article class="workflow-flow-node is-fixed">
                 <small>04</small>
-                <strong>提交上架</strong>
-                <span>进入判断</span>
+                <strong>{{
+                  t('llmOps.workflowConfig.nodes.submit.title')
+                }}</strong>
+                <span>{{
+                  t('llmOps.workflowConfig.nodes.submit.subtitle')
+                }}</span>
               </article>
             </div>
 
@@ -92,7 +111,9 @@
                 :class="{ 'is-disabled': !policies.auto_approve_enabled }"
               >
                 <div class="workflow-node-top">
-                  <small>免审路径</small>
+                  <small>{{
+                    t('llmOps.workflowConfig.policy.autoPath')
+                  }}</small>
                   <label class="workflow-node-toggle">
                     <input
                       id="workflow-auto-approve-enabled"
@@ -102,40 +123,58 @@
                       @change="onAutoApproveToggle"
                     />
                     <span>{{
-                      policies.auto_approve_enabled ? '启用' : '停用'
+                      policies.auto_approve_enabled
+                        ? t('llmOps.workflowConfig.status.enabled')
+                        : t('llmOps.workflowConfig.status.disabled')
                     }}</span>
                   </label>
                 </div>
-                <strong>利润率 ≤ {{ autoApproveRateLabel }}</strong>
-                <span>直接确认</span>
+                <strong>{{
+                  t('llmOps.workflowConfig.policy.autoApproveThreshold', {
+                    rate: autoApproveRateLabel
+                  })
+                }}</strong>
+                <span>{{
+                  t('llmOps.workflowConfig.policy.directConfirm')
+                }}</span>
               </article>
               <article
                 class="workflow-flow-node is-policy"
                 :class="{ 'is-disabled': !approvalFlowEnabled }"
               >
                 <div class="workflow-node-top">
-                  <small>审核路径</small>
+                  <small>{{
+                    t('llmOps.workflowConfig.policy.approvalPath')
+                  }}</small>
                   <select
                     id="workflow-approval-mode"
                     class="workflow-node-select"
                     name="workflow_approval_mode"
                     :value="approvalMode"
-                    aria-label="审核路径"
+                    :aria-label="t('llmOps.workflowConfig.policy.approvalPath')"
                     @change="setApprovalMode($event.target.value)"
                   >
-                    <option value="internal">内部人工确认</option>
-                    <option value="external">外部飞书审核</option>
-                    <option value="both">内部 + 外部审核</option>
+                    <option value="internal">
+                      {{ t('llmOps.workflowConfig.approvalModes.internal') }}
+                    </option>
+                    <option value="external">
+                      {{ t('llmOps.workflowConfig.approvalModes.external') }}
+                    </option>
+                    <option value="both">
+                      {{ t('llmOps.workflowConfig.approvalModes.both') }}
+                    </option>
                     <option
                       value="disabled"
                       :disabled="!policies.auto_approve_enabled"
                     >
-                      仅保留免审路径
+                      {{ t('llmOps.workflowConfig.approvalModes.disabled') }}
                     </option>
                   </select>
                 </div>
                 <strong>{{ approvalFlowLabel }}</strong>
-                <span>超阈值复核</span>
+                <span>{{
+                  t('llmOps.workflowConfig.policy.reviewOverLimit')
+                }}</span>
               </article>
             </div>
 
@@ -146,17 +185,25 @@
             <div class="workflow-flow-split">
               <article class="workflow-flow-node is-policy">
                 <div class="workflow-node-top">
-                  <small>发布策略</small>
+                  <small>{{
+                    t('llmOps.workflowConfig.policy.publishPolicy')
+                  }}</small>
                   <select
                     id="workflow-publish-mode"
                     class="workflow-node-select"
                     name="workflow_publish_mode"
                     :value="publishMode"
-                    aria-label="发布策略"
+                    :aria-label="
+                      t('llmOps.workflowConfig.policy.publishPolicy')
+                    "
                     @change="setPublishMode($event.target.value)"
                   >
-                    <option value="auto">免审后自动上线</option>
-                    <option value="manual">提交后待确认</option>
+                    <option value="auto">
+                      {{ t('llmOps.workflowConfig.publishModes.auto') }}
+                    </option>
+                    <option value="manual">
+                      {{ t('llmOps.workflowConfig.publishModes.manual') }}
+                    </option>
                   </select>
                 </div>
                 <strong>{{ publishFlowLabel }}</strong>
@@ -167,8 +214,12 @@
             <div class="workflow-flow-split is-terminal">
               <article class="workflow-flow-node is-fixed">
                 <small>06</small>
-                <strong>下架/异常处理</strong>
-                <span>确认 / 驳回 / 异常</span>
+                <strong>{{
+                  t('llmOps.workflowConfig.nodes.terminal.title')
+                }}</strong>
+                <span>{{
+                  t('llmOps.workflowConfig.nodes.terminal.subtitle')
+                }}</span>
               </article>
             </div>
           </div>
@@ -180,6 +231,7 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -200,6 +252,7 @@ const props = defineProps({
 
 const emit = defineEmits(['update:platformId', 'saved'])
 const { showSuccess, showError } = useToast()
+const { t } = useI18n()
 
 const loading = ref(false)
 const saving = ref(false)
@@ -230,11 +283,15 @@ const approvalFlowLabel = computed(() => {
     policies.value.manual_confirm_required &&
     policies.value.feishu_approval_enabled
   ) {
-    return '内部 + 外部审核'
+    return t('llmOps.workflowConfig.approvalModes.both')
   }
-  if (policies.value.feishu_approval_enabled) return '外部飞书审核'
-  if (policies.value.manual_confirm_required) return '内部人工确认'
-  return '审核路径停用'
+  if (policies.value.feishu_approval_enabled) {
+    return t('llmOps.workflowConfig.approvalModes.external')
+  }
+  if (policies.value.manual_confirm_required) {
+    return t('llmOps.workflowConfig.approvalModes.internal')
+  }
+  return t('llmOps.workflowConfig.approvalModes.disabledState')
 })
 const approvalMode = computed(() => {
   if (
@@ -248,8 +305,10 @@ const approvalMode = computed(() => {
   return 'disabled'
 })
 const publishFlowLabel = computed(() => {
-  if (policies.value.auto_apply_after_approval) return '免审后自动上线'
-  return '提交后待确认'
+  if (policies.value.auto_apply_after_approval) {
+    return t('llmOps.workflowConfig.publishModes.auto')
+  }
+  return t('llmOps.workflowConfig.publishModes.manual')
 })
 const publishMode = computed(() => {
   if (policies.value.auto_apply_after_approval) return 'auto'
@@ -257,9 +316,9 @@ const publishMode = computed(() => {
 })
 const publishFlowDescription = computed(() => {
   if (policies.value.auto_apply_after_approval) {
-    return '免审命中后确认发布'
+    return t('llmOps.workflowConfig.publishDescriptions.auto')
   }
-  return '保留人工确认'
+  return t('llmOps.workflowConfig.publishDescriptions.manual')
 })
 
 watch(
@@ -294,7 +353,9 @@ async function loadConfig() {
     workflow.value = normalizeWorkflowPayload(response.data)
     syncPolicyEdges()
   } catch (error) {
-    showError(errorMessage(error) || '加载上架流程配置失败')
+    showError(
+      errorMessage(error) || t('llmOps.workflowConfig.errors.loadFailed')
+    )
   } finally {
     loading.value = false
   }
@@ -303,7 +364,7 @@ async function loadConfig() {
 async function saveConfig() {
   if (!workflow.value || !localPlatformId.value) return
   if (!hasPublishPath(editableConfig.value.policies)) {
-    showError('至少需要保留免审、内部确认或外部审核中的一种上架路径')
+    showError(t('llmOps.workflowConfig.errors.noPublishPath'))
     return
   }
   saving.value = true
@@ -319,10 +380,12 @@ async function saveConfig() {
     )
     workflow.value = normalizeWorkflowPayload(response.data)
     syncPolicyEdges()
-    showSuccess('上架流程配置已生效')
+    showSuccess(t('llmOps.workflowConfig.messages.saved'))
     emit('saved', workflow.value)
   } catch (error) {
-    showError(errorMessage(error) || '保存上架流程配置失败')
+    showError(
+      errorMessage(error) || t('llmOps.workflowConfig.errors.saveFailed')
+    )
   } finally {
     saving.value = false
   }
@@ -330,7 +393,7 @@ async function saveConfig() {
 
 async function resetConfig() {
   if (!localPlatformId.value) return
-  if (!confirm('恢复默认流程配置？当前平台的自定义配置会被删除。')) return
+  if (!confirm(t('llmOps.workflowConfig.confirm.reset'))) return
   saving.value = true
   try {
     const response = await llmOpsApi.resetResaleWorkflowConfig(
@@ -338,10 +401,12 @@ async function resetConfig() {
     )
     workflow.value = normalizeWorkflowPayload(response.data)
     syncPolicyEdges()
-    showSuccess('已恢复默认上架流程')
+    showSuccess(t('llmOps.workflowConfig.messages.reset'))
     emit('saved', workflow.value)
   } catch (error) {
-    showError(errorMessage(error) || '恢复默认流程失败')
+    showError(
+      errorMessage(error) || t('llmOps.workflowConfig.errors.resetFailed')
+    )
   } finally {
     saving.value = false
   }
