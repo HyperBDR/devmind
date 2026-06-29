@@ -1,12 +1,21 @@
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import path, include
+from django.urls import include, path
+from django.views.generic import RedirectView
 
 from accounts.views import OAuthCallbackRedirectView
 from .swagger import schema_view, swagger_view, redoc_view
 
 # Define project URL routing configuration
 urlpatterns = [
+    # Backend root entry point
+    # Redirects direct backend visits to the API documentation.
+    path(
+        '',
+        RedirectView.as_view(pattern_name='swagger-ui', permanent=False),
+        name='root'
+    ),
+
     # Health check endpoint
     # Used by Docker/Kubernetes for container health monitoring
     # Returns a simple 'OK' response to indicate the application is running
