@@ -60,6 +60,7 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     business_source_category = serializers.SerializerMethodField()
+    can_collect_prices = serializers.SerializerMethodField()
 
     class Meta:
         model = PriceCollectionSource
@@ -68,6 +69,14 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
 
     def get_business_source_category(self, instance):
         return business_source_category_for_catalog(instance)
+
+    def get_can_collect_prices(self, instance):
+        from .source_collectors import source_supports_code_collection
+
+        return bool(
+            instance.updates_model_prices
+            and source_supports_code_collection(instance)
+        )
 
 
 class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):

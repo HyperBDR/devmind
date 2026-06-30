@@ -771,6 +771,10 @@
         "label": "Model Price Sources",
         "description": "Review supplier price sources and meta-model prices."
       },
+      "taskLogs": {
+        "label": "Collection Task Logs",
+        "description": "Review model price collection status, write results, errors, and metadata."
+      },
       "channels": {
         "label": "Forwarding Channels",
         "description": "Maintain channels and manage enabled provider models and pricing policies inside each channel."
@@ -1322,10 +1326,13 @@
     "providerManagement": {
       "title": "Provider Model Prices",
       "modelsCount": "{count} meta models",
-      "sourcesCount": "{count} price sources",
       "empty": "No providers match the current filters.",
       "actions": {
+        "add": "Add",
+        "addOfficialSource": "Add official source",
+        "added": "Added",
         "bulkImport": "Bulk import",
+        "cancel": "Cancel",
         "createSource": "New price source",
         "delete": "Delete",
         "deleting": "Deleting",
@@ -1333,7 +1340,7 @@
         "manualPricing": "Manual pricing",
         "notSupported": "Not supported",
         "submitting": "Submitting",
-        "syncAllPrices": "Sync all prices",
+        "syncAllPrices": "Sync price collection",
         "syncPrice": "Sync prices",
         "viewModels": "View meta models"
       },
@@ -1419,6 +1426,19 @@
           "label": "Syncing"
         }
       },
+      "officialSourceModal": {
+        "currency": "Currency",
+        "empty": "No official price source presets are available.",
+        "exists": "This official source has already been added.",
+        "existsBadge": "Added",
+        "loading": "Loading official sources.",
+        "provider": "Provider",
+        "ready": "Confirm to create the official price source.",
+        "slug": "System slug",
+        "source": "Price source",
+        "title": "Add Official Price Source",
+        "url": "Price URL"
+      },
       "collectMode": {
         "autoCollect": "Auto collect",
         "dedicatedCollector": "Dedicated collector",
@@ -1430,12 +1450,15 @@
       },
       "messages": {
         "deleted": "Model price source deleted",
-        "syncAllSubmitted": "{count} price source sync tasks submitted{taskId}",
+        "officialSourceAdded": "Official price source \"{name}\" added",
+        "syncAllSubmitted": "Price collection task submitted{taskId}",
         "syncSubmitted": "{name} sync task submitted{taskId}",
         "taskId": " ({taskId})"
       },
       "errors": {
+        "addOfficialSourceFailed": "Failed to add official price source",
         "deleteFailed": "Failed to delete model price source",
+        "loadOfficialSourcesFailed": "Failed to load official price sources",
         "saveFailed": "Failed to save model price source",
         "syncAllFailed": "Failed to submit model price source sync task",
         "syncFailed": "Failed to submit price sync task"
@@ -1969,6 +1992,86 @@
         "directOfflineFailed": "Direct offline failed",
         "operationFailed": "Operation failed",
         "transitionFailed": "Status transition failed"
+      }
+    },
+    "taskLogs": {
+      "title": "Collection Task Logs",
+      "description": "Records price collection task status, write counts, errors, and metadata.",
+      "deletedSource": "Deleted price source",
+      "actions": {
+        "refresh": "Refresh",
+        "showDetails": "Details",
+        "hideDetails": "Collapse",
+        "noDetails": "No details"
+      },
+      "filters": {
+        "keyword": "Keyword",
+        "keywordPlaceholder": "Search source, provider, or error",
+        "status": "Status",
+        "category": "Source type"
+      },
+      "metrics": {
+        "total": "Total tasks",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "failed": "Failed"
+      },
+      "status": {
+        "all": "All statuses",
+        "failed": "Failed",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "unknown": "Unknown"
+      },
+      "categories": {
+        "all": "All types",
+        "officialProvider": "Official",
+        "supplier": "Supplier",
+        "manual": "Manual",
+        "unknown": "Other"
+      },
+      "table": {
+        "status": "Status",
+        "source": "Price source",
+        "category": "Type",
+        "startedAt": "Started at",
+        "duration": "Duration",
+        "result": "Result",
+        "detail": "Detail"
+      },
+      "counts": {
+        "collected": "Collected",
+        "created": "Created",
+        "updated": "Updated",
+        "skipped": "Skipped"
+      },
+      "detail": {
+        "error": "Error",
+        "metadata": "Collection metadata"
+      },
+      "metadata": {
+        "changedCount": "Changed",
+        "collectedModelCodes": "Collected models",
+        "currency": "Currency",
+        "fallbackModelIds": "Fallback models",
+        "missingModelIds": "Missing models",
+        "skippedModelCodes": "Skipped models",
+        "sourceParseFallbackModelIds": "Parse fallback models",
+        "sourceParseMissingModelIds": "Parse missing models",
+        "sourceUrl": "Source URL",
+        "unchangedCount": "Unchanged"
+      },
+      "empty": {
+        "title": "No collection tasks",
+        "description": "After adding a price source and running sync, each collection result appears here."
+      },
+      "pagination": {
+        "emptyRange": "0 records",
+        "range": "{start}-{end} of {count}",
+        "pageSize": "Per page",
+        "pageSizeOption": "{size} rows",
+        "previous": "Previous",
+        "next": "Next"
       }
     },
     "auditLog": {

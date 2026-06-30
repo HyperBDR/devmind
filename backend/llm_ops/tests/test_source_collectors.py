@@ -14,7 +14,7 @@ from llm_ops.source_collectors.official import OFFICIAL_COLLECTOR_CLASSES
 class PriceSourceCollectorRegistryTests(TestCase):
     def test_all_official_configs_have_registered_collectors(self):
         self.assertEqual(
-            {"aliyun", "aliyun-wanx"},
+            {"aliyun", "aliyun-wanx", "baidu", "volcengine"},
             set(OFFICIAL_COLLECTOR_CLASSES),
         )
 
@@ -73,6 +73,49 @@ class PriceSourceCollectorRegistryTests(TestCase):
             ),
             endpoint_url=(
                 "https://api-docs.deepseek.com/quick_start/pricing"
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNone(collector)
+        self.assertFalse(source_supports_code_collection(source))
+
+    def test_baidu_official_provider_source_dispatches_to_collector(self):
+        provider = LLMProvider.objects.create(name="百度", code="baidu")
+        source = PriceCollectionSource.objects.create(
+            name="Baidu Official",
+            slug="baidu-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "official_provider:baidu")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_model_level_official_source_is_not_supported(self):
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Qwen Plus Official",
+            slug="aliyun-qwen-plus-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             is_enabled=True,
             updates_model_prices=True,

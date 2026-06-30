@@ -36,6 +36,10 @@ MODELS_DEV_PROVIDER_KEYS = {
 ALIYUN_PRICING_SOURCE_URL = (
     "https://help.aliyun.com/zh/model-studio/model-pricing"
 )
+BAIDU_PRICING_SOURCE_URL = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
+VOLCENGINE_PRICING_SOURCE_URL = (
+    "https://www.volcengine.com/docs/82379/1544106?lang=zh"
+)
 ALIYUN_LEGACY_PRICING_SOURCE_URLS = {
     "https://help.aliyun.com/zh/model-studio/model-price",
     "https://help.aliyun.com/zh/model-studio/models",
@@ -91,7 +95,7 @@ class OfficialPriceSpec:
     def matches(self, model_code: str) -> bool:
         """Return whether this spec maps to a configured model code."""
         normalized_code = normalize_model_code(model_code)
-        for alias in self.aliases:
+        for alias in (self.model_id, *self.aliases):
             normalized_alias = normalize_model_code(alias)
             if normalized_code == normalized_alias:
                 return True
@@ -419,22 +423,80 @@ OFFICIAL_PROVIDER_CONFIGS = {
         models=(
             OfficialPriceSpec(
                 model_id="deepseek-r1",
-                aliases=("deepseek-r1", "deepseek-r1-0528"),
+                aliases=("deepseek-r1",),
                 input_per_million=Decimal("4"),
                 output_per_million=Decimal("16"),
                 display_name="DeepSeek R1",
             ),
             OfficialPriceSpec(
+                model_id="deepseek-r1-0528",
+                aliases=("deepseek-r1-0528",),
+                input_per_million=Decimal("4"),
+                output_per_million=Decimal("16"),
+                display_name="DeepSeek R1 0528",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-v4-pro",
+                aliases=("deepseek-v4-pro",),
+                input_per_million=Decimal("12"),
+                output_per_million=Decimal("24"),
+                display_name="DeepSeek V4 Pro",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-v4-flash",
+                aliases=("deepseek-v4-flash",),
+                input_per_million=Decimal("1"),
+                output_per_million=Decimal("2"),
+                display_name="DeepSeek V4 Flash",
+            ),
+            OfficialPriceSpec(
                 model_id="deepseek-v3",
-                aliases=(
-                    "deepseek-v3",
-                    "deepseek-v3.1",
-                    "deepseek-v3.2",
-                    "deepseek-v3.2-exp",
-                ),
+                aliases=("deepseek-v3",),
                 input_per_million=Decimal("2"),
                 output_per_million=Decimal("8"),
                 display_name="DeepSeek V3",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-v3.1",
+                aliases=("deepseek-v3.1",),
+                input_per_million=Decimal("4"),
+                output_per_million=Decimal("12"),
+                display_name="DeepSeek V3.1",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-v3.2",
+                aliases=("deepseek-v3.2",),
+                input_per_million=Decimal("2"),
+                output_per_million=Decimal("3"),
+                display_name="DeepSeek V3.2",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-v3.2-exp",
+                aliases=("deepseek-v3.2-exp",),
+                input_per_million=Decimal("2"),
+                output_per_million=Decimal("3"),
+                display_name="DeepSeek V3.2 Exp",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-r1-distill-qwen-7b",
+                aliases=("deepseek-r1-distill-qwen-7b",),
+                input_per_million=Decimal("0.5"),
+                output_per_million=Decimal("1"),
+                display_name="DeepSeek R1 Distill Qwen 7B",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-r1-distill-qwen-14b",
+                aliases=("deepseek-r1-distill-qwen-14b",),
+                input_per_million=Decimal("1"),
+                output_per_million=Decimal("3"),
+                display_name="DeepSeek R1 Distill Qwen 14B",
+            ),
+            OfficialPriceSpec(
+                model_id="deepseek-r1-distill-qwen-32b",
+                aliases=("deepseek-r1-distill-qwen-32b",),
+                input_per_million=Decimal("2"),
+                output_per_million=Decimal("6"),
+                display_name="DeepSeek R1 Distill Qwen 32B",
             ),
             OfficialPriceSpec(
                 model_id="qwq-32b",
@@ -501,6 +563,13 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 display_name="Text Embedding V4",
             ),
         ),
+    ),
+    "baidu": OfficialProviderConfig(
+        provider_code="baidu",
+        provider_label="百度千帆",
+        source_url=BAIDU_PRICING_SOURCE_URL,
+        currency="CNY",
+        models=(),
     ),
     "aliyun-wanx": OfficialProviderConfig(
         provider_code="aliyun-wanx",
@@ -617,7 +686,7 @@ OFFICIAL_PROVIDER_CONFIGS = {
     "volcengine": OfficialProviderConfig(
         provider_code="volcengine",
         provider_label="火山方舟",
-        source_url="https://www.volcengine.com/docs/82379/1099320",
+        source_url=VOLCENGINE_PRICING_SOURCE_URL,
         currency="CNY",
         models=(
             # The volcengine catalog labels the R1 0528 release
@@ -812,7 +881,18 @@ def config_with_source_prices(
             if spec.model_id not in parsed_model_ids
         ]
     if missing_model_ids:
-        enriched_payload["source_parse_missing_model_ids"] = missing_model_ids
+        fallback_specs = [
+            spec
+            for spec in config.models
+            if spec.model_id in missing_model_ids
+        ]
+        parsed_specs.extend(fallback_specs)
+        enriched_payload["source_parse_missing_model_ids"] = (
+            missing_model_ids
+        )
+        enriched_payload["source_parse_fallback_model_ids"] = (
+            missing_model_ids
+        )
 
     parsed_config = OfficialProviderConfig(
         provider_code=config.provider_code,
@@ -1034,7 +1114,11 @@ def parse_spec_from_source_text(
     source_text: str,
 ) -> OfficialPriceSpec | None:
     """Parse one configured official model price from source text."""
-    windows = source_windows_for_spec(spec, source_text)
+    windows = source_windows_for_spec(
+        spec,
+        source_text,
+        boundary_terms=source_boundary_terms(config, spec),
+    )
     if not windows:
         return None
 
@@ -1077,6 +1161,7 @@ def source_windows_for_spec(
     spec: OfficialPriceSpec,
     source_text: str,
     radius: int = 1200,
+    boundary_terms: tuple[str, ...] = (),
 ) -> list[str]:
     """Return nearby source text windows for a configured model spec."""
     windows = []
@@ -1093,10 +1178,71 @@ def source_windows_for_spec(
             if re.search(pattern, line, re.IGNORECASE):
                 windows.append(line)
         for match in re.finditer(pattern, source_text, re.IGNORECASE):
+            windows.append(
+                bounded_forward_source_window(
+                    source_text,
+                    match.end(),
+                    radius,
+                    boundary_terms,
+                )
+            )
             start = max(match.start() - radius, 0)
             end = min(match.end() + radius, len(source_text))
             windows.append(source_text[start:end])
     return windows
+
+
+def source_boundary_terms(
+    config: OfficialProviderConfig,
+    spec: OfficialPriceSpec,
+) -> tuple[str, ...]:
+    """Return model terms that can delimit a neighboring pricing row."""
+    current_terms = {
+        normalize_model_code(term)
+        for term in spec_search_terms(spec)
+    }
+    boundary_terms = []
+    seen = set()
+    for candidate in config.models:
+        for term in spec_search_terms(candidate):
+            normalized = normalize_model_code(term)
+            if (
+                not normalized
+                or normalized in current_terms
+                or normalized in seen
+            ):
+                continue
+            boundary_terms.append(term)
+            seen.add(normalized)
+    return tuple(boundary_terms)
+
+
+def spec_search_terms(spec: OfficialPriceSpec) -> tuple[str, ...]:
+    """Return all configured source text terms for one price spec."""
+    terms = [*spec.aliases, spec.model_id]
+    if spec.display_name:
+        terms.append(spec.display_name)
+    return tuple(term for term in terms if term)
+
+
+def bounded_forward_source_window(
+    source_text: str,
+    start: int,
+    radius: int,
+    boundary_terms: tuple[str, ...],
+) -> str:
+    """Return a forward window that stops at the next known model row."""
+    end = min(start + radius, len(source_text))
+    window = source_text[start:end]
+    boundary_indexes = []
+    for term in boundary_terms:
+        pattern = model_term_pattern(term)
+        match = re.search(pattern, window, re.IGNORECASE)
+        if match:
+            boundary_indexes.append(match.start())
+    if boundary_indexes:
+        window = window[: min(boundary_indexes)]
+    return window
 
 
 def model_term_pattern(term: str) -> str:

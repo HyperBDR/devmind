@@ -12,6 +12,9 @@ from rest_framework.views import APIView
 
 from .audit import record_audit_log, snapshot_instance
 from .collection_services import (
+    ensure_supported_official_provider_source,
+    official_provider_source_slug,
+    supported_official_provider_options,
     sync_meta_models_from_models_dev,
     sync_yunce_model_prices,
 )
@@ -214,6 +217,84 @@ class PriceCollectionSourceViewSet(
             "models__meta_model",
             "models__meta_model__vendor",
         ).order_by("source_category", "provider__name", "channel__name", "id")
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="official-provider-options",
+        url_name="official-provider-options",
+    )
+    def official_provider_options(self, request):
+        """List official provider source presets operators can add."""
+        return Response(
+            {"results": supported_official_provider_options()},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="official-provider",
+        url_name="ensure-official-provider",
+    )
+    def ensure_official_provider(self, request):
+        """Create or return one supported official provider source."""
+        provider_code = str(request.data.get("provider_code") or "").strip()
+        before_source = PriceCollectionSource.objects.filter(
+            slug=official_provider_source_slug(provider_code)
+        ).first()
+        before = snapshot_instance(before_source) if before_source else {}
+        try:
+            (
+                _provider,
+                source,
+                provider_created,
+                source_created,
+            ) = ensure_supported_official_provider_source(provider_code)
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        after = snapshot_instance(source)
+        if source_created or provider_created or before != after:
+            record_audit_log(
+                request=request,
+                action=(
+                    AuditLog.ACTION_CREATE
+                    if source_created
+                    else AuditLog.ACTION_UPDATE
+                ),
+                category=AuditLog.CATEGORY_CONFIGURATION,
+                target=source,
+                summary=(
+                    "Ensured official provider price source "
+                    f"for {provider_code}"
+                ),
+                before=before,
+                after=after,
+                metadata={
+                    "provider_code": provider_code,
+                    "provider_created": provider_created,
+                    "source_created": source_created,
+                },
+            )
+
+        serializer = self.get_serializer(source)
+        response_status = (
+            status.HTTP_201_CREATED
+            if source_created
+            else status.HTTP_200_OK
+        )
+        return Response(
+            {
+                "source": serializer.data,
+                "provider_created": provider_created,
+                "source_created": source_created,
+            },
+            status=response_status,
+        )
 
     @action(detail=True, methods=["post"], url_path="collect")
     def collect(self, request, pk=None):
@@ -419,8 +500,33 @@ class PriceCollectionRunViewSet(
             "source__provider",
         )
         source = self.request.query_params.get("source")
+        status_value = self.request.query_params.get("status")
+        source_category = self.request.query_params.get("source_category")
+        provider = self.request.query_params.get("provider")
+        keyword = self.request.query_params.get("q")
         if source:
             queryset = queryset.filter(source_id=source)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        if source_category:
+            queryset = queryset.filter(
+                source__source_category=source_category
+            )
+        if provider:
+            provider_query = (
+                Q(source__provider__code__icontains=provider)
+                | Q(source__provider__name__icontains=provider)
+            )
+            if provider.isdigit():
+                provider_query |= Q(source__provider_id=provider)
+            queryset = queryset.filter(provider_query)
+        if keyword:
+            queryset = queryset.filter(
+                Q(source__name__icontains=keyword)
+                | Q(source__slug__icontains=keyword)
+                | Q(source__provider__name__icontains=keyword)
+                | Q(error_message__icontains=keyword)
+            )
         return queryset.order_by("-started_at", "-id")
 
 

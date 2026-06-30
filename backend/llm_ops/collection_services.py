@@ -35,8 +35,47 @@ from .services import (
     price_role_for_source,
     update_aggregated_model_identity,
 )
+from .skill_runner import (
+    run_vendor_pricing_skill,
+    standard_catalog_run_metadata,
+    standard_catalog_to_collected_catalog,
+    vendor_pricing_skill_exists,
+)
 
-SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = ("aliyun", "aliyun-wanx")
+SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = (
+    "aliyun",
+    "aliyun-wanx",
+    "baidu",
+    "volcengine",
+)
+FULL_CATALOG_VENDOR_SKILL_PROVIDER_CODES = (
+    "aliyun",
+    "baidu",
+    "volcengine",
+)
+
+OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
+    "aliyun": {
+        "name": "阿里云",
+        "website": "https://dashscope.aliyuncs.com/",
+        "notes": "元模型厂商。",
+    },
+    "aliyun-wanx": {
+        "name": "阿里云万象",
+        "website": "https://dashscope.aliyuncs.com/",
+        "notes": "元模型厂商。",
+    },
+    "baidu": {
+        "name": "百度",
+        "website": "https://cloud.baidu.com/",
+        "notes": "元模型厂商。",
+    },
+    "volcengine": {
+        "name": "火山方舟",
+        "website": "https://ark.cn-beijing.volces.com/",
+        "notes": "元模型厂商。",
+    },
+}
 
 MODELS_DEV_META_SOURCE_PROVIDERS = {
     "alibaba",
@@ -251,7 +290,8 @@ def provider_aliases(provider: LLMProvider) -> set[str]:
         "google": {"Google", "Google云", "Google Cloud"},
         "aliyun": {"阿里云", "阿里云百炼", "DashScope"},
         "aliyun-wanx": {"阿里云万象", "通义万相", "WAN"},
-        "volcengine": {"火山", "Volcengine", "豆包"},
+        "baidu": {"百度", "百度千帆", "千帆", "Baidu Qianfan"},
+        "volcengine": {"火山", "火山方舟", "Volcengine", "豆包"},
     }
     aliases.update(code_aliases.get(provider.code, set()))
     return {normalize_provider_label(alias) for alias in aliases}
@@ -297,8 +337,9 @@ def sync_official_provider_model_prices(
     if not source.is_enabled:
         raise ValueError("Price collection source is disabled.")
 
-    configured_codes = set(
-        provider.models.filter(is_active=True).values_list("code", flat=True)
+    target_model_codes = official_provider_target_model_codes(
+        provider=provider,
+        config=config,
     )
     run = PriceCollectionRun.objects.create(source=source)
     stats: dict[str, int | list[str]] = {
@@ -317,15 +358,17 @@ def sync_official_provider_model_prices(
             source.endpoint_url = source_url
             source.save(update_fields=["endpoint_url", "updated_at"])
 
-        catalog = collect_official_pricing_catalog(
-            provider_code=provider.code,
-            model_codes=configured_codes,
+        catalog, standard_catalog = collect_official_provider_price_catalog(
+            provider=provider,
+            source=source,
+            config=config,
+            target_model_codes=target_model_codes,
             source_url=source_url,
             verify_source=verify_source,
         )
         collected_currency = first_catalog_currency(catalog)
         collected_codes = {item.model_id for item in catalog.models}
-        skipped_codes = sorted(configured_codes - collected_codes)
+        skipped_codes = sorted(target_model_codes - collected_codes)
         with transaction.atomic():
             for item in catalog.models:
                 model_source = ensure_official_model_source(
@@ -396,15 +439,21 @@ def sync_official_provider_model_prices(
             run.created_count = int(stats["created"])
             run.updated_count = int(stats["updated"])
             run.skipped_count = len(skipped_codes)
-            run.metadata = {
+            run_metadata = {
                 "source_url": catalog.source_url,
                 "currency": collected_currency or source.currency,
                 "configured_currency": config.currency,
-                "total_configured_models": len(configured_codes),
+                "total_configured_models": len(target_model_codes),
                 "changed_count": stats["changed"],
                 "unchanged_count": stats["unchanged"],
                 "skipped_model_codes": skipped_codes,
             }
+            run_metadata.update(catalog_source_fetch_metadata(catalog))
+            if standard_catalog is not None:
+                run_metadata.update(
+                    standard_catalog_run_metadata(standard_catalog)
+                )
+            run.metadata = run_metadata
             run.save()
             stats["skipped"] = len(skipped_codes)
             stats["skipped_model_codes"] = skipped_codes
@@ -421,12 +470,116 @@ def sync_official_provider_model_prices(
         raise
 
 
+def collect_official_provider_price_catalog(
+    *,
+    provider: LLMProvider,
+    source: PriceCollectionSource,
+    config,
+    target_model_codes: set[str],
+    source_url: str,
+    verify_source: bool,
+) -> tuple[CollectedPricingCatalog, dict | None]:
+    """Collect an official provider catalog through the JSON contract."""
+    if vendor_pricing_skill_exists(provider.code):
+        skill_model_codes = (
+            None
+            if (
+                verify_source
+                and provider.code in FULL_CATALOG_VENDOR_SKILL_PROVIDER_CODES
+            )
+            else target_model_codes
+        )
+        standard_catalog = collect_official_provider_standard_catalog(
+            provider=provider,
+            source=source,
+            verify_source=verify_source,
+            model_codes=skill_model_codes,
+            source_url=source_url,
+        )
+        return (
+            standard_catalog_to_collected_catalog(standard_catalog),
+            standard_catalog,
+        )
+
+    catalog = collect_official_pricing_catalog(
+        provider_code=provider.code,
+        model_codes=target_model_codes,
+        source_url=source_url,
+        verify_source=verify_source,
+    )
+    return catalog, None
+
+
+def collect_official_provider_standard_catalog(
+    *,
+    provider: LLMProvider,
+    source: PriceCollectionSource,
+    verify_source: bool = True,
+    model_codes: set[str] | None = None,
+    source_url: str = "",
+) -> dict:
+    """Collect official prices as standard JSON without persistence."""
+    if provider.code not in OFFICIAL_PROVIDER_CONFIGS:
+        raise ValueError(f"Unsupported official provider: {provider.code}")
+    if not vendor_pricing_skill_exists(provider.code):
+        raise ValueError(
+            f"No vendor pricing skill is available for {provider.code}."
+        )
+    if source.provider_id != provider.id:
+        raise ValueError("Price source does not belong to the provider.")
+
+    config = OFFICIAL_PROVIDER_CONFIGS[provider.code]
+    target_model_codes = set(model_codes or [])
+    resolved_source_url = source_url or official_source_url(
+        provider,
+        source,
+        config,
+    )
+    return run_vendor_pricing_skill(
+        provider.code,
+        {
+            "provider_code": provider.code,
+            "provider_name": provider.name,
+            "currency": source.currency or config.currency,
+            "source_url": resolved_source_url,
+            "model_codes": sorted(target_model_codes),
+            "verify_source": verify_source,
+        },
+    )
+
+
 def first_catalog_currency(catalog) -> str:
     """Return the first non-empty currency observed in a collected catalog."""
     for item in catalog.models:
         if item.currency:
             return item.currency
     return ""
+
+
+def catalog_source_fetch_metadata(catalog) -> dict:
+    """Return official source fetch metadata from the first catalog item."""
+    for item in catalog.models:
+        raw_detail = item.raw_detail or {}
+        metadata = raw_detail.get("official_source_fetch")
+        if isinstance(metadata, dict):
+            return dict(metadata)
+    return {}
+
+
+def official_provider_target_model_codes(*, provider, config) -> set[str]:
+    """Return model codes that an official sync should attempt to cover."""
+    existing_codes = set(
+        provider.models.filter(is_active=True).values_list("code", flat=True)
+    )
+    official_codes = set()
+    for spec in config.models:
+        official_codes.add(spec.model_id)
+        official_codes.update(spec.aliases)
+    return {
+        str(code).strip()
+        for code in existing_codes | official_codes
+        if str(code).strip()
+    }
 
 
 def sync_configured_official_model_prices(
@@ -466,6 +619,93 @@ def sync_configured_official_model_prices(
                 "error": str(exc),
             }
     return results
+
+
+def supported_official_provider_options() -> list[dict]:
+    """Return official provider source presets available to operators."""
+    provider_codes = list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    providers = {
+        provider.code: provider
+        for provider in LLMProvider.objects.filter(code__in=provider_codes)
+    }
+    source_slugs = [
+        official_provider_source_slug(provider_code)
+        for provider_code in provider_codes
+    ]
+    sources = {
+        source.slug: source
+        for source in PriceCollectionSource.objects.select_related(
+            "provider"
+        ).filter(slug__in=source_slugs)
+    }
+
+    options = []
+    for provider_code in provider_codes:
+        config = OFFICIAL_PROVIDER_CONFIGS[provider_code]
+        defaults = OFFICIAL_SOURCE_PROVIDER_DEFAULTS[provider_code]
+        provider = providers.get(provider_code)
+        source_slug = official_provider_source_slug(provider_code)
+        source = sources.get(source_slug)
+        provider_name = provider.name if provider else defaults["name"]
+        options.append(
+            {
+                "provider_code": provider_code,
+                "provider_name": provider_name,
+                "provider_exists": provider is not None,
+                "source_id": source.id if source else None,
+                "source_slug": source_slug,
+                "source_name": (
+                    source.name if source else f"{provider_name} 官方价格"
+                ),
+                "source_exists": source is not None,
+                "source_url": (
+                    source.endpoint_url
+                    if source and source.endpoint_url
+                    else config.source_url
+                ),
+                "currency": source.currency if source else config.currency,
+            }
+        )
+    return options
+
+
+def ensure_supported_official_provider_source(
+    provider_code: str,
+) -> tuple[LLMProvider, PriceCollectionSource, bool, bool]:
+    """Ensure an operator-selected official provider source exists."""
+    provider_code = str(provider_code or "").strip()
+    if provider_code not in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES:
+        raise ValueError("Unsupported official provider source.")
+
+    defaults = OFFICIAL_SOURCE_PROVIDER_DEFAULTS[provider_code]
+    provider, provider_created = LLMProvider.objects.get_or_create(
+        code=provider_code,
+        defaults={
+            "name": defaults["name"],
+            "website": defaults["website"],
+            "notes": defaults["notes"],
+            "is_active": True,
+        },
+    )
+    changed_fields = []
+    for field in ("website", "notes"):
+        if not getattr(provider, field):
+            setattr(provider, field, defaults[field])
+            changed_fields.append(field)
+    if changed_fields:
+        changed_fields.append("updated_at")
+        provider.save(update_fields=changed_fields)
+
+    source_created = not PriceCollectionSource.objects.filter(
+        slug=official_provider_source_slug(provider_code)
+    ).exists()
+    source = ensure_official_source(provider=provider)
+    return provider, source, provider_created, source_created
+
+
+def official_provider_source_slug(provider_code: str) -> str:
+    """Return the stable provider-level official source slug."""
+    return f"{provider_code}-official"
 
 
 def ensure_official_model_source(

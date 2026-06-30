@@ -19,7 +19,10 @@ from llm_ops.global_config import (
 )
 from llm_ops.llm_config import resolve_price_sync_llm_settings
 from llm_ops.models import LLMOpsGlobalConfig, PriceCollectionSource
-from llm_ops.source_collectors import collect_price_source
+from llm_ops.source_collectors import (
+    collect_price_source,
+    source_supports_code_collection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -417,6 +420,10 @@ class ModelPriceSyncAgentRunner(AgentRunner):
                     self.skipped += 1
                     self.source_results[key] = {"skipped": True}
             return self._current_result(sources)
+        if all(source_supports_code_collection(source) for source in sources):
+            for source in sources:
+                self.collect_source(source.id)
+            return self._current_result(sources)
         return super().execute()
 
     def list_configured_sources(self) -> list[PriceCollectionSource]:
@@ -469,6 +476,23 @@ class ModelPriceSyncAgentRunner(AgentRunner):
         self.succeeded += 1
         self.source_results[key] = result
         return result
+
+    def collect_source_catalog(self, source_id: int) -> dict[str, Any]:
+        """Collect standard catalog JSON without persisting prices."""
+        from llm_ops.collection_services import (
+            collect_official_provider_standard_catalog,
+        )
+
+        source = self._source_by_id(source_id)
+        if not source.is_enabled or not source.updates_model_prices:
+            return {"skipped": True}
+        if not source.provider_id:
+            raise ValueError("Price source does not have a provider.")
+        return collect_official_provider_standard_catalog(
+            provider=source.provider,
+            source=source,
+            verify_source=self.verify_source,
+        )
 
     def recover_structured_response(
         self,

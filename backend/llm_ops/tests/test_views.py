@@ -344,10 +344,17 @@ class LLMOpsViewTests(TestCase):
     def test_global_config_sync_deletes_managed_source_tasks(self):
         from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         current_source = PriceCollectionSource.objects.create(
-            name="Current Source",
-            slug="current-source",
-            endpoint_url="https://current.example.com",
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
             updates_model_prices=True,
         )
         obsolete_source = PriceCollectionSource.objects.create(
@@ -614,9 +621,9 @@ class LLMOpsViewTests(TestCase):
             name="Yunce",
             code="yunce",
         )
-        platform = ResalePlatform.objects.create(
-            name="Agione",
+        platform, _ = ResalePlatform.objects.get_or_create(
             code="agione",
+            defaults={"name": "Agione"},
         )
         listing = ResaleListing.objects.create(
             platform=platform,
@@ -789,6 +796,19 @@ class LLMOpsViewTests(TestCase):
             is_enabled=True,
             updates_model_prices=True,
         )
+        PriceCollectionSource.objects.create(
+            name="Aliyun Qwen Plus Official",
+            slug="aliyun-qwen-plus-official",
+            provider=aliyun,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
         openai = LLMProvider.objects.create(name="OpenAI", code="openai")
         PriceCollectionSource.objects.create(
             name="OpenAI Official",
@@ -829,6 +849,73 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         mock_delay.assert_not_called()
+
+    def test_official_provider_options_include_aliyun_presets(self):
+        response = self.client.get(
+            reverse("collection-source-official-provider-options")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        provider_codes = {
+            item["provider_code"] for item in response.data["results"]
+        }
+        self.assertIn("aliyun", provider_codes)
+        self.assertIn("aliyun-wanx", provider_codes)
+        self.assertIn("baidu", provider_codes)
+        self.assertIn("volcengine", provider_codes)
+
+    def test_ensure_official_provider_source_creates_aliyun_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "aliyun"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(response.data["source"]["slug"], "aliyun-official")
+        self.assertEqual(response.data["source"]["provider_code"], "aliyun")
+        self.assertEqual(response.data["source"]["currency"], "CNY")
+        provider = LLMProvider.objects.get(code="aliyun")
+        source = PriceCollectionSource.objects.get(slug="aliyun-official")
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_category,
+            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER,
+        )
+        self.assertTrue(source.updates_model_prices)
+        audit = AuditLog.objects.get(target_id=str(source.id))
+        self.assertEqual(audit.action, AuditLog.ACTION_CREATE)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_CONFIGURATION)
+        self.assertEqual(audit.metadata["provider_code"], "aliyun")
+
+    def test_ensure_official_provider_source_is_idempotent(self):
+        first = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "aliyun"},
+            format="json",
+        )
+        second = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "aliyun"},
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 200)
+        self.assertFalse(second.data["provider_created"])
+        self.assertFalse(second.data["source_created"])
+        self.assertEqual(
+            first.data["source"]["id"],
+            second.data["source"]["id"],
+        )
+        self.assertEqual(
+            PriceCollectionSource.objects.filter(
+                slug="aliyun-official",
+            ).count(),
+            1,
+        )
 
     @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_rejects_disabled_source(
@@ -927,6 +1014,52 @@ class LLMOpsViewTests(TestCase):
             source_id=source.id,
             verify_source=True,
         )
+
+    def test_collection_run_list_filters_task_logs(self):
+        provider = LLMProvider.objects.create(
+            name="Alibaba Cloud",
+            code="aliyun",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+        other_source = PriceCollectionSource.objects.create(
+            name="Supplier API",
+            slug="supplier-api",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        target_run = PriceCollectionRun.objects.create(
+            source=source,
+            status=PriceCollectionRun.STATUS_FAILED,
+            error_message="remote page changed",
+        )
+        PriceCollectionRun.objects.create(
+            source=other_source,
+            status=PriceCollectionRun.STATUS_SUCCEEDED,
+        )
+
+        response = self.client.get(
+            reverse("collection-run-list"),
+            {
+                "provider": "aliyun",
+                "q": "page changed",
+                "source_category": (
+                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+                ),
+                "status": PriceCollectionRun.STATUS_FAILED,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], target_run.id)
 
     def test_collected_price_snapshot_list_returns_normalized_rows(self):
         source = PriceCollectionSource.objects.create(
@@ -1841,10 +1974,12 @@ class LLMOpsViewTests(TestCase):
         )
 
     def test_resale_workflow_config_effective_returns_platform_runtime(self):
-        platform = ResalePlatform.objects.create(
-            name="Agione",
+        platform, _ = ResalePlatform.objects.update_or_create(
             code="agione",
-            auto_approve_max_margin_rate="25.50",
+            defaults={
+                "name": "Agione",
+                "auto_approve_max_margin_rate": "25.50",
+            },
         )
 
         response = self.client.get(
@@ -1866,9 +2001,9 @@ class LLMOpsViewTests(TestCase):
         )
 
     def test_resale_workflow_config_effective_persists_edits(self):
-        platform = ResalePlatform.objects.create(
-            name="Agione",
+        platform, _ = ResalePlatform.objects.get_or_create(
             code="agione",
+            defaults={"name": "Agione"},
         )
         response = self.client.get(
             reverse("resale-workflow-config-effective"),
@@ -1897,9 +2032,9 @@ class LLMOpsViewTests(TestCase):
         self.assertIn("runtime", patch_response.data["config"])
 
     def test_resale_workflow_config_patch_requires_config(self):
-        platform = ResalePlatform.objects.create(
-            name="Agione",
+        platform, _ = ResalePlatform.objects.get_or_create(
             code="agione",
+            defaults={"name": "Agione"},
         )
 
         response = self.client.patch(
@@ -1916,9 +2051,9 @@ class LLMOpsViewTests(TestCase):
         )
 
     def test_resale_workflow_config_rejects_unknown_edge_node(self):
-        platform = ResalePlatform.objects.create(
-            name="Agione",
+        platform, _ = ResalePlatform.objects.get_or_create(
             code="agione",
+            defaults={"name": "Agione"},
         )
         payload = {
             "config": {
@@ -1953,9 +2088,9 @@ class LLMOpsViewTests(TestCase):
         self.assertIn("unknown node", str(response.data))
 
     def test_resale_workflow_config_rejects_missing_publish_path(self):
-        platform = ResalePlatform.objects.create(
-            name="Agione",
+        platform, _ = ResalePlatform.objects.get_or_create(
             code="agione",
+            defaults={"name": "Agione"},
         )
         response = self.client.get(
             reverse("resale-workflow-config-effective"),

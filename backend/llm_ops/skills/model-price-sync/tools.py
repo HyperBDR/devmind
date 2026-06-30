@@ -33,6 +33,11 @@ def build_model_price_sync_tools(runner_ref: Any) -> list[BaseTool]:
         }
 
     @tool
+    def collect_vendor_price_catalog(source_id: int) -> dict[str, Any]:
+        """Collect standard model price catalog JSON without persistence."""
+        return runner_ref.collect_source_catalog(source_id)
+
+    @tool
     def collect_model_price_source(source_id: int) -> dict[str, Any]:
         """Collect and persist model prices for one configured source."""
         return runner_ref.collect_source(source_id)
@@ -51,6 +56,7 @@ def build_model_price_sync_tools(runner_ref: Any) -> list[BaseTool]:
 
     return [
         list_configured_price_sources,
+        collect_vendor_price_catalog,
         collect_model_price_source,
         mark_model_price_sync_failed,
     ]
