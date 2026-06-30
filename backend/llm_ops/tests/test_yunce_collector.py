@@ -7,6 +7,7 @@ from llm_ops.collection_services import (
     slugify_provider,
     sync_yunce_text_model_prices,
 )
+from llm_ops.constants import canonical_meta_model_identity
 from llm_ops.collectors.yunce import (
     CollectedModelPricing,
     CollectedPricingCatalog,
@@ -88,6 +89,30 @@ class YuncePriceNormalizerTests(TestCase):
 
 
 class YunceCollectionSyncTests(TestCase):
+    def setUp(self):
+        self.ensure_meta_models(
+            "gpt-4o",
+            "gpt-image",
+            "veo",
+            "qwen-range",
+            "gpt-snapshot",
+            "deepseek-r1",
+            "claude-sonnet",
+            "gpt-unit",
+            "gpt-fails",
+        )
+
+    def ensure_meta_models(self, *model_codes):
+        for model_code in model_codes:
+            identity = canonical_meta_model_identity(model_code)
+            MetaModel.objects.get_or_create(
+                code=identity["code"],
+                defaults={
+                    "name": identity["name"],
+                    "aliases": identity["aliases"],
+                },
+            )
+
     def test_slugify_provider_uses_ascii_slug(self):
         self.assertTrue(
             slugify_provider("阿里云 百炼").startswith("provider-")
@@ -318,6 +343,65 @@ class YunceCollectionSyncTests(TestCase):
         )
         self.assertEqual(input_items[1].unit_price, Decimal("1.600000"))
         self.assertEqual(output_items[1].unit_price, Decimal("4.000000"))
+
+    @patch("llm_ops.collection_services.collect_yunce_pricing_catalog")
+    def test_sync_model_prices_skips_prices_without_meta_model(
+        self,
+        mock_collect,
+    ):
+        mock_collect.return_value = CollectedPricingCatalog(
+            source_url="https://llm.guohe-sh.com/",
+            total_models=1,
+            models=[
+                CollectedModelPricing(
+                    model_source="阿里云",
+                    model_type="文本模型",
+                    source_model_type="Text",
+                    name="Missing Meta Model",
+                    model_id="missing-meta-model",
+                    platform_id=102,
+                    mode="normal",
+                    provider="阿里云",
+                    billing_type="按量计费",
+                    billing_unit="CNY",
+                    currency="CNY",
+                    unit=1000000,
+                    billing_mode="",
+                    price_rows=[
+                        NormalizedPriceRow(
+                            kind="text_token",
+                            values={
+                                "input_price": 0.8,
+                                "output_price": 2,
+                            },
+                            raw={},
+                        )
+                    ],
+                    raw_price_info={},
+                    raw_detail={},
+                )
+            ],
+        )
+
+        result = sync_yunce_text_model_prices(
+            username="user",
+            password="secret",
+        )
+
+        self.assertEqual(result["models"], 0)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(
+            result["skipped_model_codes"],
+            ["missing-meta-model"],
+        )
+        self.assertFalse(
+            LLMModel.objects.filter(code="missing-meta-model").exists(),
+        )
+        self.assertFalse(
+            CollectedModelPriceSnapshot.objects.filter(
+                source_model_id="missing-meta-model",
+            ).exists(),
+        )
 
     @patch("llm_ops.collection_services.collect_yunce_pricing_catalog")
     def test_sync_model_prices_can_collect_without_promoting_prices(

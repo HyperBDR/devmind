@@ -18,6 +18,7 @@ from .collectors.official import (
     normalize_model_code,
 )
 from .collectors.yunce import DEFAULT_YUNCE_BASE_URL, YuncePricingClient
+from .constants import canonical_meta_model_identity
 from .models import (
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
@@ -29,8 +30,8 @@ from .models import (
     PriceCollectionSource,
 )
 from .services import (
-    ensure_meta_model,
     find_aggregated_model,
+    match_meta_model_by_alias_or_name,
     normalize_currency,
     price_role_for_source,
     update_aggregated_model_identity,
@@ -150,7 +151,7 @@ def sync_yunce_model_prices(
     password: str,
     source: PriceCollectionSource | None = None,
     base_url: str = DEFAULT_YUNCE_BASE_URL,
-) -> dict[str, int]:
+) -> dict[str, int | list[str]]:
     """Fetch Yunce pricing and persist model prices plus snapshots."""
     source = source or ensure_yunce_source(base_url=base_url)
     if not source.is_enabled:
@@ -164,6 +165,7 @@ def sync_yunce_model_prices(
         "skipped": 0,
         "changed": 0,
         "unchanged": 0,
+        "skipped_model_codes": [],
     }
 
     try:
@@ -181,11 +183,18 @@ def sync_yunce_model_prices(
                         skipped_provider_names.append(item.model_source)
                     continue
 
-                model, created = upsert_collected_model(
+                upsert_result = upsert_collected_model(
                     item,
                     source=source,
                     source_url=catalog.source_url,
                 )
+                if upsert_result is None:
+                    stats["skipped"] += 1
+                    stats["skipped_model_codes"].append(
+                        collected_model_code(item),
+                    )
+                    continue
+                model, created = upsert_result
                 _, changed = upsert_collected_snapshot(
                     item,
                     source=source,
@@ -219,6 +228,9 @@ def sync_yunce_model_prices(
                 "unchanged_count": stats["unchanged"],
                 "skipped_provider_names": sorted(
                     set(skipped_provider_names),
+                ),
+                "skipped_model_codes": sorted(
+                    set(stats["skipped_model_codes"]),
                 ),
             }
             run.save()
@@ -310,7 +322,7 @@ def sync_yunce_text_model_prices(
     password: str,
     source: PriceCollectionSource | None = None,
     base_url: str = DEFAULT_YUNCE_BASE_URL,
-) -> dict[str, int]:
+) -> dict[str, int | list[str]]:
     """Compatibility wrapper for the full Yunce model sync."""
     return sync_yunce_model_prices(
         username=username,
@@ -371,9 +383,14 @@ def sync_official_provider_model_prices(
         skipped_codes = sorted(target_model_codes - collected_codes)
         with transaction.atomic():
             for item in catalog.models:
+                model_code = collected_model_code(item)
+                meta_model = existing_meta_model_for_collected_item(item)
+                if meta_model is None:
+                    skipped_codes.append(model_code)
+                    continue
                 model_source = ensure_official_model_source(
                     provider=provider,
-                    model_code=collected_model_code(item),
+                    model_code=model_code,
                     display_name=item.name or item.model_id,
                     source_url=catalog.source_url,
                     currency=(
@@ -383,16 +400,32 @@ def sync_official_provider_model_prices(
                     ),
                 )
                 if not model_source.is_enabled:
-                    skipped_codes.append(collected_model_code(item))
+                    skipped_codes.append(model_code)
                     continue
                 model_run = PriceCollectionRun.objects.create(
                     source=model_source,
                 )
-                model, created = upsert_collected_model(
+                upsert_result = upsert_collected_model(
                     item,
                     source=model_source,
                     source_url=catalog.source_url,
+                    meta_model=meta_model,
                 )
+                if upsert_result is None:
+                    skipped_codes.append(model_code)
+                    model_run.status = PriceCollectionRun.STATUS_SUCCEEDED
+                    model_run.finished_at = timezone.now()
+                    model_run.skipped_count = 1
+                    model_run.metadata = {
+                        "source_url": catalog.source_url,
+                        "currency": item.currency or collected_currency,
+                        "provider_source_slug": source.slug,
+                        "source_model_id": model_code,
+                        "skip_reason": "missing_meta_model",
+                    }
+                    model_run.save()
+                    continue
+                model, created = upsert_result
                 _, changed = upsert_collected_snapshot(
                     item,
                     source=model_source,
@@ -427,6 +460,7 @@ def sync_official_provider_model_prices(
                 change_key = "changed" if changed else "unchanged"
                 stats[change_key] = int(stats[change_key]) + 1
 
+            skipped_codes = sorted(set(skipped_codes))
             source.last_collected_at = timezone.now()
             source_update_fields = ["last_collected_at", "updated_at"]
             if collected_currency and source.currency != collected_currency:
@@ -1110,22 +1144,19 @@ def upsert_collected_model(
     *,
     source: PriceCollectionSource,
     source_url: str,
-) -> tuple[LLMModel, bool]:
+    meta_model: MetaModel | None = None,
+) -> tuple[LLMModel, bool] | None:
     """Upsert one collected model into the canonical model table."""
-    provider = resolve_collected_provider(item, source=source)
     model_code = collected_model_code(item)
+    meta_model = meta_model or existing_meta_model_for_collected_item(item)
+    if meta_model is None:
+        return None
+    provider = resolve_collected_provider(item, source=source)
     lookup = {
         "provider": provider,
         "source": source,
         "code": model_code,
     }
-    meta_model = ensure_meta_model(
-        code=model_code,
-        raw_code=collected_model_raw_code(item),
-        name=item.name or item.model_id,
-        provider=provider,
-        modality=modality_from_source_type(item.source_model_type),
-    )
     defaults = model_defaults_from_collected_item(
         item,
         source=source,
@@ -1173,6 +1204,28 @@ def upsert_collected_model(
         changed_fields.append("updated_at")
         model.save(update_fields=changed_fields)
     return model, False
+
+
+def existing_meta_model_for_collected_item(
+    item: CollectedModelPricing,
+) -> MetaModel | None:
+    """Resolve a collected price row to an existing canonical meta model."""
+    model_code = collected_model_code(item)
+    raw_code = collected_model_raw_code(item)
+    reported_name = item.name or item.model_id
+    source_code = str(raw_code or model_code or reported_name).strip()
+    identity = canonical_meta_model_identity(source_code, reported_name)
+    meta_model = MetaModel.objects.filter(code=identity["code"]).first()
+    if meta_model is not None:
+        return meta_model
+    return match_meta_model_by_alias_or_name(
+        raw_code=raw_code,
+        reported_code=model_code,
+        reported_name=reported_name,
+        canonical_code=identity["code"],
+        canonical_name=identity["name"],
+        seed_aliases=identity["aliases"],
+    )
 
 
 def collected_model_code(item: CollectedModelPricing) -> str:

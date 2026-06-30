@@ -842,6 +842,12 @@ class OfficialCollectionSyncTests(TestCase):
         mock_get,
     ):
         provider = LLMProvider.objects.get(code="aliyun")
+        MetaModel.objects.create(
+            code="qwen-new-2026",
+            name="Qwen New 2026",
+            vendor=provider,
+            aliases=["qwen-new-2026"],
+        )
         mock_get.return_value = MockPricingResponse(
             """
             <table>
@@ -884,6 +890,113 @@ class OfficialCollectionSyncTests(TestCase):
                 model=model,
                 source=model.source,
                 is_current=True,
+            ).exists(),
+        )
+
+    @patch("requests.get")
+    def test_sync_aliyun_official_prices_collects_qwen37_page_rows(
+        self,
+        mock_get,
+    ):
+        provider = LLMProvider.objects.get(code="aliyun")
+        mock_get.return_value = MockPricingResponse(
+            """
+            <table>
+              <tr>
+                <th>模型 ID（Model ID）</th>
+                <th>服务部署范围</th>
+                <th>模式</th>
+                <th>单次请求的输入 Token 数</th>
+                <th>输入单价（每百万 Token）</th>
+                <th>输出单价（每百万 Token）</th>
+                <th>免费额度</th>
+              </tr>
+              <tr>
+                <td>
+                  <p>qwen3.7-max</p>
+                  <blockquote>
+                    当前能力等同于 qwen3.7-max-2026-05-20
+                  </blockquote>
+                </td>
+                <td>中国内地</td>
+                <td>非思考和思考模式</td>
+                <td>0&lt;Token≤1M</td>
+                <td>12 元</td>
+                <td>36 元</td>
+                <td>-</td>
+              </tr>
+            </table>
+            """,
+        )
+
+        stats = sync_official_provider_model_prices(provider=provider)
+
+        model = LLMModel.objects.get(
+            provider=provider,
+            source__slug=self.official_model_source_slug(
+                "aliyun",
+                "qwen3.7-max",
+            ),
+            code="qwen3.7-max",
+        )
+        self.assertEqual(stats["models"], 1)
+        self.assertEqual(model.input_price_per_million, Decimal("12.000000"))
+        self.assertEqual(model.output_price_per_million, Decimal("36.000000"))
+        input_item = ModelPriceItem.objects.get(
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            is_current=True,
+        )
+        self.assertEqual(
+            input_item.tier_type,
+            ModelPriceItem.TIER_USAGE_RANGE,
+        )
+        self.assertEqual(input_item.tier_start, Decimal("0.000000"))
+        self.assertEqual(input_item.tier_end, Decimal("1000000.000000"))
+
+    @patch("requests.get")
+    def test_sync_aliyun_official_prices_skips_rows_without_meta_model(
+        self,
+        mock_get,
+    ):
+        provider = LLMProvider.objects.get(code="aliyun")
+        mock_get.return_value = MockPricingResponse(
+            """
+            <table>
+              <tr>
+                <th>模型 ID（Model ID）</th>
+                <th>服务部署范围</th>
+                <th>输入单价（每百万 Token）</th>
+                <th>输出单价（每百万 Token）</th>
+                <th>免费额度</th>
+              </tr>
+              <tr>
+                <td><p>qwen-missing-meta-2099</p></td>
+                <td>中国内地</td>
+                <td>3.5 元</td>
+                <td>7 元</td>
+                <td>-</td>
+              </tr>
+            </table>
+            """,
+        )
+
+        stats = sync_official_provider_model_prices(provider=provider)
+
+        self.assertEqual(stats["models"], 0)
+        self.assertIn(
+            "qwen-missing-meta-2099",
+            stats["skipped_model_codes"],
+        )
+        self.assertFalse(
+            LLMModel.objects.filter(code="qwen-missing-meta-2099").exists(),
+        )
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(
+                slug=self.official_model_source_slug(
+                    "aliyun",
+                    "qwen-missing-meta-2099",
+                ),
             ).exists(),
         )
 
