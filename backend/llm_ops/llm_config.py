@@ -9,7 +9,7 @@ from django.db.utils import OperationalError, ProgrammingError
 
 try:
     from agentcore_metering.adapters.django.models import LLMConfig
-except ImportError, RuntimeError:
+except (ImportError, RuntimeError):
     LLMConfig = None
 
 
@@ -42,7 +42,7 @@ def get_llm_config_reference(config_uuid: str | None) -> dict[str, str]:
             .order_by("-is_active", "-is_default", "created_at", "id")
             .first()
         )
-    except OperationalError, ProgrammingError:
+    except (OperationalError, ProgrammingError):
         row = None
     if row is None:
         return {"uuid": str(config_uuid), "label": str(config_uuid)}
@@ -63,7 +63,7 @@ def _get_default_llm_row() -> Any | None:
             .order_by("-is_default", "created_at", "id")
             .first()
         )
-    except OperationalError, ProgrammingError:
+    except (OperationalError, ProgrammingError):
         return None
 
 
@@ -85,7 +85,7 @@ def resolve_price_sync_llm_settings(
                 .order_by("-is_default", "created_at", "id")
                 .first()
             )
-        except OperationalError, ProgrammingError:
+        except (OperationalError, ProgrammingError):
             selected_row = None
         if selected_row is not None:
             source = "selected"

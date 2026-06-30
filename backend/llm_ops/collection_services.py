@@ -1339,7 +1339,7 @@ def models_dev_limit(model_payload: dict, key: str) -> int:
     """Return an integer token limit from models.dev."""
     try:
         return int((model_payload.get("limit") or {}).get(key) or 0)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return 0
 
 
@@ -2547,7 +2547,7 @@ def to_decimal(value) -> Decimal | None:
         return None
     try:
         return Decimal(str(value))
-    except InvalidOperation, TypeError, ValueError:
+    except (InvalidOperation, TypeError, ValueError):
         return None
 
 
