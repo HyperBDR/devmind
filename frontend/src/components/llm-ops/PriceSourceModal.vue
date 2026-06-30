@@ -81,11 +81,20 @@
             </label>
             <label class="field-group">
               <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.category') }}
+                {{ t('llmOps.priceSourceModal.fields.sourceOwnerType') }}
               </span>
               <CompactSelect
-                v-model="form.source_category"
-                :options="sourceCategoryOptions"
+                v-model="form.source_owner_type"
+                :options="sourceOwnerTypeOptions"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.collectionMethod') }}
+              </span>
+              <CompactSelect
+                v-model="form.collection_method"
+                :options="collectionMethodOptions"
               />
             </label>
             <label
@@ -257,7 +266,11 @@ const selectedOfficialProviderCode = ref('')
 const loadingOfficialProviderOptions = ref(false)
 const isEditing = computed(() => Boolean(props.source?.id))
 const shouldUseOfficialPreset = computed(
-  () => !isEditing.value && form.value.source_category === 'official_provider'
+  () =>
+    !isEditing.value &&
+    ['model_provider_official', 'cloud_provider_official'].includes(
+      form.value.source_owner_type
+    )
 )
 const internalSlugLabel = computed(() =>
   isEditing.value ? form.value.slug || '-' : sourceSlugLabel.value
@@ -278,21 +291,48 @@ const sourceTypeLabel = computed(() => {
   return labels[type] || type || '-'
 })
 
-const sourceCategoryOptions = computed(() => [
+const sourceOwnerTypeOptions = computed(() => [
   {
-    label: t('llmOps.priceSourceModal.categories.officialProvider'),
-    value: 'official_provider'
+    label: t('llmOps.priceSourceModal.sourceOwnerTypes.modelProvider'),
+    value: 'model_provider_official'
   },
   {
-    label: t('llmOps.priceSourceModal.categories.supplier'),
+    label: t('llmOps.priceSourceModal.sourceOwnerTypes.cloudProvider'),
+    value: 'cloud_provider_official'
+  },
+  {
+    label: t('llmOps.priceSourceModal.sourceOwnerTypes.supplier'),
     value: 'supplier'
   },
   {
-    label: t('llmOps.priceSourceModal.categories.manual'),
-    value: 'manual'
+    label: t('llmOps.priceSourceModal.sourceOwnerTypes.internal'),
+    value: 'internal'
   },
   {
-    label: t('llmOps.priceSourceModal.categories.unknown'),
+    label: t('llmOps.priceSourceModal.sourceOwnerTypes.unknown'),
+    value: 'unknown'
+  }
+])
+
+const collectionMethodOptions = computed(() => [
+  {
+    label: t('llmOps.priceSourceModal.collectionMethods.autoCollect'),
+    value: 'auto_collect'
+  },
+  {
+    label: t('llmOps.priceSourceModal.collectionMethods.manualEntry'),
+    value: 'manual_entry'
+  },
+  {
+    label: t('llmOps.priceSourceModal.collectionMethods.manualImport'),
+    value: 'manual_import'
+  },
+  {
+    label: t('llmOps.priceSourceModal.collectionMethods.apiSync'),
+    value: 'api_sync'
+  },
+  {
+    label: t('llmOps.priceSourceModal.collectionMethods.unknown'),
     value: 'unknown'
   }
 ])
@@ -349,7 +389,7 @@ watch(
 )
 
 watch(
-  () => [props.open, form.value.source_category, isEditing.value],
+  () => [props.open, form.value.source_owner_type, isEditing.value],
   ([open]) => {
     if (open && shouldUseOfficialPreset.value) {
       loadOfficialProviderOptions()
@@ -366,7 +406,8 @@ function defaults() {
   return {
     name: '',
     slug: '',
-    source_category: 'supplier',
+    source_owner_type: 'supplier',
+    collection_method: 'manual_entry',
     endpoint_url: '',
     currency: 'CNY',
     is_enabled: true,
@@ -379,7 +420,10 @@ function normalizeSource(source) {
   return {
     name: source.name || '',
     slug: source.slug || '',
-    source_category: source.source_category || 'unknown',
+    source_owner_type:
+      source.source_owner_type ||
+      sourceOwnerTypeFromLegacyCategory(source.source_category),
+    collection_method: source.collection_method || 'unknown',
     endpoint_url: source.endpoint_url || '',
     currency: source.currency || 'CNY',
     is_enabled: source.is_enabled !== false,
@@ -407,6 +451,9 @@ async function save() {
         : form.value.slug || autoSlug(form.value.name),
       source_type: props.source?.source_type || 'custom'
     }
+    payload.source_category = legacyCategoryForSourceOwnerType(
+      payload.source_owner_type
+    )
     if (isEditing.value) {
       await llmOpsApi.updateCollectionSource(props.source.id, payload)
       showSuccess(t('llmOps.priceSourceModal.messages.updated'))
@@ -473,12 +520,38 @@ async function loadOfficialProviderOptions() {
 function applyOfficialProviderOption(option) {
   form.value = {
     ...form.value,
+    source_owner_type: sourceOwnerTypeForOfficialProvider(option),
+    collection_method: 'auto_collect',
     name: option.source_name || option.provider_name || form.value.name,
     slug: option.source_slug || form.value.slug,
     currency: option.currency || form.value.currency,
     endpoint_url: option.source_url || form.value.endpoint_url,
     updates_model_prices: true
   }
+}
+
+function legacyCategoryForSourceOwnerType(value) {
+  if (['model_provider_official', 'cloud_provider_official'].includes(value)) {
+    return 'official_provider'
+  }
+  if (value === 'supplier') return 'supplier'
+  if (value === 'internal') return 'manual'
+  return 'unknown'
+}
+
+function sourceOwnerTypeFromLegacyCategory(value) {
+  if (value === 'official_provider') return 'model_provider_official'
+  if (value === 'supplier') return 'supplier'
+  if (value === 'manual') return 'internal'
+  return 'unknown'
+}
+
+function sourceOwnerTypeForOfficialProvider(option) {
+  const code = String(option?.provider_code || '').toLowerCase()
+  if (['aliyun', 'aliyun-wanx', 'baidu', 'volcengine'].includes(code)) {
+    return 'cloud_provider_official'
+  }
+  return 'model_provider_official'
 }
 
 function errorMessage(error, fallback) {

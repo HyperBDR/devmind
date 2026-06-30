@@ -1372,11 +1372,13 @@
           "label": "Providers"
         },
         "supplierManual": {
-          "hint": "Supplier {supplier} · manual {manual}",
-          "label": "Supplier / manual"
+          "hint": "Cloud hosted {cloudHosted} · supplier {supplier} · internal {internal}",
+          "label": "Hosted / external"
         }
       },
       "category": {
+        "cloudHosted": "Cloud hosted",
+        "internal": "Internal",
         "manual": "Manual",
         "officialProvider": "Official",
         "supplier": "Supplier",
@@ -1395,8 +1397,10 @@
       "sourceMode": {
         "aggregateSync": "Aggregate sync",
         "autoCollect": "Auto collect",
+        "apiSync": "API sync",
         "custom": "Custom",
         "dedicatedCollect": "Dedicated collection",
+        "manualImport": "Manual import",
         "manualMaintenance": "Manual maintenance",
         "pending": "Pending adapter",
         "supplierMaintenance": "Supplier maintained"
@@ -1481,11 +1485,13 @@
       },
       "fields": {
         "category": "Pricing scope",
+        "collectionMethod": "Maintenance method",
         "currency": "Default currency",
         "endpointUrl": "Price URL",
         "name": "Price source name",
         "officialProvider": "Official provider",
         "slug": "System slug",
+        "sourceOwnerType": "Source owner",
         "sourceType": "Source mode"
       },
       "placeholders": {
@@ -1509,6 +1515,20 @@
       },
       "sourceTypes": {
         "custom": "Custom"
+      },
+      "sourceOwnerTypes": {
+        "cloudProvider": "Cloud provider official",
+        "internal": "Internal",
+        "modelProvider": "Model provider official",
+        "supplier": "Supplier",
+        "unknown": "Unknown"
+      },
+      "collectionMethods": {
+        "apiSync": "API sync",
+        "autoCollect": "Auto collect",
+        "manualEntry": "Manual entry",
+        "manualImport": "Manual import",
+        "unknown": "Unknown"
       },
       "categories": {
         "manual": "Manual maintenance",
@@ -1602,15 +1622,25 @@
         "video": "Video"
       },
       "categories": {
+        "cloudHosted": "Cloud hosted price",
         "manual": "Manual entry",
         "officialProvider": "Official price",
         "supplier": "Supplier price",
         "unknown": "Other"
       },
+      "sourceOwnerTypes": {
+        "cloudProvider": "Cloud provider official",
+        "internal": "Internal",
+        "modelProvider": "Model provider official",
+        "supplier": "Supplier",
+        "unknown": "Unknown"
+      },
       "sourceMode": {
         "aggregateSync": "Aggregate sync",
+        "apiSync": "API sync",
         "autoCollect": "Auto collect",
         "dedicatedCollect": "Dedicated collection",
+        "manualImport": "Manual import",
         "manualMaintenance": "Manual maintenance",
         "pending": "Pending adapter",
         "supplierMaintenance": "Supplier maintained"

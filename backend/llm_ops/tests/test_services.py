@@ -79,7 +79,9 @@ class LLMOpsPricingServiceTests(TestCase):
 
         self.assertEqual(cost, Decimal("28.000000"))
 
-    def test_official_source_is_supplier_for_third_party_meta_model(self):
+    def test_official_source_is_cloud_hosted_for_third_party_meta_model(
+        self,
+    ):
         deepseek = LLMProvider.objects.create(
             name="DeepSeek",
             code="deepseek",
@@ -103,7 +105,7 @@ class LLMOpsPricingServiceTests(TestCase):
             meta_model=deepseek_meta,
         )
 
-        self.assertEqual(role, LLMModel.PRICE_ROLE_SUPPLIER)
+        self.assertEqual(role, LLMModel.PRICE_ROLE_CLOUD_HOSTED)
 
     def test_records_channel_media_price_history(self):
         self.model.currency = "CNY"

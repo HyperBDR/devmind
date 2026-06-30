@@ -54,6 +54,12 @@ FULL_CATALOG_VENDOR_SKILL_PROVIDER_CODES = (
     "baidu",
     "volcengine",
 )
+CLOUD_PROVIDER_OFFICIAL_CODES = {
+    "aliyun",
+    "aliyun-wanx",
+    "baidu",
+    "volcengine",
+}
 
 OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "aliyun": {
@@ -102,6 +108,13 @@ MODELS_DEV_META_SOURCE_PROVIDERS = {
     "zai",
     "zhipuai",
 }
+
+
+def source_owner_type_for_provider(provider: LLMProvider) -> str:
+    """Return the publisher type for provider official price sources."""
+    if str(provider.code or "").lower() in CLOUD_PROVIDER_OFFICIAL_CODES:
+        return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
 
 CACHE_INPUT_PRICE_KEYS = (
     "cache_input_price",
@@ -753,6 +766,7 @@ def ensure_official_model_source(
     """Ensure an independent official source exists for one model."""
     normalized_code = collected_model_code_from_value(model_code)
     slug = official_model_source_slug(provider.code, normalized_code)
+    owner_type = source_owner_type_for_provider(provider)
     source, created = PriceCollectionSource.objects.get_or_create(
         slug=slug,
         defaults={
@@ -765,11 +779,18 @@ def ensure_official_model_source(
             "source_category": (
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
+            "source_owner_type": owner_type,
+            "collection_method": (
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             "endpoint_url": source_url,
             "currency": currency or "USD",
             "is_enabled": True,
             "updates_model_prices": True,
-            "notes": "官方公开价格采集源；该来源只对应一个模型。",
+            "notes": (
+                "官方公开价格采集源；"
+                "该来源只对应一个模型。"
+            ),
         },
     )
     if created:
@@ -777,14 +798,22 @@ def ensure_official_model_source(
 
     desired_fields = {
         "provider": provider,
-        "name": f"{provider.name} / {display_name or normalized_code} 官方价格",
+        "name": (
+            f"{provider.name} / {display_name or normalized_code} 官方价格"
+        ),
         "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
         "source_category": (
             PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
         ),
+        "source_owner_type": owner_type,
+        "collection_method": (
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+        ),
         "currency": currency or source.currency or "USD",
         "updates_model_prices": True,
-        "notes": "官方公开价格采集源；该来源只对应一个模型。",
+        "notes": (
+            "官方公开价格采集源；该来源只对应一个模型。"
+        ),
     }
     if not source.endpoint_url:
         desired_fields["endpoint_url"] = source_url
@@ -1546,6 +1575,10 @@ def price_item_payloads_from_row(
         "model": model,
         "meta_model": model.meta_model,
         "source": source,
+        "price_role": price_role_for_source(
+            source,
+            meta_model=model.meta_model,
+        ),
         "currency": item.currency or source.currency or "USD",
         "source_url": source_url,
         "raw_payload": {
@@ -1989,6 +2022,10 @@ def ensure_yunce_source(*, base_url: str = DEFAULT_YUNCE_BASE_URL):
             "source_category": (
                 PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
             ),
+            "source_owner_type": PriceCollectionSource.SOURCE_OWNER_SUPPLIER,
+            "collection_method": (
+                PriceCollectionSource.COLLECTION_METHOD_API_SYNC
+            ),
             "endpoint_url": source_url,
             "currency": "USD",
             "is_enabled": True,
@@ -2000,6 +2037,7 @@ def ensure_yunce_source(*, base_url: str = DEFAULT_YUNCE_BASE_URL):
 def ensure_official_source(*, provider: LLMProvider):
     """Ensure an official pricing source exists for a provider."""
     config = OFFICIAL_PROVIDER_CONFIGS[provider.code]
+    owner_type = source_owner_type_for_provider(provider)
     source, created = PriceCollectionSource.objects.get_or_create(
         slug=f"{provider.code}-official",
         defaults={
@@ -2008,6 +2046,10 @@ def ensure_official_source(*, provider: LLMProvider):
             "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             "source_category": (
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            "source_owner_type": owner_type,
+            "collection_method": (
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
             ),
             "endpoint_url": config.source_url,
             "currency": config.currency,
@@ -2029,6 +2071,10 @@ def ensure_official_source(*, provider: LLMProvider):
         "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
         "source_category": (
             PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        ),
+        "source_owner_type": owner_type,
+        "collection_method": (
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
         ),
         "currency": config.currency,
         "updates_model_prices": True,

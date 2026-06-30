@@ -55,7 +55,8 @@
           <div class="rounded-lg bg-slate-50 px-3 py-2">
             <p class="text-xs text-slate-500">价格结构</p>
             <p class="mt-1 text-sm text-slate-800">
-              原厂 {{ officialModelCount }} · 供货商 {{ supplierModelCount }}
+              原厂 {{ officialModelCount }} · 云托管
+              {{ cloudHostedModelCount }} · 外部 {{ externalModelCount }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
@@ -83,6 +84,113 @@
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
             <div>
+              <h3 class="panel-title">模型价格源</h3>
+              <p class="mt-1 text-xs text-slate-500">
+                管理该厂商下可采集、手工维护或供货商维护的价格来源。
+              </p>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="data-table provider-source-table">
+              <colgroup>
+                <col class="source-name-col" />
+                <col class="source-type-col" />
+                <col class="source-status-col" />
+                <col class="source-action-col" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="table-head">价格源</th>
+                  <th class="table-head">类型</th>
+                  <th class="table-head">状态</th>
+                  <th class="table-head">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="source in sourceRows" :key="source.id">
+                  <td class="table-cell">
+                    <p class="truncate font-medium text-slate-900">
+                      {{ source.name }}
+                    </p>
+                    <p class="mt-1 truncate font-mono text-xs text-slate-400">
+                      {{ source.slug }}
+                    </p>
+                  </td>
+                  <td class="table-cell">
+                    <span :class="['source-badge', source.source_tone]">
+                      {{ source.source_category_label }}
+                    </span>
+                    <p class="mt-1 truncate text-xs text-slate-400">
+                      {{ sourceModeLabel(source) }}
+                    </p>
+                  </td>
+                  <td class="table-cell">
+                    <span
+                      :class="[source.is_enabled ? 'badge-ok' : 'badge-muted']"
+                    >
+                      {{ source.is_enabled ? '启用' : '停用' }}
+                    </span>
+                  </td>
+                  <td class="table-cell">
+                    <div class="source-actions">
+                      <OperationIconButton
+                        icon="view"
+                        :label="sourceViewLabel"
+                        @click="$emit('view-source', source)"
+                      />
+                      <OperationIconButton
+                        icon="edit"
+                        :label="t('llmOps.providerManagement.actions.edit')"
+                        @click="$emit('edit-source', source)"
+                      />
+                      <OperationIconButton
+                        v-if="sourceCanManualEntry(source)"
+                        icon="manual"
+                        :label="
+                          t('llmOps.providerManagement.actions.manualPricing')
+                        "
+                        @click="$emit('manual-entry-source', source)"
+                      />
+                      <OperationIconButton
+                        :icon="source.is_enabled ? 'toggleOn' : 'toggleOff'"
+                        :label="sourceToggleLabel(source)"
+                        @click="$emit('toggle-source', source)"
+                      />
+                      <OperationIconButton
+                        icon="collect"
+                        tone="primary"
+                        :disabled="
+                          !sourceCanCollect(source) ||
+                          String(collectingSourceId || '') === String(source.id)
+                        "
+                        :label="sourceCollectLabel(source)"
+                        @click="$emit('collect-source', source)"
+                      />
+                      <OperationIconButton
+                        icon="delete"
+                        tone="danger"
+                        :disabled="
+                          String(deletingSourceId || '') === String(source.id)
+                        "
+                        :label="sourceDeleteLabel(source)"
+                        @click="$emit('delete-source', source)"
+                      />
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="!sourceRows.length">
+                  <td class="table-cell text-slate-500" colspan="4">
+                    当前厂商还没有模型价格源。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel overflow-hidden p-0">
+          <div class="table-toolbar">
+            <div>
               <h3 class="panel-title">厂商模型价格</h3>
               <p class="mt-1 text-xs text-slate-500">
                 按模型汇总输入、输出、缓存等核心价格，减少逐维度展开带来的噪音。
@@ -99,8 +207,9 @@
               <select v-model="categoryFilter" class="field-input">
                 <option value="all">全部来源</option>
                 <option value="official_provider">原厂</option>
+                <option value="cloud_hosted">云托管</option>
                 <option value="supplier">供货商</option>
-                <option value="manual">人工</option>
+                <option value="manual">内部维护</option>
               </select>
             </div>
           </div>
@@ -188,7 +297,6 @@
             </table>
           </div>
         </div>
-
       </div>
     </aside>
   </div>
@@ -196,8 +304,18 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
-defineEmits(['close'])
+defineEmits([
+  'close',
+  'view-source',
+  'manual-entry-source',
+  'edit-source',
+  'toggle-source',
+  'collect-source',
+  'delete-source'
+])
 
 const props = defineProps({
   provider: {
@@ -227,11 +345,19 @@ const props = defineProps({
   collectingSourceId: {
     type: [Number, String],
     default: null
+  },
+  deletingSourceId: {
+    type: [Number, String],
+    default: null
   }
 })
 
+const { t } = useI18n()
 const search = ref('')
 const categoryFilter = ref('all')
+const sourceViewLabel = computed(() =>
+  t('llmOps.providerManagement.actions.viewModels')
+)
 
 const priceSourceUrl = computed(() => {
   const source = preferredPriceSource(props.sources)
@@ -240,6 +366,17 @@ const priceSourceUrl = computed(() => {
 
 const modelRows = computed(() =>
   props.models.flatMap((model) => buildModelRows(model))
+)
+
+const sourceRows = computed(() =>
+  props.sources.map((source) => {
+    const ownerType = sourceOwnerType(source)
+    return {
+      ...source,
+      source_category_label: sourceOwnerTypeLabel(ownerType),
+      source_tone: sourceOwnerTone(ownerType)
+    }
+  })
 )
 
 const filteredModelRows = computed(() => {
@@ -265,6 +402,20 @@ const officialModelCount = computed(
 const supplierModelCount = computed(
   () =>
     modelRows.value.filter((row) => row.source_category === 'supplier').length
+)
+
+const cloudHostedModelCount = computed(
+  () =>
+    modelRows.value.filter((row) => row.source_category === 'cloud_hosted')
+      .length
+)
+
+const internalModelCount = computed(
+  () => modelRows.value.filter((row) => row.source_category === 'manual').length
+)
+
+const externalModelCount = computed(
+  () => supplierModelCount.value + internalModelCount.value
 )
 
 const pricedModelCount = computed(
@@ -332,8 +483,7 @@ function buildModelRow(model, items, source = null, sourceKey = 'source') {
     ...resolvedSource,
     provider_name:
       items[0]?.source_provider_name || resolvedSource.provider_name,
-    channel_name:
-      items[0]?.source_channel_name || resolvedSource.channel_name
+    channel_name: items[0]?.source_channel_name || resolvedSource.channel_name
   })
   const category = businessSourceCategory(
     items[0] || resolvedSource || model,
@@ -565,6 +715,75 @@ function sourceRelation(source) {
   return ''
 }
 
+function sourceCanCollect(source) {
+  return Boolean(
+    source?.is_enabled &&
+      (source?.can_collect ||
+        (source?.can_collect_prices &&
+          sourceCollectionMethod(source) === 'auto_collect' &&
+          source?.updates_model_prices))
+  )
+}
+
+function sourceCanManualEntry(source) {
+  return Boolean(
+    source?.can_manual_entry ||
+      ['manual_entry', 'manual_import', 'unknown'].includes(
+        sourceCollectionMethod(source)
+      )
+  )
+}
+
+function sourceModeLabel(source) {
+  const type = source?.source_type || ''
+  const method = sourceCollectionMethod(source)
+  if (String(source?.endpoint_url || '').includes('models.dev/api.json')) {
+    return '聚合同步'
+  }
+  if (method === 'auto_collect') return '自动采集'
+  if (method === 'manual_entry') return '手动维护'
+  if (method === 'manual_import') return '批量导入'
+  if (method === 'api_sync') return 'API 同步'
+  if (type === 'yunce') return '专用采集'
+  if (type === 'agione') return 'Agione'
+  return type || '待适配'
+}
+
+function sourceCollectionMethod(source) {
+  const method = source?.collection_method
+  if (method && method !== 'unknown') return method
+  if (source?.source_type === 'yunce') return 'api_sync'
+  if (
+    source?.source_category === 'official_provider' &&
+    source?.updates_model_prices
+  ) {
+    return 'auto_collect'
+  }
+  if (source?.source_category === 'manual') return 'manual_entry'
+  return method || 'unknown'
+}
+
+function sourceToggleLabel(source) {
+  if (source?.is_enabled) {
+    return t('llmOps.providerManagement.sourceStatus.inactive.label')
+  }
+  return t('llmOps.providerManagement.sourceStatus.active.label')
+}
+
+function sourceCollectLabel(source) {
+  if (String(props.collectingSourceId || '') === String(source?.id)) {
+    return t('llmOps.providerManagement.actions.submitting')
+  }
+  return t('llmOps.providerManagement.actions.syncPrice')
+}
+
+function sourceDeleteLabel(source) {
+  if (String(props.deletingSourceId || '') === String(source?.id)) {
+    return t('llmOps.providerManagement.actions.deleting')
+  }
+  return t('llmOps.providerManagement.actions.delete')
+}
+
 function hasAudioPrice(model) {
   return (
     hasValue(model.audio_input_price_per_second) ||
@@ -614,7 +833,9 @@ function preferredPriceSource(sources) {
 function businessSourceCategory(item, model = {}, source = null) {
   return (
     item?.business_source_category ||
+    item?.price_role ||
     model?.business_source_category ||
+    model?.price_role ||
     source?.business_source_category ||
     item?.source_category ||
     model?.source_category ||
@@ -626,16 +847,51 @@ function businessSourceCategory(item, model = {}, source = null) {
 function sourceCategoryLabel(category) {
   const labels = {
     official_provider: '原厂',
+    cloud_hosted: '云托管',
     supplier: '供货商',
-    manual: '人工',
+    manual: '内部维护',
     unknown: '其他'
   }
   return labels[category] || '其他'
 }
 
+function sourceOwnerType(source) {
+  const ownerType = source?.source_owner_type
+  if (ownerType && ownerType !== 'unknown') return ownerType
+  if (source?.source_category === 'official_provider') {
+    return 'model_provider_official'
+  }
+  if (source?.source_category === 'supplier') return 'supplier'
+  if (source?.source_category === 'manual') return 'internal'
+  return ownerType || 'unknown'
+}
+
+function sourceOwnerTypeLabel(ownerType) {
+  const labels = {
+    model_provider_official: '模型厂商官方',
+    cloud_provider_official: '云厂商官方',
+    supplier: '供货商',
+    internal: '内部维护',
+    unknown: '其他'
+  }
+  return labels[ownerType] || labels.unknown
+}
+
+function sourceOwnerTone(ownerType) {
+  const tones = {
+    model_provider_official: 'official',
+    cloud_provider_official: 'cloud',
+    supplier: 'supplier',
+    internal: 'manual',
+    unknown: 'unknown'
+  }
+  return tones[ownerType] || 'unknown'
+}
+
 function sourceTone(category) {
   const tones = {
     official_provider: 'official',
+    cloud_hosted: 'cloud',
     supplier: 'supplier',
     manual: 'manual',
     unknown: 'unknown'
@@ -698,6 +954,30 @@ function sourceTone(category) {
   width: 14%;
 }
 
+.provider-source-table .source-name-col {
+  width: 38%;
+}
+
+.provider-source-table .source-type-col {
+  width: 18%;
+}
+
+.provider-source-table .source-status-col {
+  width: 14%;
+}
+
+.provider-source-table .source-action-col {
+  width: 30%;
+}
+
+.source-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
 .field-input {
   @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100;
 }
@@ -720,6 +1000,10 @@ function sourceTone(category) {
 
 .source-badge.supplier {
   @apply border-indigo-100 bg-indigo-50 text-indigo-700;
+}
+
+.source-badge.cloud {
+  @apply border-sky-100 bg-sky-50 text-sky-700;
 }
 
 .source-badge.manual {
