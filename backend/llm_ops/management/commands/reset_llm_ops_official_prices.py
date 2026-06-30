@@ -1,4 +1,5 @@
 """Reset official LLM Ops price data without deleting business config."""
+
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
@@ -87,6 +88,8 @@ class Command(BaseCommand):
                 f"sources_matched={stats['sources_matched']}, "
                 f"provider_sources_kept={stats['provider_sources_kept']}, "
                 f"legacy_sources_deleted={stats['legacy_sources_deleted']}, "
+                f"legacy_models_deduplicated="
+                f"{stats['legacy_models_deduplicated']}, "
                 f"models_reset={stats['models_reset']}, "
                 f"price_items_deleted={stats['price_items_deleted']}, "
                 f"snapshots_deleted={stats['snapshots_deleted']}, "

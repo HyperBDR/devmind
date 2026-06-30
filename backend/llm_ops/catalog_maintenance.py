@@ -1,4 +1,5 @@
 """Maintenance helpers for LLM Ops catalog normalization and cleanup."""
+
 from __future__ import annotations
 
 from django.db.models import Q
@@ -28,7 +29,6 @@ from .models import (
     UsageReconciliationRecord,
 )
 from .services import stable_fingerprint
-
 
 REAL_RESOURCE_CHANNEL_CODE = "real-resource-platform"
 YUNCE_SUPPLIER_CHANNEL_CODE = "yunce-supplier-platform"
@@ -88,6 +88,8 @@ def clean_legacy_llm_ops_demo_data() -> dict[str, int]:
         "channel_price_items": 0,
         "channel_model_prices": 0,
         "channel_model_histories": 0,
+        "resale_listings": 0,
+        "resale_listing_histories": 0,
         "sources": 0,
         "channels": 0,
     }
@@ -107,13 +109,19 @@ def clean_legacy_llm_ops_demo_data() -> dict[str, int]:
         | Q(channel__code__startswith="test-")
         | Q(channel__name__startswith="测试")
     )
+    test_channel_ids = list(
+        ProcurementChannel.objects.filter(
+            Q(code=REAL_RESOURCE_CHANNEL_CODE)
+            | Q(code__in=MOCK_SUPPLIER_CHANNEL_CODES)
+            | Q(code__startswith="test-")
+        ).values_list("id", flat=True)
+    )
     PriceCollectionSource.objects.filter(
         channel__code=REAL_RESOURCE_CHANNEL_CODE,
     ).update(channel=None)
     stats["model_price_items"] += _delete_count(
         ModelPriceItem.objects.filter(
-            Q(source_id__in=source_ids)
-            | Q(spec__mock_source="yunce_supplier")
+            Q(source_id__in=source_ids) | Q(spec__mock_source="yunce_supplier")
         )
     )
     stats["channel_price_items"] += _delete_count(
@@ -130,6 +138,14 @@ def clean_legacy_llm_ops_demo_data() -> dict[str, int]:
         ChannelModelPriceHistory.objects.filter(
             price_fingerprint__in=trend_demo_history_fingerprints(),
         )
+    )
+    stats["resale_listing_histories"] += _delete_count(
+        ResaleListingPriceHistory.objects.filter(
+            channel_id__in=test_channel_ids,
+        )
+    )
+    stats["resale_listings"] += _delete_count(
+        ResaleListing.objects.filter(channel_id__in=test_channel_ids)
     )
     stats["sources"] += _delete_count(
         PriceCollectionSource.objects.filter(id__in=source_ids)
@@ -225,12 +241,16 @@ def normalize_model_linked_meta_models() -> int:
     )
     for model in LLMModel.objects.select_related("meta_model").all():
         for model_type in model_linked_types:
-            total += model_type.objects.filter(
-                model=model,
-            ).exclude(
-                meta_model=model.meta_model,
-            ).update(
-                meta_model=model.meta_model,
+            total += (
+                model_type.objects.filter(
+                    model=model,
+                )
+                .exclude(
+                    meta_model=model.meta_model,
+                )
+                .update(
+                    meta_model=model.meta_model,
+                )
             )
     return total
 
@@ -282,6 +302,14 @@ def merge_meta_model_rows(
 
 def cleanup_orphan_meta_models() -> dict[str, int]:
     """Remove meta models that no canonical price row references."""
+    return cleanup_orphan_meta_models_for_reset(dry_run=False)
+
+
+def cleanup_orphan_meta_models_for_reset(
+    *,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Remove or preview meta models that no canonical model references."""
     stats = {
         "meta_models_rehomed": 0,
         "meta_models_deleted": 0,
@@ -291,20 +319,95 @@ def cleanup_orphan_meta_models() -> dict[str, int]:
         spec = canonical_vendor_for_model_code(meta.code)
         canonical = None
         if spec:
-            canonical = ensure_canonical_vendor_row(spec)
+            if dry_run:
+                if is_canonical_vendor_code(spec["code"]):
+                    canonical = LLMProvider.objects.filter(
+                        code=spec["code"],
+                    ).first()
+            else:
+                canonical = ensure_canonical_vendor_row(spec)
         elif meta.vendor_id and is_canonical_vendor_code(meta.vendor.code):
             canonical = meta.vendor
         if canonical and meta.vendor_id and canonical.id != meta.vendor_id:
-            meta.vendor = canonical
-            meta.save(update_fields=["vendor", "updated_at"])
+            if not dry_run:
+                meta.vendor = canonical
+                meta.save(update_fields=["vendor", "updated_at"])
             stats["meta_models_rehomed"] += 1
         if not meta.provider_prices.exists():
             orphan_ids.append(meta.id)
     if orphan_ids:
-        stats["meta_models_deleted"] = MetaModel.objects.filter(
-            id__in=orphan_ids,
-        ).delete()[0]
+        if dry_run:
+            stats["meta_models_deleted"] = len(orphan_ids)
+        else:
+            stats["meta_models_deleted"] = MetaModel.objects.filter(
+                id__in=orphan_ids,
+            ).delete()[0]
     return stats
+
+
+MODEL_BUSINESS_LINK_MODELS = (
+    ("channel_model_prices", ChannelModelPrice),
+    ("channel_price_items", ChannelPriceItem),
+    ("channel_model_histories", ChannelModelPriceHistory),
+    ("resale_listings", ResaleListing),
+    ("resale_listing_exclusions", ResaleListingExclusion),
+    ("resale_listing_histories", ResaleListingPriceHistory),
+    ("usage_reconciliation_records", UsageReconciliationRecord),
+)
+
+
+def model_business_link_counts(model_ids: list[int]) -> dict[str, int]:
+    """Return downstream business references for model ids."""
+    if not model_ids:
+        return {}
+    counts = {}
+    for key, model_type in MODEL_BUSINESS_LINK_MODELS:
+        count = model_type.objects.filter(model_id__in=model_ids).count()
+        if count:
+            counts[key] = count
+    return counts
+
+
+def model_ids_with_business_links(model_ids: list[int]) -> set[int]:
+    """Return model ids referenced by downstream business rows."""
+    linked_ids: set[int] = set()
+    if not model_ids:
+        return linked_ids
+    for _, model_type in MODEL_BUSINESS_LINK_MODELS:
+        linked_ids.update(
+            model_type.objects.filter(model_id__in=model_ids)
+            .values_list("model_id", flat=True)
+            .distinct()
+        )
+    return linked_ids
+
+
+def model_delete_dependency_counts(model: LLMModel) -> dict[str, int]:
+    """Return dependencies that make direct model deletion unsafe."""
+    counts = model_business_link_counts([model.id])
+    price_items = ModelPriceItem.objects.filter(model=model).count()
+    if price_items:
+        counts["model_price_items"] = price_items
+    return counts
+
+
+def meta_model_dependency_counts(meta_model: MetaModel) -> dict[str, int]:
+    """Return dependencies that make direct meta-model deletion unsafe."""
+    counts = {}
+    for relation in MetaModel._meta.related_objects:
+        if relation.related_model is MetaModel:
+            continue
+        count = relation.related_model.objects.filter(
+            **{relation.field.name: meta_model},
+        ).count()
+        if count:
+            counts[relation.get_accessor_name()] = count
+    return counts
+
+
+def meta_model_has_business_links(meta_model: MetaModel) -> bool:
+    """Return whether a meta model is still referenced by another table."""
+    return bool(meta_model_dependency_counts(meta_model))
 
 
 def reset_meta_models_canonical() -> dict[str, int]:
@@ -314,20 +417,12 @@ def reset_meta_models_canonical() -> dict[str, int]:
         "supplier_sources_kept": 0,
         "meta_models_deleted": 0,
     }
-    stats["manual_sources_kept"] = (
-        PriceCollectionSource.objects.filter(
-            source_category=(
-                PriceCollectionSource.SOURCE_CATEGORY_MANUAL
-            ),
-        ).count()
-    )
-    stats["supplier_sources_kept"] = (
-        PriceCollectionSource.objects.filter(
-            source_category=(
-                PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
-            ),
-        ).count()
-    )
+    stats["manual_sources_kept"] = PriceCollectionSource.objects.filter(
+        source_category=(PriceCollectionSource.SOURCE_CATEGORY_MANUAL),
+    ).count()
+    stats["supplier_sources_kept"] = PriceCollectionSource.objects.filter(
+        source_category=(PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER),
+    ).count()
     PriceCollectionSource.objects.filter(
         channel__code=REAL_RESOURCE_CHANNEL_CODE,
     ).delete()

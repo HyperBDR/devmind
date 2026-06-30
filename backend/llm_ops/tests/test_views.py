@@ -12,9 +12,10 @@ from llm_ops.models import (
     ChannelModelPriceHistory,
     ChannelPriceItem,
     CollectedModelPriceSnapshot,
-    LLMOpsGlobalConfig,
     LLMModel,
+    LLMOpsGlobalConfig,
     LLMProvider,
+    MetaModel,
     ModelPriceItem,
     PriceCollectionRun,
     PriceCollectionSource,
@@ -341,9 +342,7 @@ class LLMOpsViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        legacy_task = PeriodicTask.objects.get(
-            name="llm_ops_official_collect"
-        )
+        legacy_task = PeriodicTask.objects.get(name="llm_ops_official_collect")
         self.assertFalse(legacy_task.enabled)
         self.assertEqual(legacy_task.crontab_id, legacy_crontab.id)
 
@@ -414,9 +413,7 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertFalse(
             PeriodicTask.objects.filter(
-                name=(
-                    f"llm_ops_price_source_collect_{obsolete_source.id}"
-                )
+                name=(f"llm_ops_price_source_collect_{obsolete_source.id}")
             ).exists()
         )
         self.assertFalse(
@@ -796,6 +793,49 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 204)
         self.assertFalse(ModelPriceItem.objects.filter(id=item.id).exists())
+
+    def test_model_with_business_links_cannot_be_deleted(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Default Channel",
+            code="default-channel-delete-block",
+        )
+        channel_price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            meta_model=model.meta_model,
+            currency="USD",
+        )
+
+        response = self.client.delete(
+            reverse("model-detail", args=[model.id]),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(LLMModel.objects.filter(id=model.id).exists())
+        self.assertTrue(
+            ChannelModelPrice.objects.filter(id=channel_price.id).exists()
+        )
+
+    def test_meta_model_with_provider_prices_cannot_be_deleted(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+        ).meta_model
+
+        response = self.client.delete(
+            reverse("meta-model-detail", args=[meta.id]),
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(MetaModel.objects.filter(id=meta.id).exists())
 
     @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collects_official_provider(self, mock_delay):
@@ -1224,9 +1264,7 @@ class LLMOpsViewTests(TestCase):
             2.5,
         )
         self.assertEqual(
-            row["best_channel"][
-                "input_price_per_million_settlement_ratio"
-            ],
+            row["best_channel"]["input_price_per_million_settlement_ratio"],
             0.8,
         )
         self.assertEqual(row["best_channel"]["input_price_per_million"], 2.0)
@@ -1268,7 +1306,9 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(row["best_channel"]["latency_ms"], 180)
 
     def test_summary_uses_meta_model_price_items_for_zero_sku_price(self):
-        provider = LLMProvider.objects.create(name="Anthropic", code="anthropic")
+        provider = LLMProvider.objects.create(
+            name="Anthropic", code="anthropic"
+        )
         official_model = LLMModel.objects.create(
             provider=provider,
             name="Claude Haiku 4.5",
@@ -1662,7 +1702,9 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertEqual(ResaleListingPriceHistory.objects.count(), 1)
 
-    def test_resale_listing_bulk_upsert_allows_channel_after_auto_listing(self):
+    def test_resale_listing_bulk_upsert_allows_channel_after_auto_listing(
+        self,
+    ):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(
             provider=provider,
@@ -1813,7 +1855,9 @@ class LLMOpsViewTests(TestCase):
             ).exists()
         )
 
-    def test_resale_listing_bulk_replace_allows_channel_after_auto_listing(self):
+    def test_resale_listing_bulk_replace_allows_channel_after_auto_listing(
+        self,
+    ):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(
             provider=provider,
@@ -1921,7 +1965,9 @@ class LLMOpsViewTests(TestCase):
         actions = list(
             AuditLog.objects.filter(
                 target_type="llm_ops.ResaleListingExclusion",
-            ).order_by("created_at").values_list("action", flat=True)
+            )
+            .order_by("created_at")
+            .values_list("action", flat=True)
         )
         self.assertEqual(
             actions,
@@ -2088,9 +2134,7 @@ class LLMOpsViewTests(TestCase):
         saved = ResaleWorkflowConfig.objects.get(platform=platform)
         self.assertFalse(saved.config["policies"]["auto_approve_enabled"])
         self.assertFalse(
-            patch_response.data["config"]["policies"][
-                "auto_approve_enabled"
-            ]
+            patch_response.data["config"]["policies"]["auto_approve_enabled"]
         )
         self.assertEqual(patch_response.data["notes"], "disable auto approval")
         self.assertIn("runtime", patch_response.data["config"])
@@ -2642,9 +2686,7 @@ class LLMOpsViewTests(TestCase):
             0.08,
         )
         self.assertEqual(
-            response.data["point_conversion"][
-                "auto_approve_max_margin_rate"
-            ],
+            response.data["point_conversion"]["auto_approve_max_margin_rate"],
             18.0,
         )
         diagnostic = response.data["agione"]["diagnostics"][0]

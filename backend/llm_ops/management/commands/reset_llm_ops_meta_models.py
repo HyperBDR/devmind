@@ -9,12 +9,13 @@ operators should run the Agent sync or add records manually afterwards.
 Use ``--yes`` to confirm. The command refuses to run interactively
 to avoid accidental data loss.
 """
+
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
 
 from llm_ops.catalog_maintenance import (
-    cleanup_orphan_meta_models,
+    cleanup_orphan_meta_models_for_reset,
     reset_meta_models_canonical,
 )
 
@@ -48,7 +49,7 @@ class Command(BaseCommand):
                 "preview the operation."
             )
         if options.get("dry_run"):
-            orphan_stats = cleanup_orphan_meta_models()
+            orphan_stats = cleanup_orphan_meta_models_for_reset(dry_run=True)
             self.stdout.write(
                 self.style.WARNING(
                     "[dry-run] Would reset meta-model catalogue. "

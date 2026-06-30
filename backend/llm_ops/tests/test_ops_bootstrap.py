@@ -1,4 +1,5 @@
 """Tests for LLM Ops catalog maintenance without seed bootstrap."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -25,6 +26,7 @@ from llm_ops.management.commands.cleanup_llm_ops_seed_prices import (
     execute_cleanup,
 )
 from llm_ops.models import (
+    ChannelModelPrice,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -32,6 +34,9 @@ from llm_ops.models import (
     PriceCollectionRun,
     PriceCollectionSource,
     ProcurementChannel,
+    ResaleListing,
+    ResaleListingPriceHistory,
+    ResalePlatform,
 )
 from llm_ops.periodic_tasks import register_periodic_tasks
 
@@ -134,6 +139,21 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
         self.assertFalse(MetaModel.objects.exists())
         self.assertFalse(LLMModel.objects.exists())
 
+    def test_meta_model_reset_dry_run_does_not_delete_orphans(self):
+        meta = MetaModel.objects.create(
+            name="Orphan GPT",
+            code="gpt-orphan",
+        )
+
+        call_command(
+            "reset_llm_ops_meta_models",
+            "--dry-run",
+            stdout=StringIO(),
+        )
+
+        self.assertTrue(MetaModel.objects.filter(id=meta.id).exists())
+        self.assertFalse(LLMProvider.objects.filter(code="openai").exists())
+
     def test_clean_legacy_demo_data_removes_test_rows(self):
         PriceCollectionSource.objects.create(
             name="测试价格源",
@@ -145,6 +165,78 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
 
         self.assertEqual(stats["sources"], 1)
         self.assertFalse(PriceCollectionSource.objects.exists())
+
+    def test_clean_legacy_demo_data_removes_channel_listings_first(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT Demo",
+            code="gpt-demo",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Demo Baseline",
+            code="demo-baseline-supplier",
+        )
+        platform = ResalePlatform.objects.create(
+            name="Demo Platform",
+            code="demo-platform",
+        )
+        auto_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=None,
+            retail_input_price_per_million=Decimal("1.000000"),
+            retail_output_price_per_million=Decimal("2.000000"),
+        )
+        channel_listing = ResaleListing.objects.create(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million=Decimal("1.100000"),
+            retail_output_price_per_million=Decimal("2.100000"),
+        )
+        auto_history = ResaleListingPriceHistory.objects.create(
+            platform=platform,
+            model=model,
+            channel=None,
+            retail_input_price_per_million=Decimal("1.000000"),
+            retail_output_price_per_million=Decimal("2.000000"),
+            price_fingerprint="same-price",
+            effective_from="2026-01-01T00:00:00Z",
+        )
+        channel_history = ResaleListingPriceHistory.objects.create(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million=Decimal("1.000000"),
+            retail_output_price_per_million=Decimal("2.000000"),
+            price_fingerprint="same-price",
+            effective_from="2026-01-01T00:00:00Z",
+        )
+
+        stats = clean_legacy_llm_ops_demo_data()
+
+        self.assertEqual(stats["resale_listings"], 1)
+        self.assertEqual(stats["resale_listing_histories"], 1)
+        self.assertFalse(
+            ProcurementChannel.objects.filter(id=channel.id).exists()
+        )
+        self.assertTrue(
+            ResaleListing.objects.filter(id=auto_listing.id).exists()
+        )
+        self.assertFalse(
+            ResaleListing.objects.filter(id=channel_listing.id).exists()
+        )
+        self.assertTrue(
+            ResaleListingPriceHistory.objects.filter(
+                id=auto_history.id
+            ).exists()
+        )
+        self.assertFalse(
+            ResaleListingPriceHistory.objects.filter(
+                id=channel_history.id
+            ).exists()
+        )
 
 
 class LLMOpsOfficialProviderOptionTests(TestCase):
@@ -260,6 +352,74 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
             PriceCollectionSource.objects.filter(id=legacy_source.id).exists()
         )
 
+    def test_reset_deduplicates_legacy_model_before_source_migration(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta = MetaModel.objects.create(
+            name="GPT-4.1 mini",
+            code="gpt-4.1-mini",
+            vendor=provider,
+        )
+        provider_source = PriceCollectionSource.objects.create(
+            name="OpenAI 官方价格",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://openai.com/api/pricing/",
+            updates_model_prices=True,
+        )
+        legacy_source = PriceCollectionSource.objects.create(
+            name="OpenAI / GPT-4.1 mini 官方价格",
+            slug="openai-gpt-4-1-mini-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            updates_model_prices=True,
+        )
+        provider_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=provider_source,
+            name="GPT-4.1 mini",
+            code="gpt-4.1-mini",
+            price_role=LLMModel.PRICE_ROLE_OFFICIAL,
+            input_price_per_million=Decimal("0.400000"),
+            output_price_per_million=Decimal("1.600000"),
+        )
+        legacy_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=legacy_source,
+            name="GPT-4.1 mini",
+            code="gpt-4.1-mini",
+            price_role=LLMModel.PRICE_ROLE_OFFICIAL,
+            input_price_per_million=Decimal("0.400000"),
+            output_price_per_million=Decimal("1.600000"),
+        )
+
+        stats = reset_official_price_catalog(provider_codes=["openai"])
+
+        provider_model.refresh_from_db()
+        legacy_model.refresh_from_db()
+        self.assertEqual(stats["models_reset"], 2)
+        self.assertEqual(stats["legacy_models_deduplicated"], 1)
+        self.assertIsNone(legacy_model.source_id)
+        self.assertEqual(legacy_model.price_role, LLMModel.PRICE_ROLE_UNKNOWN)
+        self.assertEqual(
+            LLMModel.objects.filter(
+                provider=provider,
+                source=provider_source,
+                code="gpt-4.1-mini",
+            ).count(),
+            1,
+        )
+        self.assertEqual(provider_model.input_price_per_million, Decimal("0"))
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(id=legacy_source.id).exists()
+        )
+
     def test_reset_keeps_non_legacy_official_source_for_same_provider(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         meta = MetaModel.objects.create(
@@ -328,6 +488,7 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
             "sources_matched": 0,
             "provider_sources_kept": 0,
             "legacy_sources_deleted": 0,
+            "legacy_models_deduplicated": 0,
             "models_reset": 0,
             "price_items_deleted": 0,
             "snapshots_deleted": 0,
@@ -430,6 +591,58 @@ class LLMOpsSeedCleanupCommandTests(TestCase):
         )
         self.assertFalse(LLMModel.objects.filter(code="ernie-4.0").exists())
 
+    def test_cleanup_detaches_legacy_model_with_business_links(self):
+        provider = LLMProvider.objects.create(name="百度", code="baidu")
+        meta = MetaModel.objects.create(
+            name="ERNIE 4.0",
+            code="ernie-4.0",
+            vendor=provider,
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Real Channel",
+            code="real-channel",
+        )
+        legacy_source = PriceCollectionSource.objects.create(
+            name="百度 / ERNIE 4.0 官方价格",
+            slug="baidu-ernie-4-0-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            updates_model_prices=True,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=legacy_source,
+            name="ERNIE 4.0",
+            code="ernie-4.0",
+            price_role=LLMModel.PRICE_ROLE_OFFICIAL,
+            input_price_per_million=Decimal("1.000000"),
+            output_price_per_million=Decimal("2.000000"),
+        )
+        channel_price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            meta_model=meta,
+            currency="CNY",
+        )
+
+        plan = build_cleanup_plan(("baidu",))
+        stats = execute_cleanup(plan)
+
+        model.refresh_from_db()
+        self.assertEqual(stats["models_detached"], 1)
+        self.assertIsNone(model.source_id)
+        self.assertEqual(model.price_role, LLMModel.PRICE_ROLE_UNKNOWN)
+        self.assertEqual(model.input_price_per_million, Decimal("0"))
+        self.assertTrue(
+            ChannelModelPrice.objects.filter(id=channel_price.id).exists()
+        )
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(id=legacy_source.id).exists()
+        )
+
 
 class LLMOpsPeriodicTasksTests(TestCase):
     """The Celery task and periodic entry are wired up correctly."""
@@ -447,9 +660,7 @@ class LLMOpsPeriodicTasksTests(TestCase):
                 "llm_ops_meta_models_dev_sync",
             ],
         )
-        price_entry = TASK_REGISTRY._entries[
-            "llm_ops_model_price_sync_agent"
-        ]
+        price_entry = TASK_REGISTRY._entries["llm_ops_model_price_sync_agent"]
         self.assertEqual(
             price_entry["task"],
             "llm_ops.tasks.run_model_price_sync_agent",
