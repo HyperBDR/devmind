@@ -25,27 +25,6 @@
         </div>
         <div class="provider-toolbar-actions">
           <button
-            class="btn-secondary btn-action-create"
-            type="button"
-            :disabled="loadingOfficialProviderOptions"
-            @click="openOfficialProviderModal"
-          >
-            <svg
-              class="source-primary-icon"
-              aria-hidden="true"
-              fill="none"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              viewBox="0 0 24 24"
-            >
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-            {{ t('llmOps.providerManagement.actions.addOfficialSource') }}
-          </button>
-          <button
             class="btn-secondary btn-action-sync"
             type="button"
             :disabled="syncingAllSources || !hasSyncablePriceSources"
@@ -228,139 +207,10 @@
     <ManualPriceImportModal
       :open="showManualImportModal"
       :providers="providers"
+      :sources="entrySourceRows"
       @close="showManualImportModal = false"
       @imported="handleManualImported"
     />
-    <div
-      v-if="showOfficialProviderModal"
-      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
-      @click.self="closeOfficialProviderModal"
-    >
-      <form
-        class="max-h-[calc(100vh-3rem)] w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-2xl"
-        @submit.prevent="addOfficialProviderSource"
-      >
-        <div class="border-b border-slate-200 px-5 py-4">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p
-                class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
-              >
-                Official Source
-              </p>
-              <h3 class="mt-2 text-lg font-semibold text-slate-900">
-                {{ t('llmOps.providerManagement.officialSourceModal.title') }}
-              </h3>
-            </div>
-            <button
-              class="btn-secondary btn-action-cancel"
-              type="button"
-              :disabled="addingOfficialProviderSource"
-              @click="closeOfficialProviderModal"
-            >
-              {{ t('llmOps.providerManagement.actions.cancel') }}
-            </button>
-          </div>
-        </div>
-
-        <div class="space-y-4 px-5 py-5">
-          <label class="field-group">
-            <span class="field-label">
-              {{
-                t('llmOps.providerManagement.officialSourceModal.provider')
-              }}
-            </span>
-            <CompactSelect
-              v-model="selectedOfficialProviderCode"
-              :disabled="
-                loadingOfficialProviderOptions ||
-                addingOfficialProviderSource
-              "
-              :options="officialProviderSelectOptions"
-              class-name="w-full"
-              :menu-min-width="360"
-            />
-          </label>
-
-          <div
-            v-if="loadingOfficialProviderOptions"
-            class="official-source-state"
-          >
-            {{ t('common.loading') }}
-          </div>
-          <div
-            v-else-if="selectedOfficialProviderOption"
-            class="official-source-detail"
-          >
-            <div>
-              <span>
-                {{
-                  t('llmOps.providerManagement.officialSourceModal.source')
-                }}
-              </span>
-              <strong>{{ selectedOfficialProviderOption.source_name }}</strong>
-            </div>
-            <div>
-              <span>
-                {{ t('llmOps.providerManagement.officialSourceModal.slug') }}
-              </span>
-              <strong class="font-mono">
-                {{ selectedOfficialProviderOption.source_slug }}
-              </strong>
-            </div>
-            <div>
-              <span>
-                {{
-                  t('llmOps.providerManagement.officialSourceModal.currency')
-                }}
-              </span>
-              <strong>{{ selectedOfficialProviderOption.currency }}</strong>
-            </div>
-            <div class="md:col-span-2">
-              <span>
-                {{ t('llmOps.providerManagement.officialSourceModal.url') }}
-              </span>
-              <strong class="break-all">
-                {{ selectedOfficialProviderOption.source_url }}
-              </strong>
-            </div>
-          </div>
-          <div v-else class="official-source-state">
-            {{ t('llmOps.providerManagement.officialSourceModal.empty') }}
-          </div>
-        </div>
-
-        <div class="modal-footer">
-          <span class="modal-footer-note">
-            {{ officialProviderModalStatus }}
-          </span>
-          <div class="modal-footer-actions">
-            <button
-              class="btn-secondary btn-action-cancel"
-              type="button"
-              :disabled="addingOfficialProviderSource"
-              @click="closeOfficialProviderModal"
-            >
-              {{ t('llmOps.providerManagement.actions.cancel') }}
-            </button>
-            <button
-              class="btn-primary btn-action-save"
-              type="submit"
-              :disabled="officialProviderAddDisabled"
-            >
-              <span class="icon-mark" />
-              {{
-                addingOfficialProviderSource
-                  ? t('llmOps.providerManagement.actions.submitting')
-                  : selectedOfficialProviderOption?.source_exists
-                    ? t('llmOps.providerManagement.actions.added')
-                    : t('llmOps.providerManagement.actions.add')
-              }}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
     <PriceSourceModal
       :open="showPriceSourceModal || Boolean(editingSource)"
       :source="editingSource"
@@ -416,7 +266,6 @@ import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
 import ProviderPricingDrawer from '@/components/llm-ops/ProviderPricingDrawer.vue'
 import SourcePriceDrawer from '@/components/llm-ops/SourcePriceDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
-import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
 const props = defineProps({
   providers: {
@@ -459,14 +308,9 @@ const editingSource = ref(null)
 const priceEntrySource = ref(null)
 const showPriceSourceModal = ref(false)
 const showManualImportModal = ref(false)
-const showOfficialProviderModal = ref(false)
 const collectingSourceId = ref(null)
 const syncingAllSources = ref(false)
 const deletingSourceId = ref(null)
-const loadingOfficialProviderOptions = ref(false)
-const addingOfficialProviderSource = ref(false)
-const officialProviderOptions = ref([])
-const selectedOfficialProviderCode = ref('')
 const sourceSearch = ref('')
 const sourceCategoryFilter = ref('all')
 const sourceStatusFilter = ref('all')
@@ -508,46 +352,6 @@ const sourceStatusFilterOptions = computed(() => [
     label: t('llmOps.providerManagement.filters.inactiveOnly')
   }
 ])
-
-const officialProviderSelectOptions = computed(() =>
-  officialProviderOptions.value.map((option) => ({
-    value: option.provider_code,
-    label: option.provider_name,
-    description: option.source_name,
-    badge: option.source_exists
-      ? t('llmOps.providerManagement.officialSourceModal.existsBadge')
-      : option.currency
-  }))
-)
-
-const selectedOfficialProviderOption = computed(() =>
-  officialProviderOptions.value.find(
-    (option) =>
-      String(option.provider_code) === String(selectedOfficialProviderCode.value)
-  )
-)
-
-const officialProviderAddDisabled = computed(
-  () =>
-    loadingOfficialProviderOptions.value ||
-    addingOfficialProviderSource.value ||
-    !selectedOfficialProviderOption.value ||
-    selectedOfficialProviderOption.value.source_exists
-)
-
-const officialProviderModalStatus = computed(() => {
-  if (loadingOfficialProviderOptions.value) {
-    return t('llmOps.providerManagement.officialSourceModal.loading')
-  }
-  const option = selectedOfficialProviderOption.value
-  if (!option) {
-    return t('llmOps.providerManagement.officialSourceModal.empty')
-  }
-  if (option.source_exists) {
-    return t('llmOps.providerManagement.officialSourceModal.exists')
-  }
-  return t('llmOps.providerManagement.officialSourceModal.ready')
-})
 
 const sourceRows = computed(() =>
   props.sources
@@ -807,7 +611,8 @@ function sourcesForProvider(provider, priceItems) {
   )
   return sourceRows.value.filter(
     (source) =>
-      sourceMatchesProvider(source, provider) || sourceIds.has(String(source.id))
+      sourceMatchesProvider(source, provider) ||
+      sourceIds.has(String(source.id))
   )
 }
 
@@ -994,75 +799,6 @@ function dimensionCount(items) {
 function handleManualImported() {
   showManualImportModal.value = false
   emit('refresh')
-}
-
-async function openOfficialProviderModal() {
-  showOfficialProviderModal.value = true
-  await loadOfficialProviderOptions()
-}
-
-function closeOfficialProviderModal() {
-  if (addingOfficialProviderSource.value) return
-  showOfficialProviderModal.value = false
-}
-
-async function loadOfficialProviderOptions() {
-  loadingOfficialProviderOptions.value = true
-  try {
-    const response = await llmOpsApi.listOfficialProviderSourceOptions()
-    const payload = response?.data?.data || response?.data || {}
-    const options = Array.isArray(payload.results) ? payload.results : []
-    officialProviderOptions.value = options
-    const current = options.find(
-      (option) =>
-        String(option.provider_code) ===
-        String(selectedOfficialProviderCode.value)
-    )
-    const preferred = options.find((option) => !option.source_exists)
-    const selected =
-      current && !current.source_exists ? current : preferred || current
-    selectedOfficialProviderCode.value =
-      selected?.provider_code || options[0]?.provider_code || ''
-  } catch (error) {
-    showError(
-      errorMessage(
-        error,
-        t('llmOps.providerManagement.errors.loadOfficialSourcesFailed')
-      )
-    )
-  } finally {
-    loadingOfficialProviderOptions.value = false
-  }
-}
-
-async function addOfficialProviderSource() {
-  const option = selectedOfficialProviderOption.value
-  if (!option || option.source_exists) return
-
-  addingOfficialProviderSource.value = true
-  try {
-    const response = await llmOpsApi.ensureOfficialProviderSource(
-      option.provider_code
-    )
-    const payload = response?.data?.data || response?.data || {}
-    const sourceName = payload.source?.name || option.source_name
-    showSuccess(
-      t('llmOps.providerManagement.messages.officialSourceAdded', {
-        name: sourceName
-      })
-    )
-    showOfficialProviderModal.value = false
-    emit('refresh')
-  } catch (error) {
-    showError(
-      errorMessage(
-        error,
-        t('llmOps.providerManagement.errors.addOfficialSourceFailed')
-      )
-    )
-  } finally {
-    addingOfficialProviderSource.value = false
-  }
 }
 
 function closePriceSourceModal() {

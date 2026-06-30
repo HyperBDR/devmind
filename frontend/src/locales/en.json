@@ -1484,6 +1484,7 @@
         "currency": "Default currency",
         "endpointUrl": "Price URL",
         "name": "Price source name",
+        "officialProvider": "Official provider",
         "slug": "System slug",
         "sourceType": "Source mode"
       },
@@ -1519,11 +1520,24 @@
         "cny": "CNY",
         "usd": "USD"
       },
+      "officialPreset": {
+        "currency": "Currency",
+        "empty": "No official price source presets are available.",
+        "exists": "This official source has already been added.",
+        "existsBadge": "Added",
+        "loading": "Loading official sources.",
+        "ready": "Confirm to create the official price source.",
+        "slug": "System slug",
+        "source": "Price source",
+        "url": "Price URL"
+      },
       "messages": {
         "created": "Model price source created",
+        "officialCreated": "Official price source \"{name}\" added",
         "updated": "Model price source updated"
       },
       "errors": {
+        "loadOfficialSources": "Failed to load official price sources",
         "save": "Failed to save model price source"
       }
     },
@@ -1728,12 +1742,15 @@
       "fields": {
         "currency": "Default currency",
         "provider": "Model provider",
+        "source": "Model price source",
+        "sourceCategory": "Pricing scope",
         "sourceName": "Model price source name",
         "sourceUrl": "Model price source URL",
         "tableContent": "Excel / CSV content"
       },
       "placeholders": {
         "selectProvider": "Select model owner",
+        "selectSource": "Select an existing model price source",
         "sourceName": "Example: OpenAI 2026-06 manual price sheet",
         "sourceUrl": "Optional, official site or internal spreadsheet link"
       },
@@ -1764,6 +1781,11 @@
         "multimodal": "Multimodal",
         "text": "Text",
         "video": "Video"
+      },
+      "validation": {
+        "sourceProviderRequired": "This price source is not bound to a model provider and cannot be imported in bulk.",
+        "sourceReady": "Prices will be imported into \"{name}\".",
+        "sourceRequired": "Select an existing model price source."
       },
       "parseErrors": {
         "invalidNumber": "Line {line}: {field} is not a valid non-negative number.",

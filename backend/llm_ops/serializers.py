@@ -1512,8 +1512,9 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
     )
     provider = serializers.PrimaryKeyRelatedField(
         queryset=LLMProvider.objects.filter(is_active=True),
+        required=False,
     )
-    source_name = serializers.CharField(max_length=255)
+    source_name = serializers.CharField(max_length=255, required=False)
     source_slug = serializers.SlugField(
         max_length=100,
         required=False,
@@ -1526,6 +1527,47 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
 
     def validate_currency(self, value):
         return validate_currency_code(value, required=True)
+
+    def validate(self, attrs):
+        source = attrs.get("source")
+        provider = attrs.get("provider")
+
+        if source is not None:
+            if source.provider_id:
+                if provider and provider.id != source.provider_id:
+                    raise serializers.ValidationError(
+                        {
+                            "provider": (
+                                "Provider must match the selected price "
+                                "source."
+                            )
+                        }
+                    )
+                attrs["provider"] = source.provider
+            elif provider is None:
+                raise serializers.ValidationError(
+                    {
+                        "source": (
+                            "Selected price source must be bound to a "
+                            "provider, or provider must be provided."
+                        )
+                    }
+                )
+            attrs.setdefault("source_name", source.name)
+            attrs.setdefault("source_url", source.endpoint_url)
+            if not self.initial_data.get("currency"):
+                attrs["currency"] = source.currency
+            return attrs
+
+        if provider is None:
+            raise serializers.ValidationError(
+                {"provider": "This field is required."}
+            )
+        if not attrs.get("source_name"):
+            raise serializers.ValidationError(
+                {"source_name": "This field is required."}
+            )
+        return attrs
 
 
 def validate_non_negative_prices(attrs, fields):
