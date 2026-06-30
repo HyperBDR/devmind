@@ -1382,11 +1382,13 @@
           "label": "厂商"
         },
         "supplierManual": {
-          "hint": "供货商 {supplier} · 人工 {manual}",
-          "label": "供货商 / 人工"
+          "hint": "云托管 {cloudHosted} · 供货商 {supplier} · 内部 {internal}",
+          "label": "托管 / 外部"
         }
       },
       "category": {
+        "cloudHosted": "云厂商托管",
+        "internal": "内部维护",
         "manual": "人工",
         "officialProvider": "原厂",
         "supplier": "供货商",
@@ -1404,9 +1406,11 @@
       },
       "sourceMode": {
         "aggregateSync": "聚合同步",
+        "apiSync": "API 同步",
         "autoCollect": "自动采集",
         "custom": "自定义",
         "dedicatedCollect": "专用采集",
+        "manualImport": "批量导入",
         "manualMaintenance": "手动维护",
         "pending": "待适配",
         "supplierMaintenance": "供货商维护"
@@ -1491,11 +1495,13 @@
       },
       "fields": {
         "category": "价格口径",
+        "collectionMethod": "维护方式",
         "currency": "默认币种",
         "endpointUrl": "价格地址",
         "name": "价格源名称",
         "officialProvider": "原厂厂商",
         "slug": "系统标识",
+        "sourceOwnerType": "来源归属",
         "sourceType": "来源方式"
       },
       "placeholders": {
@@ -1519,6 +1525,20 @@
       },
       "sourceTypes": {
         "custom": "自定义"
+      },
+      "sourceOwnerTypes": {
+        "cloudProvider": "云厂商官方",
+        "internal": "内部维护",
+        "modelProvider": "模型厂商官方",
+        "supplier": "供货商",
+        "unknown": "未知"
+      },
+      "collectionMethods": {
+        "apiSync": "API 同步",
+        "autoCollect": "自动采集",
+        "manualEntry": "手工录入",
+        "manualImport": "批量导入",
+        "unknown": "未知"
       },
       "categories": {
         "manual": "人工维护",
@@ -1612,15 +1632,25 @@
         "video": "视频"
       },
       "categories": {
+        "cloudHosted": "云托管价格",
         "manual": "人工录入",
         "officialProvider": "原厂价格",
         "supplier": "供货商价格",
         "unknown": "其他"
       },
+      "sourceOwnerTypes": {
+        "cloudProvider": "云厂商官方",
+        "internal": "内部维护",
+        "modelProvider": "模型厂商官方",
+        "supplier": "供货商",
+        "unknown": "未知"
+      },
       "sourceMode": {
         "aggregateSync": "聚合同步",
+        "apiSync": "API 同步",
         "autoCollect": "自动采集",
         "dedicatedCollect": "专用采集",
+        "manualImport": "批量导入",
         "manualMaintenance": "手动维护",
         "pending": "待适配",
         "supplierMaintenance": "供货商维护"

@@ -277,11 +277,13 @@ def normalize_meta_model_lookup_name(value: str | None) -> str:
 
 
 def price_role_for_source(
-    source: PriceCollectionSource,
+    source: PriceCollectionSource | None,
     *,
     meta_model: MetaModel | None = None,
 ) -> str:
     """Map a price source to the business role of one model row."""
+    if source is None:
+        return LLMModel.PRICE_ROLE_UNKNOWN
     category = source.source_category
     if (
         category
@@ -299,6 +301,8 @@ def price_role_for_source(
         == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
     ):
         return LLMModel.PRICE_ROLE_OFFICIAL
+    if category == LLMModel.PRICE_ROLE_CLOUD_HOSTED:
+        return LLMModel.PRICE_ROLE_CLOUD_HOSTED
     if category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
         return LLMModel.PRICE_ROLE_SUPPLIER
     if category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
@@ -367,13 +371,19 @@ def preferred_aggregated_model(
             category_rank = 2 if is_current_source else 3
         elif category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
             category_rank = 4 if is_current_source else 5
+        elif model.price_role == LLMModel.PRICE_ROLE_CLOUD_HOSTED:
+            category_rank = 4 if is_current_source else 5
         elif category == PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN:
             category_rank = 6
         else:
             category_rank = 7
         supplier_role_rank = (
             1
-            if model.price_role == LLMModel.PRICE_ROLE_SUPPLIER
+            if model.price_role
+            in (
+                LLMModel.PRICE_ROLE_SUPPLIER,
+                LLMModel.PRICE_ROLE_CLOUD_HOSTED,
+            )
             else 0
         )
         return (
@@ -733,6 +743,10 @@ def sync_manual_model_price_items(
                 "model": model,
                 "meta_model": model.meta_model,
                 "source": source,
+                "price_role": price_role_for_source(
+                    source,
+                    meta_model=model.meta_model,
+                ),
                 "dimension": dimension,
                 "billing_unit": billing_unit,
                 "currency": currency,
@@ -1213,6 +1227,10 @@ def ensure_channel_price_source(
             "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             "source_category": (
                 PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+            ),
+            "source_owner_type": PriceCollectionSource.SOURCE_OWNER_SUPPLIER,
+            "collection_method": (
+                PriceCollectionSource.COLLECTION_METHOD_API_SYNC
             ),
             "channel": channel,
             "endpoint_url": channel.api_endpoint,

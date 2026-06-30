@@ -60,6 +60,7 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     business_source_category = serializers.SerializerMethodField()
+    business_source_category_label = serializers.SerializerMethodField()
     can_collect_prices = serializers.SerializerMethodField()
 
     class Meta:
@@ -69,6 +70,36 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
 
     def get_business_source_category(self, instance):
         return business_source_category_for_catalog(instance)
+
+    def get_business_source_category_label(self, instance):
+        category = self.get_business_source_category(instance)
+        return price_role_label(category)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["source_owner_type"] = source_owner_type_for_source(instance)
+        data["collection_method"] = collection_method_for_source(instance)
+        return data
+
+    def validate(self, attrs):
+        source_owner_type = attrs.get("source_owner_type")
+        if source_owner_type and not attrs.get("source_category"):
+            attrs["source_category"] = legacy_category_for_source_owner_type(
+                source_owner_type
+            )
+        collection_method = attrs.get("collection_method")
+        if (
+            collection_method
+            in (
+                PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY,
+                PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT,
+            )
+            and not attrs.get("source_owner_type")
+        ):
+            attrs["source_owner_type"] = (
+                PriceCollectionSource.SOURCE_OWNER_INTERNAL
+            )
+        return attrs
 
     def get_can_collect_prices(self, instance):
         from .source_collectors import source_supports_code_collection
@@ -292,6 +323,7 @@ def sync_provider_official_source(provider: LLMProvider) -> None:
     config = OFFICIAL_PROVIDER_CONFIGS.get(provider.code)
     if config is None:
         return
+    owner_type = source_owner_type_for_provider_code(provider.code)
     source, created = PriceCollectionSource.objects.get_or_create(
         slug=f"{provider.code}-official",
         defaults={
@@ -300,6 +332,10 @@ def sync_provider_official_source(provider: LLMProvider) -> None:
             "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             "source_category": (
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            "source_owner_type": owner_type,
+            "collection_method": (
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
             ),
             "endpoint_url": config.source_url,
             "currency": config.currency,
@@ -320,6 +356,10 @@ def sync_provider_official_source(provider: LLMProvider) -> None:
         "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
         "source_category": (
             PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        ),
+        "source_owner_type": owner_type,
+        "collection_method": (
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
         ),
         "updates_model_prices": True,
         "notes": (
@@ -573,6 +613,7 @@ class LLMModelSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     business_source_category = serializers.SerializerMethodField()
+    business_source_category_label = serializers.SerializerMethodField()
 
     class Meta:
         model = LLMModel
@@ -635,6 +676,18 @@ class LLMModelSerializer(serializers.ModelSerializer):
     def get_business_source_category(self, instance):
         return business_source_category_for_model(instance)
 
+    def get_business_source_category_label(self, instance):
+        return price_role_label(self.get_business_source_category(instance))
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.source_id:
+            data["price_role"] = price_role_for_source(
+                instance.source,
+                meta_model=instance.meta_model,
+            )
+        return data
+
 
 class ModelPriceItemSerializer(serializers.ModelSerializer):
     """Serializer for normalized official model price items."""
@@ -694,6 +747,7 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         allow_null=True,
     )
     business_source_category = serializers.SerializerMethodField()
+    business_source_category_label = serializers.SerializerMethodField()
 
     class Meta:
         model = ModelPriceItem
@@ -718,6 +772,11 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data["meta_model"] = validated_data["model"].meta_model
+        validated_data["price_role"] = price_role_for_source(
+            validated_data.get("source")
+            or validated_data["model"].source,
+            meta_model=validated_data["meta_model"],
+        )
         validated_data.setdefault(
             "price_fingerprint",
             model_price_item_fingerprint(validated_data),
@@ -727,6 +786,11 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         model = validated_data.get("model", instance.model)
         validated_data["meta_model"] = model.meta_model
+        validated_data["price_role"] = price_role_for_source(
+            validated_data.get("source", instance.source)
+            or model.source,
+            meta_model=validated_data["meta_model"],
+        )
         if price_item_fingerprint_fields_touched(validated_data):
             validated_data["price_fingerprint"] = model_price_item_fingerprint(
                 validated_data,
@@ -736,6 +800,18 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
 
     def get_business_source_category(self, instance):
         return business_source_category_for_price_item(instance)
+
+    def get_business_source_category_label(self, instance):
+        return price_role_label(self.get_business_source_category(instance))
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        source = instance.source or getattr(instance.model, "source", None)
+        data["price_role"] = price_role_for_source(
+            source,
+            meta_model=instance.meta_model,
+        )
+        return data
 
 
 def canonical_vendor_for_meta_model(meta_model):
@@ -765,6 +841,10 @@ def business_source_category_for_source_model(*, source, meta_model):
         return raw_category
     if source_vendor_id == model_vendor_id:
         return raw_category
+    if source_owner_type_for_source(source) == (
+        PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    ):
+        return LLMModel.PRICE_ROLE_CLOUD_HOSTED
     return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
 
 
@@ -815,8 +895,88 @@ def business_source_category_for_catalog(source):
             category
             != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
         ):
-            return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+            return category
     return raw_category
+
+
+def price_role_label(category):
+    labels = {
+        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER: "Official",
+        PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER: "Supplier",
+        PriceCollectionSource.SOURCE_CATEGORY_MANUAL: "Manual",
+        LLMModel.PRICE_ROLE_CLOUD_HOSTED: "Cloud Hosted",
+        PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN: "Unknown",
+    }
+    return labels.get(category, "Unknown")
+
+
+def source_owner_type_for_source(source):
+    """Return source publisher type, inferring old rows when needed."""
+    owner_type = getattr(source, "source_owner_type", "")
+    if owner_type and owner_type != PriceCollectionSource.SOURCE_OWNER_UNKNOWN:
+        return owner_type
+
+    if (
+        source.source_category
+        == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    ):
+        return PriceCollectionSource.SOURCE_OWNER_SUPPLIER
+    if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+        return PriceCollectionSource.SOURCE_OWNER_INTERNAL
+    if (
+        source.source_category
+        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+
+    provider_code = str(getattr(source.provider, "code", "") or "").lower()
+    if provider_code in {"aliyun", "aliyun-wanx", "baidu", "volcengine"}:
+        return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+
+
+def collection_method_for_source(source):
+    """Return source maintenance method, inferring old rows when needed."""
+    method = getattr(source, "collection_method", "")
+    if method and method != PriceCollectionSource.COLLECTION_METHOD_UNKNOWN:
+        return method
+    if source.source_type == PriceCollectionSource.SOURCE_TYPE_YUNCE:
+        return PriceCollectionSource.COLLECTION_METHOD_API_SYNC
+    if (
+        source.source_category
+        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        and source.updates_model_prices
+    ):
+        return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+    if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+        return PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
+    return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
+
+
+def legacy_category_for_source_owner_type(source_owner_type):
+    """Map the new publisher dimension to the old compatibility field."""
+    if source_owner_type in (
+        PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+    ):
+        return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    if source_owner_type == PriceCollectionSource.SOURCE_OWNER_SUPPLIER:
+        return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    if source_owner_type == PriceCollectionSource.SOURCE_OWNER_INTERNAL:
+        return PriceCollectionSource.SOURCE_CATEGORY_MANUAL
+    return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
+
+
+def source_owner_type_for_provider_code(provider_code):
+    """Return the default source owner type for official provider configs."""
+    if str(provider_code or "").lower() in {
+        "aliyun",
+        "aliyun-wanx",
+        "baidu",
+        "volcengine",
+    }:
+        return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
 
 
 def price_item_fingerprint_fields_touched(data: dict) -> bool:

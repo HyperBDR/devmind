@@ -283,7 +283,7 @@ const relationName = computed(() => {
 
 const sourceConfigSummary = computed(() =>
   [
-    sourceCategoryLabel(businessSourceCategory(props.source)),
+    sourceOwnerTypeLabel(sourceOwnerType(props.source)),
     sourceModeLabel(props.source),
     props.source?.currency
   ]
@@ -518,42 +518,67 @@ function modalityLabel(modality) {
   return labels[modality] || modality || ''
 }
 
-function sourceCategoryLabel(category) {
-  const labels = {
-    official_provider: t(
-      'llmOps.sourcePriceDrawer.categories.officialProvider'
-    ),
-    supplier: t('llmOps.sourcePriceDrawer.categories.supplier'),
-    manual: t('llmOps.sourcePriceDrawer.categories.manual'),
-    unknown: t('llmOps.sourcePriceDrawer.categories.unknown')
+function sourceOwnerType(source) {
+  const ownerType = source?.source_owner_type
+  if (ownerType && ownerType !== 'unknown') return ownerType
+  if (source?.source_category === 'official_provider') {
+    return 'model_provider_official'
   }
-  return labels[category] || labels.unknown
+  if (source?.source_category === 'supplier') return 'supplier'
+  if (source?.source_category === 'manual') return 'internal'
+  return ownerType || 'unknown'
 }
 
-function businessSourceCategory(source) {
-  return (
-    source?.business_source_category || source?.source_category || 'unknown'
-  )
+function sourceOwnerTypeLabel(ownerType) {
+  const labels = {
+    model_provider_official: t(
+      'llmOps.sourcePriceDrawer.sourceOwnerTypes.modelProvider'
+    ),
+    cloud_provider_official: t(
+      'llmOps.sourcePriceDrawer.sourceOwnerTypes.cloudProvider'
+    ),
+    supplier: t('llmOps.sourcePriceDrawer.sourceOwnerTypes.supplier'),
+    internal: t('llmOps.sourcePriceDrawer.sourceOwnerTypes.internal'),
+    unknown: t('llmOps.sourcePriceDrawer.sourceOwnerTypes.unknown')
+  }
+  return labels[ownerType] || labels.unknown
 }
 
 function sourceModeLabel(source) {
-  const category = source?.source_category || ''
+  const method = sourceCollectionMethod(source)
   if (String(source?.endpoint_url || '').includes('models.dev/api.json')) {
     return t('llmOps.sourcePriceDrawer.sourceMode.aggregateSync')
   }
-  if (category === 'official_provider') {
+  if (method === 'auto_collect') {
     return t('llmOps.sourcePriceDrawer.sourceMode.autoCollect')
   }
-  if (category === 'supplier') {
-    return t('llmOps.sourcePriceDrawer.sourceMode.supplierMaintenance')
-  }
-  if (category === 'manual') {
+  if (method === 'manual_entry') {
     return t('llmOps.sourcePriceDrawer.sourceMode.manualMaintenance')
+  }
+  if (method === 'manual_import') {
+    return t('llmOps.sourcePriceDrawer.sourceMode.manualImport')
+  }
+  if (method === 'api_sync') {
+    return t('llmOps.sourcePriceDrawer.sourceMode.apiSync')
   }
   if (source?.source_type === 'yunce') {
     return t('llmOps.sourcePriceDrawer.sourceMode.dedicatedCollect')
   }
   return t('llmOps.sourcePriceDrawer.sourceMode.pending')
+}
+
+function sourceCollectionMethod(source) {
+  const method = source?.collection_method
+  if (method && method !== 'unknown') return method
+  if (source?.source_type === 'yunce') return 'api_sync'
+  if (
+    source?.source_category === 'official_provider' &&
+    source?.updates_model_prices
+  ) {
+    return 'auto_collect'
+  }
+  if (source?.source_category === 'manual') return 'manual_entry'
+  return method || 'unknown'
 }
 
 function formatDateTime(value) {

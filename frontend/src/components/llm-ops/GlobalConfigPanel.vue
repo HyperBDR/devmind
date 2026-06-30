@@ -431,8 +431,22 @@ function sourceSupportsRuntimePriceSync(source) {
   return (
     source.updates_model_prices &&
     source.can_collect_prices &&
-    source.source_category === 'official_provider'
+    sourceCollectionMethod(source) === 'auto_collect'
   )
+}
+
+function sourceCollectionMethod(source) {
+  const method = source?.collection_method
+  if (method && method !== 'unknown') return method
+  if (
+    source?.source_category === 'official_provider' &&
+    source?.updates_model_prices
+  ) {
+    return 'auto_collect'
+  }
+  if (source?.source_category === 'manual') return 'manual_entry'
+  if (source?.source_type === 'yunce') return 'api_sync'
+  return method || 'unknown'
 }
 
 function normalizeLLMConfigOption(row) {

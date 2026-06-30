@@ -2737,6 +2737,12 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
                     "source_category": (
                         PriceCollectionSource.SOURCE_CATEGORY_MANUAL
                     ),
+                    "source_owner_type": (
+                        PriceCollectionSource.SOURCE_OWNER_INTERNAL
+                    ),
+                    "collection_method": (
+                        PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT
+                    ),
                     "endpoint_url": data.get("source_url") or "",
                     "currency": data["currency"],
                     "is_enabled": True,

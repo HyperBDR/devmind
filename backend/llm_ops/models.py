@@ -31,6 +31,18 @@ class PriceCollectionSource(models.Model):
     SOURCE_CATEGORY_MANUAL = "manual"
     SOURCE_CATEGORY_UNKNOWN = "unknown"
 
+    SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL = "model_provider_official"
+    SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL = "cloud_provider_official"
+    SOURCE_OWNER_SUPPLIER = "supplier"
+    SOURCE_OWNER_INTERNAL = "internal"
+    SOURCE_OWNER_UNKNOWN = "unknown"
+
+    COLLECTION_METHOD_AUTO_COLLECT = "auto_collect"
+    COLLECTION_METHOD_MANUAL_ENTRY = "manual_entry"
+    COLLECTION_METHOD_MANUAL_IMPORT = "manual_import"
+    COLLECTION_METHOD_API_SYNC = "api_sync"
+    COLLECTION_METHOD_UNKNOWN = "unknown"
+
     SOURCE_TYPE_CHOICES = (
         (SOURCE_TYPE_AGIONE, "Agione"),
         (SOURCE_TYPE_YUNCE, "Yunce"),
@@ -42,6 +54,22 @@ class PriceCollectionSource(models.Model):
         (SOURCE_CATEGORY_SUPPLIER, "Supplier"),
         (SOURCE_CATEGORY_MANUAL, "Manual"),
         (SOURCE_CATEGORY_UNKNOWN, "Unknown"),
+    )
+
+    SOURCE_OWNER_TYPE_CHOICES = (
+        (SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL, "Model Provider Official"),
+        (SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL, "Cloud Provider Official"),
+        (SOURCE_OWNER_SUPPLIER, "Supplier"),
+        (SOURCE_OWNER_INTERNAL, "Internal"),
+        (SOURCE_OWNER_UNKNOWN, "Unknown"),
+    )
+
+    COLLECTION_METHOD_CHOICES = (
+        (COLLECTION_METHOD_AUTO_COLLECT, "Auto Collect"),
+        (COLLECTION_METHOD_MANUAL_ENTRY, "Manual Entry"),
+        (COLLECTION_METHOD_MANUAL_IMPORT, "Manual Import"),
+        (COLLECTION_METHOD_API_SYNC, "API Sync"),
+        (COLLECTION_METHOD_UNKNOWN, "Unknown"),
     )
 
     name = models.CharField(max_length=255)
@@ -69,6 +97,16 @@ class PriceCollectionSource(models.Model):
         max_length=50,
         choices=SOURCE_CATEGORY_CHOICES,
         default=SOURCE_CATEGORY_UNKNOWN,
+    )
+    source_owner_type = models.CharField(
+        max_length=50,
+        choices=SOURCE_OWNER_TYPE_CHOICES,
+        default=SOURCE_OWNER_UNKNOWN,
+    )
+    collection_method = models.CharField(
+        max_length=50,
+        choices=COLLECTION_METHOD_CHOICES,
+        default=COLLECTION_METHOD_UNKNOWN,
     )
     endpoint_url = models.URLField(max_length=1000, blank=True, default="")
     currency = models.CharField(max_length=10, default="USD")
@@ -284,6 +322,7 @@ class LLMModel(models.Model):
 
     PRICE_ROLE_OFFICIAL = "official"
     PRICE_ROLE_SUPPLIER = "supplier"
+    PRICE_ROLE_CLOUD_HOSTED = "cloud_hosted"
     PRICE_ROLE_MARKET_REFERENCE = "market_reference"
     PRICE_ROLE_MANUAL = "manual"
     PRICE_ROLE_UNKNOWN = "unknown"
@@ -291,6 +330,7 @@ class LLMModel(models.Model):
     PRICE_ROLE_CHOICES = (
         (PRICE_ROLE_OFFICIAL, "Official"),
         (PRICE_ROLE_SUPPLIER, "Supplier"),
+        (PRICE_ROLE_CLOUD_HOSTED, "Cloud Hosted"),
         (PRICE_ROLE_MARKET_REFERENCE, "Market Reference"),
         (PRICE_ROLE_MANUAL, "Manual"),
         (PRICE_ROLE_UNKNOWN, "Unknown"),
@@ -485,6 +525,12 @@ class ModelPriceItem(models.Model):
         blank=True,
         null=True,
         on_delete=models.SET_NULL,
+    )
+    price_role = models.CharField(
+        max_length=50,
+        choices=LLMModel.PRICE_ROLE_CHOICES,
+        default=LLMModel.PRICE_ROLE_UNKNOWN,
+        db_index=True,
     )
     dimension = models.CharField(max_length=50, choices=DIMENSION_CHOICES)
     billing_unit = models.CharField(

@@ -244,6 +244,7 @@
       :display-currency="displayCurrency"
       :exchange-rate="exchangeRate"
       :collecting-source-id="collectingSourceId"
+      :deleting-source-id="deletingSourceId"
       @close="selectedProvider = null"
       @view-source="openSourceFromProvider"
       @manual-entry-source="priceEntrySource = $event"
@@ -329,8 +330,12 @@ const sourceCategoryFilterOptions = computed(() => [
     label: t('llmOps.providerManagement.category.supplier')
   },
   {
+    value: 'cloud_hosted',
+    label: t('llmOps.providerManagement.category.cloudHosted')
+  },
+  {
     value: 'manual',
-    label: t('llmOps.providerManagement.category.manual')
+    label: t('llmOps.providerManagement.category.internal')
   },
   {
     value: 'unknown',
@@ -445,7 +450,10 @@ const sourceMetrics = computed(() => {
   const supplier = entrySourceRows.value.filter(
     (source) => source.business_source_category === 'supplier'
   ).length
-  const manual = entrySourceRows.value.filter(
+  const cloudHosted = entrySourceRows.value.filter(
+    (source) => source.business_source_category === 'cloud_hosted'
+  ).length
+  const internal = entrySourceRows.value.filter(
     (source) => source.business_source_category === 'manual'
   ).length
 
@@ -467,10 +475,11 @@ const sourceMetrics = computed(() => {
     },
     {
       label: t('llmOps.providerManagement.metrics.supplierManual.label'),
-      value: supplier + manual,
+      value: supplier + cloudHosted + internal,
       hint: t('llmOps.providerManagement.metrics.supplierManual.hint', {
         supplier,
-        manual
+        cloudHosted,
+        internal
       })
     }
   ]
@@ -928,8 +937,12 @@ function sourceCategory(category) {
       tone: 'supplier'
     },
     manual: {
-      label: t('llmOps.providerManagement.category.manual'),
+      label: t('llmOps.providerManagement.category.internal'),
       tone: 'manual'
+    },
+    cloud_hosted: {
+      label: t('llmOps.providerManagement.category.cloudHosted'),
+      tone: 'cloud'
     },
     unknown: {
       label: t('llmOps.providerManagement.category.unknown'),
@@ -942,8 +955,9 @@ function sourceCategory(category) {
 function categoryRank(category) {
   const ranks = {
     official_provider: 1,
-    supplier: 2,
-    manual: 3,
+    cloud_hosted: 2,
+    supplier: 3,
+    manual: 4,
     unknown: 4
   }
   return ranks[category] || 9
@@ -970,19 +984,22 @@ function sourceRelation(source) {
 
 function sourceModeLabel(source) {
   const type = source?.source_type || ''
-  const category = source?.source_category || ''
+  const method = sourceCollectionMethod(source)
 
   if (isModelsDevSource(source)) {
     return t('llmOps.providerManagement.sourceMode.aggregateSync')
   }
-  if (category === 'official_provider') {
+  if (method === 'auto_collect') {
     return t('llmOps.providerManagement.sourceMode.autoCollect')
   }
-  if (category === 'manual') {
+  if (method === 'manual_entry') {
     return t('llmOps.providerManagement.sourceMode.manualMaintenance')
   }
-  if (category === 'supplier') {
-    return t('llmOps.providerManagement.sourceMode.supplierMaintenance')
+  if (method === 'manual_import') {
+    return t('llmOps.providerManagement.sourceMode.manualImport')
+  }
+  if (method === 'api_sync') {
+    return t('llmOps.providerManagement.sourceMode.apiSync')
   }
 
   const labels = {
@@ -1016,6 +1033,13 @@ function sourceStatus(source, latestRun) {
       hint: t('llmOps.providerManagement.sourceStatus.manual.hint')
     }
   }
+  if (canApiSyncSource(source)) {
+    return {
+      label: t('llmOps.providerManagement.sourceStatus.active.label'),
+      tone: 'ok',
+      hint: collectModeLabel(source)
+    }
+  }
   if (!canCollectSource(source)) {
     return {
       label: t('llmOps.providerManagement.sourceStatus.pending.label'),
@@ -1047,20 +1071,27 @@ function sourceStatus(source, latestRun) {
 function canCollectSource(source) {
   return Boolean(
     source.can_collect_prices &&
-      source.source_category === 'official_provider' &&
+      sourceCollectionMethod(source) === 'auto_collect' &&
       source.updates_model_prices
   )
 }
 
 function isEntrySource(source) {
-  if (source?.source_category === 'official_provider') {
-    return canCollectSource(source)
-  }
-  return canManualEntrySource(source)
+  return (
+    canCollectSource(source) ||
+    canManualEntrySource(source) ||
+    canApiSyncSource(source)
+  )
+}
+
+function canApiSyncSource(source) {
+  return sourceCollectionMethod(source) === 'api_sync'
 }
 
 function canManualEntrySource(source) {
-  return ['supplier', 'manual', 'unknown'].includes(source.source_category)
+  return ['manual_entry', 'manual_import', 'unknown'].includes(
+    sourceCollectionMethod(source)
+  )
 }
 
 function collectActionLabel(source) {
@@ -1080,10 +1111,24 @@ function collectModeLabel(source) {
   if (canManualEntrySource(source)) {
     return t('llmOps.providerManagement.collectMode.manualMaintenance')
   }
-  if (source.source_type === 'yunce') {
+  if (canApiSyncSource(source) || source.source_type === 'yunce') {
     return t('llmOps.providerManagement.collectMode.dedicatedCollector')
   }
   return t('llmOps.providerManagement.collectMode.pending')
+}
+
+function sourceCollectionMethod(source) {
+  const method = source?.collection_method
+  if (method && method !== 'unknown') return method
+  if (source?.source_type === 'yunce') return 'api_sync'
+  if (
+    source?.source_category === 'official_provider' &&
+    source?.updates_model_prices
+  ) {
+    return 'auto_collect'
+  }
+  if (source?.source_category === 'manual') return 'manual_entry'
+  return method || 'unknown'
 }
 
 function isModelsDevSource(source) {
@@ -1310,6 +1355,10 @@ function apiPayload(response) {
 
 .source-badge.supplier {
   @apply border-indigo-100 bg-indigo-50 text-indigo-700;
+}
+
+.source-badge.cloud {
+  @apply border-sky-100 bg-sky-50 text-sky-700;
 }
 
 .source-badge.manual {

@@ -530,6 +530,13 @@ class LLMOpsViewTests(TestCase):
         self.assertFalse(
             PriceCollectionSource.objects.filter(id=source.id).exists()
         )
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.PriceCollectionSource",
+            target_id=str(source.id),
+        )
+        self.assertEqual(audit.action, AuditLog.ACTION_DELETE)
+        self.assertEqual(audit.category, AuditLog.CATEGORY_CONFIGURATION)
+        self.assertEqual(audit.before["slug"], "manual-source")
 
     def test_channel_delete_removes_channel_listings_without_auto_conflict(
         self,

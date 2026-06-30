@@ -257,7 +257,7 @@ class UsageReconciliationRecordSerializerTests(TestCase):
 
 
 class PriceCollectionSourceSerializerTests(TestCase):
-    def test_official_catalog_with_third_party_model_is_supplier(self):
+    def test_official_catalog_with_third_party_model_is_cloud_provider(self):
         aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
         deepseek = LLMProvider.objects.create(
             name="DeepSeek",
@@ -287,11 +287,15 @@ class PriceCollectionSourceSerializerTests(TestCase):
         data = PriceCollectionSourceSerializer(source).data
 
         self.assertEqual(data["source_category"], "official_provider")
-        self.assertEqual(data["business_source_category"], "supplier")
+        self.assertEqual(data["source_owner_type"], "cloud_provider_official")
+        self.assertEqual(data["collection_method"], "unknown")
+        self.assertEqual(data["business_source_category"], "cloud_hosted")
 
 
 class LLMModelSerializerTests(TestCase):
-    def test_official_source_model_becomes_supplier_when_vendor_differs(self):
+    def test_official_source_model_becomes_cloud_hosted_when_vendor_differs(
+        self,
+    ):
         aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
         deepseek = LLMProvider.objects.create(
             name="DeepSeek",
@@ -320,14 +324,15 @@ class LLMModelSerializerTests(TestCase):
 
         data = LLMModelSerializer(model).data
 
-        self.assertEqual(data["business_source_category"], "supplier")
+        self.assertEqual(data["business_source_category"], "cloud_hosted")
+        self.assertEqual(data["price_role"], "cloud_hosted")
         self.assertEqual(data["meta_model_vendor"], deepseek.id)
         self.assertEqual(data["meta_model_vendor_name"], "DeepSeek")
         self.assertEqual(data["meta_model_vendor_code"], "deepseek")
 
 
 class ModelPriceItemSerializerTests(TestCase):
-    def test_official_source_price_item_becomes_supplier(self):
+    def test_official_source_price_item_becomes_cloud_hosted(self):
         aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
         deepseek = LLMProvider.objects.create(
             name="DeepSeek",
@@ -367,7 +372,8 @@ class ModelPriceItemSerializerTests(TestCase):
 
         data = ModelPriceItemSerializer(item).data
 
-        self.assertEqual(data["business_source_category"], "supplier")
+        self.assertEqual(data["business_source_category"], "cloud_hosted")
+        self.assertEqual(data["price_role"], "cloud_hosted")
         self.assertEqual(data["meta_model_vendor"], deepseek.id)
         self.assertEqual(data["meta_model_vendor_name"], "DeepSeek")
         self.assertEqual(data["meta_model_vendor_code"], "deepseek")
