@@ -692,6 +692,13 @@ import { llmOpsApi } from '@/api/llmOps'
 import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 
 const FULL_LIST_PARAMS = { page_size: 10000 }
+const DATA_HEAVY_SECTIONS = new Set([
+  'channels',
+  'metaModels',
+  'providers',
+  'reconciler',
+  'reseller'
+])
 const sectionKeys = new Set([
   'monitor',
   'metaModels',
@@ -706,6 +713,9 @@ const sectionKeys = new Set([
 ])
 const activeSection = ref(initialActiveSection())
 const loading = ref(false)
+const backgroundLoading = ref(false)
+const secondaryDataLoaded = ref(false)
+const secondaryRefreshQueued = ref(false)
 
 const sources = ref([])
 const collectionRuns = ref([])
@@ -1346,6 +1356,15 @@ function extract(response) {
   return Array.isArray(data.results) ? data.results : data
 }
 
+function errorMessage(error, fallback) {
+  return (
+    error?.response?.data?.detail ||
+    error?.response?.data?.message ||
+    error?.message ||
+    fallback
+  )
+}
+
 function monitorModelSubtitle(row) {
   const name = String(row.model_name || '').trim()
   const code = String(row.model_code || '').trim()
@@ -1355,59 +1374,131 @@ function monitorModelSubtitle(row) {
 
 async function refreshAll() {
   loading.value = true
+  const section = activeSection.value
   try {
-    const [
-      sourceRes,
-      runRes,
-      providerRes,
-      metaModelRes,
-      modelRes,
-      channelRes,
-      priceRes,
-      channelPriceItemRes,
-      priceItemRes,
-      platformRes,
-      listingRes,
-      recordRes,
-      summaryRes
-    ] = await Promise.all([
-      llmOpsApi.listCollectionSources(FULL_LIST_PARAMS),
-      llmOpsApi.listCollectionRuns(FULL_LIST_PARAMS),
-      llmOpsApi.listProviders(FULL_LIST_PARAMS),
-      llmOpsApi.listMetaModels(FULL_LIST_PARAMS),
-      llmOpsApi.listModels(FULL_LIST_PARAMS),
-      llmOpsApi.listChannels(FULL_LIST_PARAMS),
-      llmOpsApi.listChannelModelPrices(FULL_LIST_PARAMS),
-      llmOpsApi.listChannelPriceItems({
-        ...FULL_LIST_PARAMS,
-        is_current: 'true'
-      }),
-      llmOpsApi.listModelPriceItems({
-        ...FULL_LIST_PARAMS,
-        is_current: 'true'
-      }),
-      llmOpsApi.listResalePlatforms(FULL_LIST_PARAMS),
-      llmOpsApi.listResaleListings(FULL_LIST_PARAMS),
-      llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS),
-      llmOpsApi.getSummary(summaryParams())
-    ])
-    sources.value = extract(sourceRes)
-    collectionRuns.value = extract(runRes)
-    providers.value = extract(providerRes)
-    metaModels.value = extract(metaModelRes)
-    models.value = extract(modelRes)
-    channels.value = extract(channelRes)
-    channelPrices.value = extract(priceRes)
-    channelPriceItems.value = extract(channelPriceItemRes)
-    modelPriceItems.value = extract(priceItemRes)
-    resalePlatforms.value = extract(platformRes)
-    listings.value = extract(listingRes)
-    records.value = extract(recordRes)
-    summary.value = extract(summaryRes)
-    await loadResaleWorkflowConfig()
+    await refreshCoreData()
+    await refreshSectionData(section)
   } finally {
     loading.value = false
   }
+
+  refreshSecondaryData({ force: true, silent: true })
+}
+
+async function refreshCoreData() {
+  const [
+    sourceRes,
+    runRes,
+    providerRes,
+    modelRes,
+    channelRes,
+    platformRes,
+    summaryRes
+  ] = await Promise.all([
+    llmOpsApi.listCollectionSources(FULL_LIST_PARAMS),
+    llmOpsApi.listCollectionRuns(FULL_LIST_PARAMS),
+    llmOpsApi.listProviders(FULL_LIST_PARAMS),
+    llmOpsApi.listModels(FULL_LIST_PARAMS),
+    llmOpsApi.listChannels(FULL_LIST_PARAMS),
+    llmOpsApi.listResalePlatforms(FULL_LIST_PARAMS),
+    llmOpsApi.getSummary(summaryParams())
+  ])
+  sources.value = extract(sourceRes)
+  collectionRuns.value = extract(runRes)
+  providers.value = extract(providerRes)
+  models.value = extract(modelRes)
+  channels.value = extract(channelRes)
+  resalePlatforms.value = extract(platformRes)
+  summary.value = extract(summaryRes)
+  await loadResaleWorkflowConfig()
+}
+
+async function refreshSecondaryData({ force = false, silent = false } = {}) {
+  if (backgroundLoading.value) {
+    if (force) {
+      secondaryDataLoaded.value = false
+      secondaryRefreshQueued.value = true
+    }
+    return
+  }
+  if (force) {
+    secondaryDataLoaded.value = false
+  }
+  backgroundLoading.value = true
+  try {
+    await Promise.all([
+      refreshMetaModels(),
+      refreshChannelPricingData(),
+      refreshModelPriceItems(),
+      refreshResaleListings(),
+      refreshReconciliationRecords()
+    ])
+    secondaryDataLoaded.value = true
+  } catch (error) {
+    if (!silent) {
+      showError(errorMessage(error, '加载 LLM Ops 扩展数据失败。'))
+    }
+  } finally {
+    backgroundLoading.value = false
+    if (secondaryRefreshQueued.value) {
+      secondaryRefreshQueued.value = false
+      refreshSecondaryData({ force: true, silent: true })
+    }
+  }
+}
+
+async function refreshSectionData(section) {
+  if (!DATA_HEAVY_SECTIONS.has(section)) return
+  if (section === 'providers' || section === 'metaModels') {
+    await Promise.all([refreshMetaModels(), refreshModelPriceItems()])
+    return
+  }
+  if (section === 'channels') {
+    await Promise.all([refreshChannelPricingData(), refreshModelPriceItems()])
+    return
+  }
+  if (section === 'reseller') {
+    await Promise.all([refreshModelPriceItems(), refreshResaleListings()])
+    return
+  }
+  if (section === 'reconciler') {
+    await refreshReconciliationRecords()
+  }
+}
+
+async function refreshMetaModels() {
+  const response = await llmOpsApi.listMetaModels(FULL_LIST_PARAMS)
+  metaModels.value = extract(response)
+}
+
+async function refreshChannelPricingData() {
+  const [priceRes, itemRes] = await Promise.all([
+    llmOpsApi.listChannelModelPrices(FULL_LIST_PARAMS),
+    llmOpsApi.listChannelPriceItems({
+      ...FULL_LIST_PARAMS,
+      is_current: 'true'
+    })
+  ])
+  channelPrices.value = extract(priceRes)
+  channelPriceItems.value = extract(itemRes)
+}
+
+async function refreshModelPriceItems() {
+  const response = await llmOpsApi.listModelPriceItems({
+    ...FULL_LIST_PARAMS,
+    is_current: 'true'
+  })
+  modelPriceItems.value = extract(response)
+}
+
+async function refreshResaleListings() {
+  const response = await llmOpsApi.listResaleListings(FULL_LIST_PARAMS)
+  listings.value = extract(response)
+}
+
+async function refreshReconciliationRecords() {
+  const response = await llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS)
+  records.value = extract(response)
 }
 
 async function refreshLight() {
@@ -1564,6 +1655,15 @@ watch(activeSection, (section) => {
   const url = new URL(window.location.href)
   url.searchParams.set('section', section)
   window.history.replaceState({}, '', `${url.pathname}${url.search}`)
+  if (
+    DATA_HEAVY_SECTIONS.has(section) &&
+    !secondaryDataLoaded.value &&
+    !loading.value
+  ) {
+    refreshSectionData(section).catch((error) => {
+      showError(errorMessage(error, '加载当前页面数据失败。'))
+    })
+  }
 })
 
 watch(selectedResalePlatformId, (platformId) => {

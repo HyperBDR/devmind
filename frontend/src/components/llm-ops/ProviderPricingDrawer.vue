@@ -61,10 +61,7 @@
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
             <p class="text-xs text-slate-500">价格来源</p>
-            <div
-              v-if="primarySource"
-              class="mt-1 min-w-0"
-            >
+            <div v-if="primarySource" class="mt-1 min-w-0">
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-slate-900">
                   {{ primarySource.name }}
@@ -85,6 +82,119 @@
               </div>
             </div>
             <p v-else class="mt-1 font-mono text-sm text-slate-800">0</p>
+          </div>
+        </div>
+
+        <div class="panel overflow-hidden p-0">
+          <div class="table-toolbar">
+            <div>
+              <h3 class="panel-title">模型价格源</h3>
+              <p class="mt-1 text-xs text-slate-500">
+                维护该厂商下的原厂、供货商和人工价格来源。
+              </p>
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="data-table provider-source-table">
+              <colgroup>
+                <col class="source-name-col" />
+                <col class="source-type-col" />
+                <col class="source-status-col" />
+                <col class="source-action-col" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th class="table-head">价格源</th>
+                  <th class="table-head">类型</th>
+                  <th class="table-head">状态</th>
+                  <th class="table-head">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="source in managementSourceRows" :key="source.id">
+                  <td class="table-cell">
+                    <div class="min-w-0">
+                      <p class="truncate font-medium text-slate-900">
+                        {{ source.name }}
+                      </p>
+                      <p class="mt-1 truncate font-mono text-xs text-slate-400">
+                        {{ source.slug }}
+                      </p>
+                      <a
+                        v-if="source.endpoint_url"
+                        class="source-link mt-1"
+                        :href="source.endpoint_url"
+                        rel="noopener noreferrer"
+                        target="_blank"
+                        :title="source.endpoint_url"
+                      >
+                        {{ source.endpoint_url }}
+                      </a>
+                    </div>
+                  </td>
+                  <td class="table-cell text-center">
+                    <span :class="['source-badge', source.category_tone]">
+                      {{ source.category_label }}
+                    </span>
+                  </td>
+                  <td class="table-cell text-center">
+                    <span
+                      :class="[source.is_enabled ? 'badge-ok' : 'badge-muted']"
+                    >
+                      {{ source.is_enabled ? '已启用' : '已停用' }}
+                    </span>
+                    <p class="mt-1 text-xs text-slate-400">
+                      {{ source.price_item_count }} 个价格项
+                    </p>
+                  </td>
+                  <td class="table-cell">
+                    <div class="source-actions">
+                      <OperationIconButton
+                        icon="edit"
+                        label="编辑价格源"
+                        @click.stop="$emit('edit-source', source)"
+                      />
+                      <OperationIconButton
+                        icon="powerOff"
+                        :label="source.is_enabled ? '停用价格源' : '启用价格源'"
+                        @click.stop="$emit('toggle-source', source)"
+                      />
+                      <OperationIconButton
+                        v-if="source.can_manual_entry"
+                        icon="manual"
+                        label="配置模型价格"
+                        tone="primary"
+                        @click.stop="$emit('manual-entry-source', source)"
+                      />
+                      <OperationIconButton
+                        v-if="source.can_collect"
+                        icon="collect"
+                        :label="source.collect_action_label || '同步价格'"
+                        :disabled="
+                          !source.is_enabled ||
+                          String(collectingSourceId || '') === String(source.id)
+                        "
+                        @click.stop="$emit('collect-source', source)"
+                      />
+                      <OperationIconButton
+                        icon="delete"
+                        label="删除价格源"
+                        tone="danger"
+                        :disabled="
+                          String(deletingSourceId || '') === String(source.id)
+                        "
+                        @click.stop="$emit('delete-source', source)"
+                      />
+                    </div>
+                  </td>
+                </tr>
+                <tr v-if="!managementSourceRows.length">
+                  <td class="table-cell text-slate-500" colspan="4">
+                    当前厂商还没有模型价格源。
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -191,6 +301,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
 defineEmits([
   'close',
@@ -264,6 +375,17 @@ const categoryFilterOptions = computed(() => {
 
 const sourceRows = computed(() =>
   aggregatePriceSources(props.sources, props.priceItems)
+)
+
+const managementSourceRows = computed(() =>
+  props.sources
+    .map((source) => buildManagementSourceRow(source))
+    .sort((left, right) => {
+      const leftRank = categoryRank(businessSourceCategory(left))
+      const rightRank = categoryRank(businessSourceCategory(right))
+      if (leftRank !== rightRank) return leftRank - rightRank
+      return String(left.name || '').localeCompare(String(right.name || ''))
+    })
 )
 
 const primarySource = computed(() => preferredPriceSource(sourceRows.value))
@@ -514,6 +636,8 @@ function buildAggregateSource(group, priceItems) {
     slug: aggregateSourceSlug(primary),
     endpoint_url: endpointUrl,
     is_enabled: sorted.some((source) => source.is_enabled),
+    category_label: sourceCategoryLabel(businessSourceCategory(primary)),
+    category_tone: sourceTone(businessSourceCategory(primary)),
     source_group_key: priceSourceGroupKey(primary),
     source_group_ids: sourceIds,
     source_count: sorted.length,
@@ -526,6 +650,20 @@ function buildAggregateSource(group, priceItems) {
     price_item_count: priceItems.filter(
       (item) =>
         sourceIds.includes(String(item.source || '')) &&
+        item.is_current !== false
+    ).length
+  }
+}
+
+function buildManagementSourceRow(source) {
+  const category = businessSourceCategory(source)
+  return {
+    ...source,
+    category_label: sourceCategoryLabel(category),
+    category_tone: sourceTone(category),
+    price_item_count: props.priceItems.filter(
+      (item) =>
+        String(item.source || '') === String(source.id) &&
         item.is_current !== false
     ).length
   }

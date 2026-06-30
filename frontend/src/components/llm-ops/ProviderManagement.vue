@@ -197,7 +197,9 @@
                     icon="edit"
                     label="编辑价格源"
                     :disabled="!provider.primary_source"
-                    @click.stop="editSourceFromProvider(provider.primary_source)"
+                    @click.stop="
+                      editSourceFromProvider(provider.primary_source)
+                    "
                   />
                   <OperationIconButton
                     v-if="provider.primary_source?.can_manual_entry"
@@ -212,7 +214,8 @@
                     v-if="provider.primary_source?.can_collect"
                     icon="collect"
                     :label="
-                      provider.primary_source?.collect_action_label || '同步价格'
+                      provider.primary_source?.collect_action_label ||
+                      '同步价格'
                     "
                     :disabled="
                       !provider.primary_source.is_enabled ||
@@ -220,6 +223,17 @@
                         String(provider.primary_source.id)
                     "
                     @click.stop="collectSource(provider.primary_source)"
+                  />
+                  <OperationIconButton
+                    icon="delete"
+                    label="删除价格源"
+                    tone="danger"
+                    :disabled="
+                      !provider.primary_source ||
+                      String(deletingSourceId || '') ===
+                        String(provider.primary_source.id)
+                    "
+                    @click.stop="deleteSource(provider.primary_source)"
                   />
                 </div>
               </td>
