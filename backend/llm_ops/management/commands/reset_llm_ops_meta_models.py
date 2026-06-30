@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
 
-from llm_ops.seed_data import (
+from llm_ops.catalog_maintenance import (
     cleanup_orphan_meta_models,
     reset_meta_models_canonical,
 )

@@ -12,9 +12,12 @@ from rest_framework.views import APIView
 
 from .audit import record_audit_log, snapshot_instance
 from .collection_services import (
+    SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
     ensure_supported_official_provider_source,
     official_provider_source_slug,
+    reset_official_price_catalog,
     supported_official_provider_options,
+    sync_configured_official_model_prices,
     sync_meta_models_from_models_dev,
     sync_yunce_model_prices,
 )
@@ -385,6 +388,115 @@ class PriceCollectionSourceViewSet(
             status=status.HTTP_202_ACCEPTED,
         )
 
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="reset-official-prices-preview",
+    )
+    def reset_official_prices_preview(self, request):
+        """Preview official price cleanup impact for operators."""
+        try:
+            provider_codes = official_reset_provider_codes(request.data)
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        stats = reset_official_price_catalog(
+            provider_codes=provider_codes,
+            dry_run=True,
+        )
+        return Response(
+            {
+                "provider_codes": provider_codes,
+                "stats": stats,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="reset-official-prices",
+    )
+    def reset_official_prices(self, request):
+        """Clear dirty official prices and optionally resync them."""
+        if request.data.get("confirm") is not True:
+            return Response(
+                {"detail": "Set confirm=true to reset official prices."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            provider_codes = official_reset_provider_codes(request.data)
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        before = reset_official_price_catalog(
+            provider_codes=provider_codes,
+            dry_run=True,
+        )
+        stats = reset_official_price_catalog(
+            provider_codes=provider_codes,
+            dry_run=False,
+        )
+        sync_results = {}
+        if request.data.get("sync") is not False:
+            sync_results = sync_configured_official_model_prices(
+                provider_codes=provider_codes,
+                verify_source=request.data.get("skip_source_check") is not True,
+            )
+
+        record_audit_log(
+            request=request,
+            action=AuditLog.ACTION_DELETE,
+            category=AuditLog.CATEGORY_CONFIGURATION,
+            target="llm_ops.official_prices",
+            summary="Reset official model price catalog",
+            before=before,
+            after=stats,
+            metadata={
+                "provider_codes": provider_codes,
+                "sync": request.data.get("sync") is not False,
+                "sync_results": sync_results,
+            },
+        )
+        return Response(
+            {
+                "provider_codes": provider_codes,
+                "stats": stats,
+                "sync_results": sync_results,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+def official_reset_provider_codes(data) -> list[str]:
+    """Parse and validate the official-price reset scope."""
+    provider_codes = data.get("provider_codes") or data.get("providers") or []
+    if isinstance(provider_codes, str):
+        provider_codes = [provider_codes]
+    provider_codes = [
+        str(provider_code).strip()
+        for provider_code in provider_codes
+        if str(provider_code or "").strip()
+    ]
+    if data.get("all") is True:
+        if provider_codes:
+            raise ValueError("Use either provider_codes or all=true, not both.")
+        return list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    if not provider_codes:
+        raise ValueError("Select at least one official provider.")
+
+    supported = set(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    unsupported = sorted(set(provider_codes) - supported)
+    if unsupported:
+        raise ValueError(
+            "Unsupported official provider(s): " + ", ".join(unsupported)
+        )
+    return sorted(set(provider_codes))
+
 
 class LLMOpsGlobalConfigAPIView(LLMOpsPermissionMixin, APIView):
     """Read and update the singleton global LLM Ops configuration."""
@@ -635,7 +747,7 @@ class MetaModelViewSet(
         return queryset.order_by("name", "id")
 
     def list(self, request, *args, **kwargs):
-        from .seed_data import (
+        from .catalog_maintenance import (
             normalize_meta_model_catalog,
             resolve_orphan_meta_models,
         )
@@ -645,7 +757,7 @@ class MetaModelViewSet(
         return super().list(request, *args, **kwargs)
 
     def retrieve(self, request, *args, **kwargs):
-        from .seed_data import (
+        from .catalog_maintenance import (
             normalize_meta_model_catalog,
             resolve_orphan_meta_models,
         )
@@ -657,7 +769,7 @@ class MetaModelViewSet(
     @action(detail=False, methods=["post"], url_path="sync")
     def sync(self, request):
         """Refresh meta models from the public models.dev API."""
-        from .seed_data import normalize_meta_model_catalog
+        from .catalog_maintenance import normalize_meta_model_catalog
 
         stats = sync_meta_models_from_models_dev()
         stats["meta_model_normalization"] = normalize_meta_model_catalog()

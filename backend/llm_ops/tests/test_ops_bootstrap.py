@@ -1,28 +1,30 @@
-"""Tests for llm_ops catalog maintenance helpers and periodic tasks.
-
-These tests cover the deployment guarantees that the pipeline
-relies on:
-
-1. Seed helper functions remain isolated from product startup paths.
-2. ``seed_initial_price_sheet_safely`` never overwrites manually
-   maintained overrides (``ChannelModelPrice.custom_*``,
-   ``LLMModel.is_active``, ``PriceCollectionSource.is_enabled``).
-3. ``register_periodic_tasks`` exposes a single
-   ``llm_ops_model_price_sync_agent`` entry, and the corresponding
-   Celery task is registered with the worker.
-"""
+"""Tests for LLM Ops catalog maintenance without seed bootstrap."""
 from __future__ import annotations
 
-import importlib
 from decimal import Decimal
-from unittest import mock
+from io import StringIO
+from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase
 
+from llm_ops.catalog_maintenance import (
+    clean_legacy_llm_ops_demo_data,
+    is_llm_ops_database_empty,
+    normalize_meta_model_catalog,
+    reset_meta_models_canonical,
+    resolve_orphan_meta_models,
+)
+from llm_ops.collection_services import (
+    reset_official_price_catalog,
+    supported_official_provider_options,
+)
+from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
+from llm_ops.management.commands.cleanup_llm_ops_seed_prices import (
+    build_cleanup_plan,
+    execute_cleanup,
+)
 from llm_ops.models import (
-    ChannelModelPrice,
-    ChannelModelPriceHistory,
-    ChannelPriceItem,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -32,22 +34,6 @@ from llm_ops.models import (
     ProcurementChannel,
 )
 from llm_ops.periodic_tasks import register_periodic_tasks
-from llm_ops.seed_data import (
-    REAL_RESOURCE_CHANNEL_CODE,
-    clean_mock_llm_ops_seed_data,
-    cleanup_orphan_meta_models,
-    is_llm_ops_database_empty,
-    normalize_meta_model_catalog,
-    reset_meta_models_canonical,
-    resolve_orphan_meta_models,
-    seed_agione_price_trend_demo,
-    seed_initial_catalog_from_official_sources,
-    seed_initial_price_sheet,
-    seed_initial_price_sheet_if_empty,
-    seed_initial_price_sheet_safely,
-    seed_yunce_supplier_price_demo,
-)
-from llm_ops.views import LLMProviderViewSet, MetaModelViewSet
 
 
 class LLMOpsCatalogStateHelperTests(TestCase):
@@ -58,14 +44,12 @@ class LLMOpsCatalogStateHelperTests(TestCase):
 
     def test_is_llm_ops_database_empty_false_when_provider_exists(self):
         LLMProvider.objects.create(name="OpenAI", code="openai")
-        # Even without the channel row, the function still treats
-        # any provider presence as "populated".
         self.assertFalse(is_llm_ops_database_empty())
 
     def test_is_llm_ops_database_empty_ignores_operator_channels(self):
         ProcurementChannel.objects.create(
             name="Real Resource",
-            code=REAL_RESOURCE_CHANNEL_CODE,
+            code="real-resource-platform",
         )
         self.assertTrue(is_llm_ops_database_empty())
 
@@ -86,213 +70,365 @@ class LLMOpsCatalogStateHelperTests(TestCase):
         self.assertIsNone(run.source_id)
 
 
-class LLMOpsSeedSafelyTests(TestCase):
-    """``seed_initial_price_sheet_safely`` must preserve human edits."""
+class LLMOpsCatalogMaintenanceTests(TestCase):
+    """Catalog maintenance is separate from seed bootstrap."""
 
-    def setUp(self):
-        # Run the safe seed once so the schema has canonical rows.
-        stats = seed_initial_price_sheet_safely()
-        self.assertGreater(stats["providers"], 0)
-        self.assertGreater(stats["models"], 0)
-        self.assertGreater(stats["model_price_items"], 0)
+    def test_resolve_orphan_meta_models_uses_canonical_vendor_rules(self):
+        MetaModel.objects.create(name="DeepSeek R1", code="deepseek-r1")
 
-    def test_safe_seed_does_not_re_enable_disabled_source(self):
-        source = PriceCollectionSource.objects.filter(
-            slug__endswith="-sheet",
-        ).first()
-        source.is_enabled = False
-        source.save()
+        stats = resolve_orphan_meta_models()
 
-        seed_initial_price_sheet_safely()
+        meta = MetaModel.objects.get(code="deepseek-r1")
+        self.assertEqual(stats["resolved"], 1)
+        self.assertEqual(meta.vendor.code, "deepseek")
 
-        source.refresh_from_db()
-        self.assertFalse(source.is_enabled)
+    def test_normalize_meta_model_catalog_merges_release_rows(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        canonical = MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            vendor=provider,
+        )
+        release = MetaModel.objects.create(
+            name="DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+            vendor=provider,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=release,
+            name="DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+        )
 
-    def test_safe_seed_does_not_reactivate_deactivated_model(self):
-        model = LLMModel.objects.filter(is_active=True).first()
-        model.is_active = False
-        model.save()
-
-        seed_initial_price_sheet_safely()
+        stats = normalize_meta_model_catalog()
 
         model.refresh_from_db()
-        self.assertFalse(model.is_active)
-
-    def test_safe_seed_is_idempotent(self):
-        first_providers = LLMProvider.objects.count()
-        first_models = LLMModel.objects.count()
-        first_sources = PriceCollectionSource.objects.count()
-        first_items = ModelPriceItem.objects.count()
-
-        stats = seed_initial_price_sheet_safely()
-
-        self.assertEqual(stats["providers"], 0)
-        self.assertEqual(stats["models"], 0)
-        self.assertEqual(stats["model_price_items"], 0)
-        self.assertEqual(stats["channel_model_prices"], 0)
-        self.assertEqual(LLMProvider.objects.count(), first_providers)
-        self.assertEqual(LLMModel.objects.count(), first_models)
-        self.assertEqual(
-            PriceCollectionSource.objects.count(), first_sources
-        )
-        self.assertEqual(ModelPriceItem.objects.count(), first_items)
-
-    def test_safe_seed_creates_source_price_items(self):
-        sheet_items = ModelPriceItem.objects.filter(
-            spec__seed_source="initial_price_sheet",
-            is_current=True,
-        )
-        self.assertTrue(sheet_items.exists())
-        self.assertTrue(
-            sheet_items.filter(
-                source__slug="siliconflow-sheet",
-                model__code="deepseek-r1",
-                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
-            ).exists()
-        )
-        self.assertTrue(
-            sheet_items.filter(
-                source__slug="siliconflow-sheet",
-                model__code="deepseek-r1",
-                dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
-            ).exists()
+        canonical.refresh_from_db()
+        self.assertEqual(stats["merged"], 1)
+        self.assertEqual(model.meta_model, canonical)
+        self.assertFalse(
+            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
         )
 
-
-class LLMOpsSeedLegacyTests(TestCase):
-    """``seed_initial_price_sheet`` keeps its overwrite semantics.
-
-    The helper remains for isolated legacy fixture tests only. Product
-    synchronization no longer exposes a seed management command.
-    """
-
-    def test_legacy_seed_overwrites_seed_managed_source_fields(self):
-        """Legacy seed re-applies its own source defaults.
-
-        The two seed paths differ in this respect: the safe seed
-        leaves seed-managed fields alone on already-existing rows,
-        while the legacy seed (used by the management command) is
-        the canonical "re-import the price sheet" operation. This
-        test pins that difference so a future refactor cannot
-        silently make the two paths equivalent.
-        """
-        seed_initial_price_sheet_safely()
-        source = PriceCollectionSource.objects.get(slug="aliyun-sheet")
-        source.name = "人工改名价格源"
-        source.currency = "USD"
-        source.save()
-
-        seed_initial_price_sheet()
-
-        source.refresh_from_db()
-        self.assertNotEqual(source.name, "人工改名价格源")
-        self.assertEqual(source.currency, "CNY")
-        self.assertIsNone(source.channel_id)
-
-
-class LLMOpsSeedIfEmptyTests(TestCase):
-    """``seed_initial_price_sheet_if_empty`` gates explicit bootstrap."""
-
-    @mock.patch("llm_ops.seed_data.sync_configured_official_model_prices")
-    def test_runs_seed_on_empty_database(self, mock_sync):
-        def fake_sync(provider_codes, verify_source=True):
-            provider = LLMProvider.objects.get(code="openai")
-            source = PriceCollectionSource.objects.create(
-                name="OpenAI / GPT Test 官方价格",
-                slug="openai-gpt-test-official",
-                provider=provider,
-                source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
-                source_category=(
-                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-                ),
-                endpoint_url="https://models.dev/api.json",
-                currency="USD",
-                updates_model_prices=True,
-            )
-            meta = MetaModel.objects.create(
-                name="GPT Test",
-                code="gpt-test",
-                vendor=provider,
-            )
-            model = LLMModel.objects.create(
-                provider=provider,
-                source=source,
-                meta_model=meta,
-                name="GPT Test",
-                code="gpt-test",
-                input_price_per_million=Decimal("1"),
-                output_price_per_million=Decimal("2"),
-                currency="USD",
-            )
-            ModelPriceItem.objects.create(
-                provider=provider,
-                model=model,
-                meta_model=meta,
-                source=source,
-                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
-                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
-                currency="USD",
-                unit_price=Decimal("1"),
-                price_fingerprint="test-fingerprint",
-            )
-            return {"openai": {"models": 1}}
-
-        mock_sync.side_effect = fake_sync
-
-        result = seed_initial_price_sheet_if_empty()
-
-        self.assertIsNotNone(result)
-        self.assertGreater(result["providers"], 0)
-        self.assertGreater(result["models"], 0)
-        self.assertTrue(
-            LLMProvider.objects.filter(code="openai").exists()
+    def test_reset_meta_models_canonical_does_not_repopulate(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta = MetaModel.objects.create(
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            vendor=provider,
         )
-        mock_sync.assert_called_once()
-        self.assertTrue(mock_sync.call_args.kwargs["verify_source"])
+        LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+        )
 
-    def test_returns_none_when_database_is_populated(self):
-        LLMProvider.objects.create(name="OpenAI", code="openai")
-        result = seed_initial_price_sheet_if_empty()
-        self.assertIsNone(result)
-        # The provider we just created must not be touched.
-        self.assertEqual(LLMProvider.objects.filter(code="openai").count(), 1)
+        stats = reset_meta_models_canonical()
 
-    @mock.patch("llm_ops.seed_data.sync_configured_official_model_prices")
-    def test_rolls_back_created_sources_and_runs_when_no_models_imported(
-        self,
-        mock_sync,
-    ):
-        def fake_sync(provider_codes, verify_source=True):
-            provider = LLMProvider.objects.get(code="openai")
-            source = PriceCollectionSource.objects.create(
-                name="OpenAI / GPT Test 官方价格",
-                slug="openai-gpt-test-official",
-                provider=provider,
-                source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
-                source_category=(
-                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-                ),
-                endpoint_url="https://models.dev/api.json",
-                currency="USD",
-                updates_model_prices=True,
-            )
-            PriceCollectionRun.objects.create(
-                source=source,
-                status=PriceCollectionRun.STATUS_FAILED,
-                error_message="no models",
-            )
-            return {"openai": {"models": 0, "error": "no models"}}
+        self.assertGreaterEqual(stats["meta_models_deleted"], 1)
+        self.assertFalse(MetaModel.objects.exists())
+        self.assertFalse(LLMModel.objects.exists())
 
-        mock_sync.side_effect = fake_sync
+    def test_clean_legacy_demo_data_removes_test_rows(self):
+        PriceCollectionSource.objects.create(
+            name="测试价格源",
+            slug="test-source",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
 
-        result = seed_initial_catalog_from_official_sources()
+        stats = clean_legacy_llm_ops_demo_data()
 
-        self.assertEqual(result["providers"], 0)
-        self.assertEqual(result["sources"], 0)
-        self.assertEqual(result["models"], 0)
+        self.assertEqual(stats["sources"], 1)
+        self.assertFalse(PriceCollectionSource.objects.exists())
+
+
+class LLMOpsOfficialProviderOptionTests(TestCase):
+    """Official source options are dynamic presets, not seed data."""
+
+    def test_supported_official_provider_options_do_not_create_rows(self):
+        options = supported_official_provider_options()
+
+        provider_codes = {option["provider_code"] for option in options}
+        self.assertIn("aliyun", provider_codes)
+        self.assertIn("baidu", provider_codes)
         self.assertFalse(LLMProvider.objects.exists())
         self.assertFalse(PriceCollectionSource.objects.exists())
-        self.assertFalse(PriceCollectionRun.objects.exists())
+
+
+class LLMOpsOfficialPriceResetCommandTests(TestCase):
+    """Official reset command keeps reset and sync scopes aligned."""
+
+    def test_reset_preserves_provider_source_for_resync(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta = MetaModel.objects.create(
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            vendor=provider,
+        )
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI 官方价格",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://openai.com/api/pricing/",
+            updates_model_prices=True,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=source,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            price_role=LLMModel.PRICE_ROLE_OFFICIAL,
+            input_price_per_million=Decimal("0.150000"),
+            output_price_per_million=Decimal("0.600000"),
+            source_url=source.endpoint_url,
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            model=model,
+            meta_model=meta,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("0.150000"),
+            price_fingerprint="official-price-fingerprint",
+            is_current=True,
+        )
+
+        stats = reset_official_price_catalog(provider_codes=["openai"])
+
+        model.refresh_from_db()
+        self.assertEqual(stats["models_reset"], 1)
+        self.assertEqual(model.source_id, source.id)
+        self.assertEqual(model.price_role, LLMModel.PRICE_ROLE_OFFICIAL)
+        self.assertEqual(model.input_price_per_million, Decimal("0"))
+        self.assertEqual(model.output_price_per_million, Decimal("0"))
+        self.assertFalse(ModelPriceItem.objects.filter(source=source).exists())
+
+    def test_reset_migrates_legacy_source_model_to_provider_source(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta = MetaModel.objects.create(
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            vendor=provider,
+        )
+        provider_source = PriceCollectionSource.objects.create(
+            name="OpenAI 官方价格",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://openai.com/api/pricing/",
+            updates_model_prices=True,
+        )
+        legacy_source = PriceCollectionSource.objects.create(
+            name="OpenAI / GPT-4o mini 官方价格",
+            slug="openai-gpt-4o-mini-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            updates_model_prices=True,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=legacy_source,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            price_role=LLMModel.PRICE_ROLE_OFFICIAL,
+            input_price_per_million=Decimal("0.150000"),
+            output_price_per_million=Decimal("0.600000"),
+        )
+
+        reset_official_price_catalog(provider_codes=["openai"])
+
+        model.refresh_from_db()
+        self.assertEqual(model.source_id, provider_source.id)
+        self.assertEqual(model.input_price_per_million, Decimal("0"))
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(id=legacy_source.id).exists()
+        )
+
+    def test_reset_keeps_non_legacy_official_source_for_same_provider(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta = MetaModel.objects.create(
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            vendor=provider,
+        )
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI enterprise official",
+            slug="openai-enterprise-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://example.com/openai-enterprise",
+            updates_model_prices=True,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=source,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+            price_role=LLMModel.PRICE_ROLE_OFFICIAL,
+            input_price_per_million=Decimal("0.150000"),
+            output_price_per_million=Decimal("0.600000"),
+        )
+        item = ModelPriceItem.objects.create(
+            provider=provider,
+            model=model,
+            meta_model=meta,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("0.150000"),
+            price_fingerprint="operator-source-price-fingerprint",
+            is_current=True,
+        )
+
+        stats = reset_official_price_catalog(provider_codes=["openai"])
+
+        model.refresh_from_db()
+        self.assertEqual(stats["sources_matched"], 0)
+        self.assertTrue(
+            PriceCollectionSource.objects.filter(id=source.id).exists()
+        )
+        self.assertEqual(model.source_id, source.id)
+        self.assertEqual(model.input_price_per_million, Decimal("0.150000"))
+        self.assertTrue(ModelPriceItem.objects.filter(id=item.id).exists())
+
+    @patch(
+        "llm_ops.management.commands.reset_llm_ops_official_prices."
+        "sync_configured_official_model_prices"
+    )
+    @patch(
+        "llm_ops.management.commands.reset_llm_ops_official_prices."
+        "reset_official_price_catalog"
+    )
+    def test_all_sync_passes_explicit_provider_codes(
+        self,
+        mock_reset,
+        mock_sync,
+    ):
+        mock_reset.return_value = {
+            "sources_matched": 0,
+            "provider_sources_kept": 0,
+            "legacy_sources_deleted": 0,
+            "models_reset": 0,
+            "price_items_deleted": 0,
+            "snapshots_deleted": 0,
+            "history_deleted": 0,
+            "runs_deleted": 0,
+            "legacy_source_slugs": [],
+        }
+        mock_sync.return_value = {}
+        provider_codes = sorted(OFFICIAL_PROVIDER_CONFIGS)
+
+        call_command(
+            "reset_llm_ops_official_prices",
+            "--all",
+            "--sync",
+            "--yes",
+            stdout=StringIO(),
+        )
+
+        mock_reset.assert_called_once_with(
+            provider_codes=provider_codes,
+            dry_run=False,
+        )
+        mock_sync.assert_called_once_with(
+            provider_codes=provider_codes,
+            verify_source=True,
+        )
+
+
+class LLMOpsSeedCleanupCommandTests(TestCase):
+    """Seed cleanup must not delete operator-created sources."""
+
+    def test_cleanup_only_removes_legacy_sources(self):
+        provider = LLMProvider.objects.create(name="百度", code="baidu")
+        meta = MetaModel.objects.create(
+            name="ERNIE 4.0",
+            code="ernie-4.0",
+            vendor=provider,
+        )
+        provider_source = PriceCollectionSource.objects.create(
+            name="百度 官方价格",
+            slug="baidu-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            updates_model_prices=True,
+        )
+        manual_source = PriceCollectionSource.objects.create(
+            name="百度 人工价格",
+            slug="baidu-manual",
+            provider=provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+        )
+        supplier_source = PriceCollectionSource.objects.create(
+            name="百度 供货商价格",
+            slug="baidu-supplier",
+            provider=provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        legacy_source = PriceCollectionSource.objects.create(
+            name="百度 / ERNIE 4.0 官方价格",
+            slug="baidu-ernie-4-0-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            updates_model_prices=True,
+        )
+        LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta,
+            source=legacy_source,
+            name="ERNIE 4.0",
+            code="ernie-4.0",
+        )
+
+        plan = build_cleanup_plan(("baidu",))
+
+        self.assertEqual(plan["provider_ids"], [])
+        self.assertEqual(plan["source_ids"], [legacy_source.id])
+
+        execute_cleanup(plan)
+
+        self.assertTrue(LLMProvider.objects.filter(id=provider.id).exists())
+        self.assertTrue(
+            PriceCollectionSource.objects.filter(
+                id=provider_source.id,
+            ).exists()
+        )
+        self.assertTrue(
+            PriceCollectionSource.objects.filter(id=manual_source.id).exists()
+        )
+        self.assertTrue(
+            PriceCollectionSource.objects.filter(
+                id=supplier_source.id,
+            ).exists()
+        )
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(id=legacy_source.id).exists()
+        )
+        self.assertFalse(LLMModel.objects.filter(code="ernie-4.0").exists())
 
 
 class LLMOpsPeriodicTasksTests(TestCase):
@@ -311,709 +447,20 @@ class LLMOpsPeriodicTasksTests(TestCase):
                 "llm_ops_meta_models_dev_sync",
             ],
         )
-        entry = TASK_REGISTRY._entries["llm_ops_model_price_sync_agent"]
+        price_entry = TASK_REGISTRY._entries[
+            "llm_ops_model_price_sync_agent"
+        ]
         self.assertEqual(
-            entry["task"], "llm_ops.tasks.run_model_price_sync_agent"
+            price_entry["task"],
+            "llm_ops.tasks.run_model_price_sync_agent",
         )
-        self.assertTrue(entry["enabled"])
         self.assertEqual(
-            entry["kwargs"],
+            price_entry["kwargs"],
             {"source_ids": None, "verify_source": True},
         )
+
         meta_entry = TASK_REGISTRY._entries["llm_ops_meta_models_dev_sync"]
         self.assertEqual(
             meta_entry["task"],
             "llm_ops.tasks.sync_meta_models_from_models_dev",
         )
-
-    def test_register_periodic_tasks_is_idempotent_at_register_call(self):
-        """Two calls to register_periodic_tasks do not duplicate.
-
-        The management command always clears the global registry before
-        re-invoking every app's ``register_periodic_tasks``, so the
-        in-memory behaviour here is "latest call wins". This test pins
-        that contract so a future refactor cannot accidentally start
-        appending duplicate ``PeriodicTask`` rows.
-        """
-        from core.periodic_registry import TASK_REGISTRY
-
-        TASK_REGISTRY.clear()
-        register_periodic_tasks()
-        register_periodic_tasks()
-        self.assertEqual(
-            len(TASK_REGISTRY._entries), 2
-        )
-
-    def test_migration_preserves_disabled_legacy_price_sync_task(self):
-        from django.apps import apps
-        from django_celery_beat.models import CrontabSchedule, PeriodicTask
-
-        migration = importlib.import_module(
-            "llm_ops.migrations."
-            "0007_llmopsglobalconfig_price_sync_llm_config_uuid"
-        )
-        crontab = CrontabSchedule.objects.create(
-            minute="15",
-            hour="1,7,13,19",
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-        )
-        PeriodicTask.objects.create(
-            name="llm_ops_official_collect",
-            task="llm_ops.tasks.collect_official_model_prices",
-            crontab=crontab,
-            enabled=False,
-        )
-
-        migration.migrate_legacy_price_sync_beat_tasks(apps, None)
-
-        legacy = PeriodicTask.objects.get(name="llm_ops_official_collect")
-        migrated = PeriodicTask.objects.get(
-            name="llm_ops_model_price_sync_agent"
-        )
-        self.assertFalse(legacy.enabled)
-        self.assertFalse(migrated.enabled)
-        self.assertEqual(
-            migrated.task,
-            "llm_ops.tasks.run_model_price_sync_agent",
-        )
-        self.assertEqual(migrated.crontab_id, crontab.id)
-
-    def test_migration_preserves_enabled_legacy_price_sync_schedule(self):
-        from django.apps import apps
-        from django_celery_beat.models import CrontabSchedule, PeriodicTask
-
-        migration = importlib.import_module(
-            "llm_ops.migrations."
-            "0007_llmopsglobalconfig_price_sync_llm_config_uuid"
-        )
-        crontab = CrontabSchedule.objects.create(
-            minute="45",
-            hour="*/8",
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-        )
-        PeriodicTask.objects.create(
-            name="llm_ops_official_collect",
-            task="llm_ops.tasks.collect_official_model_prices",
-            crontab=crontab,
-            queue="pricing",
-            enabled=True,
-        )
-
-        migration.migrate_legacy_price_sync_beat_tasks(apps, None)
-
-        legacy = PeriodicTask.objects.get(name="llm_ops_official_collect")
-        migrated = PeriodicTask.objects.get(
-            name="llm_ops_model_price_sync_agent"
-        )
-        self.assertFalse(legacy.enabled)
-        self.assertTrue(migrated.enabled)
-        self.assertEqual(migrated.queue, "pricing")
-        self.assertEqual(migrated.crontab_id, crontab.id)
-
-    def test_migration_deletes_legacy_per_source_price_sync_tasks(self):
-        from django.apps import apps
-        from django_celery_beat.models import CrontabSchedule, PeriodicTask
-
-        migration = importlib.import_module(
-            "llm_ops.migrations."
-            "0007_llmopsglobalconfig_price_sync_llm_config_uuid"
-        )
-        crontab = CrontabSchedule.objects.create(
-            minute="0",
-            hour="*/6",
-            day_of_week="*",
-            day_of_month="*",
-            month_of_year="*",
-        )
-        PeriodicTask.objects.create(
-            name="llm_ops_price_source_collect_123",
-            task="llm_ops.tasks.collect_price_source_prices",
-            crontab=crontab,
-            enabled=True,
-        )
-        PeriodicTask.objects.create(
-            name="llm_ops_price_source_collect_custom",
-            task="llm_ops.tasks.collect_price_source_prices",
-            crontab=crontab,
-            enabled=True,
-        )
-
-        migration.migrate_legacy_price_sync_beat_tasks(apps, None)
-
-        self.assertFalse(
-            PeriodicTask.objects.filter(
-                name="llm_ops_price_source_collect_123",
-            ).exists()
-        )
-        self.assertTrue(
-            PeriodicTask.objects.filter(
-                name="llm_ops_price_source_collect_custom",
-            ).exists()
-        )
-
-    def test_model_price_sync_agent_task_is_registered(self):
-        from core.celery import _lazy_autodiscover, app
-
-        _lazy_autodiscover()
-        task = app.tasks.get("llm_ops.tasks.run_model_price_sync_agent")
-        self.assertIsNotNone(task)
-        expected_name = "llm_ops.tasks.run_model_price_sync_agent"
-        self.assertEqual(task.name, expected_name)
-        self.assertTrue(task.acks_late)
-
-    def test_model_price_sync_agent_task_delegates_to_agent(self):
-        from llm_ops.tasks import run_model_price_sync_agent
-
-        with mock.patch(
-            "llm_ops.agents.model_price_sync.execute_model_price_sync_agent"
-        ) as mock_execute:
-            mock_execute.return_value = {"success": True, "succeeded": 1}
-            result = run_model_price_sync_agent(
-                source_ids=[1],
-                verify_source=False,
-            )
-        mock_execute.assert_called_once()
-        self.assertEqual(mock_execute.call_args.kwargs["source_ids"], [1])
-        self.assertFalse(mock_execute.call_args.kwargs["verify_source"])
-        self.assertEqual(result, {"success": True, "succeeded": 1})
-
-    def test_model_price_sync_agent_task_preserves_empty_source_ids(self):
-        from llm_ops.tasks import run_model_price_sync_agent
-
-        with mock.patch(
-            "llm_ops.agents.model_price_sync.execute_model_price_sync_agent"
-        ) as mock_execute:
-            mock_execute.return_value = {"success": True, "sources": 0}
-            result = run_model_price_sync_agent(
-                source_ids=[],
-                verify_source=True,
-            )
-        mock_execute.assert_called_once()
-        self.assertEqual(mock_execute.call_args.kwargs["source_ids"], [])
-        self.assertEqual(result, {"success": True, "sources": 0})
-
-    def test_collect_official_model_prices_delegates_to_service(self):
-        from llm_ops.tasks import collect_official_model_prices
-
-        with mock.patch(
-            "llm_ops.collection_services.sync_configured_official_model_prices"
-        ) as mock_sync:
-            mock_sync.return_value = {"openai": {"models": 0}}
-            result = collect_official_model_prices(
-                provider_codes=["openai"],
-                verify_source=False,
-            )
-        mock_sync.assert_called_once_with(
-            provider_codes=["openai"],
-            verify_source=False,
-        )
-        self.assertEqual(result, {"openai": {"models": 0}})
-
-    def test_collect_price_source_prices_delegates_to_code_sync(self):
-        from llm_ops.tasks import collect_price_source_prices
-
-        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
-        source = PriceCollectionSource.objects.create(
-            name="Aliyun Official",
-            slug="aliyun-official",
-            provider=provider,
-            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
-            source_category=(
-                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-            ),
-            endpoint_url=(
-                "https://help.aliyun.com/zh/model-studio/model-pricing"
-            ),
-            is_enabled=True,
-            updates_model_prices=True,
-        )
-
-        patch_path = "llm_ops.source_collectors.collect_price_source"
-        with mock.patch(patch_path) as mock_collect:
-            mock_collect.return_value = {"models": 1}
-            result = collect_price_source_prices(
-                source_id=source.id,
-                verify_source=False,
-            )
-
-        mock_collect.assert_called_once_with(
-            source,
-            verify_source=False,
-        )
-        self.assertEqual(result, {"models": 1})
-
-    def test_sync_meta_models_from_models_dev_task_delegates_to_service(self):
-        from llm_ops.tasks import sync_meta_models_from_models_dev_task
-
-        with mock.patch(
-            "llm_ops.collection_services.sync_meta_models_from_models_dev"
-        ) as mock_sync:
-            mock_sync.return_value = {"models": 1}
-            result = sync_meta_models_from_models_dev_task()
-        mock_sync.assert_called_once_with()
-        self.assertEqual(result, {"models": 1})
-
-
-class LLMOpsPeriodicApplyTests(TestCase):
-    """``apply_registry`` must not overwrite existing PeriodicTask rows.
-
-    Operators routinely tweak schedules from the django_celery_beat
-    admin. The contract of the core registry is "do not touch rows
-    that already exist"; this test asserts it end-to-end via the
-    global ``TASK_REGISTRY.apply``.
-    """
-
-    def test_apply_does_not_overwrite_existing_periodic_task(self):
-        from django_celery_beat.models import PeriodicTask
-
-        from core.management.commands.register_periodic_tasks import (
-            discover_and_register,
-        )
-        from core.periodic_registry import TASK_REGISTRY
-
-        # First registration: creates the row.
-        discover_and_register()
-        self.assertTrue(
-            PeriodicTask.objects.filter(
-                name="llm_ops_model_price_sync_agent"
-            ).exists()
-        )
-        original = PeriodicTask.objects.get(
-            name="llm_ops_model_price_sync_agent"
-        )
-        original.enabled = False
-        original.save()
-
-        # Second registration: must NOT clobber the operator's
-        # ``enabled`` flag.
-        discover_and_register()
-        original.refresh_from_db()
-        self.assertFalse(
-            original.enabled,
-            "PeriodicTask.enabled must be preserved across re-registrations",
-        )
-        # Also confirm the registry was cleared and re-populated.
-        self.assertIn(
-            "llm_ops_model_price_sync_agent",
-            TASK_REGISTRY._entries,
-        )
-
-
-class LLMOpsMockSeedCleanupTests(TestCase):
-    """Default seed must not publish legacy mock/demo supplier rows."""
-
-    def test_default_seed_does_not_create_mock_supplier_data(self):
-        stats = seed_initial_price_sheet_safely()
-
-        self.assertGreater(stats["providers"], 0)
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code="yunce-supplier-platform",
-            ).exists()
-        )
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code=REAL_RESOURCE_CHANNEL_CODE,
-            ).exists()
-        )
-        self.assertFalse(ChannelModelPrice.objects.exists())
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code="demo-premium-supplier",
-            ).exists()
-        )
-        self.assertFalse(
-            PriceCollectionSource.objects.filter(
-                slug__startswith="yunce-",
-            ).exists()
-        )
-        self.assertFalse(
-            PriceCollectionSource.objects.filter(
-                slug__endswith="-trend-demo",
-            ).exists()
-        )
-
-    def test_meta_model_vendor_is_the_company_that_built_it(self):
-        """deepseek-r1 must be owned by DeepSeek, not aliyun.
-
-        The price sheet groups DeepSeek under aliyun, but the
-        canonical model vendor must follow the company that
-        actually built the model. This test pins the rule.
-        """
-        seed_initial_price_sheet_safely()
-        aliyun = LLMProvider.objects.get(code="aliyun")
-        deepseek = LLMProvider.objects.get(code="deepseek")
-        deepseek_r1 = MetaModel.objects.get(code="deepseek-r1")
-        deepseek_v3 = MetaModel.objects.get(code="deepseek-v3")
-        qwen_plus = MetaModel.objects.get(code="qwen-plus")
-        self.assertEqual(deepseek_r1.vendor, deepseek)
-        self.assertIn("deepseek-r1-0528", deepseek_r1.aliases)
-        self.assertFalse(
-            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
-        )
-        self.assertEqual(deepseek_v3.vendor, deepseek)
-        self.assertEqual(qwen_plus.vendor, aliyun)
-
-    def test_meta_model_vendor_rehomes_legacy_supplier_assignment(
-        self,
-    ):
-        """A historical supplier vendor assignment is corrected."""
-        siliconflow = LLMProvider.objects.create(
-            name="\u7845\u57fa\u6d41\u52a8",
-            code="siliconflow",
-        )
-        MetaModel.objects.create(
-            name="DeepSeek R1",
-            code="deepseek-r1",
-            vendor=siliconflow,
-        )
-        seed_initial_price_sheet_safely()
-        deepseek = LLMProvider.objects.get(code="deepseek")
-        deepseek_r1 = MetaModel.objects.get(code="deepseek-r1")
-        self.assertEqual(deepseek_r1.vendor, deepseek)
-
-    def test_normalize_meta_model_catalog_merges_dated_releases(self):
-        """Date/build suffixes belong in aliases, not MetaModel.code."""
-        deepseek = LLMProvider.objects.create(
-            name="DeepSeek",
-            code="deepseek",
-        )
-        canonical = MetaModel.objects.create(
-            name="DeepSeek R1",
-            code="deepseek-r1",
-            vendor=deepseek,
-            context_window=64000,
-        )
-        dated = MetaModel.objects.create(
-            name="DeepSeek R1 0528",
-            code="deepseek-r1-0528",
-            vendor=deepseek,
-            context_window=128000,
-        )
-        model = LLMModel.objects.create(
-            provider=deepseek,
-            meta_model=dated,
-            name="DeepSeek R1 0528",
-            code="deepseek-r1-0528",
-        )
-
-        stats = normalize_meta_model_catalog()
-
-        self.assertEqual(stats["merged"], 1)
-        self.assertFalse(
-            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
-        )
-        canonical.refresh_from_db()
-        model.refresh_from_db()
-        self.assertEqual(model.meta_model, canonical)
-        self.assertEqual(canonical.context_window, 128000)
-        self.assertIn("deepseek-r1-0528", canonical.aliases)
-        self.assertIn("DeepSeek R1 0528", canonical.aliases)
-
-    def test_normalize_meta_model_catalog_relinks_price_source_rows(self):
-        """Existing price-source rows follow their model's meta model."""
-        deepseek = LLMProvider.objects.create(
-            name="DeepSeek",
-            code="deepseek",
-        )
-        aliyun = LLMProvider.objects.create(
-            name="阿里云",
-            code="aliyun",
-        )
-        canonical = MetaModel.objects.create(
-            name="DeepSeek R1",
-            code="deepseek-r1",
-            vendor=deepseek,
-        )
-        wrong_meta = MetaModel.objects.create(
-            name="阿里云 DeepSeek R1",
-            code="aliyun-deepseek-r1",
-            vendor=aliyun,
-        )
-        model = LLMModel.objects.create(
-            provider=deepseek,
-            meta_model=canonical,
-            name="DeepSeek R1 0528",
-            code="deepseek-r1-0528",
-        )
-        item = ModelPriceItem.objects.create(
-            provider=deepseek,
-            model=model,
-            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
-            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
-            currency="USD",
-            unit_price=Decimal("0.550000"),
-            price_fingerprint="legacy-wrong-meta",
-        )
-        ModelPriceItem.objects.filter(id=item.id).update(meta_model=wrong_meta)
-
-        stats = normalize_meta_model_catalog()
-
-        item.refresh_from_db()
-        self.assertEqual(stats["linked_records"], 1)
-        self.assertEqual(item.meta_model, canonical)
-
-    def test_resolve_orphan_meta_models_backfills_vendor(self):
-        """MetaModel rows without a vendor are auto-rehomed."""
-        from llm_ops.seed_data import resolve_orphan_meta_models
-        seed_initial_price_sheet_safely()
-        aliyun = LLMProvider.objects.get(code="aliyun")
-        orphan = MetaModel.objects.create(
-            name="Qwen X",
-            code="qwen-x",
-            vendor=None,
-        )
-        self.assertIsNone(orphan.vendor_id)
-        stats = resolve_orphan_meta_models()
-        orphan.refresh_from_db()
-        self.assertEqual(orphan.vendor, aliyun)
-        self.assertGreaterEqual(stats["resolved"], 1)
-
-    def test_resolve_orphan_meta_models_skips_unknown_codes(self):
-        """Unknown codes are surfaced as warnings, not silently dropped."""
-        from llm_ops.seed_data import resolve_orphan_meta_models
-        seed_initial_price_sheet_safely()
-        MetaModel.objects.create(
-            name="Mystery Model",
-            code="mystery-2026",
-            vendor=None,
-        )
-        stats = resolve_orphan_meta_models()
-        self.assertEqual(stats["resolved"], 0)
-        self.assertGreaterEqual(stats["unresolved"], 1)
-
-    def test_cleanup_orphan_meta_models_drops_unused_rows(self):
-        """Orphan meta models without provider_prices are removed."""
-        seed_initial_price_sheet_safely()
-        deepseek = LLMProvider.objects.get(code="deepseek")
-        MetaModel.objects.create(
-            name="Orphan Demo",
-            code="orphan-demo",
-            vendor=deepseek,
-        )
-        stats = cleanup_orphan_meta_models()
-        self.assertFalse(
-            MetaModel.objects.filter(code="orphan-demo").exists(),
-        )
-        self.assertGreaterEqual(stats["meta_models_deleted"], 1)
-
-    def test_reset_meta_models_canonical_clears_catalog(self):
-        """Full reset removes every meta model and supplier alias."""
-        seed_initial_price_sheet_safely()
-        LLMProvider.objects.create(
-            name="硅基流动",
-            code="siliconflow",
-        )
-        before_count = MetaModel.objects.count()
-        self.assertGreater(before_count, 0)
-        reset_stats = reset_meta_models_canonical()
-        self.assertEqual(MetaModel.objects.count(), 0)
-        self.assertFalse(
-            LLMProvider.objects.filter(code="siliconflow").exists(),
-        )
-        self.assertGreaterEqual(
-            reset_stats["meta_models_deleted"], before_count
-        )
-        seed_stats = seed_initial_price_sheet_safely()
-        # Every deepseek model code in the price sheet must end up
-        # owned by the deepseek vendor.
-        deepseek_codes = [
-            "deepseek-r1",
-            "deepseek-v3",
-            "deepseek-v3.1",
-            "deepseek-v3.2",
-            "deepseek-v3.2-exp",
-        ]
-        for code in deepseek_codes:
-            meta = MetaModel.objects.get(code=code)
-            self.assertEqual(meta.vendor.code, "deepseek")
-        self.assertFalse(
-            MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
-        )
-        self.assertIn(
-            "deepseek-r1-0528",
-            MetaModel.objects.get(code="deepseek-r1").aliases,
-        )
-        self.assertGreater(seed_stats["models"], 0)
-
-    def test_reset_command_refuses_without_yes(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-        from django.core.management.base import CommandError
-
-        out = StringIO()
-        with self.assertRaises(CommandError):
-            call_command("reset_llm_ops_meta_models", stdout=out)
-
-    def test_reset_command_dry_run_is_safe(self):
-        from io import StringIO
-
-        from django.core.management import call_command
-
-        seed_initial_price_sheet_safely()
-        before = MetaModel.objects.count()
-        out = StringIO()
-        call_command("reset_llm_ops_meta_models", "--dry-run", stdout=out)
-        self.assertEqual(MetaModel.objects.count(), before)
-        self.assertIn("[dry-run]", out.getvalue())
-
-    def test_clean_mock_seed_data_removes_legacy_demo_rows(self):
-        seed_initial_price_sheet_safely()
-        seed_yunce_supplier_price_demo()
-        seed_agione_price_trend_demo()
-        real_channel = ProcurementChannel.objects.create(
-            name="真实资源平台",
-            code=REAL_RESOURCE_CHANNEL_CODE,
-            currency="USD",
-        )
-        real_source = PriceCollectionSource.objects.filter(
-            slug__endswith="-sheet",
-        ).first()
-        real_source.channel = real_channel
-        real_source.save()
-        real_model = LLMModel.objects.first()
-        ChannelModelPrice.objects.create(
-            channel=real_channel,
-            model=real_model,
-            meta_model=real_model.meta_model,
-            price_source=real_source,
-        )
-        test_channel = ProcurementChannel.objects.create(
-            name="测试 02",
-            code="test-02",
-            currency="CNY",
-        )
-        test_source = PriceCollectionSource.objects.create(
-            name="测试 02 供应商价格",
-            slug="test-02-supplier",
-            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
-            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
-        )
-        test_model = LLMModel.objects.first()
-        ChannelModelPrice.objects.create(
-            channel=test_channel,
-            model=test_model,
-            meta_model=test_model.meta_model,
-        )
-        ChannelPriceItem.objects.create(
-            channel=test_channel,
-            model=test_model,
-            meta_model=test_model.meta_model,
-            source=test_source,
-            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
-            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
-            currency="CNY",
-            unit_price=Decimal("4"),
-            price_fingerprint="legacy-test-fingerprint",
-        )
-
-        self.assertTrue(
-            ProcurementChannel.objects.filter(
-                code="yunce-supplier-platform",
-            ).exists()
-        )
-        self.assertTrue(
-            PriceCollectionSource.objects.filter(
-                slug="yunce-aliyun-qwen-plus",
-            ).exists()
-        )
-        self.assertTrue(
-            ModelPriceItem.objects.filter(
-                spec__mock_source="yunce_supplier",
-            ).exists()
-        )
-        self.assertTrue(ChannelModelPriceHistory.objects.exists())
-
-        stats = clean_mock_llm_ops_seed_data()
-        second_stats = clean_mock_llm_ops_seed_data()
-
-        self.assertGreater(stats["sources"], 0)
-        self.assertGreater(stats["channels"], 0)
-        self.assertGreater(stats["channel_model_prices"], 0)
-        self.assertGreater(stats["model_price_items"], 0)
-        self.assertGreater(stats["channel_model_histories"], 0)
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code="yunce-supplier-platform",
-            ).exists()
-        )
-        self.assertFalse(
-            PriceCollectionSource.objects.filter(
-                slug__startswith="yunce-",
-            ).exists()
-        )
-        self.assertFalse(
-            ProcurementChannel.objects.filter(code="test-02").exists()
-        )
-        self.assertFalse(
-            ProcurementChannel.objects.filter(
-                code=REAL_RESOURCE_CHANNEL_CODE,
-            ).exists()
-        )
-        self.assertFalse(
-            PriceCollectionSource.objects.filter(
-                slug="test-02-supplier",
-            ).exists()
-        )
-        real_source.refresh_from_db()
-        self.assertIsNone(real_source.channel_id)
-        self.assertEqual(
-            sum(second_stats.values()),
-            0,
-        )
-
-
-class LLMOpsSupplierAliasApiTests(TestCase):
-    """Supplier-only aliases must not appear as meta-model vendors."""
-
-    def test_provider_queryset_hides_supplier_only_aliases(self):
-        deepseek = LLMProvider.objects.create(
-            name="DeepSeek",
-            code="deepseek",
-        )
-        LLMProvider.objects.create(
-            name="硅基流动",
-            code="siliconflow",
-        )
-
-        view = LLMProviderViewSet()
-        provider_codes = set(
-            view.get_queryset().values_list("code", flat=True)
-        )
-
-        self.assertIn(deepseek.code, provider_codes)
-        self.assertNotIn("siliconflow", provider_codes)
-
-    def test_meta_model_queryset_hides_supplier_only_aliases(self):
-        deepseek = LLMProvider.objects.create(
-            name="DeepSeek",
-            code="deepseek",
-        )
-        siliconflow = LLMProvider.objects.create(
-            name="硅基流动",
-            code="siliconflow",
-        )
-        MetaModel.objects.create(
-            name="DeepSeek V3",
-            code="deepseek-v3",
-            vendor=deepseek,
-        )
-        MetaModel.objects.create(
-            name="Legacy SiliconFlow Model",
-            code="legacy-siliconflow-model",
-            vendor=siliconflow,
-        )
-
-        view = MetaModelViewSet()
-        view.request = mock.Mock(query_params={})
-        meta_codes = set(
-            view.get_queryset().values_list("code", flat=True)
-        )
-
-        self.assertIn("deepseek-v3", meta_codes)
-        self.assertNotIn("legacy-siliconflow-model", meta_codes)

@@ -1,5 +1,6 @@
 from decimal import Decimal
 
+from django.utils.text import slugify
 from rest_framework import serializers
 
 from .collectors.official import OFFICIAL_PROVIDER_CONFIGS
@@ -44,6 +45,12 @@ from .workflow_config import validate_resale_workflow_config
 class PriceCollectionSourceSerializer(serializers.ModelSerializer):
     """Serializer for pricing sources and their business category."""
 
+    slug = serializers.SlugField(
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        validators=[],
+    )
     provider_name = serializers.CharField(
         source="provider.name",
         read_only=True,
@@ -108,6 +115,50 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
             instance.updates_model_prices
             and source_supports_code_collection(instance)
         )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        requested_slug = attrs.get("slug")
+        if self.instance and "slug" not in self.initial_data:
+            return attrs
+        if self.instance and requested_slug == self.instance.slug:
+            return attrs
+        attrs["slug"] = unique_price_source_slug(
+            requested_slug,
+            attrs.get("name") or getattr(self.instance, "name", ""),
+            attrs.get("source_category")
+            or getattr(self.instance, "source_category", ""),
+            instance_id=getattr(self.instance, "id", None),
+        )
+        return attrs
+
+
+def unique_price_source_slug(
+    requested_slug: str | None,
+    name: str,
+    source_category: str,
+    *,
+    instance_id: int | None = None,
+) -> str:
+    """Return a unique source slug for UI-created price sources."""
+    base_slug = slugify(str(requested_slug or name or ""), allow_unicode=False)
+    if not base_slug:
+        category_slug = slugify(
+            str(source_category or "price").replace("_", "-"),
+            allow_unicode=False,
+        )
+        base_slug = f"{category_slug or 'price'}-source"
+    base_slug = base_slug[:100].strip("-") or "price-source"
+    candidate = base_slug
+    suffix = 2
+    queryset = PriceCollectionSource.objects.all()
+    if instance_id:
+        queryset = queryset.exclude(id=instance_id)
+    while queryset.filter(slug=candidate).exists():
+        suffix_text = f"-{suffix}"
+        candidate = f"{base_slug[:100 - len(suffix_text)]}{suffix_text}"
+        suffix += 1
+    return candidate
 
 
 class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
@@ -551,12 +602,14 @@ class MetaModelSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _canonical_vendor(instance):
-        from .constants import canonical_vendor_for_model_code
+        from .constants import (
+            canonical_vendor_for_model_code,
+            ensure_canonical_vendor_row,
+        )
 
         spec = canonical_vendor_for_model_code(instance.code)
         if not spec:
             return None
-        from .seed_data import ensure_canonical_vendor_row
         provider = ensure_canonical_vendor_row(spec)
         if not provider:
             return None
@@ -841,11 +894,7 @@ def business_source_category_for_source_model(*, source, meta_model):
         return raw_category
     if source_vendor_id == model_vendor_id:
         return raw_category
-    if source_owner_type_for_source(source) == (
-        PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
-    ):
-        return LLMModel.PRICE_ROLE_CLOUD_HOSTED
-    return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    return LLMModel.PRICE_ROLE_CLOUD_HOSTED
 
 
 def business_source_category_for_model(model):
@@ -1682,7 +1731,7 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
     )
     source_url = serializers.URLField(required=False, allow_blank=True)
     currency = serializers.CharField(default="USD")
-    updates_model_prices = serializers.BooleanField(default=True)
+    updates_model_prices = serializers.BooleanField(default=False)
     rows = ManualPriceImportRowSerializer(many=True)
 
     def validate_currency(self, value):
@@ -1693,18 +1742,9 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
         provider = attrs.get("provider")
 
         if source is not None:
-            if source.provider_id:
-                if provider and provider.id != source.provider_id:
-                    raise serializers.ValidationError(
-                        {
-                            "provider": (
-                                "Provider must match the selected price "
-                                "source."
-                            )
-                        }
-                    )
+            if source.provider_id and provider is None:
                 attrs["provider"] = source.provider
-            elif provider is None:
+            if not source.provider_id and provider is None:
                 raise serializers.ValidationError(
                     {
                         "source": (
@@ -1717,6 +1757,7 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
             attrs.setdefault("source_url", source.endpoint_url)
             if not self.initial_data.get("currency"):
                 attrs["currency"] = source.currency
+            attrs["updates_model_prices"] = False
             return attrs
 
         if provider is None:
@@ -1727,6 +1768,7 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"source_name": "This field is required."}
             )
+        attrs["updates_model_prices"] = False
         return attrs
 
 

@@ -1,0 +1,373 @@
+"""Maintenance helpers for LLM Ops catalog normalization and cleanup."""
+from __future__ import annotations
+
+from django.db.models import Q
+
+from .constants import (
+    SUPPLIER_SOURCE_VENDOR_ALIASES,
+    canonical_meta_model_identity,
+    canonical_vendor_for_model_code,
+    ensure_canonical_vendor_row,
+    is_canonical_vendor_code,
+)
+from .models import (
+    ChannelModelPrice,
+    ChannelModelPriceHistory,
+    ChannelPriceItem,
+    CollectedModelPriceHistory,
+    CollectedModelPriceSnapshot,
+    LLMModel,
+    LLMProvider,
+    MetaModel,
+    ModelPriceItem,
+    PriceCollectionSource,
+    ProcurementChannel,
+    ResaleListing,
+    ResaleListingExclusion,
+    ResaleListingPriceHistory,
+    UsageReconciliationRecord,
+)
+from .services import stable_fingerprint
+
+
+REAL_RESOURCE_CHANNEL_CODE = "real-resource-platform"
+YUNCE_SUPPLIER_CHANNEL_CODE = "yunce-supplier-platform"
+DEMO_BASELINE_SUPPLIER_CHANNEL_CODE = "demo-baseline-supplier"
+MOCK_SUPPLIER_CHANNEL_CODES = (
+    YUNCE_SUPPLIER_CHANNEL_CODE,
+    DEMO_BASELINE_SUPPLIER_CHANNEL_CODE,
+    "demo-premium-supplier",
+    "demo-backup-supplier",
+)
+LEGACY_TEST_SOURCE_SLUGS = (
+    "real-resource-platform-supplier",
+    "test-02-supplier",
+    "cc-supplier",
+)
+UNCONFIRMED_PRICE_SOURCE_SLUGS = (
+    "anthropic-sheet",
+    "google-sheet",
+    "openai-sheet",
+    "aliyun-wanx-sheet",
+)
+TREND_DEMO_SOURCE_SLUGS = (
+    f"{REAL_RESOURCE_CHANNEL_CODE}-trend-demo",
+    f"{DEMO_BASELINE_SUPPLIER_CHANNEL_CODE}-trend-demo",
+    "demo-premium-supplier-trend-demo",
+    "demo-backup-supplier-trend-demo",
+)
+TREND_DEMO_HISTORY_POINTS = {
+    DEMO_BASELINE_SUPPLIER_CHANNEL_CODE: (
+        ("2026-01-01", "0.150000", "0.600000"),
+        ("2026-02-01", "0.145000", "0.570000"),
+        ("2026-03-01", "0.138000", "0.540000"),
+        ("2026-04-01", "0.132000", "0.520000"),
+        ("2026-05-01", "0.128000", "0.500000"),
+    ),
+    "demo-premium-supplier": (
+        ("2026-01-01", "0.165000", "0.640000"),
+        ("2026-02-01", "0.152000", "0.590000"),
+        ("2026-03-01", "0.130000", "0.505000"),
+        ("2026-04-01", "0.118000", "0.470000"),
+        ("2026-05-01", "0.112000", "0.450000"),
+    ),
+    "demo-backup-supplier": (
+        ("2026-01-01", "0.120000", "0.700000"),
+        ("2026-02-01", "0.118000", "0.665000"),
+        ("2026-03-01", "0.140000", "0.610000"),
+        ("2026-04-01", "0.155000", "0.580000"),
+        ("2026-05-01", "0.160000", "0.560000"),
+    ),
+}
+
+
+def clean_legacy_llm_ops_demo_data() -> dict[str, int]:
+    """Remove deterministic legacy mock/demo rows."""
+    stats = {
+        "model_price_items": 0,
+        "channel_price_items": 0,
+        "channel_model_prices": 0,
+        "channel_model_histories": 0,
+        "sources": 0,
+        "channels": 0,
+    }
+    source_ids = list(
+        PriceCollectionSource.objects.filter(
+            Q(slug__startswith="yunce-")
+            | Q(slug__in=TREND_DEMO_SOURCE_SLUGS)
+            | Q(slug__in=LEGACY_TEST_SOURCE_SLUGS)
+            | Q(slug__in=UNCONFIRMED_PRICE_SOURCE_SLUGS)
+            | Q(slug__startswith="test-")
+            | Q(name__startswith="测试")
+        ).values_list("id", flat=True)
+    )
+    test_channel_price_filter = (
+        Q(channel__code=REAL_RESOURCE_CHANNEL_CODE)
+        | Q(channel__code__in=MOCK_SUPPLIER_CHANNEL_CODES)
+        | Q(channel__code__startswith="test-")
+        | Q(channel__name__startswith="测试")
+    )
+    PriceCollectionSource.objects.filter(
+        channel__code=REAL_RESOURCE_CHANNEL_CODE,
+    ).update(channel=None)
+    stats["model_price_items"] += _delete_count(
+        ModelPriceItem.objects.filter(
+            Q(source_id__in=source_ids)
+            | Q(spec__mock_source="yunce_supplier")
+        )
+    )
+    stats["channel_price_items"] += _delete_count(
+        ChannelPriceItem.objects.filter(
+            Q(source_id__in=source_ids)
+            | Q(channel__code__startswith="test-")
+            | Q(channel__name__startswith="测试")
+        )
+    )
+    stats["channel_model_prices"] += _delete_count(
+        ChannelModelPrice.objects.filter(test_channel_price_filter)
+    )
+    stats["channel_model_histories"] += _delete_count(
+        ChannelModelPriceHistory.objects.filter(
+            price_fingerprint__in=trend_demo_history_fingerprints(),
+        )
+    )
+    stats["sources"] += _delete_count(
+        PriceCollectionSource.objects.filter(id__in=source_ids)
+    )
+    stats["channels"] += _delete_count(
+        ProcurementChannel.objects.filter(
+            Q(code=REAL_RESOURCE_CHANNEL_CODE)
+            | Q(code__in=MOCK_SUPPLIER_CHANNEL_CODES)
+            | Q(code__startswith="test-")
+        )
+    )
+    return stats
+
+
+def resolve_orphan_meta_models() -> dict[str, int]:
+    """Backfill canonical vendor on every meta model that has none."""
+    stats = {
+        "resolved": 0,
+        "unresolved": 0,
+    }
+    for meta in MetaModel.objects.filter(vendor__isnull=True):
+        spec = canonical_vendor_for_model_code(meta.code)
+        if not spec:
+            stats["unresolved"] += 1
+            continue
+        provider = ensure_canonical_vendor_row(spec)
+        if not provider:
+            stats["unresolved"] += 1
+            continue
+        meta.vendor = provider
+        meta.save(update_fields=["vendor", "updated_at"])
+        stats["resolved"] += 1
+    return stats
+
+
+def normalize_meta_model_catalog() -> dict[str, int]:
+    """Merge release/date meta-model rows into family-level rows."""
+    stats = {
+        "normalized": 0,
+        "merged": 0,
+        "linked_records": 0,
+    }
+    for meta in list(MetaModel.objects.select_related("vendor").all()):
+        identity = canonical_meta_model_identity(meta.code, meta.name)
+        canonical_code = identity["code"]
+        canonical_name = identity["name"]
+        if meta.code == canonical_code:
+            aliases = merged_meta_aliases(meta, identity)
+            if aliases != list(meta.aliases or []):
+                meta.aliases = aliases
+                meta.save(update_fields=["aliases", "updated_at"])
+                stats["normalized"] += 1
+            continue
+        canonical = MetaModel.objects.filter(code=canonical_code).first()
+        if canonical is None:
+            meta.code = canonical_code
+            meta.name = canonical_name
+            meta.aliases = merged_meta_aliases(meta, identity)
+            spec = canonical_vendor_for_model_code(canonical_code)
+            if spec:
+                meta.vendor = ensure_canonical_vendor_row(spec)
+            meta.save(
+                update_fields=[
+                    "code",
+                    "name",
+                    "aliases",
+                    "vendor",
+                    "updated_at",
+                ],
+            )
+            stats["normalized"] += 1
+            continue
+        merge_meta_model_rows(canonical, meta, identity)
+        stats["merged"] += 1
+    stats["linked_records"] = normalize_model_linked_meta_models()
+    return stats
+
+
+def normalize_model_linked_meta_models() -> int:
+    """Align every model-linked row with its model's canonical meta model."""
+    total = 0
+    model_linked_types = (
+        ModelPriceItem,
+        ChannelModelPrice,
+        ChannelPriceItem,
+        ChannelModelPriceHistory,
+        CollectedModelPriceSnapshot,
+        CollectedModelPriceHistory,
+        ResaleListing,
+        ResaleListingExclusion,
+        ResaleListingPriceHistory,
+        UsageReconciliationRecord,
+    )
+    for model in LLMModel.objects.select_related("meta_model").all():
+        for model_type in model_linked_types:
+            total += model_type.objects.filter(
+                model=model,
+            ).exclude(
+                meta_model=model.meta_model,
+            ).update(
+                meta_model=model.meta_model,
+            )
+    return total
+
+
+def merged_meta_aliases(meta: MetaModel, identity: dict) -> list[str]:
+    """Return de-duplicated aliases for a normalized meta model."""
+    aliases = list(meta.aliases or [])
+    for token in (meta.code, meta.name, *identity["aliases"]):
+        if token and token not in {identity["code"], identity["name"]}:
+            if token not in aliases:
+                aliases.append(token)
+    return aliases
+
+
+def merge_meta_model_rows(
+    canonical: MetaModel,
+    duplicate: MetaModel,
+    identity: dict,
+) -> None:
+    """Move duplicate meta-model references onto the canonical row."""
+    aliases = merged_meta_aliases(canonical, identity)
+    for token in (duplicate.code, duplicate.name, *(duplicate.aliases or [])):
+        if token and token not in {canonical.code, canonical.name}:
+            if token not in aliases:
+                aliases.append(token)
+    changed_fields = []
+    if aliases != list(canonical.aliases or []):
+        canonical.aliases = aliases
+        changed_fields.append("aliases")
+    if duplicate.context_window > canonical.context_window:
+        canonical.context_window = duplicate.context_window
+        changed_fields.append("context_window")
+    if duplicate.max_output_tokens > canonical.max_output_tokens:
+        canonical.max_output_tokens = duplicate.max_output_tokens
+        changed_fields.append("max_output_tokens")
+    if not canonical.vendor_id and duplicate.vendor_id:
+        canonical.vendor = duplicate.vendor
+        changed_fields.append("vendor")
+    if changed_fields:
+        changed_fields.append("updated_at")
+        canonical.save(update_fields=changed_fields)
+    for relation in MetaModel._meta.related_objects:
+        field = relation.field
+        relation.related_model.objects.filter(
+            **{field.name: duplicate}
+        ).update(**{field.name: canonical})
+    duplicate.delete()
+
+
+def cleanup_orphan_meta_models() -> dict[str, int]:
+    """Remove meta models that no canonical price row references."""
+    stats = {
+        "meta_models_rehomed": 0,
+        "meta_models_deleted": 0,
+    }
+    orphan_ids = []
+    for meta in MetaModel.objects.all():
+        spec = canonical_vendor_for_model_code(meta.code)
+        canonical = None
+        if spec:
+            canonical = ensure_canonical_vendor_row(spec)
+        elif meta.vendor_id and is_canonical_vendor_code(meta.vendor.code):
+            canonical = meta.vendor
+        if canonical and meta.vendor_id and canonical.id != meta.vendor_id:
+            meta.vendor = canonical
+            meta.save(update_fields=["vendor", "updated_at"])
+            stats["meta_models_rehomed"] += 1
+        if not meta.provider_prices.exists():
+            orphan_ids.append(meta.id)
+    if orphan_ids:
+        stats["meta_models_deleted"] = MetaModel.objects.filter(
+            id__in=orphan_ids,
+        ).delete()[0]
+    return stats
+
+
+def reset_meta_models_canonical() -> dict[str, int]:
+    """Wipe meta models without repopulating replacement data."""
+    stats = {
+        "manual_sources_kept": 0,
+        "supplier_sources_kept": 0,
+        "meta_models_deleted": 0,
+    }
+    stats["manual_sources_kept"] = (
+        PriceCollectionSource.objects.filter(
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_MANUAL
+            ),
+        ).count()
+    )
+    stats["supplier_sources_kept"] = (
+        PriceCollectionSource.objects.filter(
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+            ),
+        ).count()
+    )
+    PriceCollectionSource.objects.filter(
+        channel__code=REAL_RESOURCE_CHANNEL_CODE,
+    ).delete()
+    stats["meta_models_deleted"] = MetaModel.objects.all().delete()[0]
+    for supplier_code in SUPPLIER_SOURCE_VENDOR_ALIASES.keys():
+        LLMProvider.objects.filter(code=supplier_code).delete()
+    return stats
+
+
+def is_llm_ops_database_empty() -> bool:
+    """Return True when no llm_ops canonical rows exist yet."""
+    if LLMProvider.objects.exists():
+        return False
+    if LLMModel.objects.exists():
+        return False
+    return True
+
+
+def trend_demo_history_fingerprints() -> tuple[str, ...]:
+    """Return fingerprints generated by the old trend demo seed."""
+    fingerprints = []
+    for points in TREND_DEMO_HISTORY_POINTS.values():
+        for date_text, input_price, output_price in points:
+            fingerprints.append(
+                stable_fingerprint(
+                    {
+                        "is_listed": True,
+                        "input_price_per_million": str(input_price),
+                        "output_price_per_million": str(output_price),
+                        "currency": "USD",
+                        "effective_from": date_text,
+                    }
+                )
+            )
+    return tuple(fingerprints)
+
+
+def _delete_count(queryset) -> int:
+    """Delete a queryset and return the number of rows deleted."""
+    count = queryset.count()
+    if count:
+        queryset.delete()
+    return count

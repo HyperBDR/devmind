@@ -6,11 +6,8 @@ from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult
 
-SUPPORTED_OFFICIAL_PROVIDER_CODES = (
-    "aliyun",
-    "aliyun-wanx",
-    "baidu",
-    "volcengine",
+SUPPORTED_OFFICIAL_PROVIDER_CODES = tuple(
+    sorted(OFFICIAL_PROVIDER_CONFIGS.keys())
 )
 
 
@@ -18,6 +15,10 @@ class OfficialProviderPriceSourceCollector:
     """Collect prices from one model vendor's official source."""
 
     provider_code = ""
+
+    def __init__(self, provider_code: str | None = None):
+        if provider_code is not None:
+            self.provider_code = provider_code
 
     @property
     def collector_id(self) -> str:
@@ -99,8 +100,12 @@ def build_official_provider_collectors() -> tuple[
     """Build one collector per supported official provider."""
     collectors = []
     for provider_code in SUPPORTED_OFFICIAL_PROVIDER_CODES:
-        if provider_code not in OFFICIAL_PROVIDER_CONFIGS:
-            continue
-        collector_class = OFFICIAL_COLLECTOR_CLASSES[provider_code]
-        collectors.append(collector_class())
+        collector_class = OFFICIAL_COLLECTOR_CLASSES.get(
+            provider_code,
+            OfficialProviderPriceSourceCollector,
+        )
+        if collector_class is OfficialProviderPriceSourceCollector:
+            collectors.append(collector_class(provider_code=provider_code))
+        else:
+            collectors.append(collector_class())
     return tuple(collectors)

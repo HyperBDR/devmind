@@ -258,7 +258,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
             {"models": 1, "changed": 1},
         )
 
-    def test_explicit_source_ids_keep_only_supported_aliyun_sources(self):
+    def test_explicit_source_ids_keep_supported_official_sources(self):
         openai = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
             name="OpenAI Official",
@@ -274,7 +274,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         )
         runner = ModelPriceSyncAgentRunner(source_ids=[source.id])
 
-        self.assertEqual(runner.list_configured_sources(), [])
+        self.assertEqual(runner.list_configured_sources(), [source])
 
     def test_explicit_source_ids_skip_model_level_official_sources(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
@@ -330,7 +330,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         config.save()
         runner = ModelPriceSyncAgentRunner(config=config)
 
-        self.assertEqual(runner.list_configured_sources(), [])
+        self.assertEqual(runner.list_configured_sources(), [source])
 
     def test_execute_returns_noop_when_global_collection_disabled(self):
         config = LLMOpsGlobalConfig.get_solo()
@@ -359,15 +359,18 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         )
 
     def test_execute_returns_noop_when_selected_sources_are_unsupported(self):
-        openai = LLMProvider.objects.create(name="OpenAI", code="openai")
+        unknown = LLMProvider.objects.create(
+            name="Unknown AI",
+            code="unknown-ai",
+        )
         source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
-            provider=openai,
+            name="Unknown Official",
+            slug="unknown-ai-official",
+            provider=unknown,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://openai.com/api/pricing/",
+            endpoint_url="https://example.com/pricing",
             currency="USD",
             is_enabled=True,
             updates_model_prices=True,

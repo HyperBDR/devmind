@@ -7,6 +7,7 @@ import re
 from typing import Optional
 
 from .models import LLMOpsGlobalConfig, PriceCollectionSource
+from .collectors.official import OFFICIAL_PROVIDER_CONFIGS
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +19,7 @@ MODEL_PRICE_SYNC_AGENT_TASK_NAME = "llm_ops_model_price_sync_agent"
 MODEL_PRICE_SYNC_AGENT_TASK = "llm_ops.tasks.run_model_price_sync_agent"
 PRICE_SOURCE_TASK_PREFIX = "llm_ops_price_source_collect_"
 PRICE_SOURCE_TASK = "llm_ops.tasks.collect_price_source_prices"
-SUPPORTED_PRICE_SYNC_PROVIDER_CODES = (
-    "aliyun",
-    "aliyun-wanx",
-    "baidu",
-    "volcengine",
-)
+SUPPORTED_PRICE_SYNC_PROVIDER_CODES = tuple(sorted(OFFICIAL_PROVIDER_CONFIGS))
 
 
 def price_source_task_name(source_id: int) -> str:

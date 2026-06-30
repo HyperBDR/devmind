@@ -66,17 +66,6 @@
           </label>
         </div>
 
-        <label class="inline-flex items-start gap-2 text-xs text-slate-600">
-          <input
-            v-model="form.updates_model_prices"
-            class="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
-            type="checkbox"
-          />
-          <span>
-            {{ t('llmOps.manualPriceImport.updateModelPrices') }}
-          </span>
-        </label>
-
         <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
             <div class="min-w-0 flex-1">
@@ -349,7 +338,7 @@ function defaultForm() {
   return {
     source: '',
     currency: 'USD',
-    updates_model_prices: true
+    updates_model_prices: false
   }
 }
 
@@ -372,6 +361,7 @@ async function submit() {
       provider: selectedSourceProvider.value.id,
       source_name: selectedSource.value.name,
       source_url: selectedSource.value.endpoint_url || '',
+      updates_model_prices: false,
       rows: parsedRows.value.map((row) => cleanRow(row))
     })
     emit('imported')

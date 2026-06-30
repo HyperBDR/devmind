@@ -49,7 +49,7 @@
           <div class="rounded-lg bg-slate-50 px-3 py-2">
             <p class="text-xs text-slate-500">模型价格源</p>
             <p class="mt-1 font-mono text-sm text-slate-800">
-              {{ sources.length }}
+              {{ sourceRows.length }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
@@ -60,131 +60,31 @@
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">状态</p>
-            <p class="mt-1 text-sm text-slate-800">
-              {{ provider.is_active ? '启用' : '停用' }}
-            </p>
-          </div>
-          <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">价格获取地址</p>
-            <a
-              v-if="priceSourceUrl"
-              class="mt-1 block truncate text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
-              :href="priceSourceUrl"
-              rel="noopener noreferrer"
-              target="_blank"
-              :title="priceSourceUrl"
+            <p class="text-xs text-slate-500">价格来源</p>
+            <div
+              v-if="primarySource"
+              class="mt-1 min-w-0"
             >
-              {{ priceSourceUrl }}
-            </a>
-            <p v-else class="mt-1 text-sm text-slate-400">-</p>
-          </div>
-        </div>
-
-        <div class="panel overflow-hidden p-0">
-          <div class="table-toolbar">
-            <div>
-              <h3 class="panel-title">模型价格源</h3>
-              <p class="mt-1 text-xs text-slate-500">
-                管理该厂商下可采集、手工维护或供货商维护的价格来源。
-              </p>
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-slate-900">
+                  {{ primarySource.name }}
+                </p>
+                <p class="mt-1 truncate font-mono text-xs text-slate-400">
+                  {{ primarySource.slug }} · {{ sourceRows.length }} 个来源
+                </p>
+                <a
+                  v-if="primarySource.endpoint_url"
+                  class="mt-1 block truncate text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
+                  :href="primarySource.endpoint_url"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  :title="primarySource.endpoint_url"
+                >
+                  {{ primarySource.endpoint_url }}
+                </a>
+              </div>
             </div>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="data-table provider-source-table">
-              <colgroup>
-                <col class="source-name-col" />
-                <col class="source-type-col" />
-                <col class="source-status-col" />
-                <col class="source-action-col" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th class="table-head">价格源</th>
-                  <th class="table-head">类型</th>
-                  <th class="table-head">状态</th>
-                  <th class="table-head">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="source in sourceRows" :key="source.id">
-                  <td class="table-cell">
-                    <p class="truncate font-medium text-slate-900">
-                      {{ source.name }}
-                    </p>
-                    <p class="mt-1 truncate font-mono text-xs text-slate-400">
-                      {{ source.slug }}
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <span :class="['source-badge', source.source_tone]">
-                      {{ source.source_category_label }}
-                    </span>
-                    <p class="mt-1 truncate text-xs text-slate-400">
-                      {{ sourceModeLabel(source) }}
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <span
-                      :class="[source.is_enabled ? 'badge-ok' : 'badge-muted']"
-                    >
-                      {{ source.is_enabled ? '启用' : '停用' }}
-                    </span>
-                  </td>
-                  <td class="table-cell">
-                    <div class="source-actions">
-                      <OperationIconButton
-                        icon="view"
-                        :label="sourceViewLabel"
-                        @click="$emit('view-source', source)"
-                      />
-                      <OperationIconButton
-                        icon="edit"
-                        :label="t('llmOps.providerManagement.actions.edit')"
-                        @click="$emit('edit-source', source)"
-                      />
-                      <OperationIconButton
-                        v-if="sourceCanManualEntry(source)"
-                        icon="manual"
-                        :label="
-                          t('llmOps.providerManagement.actions.manualPricing')
-                        "
-                        @click="$emit('manual-entry-source', source)"
-                      />
-                      <OperationIconButton
-                        :icon="source.is_enabled ? 'toggleOn' : 'toggleOff'"
-                        :label="sourceToggleLabel(source)"
-                        @click="$emit('toggle-source', source)"
-                      />
-                      <OperationIconButton
-                        icon="collect"
-                        tone="primary"
-                        :disabled="
-                          !sourceCanCollect(source) ||
-                          String(collectingSourceId || '') === String(source.id)
-                        "
-                        :label="sourceCollectLabel(source)"
-                        @click="$emit('collect-source', source)"
-                      />
-                      <OperationIconButton
-                        icon="delete"
-                        tone="danger"
-                        :disabled="
-                          String(deletingSourceId || '') === String(source.id)
-                        "
-                        :label="sourceDeleteLabel(source)"
-                        @click="$emit('delete-source', source)"
-                      />
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="!sourceRows.length">
-                  <td class="table-cell text-slate-500" colspan="4">
-                    当前厂商还没有模型价格源。
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <p v-else class="mt-1 font-mono text-sm text-slate-800">0</p>
           </div>
         </div>
 
@@ -197,27 +97,36 @@
               </p>
             </div>
             <div
-              class="grid w-full gap-3 md:max-w-md md:grid-cols-[minmax(0,1fr)_9rem]"
+              class="grid w-full gap-3 md:max-w-xl md:grid-cols-[minmax(0,1fr)_auto]"
             >
               <input
                 v-model="search"
                 class="field-input"
                 placeholder="搜索模型、来源或 code"
               />
-              <select v-model="categoryFilter" class="field-input">
-                <option value="all">全部来源</option>
-                <option value="official_provider">原厂</option>
-                <option value="cloud_hosted">云托管</option>
-                <option value="supplier">供货商</option>
-                <option value="manual">内部维护</option>
-              </select>
+              <div class="filter-tabs" role="tablist" aria-label="来源类型">
+                <button
+                  v-for="option in categoryFilterOptions"
+                  :key="option.value"
+                  type="button"
+                  :class="[
+                    'filter-tab',
+                    categoryFilter === option.value ? 'is-active' : ''
+                  ]"
+                  :aria-selected="categoryFilter === option.value"
+                  role="tab"
+                  @click="categoryFilter = option.value"
+                >
+                  {{ option.label }}
+                  <span class="filter-tab-count">{{ option.count }}</span>
+                </button>
+              </div>
             </div>
           </div>
           <div class="overflow-x-auto">
             <table class="data-table pricing-source-table">
               <colgroup>
                 <col class="model-col" />
-                <col class="source-col" />
                 <col class="type-col" />
                 <col class="price-col" />
                 <col class="time-col" />
@@ -225,7 +134,6 @@
               <thead>
                 <tr>
                   <th class="table-head">模型</th>
-                  <th class="table-head">模型价格源</th>
                   <th class="table-head">来源类型</th>
                   <th class="table-head">价格摘要</th>
                   <th class="table-head">更新时间</th>
@@ -240,27 +148,6 @@
                     <p class="mt-1 font-mono text-xs text-slate-400">
                       {{ row.model.code }} ·
                       {{ modalityLabel(row.model.modality) }}
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <a
-                      v-if="row.source_url"
-                      class="source-link"
-                      :href="row.source_url"
-                      rel="noopener noreferrer"
-                      target="_blank"
-                      :title="row.source_url"
-                    >
-                      {{ row.source_name }}
-                    </a>
-                    <p v-else class="font-medium text-slate-800">
-                      {{ row.source_name }}
-                    </p>
-                    <p
-                      v-if="row.source_relation"
-                      class="mt-1 text-xs text-slate-400"
-                    >
-                      {{ row.source_relation }}
                     </p>
                   </td>
                   <td class="table-cell">
@@ -289,7 +176,7 @@
                   </td>
                 </tr>
                 <tr v-if="!filteredModelRows.length">
-                  <td class="table-cell text-slate-500" colspan="5">
+                  <td class="table-cell text-slate-500" colspan="4">
                     当前服务商还没有模型定价记录。
                   </td>
                 </tr>
@@ -304,12 +191,9 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
 defineEmits([
   'close',
-  'view-source',
   'manual-entry-source',
   'edit-source',
   'toggle-source',
@@ -352,32 +236,37 @@ const props = defineProps({
   }
 })
 
-const { t } = useI18n()
 const search = ref('')
 const categoryFilter = ref('all')
-const sourceViewLabel = computed(() =>
-  t('llmOps.providerManagement.actions.viewModels')
-)
-
-const priceSourceUrl = computed(() => {
-  const source = preferredPriceSource(props.sources)
-  return source?.endpoint_url || props.provider?.price_source_url || ''
-})
 
 const modelRows = computed(() =>
   props.models.flatMap((model) => buildModelRows(model))
 )
 
+const categoryFilterOptions = computed(() => {
+  const counts = sourceCategoryCounts(modelRows.value)
+  return [
+    { value: 'all', label: '全部来源', count: modelRows.value.length },
+    {
+      value: 'official_provider',
+      label: '原厂',
+      count: counts.official_provider || 0
+    },
+    {
+      value: 'cloud_hosted',
+      label: '云托管',
+      count: counts.cloud_hosted || 0
+    },
+    { value: 'supplier', label: '供货商', count: counts.supplier || 0 },
+    { value: 'manual', label: '人工', count: counts.manual || 0 }
+  ]
+})
+
 const sourceRows = computed(() =>
-  props.sources.map((source) => {
-    const ownerType = sourceOwnerType(source)
-    return {
-      ...source,
-      source_category_label: sourceOwnerTypeLabel(ownerType),
-      source_tone: sourceOwnerTone(ownerType)
-    }
-  })
+  aggregatePriceSources(props.sources, props.priceItems)
 )
+
+const primarySource = computed(() => preferredPriceSource(sourceRows.value))
 
 const filteredModelRows = computed(() => {
   const keyword = search.value.trim().toLowerCase()
@@ -427,6 +316,14 @@ const pricedModelCount = computed(
     ).size
 )
 
+function sourceCategoryCounts(rows) {
+  return rows.reduce((counts, row) => {
+    const category = row.source_category || 'unknown'
+    counts[category] = (counts[category] || 0) + 1
+    return counts
+  }, {})
+}
+
 function convertCurrencyAmount(value, sourceCurrency = 'USD') {
   if (value === null || value === undefined || value === '') return null
   const source = String(sourceCurrency || '').toUpperCase()
@@ -463,7 +360,10 @@ function buildModelRows(model) {
   }
   const groupedItems = new Map()
   items.forEach((item) => {
-    const key = String(item.source || item.source_name || 'unbound-source')
+    const rawSource = rawSourceForItem(item)
+    const key = rawSource
+      ? priceSourceGroupKey(rawSource)
+      : String(item.source || item.source_name || 'unbound-source')
     if (!groupedItems.has(key)) groupedItems.set(key, [])
     groupedItems.get(key).push(item)
   })
@@ -551,15 +451,147 @@ function legacyPricingItems(model) {
 }
 
 function sourceForItem(item) {
+  const source = rawSourceForItem(item)
+  return aggregateSourceForRawSource(source)
+}
+
+function rawSourceForItem(item) {
   return props.sources.find(
     (source) => String(source.id) === String(item.source)
   )
 }
 
 function sourceForModel(model) {
-  return props.sources.find(
+  const source = props.sources.find(
     (source) => String(source.id) === String(model.source)
   )
+  return aggregateSourceForRawSource(source)
+}
+
+function aggregatePriceSources(sources, priceItems) {
+  const groups = new Map()
+  sources.forEach((source) => {
+    const key = priceSourceGroupKey(source)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(source)
+  })
+
+  return Array.from(groups.values())
+    .map((group) => buildAggregateSource(group, priceItems))
+    .sort((left, right) => {
+      const leftRank = categoryRank(businessSourceCategory(left))
+      const rightRank = categoryRank(businessSourceCategory(right))
+      if (leftRank !== rightRank) return leftRank - rightRank
+      return String(left.name || '').localeCompare(String(right.name || ''))
+    })
+}
+
+function aggregateSourceForRawSource(source) {
+  if (!source) return null
+  const key = priceSourceGroupKey(source)
+  return sourceRows.value.find((row) => row.source_group_key === key) || source
+}
+
+function buildAggregateSource(group, priceItems) {
+  const sorted = group.slice().sort((left, right) => {
+    if (isProviderOfficialSource(left)) return -1
+    if (isProviderOfficialSource(right)) return 1
+    return String(left.name || '').localeCompare(String(right.name || ''))
+  })
+  const primary = sorted[0]
+  const sourceIds = sorted.map((source) => String(source.id))
+  const endpointUrl =
+    sorted.find((source) => source.endpoint_url)?.endpoint_url || ''
+  const latestUpdate = sorted
+    .map((source) => source.updated_at)
+    .filter(Boolean)
+    .sort((left, right) => new Date(right) - new Date(left))[0]
+
+  return {
+    ...primary,
+    id: primary.id,
+    name: aggregateSourceName(primary),
+    slug: aggregateSourceSlug(primary),
+    endpoint_url: endpointUrl,
+    is_enabled: sorted.some((source) => source.is_enabled),
+    source_group_key: priceSourceGroupKey(primary),
+    source_group_ids: sourceIds,
+    source_count: sorted.length,
+    updated_at: latestUpdate || primary.updated_at,
+    can_collect: Boolean(
+      sorted.find((source) => source.can_collect)?.can_collect
+    ),
+    can_manual_entry: sorted.some((source) => source.can_manual_entry),
+    collect_action_label: primary.collect_action_label,
+    price_item_count: priceItems.filter(
+      (item) =>
+        sourceIds.includes(String(item.source || '')) &&
+        item.is_current !== false
+    ).length
+  }
+}
+
+function priceSourceGroupKey(source) {
+  const providerCode = String(source?.provider_code || '').trim()
+  const drawerProviderCode = String(props.provider?.code || '').trim()
+  if (businessSourceCategory(source) === 'official_provider') {
+    return `official:${
+      providerCode || drawerProviderCode || officialProviderCodeFromSlug(source)
+    }`
+  }
+  return `source:${source?.id || source?.slug || 'unknown'}`
+}
+
+function isLegacyOfficialModelSource(source) {
+  if (businessSourceCategory(source) !== 'official_provider') return false
+  const providerCode = String(
+    source?.provider_code ||
+      props.provider?.code ||
+      officialProviderCodeFromSlug(source)
+  ).trim()
+  if (!providerCode) return false
+  const slug = String(source?.slug || '')
+  return slug !== `${providerCode}-official` && slug.endsWith('-official')
+}
+
+function isProviderOfficialSource(source) {
+  const providerCode = String(source?.provider_code || '').trim()
+  const drawerProviderCode = String(props.provider?.code || '').trim()
+  const expectedCode = providerCode || drawerProviderCode
+  return (
+    expectedCode &&
+    businessSourceCategory(source) === 'official_provider' &&
+    String(source?.slug || '') === `${expectedCode}-official`
+  )
+}
+
+function aggregateSourceName(source) {
+  const providerName = source.provider_name || props.provider?.name || ''
+  if (!isLegacyOfficialModelSource(source)) {
+    return source?.name || (providerName ? `${providerName} 官方价格` : '-')
+  }
+  return `${providerName || source.provider_code || '服务商'} 官方价格`
+}
+
+function aggregateSourceSlug(source) {
+  const providerCode =
+    source.provider_code ||
+    props.provider?.code ||
+    officialProviderCodeFromSlug(source)
+  if (!isLegacyOfficialModelSource(source)) {
+    return source?.slug || (providerCode ? `${providerCode}-official` : '')
+  }
+  return providerCode ? `${providerCode}-official` : source?.slug || ''
+}
+
+function officialProviderCodeFromSlug(source) {
+  const slug = String(source?.slug || '')
+  if (!slug.endsWith('-official')) return ''
+  const providerCode = String(props.provider?.code || '').trim()
+  if (providerCode && slug.startsWith(`${providerCode}-`)) {
+    return providerCode
+  }
+  return ''
 }
 
 function dimensionLabel(dimension) {
@@ -673,6 +705,7 @@ function compactDimensionLabel(dimension, billingUnit) {
 
 function summarizeModelPrices(model, items) {
   if (items.length) {
+    const dedupedItems = dedupePriceItems(items)
     const preferredOrder = [
       'text_input',
       'text_output',
@@ -683,7 +716,7 @@ function summarizeModelPrices(model, items) {
       'video_input',
       'video_output'
     ]
-    return items
+    return dedupedItems
       .slice()
       .sort(
         (left, right) =>
@@ -694,6 +727,31 @@ function summarizeModelPrices(model, items) {
       .slice(0, 3)
   }
   return legacyPricingItems(model).slice(0, 3)
+}
+
+function dedupePriceItems(items) {
+  const grouped = new Map()
+  items.forEach((item) => {
+    const key = [
+      item.dimension,
+      item.billing_unit,
+      item.currency,
+      item.tier_type,
+      item.tier_start || '',
+      item.tier_end || ''
+    ].join(':')
+    const current = grouped.get(key)
+    if (!current || isItemNewer(item, current)) {
+      grouped.set(key, item)
+    }
+  })
+  return Array.from(grouped.values())
+}
+
+function isItemNewer(left, right) {
+  const leftTime = new Date(left.updated_at || left.effective_from || 0)
+  const rightTime = new Date(right.updated_at || right.effective_from || 0)
+  return leftTime.getTime() >= rightTime.getTime()
 }
 
 function latestModelUpdatedAt(model, items) {
@@ -713,75 +771,6 @@ function sourceRelation(source) {
   if (source?.channel_name) return source.channel_name
   if (source?.provider_name) return source.provider_name
   return ''
-}
-
-function sourceCanCollect(source) {
-  return Boolean(
-    source?.is_enabled &&
-      (source?.can_collect ||
-        (source?.can_collect_prices &&
-          sourceCollectionMethod(source) === 'auto_collect' &&
-          source?.updates_model_prices))
-  )
-}
-
-function sourceCanManualEntry(source) {
-  return Boolean(
-    source?.can_manual_entry ||
-      ['manual_entry', 'manual_import', 'unknown'].includes(
-        sourceCollectionMethod(source)
-      )
-  )
-}
-
-function sourceModeLabel(source) {
-  const type = source?.source_type || ''
-  const method = sourceCollectionMethod(source)
-  if (String(source?.endpoint_url || '').includes('models.dev/api.json')) {
-    return '聚合同步'
-  }
-  if (method === 'auto_collect') return '自动采集'
-  if (method === 'manual_entry') return '手动维护'
-  if (method === 'manual_import') return '批量导入'
-  if (method === 'api_sync') return 'API 同步'
-  if (type === 'yunce') return '专用采集'
-  if (type === 'agione') return 'Agione'
-  return type || '待适配'
-}
-
-function sourceCollectionMethod(source) {
-  const method = source?.collection_method
-  if (method && method !== 'unknown') return method
-  if (source?.source_type === 'yunce') return 'api_sync'
-  if (
-    source?.source_category === 'official_provider' &&
-    source?.updates_model_prices
-  ) {
-    return 'auto_collect'
-  }
-  if (source?.source_category === 'manual') return 'manual_entry'
-  return method || 'unknown'
-}
-
-function sourceToggleLabel(source) {
-  if (source?.is_enabled) {
-    return t('llmOps.providerManagement.sourceStatus.inactive.label')
-  }
-  return t('llmOps.providerManagement.sourceStatus.active.label')
-}
-
-function sourceCollectLabel(source) {
-  if (String(props.collectingSourceId || '') === String(source?.id)) {
-    return t('llmOps.providerManagement.actions.submitting')
-  }
-  return t('llmOps.providerManagement.actions.syncPrice')
-}
-
-function sourceDeleteLabel(source) {
-  if (String(props.deletingSourceId || '') === String(source?.id)) {
-    return t('llmOps.providerManagement.actions.deleting')
-  }
-  return t('llmOps.providerManagement.actions.delete')
 }
 
 function hasAudioPrice(model) {
@@ -855,39 +844,6 @@ function sourceCategoryLabel(category) {
   return labels[category] || '其他'
 }
 
-function sourceOwnerType(source) {
-  const ownerType = source?.source_owner_type
-  if (ownerType && ownerType !== 'unknown') return ownerType
-  if (source?.source_category === 'official_provider') {
-    return 'model_provider_official'
-  }
-  if (source?.source_category === 'supplier') return 'supplier'
-  if (source?.source_category === 'manual') return 'internal'
-  return ownerType || 'unknown'
-}
-
-function sourceOwnerTypeLabel(ownerType) {
-  const labels = {
-    model_provider_official: '模型厂商官方',
-    cloud_provider_official: '云厂商官方',
-    supplier: '供货商',
-    internal: '内部维护',
-    unknown: '其他'
-  }
-  return labels[ownerType] || labels.unknown
-}
-
-function sourceOwnerTone(ownerType) {
-  const tones = {
-    model_provider_official: 'official',
-    cloud_provider_official: 'cloud',
-    supplier: 'supplier',
-    internal: 'manual',
-    unknown: 'unknown'
-  }
-  return tones[ownerType] || 'unknown'
-}
-
 function sourceTone(category) {
   const tones = {
     official_provider: 'official',
@@ -897,6 +853,17 @@ function sourceTone(category) {
     unknown: 'unknown'
   }
   return tones[category] || 'unknown'
+}
+
+function categoryRank(category) {
+  const ranks = {
+    official_provider: 1,
+    cloud_hosted: 2,
+    supplier: 3,
+    manual: 4,
+    unknown: 5
+  }
+  return ranks[category] || 9
 }
 </script>
 
@@ -935,11 +902,7 @@ function sourceTone(category) {
 }
 
 .pricing-source-table .model-col {
-  width: 24%;
-}
-
-.pricing-source-table .source-col {
-  width: 24%;
+  width: 34%;
 }
 
 .pricing-source-table .type-col {
@@ -947,11 +910,11 @@ function sourceTone(category) {
 }
 
 .pricing-source-table .price-col {
-  width: 24%;
+  width: 34%;
 }
 
 .pricing-source-table .time-col {
-  width: 14%;
+  width: 18%;
 }
 
 .provider-source-table .source-name-col {
@@ -980,6 +943,26 @@ function sourceTone(category) {
 
 .field-input {
   @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100;
+}
+
+.filter-tabs {
+  @apply inline-flex h-10 shrink-0 items-center rounded-lg border border-slate-200 bg-slate-50 p-1;
+}
+
+.filter-tab {
+  @apply inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800;
+}
+
+.filter-tab.is-active {
+  @apply bg-white text-slate-900 shadow-sm;
+}
+
+.filter-tab-count {
+  @apply font-mono text-xs text-slate-400;
+}
+
+.filter-tab.is-active .filter-tab-count {
+  @apply text-slate-500;
 }
 
 .source-link {

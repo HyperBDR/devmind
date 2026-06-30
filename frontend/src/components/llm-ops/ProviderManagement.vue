@@ -60,6 +60,13 @@
             {{ t('llmOps.providerManagement.actions.bulkImport') }}
           </button>
           <button
+            class="btn-secondary btn-action-danger"
+            type="button"
+            @click="openOfficialResetModal"
+          >
+            重置官方价格
+          </button>
+          <button
             class="btn-primary source-primary-button btn-action-create"
             type="button"
             @click="showPriceSourceModal = true"
@@ -187,9 +194,32 @@
               <td class="table-cell">
                 <div class="provider-actions">
                   <OperationIconButton
-                    icon="view"
-                    :label="t('llmOps.providerManagement.actions.viewModels')"
-                    @click.stop="selectedProvider = provider"
+                    icon="edit"
+                    label="编辑价格源"
+                    :disabled="!provider.primary_source"
+                    @click.stop="editSourceFromProvider(provider.primary_source)"
+                  />
+                  <OperationIconButton
+                    v-if="provider.primary_source?.can_manual_entry"
+                    icon="manual"
+                    label="配置模型价格"
+                    tone="primary"
+                    @click.stop="
+                      openManualEntryFromProvider(provider.primary_source)
+                    "
+                  />
+                  <OperationIconButton
+                    v-if="provider.primary_source?.can_collect"
+                    icon="collect"
+                    :label="
+                      provider.primary_source?.collect_action_label || '同步价格'
+                    "
+                    :disabled="
+                      !provider.primary_source.is_enabled ||
+                      String(collectingSourceId || '') ===
+                        String(provider.primary_source.id)
+                    "
+                    @click.stop="collectSource(provider.primary_source)"
                   />
                 </div>
               </td>
@@ -217,24 +247,105 @@
       @close="closePriceSourceModal"
       @saved="handleSourceSaved"
     />
+    <div
+      v-if="showOfficialResetModal"
+      class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/30 px-4 py-6"
+      @click.self="closeOfficialResetModal"
+    >
+      <section class="reset-modal">
+        <div class="modal-header">
+          <div>
+            <p class="modal-eyebrow">Official Price Reset</p>
+            <h3 class="modal-title">重置官方价格数据</h3>
+            <p class="modal-desc">
+              清理历史 seed / 同步写入的官方价格脏数据，并重新同步官方价格。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn-secondary btn-action-cancel"
+            :disabled="officialResetBusy"
+            @click="closeOfficialResetModal"
+          >
+            关闭
+          </button>
+        </div>
+
+        <div class="reset-modal-body">
+          <label class="field-group">
+            <span class="field-label">清理范围</span>
+            <select
+              v-model="officialResetScope"
+              class="field-input"
+              :disabled="officialResetBusy"
+              @change="officialResetPreview = null"
+            >
+              <option value="all">全部官方来源</option>
+              <option
+                v-for="option in officialResetProviderOptions"
+                :key="option.code"
+                :value="option.code"
+              >
+                {{ option.label }}
+              </option>
+            </select>
+          </label>
+
+          <div v-if="officialResetPreview" class="reset-preview-grid">
+            <div
+              v-for="item in officialResetPreviewItems"
+              :key="item.label"
+              class="reset-preview-item"
+            >
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
+          </div>
+          <p v-else class="reset-empty">
+            先预览清理范围，再执行重置。平台会保留手工价格、供货商价格和渠道配置。
+          </p>
+
+          <div
+            v-if="officialResetLegacySources.length"
+            class="reset-legacy-list"
+          >
+            <p>将删除的历史模型级来源</p>
+            <div>
+              <span v-for="slug in officialResetLegacySources" :key="slug">
+                {{ slug }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn-secondary"
+            :disabled="officialResetBusy"
+            @click="previewOfficialReset"
+          >
+            {{ officialResetPreviewing ? '预览中...' : '预览影响' }}
+          </button>
+          <button
+            type="button"
+            class="btn-danger"
+            :disabled="!officialResetPreview || officialResetBusy"
+            @click="executeOfficialReset"
+          >
+            {{ officialResetExecuting ? '重置中...' : '确认重置并同步' }}
+          </button>
+        </div>
+      </section>
+    </div>
     <ManualPriceEntryModal
       :open="Boolean(priceEntrySource)"
       :source="priceEntrySource"
       :providers="providers"
+      :meta-models="metaModels"
       :models="models"
       @close="priceEntrySource = null"
       @saved="handlePriceEntrySaved"
-    />
-    <SourcePriceDrawer
-      :source="selectedSource"
-      :models="models"
-      :price-items="priceItems"
-      :display-currency="displayCurrency"
-      :exchange-rate="exchangeRate"
-      :deleting="deletingSourceId === selectedSource?.id"
-      @close="selectedSource = null"
-      @delete="deleteSource"
-      @refresh="emit('refresh')"
     />
     <ProviderPricingDrawer
       :provider="selectedProvider"
@@ -246,9 +357,8 @@
       :collecting-source-id="collectingSourceId"
       :deleting-source-id="deletingSourceId"
       @close="selectedProvider = null"
-      @view-source="openSourceFromProvider"
-      @manual-entry-source="priceEntrySource = $event"
-      @edit-source="editingSource = $event"
+      @manual-entry-source="openManualEntryFromProvider"
+      @edit-source="editSourceFromProvider"
       @toggle-source="toggleSource"
       @collect-source="collectSource"
       @delete-source="deleteSource"
@@ -265,13 +375,16 @@ import ManualPriceImportModal from '@/components/llm-ops/ManualPriceImportModal.
 import ManualPriceEntryModal from '@/components/llm-ops/ManualPriceEntryModal.vue'
 import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
 import ProviderPricingDrawer from '@/components/llm-ops/ProviderPricingDrawer.vue'
-import SourcePriceDrawer from '@/components/llm-ops/SourcePriceDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
 const props = defineProps({
   providers: {
     type: Array,
     required: true
+  },
+  metaModels: {
+    type: Array,
+    default: () => []
   },
   models: {
     type: Array,
@@ -303,12 +416,16 @@ const emit = defineEmits(['refresh'])
 const { showSuccess, showError } = useToast()
 const { t } = useI18n()
 
-const selectedSource = ref(null)
 const selectedProvider = ref(null)
 const editingSource = ref(null)
 const priceEntrySource = ref(null)
 const showPriceSourceModal = ref(false)
 const showManualImportModal = ref(false)
+const showOfficialResetModal = ref(false)
+const officialResetScope = ref('all')
+const officialResetPreview = ref(null)
+const officialResetPreviewing = ref(false)
+const officialResetExecuting = ref(false)
 const collectingSourceId = ref(null)
 const syncingAllSources = ref(false)
 const deletingSourceId = ref(null)
@@ -416,6 +533,7 @@ const unboundProviderRow = computed(() => {
     covered_model_count: 0,
     meta_model_ids: [],
     price_item_count: 0,
+    primary_source: primaryProviderSource(sources),
     source_count: sources.length,
     source_ids: sources.map((source) => String(source.id)),
     status_label: status.label,
@@ -509,6 +627,43 @@ const hasSyncablePriceSources = computed(() =>
   sourceRows.value.some((source) => source.can_collect && source.is_enabled)
 )
 
+const officialResetProviderOptions = computed(() =>
+  sourceRows.value
+    .filter(
+      (source) =>
+        source.source_category === 'official_provider' &&
+        source.provider_code &&
+        String(source.slug || '') === `${source.provider_code}-official`
+    )
+    .map((source) => ({
+      code: source.provider_code,
+      label: source.provider_name || source.name || source.provider_code
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label))
+)
+
+const officialResetBusy = computed(
+  () => officialResetPreviewing.value || officialResetExecuting.value
+)
+
+const officialResetPreviewItems = computed(() => {
+  const stats = officialResetPreview.value?.stats || {}
+  return [
+    { label: '匹配来源', value: stats.sources_matched || 0 },
+    { label: '保留真实来源', value: stats.provider_sources_kept || 0 },
+    { label: '删除历史来源', value: stats.legacy_sources_deleted || 0 },
+    { label: '重置模型', value: stats.models_reset || 0 },
+    { label: '删除价格项', value: stats.price_items_deleted || 0 },
+    { label: '删除快照', value: stats.snapshots_deleted || 0 },
+    { label: '删除历史', value: stats.history_deleted || 0 },
+    { label: '删除运行记录', value: stats.runs_deleted || 0 }
+  ]
+})
+
+const officialResetLegacySources = computed(
+  () => officialResetPreview.value?.stats?.legacy_source_slugs || []
+)
+
 const selectedProviderModels = computed(() => {
   if (!selectedProvider.value) return []
   if (selectedProvider.value.is_unbound_sources) return []
@@ -561,6 +716,7 @@ function buildProviderRow(provider) {
     covered_model_count: metaModelIds.length,
     meta_model_ids: metaModelIds,
     price_item_count: priceItems.length,
+    primary_source: primaryProviderSource(entrySources),
     output_source_count: Math.max(sources.length - entrySources.length, 0),
     source_count: entrySources.length,
     source_ids: sources.map((source) => String(source.id)),
@@ -571,6 +727,28 @@ function buildProviderRow(provider) {
   }
 }
 
+function primaryProviderSource(sources) {
+  return (
+    sources.find(
+      (source) =>
+        source.business_source_category === 'official_provider' &&
+        source.can_collect &&
+        String(source.slug || '') === `${source.provider_code}-official`
+    ) ||
+    sources.find(
+      (source) =>
+        source.business_source_category === 'official_provider' &&
+        source.can_collect
+    ) ||
+    sources.find((source) => source.can_collect) ||
+    sources.find((source) => source.can_manual_entry && source.is_enabled) ||
+    sources.find((source) => source.can_manual_entry) ||
+    sources.find((source) => source.is_enabled) ||
+    sources[0] ||
+    null
+  )
+}
+
 function modelsForProvider(provider) {
   const providerSourceIds = sourceIdsForProvider(provider)
   const pricedModelIds = new Set(
@@ -578,7 +756,7 @@ function modelsForProvider(provider) {
       .filter(
         (item) =>
           item.is_current !== false &&
-          providerSourceIds.has(String(item.source || ''))
+          priceItemMatchesProvider(item, provider, providerSourceIds)
       )
       .map((item) => String(item.model || ''))
       .filter(Boolean)
@@ -595,8 +773,15 @@ function priceItemsForProvider(provider) {
   return props.priceItems.filter(
     (item) =>
       item.is_current !== false &&
-      providerSourceIds.has(String(item.source || ''))
+      priceItemMatchesProvider(item, provider, providerSourceIds)
   )
+}
+
+function priceItemMatchesProvider(item, provider, providerSourceIds = null) {
+  if (!item || !provider) return false
+  if (String(item.provider || '') === String(provider.id)) return true
+  const sourceIds = providerSourceIds || sourceIdsForProvider(provider)
+  return sourceIds.has(String(item.source || ''))
 }
 
 function sourceIdsForProvider(provider) {
@@ -825,9 +1010,78 @@ function handlePriceEntrySaved() {
   emit('refresh')
 }
 
-function openSourceFromProvider(source) {
+function openOfficialResetModal() {
+  officialResetScope.value = 'all'
+  officialResetPreview.value = null
+  showOfficialResetModal.value = true
+}
+
+function closeOfficialResetModal() {
+  if (officialResetBusy.value) return
+  showOfficialResetModal.value = false
+  officialResetPreview.value = null
+}
+
+function officialResetPayload(extra = {}) {
+  const payload =
+    officialResetScope.value === 'all'
+      ? { all: true }
+      : { provider_codes: [officialResetScope.value] }
+  return { ...payload, ...extra }
+}
+
+async function previewOfficialReset() {
+  officialResetPreviewing.value = true
+  try {
+    const response = await llmOpsApi.previewOfficialPriceReset(
+      officialResetPayload()
+    )
+    officialResetPreview.value = apiPayload(response)
+  } catch (error) {
+    showError(errorMessage(error, '预览官方价格重置范围失败。'))
+  } finally {
+    officialResetPreviewing.value = false
+  }
+}
+
+async function executeOfficialReset() {
+  if (!officialResetPreview.value) return
+  const confirmed = window.confirm(
+    '确认清理所选官方价格数据并重新同步？该操作会删除官方价格项、采集快照和历史模型级来源。'
+  )
+  if (!confirmed) return
+
+  officialResetExecuting.value = true
+  try {
+    const response = await llmOpsApi.resetOfficialPrices(
+      officialResetPayload({
+        confirm: true,
+        sync: true
+      })
+    )
+    const payload = apiPayload(response)
+    const stats = payload.stats || {}
+    showSuccess(
+      `官方价格已重置并同步：删除价格项 ${stats.price_items_deleted || 0}，重置模型 ${stats.models_reset || 0}`
+    )
+    showOfficialResetModal.value = false
+    officialResetPreview.value = null
+    emit('refresh')
+  } catch (error) {
+    showError(errorMessage(error, '重置官方价格失败。'))
+  } finally {
+    officialResetExecuting.value = false
+  }
+}
+
+function openManualEntryFromProvider(source) {
   selectedProvider.value = null
-  selectedSource.value = source
+  priceEntrySource.value = source
+}
+
+function editSourceFromProvider(source) {
+  selectedProvider.value = null
+  editingSource.value = source
 }
 
 async function toggleSource(source) {
@@ -906,9 +1160,6 @@ async function deleteSource(source) {
   deletingSourceId.value = source.id
   try {
     await llmOpsApi.deleteCollectionSource(source.id)
-    if (selectedSource.value?.id === source.id) {
-      selectedSource.value = null
-    }
     showSuccess(t('llmOps.providerManagement.messages.deleted'))
     emit('refresh')
   } catch (error) {
@@ -1309,6 +1560,10 @@ function apiPayload(response) {
   @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
 }
 
+.btn-danger {
+  @apply inline-flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:border-rose-200 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60;
+}
+
 .link-btn {
   @apply text-sm font-medium text-indigo-600 hover:text-indigo-700;
 }
@@ -1367,5 +1622,69 @@ function apiPayload(response) {
 
 .source-badge.unknown {
   @apply border-slate-200 bg-slate-100 text-slate-600;
+}
+
+.reset-modal {
+  @apply flex max-h-[calc(100vh-3rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl;
+}
+
+.modal-header {
+  @apply flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4;
+}
+
+.modal-eyebrow {
+  @apply text-xs font-semibold uppercase tracking-[0.18em] text-rose-600;
+}
+
+.modal-title {
+  @apply mt-1 text-lg font-semibold text-slate-900;
+}
+
+.modal-desc {
+  @apply mt-1 text-sm leading-6 text-slate-500;
+}
+
+.reset-modal-body {
+  @apply space-y-4 overflow-y-auto px-5 py-4;
+}
+
+.reset-preview-grid {
+  @apply grid gap-2 sm:grid-cols-2 lg:grid-cols-4;
+}
+
+.reset-preview-item {
+  @apply rounded-lg border border-slate-200 bg-slate-50 px-3 py-2;
+}
+
+.reset-preview-item span {
+  @apply block text-xs text-slate-500;
+}
+
+.reset-preview-item strong {
+  @apply mt-1 block font-mono text-sm text-slate-900;
+}
+
+.reset-empty {
+  @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-500;
+}
+
+.reset-legacy-list {
+  @apply rounded-lg border border-amber-100 bg-amber-50 px-3 py-3;
+}
+
+.reset-legacy-list p {
+  @apply text-xs font-semibold text-amber-800;
+}
+
+.reset-legacy-list div {
+  @apply mt-2 flex max-h-32 flex-wrap gap-1.5 overflow-y-auto;
+}
+
+.reset-legacy-list span {
+  @apply rounded border border-amber-200 bg-white px-1.5 py-1 font-mono text-[11px] text-amber-800;
+}
+
+.modal-footer {
+  @apply flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4;
 }
 </style>

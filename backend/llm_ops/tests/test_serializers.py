@@ -13,6 +13,7 @@ from llm_ops.models import (
 )
 from llm_ops.serializers import (
     LLMModelSerializer,
+    ManualPriceImportRequestSerializer,
     ModelPriceItemSerializer,
     PriceCollectionSourceSerializer,
     ProcurementChannelSerializer,
@@ -257,6 +258,64 @@ class UsageReconciliationRecordSerializerTests(TestCase):
 
 
 class PriceCollectionSourceSerializerTests(TestCase):
+    def test_create_generates_unique_slug_when_requested_slug_exists(self):
+        PriceCollectionSource.objects.create(
+            name="已有价格源",
+            slug="price-source",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+        )
+        serializer = PriceCollectionSourceSerializer(
+            data={
+                "name": "测试价格源",
+                "slug": "price-source",
+                "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                "source_category": (
+                    PriceCollectionSource.SOURCE_CATEGORY_MANUAL
+                ),
+                "currency": "CNY",
+                "is_enabled": True,
+                "updates_model_prices": False,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        source = serializer.save()
+        self.assertEqual(source.slug, "price-source-2")
+
+    def test_create_generates_slug_for_chinese_name(self):
+        serializer = PriceCollectionSourceSerializer(
+            data={
+                "name": "人工录入价格源",
+                "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                "source_category": (
+                    PriceCollectionSource.SOURCE_CATEGORY_MANUAL
+                ),
+                "currency": "CNY",
+                "is_enabled": True,
+                "updates_model_prices": False,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        source = serializer.save()
+        self.assertEqual(source.slug, "manual-source")
+
+    def test_partial_update_without_slug_preserves_existing_slug(self):
+        source = PriceCollectionSource.objects.create(
+            name="已有价格源",
+            slug="price-source",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+        )
+        serializer = PriceCollectionSourceSerializer(
+            source,
+            data={"name": "改名价格源"},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        updated = serializer.save()
+        self.assertEqual(updated.slug, "price-source")
+
     def test_official_catalog_with_third_party_model_is_cloud_provider(self):
         aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
         deepseek = LLMProvider.objects.create(
@@ -329,6 +388,104 @@ class LLMModelSerializerTests(TestCase):
         self.assertEqual(data["meta_model_vendor"], deepseek.id)
         self.assertEqual(data["meta_model_vendor_name"], "DeepSeek")
         self.assertEqual(data["meta_model_vendor_code"], "deepseek")
+
+
+class ManualPriceImportRequestSerializerTests(TestCase):
+    def test_accepts_model_provider_different_from_source_provider(self):
+        source_provider = LLMProvider.objects.create(
+            name="Alibaba Cloud",
+            code="aliyun",
+        )
+        model_provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Manual Sheet",
+            slug="aliyun-manual-sheet",
+            provider=source_provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+            currency="CNY",
+        )
+
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "source": source.id,
+                "provider": model_provider.id,
+                "rows": [
+                    {
+                        "model_code": "deepseek-r1",
+                        "model_name": "DeepSeek R1",
+                        "input_price_per_million": "4.000000",
+                    }
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertEqual(
+            serializer.validated_data["provider"],
+            model_provider,
+        )
+        self.assertFalse(serializer.validated_data["updates_model_prices"])
+
+    def test_new_manual_source_import_never_promotes_model_prices(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "provider": provider.id,
+                "source_name": "Manual Sheet",
+                "source_slug": "manual-sheet",
+                "currency": "CNY",
+                "updates_model_prices": True,
+                "rows": [
+                    {
+                        "model_code": "deepseek-r1",
+                        "model_name": "DeepSeek R1",
+                        "input_price_per_million": "4.000000",
+                    }
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertFalse(serializer.validated_data["updates_model_prices"])
+
+    def test_existing_official_source_manual_import_never_promotes_prices(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            updates_model_prices=True,
+        )
+
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "source": source.id,
+                "provider": provider.id,
+                "currency": "USD",
+                "updates_model_prices": True,
+                "rows": [
+                    {
+                        "model_code": "gpt-4o-mini",
+                        "model_name": "GPT-4o mini",
+                        "input_price_per_million": "0.150000",
+                    }
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertFalse(serializer.validated_data["updates_model_prices"])
 
 
 class ModelPriceItemSerializerTests(TestCase):

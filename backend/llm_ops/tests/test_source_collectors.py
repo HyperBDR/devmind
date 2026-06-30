@@ -2,20 +2,23 @@ from unittest import mock
 
 from django.test import TestCase
 
+from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
 from llm_ops.models import LLMProvider, PriceCollectionSource
 from llm_ops.source_collectors import (
     collect_price_source,
     get_price_source_collector,
     source_supports_code_collection,
 )
-from llm_ops.source_collectors.official import OFFICIAL_COLLECTOR_CLASSES
+from llm_ops.source_collectors.official import (
+    SUPPORTED_OFFICIAL_PROVIDER_CODES,
+)
 
 
 class PriceSourceCollectorRegistryTests(TestCase):
     def test_all_official_configs_have_registered_collectors(self):
         self.assertEqual(
-            {"aliyun", "aliyun-wanx", "baidu", "volcengine"},
-            set(OFFICIAL_COLLECTOR_CLASSES),
+            set(OFFICIAL_PROVIDER_CONFIGS),
+            set(SUPPORTED_OFFICIAL_PROVIDER_CODES),
         )
 
     def test_official_provider_source_dispatches_to_provider_collector(self):
@@ -61,7 +64,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
         )
         self.assertEqual(result, {"models": 1})
 
-    def test_non_aliyun_official_provider_source_is_not_supported(self):
+    def test_generic_official_provider_source_dispatches_to_collector(self):
         provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
         source = PriceCollectionSource.objects.create(
             name="DeepSeek Official",
@@ -80,8 +83,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
 
         collector = get_price_source_collector(source)
 
-        self.assertIsNone(collector)
-        self.assertFalse(source_supports_code_collection(source))
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "official_provider:deepseek")
+        self.assertTrue(source_supports_code_collection(source))
 
     def test_baidu_official_provider_source_dispatches_to_collector(self):
         provider = LLMProvider.objects.create(name="百度", code="baidu")

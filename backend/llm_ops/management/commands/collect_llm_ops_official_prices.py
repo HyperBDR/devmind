@@ -9,7 +9,7 @@ from llm_ops.collection_services import (
 class Command(BaseCommand):
     """Collect official LLM provider prices into LLM Ops tables."""
 
-    help = "Collect official provider pricing for configured LLM Ops models."
+    help = "Collect official provider pricing for explicit providers."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -26,8 +26,18 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        providers = options.get("providers")
+        if not providers:
+            self.stdout.write(
+                self.style.WARNING(
+                    "No provider selected. Pass --provider to collect "
+                    "one or more official providers."
+                )
+            )
+            return
+
         results = sync_configured_official_model_prices(
-            provider_codes=options.get("providers"),
+            provider_codes=providers,
             verify_source=not options.get("skip_source_check"),
         )
         if not results:
