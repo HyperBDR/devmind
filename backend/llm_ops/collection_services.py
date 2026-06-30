@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import re
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.utils import timezone
@@ -22,8 +22,8 @@ from .constants import canonical_meta_model_identity
 from .models import (
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
-    LLMOpsGlobalConfig,
     LLMModel,
+    LLMOpsGlobalConfig,
     LLMProvider,
     MetaModel,
     ModelPriceItem,
@@ -114,6 +114,7 @@ def source_owner_type_for_provider(provider: LLMProvider) -> str:
     if str(provider.code or "").lower() in CLOUD_PROVIDER_OFFICIAL_CODES:
         return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+
 
 CACHE_INPUT_PRICE_KEYS = (
     "cache_input_price",
@@ -592,8 +593,8 @@ def sync_configured_official_model_prices(
     verify_source: bool = True,
 ) -> dict[str, dict[str, int | str | list[str]]]:
     """Collect official prices for configured supported providers."""
-    selected_provider_codes = (
-        provider_codes or list(DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    selected_provider_codes = provider_codes or list(
+        DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES
     )
     selected_provider_codes = [
         code
@@ -730,10 +731,11 @@ def reset_official_price_catalog(
     dry_run: bool = False,
 ) -> dict[str, int | list[str]]:
     """Clear official price data while preserving provider-level sources."""
-    codes = tuple(provider_codes or SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    codes = tuple(
+        provider_codes or SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES
+    )
     provider_source_slugs = {
-        official_provider_source_slug(provider_code)
-        for provider_code in codes
+        official_provider_source_slug(provider_code) for provider_code in codes
     }
     matched_sources = [
         source
@@ -767,20 +769,24 @@ def reset_official_price_catalog(
         if source.slug not in provider_source_slugs
     ]
     legacy_sources = [
-        source
-        for source in matched_sources
-        if source.id in legacy_source_ids
+        source for source in matched_sources if source.id in legacy_source_ids
     ]
     legacy_source_slugs = sorted(
         source.slug
         for source in matched_sources
         if source.id in legacy_source_ids
     )
+    legacy_models_deduplicated = count_legacy_model_source_collisions(
+        legacy_sources=legacy_sources,
+        provider_source_ids=provider_source_ids,
+        provider_sources_by_provider_id=provider_sources_by_provider_id,
+    )
 
     stats: dict[str, int | list[str]] = {
         "sources_matched": len(source_ids),
         "provider_sources_kept": len(provider_source_ids),
         "legacy_sources_deleted": len(legacy_source_ids),
+        "legacy_models_deduplicated": legacy_models_deduplicated,
         "models_reset": LLMModel.objects.filter(
             source_id__in=source_ids,
         ).count(),
@@ -837,15 +843,82 @@ def reset_official_price_catalog(
                     updated_at=now,
                 )
                 continue
-            queryset.update(
-                source_id=provider_source.id,
-                source_url=provider_source.endpoint_url or "",
-                updated_at=now,
+            migrate_legacy_models_to_provider_source(
+                queryset=queryset,
+                provider_source=provider_source,
+                now=now,
             )
         prune_global_config_price_sources(legacy_source_ids)
         PriceCollectionSource.objects.filter(id__in=legacy_source_ids).delete()
 
     return stats
+
+
+def count_legacy_model_source_collisions(
+    *,
+    legacy_sources: list[PriceCollectionSource],
+    provider_source_ids: list[int],
+    provider_sources_by_provider_id: dict[int, PriceCollectionSource],
+) -> int:
+    """Count legacy model rows that would collide on provider source move."""
+    if not legacy_sources:
+        return 0
+
+    target_keys = set(
+        LLMModel.objects.filter(source_id__in=provider_source_ids).values_list(
+            "provider_id", "source_id", "code"
+        )
+    )
+    collisions = 0
+    for legacy_source in legacy_sources:
+        provider_source = provider_sources_by_provider_id.get(
+            legacy_source.provider_id
+        )
+        if provider_source is None:
+            continue
+        legacy_models = LLMModel.objects.filter(
+            source=legacy_source,
+        ).values_list("provider_id", "code")
+        for provider_id, code in legacy_models:
+            key = (provider_id, provider_source.id, code)
+            if key in target_keys:
+                collisions += 1
+                continue
+            target_keys.add(key)
+    return collisions
+
+
+def migrate_legacy_models_to_provider_source(
+    *,
+    queryset,
+    provider_source: PriceCollectionSource,
+    now,
+) -> None:
+    """Move legacy official models without violating provider/source/code."""
+    source_url = provider_source.endpoint_url or ""
+    for model in queryset.order_by("id").only("id", "provider_id", "code"):
+        duplicate_exists = (
+            LLMModel.objects.filter(
+                provider_id=model.provider_id,
+                source_id=provider_source.id,
+                code=model.code,
+            )
+            .exclude(id=model.id)
+            .exists()
+        )
+        if duplicate_exists:
+            LLMModel.objects.filter(id=model.id).update(
+                source=None,
+                source_url="",
+                price_role=LLMModel.PRICE_ROLE_UNKNOWN,
+                updated_at=now,
+            )
+            continue
+        LLMModel.objects.filter(id=model.id).update(
+            source_id=provider_source.id,
+            source_url=source_url,
+            updated_at=now,
+        )
 
 
 def official_source_matches_provider_codes(
@@ -881,7 +954,9 @@ def official_source_matches_provider_codes(
         )
     )
     for model_code in model_codes:
-        if source.slug == official_model_source_slug(provider_code, model_code):
+        if source.slug == official_model_source_slug(
+            provider_code, model_code
+        ):
             return True
     return False
 
@@ -895,14 +970,14 @@ def prune_global_config_price_sources(source_ids: list[int]) -> int:
     for config in LLMOpsGlobalConfig.objects.all():
         raw_ids = list(config.price_collection_source_ids or [])
         kept_ids = [
-            source_id
-            for source_id in raw_ids
-            if str(source_id) not in deleted
+            source_id for source_id in raw_ids if str(source_id) not in deleted
         ]
         if kept_ids == raw_ids:
             continue
         config.price_collection_source_ids = kept_ids
-        config.save(update_fields=["price_collection_source_ids", "updated_at"])
+        config.save(
+            update_fields=["price_collection_source_ids", "updated_at"]
+        )
         changed += 1
     return changed
 
@@ -939,10 +1014,7 @@ def ensure_official_model_source(
             "currency": currency or "USD",
             "is_enabled": True,
             "updates_model_prices": True,
-            "notes": (
-                "官方公开价格采集源；"
-                "该来源只对应一个模型。"
-            ),
+            "notes": ("官方公开价格采集源；" "该来源只对应一个模型。"),
         },
     )
     if created:
@@ -963,9 +1035,7 @@ def ensure_official_model_source(
         ),
         "currency": currency or source.currency or "USD",
         "updates_model_prices": True,
-        "notes": (
-            "官方公开价格采集源；该来源只对应一个模型。"
-        ),
+        "notes": ("官方公开价格采集源；该来源只对应一个模型。"),
     }
     if not source.endpoint_url:
         desired_fields["endpoint_url"] = source_url
@@ -1201,9 +1271,11 @@ def update_meta_model_numbers(
 def merge_meta_model_json(meta_model: MetaModel, defaults: dict) -> list[str]:
     """Merge aliases, capabilities and source metadata."""
     changed_fields = []
-    aliases = list(dict.fromkeys(
-        list(meta_model.aliases or []) + list(defaults["aliases"])
-    ))
+    aliases = list(
+        dict.fromkeys(
+            list(meta_model.aliases or []) + list(defaults["aliases"])
+        )
+    )
     if aliases != (meta_model.aliases or []):
         meta_model.aliases = aliases
         changed_fields.append("aliases")
@@ -1267,7 +1339,7 @@ def models_dev_limit(model_payload: dict, key: str) -> int:
     """Return an integer token limit from models.dev."""
     try:
         return int((model_payload.get("limit") or {}).get(key) or 0)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0
 
 
@@ -1577,10 +1649,7 @@ def upsert_collected_snapshot(
         source=source,
         source_platform_id=str(item.platform_id),
     ).first()
-    changed = (
-        existing is None
-        or existing.price_fingerprint != fingerprint
-    )
+    changed = existing is None or existing.price_fingerprint != fingerprint
     if changed:
         create_collected_price_history(
             payload,
@@ -1819,15 +1888,19 @@ def price_item_payloads_from_row(
         spec = {}
         if values.get("image_size"):
             spec["size"] = values.get("image_size")
-        return [
-            price_item_payload(
-                common,
-                dimension=ModelPriceItem.DIMENSION_IMAGE_OUTPUT,
-                billing_unit=ModelPriceItem.UNIT_PER_IMAGE,
-                unit_price=price,
-                spec=spec,
-            )
-        ] if price is not None else []
+        return (
+            [
+                price_item_payload(
+                    common,
+                    dimension=ModelPriceItem.DIMENSION_IMAGE_OUTPUT,
+                    billing_unit=ModelPriceItem.UNIT_PER_IMAGE,
+                    unit_price=price,
+                    spec=spec,
+                )
+            ]
+            if price is not None
+            else []
+        )
     if row.kind == "video_resolution_input":
         return video_resolution_input_payloads(values, common)
     if row.kind == "video_resolution_output":
@@ -1836,14 +1909,18 @@ def price_item_payloads_from_row(
         return video_inference_payloads(values, common)
     if row.kind == "video_unit":
         price = first_decimal_from_row(values, "unit_price", "price")
-        return [
-            price_item_payload(
-                common,
-                dimension=ModelPriceItem.DIMENSION_VIDEO_OUTPUT,
-                billing_unit=ModelPriceItem.UNIT_PER_SECOND,
-                unit_price=price,
-            )
-        ] if price is not None else []
+        return (
+            [
+                price_item_payload(
+                    common,
+                    dimension=ModelPriceItem.DIMENSION_VIDEO_OUTPUT,
+                    billing_unit=ModelPriceItem.UNIT_PER_SECOND,
+                    unit_price=price,
+                )
+            ]
+            if price is not None
+            else []
+        )
     return []
 
 
@@ -2140,12 +2217,8 @@ def model_defaults_from_collected_item(
         "cache_input_price_per_million": prices[
             "cache_input_price_per_million"
         ],
-        "image_output_price_per_image": prices[
-            "image_output_price_per_image"
-        ],
-        "video_input_price_per_second": prices[
-            "video_input_price_per_second"
-        ],
+        "image_output_price_per_image": prices["image_output_price_per_image"],
+        "video_input_price_per_second": prices["video_input_price_per_second"],
         "video_output_price_per_second": prices[
             "video_output_price_per_second"
         ],
@@ -2277,8 +2350,7 @@ def ensure_official_source(*, provider: LLMProvider):
             "is_enabled": True,
             "updates_model_prices": True,
             "notes": (
-                "官方公开价格采集源；价格按官方币种入库，"
-                "不做跨币种换算。"
+                "官方公开价格采集源；价格按官方币种入库，" "不做跨币种换算。"
             ),
         },
     )
@@ -2300,8 +2372,7 @@ def ensure_official_source(*, provider: LLMProvider):
         "currency": config.currency,
         "updates_model_prices": True,
         "notes": (
-            "官方公开价格采集源；价格按官方币种入库，"
-            "不做跨币种换算。"
+            "官方公开价格采集源；价格按官方币种入库，" "不做跨币种换算。"
         ),
     }
     if not source.endpoint_url or is_legacy_aliyun_pricing_url(
@@ -2438,8 +2509,7 @@ def first_decimal_from_row(
 ) -> Decimal | None:
     """Return the first decimal value from a row dictionary."""
     normalized_values = {
-        normalize_price_key(key): value
-        for key, value in values.items()
+        normalize_price_key(key): value for key, value in values.items()
     }
     for key in keys:
         value = to_decimal(values.get(key))
@@ -2477,7 +2547,7 @@ def to_decimal(value) -> Decimal | None:
         return None
     try:
         return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
+    except InvalidOperation, TypeError, ValueError:
         return None
 
 

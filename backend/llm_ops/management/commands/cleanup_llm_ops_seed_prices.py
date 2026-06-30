@@ -1,4 +1,5 @@
 """Clean legacy LLM Ops seed and unintended official provider data."""
+
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
@@ -9,6 +10,8 @@ from llm_ops.catalog_maintenance import (
     LEGACY_TEST_SOURCE_SLUGS,
     TREND_DEMO_SOURCE_SLUGS,
     UNCONFIRMED_PRICE_SOURCE_SLUGS,
+    meta_model_has_business_links,
+    model_ids_with_business_links,
 )
 from llm_ops.collection_services import prune_global_config_price_sources
 from llm_ops.models import (
@@ -24,7 +27,6 @@ from llm_ops.models import (
     PriceCollectionSource,
     ResaleListing,
 )
-
 
 DEFAULT_PROVIDER_CODES = ("aliyun-wanx", "baidu")
 
@@ -87,6 +89,8 @@ class Command(BaseCommand):
                 f"providers={stats['providers']}, "
                 f"sources={stats['sources']}, "
                 f"models={stats['models']}, "
+                f"models_deleted={stats['models_deleted']}, "
+                f"models_detached={stats['models_detached']}, "
                 f"model_price_items={stats['model_price_items']}, "
                 f"snapshots={stats['snapshots']}, "
                 f"history={stats['history']}, "
@@ -117,7 +121,9 @@ def normalize_provider_codes(values) -> tuple[str, ...]:
     return tuple(codes)
 
 
-def build_cleanup_plan(provider_codes: tuple[str, ...]) -> dict[str, list[int]]:
+def build_cleanup_plan(
+    provider_codes: tuple[str, ...],
+) -> dict[str, list[int]]:
     """Collect row ids that belong to unwanted provider data."""
     provider_scope_ids = list(
         LLMProvider.objects.filter(code__in=provider_codes)
@@ -214,10 +220,13 @@ def plan_stats(plan: dict[str, list[int]]) -> dict[str, int]:
     source_ids = plan["source_ids"]
     model_ids = plan["model_ids"]
     provider_ids = plan["provider_ids"]
+    linked_model_ids = model_ids_with_business_links(model_ids)
     return {
         "providers": len(provider_ids),
         "sources": len(source_ids),
         "models": len(model_ids),
+        "models_deleted": len(model_ids) - len(linked_model_ids),
+        "models_detached": len(linked_model_ids),
         "model_price_items": ModelPriceItem.objects.filter(
             Q(model_id__in=model_ids) | Q(source_id__in=source_ids)
         ).count(),
@@ -243,31 +252,66 @@ def plan_stats(plan: dict[str, list[int]]) -> dict[str, int]:
 def execute_cleanup(plan: dict[str, list[int]]) -> dict[str, int]:
     """Delete planned rows and prune now-unreferenced meta models."""
     stats = {}
+    model_ids = plan["model_ids"]
+    linked_model_ids = model_ids_with_business_links(model_ids)
+    deletable_model_ids = [
+        model_id for model_id in model_ids if model_id not in linked_model_ids
+    ]
     with transaction.atomic():
         PriceCollectionRun.objects.filter(id__in=plan["run_ids"]).delete()
         CollectedModelPriceSnapshot.objects.filter(
-            cleanup_relation_query(plan),
+            cleanup_relation_query(plan, deletable_model_ids),
         ).delete()
         CollectedModelPriceHistory.objects.filter(
-            cleanup_relation_query(plan),
+            cleanup_relation_query(plan, deletable_model_ids),
         ).delete()
-        ModelPriceItem.objects.filter(cleanup_relation_query(plan)).delete()
-        LLMModel.objects.filter(id__in=plan["model_ids"]).delete()
+        ModelPriceItem.objects.filter(
+            cleanup_relation_query(plan, deletable_model_ids),
+        ).delete()
+        LLMModel.objects.filter(id__in=deletable_model_ids).delete()
+        detach_count = detach_cleanup_models(linked_model_ids)
         prune_count = prune_global_config_price_sources(plan["source_ids"])
         PriceCollectionSource.objects.filter(
             id__in=plan["source_ids"],
         ).delete()
         orphan_count = delete_orphan_meta_models(plan["meta_model_ids"])
+        stats["models_deleted"] = len(deletable_model_ids)
+        stats["models_detached"] = detach_count
         stats["global_configs_pruned"] = prune_count
         stats["orphan_meta_models_deleted"] = orphan_count
     return stats
 
 
-def cleanup_relation_query(plan: dict[str, list[int]]) -> Q:
+def cleanup_relation_query(
+    plan: dict[str, list[int]],
+    deletable_model_ids: list[int] | None = None,
+) -> Q:
     """Return relation filters shared by cleanup-owned rows."""
-    return (
-        Q(source_id__in=plan["source_ids"])
-        | Q(model_id__in=plan["model_ids"])
+    if deletable_model_ids is None:
+        model_ids = plan["model_ids"]
+    else:
+        model_ids = deletable_model_ids
+    return Q(source_id__in=plan["source_ids"]) | Q(model_id__in=model_ids)
+
+
+def detach_cleanup_models(model_ids: set[int]) -> int:
+    """Detach legacy cleanup models that have downstream business rows."""
+    if not model_ids:
+        return 0
+    return LLMModel.objects.filter(id__in=model_ids).update(
+        source=None,
+        source_url="",
+        price_role=LLMModel.PRICE_ROLE_UNKNOWN,
+        input_price_per_million=0,
+        output_price_per_million=0,
+        cache_input_price_per_million=None,
+        image_output_price_per_image=None,
+        audio_input_price_per_second=None,
+        audio_output_price_per_second=None,
+        video_input_price_per_second=None,
+        video_output_price_per_second=None,
+        video_resolution_prices={},
+        last_price_updated_at=None,
     )
 
 
@@ -280,15 +324,3 @@ def delete_orphan_meta_models(meta_model_ids: list[int]) -> int:
         meta_model.delete()
         deleted += 1
     return deleted
-
-
-def meta_model_has_business_links(meta_model: MetaModel) -> bool:
-    """Return whether a meta model is still referenced by another table."""
-    for relation in MetaModel._meta.related_objects:
-        if relation.related_model is MetaModel:
-            continue
-        if relation.related_model.objects.filter(
-            **{relation.field.name: meta_model},
-        ).exists():
-            return True
-    return False

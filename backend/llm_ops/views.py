@@ -1,6 +1,5 @@
 from decimal import Decimal
 
-from accounts.permissions import HasRequiredFeature
 from django.db import transaction
 from django.db.models import Count, IntegerField, Q, Value
 from django.utils.text import slugify
@@ -9,6 +8,8 @@ from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
+
+from accounts.permissions import HasRequiredFeature
 
 from .audit import record_audit_log, snapshot_instance
 from .collection_services import (
@@ -33,8 +34,8 @@ from .models import (
     ChannelPriceItem,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
-    LLMOpsGlobalConfig,
     LLMModel,
+    LLMOpsGlobalConfig,
     LLMProvider,
     MetaModel,
     ModelPriceItem,
@@ -50,13 +51,13 @@ from .models import (
 )
 from .serializers import (
     AuditLogSerializer,
-    ChannelModelPriceSerializer,
     ChannelModelPriceHistorySerializer,
+    ChannelModelPriceSerializer,
     ChannelPriceItemSerializer,
     CollectedModelPriceHistorySerializer,
     CollectedModelPriceSnapshotSerializer,
-    LLMOpsGlobalConfigSerializer,
     LLMModelSerializer,
+    LLMOpsGlobalConfigSerializer,
     LLMProviderSerializer,
     ManualPriceImportRequestSerializer,
     MetaModelSerializer,
@@ -65,14 +66,13 @@ from .serializers import (
     PriceCollectionSourceSerializer,
     ProcurementChannelSerializer,
     ResaleListingExclusionSerializer,
-    ResaleListingSerializer,
     ResaleListingPriceHistorySerializer,
+    ResaleListingSerializer,
     ResalePlatformSerializer,
     ResaleWorkflowConfigSerializer,
     UsageReconciliationRecordSerializer,
     YunceCollectionRequestSerializer,
 )
-from .source_collectors import source_supports_code_collection
 from .services import (
     build_currency_conversion_context,
     calculate_usage_cost,
@@ -85,12 +85,12 @@ from .services import (
     resolve_resale_listing_currency,
     sync_channel_price_items,
 )
+from .source_collectors import source_supports_code_collection
 from .tasks import collect_price_source_prices, run_model_price_sync_agent
 from .workflow_config import (
     merge_resale_workflow_config,
     validate_resale_workflow_config,
 )
-
 
 FEATURE_KEY = "llm_ops"
 DEFAULT_INPUT_TOKENS = 10_000_000
@@ -213,13 +213,19 @@ class PriceCollectionSourceViewSet(
     serializer_class = PriceCollectionSourceSerializer
 
     def get_queryset(self):
-        return PriceCollectionSource.objects.select_related(
-            "provider",
-            "channel",
-        ).prefetch_related(
-            "models__meta_model",
-            "models__meta_model__vendor",
-        ).order_by("source_category", "provider__name", "channel__name", "id")
+        return (
+            PriceCollectionSource.objects.select_related(
+                "provider",
+                "channel",
+            )
+            .prefetch_related(
+                "models__meta_model",
+                "models__meta_model__vendor",
+            )
+            .order_by(
+                "source_category", "provider__name", "channel__name", "id"
+            )
+        )
 
     @action(
         detail=False,
@@ -286,9 +292,7 @@ class PriceCollectionSourceViewSet(
 
         serializer = self.get_serializer(source)
         response_status = (
-            status.HTTP_201_CREATED
-            if source_created
-            else status.HTTP_200_OK
+            status.HTTP_201_CREATED if source_created else status.HTTP_200_OK
         )
         return Response(
             {
@@ -445,7 +449,8 @@ class PriceCollectionSourceViewSet(
         if request.data.get("sync") is not False:
             sync_results = sync_configured_official_model_prices(
                 provider_codes=provider_codes,
-                verify_source=request.data.get("skip_source_check") is not True,
+                verify_source=request.data.get("skip_source_check")
+                is not True,
             )
 
         record_audit_log(
@@ -484,7 +489,9 @@ def official_reset_provider_codes(data) -> list[str]:
     ]
     if data.get("all") is True:
         if provider_codes:
-            raise ValueError("Use either provider_codes or all=true, not both.")
+            raise ValueError(
+                "Use either provider_codes or all=true, not both."
+            )
         return list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
     if not provider_codes:
         raise ValueError("Select at least one official provider.")
@@ -621,13 +628,10 @@ class PriceCollectionRunViewSet(
         if status_value:
             queryset = queryset.filter(status=status_value)
         if source_category:
-            queryset = queryset.filter(
-                source__source_category=source_category
-            )
+            queryset = queryset.filter(source__source_category=source_category)
         if provider:
-            provider_query = (
-                Q(source__provider__code__icontains=provider)
-                | Q(source__provider__name__icontains=provider)
+            provider_query = Q(source__provider__code__icontains=provider) | Q(
+                source__provider__name__icontains=provider
             )
             if provider.isdigit():
                 provider_query |= Q(source__provider_id=provider)
@@ -712,11 +716,15 @@ class LLMProviderViewSet(
     serializer_class = LLMProviderSerializer
 
     def get_queryset(self):
-        return LLMProvider.objects.annotate(
-            model_count=Count("models"),
-        ).exclude(
-            code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
-        ).order_by("name", "id")
+        return (
+            LLMProvider.objects.annotate(
+                model_count=Count("models"),
+            )
+            .exclude(
+                code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
+            )
+            .order_by("name", "id")
+        )
 
 
 class MetaModelViewSet(
@@ -736,15 +744,37 @@ class MetaModelViewSet(
     serializer_class = MetaModelSerializer
 
     def get_queryset(self):
-        queryset = MetaModel.objects.select_related("vendor").annotate(
-            provider_price_count=Count("provider_prices"),
-        ).exclude(
-            vendor__code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
+        queryset = (
+            MetaModel.objects.select_related("vendor")
+            .annotate(
+                provider_price_count=Count("provider_prices"),
+            )
+            .exclude(
+                vendor__code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
+            )
         )
         vendor = self.request.query_params.get("vendor")
         if vendor:
             queryset = queryset.filter(vendor_id=vendor)
         return queryset.order_by("name", "id")
+
+    def destroy(self, request, *args, **kwargs):
+        """Block deleting canonical models that still have dependencies."""
+        instance = self.get_object()
+        from .catalog_maintenance import meta_model_dependency_counts
+
+        dependencies = meta_model_dependency_counts(instance)
+        if dependencies:
+            return Response(
+                {
+                    "detail": (
+                        "Cannot delete meta model with dependent records."
+                    ),
+                    "dependencies": dependencies,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
     def list(self, request, *args, **kwargs):
         from .catalog_maintenance import (
@@ -808,6 +838,22 @@ class LLMModelViewSet(
         if meta_model:
             queryset = queryset.filter(meta_model_id=meta_model)
         return queryset.order_by("meta_model__name", "provider__name", "id")
+
+    def destroy(self, request, *args, **kwargs):
+        """Block deleting models that still have dependent business rows."""
+        instance = self.get_object()
+        from .catalog_maintenance import model_delete_dependency_counts
+
+        dependencies = model_delete_dependency_counts(instance)
+        if dependencies:
+            return Response(
+                {
+                    "detail": "Cannot delete model with dependent records.",
+                    "dependencies": dependencies,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class ModelPriceItemViewSet(
@@ -1227,9 +1273,7 @@ class ResaleWorkflowConfigViewSet(
 
     def _effective_payload(self, platform, instance):
         saved_config = (
-            instance.config
-            if instance and instance.is_active
-            else None
+            instance.config if instance and instance.is_active else None
         )
         return {
             "id": instance.id if instance else None,
@@ -1691,8 +1735,7 @@ class ResaleListingViewSet(
                 )
             listings = list(queryset)
             before_by_id = {
-                listing.id: snapshot_instance(listing)
-                for listing in listings
+                listing.id: snapshot_instance(listing) for listing in listings
             }
             queryset.update(
                 is_active=False,
@@ -1838,12 +1881,10 @@ class ResaleListingExclusionViewSet(
                     before=before,
                     metadata={"bulk_count": len(model_ids)},
                 )
-            deleted_count, _ = (
-                ResaleListingExclusion.objects.filter(
-                    platform_id=platform_id,
-                    model_id__in=model_ids,
-                ).delete()
-            )
+            deleted_count, _ = ResaleListingExclusion.objects.filter(
+                platform_id=platform_id,
+                model_id__in=model_ids,
+            ).delete()
         return Response(
             {"deleted_count": deleted_count},
             status=status.HTTP_200_OK,
@@ -1922,9 +1963,7 @@ def _listing_submit_status(existing: ResaleListing | None) -> dict:
         ResaleListing.WORKFLOW_UPDATE_DRAFT,
     }
     if existing.workflow_status not in _allowed_submit_workflows:
-        raise ValueError(
-            f"Cannot submit from {existing.workflow_status}."
-        )
+        raise ValueError(f"Cannot submit from {existing.workflow_status}.")
 
     if existing.publish_status == ResaleListing.PUBLISH_ONLINE:
         return {
@@ -1955,9 +1994,7 @@ def _listing_draft_status(existing: ResaleListing | None) -> dict:
         ResaleListing.WORKFLOW_UPDATE_DRAFT,
     }
     if existing.workflow_status not in _allowed_draft_workflows:
-        raise ValueError(
-            f"Cannot save draft from {existing.workflow_status}."
-        )
+        raise ValueError(f"Cannot save draft from {existing.workflow_status}.")
 
     if existing.publish_status == ResaleListing.PUBLISH_ONLINE:
         return {
@@ -1995,39 +2032,90 @@ def _invalid_transition(action_name: str, listing: ResaleListing):
 _RL = ResaleListing
 _LISTING_TRANSITIONS: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("withdraw", _RL.WORKFLOW_PENDING_PUBLISH): (
-        _RL.PUBLISH_NONE, _RL.WORKFLOW_DRAFT, False),
+        _RL.PUBLISH_NONE,
+        _RL.WORKFLOW_DRAFT,
+        False,
+    ),
     ("withdraw", _RL.WORKFLOW_PENDING_UPDATE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_UPDATE_DRAFT, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_UPDATE_DRAFT,
+        True,
+    ),
     ("withdraw", _RL.WORKFLOW_PENDING_OFFLINE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_ONLINE,
+        True,
+    ),
     ("submit", _RL.WORKFLOW_DRAFT): (
-        _RL.PUBLISH_NONE, _RL.WORKFLOW_PENDING_PUBLISH, False),
+        _RL.PUBLISH_NONE,
+        _RL.WORKFLOW_PENDING_PUBLISH,
+        False,
+    ),
     ("submit", _RL.WORKFLOW_UPDATE_DRAFT): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_PENDING_UPDATE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_PENDING_UPDATE,
+        True,
+    ),
     ("confirm_publish", _RL.WORKFLOW_PENDING_PUBLISH): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_ONLINE,
+        True,
+    ),
     ("start_edit", _RL.WORKFLOW_ONLINE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_UPDATE_DRAFT, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_UPDATE_DRAFT,
+        True,
+    ),
     ("abandon_update", _RL.WORKFLOW_UPDATE_DRAFT): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_ONLINE,
+        True,
+    ),
     ("confirm_update", _RL.WORKFLOW_PENDING_UPDATE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_ONLINE,
+        True,
+    ),
     ("request_offline", _RL.WORKFLOW_ONLINE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_PENDING_OFFLINE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_PENDING_OFFLINE,
+        True,
+    ),
     ("confirm_offline", _RL.WORKFLOW_PENDING_OFFLINE): (
-        _RL.PUBLISH_OFFLINE, _RL.WORKFLOW_OFFLINE, False),
+        _RL.PUBLISH_OFFLINE,
+        _RL.WORKFLOW_OFFLINE,
+        False,
+    ),
     ("confirm_offline", _RL.WORKFLOW_OFFLINE_EXCEPTION): (
-        _RL.PUBLISH_OFFLINE, _RL.WORKFLOW_OFFLINE, False),
+        _RL.PUBLISH_OFFLINE,
+        _RL.WORKFLOW_OFFLINE,
+        False,
+    ),
     ("reject_offline", _RL.WORKFLOW_PENDING_OFFLINE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_ONLINE, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_ONLINE,
+        True,
+    ),
     ("mark_offline_exception", _RL.WORKFLOW_PENDING_OFFLINE): (
-        _RL.PUBLISH_ONLINE, _RL.WORKFLOW_OFFLINE_EXCEPTION, True),
+        _RL.PUBLISH_ONLINE,
+        _RL.WORKFLOW_OFFLINE_EXCEPTION,
+        True,
+    ),
     ("republish", _RL.WORKFLOW_OFFLINE): (
-        _RL.PUBLISH_NONE, _RL.WORKFLOW_PENDING_PUBLISH, False),
+        _RL.PUBLISH_NONE,
+        _RL.WORKFLOW_PENDING_PUBLISH,
+        False,
+    ),
     ("delete", _RL.WORKFLOW_DRAFT): (
-        _RL.PUBLISH_DELETED, _RL.WORKFLOW_DELETED, False),
+        _RL.PUBLISH_DELETED,
+        _RL.WORKFLOW_DELETED,
+        False,
+    ),
     ("delete", _RL.WORKFLOW_OFFLINE): (
-        _RL.PUBLISH_DELETED, _RL.WORKFLOW_DELETED, False),
+        _RL.PUBLISH_DELETED,
+        _RL.WORKFLOW_DELETED,
+        False,
+    ),
 }
 
 
@@ -2142,10 +2230,7 @@ def _selected_resale_platform(value: str | None):
         selected = queryset.filter(code=value).first()
         if selected:
             return selected
-    return (
-        queryset.filter(code="agione").first()
-        or queryset.first()
-    )
+    return queryset.filter(code="agione").first() or queryset.first()
 
 
 def _point_conversion_payload(platform: ResalePlatform | None):
@@ -2407,8 +2492,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 )
             )
             requires_currency_conversion = any(
-                item.get("requires_currency_conversion")
-                for item in options
+                item.get("requires_currency_conversion") for item in options
             )
             best = _select_best_option(options) if options else None
             procurement_rows.append(
@@ -2569,9 +2653,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "model_name": listing.model.name,
                     "model_code": listing.model.code,
                     "channel_id": listing.channel_id,
-                    "channel_name": (
-                        channel.name if channel else "自动最优"
-                    ),
+                    "channel_name": (channel.name if channel else "自动最优"),
                     "currency": (
                         currency_context.display_currency
                         if not requires_currency_conversion
