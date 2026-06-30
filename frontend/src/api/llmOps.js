@@ -51,6 +51,20 @@ export const llmOpsApi = {
     return apiClient.post(`${base}/collection-sources/sync-all/`)
   },
 
+  previewOfficialPriceReset(payload) {
+    return apiClient.post(
+      `${base}/collection-sources/reset-official-prices-preview/`,
+      payload
+    )
+  },
+
+  resetOfficialPrices(payload) {
+    return apiClient.post(
+      `${base}/collection-sources/reset-official-prices/`,
+      payload
+    )
+  },
+
   getGlobalConfig() {
     return apiClient.get(`${base}/global-config/`)
   },

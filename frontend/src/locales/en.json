@@ -1657,11 +1657,12 @@
         "priceHint": "Fill prices by supported billing dimension. Empty dimensions will not create price items."
       },
       "modelMode": {
-        "custom": "Create custom model",
+        "custom": "Select meta model",
         "existing": "Select existing model"
       },
       "fields": {
         "currency": "Currency",
+        "metaModel": "Meta model",
         "model": "Model",
         "modelCode": "Model code",
         "modelName": "Model name",
@@ -1672,13 +1673,16 @@
       "placeholders": {
         "modelCode": "Example: deepseek-v3",
         "modelName": "Example: DeepSeek V3",
+        "searchMetaModel": "Search meta model name, code, or provider",
         "searchModel": "Search model name, code, or provider",
         "searchProvider": "Search model provider",
+        "selectMetaModel": "Select meta model",
         "selectProvider": "Select model provider",
         "sourceUrl": "Optional, pricing page or quote URL"
       },
       "help": {
-        "existingModel": "Choose from existing system models. Provider and type will be filled automatically."
+        "existingModel": "Choose from existing system models. Provider and type will be filled automatically.",
+        "metaModel": "Choose from the standard meta-model catalog. Saving will create or reuse the corresponding model."
       },
       "actions": {
         "cancel": "Cancel",
@@ -1747,7 +1751,8 @@
         "customModelProvider": "Select the model provider for the custom model.",
         "noSource": "Missing price source.",
         "price": "Enter at least one price dimension.",
-        "selectExistingModel": "Select an existing model."
+        "selectExistingModel": "Select an existing model.",
+        "selectMetaModel": "Select a meta model."
       },
       "groups": {
         "currentProvider": "Current price source provider",

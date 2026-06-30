@@ -95,7 +95,7 @@
             </label>
             <div class="readonly-field">
               <span>{{ t('llmOps.manualPriceEntry.fields.provider') }}</span>
-              <strong>{{ selectedModel?.provider_name || '-' }}</strong>
+              <strong>{{ selectedModelProviderName }}</strong>
             </div>
             <div class="readonly-field">
               <span>{{ t('llmOps.manualPriceEntry.fields.modality') }}</span>
@@ -104,52 +104,37 @@
           </div>
 
           <div v-else class="grid gap-4 md:grid-cols-2">
-            <label class="field-group">
+            <label class="field-group md:col-span-2">
               <span class="field-label">
-                {{ t('llmOps.manualPriceEntry.fields.modelName') }}
-              </span>
-              <input
-                v-model="form.custom_model_name"
-                class="field"
-                :placeholder="
-                  t('llmOps.manualPriceEntry.placeholders.modelName')
-                "
-              />
-            </label>
-            <label class="field-group">
-              <span class="field-label">
-                {{ t('llmOps.manualPriceEntry.fields.modelCode') }}
-              </span>
-              <input
-                v-model="form.custom_model_code"
-                class="field"
-                :placeholder="
-                  t('llmOps.manualPriceEntry.placeholders.modelCode')
-                "
-              />
-            </label>
-            <label class="field-group">
-              <span class="field-label">
-                {{ t('llmOps.manualPriceEntry.fields.provider') }}
+                {{ t('llmOps.manualPriceEntry.fields.metaModel') }}
               </span>
               <CompactSelect
-                v-model="form.provider"
-                :options="providerOptions"
+                v-model="form.meta_model_id"
+                :options="metaModelOptions"
+                :placeholder="
+                  t('llmOps.manualPriceEntry.placeholders.selectMetaModel')
+                "
                 searchable
                 :search-placeholder="
-                  t('llmOps.manualPriceEntry.placeholders.searchProvider')
+                  t('llmOps.manualPriceEntry.placeholders.searchMetaModel')
                 "
               />
+              <span class="field-help">
+                {{ t('llmOps.manualPriceEntry.help.metaModel') }}
+              </span>
             </label>
-            <label class="field-group">
-              <span class="field-label">
+            <div class="readonly-field">
+              <span>
+                {{ t('llmOps.manualPriceEntry.fields.provider') }}
+              </span>
+              <strong>{{ selectedMetaProvider?.name || '-' }}</strong>
+            </div>
+            <div class="readonly-field">
+              <span>
                 {{ t('llmOps.manualPriceEntry.fields.modality') }}
               </span>
-              <CompactSelect
-                v-model="form.modality"
-                :options="modalityOptions"
-              />
-            </label>
+              <strong>{{ modalityLabel(selectedMetaModel?.modality) }}</strong>
+            </div>
           </div>
         </section>
 
@@ -244,6 +229,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
   open: {
@@ -255,6 +241,10 @@ const props = defineProps({
     default: null
   },
   providers: {
+    type: Array,
+    default: () => []
+  },
+  metaModels: {
     type: Array,
     default: () => []
   },
@@ -323,58 +313,59 @@ const priceFields = computed(() => [
   }
 ])
 
-const modalityOptions = computed(() => [
-  { label: t('llmOps.manualPriceEntry.modalities.text'), value: 'text' },
-  {
-    label: t('llmOps.manualPriceEntry.modalities.multimodal'),
-    value: 'multimodal'
-  },
-  { label: t('llmOps.manualPriceEntry.modalities.audio'), value: 'audio' },
-  { label: t('llmOps.manualPriceEntry.modalities.video'), value: 'video' }
-])
-
 const currencyOptions = computed(() => [
   { label: t('llmOps.manualPriceEntry.currencies.cny'), value: 'CNY' },
   { label: t('llmOps.manualPriceEntry.currencies.usd'), value: 'USD' }
 ])
 
-const providerOptions = computed(() => [
-  {
-    label: t('llmOps.manualPriceEntry.placeholders.selectProvider'),
-    value: ''
-  },
-  ...props.providers
-    .slice()
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((provider) => ({
-      label: provider.name,
-      value: provider.id,
-      description: provider.code
-    }))
-])
-
 const modelOptions = computed(() => buildModelOptions())
+const metaModelOptions = computed(() => buildMetaModelOptions())
 
 const selectedModel = computed(() =>
   props.models.find((model) => String(model.id) === String(form.value.model_id))
 )
 
+const selectedModelProviderName = computed(() => {
+  if (!selectedModel.value) return '-'
+  const vendor = resolveCanonicalMetaVendor(
+    selectedModel.value,
+    props.providers
+  )
+  return (
+    vendor.name ||
+    selectedModel.value.meta_model_vendor_name ||
+    selectedModel.value.provider_name ||
+    '-'
+  )
+})
+
+const selectedMetaModel = computed(() =>
+  props.metaModels.find(
+    (model) => String(model.id) === String(form.value.meta_model_id)
+  )
+)
+
+const selectedMetaProvider = computed(() => {
+  if (!selectedMetaModel.value) return null
+  const vendor = resolveCanonicalMetaVendor(
+    selectedMetaModel.value,
+    props.providers
+  )
+  return props.providers.find(
+    (provider) => String(provider.id) === String(vendor.id)
+  )
+})
+
 const currentPriceModality = computed(() => {
   if (modelMode.value === 'existing') {
     return selectedModel.value?.modality || 'text'
   }
-  return form.value.modality || 'text'
+  return selectedMetaModel.value?.modality || 'text'
 })
 
 const activePriceFields = computed(() =>
   priceFields.value.filter((field) =>
     field.modalities.includes(currentPriceModality.value)
-  )
-)
-
-const selectedProvider = computed(() =>
-  props.providers.find(
-    (provider) => String(provider.id) === String(form.value.provider)
   )
 )
 
@@ -419,19 +410,30 @@ const sourceRelationLabel = computed(() => {
   return t('llmOps.manualPriceEntry.relation.unbound')
 })
 
+const isManualSource = computed(() => {
+  const category =
+    props.source?.business_source_category ||
+    props.source?.source_category ||
+    'unknown'
+  return category === 'manual'
+})
+
 const validationMessage = computed(() => {
   if (!props.source?.id) return t('llmOps.manualPriceEntry.validation.noSource')
   if (modelMode.value === 'existing' && !selectedModel.value) {
     return t('llmOps.manualPriceEntry.validation.selectExistingModel')
   }
+  if (
+    modelMode.value === 'existing' &&
+    !resolveModelProviderId(selectedModel.value)
+  ) {
+    return t('llmOps.manualPriceEntry.validation.customModelProvider')
+  }
   if (modelMode.value === 'custom') {
-    if (!form.value.custom_model_name.trim()) {
-      return t('llmOps.manualPriceEntry.validation.customModelName')
+    if (!selectedMetaModel.value) {
+      return t('llmOps.manualPriceEntry.validation.selectMetaModel')
     }
-    if (!form.value.custom_model_code.trim()) {
-      return t('llmOps.manualPriceEntry.validation.customModelCode')
-    }
-    if (!selectedProvider.value) {
+    if (!selectedMetaProvider.value) {
       return t('llmOps.manualPriceEntry.validation.customModelProvider')
     }
   }
@@ -443,7 +445,7 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      modelMode.value = 'existing'
+      modelMode.value = isManualSource.value ? 'custom' : 'existing'
       form.value = defaults()
       if (!form.value.model_id && props.models.length) {
         const matched = props.models.find(
@@ -462,10 +464,7 @@ watch(currentPriceModality, () => {
 function defaults() {
   return {
     model_id: '',
-    provider: props.source?.provider || '',
-    custom_model_name: '',
-    custom_model_code: '',
-    modality: 'text',
+    meta_model_id: '',
     currency: props.source?.currency || 'CNY',
     source_url: props.source?.endpoint_url || '',
     input_price_per_million: '',
@@ -492,9 +491,7 @@ async function submit() {
 
   saving.value = true
   try {
-    const model = await resolveModel()
-    const providerId = model.provider
-    const row = buildImportRow(model)
+    const { providerId, row } = resolveImportSelection()
     await llmOpsApi.importManualPrices({
       source: props.source.id,
       provider: providerId,
@@ -502,7 +499,7 @@ async function submit() {
       source_slug: props.source.slug,
       source_url: form.value.source_url || props.source.endpoint_url || '',
       currency: form.value.currency,
-      updates_model_prices: Boolean(props.source.updates_model_prices),
+      updates_model_prices: false,
       rows: [row]
     })
     showSuccess(t('llmOps.manualPriceEntry.messages.saved'))
@@ -514,21 +511,22 @@ async function submit() {
   }
 }
 
-async function resolveModel() {
+function resolveImportSelection() {
   if (modelMode.value === 'existing') {
-    return selectedModel.value
+    return {
+      providerId: resolveModelProviderId(selectedModel.value),
+      row: buildImportRow(selectedModel.value)
+    }
   }
-  const response = await llmOpsApi.createModel({
-    provider: selectedProvider.value.id,
-    name: form.value.custom_model_name.trim(),
-    code: form.value.custom_model_code.trim(),
-    modality: form.value.modality,
-    currency: form.value.currency,
-    source: props.source.id,
-    source_url: form.value.source_url || props.source.endpoint_url || '',
-    is_active: true
-  })
-  return response.data
+  const model = {
+    code: selectedMetaModel.value.code,
+    name: selectedMetaModel.value.name || selectedMetaModel.value.code,
+    modality: selectedMetaModel.value.modality || 'text'
+  }
+  return {
+    providerId: selectedMetaProvider.value.id,
+    row: buildImportRow(model)
+  }
 }
 
 function buildImportRow(model) {
@@ -595,6 +593,57 @@ function buildModelOptions() {
   ]
 }
 
+function resolveModelProviderId(model) {
+  if (!model) return ''
+  const vendor = resolveCanonicalMetaVendor(model, props.providers)
+  return vendor.id || model.meta_model_vendor || model.provider || ''
+}
+
+function buildMetaModelOptions() {
+  const sourceProvider = props.source?.provider
+  const rows = props.metaModels
+    .map((model) => {
+      const vendor = resolveCanonicalMetaVendor(model, props.providers)
+      return {
+        ...model,
+        resolved_vendor: vendor.id,
+        resolved_vendor_name: vendor.name
+      }
+    })
+    .sort((left, right) => {
+      const vendorCompare = String(
+        left.resolved_vendor_name || ''
+      ).localeCompare(String(right.resolved_vendor_name || ''))
+      if (vendorCompare !== 0) return vendorCompare
+      return String(left.name || left.code || '').localeCompare(
+        String(right.name || right.code || '')
+      )
+    })
+  const preferred = rows.filter(
+    (model) => String(model.resolved_vendor) === String(sourceProvider)
+  )
+  const others = rows.filter(
+    (model) => String(model.resolved_vendor) !== String(sourceProvider)
+  )
+  if (!sourceProvider || !preferred.length) {
+    return rows.map(metaModelOption)
+  }
+  return [
+    {
+      label: t('llmOps.manualPriceEntry.groups.currentProvider'),
+      value: '__group_preferred_meta',
+      type: 'group'
+    },
+    ...preferred.map(metaModelOption),
+    {
+      label: t('llmOps.manualPriceEntry.groups.otherModels'),
+      value: '__group_other_meta',
+      type: 'group'
+    },
+    ...others.map(metaModelOption)
+  ]
+}
+
 function modelOption(model) {
   return {
     label: model.name || model.code,
@@ -605,6 +654,26 @@ function modelOption(model) {
     } · ${model.code}`,
     badge: modalityLabel(model.modality),
     searchText: [model.name, model.code, model.provider_name].join(' ')
+  }
+}
+
+function metaModelOption(model) {
+  const providerName =
+    model.resolved_vendor_name ||
+    model.vendor_name ||
+    t('llmOps.manualPriceEntry.fallback.unknownProvider')
+  return {
+    label: model.name || model.code,
+    value: model.id,
+    description: `${providerName} · ${model.code}`,
+    badge: modalityLabel(model.modality),
+    searchText: [
+      model.name,
+      model.code,
+      model.family,
+      providerName,
+      ...(Array.isArray(model.aliases) ? model.aliases : [])
+    ].join(' ')
   }
 }
 
@@ -626,12 +695,28 @@ function modalityLabel(value) {
 }
 
 function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
+  const data = error?.response?.data
+  const fieldMessage = firstErrorMessage(data)
+  if (data?.detail) return data.detail
+  if (data?.message) return data.message
+  if (fieldMessage) return fieldMessage
+  return error?.message || fallback
+}
+
+function firstErrorMessage(value, field = '') {
+  if (!value || typeof value === 'string') return value || ''
+  if (Array.isArray(value)) {
+    return firstErrorMessage(value[0], field)
+  }
+  if (typeof value !== 'object') return String(value)
+
+  const [key, nested] = Object.entries(value)[0] || []
+  if (!key) return ''
+  const label = field && key !== 'non_field_errors' ? `${field}.${key}` : key
+  const message = firstErrorMessage(nested, label)
+  if (!message) return ''
+  if (key === 'non_field_errors') return message
+  return `${label}: ${message}`
 }
 </script>
 

@@ -290,8 +290,6 @@ def price_role_for_source(
         == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
         and meta_model is not None
     ):
-        from .serializers import business_source_category_for_source_model
-
         category = business_source_category_for_source_model(
             source=source,
             meta_model=meta_model,
@@ -308,6 +306,47 @@ def price_role_for_source(
     if category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
         return LLMModel.PRICE_ROLE_MANUAL
     return LLMModel.PRICE_ROLE_UNKNOWN
+
+
+def canonical_vendor_for_meta_model(meta_model: MetaModel | None):
+    """Resolve the real vendor for one canonical meta model."""
+    if meta_model is None:
+        return None
+
+    from .constants import (
+        canonical_vendor_for_model_code,
+        ensure_canonical_vendor_row,
+    )
+
+    spec = canonical_vendor_for_model_code(meta_model.code)
+    if spec is not None:
+        provider = ensure_canonical_vendor_row(spec)
+        if provider is not None:
+            return provider
+    return meta_model.vendor
+
+
+def business_source_category_for_source_model(
+    *,
+    source: PriceCollectionSource,
+    meta_model: MetaModel | None,
+) -> str:
+    """Return official only when the source vendor owns the model."""
+    raw_category = source.source_category
+    if (
+        raw_category
+        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return raw_category
+
+    source_vendor_id = source.provider_id
+    model_vendor = canonical_vendor_for_meta_model(meta_model)
+    model_vendor_id = getattr(model_vendor, "id", None)
+    if not source_vendor_id or not model_vendor_id:
+        return raw_category
+    if source_vendor_id == model_vendor_id:
+        return raw_category
+    return LLMModel.PRICE_ROLE_CLOUD_HOSTED
 
 
 def find_aggregated_model(
@@ -532,6 +571,12 @@ def import_manual_model_prices(
 ) -> dict:
     """Import manually maintained model prices into durable price tables."""
     now = timezone.now()
+    effective_updates_model_prices = updates_model_prices
+    if (
+        source.source_category
+        == PriceCollectionSource.SOURCE_CATEGORY_MANUAL
+    ):
+        effective_updates_model_prices = False
     run = source.collection_runs.create(status="running")
     created_count = 0
     updated_count = 0
@@ -550,7 +595,7 @@ def import_manual_model_prices(
             provider=provider,
             modality=row.get("modality") or LLMModel.MODALITY_TEXT,
         )
-        if updates_model_prices:
+        if effective_updates_model_prices:
             model, created = LLMModel.objects.get_or_create(
                 provider=provider,
                 source=source,
@@ -610,7 +655,7 @@ def import_manual_model_prices(
             row,
             source=source,
             default_currency=default_currency,
-            updates_model_prices=updates_model_prices,
+            updates_model_prices=effective_updates_model_prices,
             now=now,
         )
         if changed_fields:
@@ -627,7 +672,7 @@ def import_manual_model_prices(
 
     source.last_collected_at = now
     source.currency = normalize_currency(default_currency) or source.currency
-    source.updates_model_prices = updates_model_prices
+    source.updates_model_prices = effective_updates_model_prices
     source.save(
         update_fields=[
             "last_collected_at",
@@ -645,7 +690,7 @@ def import_manual_model_prices(
     run.metadata = {
         "import_mode": "manual_table",
         "price_item_count": price_item_count,
-        "updates_model_prices": updates_model_prices,
+        "updates_model_prices": effective_updates_model_prices,
     }
     run.save()
     return {

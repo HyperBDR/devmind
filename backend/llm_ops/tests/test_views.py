@@ -195,15 +195,18 @@ class LLMOpsViewTests(TestCase):
     def test_global_config_stale_sources_write_empty_task_source_ids(self):
         from django_celery_beat.models import PeriodicTask
 
-        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        provider = LLMProvider.objects.create(
+            name="Legacy Vendor",
+            code="legacy-vendor",
+        )
         source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
+            name="Legacy Official",
+            slug="legacy-official",
             provider=provider,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://openai.com/api/pricing/",
+            endpoint_url="https://legacy.example.com/pricing/",
             updates_model_prices=True,
         )
         config = LLMOpsGlobalConfig.get_solo()
@@ -252,16 +255,19 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("price_collection_source_ids", response.data)
 
-    def test_global_config_rejects_non_aliyun_price_source_ids(self):
-        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+    def test_global_config_rejects_unsupported_price_source_ids(self):
+        provider = LLMProvider.objects.create(
+            name="Legacy Vendor",
+            code="legacy-vendor",
+        )
         source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
+            name="Legacy Official",
+            slug="legacy-official",
             provider=provider,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://openai.com/api/pricing/",
+            endpoint_url="https://legacy.example.com/pricing/",
             updates_model_prices=True,
         )
 
@@ -509,6 +515,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(kwargs["source"], source)
         self.assertEqual(kwargs["provider"], provider)
         self.assertEqual(kwargs["default_currency"], "CNY")
+        self.assertFalse(kwargs["updates_model_prices"])
         self.assertEqual(
             AuditLog.objects.filter(target_id=str(source.id)).count(),
             1,
@@ -861,7 +868,7 @@ class LLMOpsViewTests(TestCase):
             updates_model_prices=True,
         )
         openai = LLMProvider.objects.create(name="OpenAI", code="openai")
-        PriceCollectionSource.objects.create(
+        openai_source = PriceCollectionSource.objects.create(
             name="OpenAI Official",
             slug="openai-official",
             provider=openai,
@@ -878,10 +885,13 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["task_id"], "task-all")
-        self.assertEqual(response.data["source_count"], 1)
-        self.assertEqual(response.data["source_ids"], [aliyun_source.id])
+        self.assertEqual(response.data["source_count"], 2)
+        self.assertEqual(
+            response.data["source_ids"],
+            [aliyun_source.id, openai_source.id],
+        )
         mock_delay.assert_called_once_with(
-            source_ids=[aliyun_source.id],
+            source_ids=[aliyun_source.id, openai_source.id],
             verify_source=True,
         )
         audit = AuditLog.objects.get(
@@ -889,7 +899,10 @@ class LLMOpsViewTests(TestCase):
             action=AuditLog.ACTION_SYNC,
         )
         self.assertEqual(audit.metadata["task_id"], "task-all")
-        self.assertEqual(audit.metadata["source_ids"], [aliyun_source.id])
+        self.assertEqual(
+            audit.metadata["source_ids"],
+            [aliyun_source.id, openai_source.id],
+        )
 
     @patch("llm_ops.views.run_model_price_sync_agent.delay")
     def test_collection_sources_sync_all_rejects_without_sources(

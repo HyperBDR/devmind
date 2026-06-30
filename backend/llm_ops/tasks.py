@@ -83,11 +83,10 @@ def collect_official_model_prices(
     Parameters
     ----------
     provider_codes:
-        Optional iterable of provider codes to limit the run to. When
-        ``None`` (the periodic default), every provider listed in
-        ``OFFICIAL_PROVIDER_CONFIGS`` is collected. Limiting the list
-        is useful for re-running a single provider after a transient
-        upstream failure.
+        Explicit iterable of provider codes to collect. When ``None``,
+        this compatibility task uses the configured default provider
+        set; fresh deployments keep that set empty so the task does
+        no work instead of rebuilding the price catalogue.
     verify_source:
         When ``True`` (the default) the collector fetches the
         provider's pricing page before extracting prices. Set to

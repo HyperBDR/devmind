@@ -589,6 +589,7 @@
             <ProviderManagement
               v-else-if="activeSection === 'providers'"
               :providers="providers"
+              :meta-models="metaModels"
               :models="models"
               :sources="providerCollectionSources"
               :collection-runs="collectionRuns"

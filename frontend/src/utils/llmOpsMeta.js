@@ -76,6 +76,7 @@ export function resolveCanonicalMetaVendor(modelRecord, providers) {
   }
   const effectiveCode = String(
     modelRecord.effective_vendor_code ||
+      modelRecord.meta_model_vendor_code ||
       modelRecord.vendor_code ||
       ''
   ).toLowerCase()
@@ -88,17 +89,22 @@ export function resolveCanonicalMetaVendor(modelRecord, providers) {
     }
   }
   const code = canonicalMetaVendorCode(
-    modelRecord.code ||
-      modelRecord.meta_model_code ||
+    modelRecord.meta_model_code ||
+      modelRecord.code ||
       modelRecord.model_code ||
       ''
   )
   if (!code) {
     return {
-      id: modelRecord.effective_vendor || modelRecord.vendor || '',
+      id:
+        modelRecord.effective_vendor ||
+        modelRecord.meta_model_vendor ||
+        modelRecord.vendor ||
+        '',
       code: '',
       name:
         modelRecord.effective_vendor_name ||
+        modelRecord.meta_model_vendor_name ||
         modelRecord.vendor_name ||
         ''
     }

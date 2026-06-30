@@ -22,6 +22,7 @@ from .constants import canonical_meta_model_identity
 from .models import (
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
+    LLMOpsGlobalConfig,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -43,12 +44,10 @@ from .skill_runner import (
     vendor_pricing_skill_exists,
 )
 
-SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = (
-    "aliyun",
-    "aliyun-wanx",
-    "baidu",
-    "volcengine",
+SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = tuple(
+    sorted(OFFICIAL_PROVIDER_CONFIGS.keys())
 )
+DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES: tuple[str, ...] = ()
 FULL_CATALOG_VENDOR_SKILL_PROVIDER_CODES = (
     "aliyun",
     "baidu",
@@ -401,72 +400,30 @@ def sync_official_provider_model_prices(
                 if meta_model is None:
                     skipped_codes.append(model_code)
                     continue
-                model_source = ensure_official_model_source(
-                    provider=provider,
-                    model_code=model_code,
-                    display_name=item.name or item.model_id,
-                    source_url=catalog.source_url,
-                    currency=(
-                        item.currency
-                        or collected_currency
-                        or source.currency
-                    ),
-                )
-                if not model_source.is_enabled:
-                    skipped_codes.append(model_code)
-                    continue
-                model_run = PriceCollectionRun.objects.create(
-                    source=model_source,
-                )
                 upsert_result = upsert_collected_model(
                     item,
-                    source=model_source,
+                    source=source,
                     source_url=catalog.source_url,
                     meta_model=meta_model,
                 )
                 if upsert_result is None:
                     skipped_codes.append(model_code)
-                    model_run.status = PriceCollectionRun.STATUS_SUCCEEDED
-                    model_run.finished_at = timezone.now()
-                    model_run.skipped_count = 1
-                    model_run.metadata = {
-                        "source_url": catalog.source_url,
-                        "currency": item.currency or collected_currency,
-                        "provider_source_slug": source.slug,
-                        "source_model_id": model_code,
-                        "skip_reason": "missing_meta_model",
-                    }
-                    model_run.save()
                     continue
                 model, created = upsert_result
                 _, changed = upsert_collected_snapshot(
                     item,
-                    source=model_source,
-                    run=model_run,
+                    source=source,
+                    run=run,
                     model=model,
                     provider=model.provider,
                 )
                 sync_model_price_items(
                     item,
-                    source=model_source,
+                    source=source,
                     model=model,
                     provider=model.provider,
                     source_url=catalog.source_url,
                 )
-                model_run.status = PriceCollectionRun.STATUS_SUCCEEDED
-                model_run.finished_at = timezone.now()
-                model_run.collected_count = 1
-                model_run.created_count = 1 if created else 0
-                model_run.updated_count = 0 if created else 1
-                model_run.skipped_count = 0
-                model_run.metadata = {
-                    "source_url": catalog.source_url,
-                    "currency": item.currency or collected_currency,
-                    "provider_source_slug": source.slug,
-                    "source_model_id": collected_model_code(item),
-                    "changed": changed,
-                }
-                model_run.save()
                 stats["models"] = int(stats["models"]) + 1
                 key = "created" if created else "updated"
                 stats[key] = int(stats[key]) + 1
@@ -636,7 +593,7 @@ def sync_configured_official_model_prices(
 ) -> dict[str, dict[str, int | str | list[str]]]:
     """Collect official prices for configured supported providers."""
     selected_provider_codes = (
-        provider_codes or list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+        provider_codes or list(DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
     )
     selected_provider_codes = [
         code
@@ -689,7 +646,7 @@ def supported_official_provider_options() -> list[dict]:
     options = []
     for provider_code in provider_codes:
         config = OFFICIAL_PROVIDER_CONFIGS[provider_code]
-        defaults = OFFICIAL_SOURCE_PROVIDER_DEFAULTS[provider_code]
+        defaults = official_provider_defaults(provider_code)
         provider = providers.get(provider_code)
         source_slug = official_provider_source_slug(provider_code)
         source = sources.get(source_slug)
@@ -724,7 +681,7 @@ def ensure_supported_official_provider_source(
     if provider_code not in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES:
         raise ValueError("Unsupported official provider source.")
 
-    defaults = OFFICIAL_SOURCE_PROVIDER_DEFAULTS[provider_code]
+    defaults = official_provider_defaults(provider_code)
     provider, provider_created = LLMProvider.objects.get_or_create(
         code=provider_code,
         defaults={
@@ -753,6 +710,201 @@ def ensure_supported_official_provider_source(
 def official_provider_source_slug(provider_code: str) -> str:
     """Return the stable provider-level official source slug."""
     return f"{provider_code}-official"
+
+
+def official_provider_defaults(provider_code: str) -> dict[str, str]:
+    """Return display defaults for an implemented official provider."""
+    if provider_code in OFFICIAL_SOURCE_PROVIDER_DEFAULTS:
+        return OFFICIAL_SOURCE_PROVIDER_DEFAULTS[provider_code]
+    config = OFFICIAL_PROVIDER_CONFIGS[provider_code]
+    return {
+        "name": config.provider_label,
+        "website": config.source_url,
+        "notes": "元模型厂商。",
+    }
+
+
+def reset_official_price_catalog(
+    *,
+    provider_codes: list[str] | tuple[str, ...] | None = None,
+    dry_run: bool = False,
+) -> dict[str, int | list[str]]:
+    """Clear official price data while preserving provider-level sources."""
+    codes = tuple(provider_codes or SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    provider_source_slugs = {
+        official_provider_source_slug(provider_code)
+        for provider_code in codes
+    }
+    matched_sources = [
+        source
+        for source in PriceCollectionSource.objects.select_related(
+            "provider"
+        ).filter(
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+        if official_source_matches_provider_codes(
+            source,
+            provider_codes=codes,
+            provider_source_slugs=provider_source_slugs,
+        )
+    ]
+    source_ids = [source.id for source in matched_sources]
+    provider_source_ids = [
+        source.id
+        for source in matched_sources
+        if source.slug in provider_source_slugs
+    ]
+    provider_sources_by_provider_id = {
+        source.provider_id: source
+        for source in matched_sources
+        if source.id in provider_source_ids and source.provider_id
+    }
+    legacy_source_ids = [
+        source.id
+        for source in matched_sources
+        if source.slug not in provider_source_slugs
+    ]
+    legacy_sources = [
+        source
+        for source in matched_sources
+        if source.id in legacy_source_ids
+    ]
+    legacy_source_slugs = sorted(
+        source.slug
+        for source in matched_sources
+        if source.id in legacy_source_ids
+    )
+
+    stats: dict[str, int | list[str]] = {
+        "sources_matched": len(source_ids),
+        "provider_sources_kept": len(provider_source_ids),
+        "legacy_sources_deleted": len(legacy_source_ids),
+        "models_reset": LLMModel.objects.filter(
+            source_id__in=source_ids,
+        ).count(),
+        "price_items_deleted": ModelPriceItem.objects.filter(
+            source_id__in=source_ids,
+        ).count(),
+        "snapshots_deleted": CollectedModelPriceSnapshot.objects.filter(
+            source_id__in=source_ids,
+        ).count(),
+        "history_deleted": CollectedModelPriceHistory.objects.filter(
+            source_id__in=source_ids,
+        ).count(),
+        "runs_deleted": PriceCollectionRun.objects.filter(
+            source_id__in=source_ids,
+        ).count(),
+        "legacy_source_slugs": legacy_source_slugs,
+    }
+    if dry_run:
+        return stats
+
+    now = timezone.now()
+    with transaction.atomic():
+        CollectedModelPriceSnapshot.objects.filter(
+            source_id__in=source_ids,
+        ).delete()
+        CollectedModelPriceHistory.objects.filter(
+            source_id__in=source_ids,
+        ).delete()
+        ModelPriceItem.objects.filter(source_id__in=source_ids).delete()
+        PriceCollectionRun.objects.filter(source_id__in=source_ids).delete()
+        LLMModel.objects.filter(source_id__in=source_ids).update(
+            input_price_per_million=0,
+            output_price_per_million=0,
+            cache_input_price_per_million=None,
+            image_output_price_per_image=None,
+            audio_input_price_per_second=None,
+            audio_output_price_per_second=None,
+            video_input_price_per_second=None,
+            video_output_price_per_second=None,
+            video_resolution_prices={},
+            last_price_updated_at=None,
+            updated_at=now,
+        )
+        for legacy_source in legacy_sources:
+            queryset = LLMModel.objects.filter(source=legacy_source)
+            provider_source = provider_sources_by_provider_id.get(
+                legacy_source.provider_id
+            )
+            if provider_source is None:
+                queryset.update(
+                    source=None,
+                    source_url="",
+                    price_role=LLMModel.PRICE_ROLE_UNKNOWN,
+                    updated_at=now,
+                )
+                continue
+            queryset.update(
+                source_id=provider_source.id,
+                source_url=provider_source.endpoint_url or "",
+                updated_at=now,
+            )
+        prune_global_config_price_sources(legacy_source_ids)
+        PriceCollectionSource.objects.filter(id__in=legacy_source_ids).delete()
+
+    return stats
+
+
+def official_source_matches_provider_codes(
+    source: PriceCollectionSource,
+    *,
+    provider_codes: tuple[str, ...],
+    provider_source_slugs: set[str],
+) -> bool:
+    """Return whether an official source belongs to the reset scope."""
+    if source.slug in provider_source_slugs:
+        return True
+    if not source.provider or source.provider.code not in provider_codes:
+        return False
+
+    provider_code = source.provider.code
+    if not source.slug.startswith(f"{provider_code}-"):
+        return False
+    if not source.slug.endswith("-official"):
+        return False
+
+    model_codes = set(
+        LLMModel.objects.filter(source=source).values_list("code", flat=True)
+    )
+    model_codes.update(
+        ModelPriceItem.objects.filter(source=source)
+        .exclude(model__isnull=True)
+        .values_list("model__code", flat=True)
+    )
+    model_codes.update(
+        CollectedModelPriceSnapshot.objects.filter(source=source).values_list(
+            "source_platform_id",
+            flat=True,
+        )
+    )
+    for model_code in model_codes:
+        if source.slug == official_model_source_slug(provider_code, model_code):
+            return True
+    return False
+
+
+def prune_global_config_price_sources(source_ids: list[int]) -> int:
+    """Remove deleted source ids from persisted sync selections."""
+    if not source_ids:
+        return 0
+    deleted = {str(source_id) for source_id in source_ids}
+    changed = 0
+    for config in LLMOpsGlobalConfig.objects.all():
+        raw_ids = list(config.price_collection_source_ids or [])
+        kept_ids = [
+            source_id
+            for source_id in raw_ids
+            if str(source_id) not in deleted
+        ]
+        if kept_ids == raw_ids:
+            continue
+        config.price_collection_source_ids = kept_ids
+        config.save(update_fields=["price_collection_source_ids", "updated_at"])
+        changed += 1
+    return changed
 
 
 def ensure_official_model_source(
@@ -1191,13 +1343,27 @@ def upsert_collected_model(
         source=source,
         source_url=source_url,
     )
+    defaults["source"] = source
     defaults["meta_model"] = meta_model
     defaults["price_role"] = price_role_for_source(
         source,
         meta_model=meta_model,
     )
     if source.updates_model_prices:
-        return LLMModel.objects.update_or_create(**lookup, defaults=defaults)
+        existing = LLMModel.objects.filter(**lookup).first()
+        if existing is None:
+            existing = legacy_official_model_for_provider_source(
+                provider=provider,
+                source=source,
+                code=model_code,
+            )
+        if existing is None:
+            return LLMModel.objects.create(**{**lookup, **defaults}), True
+        changed_fields = update_model_from_defaults(existing, defaults)
+        if changed_fields:
+            changed_fields.append("updated_at")
+            existing.save(update_fields=changed_fields)
+        return existing, False
 
     model = find_aggregated_model(
         provider=provider,
@@ -1233,6 +1399,50 @@ def upsert_collected_model(
         changed_fields.append("updated_at")
         model.save(update_fields=changed_fields)
     return model, False
+
+
+def legacy_official_model_for_provider_source(
+    *,
+    provider: LLMProvider,
+    source: PriceCollectionSource,
+    code: str,
+) -> LLMModel | None:
+    """Return an existing model row that should move to provider source."""
+    official_model = (
+        LLMModel.objects.filter(
+            provider=provider,
+            code=code,
+            source__source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+        .exclude(source=source)
+        .order_by("id")
+        .first()
+    )
+    if official_model is not None:
+        return official_model
+
+    return (
+        LLMModel.objects.filter(
+            provider=provider,
+            code=code,
+            source__isnull=True,
+        )
+        .order_by("id")
+        .first()
+    )
+
+
+def update_model_from_defaults(model: LLMModel, defaults: dict) -> list[str]:
+    """Apply update_or_create defaults to an existing model instance."""
+    changed_fields = []
+    for field, value in defaults.items():
+        if getattr(model, field) == value:
+            continue
+        setattr(model, field, value)
+        changed_fields.append(field)
+    return changed_fields
 
 
 def existing_meta_model_for_collected_item(
@@ -1508,11 +1718,22 @@ def sync_model_price_items(
         return []
 
     now = timezone.now()
-    ModelPriceItem.objects.filter(
-        model=model,
-        source=source,
-        is_current=True,
-    ).update(is_current=False, effective_to=now)
+    current_filter = {
+        "model": model,
+        "is_current": True,
+    }
+    if source.source_category == (
+        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        current_filter["source__source_category"] = (
+            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        )
+    else:
+        current_filter["source"] = source
+    ModelPriceItem.objects.filter(**current_filter).update(
+        is_current=False,
+        effective_to=now,
+    )
     items = []
     for payload in payloads:
         fingerprint = model_price_item_fingerprint(payload)
