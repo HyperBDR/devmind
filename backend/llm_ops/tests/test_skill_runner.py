@@ -60,6 +60,69 @@ ALIYUN_HTML = """
 </table>
 """
 
+ALIYUN_QWEN37_HTML = """
+<table>
+  <tr>
+    <th>模型 ID（Model ID）</th><th>服务部署范围</th><th>模式</th>
+    <th>单次请求的输入 Token 数</th>
+    <th>输入单价（每百万 Token）</th>
+    <th>输出单价（每百万 Token）</th><th>免费额度</th>
+  </tr>
+  <tr>
+    <td>
+      <p>qwen3.7-max</p>
+      <blockquote>当前能力等同于 qwen3.7-max-2026-05-20</blockquote>
+    </td>
+    <td>中国内地</td><td>非思考和思考模式</td>
+    <td>0&lt;Token≤1M</td><td>12 元</td><td>36 元</td><td>-</td>
+  </tr>
+</table>
+"""
+
+ALIYUN_TIERED_HTML = """
+<table>
+  <tr>
+    <th>模型 ID（Model ID）</th><th>服务部署范围</th><th>模式</th>
+    <th>单次请求的输入 Token 数</th>
+    <th>输入单价（每百万 Token）</th>
+    <th>输出单价（每百万 Token）</th><th>免费额度</th>
+  </tr>
+  <tr>
+    <td rowspan="2"><p>qwen3.6-max-preview</p></td>
+    <td rowspan="2">中国内地</td>
+    <td rowspan="2">非思考和思考模式</td>
+    <td>0&lt;Token≤128K</td><td>9 元</td><td>54 元</td>
+    <td rowspan="2">-</td>
+  </tr>
+  <tr>
+    <td>128K&lt;Token≤256K</td><td>15 元</td><td>90 元</td>
+  </tr>
+</table>
+"""
+
+ALIYUN_PREFIXED_MODEL_HTML = """
+<table>
+  <tr>
+    <th>模型 ID（Model ID）</th><th>服务部署范围</th><th>模式</th>
+    <th>输入单价（每百万 Token）</th>
+    <th>输出单价（每百万 Token）</th><th>免费额度</th>
+  </tr>
+  <tr>
+    <td>ZHIPU/GLM-5</td><td>中国内地</td><td>非思考和思考模式</td>
+    <td>8 元</td><td>28 元</td><td>-</td>
+  </tr>
+  <tr>
+    <td>siliconflow/deepseek-v3.2</td><td>中国内地</td>
+    <td>非思考和思考模式</td>
+    <td>2 元</td><td>3 元</td><td>-</td>
+  </tr>
+  <tr>
+    <td>128K</td><td>中国内地</td><td>非思考和思考模式</td>
+    <td>12 元</td><td>12 元</td><td>-</td>
+  </tr>
+</table>
+"""
+
 
 class ModelPriceSkillRunnerTests(SimpleTestCase):
     def test_aliyun_vendor_skill_returns_standard_catalog_json(self):
@@ -136,6 +199,65 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
             payload["models"][0]["price_rows"][0]["values"]["output_price"],
             "7",
         )
+
+    def test_aliyun_vendor_skill_extracts_seven_column_qwen_rows(self):
+        payload = run_vendor_pricing_skill(
+            "aliyun",
+            {
+                "provider_name": "阿里云",
+                "currency": "CNY",
+                "raw_html": ALIYUN_QWEN37_HTML,
+            },
+        )
+
+        self.assertEqual(payload["provider"]["code"], "aliyun")
+        self.assertEqual(payload["total_models"], 1)
+        self.assertEqual(payload["models"][0]["model_id"], "qwen3.7-max")
+        values = payload["models"][0]["price_rows"][0]["values"]
+        self.assertEqual(values["input_price"], "12")
+        self.assertEqual(values["output_price"], "36")
+        self.assertEqual(values["input_token_range"], "0-1000000")
+
+    def test_aliyun_vendor_skill_preserves_tiered_token_prices(self):
+        payload = run_vendor_pricing_skill(
+            "aliyun",
+            {
+                "provider_name": "阿里云",
+                "currency": "CNY",
+                "raw_html": ALIYUN_TIERED_HTML,
+            },
+        )
+
+        self.assertEqual(payload["total_models"], 1)
+        self.assertEqual(
+            payload["models"][0]["model_id"],
+            "qwen3.6-max-preview",
+        )
+        rows = payload["models"][0]["price_rows"]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["values"]["input_token_range"], "0-128000")
+        self.assertEqual(rows[0]["values"]["input_price"], "9")
+        self.assertEqual(
+            rows[1]["values"]["input_token_range"],
+            "128000-256000",
+        )
+        self.assertEqual(rows[1]["values"]["output_price"], "90")
+
+    def test_aliyun_vendor_skill_filters_non_model_rows(self):
+        payload = run_vendor_pricing_skill(
+            "aliyun",
+            {
+                "provider_name": "阿里云",
+                "currency": "CNY",
+                "raw_html": ALIYUN_PREFIXED_MODEL_HTML,
+            },
+        )
+
+        model_ids = [model["model_id"] for model in payload["models"]]
+        self.assertEqual(model_ids, ["GLM-5"])
+        values = payload["models"][0]["price_rows"][0]["values"]
+        self.assertEqual(values["input_price"], "8")
+        self.assertEqual(values["output_price"], "28")
 
     def test_volcengine_vendor_skill_returns_standard_catalog_json(self):
         payload = run_vendor_pricing_skill(

@@ -74,7 +74,6 @@ def build_text_token_standard_catalog(
     from llm_ops.collectors import (
         CollectedModelPricing,
         CollectedPricingCatalog,
-        NormalizedPriceRow,
     )
     from llm_ops.skill_runner import collected_catalog_to_standard_catalog
 
@@ -85,28 +84,11 @@ def build_text_token_standard_catalog(
         ).strip()
         if not model_id:
             continue
-        values = {}
-        for source_key, target_key in (
-            ("input_price_per_million", "input_price"),
-            ("output_price_per_million", "output_price"),
-            ("cache_hit_price_per_million", "cache_hit_input_price"),
-        ):
-            value = _format_price_value(item.get(source_key))
-            if value != "":
-                values[target_key] = value
-        if not values:
+        price_rows = _text_token_price_rows(item)
+        if not price_rows:
             continue
 
         aliases = _normalize_aliases(item.get("aliases"), model_id)
-        row = NormalizedPriceRow(
-            kind="text_token",
-            values=values,
-            raw={
-                "model_id": model_id,
-                "aliases": aliases,
-                "source_note": str(item.get("notes") or ""),
-            },
-        )
         raw_detail = {
             "official_source_url": source_url,
             "official_provider": provider_name,
@@ -133,7 +115,7 @@ def build_text_token_standard_catalog(
                 currency=currency,
                 unit=1000000,
                 billing_mode="pay_as_you_go",
-                price_rows=[row],
+                price_rows=price_rows,
                 raw_price_info={
                     "currency": currency,
                     "unit": 1000000,
@@ -156,6 +138,59 @@ def build_text_token_standard_catalog(
         source_type="vendor_python_skill",
         notes=notes,
         raw_payload=raw_payload or {},
+    )
+
+
+def _text_token_price_rows(item: dict[str, Any]):
+    rows = []
+    raw_rows = item.get("price_rows")
+    if isinstance(raw_rows, list) and raw_rows:
+        for row in raw_rows:
+            if not isinstance(row, dict):
+                continue
+            values = _normalize_text_token_values(row)
+            if values:
+                rows.append(_build_text_token_row(item, values))
+        return rows
+
+    values = _normalize_text_token_values(item)
+    if not values:
+        return []
+    return [_build_text_token_row(item, values)]
+
+
+def _normalize_text_token_values(row: dict[str, Any]) -> dict[str, str]:
+    values = {}
+    for source_key, target_key in (
+        ("input_price_per_million", "input_price"),
+        ("output_price_per_million", "output_price"),
+        ("cache_hit_price_per_million", "cache_hit_input_price"),
+    ):
+        value = _format_price_value(row.get(source_key))
+        if value != "":
+            values[target_key] = value
+    for key in ("input_token_range", "output_token_range"):
+        value = str(row.get(key) or "").strip()
+        if value:
+            values[key] = value
+    return values
+
+
+def _build_text_token_row(item: dict[str, Any], values: dict[str, str]):
+    from llm_ops.collectors import NormalizedPriceRow
+
+    model_id = str(
+        item.get("model_id") or item.get("model_name") or ""
+    ).strip()
+    aliases = _normalize_aliases(item.get("aliases"), model_id)
+    return NormalizedPriceRow(
+        kind="text_token",
+        values=values,
+        raw={
+            "model_id": model_id,
+            "aliases": aliases,
+            "source_note": str(item.get("notes") or ""),
+        },
     )
 
 
