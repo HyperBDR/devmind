@@ -270,8 +270,6 @@ const llmConfigLoading = ref(false)
 const llmConfigs = ref([])
 const sourceMode = ref('all')
 
-const supportedPriceSyncProviderCodes = new Set(['aliyun', 'aliyun-wanx'])
-
 const form = reactive({
   meta_model_sync_enabled: true,
   meta_model_sync_source_url: 'https://models.dev/api.json',
@@ -430,10 +428,9 @@ function applyConfig(nextConfig) {
 }
 
 function sourceSupportsRuntimePriceSync(source) {
-  const providerCode = source.provider_code || source.provider?.code || ''
   return (
     source.updates_model_prices &&
-    supportedPriceSyncProviderCodes.has(providerCode) &&
+    source.can_collect_prices &&
     source.source_category === 'official_provider'
   )
 }

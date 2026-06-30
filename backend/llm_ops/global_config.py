@@ -18,7 +18,12 @@ MODEL_PRICE_SYNC_AGENT_TASK_NAME = "llm_ops_model_price_sync_agent"
 MODEL_PRICE_SYNC_AGENT_TASK = "llm_ops.tasks.run_model_price_sync_agent"
 PRICE_SOURCE_TASK_PREFIX = "llm_ops_price_source_collect_"
 PRICE_SOURCE_TASK = "llm_ops.tasks.collect_price_source_prices"
-SUPPORTED_PRICE_SYNC_PROVIDER_CODES = ("aliyun", "aliyun-wanx")
+SUPPORTED_PRICE_SYNC_PROVIDER_CODES = (
+    "aliyun",
+    "aliyun-wanx",
+    "baidu",
+    "volcengine",
+)
 
 
 def price_source_task_name(source_id: int) -> str:
@@ -172,10 +177,19 @@ def price_sync_source_queryset():
     """Return sources currently supported by runtime price sync."""
     return PriceCollectionSource.objects.filter(
         provider__code__in=SUPPORTED_PRICE_SYNC_PROVIDER_CODES,
+        slug__in=official_provider_source_slugs(),
         source_category=(
             PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
         ),
         updates_model_prices=True,
+    )
+
+
+def official_provider_source_slugs() -> tuple[str, ...]:
+    """Return supported provider-level official source slugs."""
+    return tuple(
+        f"{provider_code}-official"
+        for provider_code in SUPPORTED_PRICE_SYNC_PROVIDER_CODES
     )
 
 

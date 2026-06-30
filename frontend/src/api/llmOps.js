@@ -19,6 +19,18 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/collection-sources/`, paramsOrEmpty(params))
   },
 
+  listOfficialProviderSourceOptions() {
+    return apiClient.get(
+      `${base}/collection-sources/official-provider-options/`
+    )
+  },
+
+  ensureOfficialProviderSource(providerCode) {
+    return apiClient.post(`${base}/collection-sources/official-provider/`, {
+      provider_code: providerCode
+    })
+  },
+
   createCollectionSource(payload) {
     return apiClient.post(`${base}/collection-sources/`, payload)
   },

@@ -25,6 +25,27 @@
         </div>
         <div class="provider-toolbar-actions">
           <button
+            class="btn-secondary btn-action-create"
+            type="button"
+            :disabled="loadingOfficialProviderOptions"
+            @click="openOfficialProviderModal"
+          >
+            <svg
+              class="source-primary-icon"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+            {{ t('llmOps.providerManagement.actions.addOfficialSource') }}
+          </button>
+          <button
             class="btn-secondary btn-action-sync"
             type="button"
             :disabled="syncingAllSources || !hasSyncablePriceSources"
@@ -176,22 +197,12 @@
                     })
                   }}
                 </p>
-                <p class="mt-1 text-xs text-slate-400">
-                  {{
-                    t('llmOps.providerManagement.sourcesCount', {
-                      count: provider.source_count
-                    })
-                  }}
-                </p>
               </td>
 
               <td class="table-cell">
                 <span :class="['status-pill', provider.status_tone]">
                   {{ provider.status_label }}
                 </span>
-                <p class="mt-1 text-xs text-slate-400">
-                  {{ provider.status_hint }}
-                </p>
               </td>
 
               <td class="table-cell">
@@ -220,6 +231,136 @@
       @close="showManualImportModal = false"
       @imported="handleManualImported"
     />
+    <div
+      v-if="showOfficialProviderModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6"
+      @click.self="closeOfficialProviderModal"
+    >
+      <form
+        class="max-h-[calc(100vh-3rem)] w-full max-w-xl overflow-hidden rounded-xl bg-white shadow-2xl"
+        @submit.prevent="addOfficialProviderSource"
+      >
+        <div class="border-b border-slate-200 px-5 py-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p
+                class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
+              >
+                Official Source
+              </p>
+              <h3 class="mt-2 text-lg font-semibold text-slate-900">
+                {{ t('llmOps.providerManagement.officialSourceModal.title') }}
+              </h3>
+            </div>
+            <button
+              class="btn-secondary btn-action-cancel"
+              type="button"
+              :disabled="addingOfficialProviderSource"
+              @click="closeOfficialProviderModal"
+            >
+              {{ t('llmOps.providerManagement.actions.cancel') }}
+            </button>
+          </div>
+        </div>
+
+        <div class="space-y-4 px-5 py-5">
+          <label class="field-group">
+            <span class="field-label">
+              {{
+                t('llmOps.providerManagement.officialSourceModal.provider')
+              }}
+            </span>
+            <CompactSelect
+              v-model="selectedOfficialProviderCode"
+              :disabled="
+                loadingOfficialProviderOptions ||
+                addingOfficialProviderSource
+              "
+              :options="officialProviderSelectOptions"
+              class-name="w-full"
+              :menu-min-width="360"
+            />
+          </label>
+
+          <div
+            v-if="loadingOfficialProviderOptions"
+            class="official-source-state"
+          >
+            {{ t('common.loading') }}
+          </div>
+          <div
+            v-else-if="selectedOfficialProviderOption"
+            class="official-source-detail"
+          >
+            <div>
+              <span>
+                {{
+                  t('llmOps.providerManagement.officialSourceModal.source')
+                }}
+              </span>
+              <strong>{{ selectedOfficialProviderOption.source_name }}</strong>
+            </div>
+            <div>
+              <span>
+                {{ t('llmOps.providerManagement.officialSourceModal.slug') }}
+              </span>
+              <strong class="font-mono">
+                {{ selectedOfficialProviderOption.source_slug }}
+              </strong>
+            </div>
+            <div>
+              <span>
+                {{
+                  t('llmOps.providerManagement.officialSourceModal.currency')
+                }}
+              </span>
+              <strong>{{ selectedOfficialProviderOption.currency }}</strong>
+            </div>
+            <div class="md:col-span-2">
+              <span>
+                {{ t('llmOps.providerManagement.officialSourceModal.url') }}
+              </span>
+              <strong class="break-all">
+                {{ selectedOfficialProviderOption.source_url }}
+              </strong>
+            </div>
+          </div>
+          <div v-else class="official-source-state">
+            {{ t('llmOps.providerManagement.officialSourceModal.empty') }}
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <span class="modal-footer-note">
+            {{ officialProviderModalStatus }}
+          </span>
+          <div class="modal-footer-actions">
+            <button
+              class="btn-secondary btn-action-cancel"
+              type="button"
+              :disabled="addingOfficialProviderSource"
+              @click="closeOfficialProviderModal"
+            >
+              {{ t('llmOps.providerManagement.actions.cancel') }}
+            </button>
+            <button
+              class="btn-primary btn-action-save"
+              type="submit"
+              :disabled="officialProviderAddDisabled"
+            >
+              <span class="icon-mark" />
+              {{
+                addingOfficialProviderSource
+                  ? t('llmOps.providerManagement.actions.submitting')
+                  : selectedOfficialProviderOption?.source_exists
+                    ? t('llmOps.providerManagement.actions.added')
+                    : t('llmOps.providerManagement.actions.add')
+              }}
+            </button>
+          </div>
+        </div>
+      </form>
+    </div>
     <PriceSourceModal
       :open="showPriceSourceModal || Boolean(editingSource)"
       :source="editingSource"
@@ -275,6 +416,7 @@ import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
 import ProviderPricingDrawer from '@/components/llm-ops/ProviderPricingDrawer.vue'
 import SourcePriceDrawer from '@/components/llm-ops/SourcePriceDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
+import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
 const props = defineProps({
   providers: {
@@ -317,14 +459,17 @@ const editingSource = ref(null)
 const priceEntrySource = ref(null)
 const showPriceSourceModal = ref(false)
 const showManualImportModal = ref(false)
+const showOfficialProviderModal = ref(false)
 const collectingSourceId = ref(null)
 const syncingAllSources = ref(false)
 const deletingSourceId = ref(null)
+const loadingOfficialProviderOptions = ref(false)
+const addingOfficialProviderSource = ref(false)
+const officialProviderOptions = ref([])
+const selectedOfficialProviderCode = ref('')
 const sourceSearch = ref('')
 const sourceCategoryFilter = ref('all')
 const sourceStatusFilter = ref('all')
-
-const supportedPriceSyncProviderCodes = new Set(['aliyun', 'aliyun-wanx'])
 
 const sourceCategoryFilterOptions = computed(() => [
   {
@@ -364,6 +509,46 @@ const sourceStatusFilterOptions = computed(() => [
   }
 ])
 
+const officialProviderSelectOptions = computed(() =>
+  officialProviderOptions.value.map((option) => ({
+    value: option.provider_code,
+    label: option.provider_name,
+    description: option.source_name,
+    badge: option.source_exists
+      ? t('llmOps.providerManagement.officialSourceModal.existsBadge')
+      : option.currency
+  }))
+)
+
+const selectedOfficialProviderOption = computed(() =>
+  officialProviderOptions.value.find(
+    (option) =>
+      String(option.provider_code) === String(selectedOfficialProviderCode.value)
+  )
+)
+
+const officialProviderAddDisabled = computed(
+  () =>
+    loadingOfficialProviderOptions.value ||
+    addingOfficialProviderSource.value ||
+    !selectedOfficialProviderOption.value ||
+    selectedOfficialProviderOption.value.source_exists
+)
+
+const officialProviderModalStatus = computed(() => {
+  if (loadingOfficialProviderOptions.value) {
+    return t('llmOps.providerManagement.officialSourceModal.loading')
+  }
+  const option = selectedOfficialProviderOption.value
+  if (!option) {
+    return t('llmOps.providerManagement.officialSourceModal.empty')
+  }
+  if (option.source_exists) {
+    return t('llmOps.providerManagement.officialSourceModal.exists')
+  }
+  return t('llmOps.providerManagement.officialSourceModal.ready')
+})
+
 const sourceRows = computed(() =>
   props.sources
     .map((source) => buildSourceRow(source))
@@ -374,6 +559,8 @@ const sourceRows = computed(() =>
       return String(left.name).localeCompare(String(right.name))
     })
 )
+
+const entrySourceRows = computed(() => sourceRows.value.filter(isEntrySource))
 
 const providerRows = computed(() =>
   props.providers
@@ -397,7 +584,7 @@ const unboundSourceRows = computed(() => {
 })
 
 const unboundProviderRow = computed(() => {
-  const sources = unboundSourceRows.value
+  const sources = unboundSourceRows.value.filter(isEntrySource)
   if (!sources.length) return null
 
   const provider = {
@@ -424,7 +611,6 @@ const unboundProviderRow = computed(() => {
     source_ids: sources.map((source) => String(source.id)),
     status_label: status.label,
     status_tone: status.tone,
-    status_hint: status.hint,
     filter_is_active: status.filterActive,
     search_text: [
       provider.name,
@@ -449,13 +635,13 @@ const sourceMetrics = computed(() => {
     provider.meta_model_ids.forEach((id) => coveredMetaModelIds.add(id))
   })
 
-  const official = sourceRows.value.filter(
+  const official = entrySourceRows.value.filter(
     (source) => source.business_source_category === 'official_provider'
   ).length
-  const supplier = sourceRows.value.filter(
+  const supplier = entrySourceRows.value.filter(
     (source) => source.business_source_category === 'supplier'
   ).length
-  const manual = sourceRows.value.filter(
+  const manual = entrySourceRows.value.filter(
     (source) => source.business_source_category === 'manual'
   ).length
 
@@ -543,13 +729,14 @@ function buildProviderRow(provider) {
   const models = modelsForProvider(provider)
   const priceItems = priceItemsForProvider(provider)
   const sources = sourcesForProvider(provider, priceItems)
+  const entrySources = sources.filter(isEntrySource)
   const metaModelIds = metaModelIdsForProvider(models, priceItems)
   const categoryKeys = sourceCategoryKeysForProvider(
     provider,
-    sources,
+    entrySources,
     priceItems
   )
-  const status = providerStatus(provider, sources)
+  const status = providerStatus(provider, entrySources)
 
   return {
     ...provider,
@@ -561,46 +748,56 @@ function buildProviderRow(provider) {
     covered_model_count: metaModelIds.length,
     meta_model_ids: metaModelIds,
     price_item_count: priceItems.length,
-    source_count: sources.length,
+    output_source_count: Math.max(sources.length - entrySources.length, 0),
+    source_count: entrySources.length,
     source_ids: sources.map((source) => String(source.id)),
     status_label: status.label,
     status_tone: status.tone,
-    status_hint: status.hint,
     filter_is_active: status.filterActive,
     search_text: buildProviderSearchText(provider, models, sources, priceItems)
   }
 }
 
 function modelsForProvider(provider) {
-  return props.models.filter((model) =>
-    recordMatchesModelVendor(model, provider)
+  const providerSourceIds = sourceIdsForProvider(provider)
+  const pricedModelIds = new Set(
+    props.priceItems
+      .filter(
+        (item) =>
+          item.is_current !== false &&
+          providerSourceIds.has(String(item.source || ''))
+      )
+      .map((item) => String(item.model || ''))
+      .filter(Boolean)
+  )
+  return props.models.filter(
+    (model) =>
+      sourceMatchesProvider(sourceForRecord(model), provider) ||
+      pricedModelIds.has(String(model.id))
   )
 }
 
 function priceItemsForProvider(provider) {
-  const modelIds = new Set(
-    modelsForProvider(provider).map((model) => String(model.id))
-  )
+  const providerSourceIds = sourceIdsForProvider(provider)
   return props.priceItems.filter(
     (item) =>
       item.is_current !== false &&
-      (modelIds.has(String(item.model)) ||
-        recordMatchesModelVendor(item, provider))
+      providerSourceIds.has(String(item.source || ''))
   )
 }
 
-function recordMatchesModelVendor(record, provider) {
-  const vendorId = String(record.meta_model_vendor || '')
-  const vendorCode = String(record.meta_model_vendor_code || '')
-  if (vendorId || vendorCode) {
-    return (
-      vendorId === String(provider.id) ||
-      vendorCode === String(provider.code)
-    )
-  }
-  return (
-    String(record.provider || '') === String(provider.id) ||
-    String(record.provider_code || '') === String(provider.code)
+function sourceIdsForProvider(provider) {
+  return new Set(
+    sourceRows.value
+      .filter((source) => sourceMatchesProvider(source, provider))
+      .map((source) => String(source.id))
+  )
+}
+
+function sourceForRecord(record) {
+  if (!record?.source) return null
+  return sourceRows.value.find(
+    (source) => String(source.id) === String(record.source || '')
   )
 }
 
@@ -615,6 +812,7 @@ function sourcesForProvider(provider, priceItems) {
 }
 
 function sourceMatchesProvider(source, provider) {
+  if (!source || !provider) return false
   return (
     String(source.provider || '') === String(provider.id) ||
     String(source.provider_code || '') === String(provider.code)
@@ -654,7 +852,6 @@ function providerStatus(provider, sources) {
     return {
       label: t('llmOps.providerManagement.sourceStatus.inactive.label'),
       tone: 'muted',
-      hint: t('llmOps.providerManagement.sourceStatus.inactive.hint'),
       filterActive: false
     }
   }
@@ -662,16 +859,12 @@ function providerStatus(provider, sources) {
     return {
       label: t('llmOps.providerManagement.sourceStatus.pending.label'),
       tone: 'warn',
-      hint: t('llmOps.providerManagement.sourcesCount', { count: 0 }),
       filterActive: true
     }
   }
   return {
     label: t('llmOps.providerManagement.sourceStatus.active.label'),
     tone: 'ok',
-    hint: t('llmOps.providerManagement.sourcesCount', {
-      count: sources.length
-    }),
     filterActive: true
   }
 }
@@ -803,6 +996,75 @@ function handleManualImported() {
   emit('refresh')
 }
 
+async function openOfficialProviderModal() {
+  showOfficialProviderModal.value = true
+  await loadOfficialProviderOptions()
+}
+
+function closeOfficialProviderModal() {
+  if (addingOfficialProviderSource.value) return
+  showOfficialProviderModal.value = false
+}
+
+async function loadOfficialProviderOptions() {
+  loadingOfficialProviderOptions.value = true
+  try {
+    const response = await llmOpsApi.listOfficialProviderSourceOptions()
+    const payload = response?.data?.data || response?.data || {}
+    const options = Array.isArray(payload.results) ? payload.results : []
+    officialProviderOptions.value = options
+    const current = options.find(
+      (option) =>
+        String(option.provider_code) ===
+        String(selectedOfficialProviderCode.value)
+    )
+    const preferred = options.find((option) => !option.source_exists)
+    const selected =
+      current && !current.source_exists ? current : preferred || current
+    selectedOfficialProviderCode.value =
+      selected?.provider_code || options[0]?.provider_code || ''
+  } catch (error) {
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.providerManagement.errors.loadOfficialSourcesFailed')
+      )
+    )
+  } finally {
+    loadingOfficialProviderOptions.value = false
+  }
+}
+
+async function addOfficialProviderSource() {
+  const option = selectedOfficialProviderOption.value
+  if (!option || option.source_exists) return
+
+  addingOfficialProviderSource.value = true
+  try {
+    const response = await llmOpsApi.ensureOfficialProviderSource(
+      option.provider_code
+    )
+    const payload = response?.data?.data || response?.data || {}
+    const sourceName = payload.source?.name || option.source_name
+    showSuccess(
+      t('llmOps.providerManagement.messages.officialSourceAdded', {
+        name: sourceName
+      })
+    )
+    showOfficialProviderModal.value = false
+    emit('refresh')
+  } catch (error) {
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.providerManagement.errors.addOfficialSourceFailed')
+      )
+    )
+  } finally {
+    addingOfficialProviderSource.value = false
+  }
+}
+
 function closePriceSourceModal() {
   showPriceSourceModal.value = false
   editingSource.value = null
@@ -843,7 +1105,8 @@ async function collectSource(source) {
   collectingSourceId.value = source.id
   try {
     const response = await llmOpsApi.collectCollectionSource(source.id)
-    const taskId = response?.data?.task_id
+    const payload = apiPayload(response)
+    const taskId = payload.task_id
     showSuccess(
       t('llmOps.providerManagement.messages.syncSubmitted', {
         name: source.name,
@@ -867,11 +1130,10 @@ async function syncAllPriceSources() {
   syncingAllSources.value = true
   try {
     const response = await llmOpsApi.syncAllCollectionSources()
-    const taskId = response?.data?.task_id
-    const count = response?.data?.source_count || 0
+    const payload = apiPayload(response)
+    const taskId = payload.task_id
     showSuccess(
       t('llmOps.providerManagement.messages.syncAllSubmitted', {
-        count,
         taskId: taskId
           ? t('llmOps.providerManagement.messages.taskId', { taskId })
           : ''
@@ -1047,12 +1309,18 @@ function sourceStatus(source, latestRun) {
 }
 
 function canCollectSource(source) {
-  const providerCode = source.provider_code || source.provider?.code || ''
   return Boolean(
-    source.provider &&
+    source.can_collect_prices &&
       source.source_category === 'official_provider' &&
-      supportedPriceSyncProviderCodes.has(providerCode)
+      source.updates_model_prices
   )
+}
+
+function isEntrySource(source) {
+  if (source?.source_category === 'official_provider') {
+    return canCollectSource(source)
+  }
+  return canManualEntrySource(source)
 }
 
 function canManualEntrySource(source) {
@@ -1110,6 +1378,10 @@ function errorMessage(error, fallback) {
     error?.message ||
     fallback
   )
+}
+
+function apiPayload(response) {
+  return response?.data?.data || response?.data || {}
 }
 </script>
 
@@ -1192,6 +1464,38 @@ function errorMessage(error, fallback) {
 
 .field-input {
   @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100;
+}
+
+.field-group {
+  @apply flex min-w-0 flex-col gap-1.5;
+}
+
+.field-label {
+  @apply text-xs font-medium text-slate-500;
+}
+
+.official-source-detail {
+  @apply grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-2;
+}
+
+.official-source-detail div {
+  @apply min-w-0;
+}
+
+.official-source-detail span {
+  @apply block text-xs font-medium text-slate-500;
+}
+
+.official-source-detail strong {
+  @apply mt-1 block truncate text-sm font-semibold text-slate-900;
+}
+
+.official-source-detail strong.break-all {
+  @apply whitespace-normal;
+}
+
+.official-source-state {
+  @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500;
 }
 
 .btn-primary {

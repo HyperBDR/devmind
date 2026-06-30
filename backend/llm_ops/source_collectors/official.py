@@ -6,7 +6,12 @@ from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult
 
-SUPPORTED_OFFICIAL_PROVIDER_CODES = ("aliyun", "aliyun-wanx")
+SUPPORTED_OFFICIAL_PROVIDER_CODES = (
+    "aliyun",
+    "aliyun-wanx",
+    "baidu",
+    "volcengine",
+)
 
 
 class OfficialProviderPriceSourceCollector:
@@ -28,7 +33,10 @@ class OfficialProviderPriceSourceCollector:
             return False
         if not source.provider_id:
             return False
-        return source.provider.code == self.provider_code
+        return (
+            source.provider.code == self.provider_code
+            and source.slug == f"{self.provider_code}-official"
+        )
 
     def collect(
         self,
@@ -60,9 +68,27 @@ class AliyunWanxOfficialPriceSourceCollector(
     provider_code = "aliyun-wanx"
 
 
+class BaiduOfficialPriceSourceCollector(
+    OfficialProviderPriceSourceCollector,
+):
+    """Collect prices from Baidu Qianfan's official pricing source."""
+
+    provider_code = "baidu"
+
+
+class VolcengineOfficialPriceSourceCollector(
+    OfficialProviderPriceSourceCollector,
+):
+    """Collect prices from VolcEngine Ark's official pricing source."""
+
+    provider_code = "volcengine"
+
+
 OFFICIAL_COLLECTOR_CLASSES = {
     "aliyun": AliyunOfficialPriceSourceCollector,
     "aliyun-wanx": AliyunWanxOfficialPriceSourceCollector,
+    "baidu": BaiduOfficialPriceSourceCollector,
+    "volcengine": VolcengineOfficialPriceSourceCollector,
 }
 
 

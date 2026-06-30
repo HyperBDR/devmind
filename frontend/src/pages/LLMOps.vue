@@ -579,6 +579,13 @@
               @saved="refreshLight"
             />
 
+            <CollectionRunLogPanel
+              v-else-if="activeSection === 'taskLogs'"
+              :runs="collectionRuns"
+              :sources="sources"
+              @refresh="refreshCollectionRuns"
+            />
+
             <ProviderManagement
               v-else-if="activeSection === 'providers'"
               :providers="providers"
@@ -670,6 +677,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
 import AuditLogPanel from '@/components/llm-ops/AuditLogPanel.vue'
 import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
+import CollectionRunLogPanel from '@/components/llm-ops/CollectionRunLogPanel.vue'
 import GlobalConfigPanel from '@/components/llm-ops/GlobalConfigPanel.vue'
 import MetaModelManagement from '@/components/llm-ops/MetaModelManagement.vue'
 import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
@@ -687,6 +695,7 @@ const sectionKeys = new Set([
   'monitor',
   'metaModels',
   'providers',
+  'taskLogs',
   'channels',
   'globalConfig',
   'reseller',
@@ -769,6 +778,7 @@ const navIcons = {
     'M14 17h1'
   ],
   reseller: ['M6 8h12l-1 12H7L6 8Z', 'M9 8a3 3 0 0 1 6 0'],
+  taskLogs: ['M5 4h14v16H5Z', 'M8 8h8', 'M8 12h8', 'M8 16h5'],
   workflow: [
     'M4 6h7',
     'M13 6h7',
@@ -802,6 +812,13 @@ const navItems = computed(() => [
     eyebrow: 'Sources',
     description: t('llmOps.nav.providers.description'),
     icon: navIcons.providers
+  },
+  {
+    key: 'taskLogs',
+    label: t('llmOps.nav.taskLogs.label'),
+    eyebrow: 'Task Logs',
+    description: t('llmOps.nav.taskLogs.description'),
+    icon: navIcons.taskLogs
   },
   {
     key: 'channels',
@@ -864,7 +881,8 @@ const navGroups = computed(() =>
     createNavGroup('overview', 'llmOps.navGroups.overview', ['monitor']),
     createNavGroup('catalog', 'llmOps.navGroups.catalog', [
       'metaModels',
-      'providers'
+      'providers',
+      'taskLogs'
     ]),
     createNavGroup('distribution', 'llmOps.navGroups.distribution', [
       'channels',
@@ -1204,7 +1222,7 @@ const actionItems = computed(() => [
       : t('llmOps.queue.checkPriceSource.empty'),
     value: collectionAttentionCount.value,
     tone: collectionAttentionCount.value ? 'danger' : 'good',
-    section: 'providers'
+    section: 'taskLogs'
   },
   {
     label: t('llmOps.queue.handleReconciliation.label'),
@@ -1408,6 +1426,15 @@ async function refreshLight() {
   listings.value = extract(listingRes)
   records.value = extract(recordRes)
   summary.value = extract(summaryRes)
+}
+
+async function refreshCollectionRuns() {
+  const [sourceRes, runRes] = await Promise.all([
+    llmOpsApi.listCollectionSources(FULL_LIST_PARAMS),
+    llmOpsApi.listCollectionRuns(FULL_LIST_PARAMS)
+  ])
+  sources.value = extract(sourceRes)
+  collectionRuns.value = extract(runRes)
 }
 
 async function loadResaleWorkflowConfig(

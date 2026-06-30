@@ -189,92 +189,6 @@
           </div>
         </div>
 
-        <div v-if="sources.length" class="panel space-y-3">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <h3 class="panel-title">价格源概览</h3>
-              <p class="mt-1 text-xs text-slate-500">
-                这里保留该厂商下的原厂、供货商和人工价格源，便于继续录价和维护。
-              </p>
-            </div>
-          </div>
-          <div class="grid gap-3 md:grid-cols-2">
-            <div
-              v-for="source in sources"
-              :key="source.id"
-              class="rounded-lg border border-slate-200 px-3 py-2"
-            >
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <p class="truncate text-sm font-medium text-slate-900">
-                    {{ source.name }}
-                  </p>
-                  <p class="mt-1 text-xs text-slate-500">
-                    {{ sourceCategoryLabel(businessSourceCategory(source)) }}
-                    <span v-if="source.channel_name">
-                      / {{ source.channel_name }}
-                    </span>
-                  </p>
-                  <a
-                    v-if="source.endpoint_url"
-                    class="mt-1 block truncate text-xs text-indigo-600 hover:text-indigo-700 hover:underline"
-                    :href="source.endpoint_url"
-                    rel="noopener noreferrer"
-                    target="_blank"
-                    :title="source.endpoint_url"
-                  >
-                    {{ source.endpoint_url }}
-                  </a>
-                  <p v-else class="mt-1 text-xs text-slate-400">-</p>
-                </div>
-                <span :class="source.is_enabled ? 'badge-ok' : 'badge-muted'">
-                  {{ source.is_enabled ? '启用' : '停用' }}
-                </span>
-              </div>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <OperationIconButton
-                  icon="price"
-                  label="价格明细"
-                  @click="$emit('view-source', source)"
-                />
-                <OperationIconButton
-                  v-if="source.can_manual_entry"
-                  icon="manual"
-                  label="手工录价"
-                  tone="success"
-                  @click="$emit('manual-entry-source', source)"
-                />
-                <OperationIconButton
-                  icon="edit"
-                  label="编辑"
-                  @click="$emit('edit-source', source)"
-                />
-                <OperationIconButton
-                  :icon="source.is_enabled ? 'toggleOff' : 'toggleOn'"
-                  :label="source.is_enabled ? '停用' : '启用'"
-                  :tone="source.is_enabled ? 'warn' : 'success'"
-                  @click="$emit('toggle-source', source)"
-                />
-                <OperationIconButton
-                  v-if="source.can_collect"
-                  icon="collect"
-                  :label="source.collect_action_label || '采集价格'"
-                  tone="primary"
-                  :disabled="
-                    String(collectingSourceId || '') === String(source.id)
-                  "
-                  @click="$emit('collect-source', source)"
-                />
-                <OperationIconButton
-                  icon="delete"
-                  label="删除"
-                  tone="danger"
-                  @click="$emit('delete-source', source)"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </aside>
   </div>
@@ -282,17 +196,8 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
-defineEmits([
-  'close',
-  'view-source',
-  'manual-entry-source',
-  'edit-source',
-  'toggle-source',
-  'collect-source',
-  'delete-source'
-])
+defineEmits(['close'])
 
 const props = defineProps({
   provider: {

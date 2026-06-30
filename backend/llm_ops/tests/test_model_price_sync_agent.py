@@ -131,6 +131,56 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         self.assertEqual(payload["sources"][0]["id"], selected.id)
         self.assertEqual(payload["sources"][0]["provider_code"], "aliyun")
 
+    def test_system_prompt_includes_official_source_sync_contract(self):
+        runner = ModelPriceSyncAgentRunner()
+
+        prompt = "\n".join(runner.build_system_prompt_fragments())
+
+        self.assertIn("Official Source Contract", prompt)
+        self.assertIn("standard JSON catalog", prompt)
+        self.assertIn("SKU-level evidence", prompt)
+        self.assertIn("Do not merge `deepseek-v3`", prompt)
+        self.assertIn("Result Logging", prompt)
+
+    def test_skill_tools_collect_vendor_price_catalog_without_persisting(self):
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
+            currency="CNY",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        runner = ModelPriceSyncAgentRunner(
+            source_ids=[source.id],
+            verify_source=False,
+        )
+        tools = {
+            tool.name: tool
+            for tool in runner.get_skill_tools("model-price-sync")
+        }
+
+        payload = tools["collect_vendor_price_catalog"].invoke(
+            {"source_id": source.id}
+        )
+
+        self.assertEqual(
+            payload["schema_version"],
+            "llm_ops.model_price_catalog.v1",
+        )
+        self.assertEqual(payload["source_type"], "vendor_python_skill")
+        self.assertEqual(payload["provider"]["code"], "aliyun")
+        self.assertGreater(payload["total_models"], 0)
+        self.assertEqual(provider.models.count(), 0)
+        self.assertEqual(source.collection_runs.count(), 0)
+
     def test_collect_source_delegates_to_platform_collector(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
@@ -163,6 +213,51 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         self.assertEqual(runner.succeeded, 1)
         self.assertEqual(runner.source_results["aliyun-official"], result)
 
+    def test_execute_collects_code_supported_sources_without_agent(self):
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
+            currency="CNY",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        runner = ModelPriceSyncAgentRunner(
+            source_ids=[source.id],
+            verify_source=False,
+        )
+
+        with (
+            mock.patch(
+                "llm_ops.agents.model_price_sync.definition."
+                "build_llm_ops_agent_model"
+            ) as mock_build_model,
+            mock.patch(
+                "llm_ops.agents.model_price_sync.definition."
+                "collect_price_source"
+            ) as mock_collect,
+        ):
+            mock_collect.return_value = {"models": 1, "changed": 1}
+            result = runner.execute()
+
+        mock_build_model.assert_not_called()
+        mock_collect.assert_called_once_with(source, verify_source=False)
+        self.assertEqual(result["success"], True)
+        self.assertEqual(result["sources"], 1)
+        self.assertEqual(result["succeeded"], 1)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(
+            result["source_results"]["aliyun-official"],
+            {"models": 1, "changed": 1},
+        )
+
     def test_explicit_source_ids_keep_only_supported_aliyun_sources(self):
         openai = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
@@ -174,6 +269,26 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
             ),
             endpoint_url="https://openai.com/api/pricing/",
             currency="USD",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        runner = ModelPriceSyncAgentRunner(source_ids=[source.id])
+
+        self.assertEqual(runner.list_configured_sources(), [])
+
+    def test_explicit_source_ids_skip_model_level_official_sources(self):
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Qwen Plus Official",
+            slug="aliyun-qwen-plus-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
+            currency="CNY",
             is_enabled=True,
             updates_model_prices=True,
         )
