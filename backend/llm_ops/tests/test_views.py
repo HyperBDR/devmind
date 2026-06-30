@@ -470,6 +470,50 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(audit.metadata["provider_id"], provider.id)
         self.assertNotIn("rows", audit.metadata)
 
+    @patch("llm_ops.views.import_manual_model_prices")
+    def test_manual_price_import_accepts_existing_source(self, mock_import):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Manual Sheet",
+            slug="openai-manual-sheet",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+            currency="CNY",
+        )
+        mock_import.return_value = {
+            "created_models": 0,
+            "updated_models": 1,
+            "created_price_items": 1,
+        }
+
+        response = self.client.post(
+            reverse("llm-ops-manual-price-import"),
+            {
+                "source": source.id,
+                "updates_model_prices": True,
+                "rows": [
+                    {
+                        "model_code": "gpt-5",
+                        "model_name": "GPT-5",
+                        "input_price_per_million": "1.000000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_import.assert_called_once()
+        _, kwargs = mock_import.call_args
+        self.assertEqual(kwargs["source"], source)
+        self.assertEqual(kwargs["provider"], provider)
+        self.assertEqual(kwargs["default_currency"], "CNY")
+        self.assertEqual(
+            AuditLog.objects.filter(target_id=str(source.id)).count(),
+            1,
+        )
+
     def test_collection_source_can_be_deleted(self):
         source = PriceCollectionSource.objects.create(
             name="Manual Source",

@@ -26,12 +26,32 @@
 
       <div class="modal-body space-y-4">
         <div class="grid gap-3 md:grid-cols-2">
-          <label class="form-field">
+          <label class="form-field md:col-span-2">
             <span class="field-label">
-              {{ t('llmOps.manualPriceImport.fields.provider') }}
+              {{ t('llmOps.manualPriceImport.fields.source') }}
             </span>
-            <CompactSelect v-model="form.provider" :options="providerOptions" />
+            <CompactSelect
+              v-model="form.source"
+              :options="sourceOptions"
+              class-name="w-full"
+              :menu-min-width="360"
+            />
+            <span class="field-help">
+              {{ sourceStatusText }}
+            </span>
           </label>
+          <div class="source-context">
+            <span>{{ t('llmOps.manualPriceImport.fields.provider') }}</span>
+            <strong>
+              {{ selectedSourceProvider?.name || '-' }}
+            </strong>
+          </div>
+          <div class="source-context">
+            <span>{{ t('llmOps.manualPriceImport.fields.sourceUrl') }}</span>
+            <strong class="break-all">
+              {{ selectedSource?.endpoint_url || '-' }}
+            </strong>
+          </div>
           <label class="form-field">
             <span class="field-label">
               {{ t('llmOps.manualPriceImport.fields.currency') }}
@@ -40,27 +60,9 @@
           </label>
           <label class="form-field">
             <span class="field-label">
-              {{ t('llmOps.manualPriceImport.fields.sourceName') }}
+              {{ t('llmOps.manualPriceImport.fields.sourceCategory') }}
             </span>
-            <input
-              v-model="form.source_name"
-              class="field"
-              :placeholder="
-                t('llmOps.manualPriceImport.placeholders.sourceName')
-              "
-            />
-          </label>
-          <label class="form-field">
-            <span class="field-label">
-              {{ t('llmOps.manualPriceImport.fields.sourceUrl') }}
-            </span>
-            <input
-              v-model="form.source_url"
-              class="field"
-              :placeholder="
-                t('llmOps.manualPriceImport.placeholders.sourceUrl')
-              "
-            />
+            <input class="field" :value="sourceCategoryLabel" disabled />
           </label>
         </div>
 
@@ -252,6 +254,10 @@ const props = defineProps({
   providers: {
     type: Array,
     required: true
+  },
+  sources: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -267,27 +273,57 @@ const currencyOptions = [
   { label: 'CNY', value: 'CNY' }
 ]
 
-const providerOptions = computed(() => [
+const sourceOptions = computed(() => [
   {
-    label: t('llmOps.manualPriceImport.placeholders.selectProvider'),
+    label: t('llmOps.manualPriceImport.placeholders.selectSource'),
     value: ''
   },
-  ...props.providers
+  ...props.sources
     .slice()
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((provider) => ({
-      label: provider.name,
-      value: provider.id
+    .sort((left, right) => String(left.name).localeCompare(String(right.name)))
+    .map((source) => ({
+      label: source.name,
+      value: source.id,
+      description: source.provider_name || source.relation_name || '',
+      badge: source.category_label || source.source_category || ''
     }))
 ])
 
+const selectedSource = computed(() =>
+  props.sources.find(
+    (source) => String(source.id) === String(form.value.source)
+  )
+)
+const selectedSourceProvider = computed(() => {
+  const providerId = selectedSource.value?.provider
+  return props.providers.find(
+    (provider) => String(provider.id) === String(providerId || '')
+  )
+})
+const sourceCategoryLabel = computed(
+  () =>
+    selectedSource.value?.category_label ||
+    selectedSource.value?.source_category ||
+    '-'
+)
+const sourceStatusText = computed(() => {
+  if (!selectedSource.value) {
+    return t('llmOps.manualPriceImport.validation.sourceRequired')
+  }
+  if (!selectedSourceProvider.value) {
+    return t('llmOps.manualPriceImport.validation.sourceProviderRequired')
+  }
+  return t('llmOps.manualPriceImport.validation.sourceReady', {
+    name: selectedSource.value.name
+  })
+})
 const parsed = computed(() => parseTable(rawTable.value))
 const parsedRows = computed(() => parsed.value.rows)
 const parseErrors = computed(() => parsed.value.errors)
 const canSubmit = computed(
   () =>
-    form.value.provider &&
-    form.value.source_name.trim() &&
+    form.value.source &&
+    selectedSourceProvider.value &&
     parsedRows.value.length &&
     !parseErrors.value.length
 )
@@ -298,18 +334,28 @@ watch(
     if (open) {
       form.value = defaultForm()
       rawTable.value = ''
+      form.value.source = firstImportSourceId()
     }
   }
 )
 
+watch(selectedSource, (source) => {
+  if (source?.currency) {
+    form.value.currency = source.currency
+  }
+})
+
 function defaultForm() {
   return {
-    provider: '',
-    source_name: '',
-    source_url: '',
+    source: '',
     currency: 'USD',
     updates_model_prices: true
   }
+}
+
+function firstImportSourceId() {
+  const source = props.sources.find((item) => item.provider)
+  return source?.id || props.sources[0]?.id || ''
 }
 
 function close() {
@@ -323,6 +369,9 @@ async function submit() {
   try {
     await llmOpsApi.importManualPrices({
       ...form.value,
+      provider: selectedSourceProvider.value.id,
+      source_name: selectedSource.value.name,
+      source_url: selectedSource.value.endpoint_url || '',
       rows: parsedRows.value.map((row) => cleanRow(row))
     })
     emit('imported')
@@ -548,8 +597,24 @@ function modalityLabel(value) {
   @apply text-xs font-medium text-slate-500;
 }
 
+.field-help {
+  @apply text-xs leading-5 text-slate-400;
+}
+
 .field {
   @apply min-h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.source-context {
+  @apply rounded-lg border border-slate-200 bg-slate-50 px-3 py-2;
+}
+
+.source-context span {
+  @apply block text-xs text-slate-500;
+}
+
+.source-context strong {
+  @apply mt-1 block truncate text-sm font-medium text-slate-800;
 }
 
 .table-input {

@@ -1494,6 +1494,7 @@
         "currency": "默认币种",
         "endpointUrl": "价格地址",
         "name": "价格源名称",
+        "officialProvider": "原厂厂商",
         "slug": "系统标识",
         "sourceType": "来源方式"
       },
@@ -1529,11 +1530,24 @@
         "cny": "CNY",
         "usd": "USD"
       },
+      "officialPreset": {
+        "currency": "币种",
+        "empty": "暂无可添加的原厂价格源。",
+        "exists": "当前原厂源已经添加。",
+        "existsBadge": "已添加",
+        "loading": "正在加载原厂源。",
+        "ready": "确认后会创建原厂价格源。",
+        "slug": "系统标识",
+        "source": "价格源",
+        "url": "价格地址"
+      },
       "messages": {
         "created": "模型价格源已创建",
+        "officialCreated": "原厂价格源「{name}」已添加",
         "updated": "模型价格源已更新"
       },
       "errors": {
+        "loadOfficialSources": "加载原厂价格源失败",
         "save": "保存模型价格源失败"
       }
     },
@@ -1738,12 +1752,15 @@
       "fields": {
         "currency": "默认币种",
         "provider": "模型厂商",
+        "source": "模型价格源",
+        "sourceCategory": "价格口径",
         "sourceName": "模型价格源名称",
         "sourceUrl": "模型价格源地址",
         "tableContent": "Excel / CSV 内容"
       },
       "placeholders": {
         "selectProvider": "选择模型归属方",
+        "selectSource": "选择已有模型价格源",
         "sourceName": "例如 OpenAI 2026-06 手动价格表",
         "sourceUrl": "可选，官网或内部表格链接"
       },
@@ -1774,6 +1791,11 @@
         "multimodal": "多模态",
         "text": "文本",
         "video": "视频"
+      },
+      "validation": {
+        "sourceProviderRequired": "该价格源尚未绑定模型厂商，无法批量导入。",
+        "sourceReady": "将导入到价格源「{name}」。",
+        "sourceRequired": "请选择一个已有模型价格源。"
       },
       "parseErrors": {
         "invalidNumber": "第 {line} 行 {field} 不是有效的非负数字。",

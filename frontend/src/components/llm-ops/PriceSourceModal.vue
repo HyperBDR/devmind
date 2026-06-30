@@ -88,6 +88,61 @@
                 :options="sourceCategoryOptions"
               />
             </label>
+            <label
+              v-if="shouldUseOfficialPreset"
+              class="field-group md:col-span-2"
+            >
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.officialProvider') }}
+              </span>
+              <CompactSelect
+                v-model="selectedOfficialProviderCode"
+                :disabled="loadingOfficialProviderOptions || saving"
+                :options="officialProviderSelectOptions"
+                class-name="w-full"
+                :menu-min-width="360"
+              />
+              <span class="field-help">
+                {{ officialProviderStatus }}
+              </span>
+            </label>
+            <div
+              v-if="shouldUseOfficialPreset && selectedOfficialProviderOption"
+              class="official-source-detail md:col-span-2"
+            >
+              <div>
+                <span>
+                  {{ t('llmOps.priceSourceModal.officialPreset.source') }}
+                </span>
+                <strong>
+                  {{ selectedOfficialProviderOption.source_name }}
+                </strong>
+              </div>
+              <div>
+                <span>
+                  {{ t('llmOps.priceSourceModal.officialPreset.slug') }}
+                </span>
+                <strong class="font-mono">
+                  {{ selectedOfficialProviderOption.source_slug }}
+                </strong>
+              </div>
+              <div>
+                <span>
+                  {{ t('llmOps.priceSourceModal.officialPreset.currency') }}
+                </span>
+                <strong>
+                  {{ selectedOfficialProviderOption.currency }}
+                </strong>
+              </div>
+              <div>
+                <span>
+                  {{ t('llmOps.priceSourceModal.officialPreset.url') }}
+                </span>
+                <strong class="break-all">
+                  {{ selectedOfficialProviderOption.source_url || '-' }}
+                </strong>
+              </div>
+            </div>
             <label class="field-group">
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.currency') }}
@@ -156,7 +211,7 @@
           <button
             class="btn-primary btn-action-save"
             type="submit"
-            :disabled="saving"
+            :disabled="saving || saveDisabled"
           >
             <span class="icon-mark" />
             {{
@@ -197,10 +252,22 @@ const { t } = useI18n()
 
 const saving = ref(false)
 const form = ref(defaults())
+const officialProviderOptions = ref([])
+const selectedOfficialProviderCode = ref('')
+const loadingOfficialProviderOptions = ref(false)
 const isEditing = computed(() => Boolean(props.source?.id))
-const internalSlugLabel = computed(() =>
-  isEditing.value ? form.value.slug || '-' : autoSlug(form.value.name || '')
+const shouldUseOfficialPreset = computed(
+  () => !isEditing.value && form.value.source_category === 'official_provider'
 )
+const internalSlugLabel = computed(() =>
+  isEditing.value ? form.value.slug || '-' : sourceSlugLabel.value
+)
+const sourceSlugLabel = computed(() => {
+  if (shouldUseOfficialPreset.value && selectedOfficialProviderOption.value) {
+    return selectedOfficialProviderOption.value.source_slug || '-'
+  }
+  return autoSlug(form.value.name || '')
+})
 const sourceTypeLabel = computed(() => {
   const type = props.source?.source_type || 'custom'
   const labels = {
@@ -235,6 +302,44 @@ const currencyOptions = computed(() => [
   { label: t('llmOps.priceSourceModal.currencies.usd'), value: 'USD' }
 ])
 
+const officialProviderSelectOptions = computed(() =>
+  officialProviderOptions.value.map((option) => ({
+    value: option.provider_code,
+    label: option.provider_name,
+    description: option.source_name,
+    badge: option.source_exists
+      ? t('llmOps.priceSourceModal.officialPreset.existsBadge')
+      : option.currency
+  }))
+)
+
+const selectedOfficialProviderOption = computed(() =>
+  officialProviderOptions.value.find(
+    (option) =>
+      String(option.provider_code) ===
+      String(selectedOfficialProviderCode.value)
+  )
+)
+
+const officialProviderStatus = computed(() => {
+  if (loadingOfficialProviderOptions.value) {
+    return t('llmOps.priceSourceModal.officialPreset.loading')
+  }
+  const option = selectedOfficialProviderOption.value
+  if (!option) return t('llmOps.priceSourceModal.officialPreset.empty')
+  if (option.source_exists) {
+    return t('llmOps.priceSourceModal.officialPreset.exists')
+  }
+  return t('llmOps.priceSourceModal.officialPreset.ready')
+})
+
+const saveDisabled = computed(
+  () =>
+    shouldUseOfficialPreset.value &&
+    (!selectedOfficialProviderOption.value ||
+      selectedOfficialProviderOption.value.source_exists)
+)
+
 watch(
   () => props.source,
   (source) => {
@@ -242,6 +347,20 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => [props.open, form.value.source_category, isEditing.value],
+  ([open]) => {
+    if (open && shouldUseOfficialPreset.value) {
+      loadOfficialProviderOptions()
+    }
+  }
+)
+
+watch(selectedOfficialProviderOption, (option) => {
+  if (!shouldUseOfficialPreset.value || !option) return
+  applyOfficialProviderOption(option)
+})
 
 function defaults() {
   return {
@@ -277,6 +396,10 @@ function close() {
 async function save() {
   saving.value = true
   try {
+    if (shouldUseOfficialPreset.value) {
+      await saveOfficialProviderSource()
+      return
+    }
     const payload = {
       ...form.value,
       slug: isEditing.value
@@ -296,6 +419,65 @@ async function save() {
     showError(errorMessage(error, t('llmOps.priceSourceModal.errors.save')))
   } finally {
     saving.value = false
+  }
+}
+
+async function saveOfficialProviderSource() {
+  const option = selectedOfficialProviderOption.value
+  if (!option || option.source_exists) return
+
+  const response = await llmOpsApi.ensureOfficialProviderSource(
+    option.provider_code
+  )
+  const payload = response?.data?.data || response?.data || {}
+  const sourceName = payload.source?.name || option.source_name
+  showSuccess(
+    t('llmOps.priceSourceModal.messages.officialCreated', {
+      name: sourceName
+    })
+  )
+  emit('saved')
+}
+
+async function loadOfficialProviderOptions() {
+  if (loadingOfficialProviderOptions.value) return
+  loadingOfficialProviderOptions.value = true
+  try {
+    const response = await llmOpsApi.listOfficialProviderSourceOptions()
+    const payload = response?.data?.data || response?.data || {}
+    const options = Array.isArray(payload.results) ? payload.results : []
+    officialProviderOptions.value = options
+    const current = options.find(
+      (option) =>
+        String(option.provider_code) ===
+        String(selectedOfficialProviderCode.value)
+    )
+    const preferred = options.find((option) => !option.source_exists)
+    const selected =
+      current && !current.source_exists ? current : preferred || current
+    selectedOfficialProviderCode.value =
+      selected?.provider_code || options[0]?.provider_code || ''
+    if (selected) applyOfficialProviderOption(selected)
+  } catch (error) {
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.priceSourceModal.errors.loadOfficialSources')
+      )
+    )
+  } finally {
+    loadingOfficialProviderOptions.value = false
+  }
+}
+
+function applyOfficialProviderOption(option) {
+  form.value = {
+    ...form.value,
+    name: option.source_name || option.provider_name || form.value.name,
+    slug: option.source_slug || form.value.slug,
+    currency: option.currency || form.value.currency,
+    endpoint_url: option.source_url || form.value.endpoint_url,
+    updates_model_prices: true
   }
 }
 
