@@ -560,7 +560,7 @@ import {
   referenceRetailPrice,
   RESALE_PRICE_DIMENSION_SPECS
 } from '@/utils/resalePricing'
-import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
+import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
   initialModelId: {
@@ -690,12 +690,12 @@ onBeforeUnmount(() => {
 
 const metaModelRows = computed(() =>
   (props.metaModels || []).map((item) => {
-    const vendor = resolveCanonicalMetaVendor(item, props.providers)
+    const vendor = resolveCanonicalMetaOwner(item, props.providers)
     return {
       ...item,
-      effective_vendor: item.effective_vendor || vendor.id,
-      effective_vendor_code: item.effective_vendor_code || vendor.code,
-      effective_vendor_name: item.effective_vendor_name || vendor.name
+      owner_key: item.owner_code || vendor.code,
+      owner_code: item.owner_code || vendor.code,
+      owner_name: item.owner_name || vendor.name
     }
   })
 )
@@ -768,7 +768,7 @@ const platformSelectOptions = computed(() =>
 const metaVendorOptions = computed(() => {
   const map = new Map()
   metaModelRows.value.forEach((model) => {
-    const id = model.effective_vendor
+    const id = model.owner_key
     if (!id) return
     if (!availableMetaModelIds.value.has(String(model.id))) return
     const key = String(id)
@@ -776,10 +776,9 @@ const metaVendorOptions = computed(() => {
     map.set(key, {
       id,
       name:
-        model.effective_vendor_name ||
-        model.vendor_name ||
+        model.owner_name ||
         t('llmOps.publishingWorkspace.fallback.uncategorized'),
-      code: model.effective_vendor_code || ''
+      code: model.owner_code || ''
     })
   })
   return Array.from(map.values()).sort((left, right) =>
@@ -802,14 +801,14 @@ const baseModelOptions = computed(() => {
     .filter((item) => {
       if (!availableMetaModelIds.value.has(String(item.id))) return false
       if (!metaVendorId) return true
-      return String(item.effective_vendor) === String(metaVendorId)
+      return String(item.owner_key) === String(metaVendorId)
     })
     .map((item) => ({
       id: item.id,
       name: item.name || item.code,
       code: item.code,
       family: item.family,
-      vendorName: item.effective_vendor_name || item.vendor_name
+      vendorName: item.owner_name
     }))
     .sort((left, right) => String(left.name).localeCompare(String(right.name)))
 })
@@ -1051,9 +1050,9 @@ const chainRows = computed(() => {
   if (!metaModel) return []
   const supplierFilter = form.value.supplierId
   const metaVendor = {
-    id: metaModel.effective_vendor,
-    code: metaModel.effective_vendor_code,
-    name: metaModel.effective_vendor_name || metaModel.vendor_name
+    id: metaModel.owner_key,
+    code: metaModel.owner_code,
+    name: metaModel.owner_name
   }
   return selectedMetaModelProcurements.value
     .flatMap((procurement) => {
@@ -1292,8 +1291,8 @@ function hydrateInitialModel() {
   const skuModel = modelById.value.get(String(initialModelId))
   const metaModelId = skuModel?.meta_model || initialModelId
   const metaModel = metaModelById.value.get(String(metaModelId))
-  form.value.metaVendorId = metaModel?.effective_vendor
-    ? String(metaModel.effective_vendor)
+  form.value.metaVendorId = metaModel?.owner_key
+    ? String(metaModel.owner_key)
     : skuModel?.provider
       ? String(skuModel.provider)
       : ''

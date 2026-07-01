@@ -514,7 +514,10 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
     is added to its alias set so future lookups succeed without
     a database scan.
     """
-    from .constants import canonical_meta_model_identity
+    from .constants import (
+        canonical_meta_model_identity,
+        meta_model_owner_payload,
+    )
 
     reported_code = str(data.get("code") or data.get("name") or "").strip()
     reported_name = str(data.get("name") or reported_code).strip()
@@ -590,7 +593,7 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
 
     defaults = {
         "name": name,
-        "vendor": provider,
+        **meta_model_owner_payload(code, provider),
         "modality": data.get("modality") or MetaModel.MODALITY_TEXT,
         "context_window": data.get("context_window") or 0,
         "max_output_tokens": data.get("max_output_tokens") or 0,
@@ -605,32 +608,12 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
 
 
 class MetaModelSerializer(serializers.ModelSerializer):
-    """Serializer for canonical model identities.
+    """Serializer for canonical model identities."""
 
-    The ``vendor`` field is recomputed through the canonical
-    vendor rules so the API never returns a supplier alias
-    (``siliconflow``) or a wrong attribution (deepseek model
-    owned by Aliyun). The original pointer is preserved on
-    ``raw_vendor`` for debugging.
-    """
-
-    vendor_name = serializers.CharField(
-        source="vendor.name",
-        read_only=True,
-        allow_null=True,
-    )
     provider_price_count = serializers.IntegerField(
         read_only=True,
         required=False,
     )
-    raw_vendor = serializers.IntegerField(
-        source="vendor_id",
-        read_only=True,
-        allow_null=True,
-    )
-    effective_vendor = serializers.SerializerMethodField()
-    effective_vendor_code = serializers.SerializerMethodField()
-    effective_vendor_name = serializers.SerializerMethodField()
     release_date = serializers.SerializerMethodField()
 
     class Meta:
@@ -638,27 +621,12 @@ class MetaModelSerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ("created_at", "updated_at")
 
-    def get_effective_vendor(self, instance):
-        canonical = self._canonical_vendor(instance)
-        if canonical is not None:
-            return canonical["provider"].id
-        return instance.vendor_id
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        from .constants import resolve_meta_model_owner_fields
 
-    def get_effective_vendor_code(self, instance):
-        canonical = self._canonical_vendor(instance)
-        if canonical is not None:
-            return canonical["provider"].code
-        if instance.vendor_id:
-            return instance.vendor.code
-        return ""
-
-    def get_effective_vendor_name(self, instance):
-        canonical = self._canonical_vendor(instance)
-        if canonical is not None:
-            return canonical["provider"].name
-        if instance.vendor_id:
-            return instance.vendor.name
-        return ""
+        data.update(resolve_meta_model_owner_fields(instance))
+        return data
 
     def get_release_date(self, instance):
         metadata = instance.metadata or {}
@@ -668,21 +636,6 @@ class MetaModelSerializer(serializers.ModelSerializer):
             or models_dev.get("last_updated")
             or ""
         )
-
-    @staticmethod
-    def _canonical_vendor(instance):
-        from .constants import (
-            canonical_vendor_for_model_code,
-            ensure_canonical_vendor_row,
-        )
-
-        spec = canonical_vendor_for_model_code(instance.code)
-        if not spec:
-            return None
-        provider = ensure_canonical_vendor_row(spec)
-        if not provider:
-            return None
-        return {"spec": spec, "provider": provider}
 
 
 class LLMModelSerializer(serializers.ModelSerializer):
@@ -696,20 +649,17 @@ class LLMModelSerializer(serializers.ModelSerializer):
         source="meta_model.code",
         read_only=True,
     )
-    meta_model_vendor = serializers.IntegerField(
-        source="meta_model.vendor_id",
+    meta_model_owner_code = serializers.CharField(
+        source="meta_model.owner_code",
         read_only=True,
-        allow_null=True,
     )
-    meta_model_vendor_name = serializers.CharField(
-        source="meta_model.vendor.name",
+    meta_model_owner_name = serializers.CharField(
+        source="meta_model.owner_name",
         read_only=True,
-        allow_null=True,
     )
-    meta_model_vendor_code = serializers.CharField(
-        source="meta_model.vendor.code",
+    meta_model_owner_website = serializers.CharField(
+        source="meta_model.owner_website",
         read_only=True,
-        allow_null=True,
     )
     provider_name = serializers.CharField(
         source="provider.name",
@@ -826,20 +776,17 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         source="meta_model.code",
         read_only=True,
     )
-    meta_model_vendor = serializers.IntegerField(
-        source="meta_model.vendor_id",
+    meta_model_owner_code = serializers.CharField(
+        source="meta_model.owner_code",
         read_only=True,
-        allow_null=True,
     )
-    meta_model_vendor_name = serializers.CharField(
-        source="meta_model.vendor.name",
+    meta_model_owner_name = serializers.CharField(
+        source="meta_model.owner_name",
         read_only=True,
-        allow_null=True,
     )
-    meta_model_vendor_code = serializers.CharField(
-        source="meta_model.vendor.code",
+    meta_model_owner_website = serializers.CharField(
+        source="meta_model.owner_website",
         read_only=True,
-        allow_null=True,
     )
     model_name = serializers.CharField(source="model.name", read_only=True)
     model_code = serializers.CharField(source="model.code", read_only=True)
@@ -936,19 +883,19 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         return data
 
 
-def canonical_vendor_for_meta_model(meta_model):
-    """Resolve the real vendor for one canonical meta model."""
+def canonical_owner_code_for_meta_model(meta_model):
+    """Resolve the real owner code for one canonical meta model."""
     if meta_model is None:
-        return None
+        return ""
 
-    canonical = MetaModelSerializer._canonical_vendor(meta_model)
-    if canonical is not None:
-        return canonical["provider"]
-    return meta_model.vendor
+    from .constants import meta_model_owner_payload
+
+    owner = meta_model_owner_payload(meta_model.code)
+    return owner["owner_code"] or meta_model.owner_code
 
 
 def business_source_category_for_source_model(*, source, meta_model):
-    """Return official only when the source vendor owns the model."""
+    """Return official only when the source provider matches the owner."""
     raw_category = source.source_category
     if (
         raw_category
@@ -956,12 +903,11 @@ def business_source_category_for_source_model(*, source, meta_model):
     ):
         return raw_category
 
-    source_vendor_id = source.provider_id
-    model_vendor = canonical_vendor_for_meta_model(meta_model)
-    model_vendor_id = getattr(model_vendor, "id", None)
-    if not source_vendor_id or not model_vendor_id:
+    source_owner_code = str(getattr(source.provider, "code", "") or "")
+    model_owner_code = canonical_owner_code_for_meta_model(meta_model)
+    if not source_owner_code or not model_owner_code:
         return raw_category
-    if source_vendor_id == model_vendor_id:
+    if source_owner_code == model_owner_code:
         return raw_category
     return LLMModel.PRICE_ROLE_CLOUD_HOSTED
 
@@ -998,9 +944,7 @@ def business_source_category_for_catalog(source):
     ):
         return raw_category
 
-    models = list(
-        source.models.select_related("meta_model", "meta_model__vendor")
-    )
+    models = list(source.models.select_related("meta_model"))
     if not models:
         return raw_category
 

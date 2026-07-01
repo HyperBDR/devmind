@@ -5,11 +5,10 @@ from __future__ import annotations
 from django.db.models import Q
 
 from .constants import (
-    SUPPLIER_SOURCE_VENDOR_ALIASES,
+    SUPPLIER_SOURCE_OWNER_ALIASES,
     canonical_meta_model_identity,
-    canonical_vendor_for_model_code,
-    ensure_canonical_vendor_row,
-    is_canonical_vendor_code,
+    meta_model_owner_payload,
+    resolve_meta_model_owner_fields,
 )
 from .models import (
     ChannelModelPrice,
@@ -161,22 +160,19 @@ def clean_legacy_llm_ops_demo_data() -> dict[str, int]:
 
 
 def resolve_orphan_meta_models() -> dict[str, int]:
-    """Backfill canonical vendor on every meta model that has none."""
+    """Backfill canonical owner on every meta model that has none."""
     stats = {
         "resolved": 0,
         "unresolved": 0,
     }
-    for meta in MetaModel.objects.filter(vendor__isnull=True):
-        spec = canonical_vendor_for_model_code(meta.code)
-        if not spec:
+    for meta in MetaModel.objects.filter(owner_code=""):
+        owner = meta_model_owner_payload(meta.code)
+        if not owner["owner_code"]:
             stats["unresolved"] += 1
             continue
-        provider = ensure_canonical_vendor_row(spec)
-        if not provider:
-            stats["unresolved"] += 1
-            continue
-        meta.vendor = provider
-        meta.save(update_fields=["vendor", "updated_at"])
+        for field_name, value in owner.items():
+            setattr(meta, field_name, value)
+        meta.save(update_fields=[*owner.keys(), "updated_at"])
         stats["resolved"] += 1
     return stats
 
@@ -188,15 +184,23 @@ def normalize_meta_model_catalog() -> dict[str, int]:
         "merged": 0,
         "linked_records": 0,
     }
-    for meta in list(MetaModel.objects.select_related("vendor").all()):
+    for meta in list(MetaModel.objects.all()):
         identity = canonical_meta_model_identity(meta.code, meta.name)
         canonical_code = identity["code"]
         canonical_name = identity["name"]
         if meta.code == canonical_code:
+            changed_fields = []
             aliases = merged_meta_aliases(meta, identity)
             if aliases != list(meta.aliases or []):
                 meta.aliases = aliases
-                meta.save(update_fields=["aliases", "updated_at"])
+                changed_fields.append("aliases")
+            owner = resolve_meta_model_owner_fields(meta)
+            for field_name, value in owner.items():
+                if getattr(meta, field_name) != value:
+                    setattr(meta, field_name, value)
+                    changed_fields.append(field_name)
+            if changed_fields:
+                meta.save(update_fields=[*changed_fields, "updated_at"])
                 stats["normalized"] += 1
             continue
         canonical = MetaModel.objects.filter(code=canonical_code).first()
@@ -204,15 +208,15 @@ def normalize_meta_model_catalog() -> dict[str, int]:
             meta.code = canonical_code
             meta.name = canonical_name
             meta.aliases = merged_meta_aliases(meta, identity)
-            spec = canonical_vendor_for_model_code(canonical_code)
-            if spec:
-                meta.vendor = ensure_canonical_vendor_row(spec)
+            owner = meta_model_owner_payload(canonical_code)
+            for field_name, value in owner.items():
+                setattr(meta, field_name, value)
             meta.save(
                 update_fields=[
                     "code",
                     "name",
                     "aliases",
-                    "vendor",
+                    *owner.keys(),
                     "updated_at",
                 ],
             )
@@ -286,9 +290,11 @@ def merge_meta_model_rows(
     if duplicate.max_output_tokens > canonical.max_output_tokens:
         canonical.max_output_tokens = duplicate.max_output_tokens
         changed_fields.append("max_output_tokens")
-    if not canonical.vendor_id and duplicate.vendor_id:
-        canonical.vendor = duplicate.vendor
-        changed_fields.append("vendor")
+    if not canonical.owner_code and duplicate.owner_code:
+        canonical.owner_code = duplicate.owner_code
+        canonical.owner_name = duplicate.owner_name
+        canonical.owner_website = duplicate.owner_website
+        changed_fields += ["owner_code", "owner_name", "owner_website"]
     if changed_fields:
         changed_fields.append("updated_at")
         canonical.save(update_fields=changed_fields)
@@ -311,28 +317,22 @@ def cleanup_orphan_meta_models_for_reset(
 ) -> dict[str, int]:
     """Remove or preview meta models that no canonical model references."""
     stats = {
-        "meta_models_rehomed": 0,
+        "meta_models_owner_updated": 0,
         "meta_models_deleted": 0,
     }
     orphan_ids = []
     for meta in MetaModel.objects.all():
-        spec = canonical_vendor_for_model_code(meta.code)
-        canonical = None
-        if spec:
-            if dry_run:
-                if is_canonical_vendor_code(spec["code"]):
-                    canonical = LLMProvider.objects.filter(
-                        code=spec["code"],
-                    ).first()
-            else:
-                canonical = ensure_canonical_vendor_row(spec)
-        elif meta.vendor_id and is_canonical_vendor_code(meta.vendor.code):
-            canonical = meta.vendor
-        if canonical and meta.vendor_id and canonical.id != meta.vendor_id:
+        owner = resolve_meta_model_owner_fields(meta)
+        owner_changed = any(
+            getattr(meta, field_name) != value
+            for field_name, value in owner.items()
+        )
+        if owner_changed:
             if not dry_run:
-                meta.vendor = canonical
-                meta.save(update_fields=["vendor", "updated_at"])
-            stats["meta_models_rehomed"] += 1
+                for field_name, value in owner.items():
+                    setattr(meta, field_name, value)
+                meta.save(update_fields=[*owner.keys(), "updated_at"])
+            stats["meta_models_owner_updated"] += 1
         if not meta.provider_prices.exists():
             orphan_ids.append(meta.id)
     if orphan_ids:
@@ -427,7 +427,7 @@ def reset_meta_models_canonical() -> dict[str, int]:
         channel__code=REAL_RESOURCE_CHANNEL_CODE,
     ).delete()
     stats["meta_models_deleted"] = MetaModel.objects.all().delete()[0]
-    for supplier_code in SUPPLIER_SOURCE_VENDOR_ALIASES.keys():
+    for supplier_code in SUPPLIER_SOURCE_OWNER_ALIASES.keys():
         LLMProvider.objects.filter(code=supplier_code).delete()
     return stats
 

@@ -608,7 +608,7 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertFalse(
             MetaModel.objects.filter(code__startswith="llama-3.3").exists(),
         )
-        self.assertEqual(meta.vendor.code, "openai")
+        self.assertEqual(meta.owner_code, "openai")
         self.assertEqual(meta.family, "gpt-mini")
         self.assertEqual(meta.modality, MetaModel.MODALITY_MULTIMODAL)
         self.assertEqual(meta.context_window, 128000)
@@ -682,7 +682,9 @@ class OfficialCollectionSyncTests(TestCase):
         linked = MetaModel.objects.create(
             code="linked-online-model",
             name="Linked Online Model",
-            vendor=LLMProvider.objects.get(code="openai"),
+            owner_code="openai",
+            owner_name="OpenAI",
+            owner_website="https://api.openai.com/",
             metadata={
                 "models_dev": {
                     "id": "supplier/linked-online-model",
@@ -929,7 +931,9 @@ class OfficialCollectionSyncTests(TestCase):
         MetaModel.objects.create(
             code="qwen-new-2026",
             name="Qwen New 2026",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
             aliases=["qwen-new-2026"],
         )
         mock_get.return_value = MockPricingResponse(

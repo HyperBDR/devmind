@@ -63,10 +63,10 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模型厂商</span>
+              <span class="field-label">模型归属方</span>
               <CompactSelect
-                v-model="form.vendor"
-                :options="vendorOptions"
+                v-model="form.owner_code"
+                :options="ownerOptions"
                 class-name="meta-select w-full"
               />
             </label>
@@ -217,6 +217,10 @@ const props = defineProps({
   providers: {
     type: Array,
     default: () => []
+  },
+  metaModels: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -239,13 +243,30 @@ const modalityOptions = [
   { value: 'video', label: 'Video' }
 ]
 
-const vendorOptions = computed(() => [
-  { value: '', label: '未绑定' },
-  ...props.providers.map((provider) => ({
-    value: provider.id,
-    label: provider.name
-  }))
-])
+const ownerOptions = computed(() => {
+  const options = [{ value: '', label: '未绑定' }]
+  const seen = new Set([''])
+  props.metaModels.forEach((model) => {
+    pushOwnerOption(options, seen, model.owner_code, model.owner_name)
+  })
+  pushOwnerOption(
+    options,
+    seen,
+    form.value.owner_code || props.metaModel?.owner_code,
+    form.value.owner_name || props.metaModel?.owner_name
+  )
+  return options
+})
+
+function pushOwnerOption(options, seen, code, name) {
+  const value = String(code || '').trim()
+  if (!value || seen.has(value)) return
+  seen.add(value)
+  options.push({
+    value,
+    label: String(name || value).trim()
+  })
+}
 
 watch(
   () => [props.open, props.metaModel],
@@ -261,7 +282,9 @@ function defaults() {
     id: null,
     name: '',
     code: '',
-    vendor: '',
+    owner_code: '',
+    owner_name: '',
+    owner_website: '',
     family: '',
     modality: 'text',
     status: 'active',
@@ -280,7 +303,9 @@ function metaModelToForm(item) {
     id: item.id,
     name: item.name || '',
     code: item.code || '',
-    vendor: item.vendor || '',
+    owner_code: item.owner_code || '',
+    owner_name: item.owner_name || '',
+    owner_website: item.owner_website || '',
     family: item.family || '',
     modality: item.modality || 'text',
     status: item.status || 'active',
@@ -338,10 +363,16 @@ function normalizePayload(payload) {
     .map((item) => item.trim())
     .filter(Boolean)
 
+  const owner = props.providers.find(
+    (provider) => String(provider.code) === String(payload.owner_code)
+  )
+
   return {
     name: String(payload.name || '').trim(),
     code: String(payload.code || '').trim(),
-    vendor: payload.vendor || null,
+    owner_code: payload.owner_code || '',
+    owner_name: owner?.name || payload.owner_name || '',
+    owner_website: owner?.website || payload.owner_website || '',
     family: String(payload.family || '').trim(),
     modality: payload.modality || 'text',
     status: payload.status || 'active',

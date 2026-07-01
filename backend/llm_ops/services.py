@@ -106,17 +106,16 @@ def ensure_meta_model(
 ) -> MetaModel:
     """Create or update canonical model identity for a source model.
 
-    The ``vendor`` argument is treated as a price-sheet hint. The
-    canonical vendor is resolved from the model code, and a
-    supplier alias is never written as the meta model vendor.
+    The ``provider`` argument is treated as a price-sheet hint. The
+    canonical owner is resolved from the model code, and a supplier
+    alias is never written as the meta model owner.
     ``raw_code`` keeps the original collector spelling so alias-only
     lookups can still reuse an existing canonical row.
     """
     from .constants import (
         canonical_meta_model_identity,
-        canonical_vendor_for_model_code,
-        ensure_canonical_vendor_row,
-        is_canonical_vendor_code,
+        meta_model_owner_payload,
+        resolve_meta_model_owner_fields,
     )
 
     reported_code = str(code or "").strip()
@@ -126,15 +125,10 @@ def ensure_meta_model(
     canonical_code = identity["code"]
     canonical_name = identity["name"]
     seed_aliases = identity["aliases"]
-    spec = canonical_vendor_for_model_code(canonical_code)
-    canonical_vendor = None
-    if spec:
-        canonical_vendor = ensure_canonical_vendor_row(spec)
-    elif provider and is_canonical_vendor_code(provider.code):
-        canonical_vendor = provider
+    owner = meta_model_owner_payload(canonical_code, provider)
     defaults = {
         "name": canonical_name,
-        "vendor": canonical_vendor,
+        **owner,
         "modality": modality or MetaModel.MODALITY_TEXT,
         "context_window": context_window or 0,
         "max_output_tokens": max_output_tokens or 0,
@@ -164,14 +158,11 @@ def ensure_meta_model(
     if canonical_name and meta_model.name in {"", meta_model.code}:
         meta_model.name = canonical_name
         changed_fields.append("name")
-    if canonical_vendor and (
-        not meta_model.vendor_id
-        or not is_canonical_vendor_code(
-            meta_model.vendor.code if meta_model.vendor_id else ""
-        )
-    ):
-        meta_model.vendor = canonical_vendor
-        changed_fields.append("vendor")
+    owner = resolve_meta_model_owner_fields(meta_model, provider)
+    for field_name, value in owner.items():
+        if getattr(meta_model, field_name) != value:
+            setattr(meta_model, field_name, value)
+            changed_fields.append(field_name)
     if modality and meta_model.modality == MetaModel.MODALITY_TEXT:
         if modality != MetaModel.MODALITY_TEXT:
             meta_model.modality = modality
@@ -309,22 +300,15 @@ def price_role_for_source(
     return LLMModel.PRICE_ROLE_UNKNOWN
 
 
-def canonical_vendor_for_meta_model(meta_model: MetaModel | None):
-    """Resolve the real vendor for one canonical meta model."""
+def canonical_owner_code_for_meta_model(meta_model: MetaModel | None) -> str:
+    """Resolve the real owner code for one canonical meta model."""
     if meta_model is None:
-        return None
+        return ""
 
-    from .constants import (
-        canonical_vendor_for_model_code,
-        ensure_canonical_vendor_row,
-    )
+    from .constants import meta_model_owner_payload
 
-    spec = canonical_vendor_for_model_code(meta_model.code)
-    if spec is not None:
-        provider = ensure_canonical_vendor_row(spec)
-        if provider is not None:
-            return provider
-    return meta_model.vendor
+    owner = meta_model_owner_payload(meta_model.code)
+    return owner["owner_code"] or meta_model.owner_code
 
 
 def business_source_category_for_source_model(
@@ -332,7 +316,7 @@ def business_source_category_for_source_model(
     source: PriceCollectionSource,
     meta_model: MetaModel | None,
 ) -> str:
-    """Return official only when the source vendor owns the model."""
+    """Return official only when the source provider matches the owner."""
     raw_category = source.source_category
     if (
         raw_category
@@ -340,12 +324,11 @@ def business_source_category_for_source_model(
     ):
         return raw_category
 
-    source_vendor_id = source.provider_id
-    model_vendor = canonical_vendor_for_meta_model(meta_model)
-    model_vendor_id = getattr(model_vendor, "id", None)
-    if not source_vendor_id or not model_vendor_id:
+    source_owner_code = str(getattr(source.provider, "code", "") or "")
+    model_owner_code = canonical_owner_code_for_meta_model(meta_model)
+    if not source_owner_code or not model_owner_code:
         return raw_category
-    if source_vendor_id == model_vendor_id:
+    if source_owner_code == model_owner_code:
         return raw_category
     return LLMModel.PRICE_ROLE_CLOUD_HOSTED
 
@@ -716,7 +699,7 @@ def resolve_manual_import_provider(
     default_provider: LLMProvider | None,
     model_code: str,
 ) -> LLMProvider:
-    """Resolve the model owner for one manually imported price row."""
+    """Resolve the provider row for one manually imported price row."""
 
     if default_provider is not None:
         return default_provider
@@ -735,14 +718,6 @@ def resolve_manual_import_provider(
     }
     if len(provider_ids) == 1:
         return model_matches[0].provider
-
-    meta_model = (
-        MetaModel.objects.filter(code=model_code)
-        .select_related("vendor")
-        .first()
-    )
-    if meta_model and meta_model.vendor_id:
-        return meta_model.vendor
 
     raise ValueError(
         "Cannot resolve model provider for manual price row "

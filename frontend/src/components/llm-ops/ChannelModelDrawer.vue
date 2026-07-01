@@ -1503,9 +1503,8 @@ function normalizeSearch(value) {
 
 function modelVendorKey(model) {
   return normalizeSearch(
-    model.meta_model_vendor ||
-      model.meta_model_vendor_code ||
-      model.meta_model_vendor_name ||
+    model.meta_model_owner_code ||
+      model.meta_model_owner_name ||
       model.provider_code ||
       model.provider_name ||
       'unknown'
@@ -1514,8 +1513,8 @@ function modelVendorKey(model) {
 
 function modelVendorName(model) {
   return (
-    model.meta_model_vendor_name ||
-    model.meta_model_vendor_code ||
+    model.meta_model_owner_name ||
+    model.meta_model_owner_code ||
     model.provider_name ||
     model.provider_code ||
     '未归属厂商'

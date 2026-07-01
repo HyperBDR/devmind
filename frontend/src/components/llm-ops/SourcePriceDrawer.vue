@@ -320,8 +320,8 @@ function buildRawItemRow(item) {
       t('llmOps.sourcePriceDrawer.fallback.unknownMetaModel'),
     meta_model_code: item.meta_model_code || model.meta_model_code || '-',
     provider_name:
-      item.meta_model_vendor_name ||
-      model.meta_model_vendor_name ||
+      item.meta_model_owner_name ||
+      model.meta_model_owner_name ||
       item.provider_name ||
       model.provider_name ||
       t('llmOps.sourcePriceDrawer.fallback.unboundProvider'),
@@ -380,7 +380,7 @@ function buildFallbackModelRow(model, key) {
       t('llmOps.sourcePriceDrawer.fallback.unknownMetaModel'),
     meta_model_code: model.meta_model_code || model.code || '-',
     provider_name:
-      model.meta_model_vendor_name ||
+      model.meta_model_owner_name ||
       model.provider_name ||
       t('llmOps.sourcePriceDrawer.fallback.unboundProvider'),
     modality_label: modalityLabel(model.modality),

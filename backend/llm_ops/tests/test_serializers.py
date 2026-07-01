@@ -209,30 +209,24 @@ class UsageReconciliationRecordSerializerTests(TestCase):
         self.assertEqual(record.discrepancy, Decimal("-7.500000"))
         self.assertEqual(record.status, "overcharged")
 
-    def test_meta_model_serializer_exposes_canonical_vendor(self):
-        """The serializer always reports the canonical vendor."""
+    def test_meta_model_serializer_exposes_owner_fields(self):
+        """The serializer reports plain owner fields."""
         from llm_ops.models import LLMProvider, MetaModel
         from llm_ops.serializers import MetaModelSerializer
         aliyun = LLMProvider.objects.create(
             name="阿里云",
             code="aliyun",
         )
-        deepseek = LLMProvider.objects.create(
-            name="DeepSeek",
-            code="deepseek",
-        )
-        # Manually inserted with the wrong vendor (legacy state).
-        wrong = MetaModel.objects.create(
+        meta_model = MetaModel.objects.create(
             name="DeepSeek R1 0528",
             code="deepseek-r1-0528",
-            vendor=aliyun,
+            owner_code=aliyun.code,
+            owner_name=aliyun.name,
+            owner_website=aliyun.website,
         )
-        data = MetaModelSerializer(wrong).data
-        self.assertEqual(data["effective_vendor_code"], "deepseek")
-        self.assertEqual(data["effective_vendor_name"], "DeepSeek")
-        self.assertEqual(data["effective_vendor"], deepseek.id)
-        # The raw pointer is preserved for auditing.
-        self.assertEqual(data["raw_vendor"], aliyun.id)
+        data = MetaModelSerializer(meta_model).data
+        self.assertEqual(data["owner_code"], "deepseek")
+        self.assertEqual(data["owner_name"], "DeepSeek")
 
     def test_meta_model_serializer_exposes_release_date(self):
         from llm_ops.serializers import MetaModelSerializer
@@ -244,7 +238,9 @@ class UsageReconciliationRecordSerializerTests(TestCase):
         meta = MetaModel.objects.create(
             name="GPT Test",
             code="gpt-test",
-            vendor=openai,
+            owner_code=openai.code,
+            owner_name=openai.name,
+            owner_website=openai.website,
             metadata={
                 "models_dev": {
                     "release_date": "2024-07-18",
@@ -378,7 +374,9 @@ class PriceCollectionSourceSerializerTests(TestCase):
         meta_model = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
-            vendor=deepseek,
+            owner_code=deepseek.code,
+            owner_name=deepseek.name,
+            owner_website=deepseek.website,
         )
         source = PriceCollectionSource.objects.create(
             name="阿里云官方价格",
@@ -458,7 +456,9 @@ class LLMModelSerializerTests(TestCase):
         meta_model = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
-            vendor=deepseek,
+            owner_code=deepseek.code,
+            owner_name=deepseek.name,
+            owner_website=deepseek.website,
         )
         source = PriceCollectionSource.objects.create(
             name="阿里云官方价格",
@@ -480,9 +480,8 @@ class LLMModelSerializerTests(TestCase):
 
         self.assertEqual(data["business_source_category"], "cloud_hosted")
         self.assertEqual(data["price_role"], "cloud_hosted")
-        self.assertEqual(data["meta_model_vendor"], deepseek.id)
-        self.assertEqual(data["meta_model_vendor_name"], "DeepSeek")
-        self.assertEqual(data["meta_model_vendor_code"], "deepseek")
+        self.assertEqual(data["meta_model_owner_name"], "DeepSeek")
+        self.assertEqual(data["meta_model_owner_code"], "deepseek")
 
 
 class ManualPriceImportRequestSerializerTests(TestCase):
@@ -620,7 +619,9 @@ class ModelPriceItemSerializerTests(TestCase):
         meta_model = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
-            vendor=deepseek,
+            owner_code=deepseek.code,
+            owner_name=deepseek.name,
+            owner_website=deepseek.website,
         )
         source = PriceCollectionSource.objects.create(
             name="阿里云官方价格",
@@ -653,9 +654,8 @@ class ModelPriceItemSerializerTests(TestCase):
 
         self.assertEqual(data["business_source_category"], "cloud_hosted")
         self.assertEqual(data["price_role"], "cloud_hosted")
-        self.assertEqual(data["meta_model_vendor"], deepseek.id)
-        self.assertEqual(data["meta_model_vendor_name"], "DeepSeek")
-        self.assertEqual(data["meta_model_vendor_code"], "deepseek")
+        self.assertEqual(data["meta_model_owner_name"], "DeepSeek")
+        self.assertEqual(data["meta_model_owner_code"], "deepseek")
 
     def test_price_item_meta_model_follows_canonical_model(self):
         deepseek = LLMProvider.objects.create(
@@ -676,7 +676,9 @@ class ModelPriceItemSerializerTests(TestCase):
         wrong_meta = MetaModel.objects.create(
             name="阿里云 DeepSeek R1 250528",
             code="aliyun-deepseek-r1-250528",
-            vendor=aliyun,
+            owner_code=aliyun.code,
+            owner_name=aliyun.name,
+            owner_website=aliyun.website,
         )
 
         serializer = ModelPriceItemSerializer(
@@ -732,7 +734,10 @@ class EnsureMetaModelForPriceDataTests(TestCase):
         self.assertEqual(meta.code, "deepseek-r1")
         self.assertEqual(meta.name, "DeepSeek R1")
         self.assertIn("deepseek-r1-0528", meta.aliases)
-        self.assertEqual(MetaModel.objects.filter(vendor=self.deepseek).count(), 1)
+        self.assertEqual(
+            MetaModel.objects.filter(owner_code=self.deepseek.code).count(),
+            1,
+        )
 
     def test_reuses_existing_row_when_alias_known(self):
         from llm_ops.serializers import ensure_meta_model_for_price_data
@@ -760,7 +765,7 @@ class EnsureMetaModelForPriceDataTests(TestCase):
         self.assertEqual(alias_report.id, canonical.id)
         self.assertIn("deepseek-r1-250528", alias_report.aliases)
         self.assertEqual(
-            MetaModel.objects.filter(vendor=self.deepseek).count(),
+            MetaModel.objects.filter(owner_code=self.deepseek.code).count(),
             1,
         )
 
@@ -820,8 +825,8 @@ class EnsureMetaModelForPriceDataTests(TestCase):
         self.assertEqual(reused.id, canonical.id)
         self.assertIn("deepseek-r1-250528", reused.aliases)
 
-    def test_mainstream_online_model_families_have_canonical_vendors(self):
-        from llm_ops.constants import canonical_vendor_for_model_code
+    def test_mainstream_online_model_families_have_canonical_owners(self):
+        from llm_ops.constants import canonical_owner_for_model_code
 
         cases = {
             "grok-4": "xai",
@@ -837,8 +842,8 @@ class EnsureMetaModelForPriceDataTests(TestCase):
             "command-a": "cohere",
         }
 
-        for model_code, vendor_code in cases.items():
+        for model_code, owner_code in cases.items():
             with self.subTest(model_code=model_code):
-                spec = canonical_vendor_for_model_code(model_code)
+                spec = canonical_owner_for_model_code(model_code)
                 self.assertIsNotNone(spec)
-                self.assertEqual(spec["code"], vendor_code)
+                self.assertEqual(spec["code"], owner_code)

@@ -28,17 +28,23 @@ class LLMOpsMetaModelsApiTests(TestCase):
         MetaModel.objects.create(
             name="Qwen Plus",
             code="qwen-plus",
-            vendor=aliyun,
+            owner_code=aliyun.code,
+            owner_name=aliyun.name,
+            owner_website=aliyun.website,
         )
         MetaModel.objects.create(
             name="DeepSeek V3",
             code="deepseek-v3",
-            vendor=deepseek,
+            owner_code=deepseek.code,
+            owner_name=deepseek.name,
+            owner_website=deepseek.website,
         )
         MetaModel.objects.create(
             name="Legacy SiliconFlow Model",
             code="legacy-siliconflow-model",
-            vendor=siliconflow,
+            owner_code=siliconflow.code,
+            owner_name=siliconflow.name,
+            owner_website=siliconflow.website,
         )
 
     def _serialize(self, queryset):
@@ -54,24 +60,23 @@ class LLMOpsMetaModelsApiTests(TestCase):
         leaked = [
             r for r in rows
             if r["code"].startswith("deepseek")
-            and r["effective_vendor_code"] != "deepseek"
+            and r["owner_code"] != "deepseek"
         ]
         self.assertEqual(leaked, [])
-        # No meta model is allowed to have a supplier alias as vendor.
+        # No meta model is allowed to have a supplier alias as owner.
         alias_codes = {"siliconflow"}
         for row in rows:
-            self.assertNotIn(row["effective_vendor_code"], alias_codes)
-        # No meta model is allowed to lack a vendor.
-        unbound = [r for r in rows if not r["effective_vendor"]]
+            self.assertNotIn(row["owner_code"], alias_codes)
+        # No meta model is allowed to lack an owner.
+        unbound = [r for r in rows if not r["owner_code"]]
         self.assertEqual(unbound, [])
 
     def test_filter_by_aliyun_does_not_leak_deepseek(self):
         view = MetaModelViewSet()
         view.action = "list"
-        aliyun = LLMProvider.objects.get(code="aliyun")
         view.kwargs = {}
         view.request = type("R", (), {
-            "query_params": {"vendor": str(aliyun.id)},
+            "query_params": {"owner": "aliyun"},
         })()
         rows = self._serialize(view.get_queryset())
         leaked = [r for r in rows if r["code"].startswith("deepseek")]
@@ -80,10 +85,9 @@ class LLMOpsMetaModelsApiTests(TestCase):
     def test_filter_by_deepseek_returns_only_deepseek(self):
         view = MetaModelViewSet()
         view.action = "list"
-        deepseek = LLMProvider.objects.get(code="deepseek")
         view.kwargs = {}
         view.request = type("R", (), {
-            "query_params": {"vendor": str(deepseek.id)},
+            "query_params": {"owner": "deepseek"},
         })()
         rows = self._serialize(view.get_queryset())
         for row in rows:
@@ -91,8 +95,8 @@ class LLMOpsMetaModelsApiTests(TestCase):
                 row["code"].startswith("deepseek"),
                 f"non-deepseek code in deepseek filter: {row['code']}",
             )
-            self.assertEqual(row["effective_vendor_code"], "deepseek")
+            self.assertEqual(row["owner_code"], "deepseek")
 
     def test_unbound_meta_models_do_not_exist(self):
-        orphans = MetaModel.objects.filter(vendor__isnull=True)
+        orphans = MetaModel.objects.filter(owner_code="")
         self.assertEqual(orphans.count(), 0)

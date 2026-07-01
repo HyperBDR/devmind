@@ -1,5 +1,5 @@
 import { computed, unref } from 'vue'
-import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
+import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 
 /**
  * Centralized derived state for the Agione resale listing workbench.
@@ -730,7 +730,7 @@ export function useAgioneListingRows({
   }
 
   function metaVendorName(model) {
-    const vendor = resolveCanonicalMetaVendor(model, unref(providersRef) || [])
+    const vendor = resolveCanonicalMetaOwner(model, unref(providersRef) || [])
     return vendor.name || ''
   }
 

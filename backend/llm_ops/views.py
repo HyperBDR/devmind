@@ -22,7 +22,7 @@ from .collection_services import (
     sync_meta_models_from_models_dev,
     sync_yunce_model_prices,
 )
-from .constants import SUPPLIER_SOURCE_VENDOR_ALIASES
+from .constants import SUPPLIER_SOURCE_OWNER_ALIASES
 from .global_config import (
     price_sync_source_queryset,
     sync_global_config_to_beat,
@@ -220,7 +220,6 @@ class PriceCollectionSourceViewSet(
             )
             .prefetch_related(
                 "models__meta_model",
-                "models__meta_model__vendor",
             )
             .order_by(
                 "source_category", "provider__name", "channel__name", "id"
@@ -721,7 +720,7 @@ class LLMProviderViewSet(
                 model_count=Count("models"),
             )
             .exclude(
-                code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
+                code__in=SUPPLIER_SOURCE_OWNER_ALIASES.keys(),
             )
             .order_by("name", "id")
         )
@@ -734,10 +733,8 @@ class MetaModelViewSet(
 ):
     """CRUD API for canonical model identities.
 
-    Every meta model must belong to a real model vendor. The
-    list and detail entry points backfill orphan rows by
-    resolving the canonical vendor from the model code, so the
-    API never exposes an "unbound" meta model.
+    Every meta model records its real model owner as plain owner
+    fields, never as a price-provider foreign key.
     """
 
     audit_category = AuditLog.CATEGORY_CONFIGURATION
@@ -745,17 +742,17 @@ class MetaModelViewSet(
 
     def get_queryset(self):
         queryset = (
-            MetaModel.objects.select_related("vendor")
-            .annotate(
+            MetaModel.objects.annotate(
                 provider_price_count=Count("provider_prices"),
             )
             .exclude(
-                vendor__code__in=SUPPLIER_SOURCE_VENDOR_ALIASES.keys(),
+                owner_code__in=SUPPLIER_SOURCE_OWNER_ALIASES.keys(),
             )
+            .exclude(owner_code="")
         )
-        vendor = self.request.query_params.get("vendor")
-        if vendor:
-            queryset = queryset.filter(vendor_id=vendor)
+        owner = self.request.query_params.get("owner")
+        if owner:
+            queryset = queryset.filter(owner_code=owner)
         return queryset.order_by("name", "id")
 
     def destroy(self, request, *args, **kwargs):
@@ -827,7 +824,6 @@ class LLMModelViewSet(
     def get_queryset(self):
         queryset = LLMModel.objects.select_related(
             "meta_model",
-            "meta_model__vendor",
             "provider",
             "source",
         )
@@ -869,11 +865,9 @@ class ModelPriceItemViewSet(
     def get_queryset(self):
         queryset = ModelPriceItem.objects.select_related(
             "meta_model",
-            "meta_model__vendor",
             "provider",
             "model",
             "model__meta_model",
-            "model__meta_model__vendor",
             "source",
         )
         provider = self.request.query_params.get("provider")

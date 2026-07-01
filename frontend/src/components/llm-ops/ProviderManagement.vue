@@ -743,8 +743,8 @@ function buildSourceSearchText(source, relation, category, currentItems) {
       [
         item.meta_model_name,
         item.meta_model_code,
-        item.meta_model_vendor_name,
-        item.meta_model_vendor_code,
+        item.meta_model_owner_name,
+        item.meta_model_owner_code,
         item.provider_name,
         item.dimension
       ]
