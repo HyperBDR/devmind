@@ -78,14 +78,29 @@ class LLMOpsCatalogStateHelperTests(TestCase):
 class LLMOpsCatalogMaintenanceTests(TestCase):
     """Catalog maintenance is separate from seed bootstrap."""
 
-    def test_resolve_orphan_meta_models_uses_canonical_vendor_rules(self):
+    def test_resolve_orphan_meta_models_uses_canonical_owner_rules(self):
         MetaModel.objects.create(name="DeepSeek R1", code="deepseek-r1")
 
         stats = resolve_orphan_meta_models()
 
         meta = MetaModel.objects.get(code="deepseek-r1")
         self.assertEqual(stats["resolved"], 1)
-        self.assertEqual(meta.vendor.code, "deepseek")
+        self.assertEqual(meta.owner_code, "deepseek")
+
+    def test_normalize_meta_model_catalog_repairs_stale_owner(self):
+        MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            owner_code="aliyun",
+            owner_name="阿里云",
+        )
+
+        stats = normalize_meta_model_catalog()
+
+        meta = MetaModel.objects.get(code="deepseek-r1")
+        self.assertEqual(stats["normalized"], 1)
+        self.assertEqual(meta.owner_code, "deepseek")
+        self.assertEqual(meta.owner_name, "DeepSeek")
 
     def test_normalize_meta_model_catalog_merges_release_rows(self):
         provider = LLMProvider.objects.create(
@@ -95,12 +110,16 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
         canonical = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         release = MetaModel.objects.create(
             name="DeepSeek R1 0528",
             code="deepseek-r1-0528",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         model = LLMModel.objects.create(
             provider=provider,
@@ -124,7 +143,9 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
         meta = MetaModel.objects.create(
             name="GPT-4o mini",
             code="gpt-4o-mini",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         LLMModel.objects.create(
             provider=provider,
@@ -260,7 +281,9 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
         meta = MetaModel.objects.create(
             name="GPT-4o mini",
             code="gpt-4o-mini",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         source = PriceCollectionSource.objects.create(
             name="OpenAI 官方价格",
@@ -311,7 +334,9 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
         meta = MetaModel.objects.create(
             name="GPT-4o mini",
             code="gpt-4o-mini",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         provider_source = PriceCollectionSource.objects.create(
             name="OpenAI 官方价格",
@@ -357,7 +382,9 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
         meta = MetaModel.objects.create(
             name="GPT-4.1 mini",
             code="gpt-4.1-mini",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         provider_source = PriceCollectionSource.objects.create(
             name="OpenAI 官方价格",
@@ -425,7 +452,9 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
         meta = MetaModel.objects.create(
             name="GPT-4o mini",
             code="gpt-4o-mini",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         source = PriceCollectionSource.objects.create(
             name="OpenAI enterprise official",
@@ -525,7 +554,9 @@ class LLMOpsSeedCleanupCommandTests(TestCase):
         meta = MetaModel.objects.create(
             name="ERNIE 4.0",
             code="ernie-4.0",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         provider_source = PriceCollectionSource.objects.create(
             name="百度 官方价格",
@@ -596,7 +627,9 @@ class LLMOpsSeedCleanupCommandTests(TestCase):
         meta = MetaModel.objects.create(
             name="ERNIE 4.0",
             code="ernie-4.0",
-            vendor=provider,
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
         )
         channel = ProcurementChannel.objects.create(
             name="Real Channel",

@@ -158,14 +158,15 @@ class MetaModelAdmin(admin.ModelAdmin):
     list_display = (
         "name",
         "code",
-        "vendor",
+        "owner_code",
+        "owner_name",
         "modality",
         "status",
         "context_window",
         "max_output_tokens",
     )
-    list_filter = ("vendor", "modality", "status")
-    search_fields = ("name", "code", "family")
+    list_filter = ("owner_code", "modality", "status")
+    search_fields = ("name", "code", "family", "owner_code", "owner_name")
 
 
 @admin.register(LLMModel)

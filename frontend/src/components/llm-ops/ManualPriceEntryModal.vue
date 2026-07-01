@@ -127,7 +127,11 @@
               <span>
                 {{ t('llmOps.manualPriceEntry.fields.provider') }}
               </span>
-              <strong>{{ selectedMetaProvider?.name || '-' }}</strong>
+              <strong>
+                {{
+                  selectedSourceProvider?.name || source?.provider_name || '-'
+                }}
+              </strong>
             </div>
             <div class="readonly-field">
               <span>
@@ -229,7 +233,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
-import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
+import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
   open: {
@@ -327,14 +331,9 @@ const selectedModel = computed(() =>
 
 const selectedModelProviderName = computed(() => {
   if (!selectedModel.value) return '-'
-  const vendor = resolveCanonicalMetaVendor(
-    selectedModel.value,
-    props.providers
-  )
   return (
-    vendor.name ||
-    selectedModel.value.meta_model_vendor_name ||
     selectedModel.value.provider_name ||
+    selectedModel.value.provider_code ||
     '-'
   )
 })
@@ -345,14 +344,11 @@ const selectedMetaModel = computed(() =>
   )
 )
 
-const selectedMetaProvider = computed(() => {
-  if (!selectedMetaModel.value) return null
-  const vendor = resolveCanonicalMetaVendor(
-    selectedMetaModel.value,
-    props.providers
-  )
+const selectedSourceProvider = computed(() => {
+  const sourceProviderId = sourceProviderIdValue()
+  if (!sourceProviderId) return null
   return props.providers.find(
-    (provider) => String(provider.id) === String(vendor.id)
+    (provider) => String(provider.id) === String(sourceProviderId)
   )
 })
 
@@ -433,7 +429,7 @@ const validationMessage = computed(() => {
     if (!selectedMetaModel.value) {
       return t('llmOps.manualPriceEntry.validation.selectMetaModel')
     }
-    if (!selectedMetaProvider.value) {
+    if (!sourceProviderIdValue()) {
       return t('llmOps.manualPriceEntry.validation.customModelProvider')
     }
   }
@@ -486,16 +482,19 @@ async function submit() {
   saving.value = true
   try {
     const { providerId, row } = resolveImportSelection()
-    await llmOpsApi.importManualPrices({
+    const payload = {
       source: props.source.id,
-      provider: providerId,
       source_name: props.source.name,
       source_slug: props.source.slug,
       source_url: form.value.source_url || props.source.endpoint_url || '',
       currency: form.value.currency,
       updates_model_prices: false,
       rows: [row]
-    })
+    }
+    if (providerId) {
+      payload.provider = providerId
+    }
+    await llmOpsApi.importManualPrices(payload)
     showSuccess(t('llmOps.manualPriceEntry.messages.saved'))
     emit('saved')
   } catch (error) {
@@ -518,7 +517,7 @@ function resolveImportSelection() {
     modality: selectedMetaModel.value.modality || 'text'
   }
   return {
-    providerId: selectedMetaProvider.value.id,
+    providerId: sourceProviderIdValue(),
     row: buildImportRow(model)
   }
 }
@@ -530,6 +529,9 @@ function buildImportRow(model) {
     modality: model.modality || form.value.modality,
     currency: form.value.currency,
     source_url: form.value.source_url || props.source.endpoint_url || ''
+  }
+  if (model.provider_code) {
+    row.provider_code = model.provider_code
   }
   activePriceFields.value.forEach((field) => {
     const value = normalizePrice(form.value[field.key])
@@ -566,25 +568,28 @@ function buildModelOptions() {
 
 function resolveModelProviderId(model) {
   if (!model) return ''
-  const vendor = resolveCanonicalMetaVendor(model, props.providers)
-  return vendor.id || model.meta_model_vendor || model.provider || ''
+  return model.provider || ''
+}
+
+function sourceProviderIdValue() {
+  return props.source?.provider || props.source?.provider_id || ''
 }
 
 function buildMetaModelOptions() {
   return props.metaModels
     .map((model) => {
-      const vendor = resolveCanonicalMetaVendor(model, props.providers)
+      const owner = resolveCanonicalMetaOwner(model, props.providers)
       return {
         ...model,
-        resolved_vendor: vendor.id,
-        resolved_vendor_name: vendor.name
+        resolved_owner: owner.id,
+        resolved_owner_name: owner.name
       }
     })
     .sort((left, right) => {
-      const vendorCompare = String(
-        left.resolved_vendor_name || ''
-      ).localeCompare(String(right.resolved_vendor_name || ''))
-      if (vendorCompare !== 0) return vendorCompare
+      const ownerCompare = String(left.resolved_owner_name || '').localeCompare(
+        String(right.resolved_owner_name || '')
+      )
+      if (ownerCompare !== 0) return ownerCompare
       return String(left.name || left.code || '').localeCompare(
         String(right.name || right.code || '')
       )
@@ -607,8 +612,8 @@ function modelOption(model) {
 
 function metaModelOption(model) {
   const providerName =
-    model.resolved_vendor_name ||
-    model.vendor_name ||
+    model.resolved_owner_name ||
+    model.owner_name ||
     t('llmOps.manualPriceEntry.fallback.unknownProvider')
   return {
     label: model.name || model.code,

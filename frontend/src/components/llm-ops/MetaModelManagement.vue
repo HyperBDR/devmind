@@ -100,10 +100,7 @@
               {{ t('llmOps.metaModelManagement.actions.viewModels') }}
             </span>
           </button>
-          <div
-            v-if="!filteredVendorRows.length"
-            class="empty-state"
-          >
+          <div v-if="!filteredVendorRows.length" class="empty-state">
             <h4 class="empty-title">
               {{ vendorEmptyTitle }}
             </h4>
@@ -387,7 +384,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
-import { resolveCanonicalMetaVendor } from '@/utils/llmOpsMeta'
+import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
   metaModels: {
@@ -469,12 +466,12 @@ const rows = computed(() =>
     const skuCount = props.models.filter(
       (model) => String(model.meta_model) === String(item.id)
     ).length
-    const canonicalVendor = resolveCanonicalMetaVendor(item, props.providers)
+    const canonicalVendor = resolveCanonicalMetaOwner(item, props.providers)
     return {
       ...item,
-      effective_vendor: item.effective_vendor || canonicalVendor.id,
-      effective_vendor_code: item.effective_vendor_code || canonicalVendor.code,
-      effective_vendor_name: item.effective_vendor_name || canonicalVendor.name,
+      owner_key: item.owner_code || canonicalVendor.code,
+      owner_code: item.owner_code || canonicalVendor.code,
+      owner_name: item.owner_name || canonicalVendor.name,
       sku_count: skuCount
     }
   })
@@ -483,8 +480,8 @@ const rows = computed(() =>
 const vendorRows = computed(() => {
   const map = new Map()
   props.providers.forEach((provider) => {
-    map.set(String(provider.id), {
-      id: provider.id,
+    map.set(String(provider.code), {
+      id: provider.code,
       name: provider.name,
       code: provider.code,
       meta_model_count: 0,
@@ -492,15 +489,21 @@ const vendorRows = computed(() => {
     })
   })
   rows.value.forEach((item) => {
-    if (!item.effective_vendor) {
+    if (!item.owner_key) {
       // The backend canonical resolver guarantees every meta
-      // model has a vendor. Rows without one are skipped so
-      // the UI never shows an "unbound" vendor bucket.
+      // model has an owner. Rows without one are skipped so
+      // the UI never shows an "unbound" owner bucket.
       return
     }
-    const key = String(item.effective_vendor)
+    const key = String(item.owner_key)
     if (!map.has(key)) {
-      return
+      map.set(key, {
+        id: key,
+        name: item.owner_name || key,
+        code: item.owner_code || key,
+        meta_model_count: 0,
+        sku_count: 0
+      })
     }
     const row = map.get(key)
     row.meta_model_count += 1
@@ -541,9 +544,7 @@ const vendorMetaRows = computed(() => {
       if (!selectedVendorId.value) {
         return false
       }
-      if (
-        String(item.effective_vendor || '') !== String(selectedVendorId.value)
-      ) {
+      if (String(item.owner_key || '') !== String(selectedVendorId.value)) {
         return false
       }
       if (statusFilter.value && item.status !== statusFilter.value) {
@@ -579,7 +580,7 @@ const paginatedVendorMetaRows = computed(() => {
   return vendorMetaRows.value.slice(start, start + size)
 })
 
-// resolveCanonicalVendor / canonicalMetaVendorCode moved to
+// resolveCanonicalVendor / canonicalMetaOwnerCode moved to
 // frontend/src/utils/llmOpsMeta.js for reuse across the
 // immersive publishing workspace and the meta model library.
 
@@ -590,7 +591,7 @@ const metricCards = computed(() => {
   )
   const boundVendorIds = new Set(
     props.metaModels
-      .map((item) => item.vendor)
+      .map((item) => item.owner_code)
       .filter((vendor) => vendor !== null && vendor !== undefined)
       .map(String)
   )
@@ -683,7 +684,7 @@ function searchableText(item) {
     item.name,
     item.code,
     item.family,
-    item.vendor_name,
+    item.owner_name,
     ...(Array.isArray(item.aliases) ? item.aliases : [])
   ]
     .join(' ')

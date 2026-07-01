@@ -88,7 +88,9 @@ class LLMOpsPricingServiceTests(TestCase):
         deepseek_meta = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
-            vendor=deepseek,
+            owner_code=deepseek.code,
+            owner_name=deepseek.name,
+            owner_website=deepseek.website,
         )
         official_source = PriceCollectionSource.objects.create(
             name="OpenAI Official",
@@ -470,7 +472,9 @@ class LLMOpsPricingServiceTests(TestCase):
         deepseek_meta = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
-            vendor=deepseek,
+            owner_code=deepseek.code,
+            owner_name=deepseek.name,
+            owner_website=deepseek.website,
         )
         official_source = PriceCollectionSource.objects.create(
             provider=aliyun,

@@ -1,22 +1,25 @@
 import re
 
 
-SUPPLIER_SOURCE_VENDOR_ALIASES = {
+SUPPLIER_SOURCE_OWNER_ALIASES = {
     "siliconflow": {
-        "vendor_code": "deepseek",
-        "vendor_name": "DeepSeek",
-        "vendor_url": "https://api.deepseek.com/",
+        "owner_code": "deepseek",
+        "owner_name": "DeepSeek",
+        "owner_website": "https://api.deepseek.com/",
         "model_prefixes": ("deepseek-",),
     },
+    "openrouter": {},
+    "yunce": {},
+    "agione": {},
 }
 
-# Canonical vendor lookup rules. A meta model belongs to the company
+# Canonical owner lookup rules. A meta model belongs to the company
 # that actually built it, never to a price source or reseller. The
-# seed, the API layer and the cleanup helpers all funnel through
-# ``canonical_vendor_for_model_code`` so the meta-model ``vendor``
-# field can never end up pointing at a marketplace.
-META_MODEL_VENDOR_RULES = (
-    # (model code prefix, vendor code, vendor name, vendor website)
+# API layer and cleanup helpers all funnel through
+# ``canonical_owner_for_model_code`` so marketplace suppliers never
+# become meta-model owners.
+META_MODEL_OWNER_RULES = (
+    # (model code prefix, owner code, owner name, owner website)
     ("gpt-", "openai", "OpenAI", "https://api.openai.com/"),
     ("o1", "openai", "OpenAI", "https://api.openai.com/"),
     ("o3", "openai", "OpenAI", "https://api.openai.com/"),
@@ -123,82 +126,68 @@ def normalize_meta_model_name(value, canonical_code):
     return " ".join(parts) or canonical_code
 
 
-def canonical_vendor_for_model_code(model_code):
-    """Return the canonical vendor spec for a model code.
+def canonical_owner_for_model_code(model_code):
+    """Return the canonical owner spec for a model code.
 
     A meta model always belongs to the company that built the model.
     Price sources such as SiliconFlow or OpenRouter never appear as a
-    vendor here. Returns ``None`` when the code is unknown so callers
+    owner here. Returns ``None`` when the code is unknown so callers
     can fall back to historical data.
     """
     if not model_code:
         return None
     normalized = str(model_code).strip().lower()
-    for prefix, code, name, url in META_MODEL_VENDOR_RULES:
+    for prefix, code, name, url in META_MODEL_OWNER_RULES:
         if normalized.startswith(prefix):
             return {
                 "code": code,
                 "name": name,
-                "url": url,
+                "website": url,
             }
     return None
 
 
-def is_canonical_vendor_code(vendor_code):
-    """Return True when ``vendor_code`` is a model vendor (not a supplier)."""
-    if not vendor_code:
+def is_canonical_owner_code(owner_code):
+    """Return True when ``owner_code`` is a model owner, not a supplier."""
+    owner_code = str(owner_code or "").strip().lower()
+    if not owner_code:
         return False
-    return vendor_code not in SUPPLIER_SOURCE_VENDOR_ALIASES
+    return owner_code not in SUPPLIER_SOURCE_OWNER_ALIASES
 
 
-def ensure_canonical_vendor_row(spec):
-    """Return the LLMProvider that owns a canonical model vendor.
-
-    The lookup is refusal-by-default: supplier aliases are not
-    treated as canonical vendors, even when the legacy seed
-    pointed at them.
-    """
+def meta_model_owner_payload(model_code, provider=None):
+    """Return owner fields for a meta model without creating FK rows."""
+    spec = canonical_owner_for_model_code(model_code)
     if not spec:
-        return None
-    if not is_canonical_vendor_code(spec["code"]):
-        return None
-    from .models import LLMProvider
-    provider, _ = LLMProvider.objects.get_or_create(
-        code=spec["code"],
-        defaults={
-            "name": spec["name"],
-            "website": spec["url"],
-            "is_active": True,
-            "notes": "\u5143\u6a21\u578b\u5382\u5546\u3002",
-        },
-    )
-    if provider.name != spec["name"]:
-        provider.name = spec["name"]
-        provider.save(update_fields=["name", "updated_at"])
-    return provider
+        provider_code = str(getattr(provider, "code", "") or "").strip()
+        if provider and is_canonical_owner_code(provider_code):
+            spec = {
+                "code": provider_code,
+                "name": getattr(provider, "name", "") or provider_code,
+                "website": getattr(provider, "website", "") or "",
+            }
+    if not spec or not is_canonical_owner_code(spec["code"]):
+        return {
+            "owner_code": "",
+            "owner_name": "",
+            "owner_website": "",
+        }
+    return {
+        "owner_code": spec["code"],
+        "owner_name": spec["name"],
+        "owner_website": spec["website"],
+    }
 
 
-def resolve_meta_model_vendor(meta_model, info, provider):
-    """Decide which LLMProvider should be the canonical vendor.
-
-    Always prefer the company that built the model. We only
-    overwrite an existing vendor when it is missing or when it
-    points at a known supplier alias (e.g. legacy SiliconFlow).
-    """
-    spec = canonical_vendor_for_model_code(meta_model.code)
-    canonical = None
-    if spec:
-        canonical = ensure_canonical_vendor_row(spec)
-    elif provider and is_canonical_vendor_code(provider.code):
-        canonical = provider
-    if not meta_model.vendor_id:
-        return canonical
-    existing_code = (
-        meta_model.vendor.code if meta_model.vendor_id else ""
-    )
-    if not is_canonical_vendor_code(existing_code):
-        # Legacy row pointing at a supplier alias: rehome it.
-        return canonical
-    if canonical and canonical.id != meta_model.vendor_id:
-        return canonical
-    return meta_model.vendor
+def resolve_meta_model_owner_fields(meta_model, provider=None):
+    """Return the corrected owner fields for one meta model."""
+    payload = meta_model_owner_payload(meta_model.code, provider)
+    if payload["owner_code"]:
+        return payload
+    if is_canonical_owner_code(meta_model.owner_code):
+        return {
+            "owner_code": meta_model.owner_code,
+            "owner_name": meta_model.owner_name,
+            "owner_website": meta_model.owner_website,
+        }
+    return payload

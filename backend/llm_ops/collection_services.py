@@ -1074,8 +1074,7 @@ def sync_meta_models_from_models_dev(
     """Fetch models.dev and upsert canonical meta-model identities."""
     from .constants import (
         canonical_meta_model_identity,
-        canonical_vendor_for_model_code,
-        ensure_canonical_vendor_row,
+        meta_model_owner_payload,
     )
 
     payload = fetch_source_payload(source_url, timeout)
@@ -1111,20 +1110,16 @@ def sync_meta_models_from_models_dev(
                 if not code or code in seen_codes:
                     stats["skipped"] += 1
                     continue
-                spec = canonical_vendor_for_model_code(code)
-                if spec is None:
+                owner = meta_model_owner_payload(code)
+                if not owner["owner_code"]:
                     stats["skipped"] += 1
                     continue
                 seen_codes.add(code)
-                vendor = ensure_canonical_vendor_row(spec)
-                if vendor is None:
-                    stats["skipped"] += 1
-                    continue
                 _, created, changed = upsert_models_dev_meta_model(
                     model_payload,
                     code=code,
                     identity=identity,
-                    vendor=vendor,
+                    owner=owner,
                     source_url=source_url,
                 )
                 stats["models"] += 1
@@ -1200,14 +1195,14 @@ def upsert_models_dev_meta_model(
     *,
     code: str,
     identity: dict,
-    vendor: LLMProvider,
+    owner: dict,
     source_url: str,
 ) -> tuple[MetaModel, bool, bool]:
     """Upsert one models.dev row without overwriting operator fields."""
     name = identity["name"]
     defaults = {
         "name": name,
-        "vendor": vendor,
+        **owner,
         "family": str(model_payload.get("family") or "").strip(),
         "modality": models_dev_modality(model_payload),
         "aliases": models_dev_meta_aliases(model_payload, code, identity),
@@ -1228,9 +1223,10 @@ def upsert_models_dev_meta_model(
     if meta_model.name in {"", meta_model.code} and name:
         meta_model.name = name
         changed_fields.append("name")
-    if not meta_model.vendor_id or meta_model.vendor_id != vendor.id:
-        meta_model.vendor = vendor
-        changed_fields.append("vendor")
+    for field_name, value in owner.items():
+        if getattr(meta_model, field_name) != value:
+            setattr(meta_model, field_name, value)
+            changed_fields.append(field_name)
     if not meta_model.family and defaults["family"]:
         meta_model.family = defaults["family"]
         changed_fields.append("family")

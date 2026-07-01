@@ -281,7 +281,7 @@ class LLMOpsGlobalConfig(models.Model):
 
 
 class LLMProvider(models.Model):
-    """Original model vendor, such as OpenAI, Anthropic, or DeepSeek."""
+    """Price source provider, supplier, cloud host, or API platform."""
 
     name = models.CharField(max_length=255)
     code = models.SlugField(max_length=100, unique=True, db_index=True)
@@ -299,7 +299,7 @@ class LLMProvider(models.Model):
 
 
 class MetaModel(models.Model):
-    """Canonical model identity shared by providers and suppliers."""
+    """Canonical model identity shared by price sources and suppliers."""
 
     STATUS_ACTIVE = "active"
     STATUS_DEPRECATED = "deprecated"
@@ -326,13 +326,14 @@ class MetaModel(models.Model):
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=150, unique=True, db_index=True)
     family = models.CharField(max_length=120, blank=True, default="")
-    vendor = models.ForeignKey(
-        LLMProvider,
-        related_name="canonical_models",
+    owner_code = models.CharField(
+        max_length=100,
         blank=True,
-        null=True,
-        on_delete=models.SET_NULL,
+        default="",
+        db_index=True,
     )
+    owner_name = models.CharField(max_length=255, blank=True, default="")
+    owner_website = models.URLField(max_length=1000, blank=True, default="")
     modality = models.CharField(
         max_length=20,
         choices=MODALITY_CHOICES,
@@ -353,6 +354,23 @@ class MetaModel(models.Model):
 
     class Meta:
         ordering = ["name", "id"]
+
+    def save(self, *args, **kwargs):
+        """Keep known model owners canonical before writing."""
+        from .constants import resolve_meta_model_owner_fields
+
+        owner = resolve_meta_model_owner_fields(self)
+        changed_fields = []
+        for field_name, value in owner.items():
+            if getattr(self, field_name) != value:
+                setattr(self, field_name, value)
+                changed_fields.append(field_name)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and changed_fields:
+            kwargs["update_fields"] = list(
+                dict.fromkeys([*update_fields, *changed_fields])
+            )
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return self.name
@@ -481,16 +499,20 @@ class LLMModel(models.Model):
     def save(self, *args, **kwargs):
         """Ensure direct model creation still links a canonical model."""
         if not self.meta_model_id:
-            from .constants import canonical_meta_model_identity
+            from .constants import (
+                canonical_meta_model_identity,
+                meta_model_owner_payload,
+            )
 
             identity = canonical_meta_model_identity(self.code, self.name)
             code = identity["code"]
             name = identity["name"]
+            owner = meta_model_owner_payload(code, self.provider)
             meta_model, _ = MetaModel.objects.get_or_create(
                 code=code,
                 defaults={
                     "name": name,
-                    "vendor_id": self.provider_id,
+                    **owner,
                     "modality": self.modality,
                     "context_window": self.context_window,
                     "max_output_tokens": self.max_output_tokens,
