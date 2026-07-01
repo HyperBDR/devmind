@@ -46,12 +46,44 @@
         class="max-h-[calc(100vh-15rem)] space-y-5 overflow-y-auto px-5 py-5"
       >
         <section class="form-section">
-          <div class="section-heading">
-            <h4>{{ t('llmOps.priceSourceModal.sections.basic') }}</h4>
-            <p>{{ t('llmOps.priceSourceModal.sections.basicHint') }}</p>
+          <div class="section-heading section-heading-row">
+            <div>
+              <h4>{{ t('llmOps.priceSourceModal.sections.basic') }}</h4>
+              <p>{{ t('llmOps.priceSourceModal.sections.basicHint') }}</p>
+            </div>
+            <div class="mode-control">
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.collectionMethod') }}
+              </span>
+              <div
+                class="mode-segment"
+                role="radiogroup"
+                :aria-label="
+                  t('llmOps.priceSourceModal.fields.collectionMethod')
+                "
+              >
+                <button
+                  v-for="option in maintenanceModeOptions"
+                  :key="option.value"
+                  type="button"
+                  class="mode-segment-option"
+                  :class="{
+                    active: maintenanceModeSelection === option.value
+                  }"
+                  role="radio"
+                  :aria-checked="maintenanceModeSelection === option.value"
+                  @click="maintenanceModeSelection = option.value"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+            </div>
           </div>
-          <div class="grid gap-4 md:grid-cols-2">
-            <label class="field-group">
+          <div
+            class="basic-field-grid"
+            :class="{ 'manual-basic-grid': !shouldUseOfficialPreset }"
+          >
+            <label class="field-group field-name">
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.name') }}
               </span>
@@ -62,7 +94,7 @@
                 required
               />
             </label>
-            <label class="field-group">
+            <label class="field-group field-slug">
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.slug') }}
               </span>
@@ -78,26 +110,9 @@
                 {{ slugHelpText }}
               </span>
             </label>
-            <label class="field-group">
-              <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.sourceOwnerType') }}
-              </span>
-              <CompactSelect
-                v-model="sourceOwnerTypeSelection"
-                :options="sourceOwnerTypeOptions"
-              />
-            </label>
-            <label class="field-group">
-              <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.collectionMethod') }}
-              </span>
-              <CompactSelect
-                v-model="form.collection_method"
-                :options="collectionMethodOptions"
-              />
-            </label>
             <label
-              class="field-group"
+              v-if="shouldUseOfficialPreset"
+              class="field-group field-provider"
             >
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.officialProvider') }}
@@ -116,32 +131,19 @@
                   t('llmOps.priceSourceModal.officialPreset.selectProvider')
                 "
               />
-              <span class="field-help">
+              <span v-if="officialProviderHelpText" class="field-help">
                 {{ officialProviderHelpText }}
               </span>
             </label>
-            <label class="field-group">
+            <label class="field-group field-currency">
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.currency') }}
               </span>
               <CompactSelect
                 v-model="form.currency"
                 :options="currencyOptions"
+                class-name="currency-select"
               />
-            </label>
-            <label class="field-group md:col-span-2">
-              <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.endpointUrl') }}
-              </span>
-              <input
-                v-model="form.endpoint_url"
-                class="field"
-                placeholder="https://example.com/pricing"
-                type="url"
-              />
-              <span class="field-help">
-                {{ t('llmOps.priceSourceModal.help.endpointUrl') }}
-              </span>
             </label>
           </div>
         </section>
@@ -237,7 +239,8 @@ const officialSourceOwnerTypes = [
   'cloud_provider_official'
 ]
 const visibleSourceOwnerTypes = ['supplier', 'internal']
-const sourceOwnerOfficialOption = 'official'
+const maintenanceModeAuto = 'auto_collect'
+const maintenanceModeManual = 'manual'
 const isEditing = computed(() => Boolean(props.source?.id))
 const shouldUseOfficialPreset = computed(
   () =>
@@ -280,70 +283,38 @@ const sourceSlugLabel = computed(() => {
   }
   return autoSlug(form.value.name || '')
 })
-const sourceOwnerTypeOptions = computed(() => [
+const maintenanceModeOptions = computed(() => [
   {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.official'),
-    value: sourceOwnerOfficialOption
+    label: t('llmOps.priceSourceModal.maintenanceModes.autoCollect'),
+    value: maintenanceModeAuto
   },
   {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.supplier'),
-    value: 'supplier'
-  },
-  {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.internal'),
-    value: 'internal'
+    label: t('llmOps.priceSourceModal.maintenanceModes.manual'),
+    value: maintenanceModeManual
   }
 ])
 
-const sourceOwnerTypeSelection = computed({
+const maintenanceModeSelection = computed({
   get() {
     if (officialSourceOwnerTypes.includes(form.value.source_owner_type)) {
-      return sourceOwnerOfficialOption
+      return maintenanceModeAuto
     }
-    if (visibleSourceOwnerTypes.includes(form.value.source_owner_type)) {
-      return form.value.source_owner_type
-    }
-    return 'internal'
+    return maintenanceModeManual
   },
   set(value) {
-    if (value === sourceOwnerOfficialOption) {
+    if (value === maintenanceModeAuto) {
       selectedOfficialProviderCode.value = ''
-      form.value.source_owner_type = sourceOwnerTypeForOfficialProvider(
-        { provider_code: selectedOfficialProviderCode.value }
-      )
+      form.value.source_owner_type = sourceOwnerTypeForOfficialProvider({
+        provider_code: selectedOfficialProviderCode.value
+      })
       form.value.collection_method = 'auto_collect'
       return
     }
     selectedOfficialProviderCode.value = ''
-    form.value.source_owner_type = value
-    if (['supplier', 'internal'].includes(value)) {
-      form.value.collection_method = 'manual_entry'
-    }
+    form.value.source_owner_type = manualSourceOwnerType()
+    form.value.collection_method = 'manual_entry'
   }
 })
-
-const collectionMethodOptions = computed(() => [
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.autoCollect'),
-    value: 'auto_collect'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.manualEntry'),
-    value: 'manual_entry'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.manualImport'),
-    value: 'manual_import'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.apiSync'),
-    value: 'api_sync'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.unknown'),
-    value: 'unknown'
-  }
-])
 
 const currencyOptions = computed(() => [
   { label: t('llmOps.priceSourceModal.currencies.cny'), value: 'CNY' },
@@ -375,7 +346,7 @@ const officialProviderStatus = computed(() => {
   }
   const option = selectedOfficialProviderOption.value
   if (!option && officialProviderOptions.value.length) {
-    return t('llmOps.priceSourceModal.officialPreset.selectProvider')
+    return ''
   }
   if (!option) return t('llmOps.priceSourceModal.officialPreset.empty')
   if (option.source_exists) {
@@ -467,6 +438,9 @@ async function save() {
       : props.source?.slug || form.value.slug || autoSlug(form.value.name)
     const payload = {
       ...form.value,
+      collection_method: collectionMethodForSourceOwnerType(
+        form.value.source_owner_type
+      ),
       slug: submittedSlug,
       source_type: props.source?.source_type || 'custom'
     }
@@ -569,6 +543,25 @@ function sourceOwnerTypeForOfficialProvider(option) {
   return 'model_provider_official'
 }
 
+function manualSourceOwnerType() {
+  if (visibleSourceOwnerTypes.includes(form.value.source_owner_type)) {
+    return form.value.source_owner_type
+  }
+  const originalValue =
+    props.source?.source_owner_type ||
+    sourceOwnerTypeFromLegacyCategory(props.source?.source_category)
+  if (visibleSourceOwnerTypes.includes(originalValue)) {
+    return originalValue
+  }
+  return 'internal'
+}
+
+function collectionMethodForSourceOwnerType(value) {
+  if (officialSourceOwnerTypes.includes(value)) return 'auto_collect'
+  if (['supplier', 'internal'].includes(value)) return 'manual_entry'
+  return 'unknown'
+}
+
 function errorMessage(error, fallback) {
   return (
     error?.response?.data?.detail ||
@@ -598,11 +591,15 @@ function normalizeSlug(value) {
 
 <style scoped>
 .form-section {
-  @apply rounded-lg border border-slate-200 bg-slate-50 p-4;
+  @apply rounded-lg border border-slate-200 bg-white p-4;
 }
 
 .section-heading {
   @apply mb-4;
+}
+
+.section-heading-row {
+  @apply flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-start md:justify-between;
 }
 
 .section-heading h4 {
@@ -611,6 +608,51 @@ function normalizeSlug(value) {
 
 .section-heading p {
   @apply mt-1 text-xs leading-5 text-slate-500;
+}
+
+.mode-control {
+  @apply flex shrink-0 flex-col gap-1.5;
+}
+
+.mode-segment {
+  @apply inline-grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-100 p-0.5;
+  width: 13rem;
+}
+
+.mode-segment-option {
+  @apply h-8 rounded-md px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-100;
+}
+
+.mode-segment-option.active {
+  @apply bg-white text-indigo-700 shadow-sm;
+}
+
+.basic-field-grid {
+  @apply grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(14rem,0.75fr)_auto];
+}
+
+.field-name {
+  @apply md:col-span-2;
+}
+
+.field-slug {
+  @apply md:col-span-1;
+}
+
+.field-provider {
+  @apply md:col-span-2;
+}
+
+.field-currency {
+  @apply md:col-span-1;
+}
+
+.manual-basic-grid .field-name {
+  @apply md:col-span-2;
+}
+
+.manual-basic-grid .field-currency {
+  @apply md:col-start-3 md:row-start-1;
 }
 
 .field-group {

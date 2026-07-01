@@ -3,7 +3,10 @@ from __future__ import annotations
 from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult, PriceSourceCollector
-from .official import build_official_provider_collectors
+from .official import (
+    build_official_provider_collectors,
+    registered_official_provider_codes,
+)
 
 
 PRICE_SOURCE_COLLECTORS: tuple[PriceSourceCollector, ...] = (

@@ -37,6 +37,7 @@ from .services import (
     price_role_for_source,
     update_aggregated_model_identity,
 )
+from .source_collectors import registered_official_provider_codes
 from .skill_runner import (
     run_vendor_pricing_skill,
     standard_catalog_run_metadata,
@@ -628,7 +629,7 @@ def sync_configured_official_model_prices(
 
 def supported_official_provider_options() -> list[dict]:
     """Return official provider source presets available to operators."""
-    provider_codes = list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    provider_codes = list(registered_official_provider_codes())
     providers = {
         provider.code: provider
         for provider in LLMProvider.objects.filter(code__in=provider_codes)
@@ -679,7 +680,7 @@ def ensure_supported_official_provider_source(
 ) -> tuple[LLMProvider, PriceCollectionSource, bool, bool]:
     """Ensure an operator-selected official provider source exists."""
     provider_code = str(provider_code or "").strip()
-    if provider_code not in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES:
+    if provider_code not in registered_official_provider_codes():
         raise ValueError("Unsupported official provider source.")
 
     defaults = official_provider_defaults(provider_code)

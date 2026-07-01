@@ -1484,8 +1484,8 @@
         "edit": "编辑模型价格源"
       },
       "description": {
-        "create": "新建原厂、供货商或人工维护价格源，用于后续录价和采集模型价格。",
-        "edit": "维护价格源名称、口径、价格地址和启停状态。"
+        "create": "新建自动采集或手动维护价格源，用于后续采集、录入和导入模型价格。",
+        "edit": "维护价格源名称、口径和启停状态。"
       },
       "sections": {
         "basic": "基础信息",
@@ -1543,6 +1543,10 @@
         "manualEntry": "手工录入",
         "manualImport": "批量导入",
         "unknown": "未知"
+      },
+      "maintenanceModes": {
+        "autoCollect": "自动采集",
+        "manual": "手动维护"
       },
       "categories": {
         "manual": "人工维护",

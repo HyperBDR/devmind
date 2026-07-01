@@ -302,6 +302,8 @@
                         selectedProviderByModelKey[item.group.key] || ''
                       "
                       :options="item.options"
+                      class-name="w-full"
+                      :menu-min-width="260"
                       placeholder="选择渠道上游"
                       searchable
                       search-placeholder="搜索上游 / 币种 / 类型"
@@ -314,15 +316,32 @@
                       <span class="truncate">无可用上游</span>
                     </div>
                     <div v-if="item.model" class="batch-price-preview">
-                      <span>上游 {{ upstreamPriceSummary(item.model) }}</span>
-                      <strong>
-                        成本
-                        {{ pendingDraftPriceSummary(newDraft, item.model) }}
-                      </strong>
+                      <div class="batch-price-line">
+                        <span class="batch-price-label">上游</span>
+                        <span class="batch-price-value">
+                          {{ batchUpstreamPriceSummary(item.model) }}
+                        </span>
+                      </div>
+                      <div class="batch-price-line cost">
+                        <span class="batch-price-label">成本</span>
+                        <strong class="batch-price-value">
+                          {{
+                            batchPendingDraftPriceSummary(newDraft, item.model)
+                          }}
+                        </strong>
+                      </div>
                     </div>
                     <div v-else class="batch-price-preview muted">
-                      <span>待选择渠道上游</span>
-                      <strong>选择后显示价格</strong>
+                      <div class="batch-price-line">
+                        <span class="batch-price-label">上游</span>
+                        <span class="batch-price-value">待选择渠道上游</span>
+                      </div>
+                      <div class="batch-price-line">
+                        <span class="batch-price-label">成本</span>
+                        <strong class="batch-price-value">
+                          选择后显示价格
+                        </strong>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1924,12 +1943,106 @@ function upstreamPriceSummary(model) {
     .join(' · ')
 }
 
-function pendingDraftPriceSummary(draft, model) {
+function batchUpstreamPriceSummary(model) {
+  const itemRows = providerPriceItemsForModel(model)
+  if (itemRows.length) {
+    return compactBatchPriceItemSummary(itemRows, model)
+  }
+  const rows = providerPriceSummary(model)
+  if (!rows.length) return '-'
+  return rows
+    .map((item) => `${item.label} ${priceAmountText(item, model)}`)
+    .join(' · ')
+}
+
+function batchPendingDraftPriceSummary(draft, model) {
+  const itemRows = providerPriceItemsForModel(model)
+  if (itemRows.length && !hasCustomPrices(draft)) {
+    return compactBatchPriceItemSummary(itemRows, model)
+  }
   const rows = draftPricePreview(draft, model)
   if (!rows.length) return '-'
   return rows
-    .map((item) => `${previewPriceLabel(item.label)} ${priceText(item, model)}`)
+    .map(
+      (item) =>
+        `${previewPriceLabel(item.label)} ${priceAmountText(item, model)}`
+    )
     .join(' · ')
+}
+
+function compactBatchPriceItemSummary(items, model) {
+  const groups = new Map()
+  sortPriceItems(items).forEach((item) => {
+    const label = providerPriceItemLabel(item.dimension)
+    const group = groups.get(label) || []
+    group.push(item)
+    groups.set(label, group)
+  })
+  return Array.from(groups.entries())
+    .map(([label, rows]) => `${label} ${priceItemRangeText(rows, model)}`)
+    .join(' · ')
+}
+
+function priceItemRangeText(rows, model) {
+  const tiers = rows
+    .map((item, index) => {
+      const amount = priceAmountText(priceItemPreview(item), model)
+      if (!amount || amount === '-') return ''
+      return `${priceItemTierLabel(item, index)} ${amount}`
+    })
+    .filter(Boolean)
+  if (!tiers.length) return '-'
+  return tiers.join(' / ')
+}
+
+function priceItemPreview(item) {
+  return {
+    value: item.unit_price,
+    currency: item.currency,
+    label: providerPriceItemLabel(item.dimension)
+  }
+}
+
+function priceItemTierLabel(item, index) {
+  const start = numericTierValue(item?.tier_start)
+  const end = numericTierValue(item?.tier_end)
+  if (start === null && end === null) {
+    return `第${index + 1}档`
+  }
+  const unit = tierRangeUnitSuffix(item?.billing_unit)
+  if (start !== null && end !== null) {
+    return `${formatTierBoundary(start)}-${formatTierBoundary(end)}${unit}`
+  }
+  if (end !== null) {
+    return `<${formatTierBoundary(end)}${unit}`
+  }
+  return `>=${formatTierBoundary(start)}${unit}`
+}
+
+function numericTierValue(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  if (!Number.isFinite(number)) return null
+  return number
+}
+
+function tierRangeUnitSuffix(billingUnit) {
+  if (billingUnit === 'per_1m_tokens') return ' tokens'
+  if (billingUnit === 'per_second') return 's'
+  return ''
+}
+
+function formatTierBoundary(value) {
+  if (value >= 1000000 && value % 1000000 === 0) {
+    return `${value / 1000000}M`
+  }
+  if (value >= 1000 && value % 1000 === 0) {
+    return `${value / 1000}K`
+  }
+  if (Number.isInteger(value)) return String(value)
+  return Number(value)
+    .toFixed(2)
+    .replace(/\.?0+$/, '')
 }
 
 function performanceSummaryItems(row) {
@@ -1958,6 +2071,23 @@ function priceText(item, model) {
   }
   if (Number(item.value) !== 0) {
     return money(item.value, item.currency)
+  }
+  if (isNotApplicablePrice(item, model)) {
+    return '不适用'
+  }
+  return '缺价格'
+}
+
+function priceAmountText(item, model) {
+  if (!item) return '-'
+  if (item.missingReason) return item.missingReason
+  if (item.value === null || item.value === undefined || item.value === '') {
+    return '-'
+  }
+  if (Number(item.value) !== 0) {
+    const displayValue = convertCurrencyAmount(item.value, item.currency)
+    if (displayValue === null) return Number(item.value).toFixed(4)
+    return displayValue.toFixed(4)
   }
   if (isNotApplicablePrice(item, model)) {
     return '不适用'
@@ -2106,7 +2236,12 @@ function priceDimensionSortKey(item) {
   }
   const dimension = String(item?.dimension || '')
   const score = order[dimension] ?? 999
-  return `${String(score).padStart(3, '0')}-${item?.tier_start || ''}-${dimension}`
+  const tierStart = numericTierValue(item?.tier_start) ?? -1
+  return [
+    String(score).padStart(3, '0'),
+    String(tierStart).padStart(18, '0'),
+    dimension
+  ].join('-')
 }
 
 function providerPriceItemLabel(dimension) {
@@ -2438,7 +2573,14 @@ function modalityLabel(modality) {
 }
 
 .batch-selection-row {
-  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(9rem,0.8fr)_minmax(11rem,0.9fr)_minmax(0,1.35fr)] xl:items-center;
+  @apply grid gap-2 px-3 py-3;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 768px) {
+  .batch-selection-row {
+    grid-template-columns: minmax(10rem, 1fr) minmax(15rem, 0.95fr);
+  }
 }
 
 .batch-model-main {
@@ -2454,24 +2596,33 @@ function modalityLabel(modality) {
 }
 
 .batch-price-preview {
-  @apply grid min-w-0 gap-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs;
+  @apply grid min-w-0 gap-1 rounded-lg bg-slate-50 px-3 py-2 text-xs;
+  grid-column: 1 / -1;
 }
 
-.batch-price-preview span,
-.batch-price-preview strong {
-  @apply truncate font-mono text-xs leading-5;
+.batch-price-line {
+  @apply grid min-w-0 gap-2;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
 }
 
-.batch-price-preview span {
-  @apply text-slate-500;
+.batch-price-label {
+  @apply inline-flex h-5 items-center justify-center rounded border border-slate-200 bg-white px-1.5 text-[11px] font-medium text-slate-500;
 }
 
-.batch-price-preview strong {
+.batch-price-value {
+  @apply min-w-0 whitespace-normal break-words font-mono text-xs leading-5 text-slate-500;
+}
+
+.batch-price-line.cost .batch-price-label {
+  @apply border-indigo-100 bg-indigo-50 text-indigo-600;
+}
+
+.batch-price-line.cost .batch-price-value {
   @apply font-semibold text-slate-800;
 }
 
-.batch-price-preview.muted span,
-.batch-price-preview.muted strong {
+.batch-price-preview.muted .batch-price-label,
+.batch-price-preview.muted .batch-price-value {
   @apply font-sans text-slate-400;
 }
 
