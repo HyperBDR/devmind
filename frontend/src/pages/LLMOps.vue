@@ -597,6 +597,7 @@
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
               @refresh="refreshProviderManagementData"
+              @manual-price-saved="handleManualPriceSaved"
             />
 
             <MetaModelManagement
@@ -1856,6 +1857,55 @@ function mergeResaleListings(updatedItems) {
   listings.value = Array.from(byId.values())
 }
 
+async function handleManualPriceSaved(payload) {
+  if (!payload || !Array.isArray(payload.price_items)) {
+    await refreshProviderManagementData()
+    return
+  }
+
+  if (payload.source?.id) {
+    sources.value = mergeById(sources.value, [payload.source])
+  }
+  collectionRuns.value = mergeById(
+    collectionRuns.value,
+    payload.collection_runs || []
+  )
+  metaModels.value = mergeById(metaModels.value, payload.meta_models || [])
+  models.value = mergeById(models.value, payload.models || [])
+  modelPriceItems.value = removeById(
+    modelPriceItems.value,
+    payload.deactivated_price_item_ids || []
+  )
+  modelPriceItems.value = mergeById(
+    modelPriceItems.value,
+    payload.price_items || []
+  )
+
+  try {
+    const summaryRes = await llmOpsApi.getSummary(summaryParams())
+    summary.value = extract(summaryRes)
+  } catch (error) {
+    showError(errorMessage(error, '刷新汇总数据失败。'))
+  }
+}
+
+function mergeById(currentItems, updatedItems) {
+  if (!Array.isArray(updatedItems) || !updatedItems.length) {
+    return currentItems
+  }
+  const byId = new Map(currentItems.map((item) => [String(item.id), item]))
+  updatedItems.forEach((item) => {
+    if (item?.id) byId.set(String(item.id), item)
+  })
+  return Array.from(byId.values())
+}
+
+function removeById(currentItems, ids) {
+  if (!Array.isArray(ids) || !ids.length) return currentItems
+  const idSet = new Set(ids.map((id) => String(id)))
+  return currentItems.filter((item) => !idSet.has(String(item.id)))
+}
+
 function openListingActionDrawer({ modelId, kind }) {
   if (kind === 'configure-channel') {
     activeSection.value = 'channels'
@@ -1901,7 +1951,18 @@ async function handleResaleWorkspacePublished(payload) {
     showInfo(t('llmOps.messages.noListingsToPublish'))
     return
   }
-  const publishListings = payload.listings.filter(
+  if (!payload.hasChanges) {
+    showInfo(t('llmOps.messages.noChangesToSave'))
+    return
+  }
+  const changedListings = payload.listings.filter(
+    (item) => item.hasChanges !== false
+  )
+  if (!changedListings.length) {
+    showInfo(t('llmOps.messages.noChangesToSave'))
+    return
+  }
+  const publishListings = changedListings.filter(
     (item) => Number(item.priceIn) > 0 && Number(item.priceOut) > 0
   )
   const items = publishListings.map(mapWorkspaceListingToPayload)

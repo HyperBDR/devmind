@@ -197,10 +197,13 @@ const workspaceKey = computed(() =>
 
 const canPublish = computed(() => {
   if (!latestPayload.value) return false
-  const { listings, platformId, modelId } = latestPayload.value
+  const { hasChanges, listings, platformId, modelId } = latestPayload.value
   if (!platformId || !modelId) return false
+  if (!hasChanges) return false
   if (!listings.length) return false
-  return listings.every(
+  const changedListings = listings.filter((item) => item.hasChanges !== false)
+  if (!changedListings.length) return false
+  return changedListings.every(
     (l) =>
       Number.isFinite(Number(l.priceIn)) &&
       Number.isFinite(Number(l.priceOut)) &&

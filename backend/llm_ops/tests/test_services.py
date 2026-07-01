@@ -418,8 +418,20 @@ class LLMOpsPricingServiceTests(TestCase):
                     "model_code": "gpt-4o",
                     "model_name": "GPT-4o",
                     "currency": "USD",
+                    "output_price_per_million": Decimal("3.5"),
+                },
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "output_price_per_million": Decimal("3.5"),
+                },
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
                     "input_price_per_million": Decimal("1.5"),
-                }
+                },
             ],
             default_currency="USD",
             updates_model_prices=False,
@@ -432,8 +444,199 @@ class LLMOpsPricingServiceTests(TestCase):
             self.model.input_price_per_million,
             Decimal("2.5"),
         )
-        item = ModelPriceItem.objects.get(source=source)
+        self.assertGreater(
+            ModelPriceItem.objects.filter(source=source).count(),
+            1,
+        )
+        self.assertEqual(
+            ModelPriceItem.objects.filter(
+                source=source,
+                is_current=True,
+            ).count(),
+            1,
+        )
+        item = ModelPriceItem.objects.get(source=source, is_current=True)
         self.assertEqual(item.model, self.model)
+        self.assertEqual(item.dimension, ModelPriceItem.DIMENSION_TEXT_INPUT)
+
+    def test_manual_import_reports_incremental_refresh_records(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Sheet",
+            slug="supplier-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+
+        first_result = import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+        input_item = ModelPriceItem.objects.get(
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+        self.model.refresh_from_db()
+
+        self.assertIn(self.model.id, first_result["affected_model_ids"])
+        self.assertIn(
+            self.model.meta_model_id,
+            first_result["affected_meta_model_ids"],
+        )
+        self.assertIn(input_item.id, first_result["affected_price_item_ids"])
+        self.assertEqual(first_result["deactivated_price_item_ids"], [])
+
+        second_result = import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "output_price_per_million": Decimal("3.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+
+        self.assertIn(
+            input_item.id,
+            second_result["deactivated_price_item_ids"],
+        )
+        self.assertEqual(
+            ModelPriceItem.objects.filter(source=source, is_current=True)
+            .values_list("dimension", flat=True)
+            .get(),
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+        )
+
+    def test_manual_import_omits_deactivated_items_from_affected_ids(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Sheet",
+            slug="supplier-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+
+        result = import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                },
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "output_price_per_million": Decimal("3.5"),
+                },
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+
+        current_item = ModelPriceItem.objects.get(
+            source=source,
+            is_current=True,
+        )
+        stale_item = ModelPriceItem.objects.get(
+            source=source,
+            is_current=False,
+        )
+
+        self.assertEqual(
+            current_item.dimension,
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+        )
+        self.assertIn(current_item.id, result["affected_price_item_ids"])
+        self.assertNotIn(stale_item.id, result["affected_price_item_ids"])
+        self.assertIn(stale_item.id, result["deactivated_price_item_ids"])
+
+    def test_manual_import_omits_reactivated_items_from_deactivated_ids(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Sheet",
+            slug="supplier-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+
+        import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "output_price_per_million": Decimal("3.5"),
+                },
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+        input_item = ModelPriceItem.objects.get(
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+
+        result = import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "output_price_per_million": Decimal("3.5"),
+                },
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                },
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+        input_item.refresh_from_db()
+        output_item = ModelPriceItem.objects.get(
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+        )
+
+        self.assertTrue(input_item.is_current)
+        self.assertFalse(output_item.is_current)
+        self.assertIn(input_item.id, result["affected_price_item_ids"])
+        self.assertNotIn(input_item.id, result["deactivated_price_item_ids"])
+        self.assertIn(output_item.id, result["deactivated_price_item_ids"])
 
     def test_manual_import_without_source_provider_uses_model_owner(self):
         source = PriceCollectionSource.objects.create(

@@ -1147,18 +1147,20 @@
       "policy": {
         "approvalPath": "Approval path",
         "autoApproveThreshold": "Margin <= {rate}",
-        "autoPath": "Auto-approval path",
-        "directConfirm": "Direct confirmation",
-        "publishPolicy": "Publishing policy",
-        "reviewOverLimit": "Review over threshold"
+        "autoApproveHint": "Skip review when matched",
+        "autoPath": "Enable auto-approval",
+        "postApprovalAction": "Post-approval action",
+        "publishPolicy": "Post-approval action",
+        "reviewFallback": "Used when auto-approval is not matched",
+        "reviewOverLimit": "Used when auto-approval is not matched"
       },
       "publishDescriptions": {
-        "auto": "Confirm publishing after auto-approval hits",
-        "manual": "Keep manual confirmation"
+        "auto": "Set online automatically after auto-approval or review passes",
+        "manual": "Keep pending for online confirmation after pass"
       },
       "publishModes": {
-        "auto": "Auto-publish after auto-approval",
-        "manual": "Pending confirmation after submission"
+        "auto": "Auto-publish after pass",
+        "manual": "Pending confirmation after pass"
       },
       "status": {
         "disabled": "Disabled",

@@ -2965,4 +2965,39 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
                 "result": result,
             },
         )
-        return Response(result)
+        response_payload = {
+            **result,
+            "source": PriceCollectionSourceSerializer(source).data,
+            "collection_runs": PriceCollectionRunSerializer(
+                PriceCollectionRun.objects.filter(
+                    id__in=result.get("affected_collection_run_ids", []),
+                ),
+                many=True,
+            ).data,
+            "meta_models": MetaModelSerializer(
+                MetaModel.objects.filter(
+                    id__in=result.get("affected_meta_model_ids", []),
+                ),
+                many=True,
+            ).data,
+            "models": LLMModelSerializer(
+                LLMModel.objects.filter(
+                    id__in=result.get("affected_model_ids", []),
+                ).select_related("provider", "meta_model", "source"),
+                many=True,
+            ).data,
+            "price_items": ModelPriceItemSerializer(
+                ModelPriceItem.objects.filter(
+                    id__in=result.get("affected_price_item_ids", []),
+                ).select_related(
+                    "provider",
+                    "meta_model",
+                    "model",
+                    "source",
+                    "source__channel",
+                    "source__provider",
+                ),
+                many=True,
+            ).data,
+        }
+        return Response(response_payload)

@@ -514,9 +514,9 @@ async function submit() {
     if (providerId) {
       payload.provider = providerId
     }
-    await llmOpsApi.importManualPrices(payload)
+    const response = await llmOpsApi.importManualPrices(payload)
     showSuccess(t('llmOps.manualPriceEntry.messages.saved'))
-    emit('saved')
+    emit('saved', apiPayload(response))
   } catch (error) {
     showError(errorMessage(error, t('llmOps.manualPriceEntry.errors.save')))
   } finally {
@@ -692,6 +692,10 @@ function firstErrorMessage(value, field = '') {
   if (!message) return ''
   if (key === 'non_field_errors') return message
   return `${label}: ${message}`
+}
+
+function apiPayload(response) {
+  return response?.data?.data || response?.data || {}
 }
 </script>
 
