@@ -1474,8 +1474,8 @@
         "edit": "Edit Model Price Source"
       },
       "description": {
-        "create": "Create an official, supplier, or manually maintained price source for later price entry and collection.",
-        "edit": "Maintain the source name, pricing scope, price URL, and enabled status."
+        "create": "Create an auto-collected or manually maintained price source for later collection, entry, and import.",
+        "edit": "Maintain the source name, pricing scope, and enabled status."
       },
       "sections": {
         "basic": "Basic information",
@@ -1533,6 +1533,10 @@
         "manualEntry": "Manual entry",
         "manualImport": "Manual import",
         "unknown": "Unknown"
+      },
+      "maintenanceModes": {
+        "autoCollect": "Auto collect",
+        "manual": "Manual maintenance"
       },
       "categories": {
         "manual": "Manual maintenance",

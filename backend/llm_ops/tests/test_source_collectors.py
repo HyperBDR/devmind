@@ -7,19 +7,17 @@ from llm_ops.models import LLMProvider, PriceCollectionSource
 from llm_ops.source_collectors import (
     collect_price_source,
     get_price_source_collector,
+    registered_official_provider_codes,
     source_supports_code_collection,
-)
-from llm_ops.source_collectors.official import (
-    SUPPORTED_OFFICIAL_PROVIDER_CODES,
 )
 
 
 class PriceSourceCollectorRegistryTests(TestCase):
-    def test_all_official_configs_have_registered_collectors(self):
-        self.assertEqual(
-            set(OFFICIAL_PROVIDER_CONFIGS),
-            set(SUPPORTED_OFFICIAL_PROVIDER_CODES),
-        )
+    def test_registered_official_collectors_have_provider_configs(self):
+        provider_codes = set(registered_official_provider_codes())
+
+        self.assertEqual(provider_codes, {"aliyun"})
+        self.assertLessEqual(provider_codes, set(OFFICIAL_PROVIDER_CONFIGS))
 
     def test_official_provider_source_dispatches_to_provider_collector(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
@@ -48,8 +46,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
         self.assertTrue(source_supports_code_collection(source))
 
         with mock.patch(
-            "llm_ops.source_collectors.official."
-            "sync_official_provider_model_prices"
+            "llm_ops.collection_services.sync_official_provider_model_prices"
         ) as mock_sync:
             mock_sync.return_value = {"models": 1}
             result = collect_price_source(
@@ -64,7 +61,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
         )
         self.assertEqual(result, {"models": 1})
 
-    def test_generic_official_provider_source_dispatches_to_collector(self):
+    def test_unregistered_official_provider_source_is_not_supported(self):
         provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
         source = PriceCollectionSource.objects.create(
             name="DeepSeek Official",
@@ -83,11 +80,10 @@ class PriceSourceCollectorRegistryTests(TestCase):
 
         collector = get_price_source_collector(source)
 
-        self.assertIsNotNone(collector)
-        self.assertEqual(collector.collector_id, "official_provider:deepseek")
-        self.assertTrue(source_supports_code_collection(source))
+        self.assertIsNone(collector)
+        self.assertFalse(source_supports_code_collection(source))
 
-    def test_baidu_official_provider_source_dispatches_to_collector(self):
+    def test_baidu_official_provider_source_is_not_supported(self):
         provider = LLMProvider.objects.create(name="百度", code="baidu")
         source = PriceCollectionSource.objects.create(
             name="Baidu Official",
@@ -104,9 +100,8 @@ class PriceSourceCollectorRegistryTests(TestCase):
 
         collector = get_price_source_collector(source)
 
-        self.assertIsNotNone(collector)
-        self.assertEqual(collector.collector_id, "official_provider:baidu")
-        self.assertTrue(source_supports_code_collection(source))
+        self.assertIsNone(collector)
+        self.assertFalse(source_supports_code_collection(source))
 
     def test_model_level_official_source_is_not_supported(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")

@@ -1,14 +1,27 @@
 from __future__ import annotations
 
-from llm_ops.collection_services import sync_official_provider_model_prices
 from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
 from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult
 
-SUPPORTED_OFFICIAL_PROVIDER_CODES = tuple(
-    sorted(OFFICIAL_PROVIDER_CONFIGS.keys())
-)
+OFFICIAL_COLLECTOR_REGISTRY = {}
+
+
+def register_official_provider_collector(collector_class):
+    """Register a backend-implemented official price collector."""
+    provider_code = getattr(collector_class, "provider_code", "")
+    if not provider_code:
+        raise ValueError("Official collector must define provider_code.")
+    if provider_code not in OFFICIAL_PROVIDER_CONFIGS:
+        raise ValueError(f"Unknown official provider: {provider_code}")
+    OFFICIAL_COLLECTOR_REGISTRY[provider_code] = collector_class
+    return collector_class
+
+
+def registered_official_provider_codes() -> tuple[str, ...]:
+    """Return provider codes with implemented official collectors."""
+    return tuple(sorted(OFFICIAL_COLLECTOR_REGISTRY))
 
 
 class OfficialProviderPriceSourceCollector:
@@ -46,6 +59,10 @@ class OfficialProviderPriceSourceCollector:
         verify_source: bool = True,
     ) -> CollectorResult:
         """Collect prices using the provider-specific official sync."""
+        from llm_ops.collection_services import (
+            sync_official_provider_model_prices,
+        )
+
         return sync_official_provider_model_prices(
             provider=source.provider,
             source=source,
@@ -53,6 +70,7 @@ class OfficialProviderPriceSourceCollector:
         )
 
 
+@register_official_provider_collector
 class AliyunOfficialPriceSourceCollector(
     OfficialProviderPriceSourceCollector,
 ):
@@ -61,51 +79,14 @@ class AliyunOfficialPriceSourceCollector(
     provider_code = "aliyun"
 
 
-class AliyunWanxOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from Aliyun Wanxiang's official pricing source."""
-
-    provider_code = "aliyun-wanx"
-
-
-class BaiduOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from Baidu Qianfan's official pricing source."""
-
-    provider_code = "baidu"
-
-
-class VolcengineOfficialPriceSourceCollector(
-    OfficialProviderPriceSourceCollector,
-):
-    """Collect prices from VolcEngine Ark's official pricing source."""
-
-    provider_code = "volcengine"
-
-
-OFFICIAL_COLLECTOR_CLASSES = {
-    "aliyun": AliyunOfficialPriceSourceCollector,
-    "aliyun-wanx": AliyunWanxOfficialPriceSourceCollector,
-    "baidu": BaiduOfficialPriceSourceCollector,
-    "volcengine": VolcengineOfficialPriceSourceCollector,
-}
-
-
 def build_official_provider_collectors() -> tuple[
     OfficialProviderPriceSourceCollector,
     ...,
 ]:
     """Build one collector per supported official provider."""
-    collectors = []
-    for provider_code in SUPPORTED_OFFICIAL_PROVIDER_CODES:
-        collector_class = OFFICIAL_COLLECTOR_CLASSES.get(
-            provider_code,
-            OfficialProviderPriceSourceCollector,
+    return tuple(
+        collector_class()
+        for _provider_code, collector_class in sorted(
+            OFFICIAL_COLLECTOR_REGISTRY.items()
         )
-        if collector_class is OfficialProviderPriceSourceCollector:
-            collectors.append(collector_class(provider_code=provider_code))
-        else:
-            collectors.append(collector_class())
-    return tuple(collectors)
+    )

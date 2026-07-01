@@ -950,7 +950,7 @@ class LLMOpsViewTests(TestCase):
             updates_model_prices=True,
         )
         openai = LLMProvider.objects.create(name="OpenAI", code="openai")
-        openai_source = PriceCollectionSource.objects.create(
+        PriceCollectionSource.objects.create(
             name="OpenAI Official",
             slug="openai-official",
             provider=openai,
@@ -967,13 +967,13 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["task_id"], "task-all")
-        self.assertEqual(response.data["source_count"], 2)
+        self.assertEqual(response.data["source_count"], 1)
         self.assertEqual(
             response.data["source_ids"],
-            [aliyun_source.id, openai_source.id],
+            [aliyun_source.id],
         )
         mock_delay.assert_called_once_with(
-            source_ids=[aliyun_source.id, openai_source.id],
+            source_ids=[aliyun_source.id],
             verify_source=True,
         )
         audit = AuditLog.objects.get(
@@ -983,7 +983,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(audit.metadata["task_id"], "task-all")
         self.assertEqual(
             audit.metadata["source_ids"],
-            [aliyun_source.id, openai_source.id],
+            [aliyun_source.id],
         )
 
     @patch("llm_ops.views.run_model_price_sync_agent.delay")
@@ -996,7 +996,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         mock_delay.assert_not_called()
 
-    def test_official_provider_options_include_aliyun_presets(self):
+    def test_official_provider_options_only_include_aliyun_preset(self):
         response = self.client.get(
             reverse("collection-source-official-provider-options")
         )
@@ -1005,10 +1005,7 @@ class LLMOpsViewTests(TestCase):
         provider_codes = {
             item["provider_code"] for item in response.data["results"]
         }
-        self.assertIn("aliyun", provider_codes)
-        self.assertIn("aliyun-wanx", provider_codes)
-        self.assertIn("baidu", provider_codes)
-        self.assertIn("volcengine", provider_codes)
+        self.assertEqual(provider_codes, {"aliyun"})
 
     def test_ensure_official_provider_source_creates_aliyun_source(self):
         response = self.client.post(
@@ -1073,6 +1070,25 @@ class LLMOpsViewTests(TestCase):
                 slug="aliyun-official",
             ).count(),
             1,
+        )
+
+    def test_ensure_official_provider_source_rejects_non_aliyun(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "baidu"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["detail"],
+            "Unsupported official provider source.",
+        )
+        self.assertFalse(LLMProvider.objects.filter(code="baidu").exists())
+        self.assertFalse(
+            PriceCollectionSource.objects.filter(
+                slug="baidu-official",
+            ).exists()
         )
 
     @patch("llm_ops.views.run_model_price_sync_agent.delay")

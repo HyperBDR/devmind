@@ -267,8 +267,7 @@ class LLMOpsOfficialProviderOptionTests(TestCase):
         options = supported_official_provider_options()
 
         provider_codes = {option["provider_code"] for option in options}
-        self.assertIn("aliyun", provider_codes)
-        self.assertIn("baidu", provider_codes)
+        self.assertEqual(provider_codes, {"aliyun"})
         self.assertFalse(LLMProvider.objects.exists())
         self.assertFalse(PriceCollectionSource.objects.exists())
 
