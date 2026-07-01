@@ -135,7 +135,7 @@
                   })
                 }}</strong>
                 <span>{{
-                  t('llmOps.workflowConfig.policy.directConfirm')
+                  t('llmOps.workflowConfig.policy.autoApproveHint')
                 }}</span>
               </article>
               <article
@@ -173,7 +173,7 @@
                 </div>
                 <strong>{{ approvalFlowLabel }}</strong>
                 <span>{{
-                  t('llmOps.workflowConfig.policy.reviewOverLimit')
+                  t('llmOps.workflowConfig.policy.reviewFallback')
                 }}</span>
               </article>
             </div>
@@ -183,19 +183,17 @@
               <span class="workflow-flow-join-trunk"></span>
             </div>
 
-            <div class="workflow-flow-split">
-              <article class="workflow-flow-node is-policy">
+            <div class="workflow-flow-split is-post-approval">
+              <article class="workflow-flow-node is-publish">
                 <div class="workflow-node-top">
-                  <small>{{
-                    t('llmOps.workflowConfig.policy.publishPolicy')
-                  }}</small>
+                  <small>05</small>
                   <select
                     id="workflow-publish-mode"
                     class="workflow-node-select"
                     name="workflow_publish_mode"
                     :value="publishMode"
                     :aria-label="
-                      t('llmOps.workflowConfig.policy.publishPolicy')
+                      t('llmOps.workflowConfig.policy.postApprovalAction')
                     "
                     @change="setPublishMode($event.target.value)"
                   >
@@ -207,7 +205,12 @@
                     </option>
                   </select>
                 </div>
-                <strong>{{ publishFlowLabel }}</strong>
+                <strong>{{
+                  t('llmOps.workflowConfig.policy.postApprovalAction')
+                }}</strong>
+                <span class="workflow-flow-outcome">
+                  {{ publishFlowLabel }}
+                </span>
                 <span>{{ publishFlowDescription }}</span>
               </article>
             </div>
@@ -676,6 +679,10 @@ function errorMessage(error) {
   margin-bottom: 1rem;
 }
 
+.workflow-flow-split.is-post-approval {
+  margin-top: 0.25rem;
+}
+
 .workflow-flow-elbow {
   height: 2rem;
   margin: -1rem auto;
@@ -906,6 +913,21 @@ function errorMessage(error) {
 
 .workflow-flow-node.is-policy small {
   color: #b45309;
+}
+
+.workflow-flow-node.is-publish {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  box-shadow: inset 0 3px 0 #10b981;
+}
+
+.workflow-flow-node.is-publish small {
+  color: #047857;
+}
+
+.workflow-flow-node span.workflow-flow-outcome {
+  color: #065f46;
+  font-weight: 800;
 }
 
 .workflow-flow-node.is-disabled {

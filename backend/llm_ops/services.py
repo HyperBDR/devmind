@@ -566,6 +566,10 @@ def import_manual_model_prices(
     updated_count = 0
     price_item_count = 0
     skipped_count = 0
+    affected_model_ids = set()
+    affected_meta_model_ids = set()
+    affected_price_item_ids = set()
+    deactivated_price_item_ids = set()
 
     for index, row in enumerate(rows, start=1):
         model_code = str(row.get("model_code") or "").strip()
@@ -650,13 +654,23 @@ def import_manual_model_prices(
         if changed_fields:
             model.save(update_fields=changed_fields)
 
-        price_item_count += sync_manual_model_price_items(
+        affected_model_ids.add(model.id)
+        if model.meta_model_id:
+            affected_meta_model_ids.add(model.meta_model_id)
+
+        price_result = sync_manual_model_price_items(
             source=source,
             provider=row_provider,
             model=model,
             row=row,
             row_index=index,
             default_currency=default_currency,
+        )
+        price_items = price_result["current_items"]
+        price_item_count += len(price_items)
+        affected_price_item_ids.update(item.id for item in price_items)
+        deactivated_price_item_ids.update(
+            price_result["deactivated_item_ids"],
         )
 
     source.last_collected_at = now
@@ -682,6 +696,13 @@ def import_manual_model_prices(
         "updates_model_prices": effective_updates_model_prices,
     }
     run.save()
+    changed_price_item_ids = affected_price_item_ids | deactivated_price_item_ids
+    current_price_item_ids = set(
+        ModelPriceItem.objects.filter(
+            id__in=changed_price_item_ids,
+            is_current=True,
+        ).values_list("id", flat=True)
+    )
     return {
         "run_id": run.id,
         "source_id": source.id,
@@ -690,6 +711,15 @@ def import_manual_model_prices(
         "updated_count": updated_count,
         "skipped_count": skipped_count,
         "price_item_count": price_item_count,
+        "affected_collection_run_ids": [run.id],
+        "affected_meta_model_ids": sorted(affected_meta_model_ids),
+        "affected_model_ids": sorted(affected_model_ids),
+        "affected_price_item_ids": sorted(
+            affected_price_item_ids & current_price_item_ids,
+        ),
+        "deactivated_price_item_ids": sorted(
+            deactivated_price_item_ids - current_price_item_ids,
+        ),
     }
 
 
@@ -790,7 +820,10 @@ def update_model_from_manual_row(
             changed_fields.append(field)
 
     if not updates_model_prices:
-        if model.source_id == source.id and can_detach_model_from_source(model):
+        if (
+            model.source_id == source.id
+            and can_detach_model_from_source(model)
+        ):
             model.source = None
             model.source_url = ""
             changed_fields.extend(["source", "source_url"])
@@ -828,7 +861,7 @@ def sync_manual_model_price_items(
     row: dict,
     row_index: int,
     default_currency: str,
-) -> int:
+) -> dict:
     """Replace current manual price items for one model/source pair."""
     currency = normalize_currency(row.get("currency") or default_currency)
     now = timezone.now()
@@ -864,14 +897,17 @@ def sync_manual_model_price_items(
             }
         )
     if not payloads:
-        return 0
+        return {"current_items": [], "deactivated_item_ids": []}
 
-    ModelPriceItem.objects.filter(
+    current_queryset = ModelPriceItem.objects.filter(
         model=model,
         source=source,
         is_current=True,
-    ).update(is_current=False, effective_to=now)
+    )
+    old_current_ids = set(current_queryset.values_list("id", flat=True))
+    current_queryset.update(is_current=False, effective_to=now)
 
+    current_items = []
     for payload in payloads:
         fingerprint = stable_fingerprint(
             {
@@ -899,7 +935,13 @@ def sync_manual_model_price_items(
             price_item.is_current = True
             price_item.effective_to = None
             price_item.save(update_fields=["is_current", "effective_to"])
-    return len(payloads)
+        current_items.append(price_item)
+
+    current_item_ids = {item.id for item in current_items}
+    return {
+        "current_items": current_items,
+        "deactivated_item_ids": sorted(old_current_ids - current_item_ids),
+    }
 
 
 def resolve_channel_model_currency(

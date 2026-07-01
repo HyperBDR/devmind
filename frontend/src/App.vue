@@ -22,7 +22,7 @@ onMounted(() => {
   const hasToken = !!localStorage.getItem('access_token')
   if (hasToken && !userStore.user) {
     userStore.checkAuth().catch(() => {
-      // Error handling is done in checkAuth (clears auth state)
+      // Error handling is centralized in checkAuth.
     })
   }
 })

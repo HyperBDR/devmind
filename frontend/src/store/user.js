@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { shouldKeepAuthStateOnError } from '@/api/authErrors'
 import { authApi } from '@/api/auth'
 import {
   getAvailablePlatforms,
@@ -7,12 +8,33 @@ import {
   hasFeature
 } from '@/utils/platformAccess'
 
+const USER_CACHE_KEY = 'user_profile_cache'
+
+function readCachedUser() {
+  try {
+    const raw = localStorage.getItem(USER_CACHE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+function writeCachedUser(userData) {
+  if (!userData) return
+  localStorage.setItem(USER_CACHE_KEY, JSON.stringify(userData))
+}
+
+function clearCachedUser() {
+  localStorage.removeItem(USER_CACHE_KEY)
+}
+
 export const useUserStore = defineStore('user', () => {
   // State
   const user = ref(null)
   const token = ref(localStorage.getItem('access_token'))
   const loading = ref(false)
   const error = ref(null)
+  const authCheckUnavailable = ref(false)
   let pendingAuthCheck = Promise.resolve()
 
   // Getters
@@ -40,6 +62,8 @@ export const useUserStore = defineStore('user', () => {
       if (data.access) {
         token.value = data.access
         user.value = data.user
+        authCheckUnavailable.value = false
+        writeCachedUser(data.user)
 
         // Save tokens to localStorage
         localStorage.setItem('access_token', data.access)
@@ -50,6 +74,8 @@ export const useUserStore = defineStore('user', () => {
         // Fallback for different response format
         token.value = data.token || data.access_token
         user.value = data.user
+        authCheckUnavailable.value = false
+        writeCachedUser(data.user)
         localStorage.setItem('access_token', token.value)
       }
 
@@ -70,9 +96,11 @@ export const useUserStore = defineStore('user', () => {
   const clearAuthState = () => {
     user.value = null
     token.value = null
+    authCheckUnavailable.value = false
     pendingAuthCheck = Promise.resolve()
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
+    clearCachedUser()
   }
 
   const logout = async () => {
@@ -112,9 +140,20 @@ export const useUserStore = defineStore('user', () => {
         const response = await authApi.getProfile()
         const data = response.data.data || response.data
         user.value = data
+        authCheckUnavailable.value = false
+        writeCachedUser(data)
         await loadUserPreferences()
         return true
       } catch (err) {
+        if (shouldKeepAuthStateOnError(err)) {
+          authCheckUnavailable.value = true
+          const cachedUser = readCachedUser()
+          if (cachedUser) {
+            user.value = cachedUser
+            return true
+          }
+          return false
+        }
         clearAuthState()
         return false
       }
@@ -138,13 +177,25 @@ export const useUserStore = defineStore('user', () => {
         const response = await authApi.getProfile()
         const data = response.data.data || response.data
         user.value = data
+        authCheckUnavailable.value = false
+        writeCachedUser(data)
         if (!token.value && localStorage.getItem('access_token')) {
           token.value = localStorage.getItem('access_token')
         }
         await loadUserPreferences()
         return data
       } catch (err) {
-        if (err?.response?.status !== 502 && err?.code !== 'ERR_BAD_RESPONSE') {
+        if (shouldKeepAuthStateOnError(err)) {
+          authCheckUnavailable.value = true
+          const cachedUser = readCachedUser()
+          if (cachedUser) {
+            user.value = cachedUser
+            return cachedUser
+          }
+        } else if (
+          err?.response?.status !== 502 &&
+          err?.code !== 'ERR_BAD_RESPONSE'
+        ) {
           console.error('Check auth status failed:', err)
         }
         return null
@@ -163,6 +214,7 @@ export const useUserStore = defineStore('user', () => {
       // Handle the actual response format from backend
       const data = response.data.data || response.data
       user.value = data
+      writeCachedUser(data)
       return data
     } catch (err) {
       error.value = err.response?.data?.message || 'Update failed'
@@ -174,6 +226,7 @@ export const useUserStore = defineStore('user', () => {
 
   const setUser = (userData) => {
     user.value = userData
+    writeCachedUser(userData)
   }
 
   const setToken = (tokenValue, refreshValue = null) => {
@@ -195,6 +248,7 @@ export const useUserStore = defineStore('user', () => {
     token,
     loading,
     error,
+    authCheckUnavailable,
     // Getters
     isAuthenticated,
     userInfo,

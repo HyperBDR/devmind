@@ -437,7 +437,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['refresh'])
+const emit = defineEmits(['refresh', 'manual-price-saved'])
 const { showSuccess, showError } = useToast()
 const { t } = useI18n()
 
@@ -800,9 +800,9 @@ function handleSourceSaved() {
   emit('refresh')
 }
 
-function handlePriceEntrySaved() {
+function handlePriceEntrySaved(payload) {
   priceEntrySource.value = null
-  emit('refresh')
+  emit('manual-price-saved', payload)
 }
 
 function openOfficialResetModal() {

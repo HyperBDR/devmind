@@ -15,6 +15,11 @@ const routes = [
     meta: { requiresGuest: true }
   },
   {
+    path: '/auth-unavailable',
+    name: 'AuthUnavailable',
+    component: () => import('@/pages/AuthUnavailable.vue')
+  },
+  {
     path: '/dashboard',
     name: 'Dashboard',
     component: () => import('@/pages/Dashboard.vue'),
@@ -270,6 +275,13 @@ router.beforeEach(async (to, from, next) => {
       try {
         const authSuccess = await userStore.checkAuth()
         if (!authSuccess) {
+          if (userStore.authCheckUnavailable) {
+            next({
+              name: 'AuthUnavailable',
+              query: { redirect: to.fullPath }
+            })
+            return
+          }
           next('/login')
           return
         }
@@ -281,6 +293,7 @@ router.beforeEach(async (to, from, next) => {
 
     if (
       to.meta.requiredFeature &&
+      userStore.userInfo &&
       !hasFeature(userStore.userInfo, to.meta.requiredFeature)
     ) {
       next(getLandingPath(userStore.userInfo))
