@@ -50,16 +50,6 @@
             <h4>{{ t('llmOps.priceSourceModal.sections.basic') }}</h4>
             <p>{{ t('llmOps.priceSourceModal.sections.basicHint') }}</p>
           </div>
-          <div class="source-meta-strip">
-            <div class="source-meta-item">
-              <span>{{ t('llmOps.priceSourceModal.fields.slug') }}</span>
-              <strong>{{ internalSlugLabel }}</strong>
-            </div>
-            <div class="source-meta-item">
-              <span>{{ t('llmOps.priceSourceModal.fields.sourceType') }}</span>
-              <strong>{{ sourceTypeLabel }}</strong>
-            </div>
-          </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
               <span class="field-label">
@@ -71,12 +61,21 @@
                 :placeholder="t('llmOps.priceSourceModal.placeholders.name')"
                 required
               />
-              <span v-if="!isEditing" class="field-help">
-                {{
-                  t('llmOps.priceSourceModal.help.autoSlug', {
-                    slug: internalSlugLabel
-                  })
-                }}
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.priceSourceModal.fields.slug') }}
+              </span>
+              <input
+                v-model="form.slug"
+                class="field font-mono"
+                :disabled="!canEditSlug"
+                maxlength="100"
+                :placeholder="sourceSlugLabel"
+                @blur="normalizeSlugField"
+              />
+              <span class="field-help">
+                {{ slugHelpText }}
               </span>
             </label>
             <label class="field-group">
@@ -84,7 +83,7 @@
                 {{ t('llmOps.priceSourceModal.fields.sourceOwnerType') }}
               </span>
               <CompactSelect
-                v-model="form.source_owner_type"
+                v-model="sourceOwnerTypeSelection"
                 :options="sourceOwnerTypeOptions"
               />
             </label>
@@ -98,60 +97,29 @@
               />
             </label>
             <label
-              v-if="shouldUseOfficialPreset"
-              class="field-group md:col-span-2"
+              class="field-group"
             >
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.officialProvider') }}
               </span>
               <CompactSelect
                 v-model="selectedOfficialProviderCode"
-                :disabled="loadingOfficialProviderOptions || saving"
+                :disabled="
+                  !shouldUseOfficialPreset ||
+                  loadingOfficialProviderOptions ||
+                  saving
+                "
                 :options="officialProviderSelectOptions"
                 class-name="w-full"
                 :menu-min-width="360"
+                :placeholder="
+                  t('llmOps.priceSourceModal.officialPreset.selectProvider')
+                "
               />
               <span class="field-help">
-                {{ officialProviderStatus }}
+                {{ officialProviderHelpText }}
               </span>
             </label>
-            <div
-              v-if="shouldUseOfficialPreset && selectedOfficialProviderOption"
-              class="official-source-detail md:col-span-2"
-            >
-              <div>
-                <span>
-                  {{ t('llmOps.priceSourceModal.officialPreset.source') }}
-                </span>
-                <strong>
-                  {{ selectedOfficialProviderOption.source_name }}
-                </strong>
-              </div>
-              <div>
-                <span>
-                  {{ t('llmOps.priceSourceModal.officialPreset.slug') }}
-                </span>
-                <strong class="font-mono">
-                  {{ selectedOfficialProviderOption.source_slug }}
-                </strong>
-              </div>
-              <div>
-                <span>
-                  {{ t('llmOps.priceSourceModal.officialPreset.currency') }}
-                </span>
-                <strong>
-                  {{ selectedOfficialProviderOption.currency }}
-                </strong>
-              </div>
-              <div>
-                <span>
-                  {{ t('llmOps.priceSourceModal.officialPreset.url') }}
-                </span>
-                <strong class="break-all">
-                  {{ selectedOfficialProviderOption.source_url || '-' }}
-                </strong>
-              </div>
-            </div>
             <label class="field-group">
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.currency') }}
@@ -264,41 +232,58 @@ const form = ref(defaults())
 const officialProviderOptions = ref([])
 const selectedOfficialProviderCode = ref('')
 const loadingOfficialProviderOptions = ref(false)
+const officialSourceOwnerTypes = [
+  'model_provider_official',
+  'cloud_provider_official'
+]
+const visibleSourceOwnerTypes = ['supplier', 'internal']
+const sourceOwnerOfficialOption = 'official'
 const isEditing = computed(() => Boolean(props.source?.id))
 const shouldUseOfficialPreset = computed(
   () =>
     !isEditing.value &&
-    ['model_provider_official', 'cloud_provider_official'].includes(
-      form.value.source_owner_type
-    )
+    officialSourceOwnerTypes.includes(form.value.source_owner_type)
 )
-const internalSlugLabel = computed(() =>
-  isEditing.value ? form.value.slug || '-' : sourceSlugLabel.value
+const canEditSlug = computed(
+  () => !shouldUseOfficialPreset.value && !isStableOfficialSource.value
 )
+const isStableOfficialSource = computed(() => {
+  if (!isEditing.value) return false
+  const source = props.source || {}
+  const providerCode = String(source.provider_code || '').trim()
+  if (!providerCode) return false
+  return (
+    source.source_category === 'official_provider' &&
+    String(source.slug || '') === `${providerCode}-official`
+  )
+})
+const slugHelpText = computed(() => {
+  if (shouldUseOfficialPreset.value && !selectedOfficialProviderOption.value) {
+    return t('llmOps.priceSourceModal.help.officialSlugPreset')
+  }
+  if (isStableOfficialSource.value) {
+    return t('llmOps.priceSourceModal.help.officialSlugLocked')
+  }
+  if (shouldUseOfficialPreset.value) {
+    return t('llmOps.priceSourceModal.help.officialSlugLocked')
+  }
+  if (isEditing.value) {
+    return t('llmOps.priceSourceModal.help.slug')
+  }
+  return t('llmOps.priceSourceModal.help.autoSlug', {
+    slug: sourceSlugLabel.value
+  })
+})
 const sourceSlugLabel = computed(() => {
   if (shouldUseOfficialPreset.value && selectedOfficialProviderOption.value) {
     return selectedOfficialProviderOption.value.source_slug || '-'
   }
   return autoSlug(form.value.name || '')
 })
-const sourceTypeLabel = computed(() => {
-  const type = props.source?.source_type || 'custom'
-  const labels = {
-    agione: 'Agione',
-    yunce: 'Yunce',
-    custom: t('llmOps.priceSourceModal.sourceTypes.custom')
-  }
-  return labels[type] || type || '-'
-})
-
 const sourceOwnerTypeOptions = computed(() => [
   {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.modelProvider'),
-    value: 'model_provider_official'
-  },
-  {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.cloudProvider'),
-    value: 'cloud_provider_official'
+    label: t('llmOps.priceSourceModal.sourceOwnerTypes.official'),
+    value: sourceOwnerOfficialOption
   },
   {
     label: t('llmOps.priceSourceModal.sourceOwnerTypes.supplier'),
@@ -307,12 +292,35 @@ const sourceOwnerTypeOptions = computed(() => [
   {
     label: t('llmOps.priceSourceModal.sourceOwnerTypes.internal'),
     value: 'internal'
-  },
-  {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.unknown'),
-    value: 'unknown'
   }
 ])
+
+const sourceOwnerTypeSelection = computed({
+  get() {
+    if (officialSourceOwnerTypes.includes(form.value.source_owner_type)) {
+      return sourceOwnerOfficialOption
+    }
+    if (visibleSourceOwnerTypes.includes(form.value.source_owner_type)) {
+      return form.value.source_owner_type
+    }
+    return 'internal'
+  },
+  set(value) {
+    if (value === sourceOwnerOfficialOption) {
+      selectedOfficialProviderCode.value = ''
+      form.value.source_owner_type = sourceOwnerTypeForOfficialProvider(
+        { provider_code: selectedOfficialProviderCode.value }
+      )
+      form.value.collection_method = 'auto_collect'
+      return
+    }
+    selectedOfficialProviderCode.value = ''
+    form.value.source_owner_type = value
+    if (['supplier', 'internal'].includes(value)) {
+      form.value.collection_method = 'manual_entry'
+    }
+  }
+})
 
 const collectionMethodOptions = computed(() => [
   {
@@ -366,11 +374,21 @@ const officialProviderStatus = computed(() => {
     return t('llmOps.priceSourceModal.officialPreset.loading')
   }
   const option = selectedOfficialProviderOption.value
+  if (!option && officialProviderOptions.value.length) {
+    return t('llmOps.priceSourceModal.officialPreset.selectProvider')
+  }
   if (!option) return t('llmOps.priceSourceModal.officialPreset.empty')
   if (option.source_exists) {
     return t('llmOps.priceSourceModal.officialPreset.exists')
   }
   return t('llmOps.priceSourceModal.officialPreset.ready')
+})
+
+const officialProviderHelpText = computed(() => {
+  if (!shouldUseOfficialPreset.value) {
+    return t('llmOps.priceSourceModal.officialPreset.onlyOfficial')
+  }
+  return officialProviderStatus.value
 })
 
 const saveDisabled = computed(
@@ -406,8 +424,8 @@ function defaults() {
   return {
     name: '',
     slug: '',
-    source_owner_type: 'supplier',
-    collection_method: 'manual_entry',
+    source_owner_type: 'model_provider_official',
+    collection_method: 'auto_collect',
     endpoint_url: '',
     currency: 'CNY',
     is_enabled: true,
@@ -444,11 +462,12 @@ async function save() {
       await saveOfficialProviderSource()
       return
     }
+    const submittedSlug = canEditSlug.value
+      ? normalizeSlug(form.value.slug) || autoSlug(form.value.name)
+      : props.source?.slug || form.value.slug || autoSlug(form.value.name)
     const payload = {
       ...form.value,
-      slug: isEditing.value
-        ? props.source?.slug || form.value.slug || autoSlug(form.value.name)
-        : form.value.slug || autoSlug(form.value.name),
+      slug: submittedSlug,
       source_type: props.source?.source_type || 'custom'
     }
     payload.source_category = legacyCategoryForSourceOwnerType(
@@ -499,12 +518,8 @@ async function loadOfficialProviderOptions() {
         String(option.provider_code) ===
         String(selectedOfficialProviderCode.value)
     )
-    const preferred = options.find((option) => !option.source_exists)
-    const selected =
-      current && !current.source_exists ? current : preferred || current
-    selectedOfficialProviderCode.value =
-      selected?.provider_code || options[0]?.provider_code || ''
-    if (selected) applyOfficialProviderOption(selected)
+    selectedOfficialProviderCode.value = current?.provider_code || ''
+    if (current) applyOfficialProviderOption(current)
   } catch (error) {
     showError(
       errorMessage(
@@ -531,7 +546,7 @@ function applyOfficialProviderOption(option) {
 }
 
 function legacyCategoryForSourceOwnerType(value) {
-  if (['model_provider_official', 'cloud_provider_official'].includes(value)) {
+  if (officialSourceOwnerTypes.includes(value)) {
     return 'official_provider'
   }
   if (value === 'supplier') return 'supplier'
@@ -563,13 +578,21 @@ function errorMessage(error, fallback) {
   )
 }
 
+function normalizeSlugField() {
+  if (!canEditSlug.value) return
+  form.value.slug = normalizeSlug(form.value.slug)
+}
+
 function autoSlug(value) {
-  const normalized = String(value || '')
+  return normalizeSlug(value) || 'price-source'
+}
+
+function normalizeSlug(value) {
+  return String(value || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-  return normalized || 'price-source'
 }
 </script>
 
@@ -603,23 +626,7 @@ function autoSlug(value) {
 }
 
 .field {
-  @apply h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100;
-}
-
-.source-meta-strip {
-  @apply mb-4 grid gap-3 sm:grid-cols-2;
-}
-
-.source-meta-item {
-  @apply rounded-lg border border-slate-200 bg-white px-3 py-2;
-}
-
-.source-meta-item span {
-  @apply block text-xs text-slate-500;
-}
-
-.source-meta-item strong {
-  @apply mt-1 block truncate font-mono text-sm text-slate-800;
+  @apply h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500;
 }
 
 .status-inline {

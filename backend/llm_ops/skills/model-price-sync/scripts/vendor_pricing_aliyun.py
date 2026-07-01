@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 import re
 from html import unescape
 from typing import Any
@@ -342,11 +343,20 @@ def _price_row(
     row = {
         "input_price_per_million": input_price,
         "output_price_per_million": output_price,
+        "cache_hit_price_per_million": _cache_hit_price(input_price),
     }
     if token_range:
         row["input_token_range"] = token_range
         row["output_token_range"] = token_range
     return row
+
+
+def _cache_hit_price(input_price: str) -> str:
+    try:
+        price = Decimal(str(input_price)) * Decimal("0.1")
+    except (InvalidOperation, ValueError):
+        return ""
+    return format(price.normalize(), "f")
 
 
 def _normalize_token_range(text: str) -> str:

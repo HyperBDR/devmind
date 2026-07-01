@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase
 
 from llm_ops.collection_services import (
+    ensure_official_model_source,
     ensure_official_source,
     official_model_source_slug as build_official_model_source_slug,
     sync_configured_official_model_prices,
@@ -1098,6 +1099,54 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(
             ensured.endpoint_url,
             "https://help.aliyun.com/zh/model-studio/model-pricing",
+        )
+
+    def test_ensure_official_model_source_sets_classification_fields(self):
+        provider = LLMProvider.objects.get(code="aliyun")
+
+        source = ensure_official_model_source(
+            provider=provider,
+            model_code="deepseek-r1",
+            display_name="DeepSeek R1",
+            source_url=OFFICIAL_PROVIDER_CONFIGS["aliyun"].source_url,
+            currency="CNY",
+        )
+
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+
+    def test_price_source_save_fills_missing_classification_fields(self):
+        provider = LLMProvider.objects.get(code="aliyun")
+
+        source = PriceCollectionSource.objects.create(
+            provider=provider,
+            name="阿里云 / DeepSeek R1 官方价格",
+            slug="aliyun-deepseek-r1-official-test",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            source_owner_type=None,
+            collection_method=None,
+            endpoint_url=OFFICIAL_PROVIDER_CONFIGS["aliyun"].source_url,
+            currency="CNY",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
         )
 
     def test_sync_volcengine_official_prices_keeps_cny_currency(self):

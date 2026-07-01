@@ -15,6 +15,7 @@ from .models import (
     ChannelModelPriceHistory,
     ChannelPriceItem,
     LLMModel,
+    LLMProvider,
     MetaModel,
     ModelPriceItem,
     PriceCollectionSource,
@@ -564,7 +565,7 @@ def can_convert_currency(
 def import_manual_model_prices(
     *,
     source: PriceCollectionSource,
-    provider,
+    provider=None,
     rows: list[dict],
     default_currency: str,
     updates_model_prices: bool,
@@ -589,15 +590,20 @@ def import_manual_model_prices(
             skipped_count += 1
             continue
 
+        row_provider = resolve_manual_import_provider(
+            row,
+            default_provider=provider,
+            model_code=model_code,
+        )
         meta_model = ensure_meta_model(
             code=model_code,
             name=row.get("model_name") or model_code,
-            provider=provider,
+            provider=row_provider,
             modality=row.get("modality") or LLMModel.MODALITY_TEXT,
         )
         if effective_updates_model_prices:
             model, created = LLMModel.objects.get_or_create(
-                provider=provider,
+                provider=row_provider,
                 source=source,
                 code=model_code,
                 defaults={
@@ -621,7 +627,7 @@ def import_manual_model_prices(
             )
         else:
             model = find_aggregated_model(
-                provider=provider,
+                provider=row_provider,
                 code=model_code,
                 meta_model=meta_model,
                 source=source,
@@ -629,7 +635,7 @@ def import_manual_model_prices(
             created = model is None
             if model is None:
                 model = LLMModel.objects.create(
-                    provider=provider,
+                    provider=row_provider,
                     meta_model=meta_model,
                     name=row.get("model_name") or model_code,
                     code=model_code,
@@ -663,7 +669,7 @@ def import_manual_model_prices(
 
         price_item_count += sync_manual_model_price_items(
             source=source,
-            provider=provider,
+            provider=row_provider,
             model=model,
             row=row,
             row_index=index,
@@ -702,6 +708,79 @@ def import_manual_model_prices(
         "skipped_count": skipped_count,
         "price_item_count": price_item_count,
     }
+
+
+def resolve_manual_import_provider(
+    row: dict,
+    *,
+    default_provider: LLMProvider | None,
+    model_code: str,
+) -> LLMProvider:
+    """Resolve the model owner for one manually imported price row."""
+
+    if default_provider is not None:
+        return default_provider
+
+    matched = match_manual_import_provider(row)
+    if matched is not None:
+        return matched
+
+    model_matches = list(
+        LLMModel.objects.filter(code=model_code)
+        .select_related("provider")
+        .order_by("id")
+    )
+    provider_ids = {
+        model.provider_id for model in model_matches if model.provider_id
+    }
+    if len(provider_ids) == 1:
+        return model_matches[0].provider
+
+    meta_model = (
+        MetaModel.objects.filter(code=model_code)
+        .select_related("vendor")
+        .first()
+    )
+    if meta_model and meta_model.vendor_id:
+        return meta_model.vendor
+
+    raise ValueError(
+        "Cannot resolve model provider for manual price row "
+        f"{model_code}. Add provider_code or select an existing model."
+    )
+
+
+def match_manual_import_provider(row: dict) -> LLMProvider | None:
+    """Match row-level provider fields to an existing model provider."""
+
+    labels = {
+        normalize_provider_match_label(row.get(field))
+        for field in (
+            "provider",
+            "provider_code",
+            "provider_name",
+            "model_provider",
+            "model_source",
+        )
+        if normalize_provider_match_label(row.get(field))
+    }
+    if not labels:
+        return None
+
+    for provider in LLMProvider.objects.filter(is_active=True).order_by("id"):
+        provider_labels = {
+            normalize_provider_match_label(provider.code),
+            normalize_provider_match_label(provider.name),
+        }
+        if labels & provider_labels:
+            return provider
+    return None
+
+
+def normalize_provider_match_label(value: str | None) -> str:
+    """Normalize provider labels for manual import matching."""
+
+    return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
 
 
 def update_model_from_manual_row(

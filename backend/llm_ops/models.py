@@ -22,6 +22,13 @@ def _ensure_meta_model_from_model(instance, kwargs):
 class PriceCollectionSource(models.Model):
     """Pricing source for official, supplier, or manual price catalogs."""
 
+    CLOUD_PROVIDER_OFFICIAL_CODES = {
+        "aliyun",
+        "aliyun-wanx",
+        "baidu",
+        "volcengine",
+    }
+
     SOURCE_TYPE_AGIONE = "agione"
     SOURCE_TYPE_YUNCE = "yunce"
     SOURCE_TYPE_CUSTOM = "custom"
@@ -122,6 +129,46 @@ class PriceCollectionSource(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.slug})"
+
+    def save(self, *args, **kwargs):
+        """Normalize required source classification fields before saving."""
+        self._fill_required_classification_fields()
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            update_fields.update({"source_owner_type", "collection_method"})
+            kwargs["update_fields"] = list(update_fields)
+        super().save(*args, **kwargs)
+
+    def _fill_required_classification_fields(self):
+        """Apply source classification defaults for legacy creation paths."""
+        if not self.source_owner_type:
+            self.source_owner_type = self._default_source_owner_type()
+        if not self.collection_method:
+            self.collection_method = self._default_collection_method()
+
+    def _default_source_owner_type(self):
+        if self.source_category == self.SOURCE_CATEGORY_OFFICIAL_PROVIDER:
+            provider_code = str(getattr(self.provider, "code", "")).lower()
+            if provider_code in self.CLOUD_PROVIDER_OFFICIAL_CODES:
+                return self.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+            return self.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+        if self.source_category == self.SOURCE_CATEGORY_SUPPLIER:
+            return self.SOURCE_OWNER_SUPPLIER
+        if self.source_category == self.SOURCE_CATEGORY_MANUAL:
+            return self.SOURCE_OWNER_INTERNAL
+        return self.SOURCE_OWNER_UNKNOWN
+
+    def _default_collection_method(self):
+        if self.source_category == self.SOURCE_CATEGORY_OFFICIAL_PROVIDER:
+            return self.COLLECTION_METHOD_AUTO_COLLECT
+        if self.source_category == self.SOURCE_CATEGORY_SUPPLIER:
+            if self.source_type == self.SOURCE_TYPE_YUNCE:
+                return self.COLLECTION_METHOD_API_SYNC
+            return self.COLLECTION_METHOD_UNKNOWN
+        if self.source_category == self.SOURCE_CATEGORY_MANUAL:
+            return self.COLLECTION_METHOD_MANUAL_ENTRY
+        return self.COLLECTION_METHOD_UNKNOWN
 
 
 class LLMOpsGlobalConfig(models.Model):

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import List, Protocol, Union
 
 from llm_ops.models import PriceCollectionSource
 
 
-CollectorResult = dict[str, int | list[str]]
+CollectorResult = dict[str, Union[int, List[str]]]
 
 
 class PriceSourceCollector(Protocol):

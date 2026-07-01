@@ -518,6 +518,48 @@ class LLMOpsViewTests(TestCase):
             1,
         )
 
+    @patch("llm_ops.views.import_manual_model_prices")
+    def test_manual_price_import_accepts_source_without_provider(
+        self,
+        mock_import,
+    ):
+        source = PriceCollectionSource.objects.create(
+            name="Agione Manual Sheet",
+            slug="agione-manual-sheet",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+            currency="CNY",
+        )
+        mock_import.return_value = {
+            "created_models": 0,
+            "updated_models": 1,
+            "created_price_items": 1,
+        }
+
+        response = self.client.post(
+            reverse("llm-ops-manual-price-import"),
+            {
+                "source": source.id,
+                "rows": [
+                    {
+                        "model_code": "deepseek-r1",
+                        "model_name": "DeepSeek R1",
+                        "provider_code": "deepseek",
+                        "input_price_per_million": "1.000000",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_import.assert_called_once()
+        _, kwargs = mock_import.call_args
+        self.assertEqual(kwargs["source"], source)
+        self.assertIsNone(kwargs["provider"])
+        audit = AuditLog.objects.get(target_id=str(source.id))
+        self.assertIsNone(audit.metadata["provider_id"])
+
     def test_collection_source_can_be_deleted(self):
         source = PriceCollectionSource.objects.create(
             name="Manual Source",
@@ -837,7 +879,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(MetaModel.objects.filter(id=meta.id).exists())
 
-    @patch("llm_ops.views.collect_price_source_prices.delay")
+    @patch("llm_ops.views.run_model_price_sync_agent.delay")
     def test_collection_source_collects_official_provider(self, mock_delay):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
@@ -867,7 +909,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["provider_code"], "aliyun")
         self.assertEqual(response.data["source_id"], source.id)
         mock_delay.assert_called_once_with(
-            source_id=source.id,
+            source_ids=[source.id],
             verify_source=True,
         )
         audit = AuditLog.objects.get(target_id=str(source.id))
@@ -981,12 +1023,24 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["source"]["slug"], "aliyun-official")
         self.assertEqual(response.data["source"]["provider_code"], "aliyun")
         self.assertEqual(response.data["source"]["currency"], "CNY")
+        self.assertEqual(
+            response.data["source"]["collection_method"],
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
         provider = LLMProvider.objects.get(code="aliyun")
         source = PriceCollectionSource.objects.get(slug="aliyun-official")
         self.assertEqual(source.provider, provider)
         self.assertEqual(
             source.source_category,
             PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER,
+        )
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
         )
         self.assertTrue(source.updates_model_prices)
         audit = AuditLog.objects.get(target_id=str(source.id))
@@ -1021,7 +1075,7 @@ class LLMOpsViewTests(TestCase):
             1,
         )
 
-    @patch("llm_ops.views.collect_price_source_prices.delay")
+    @patch("llm_ops.views.run_model_price_sync_agent.delay")
     def test_collection_source_collect_rejects_disabled_source(
         self,
         mock_delay,
@@ -1052,7 +1106,7 @@ class LLMOpsViewTests(TestCase):
         )
         mock_delay.assert_not_called()
 
-    @patch("llm_ops.views.collect_price_source_prices.delay")
+    @patch("llm_ops.views.run_model_price_sync_agent.delay")
     def test_collection_source_collect_rejects_unsupported_source(
         self,
         mock_delay,
@@ -1086,7 +1140,7 @@ class LLMOpsViewTests(TestCase):
         mock_delay.assert_not_called()
 
     @patch("llm_ops.views.source_supports_code_collection")
-    @patch("llm_ops.views.collect_price_source_prices.delay")
+    @patch("llm_ops.views.run_model_price_sync_agent.delay")
     def test_collection_source_collect_does_not_require_provider(
         self,
         mock_delay,
@@ -1115,7 +1169,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["provider_code"], "")
         self.assertEqual(response.data["source_id"], source.id)
         mock_delay.assert_called_once_with(
-            source_id=source.id,
+            source_ids=[source.id],
             verify_source=True,
         )
 

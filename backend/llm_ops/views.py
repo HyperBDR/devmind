@@ -86,7 +86,7 @@ from .services import (
     sync_channel_price_items,
 )
 from .source_collectors import source_supports_code_collection
-from .tasks import collect_price_source_prices, run_model_price_sync_agent
+from .tasks import run_model_price_sync_agent
 from .workflow_config import (
     merge_resale_workflow_config,
     validate_resale_workflow_config,
@@ -313,8 +313,8 @@ class PriceCollectionSourceViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if source_supports_code_collection(source):
-            task = collect_price_source_prices.delay(
-                source_id=source.id,
+            task = run_model_price_sync_agent.delay(
+                source_ids=[source.id],
                 verify_source=True,
             )
             record_audit_log(
@@ -2909,7 +2909,7 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
         serializer = ManualPriceImportRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        provider = data["provider"]
+        provider = data.get("provider")
         source = data.get("source")
         source_before = snapshot_instance(source)
         if source is None:
@@ -2943,13 +2943,19 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
                     "updates_model_prices": data["updates_model_prices"],
                 },
             )
-        result = import_manual_model_prices(
-            source=source,
-            provider=provider,
-            rows=data["rows"],
-            default_currency=data["currency"],
-            updates_model_prices=data["updates_model_prices"],
-        )
+        try:
+            result = import_manual_model_prices(
+                source=source,
+                provider=provider,
+                rows=data["rows"],
+                default_currency=data["currency"],
+                updates_model_prices=data["updates_model_prices"],
+            )
+        except ValueError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         record_audit_log(
             request=request,
             action=AuditLog.ACTION_IMPORT,
@@ -2959,7 +2965,7 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
             before=source_before,
             after=snapshot_instance(source),
             metadata={
-                "provider_id": provider.id,
+                "provider_id": provider.id if provider else None,
                 "row_count": len(data["rows"]),
                 "updates_model_prices": data["updates_model_prices"],
                 "result": result,
