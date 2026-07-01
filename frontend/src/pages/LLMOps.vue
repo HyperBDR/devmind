@@ -3,37 +3,122 @@
     <div class="llm-ops-page h-full min-h-[calc(100vh-4rem)] bg-slate-50">
       <div class="flex h-full min-h-[calc(100vh-4rem)] w-full gap-0">
         <aside
-          class="llm-ops-sidebar fixed bottom-0 left-0 top-16 z-20 hidden w-72 flex-col overflow-hidden text-white lg:flex"
+          :class="[
+            'llm-ops-sidebar fixed bottom-0 left-0 top-16 z-20 hidden',
+            'flex-col overflow-hidden text-white lg:flex',
+            sidebarCollapsed ? 'is-collapsed w-20' : 'w-72'
+          ]"
         >
           <div class="llm-ops-sidebar-brand px-5 py-5">
-            <p
-              class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-300"
+            <div
+              :class="[
+                'flex gap-3',
+                sidebarCollapsed
+                  ? 'flex-col items-center'
+                  : 'items-start justify-between'
+              ]"
             >
-              LLM OPS
-            </p>
-            <h1 class="mt-2 text-lg font-semibold">
-              {{ t('llmOps.shell.title') }}
-            </h1>
-            <p class="mt-2 text-xs leading-5 text-slate-400">
+              <div :class="['min-w-0', sidebarCollapsed ? 'text-center' : '']">
+                <p
+                  class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-300"
+                >
+                  {{ sidebarCollapsed ? 'LLM' : 'LLM OPS' }}
+                </p>
+                <h1 v-if="!sidebarCollapsed" class="mt-2 text-lg font-semibold">
+                  {{ t('llmOps.shell.title') }}
+                </h1>
+              </div>
+              <button
+                type="button"
+                class="sidebar-toggle-button"
+                :aria-expanded="!sidebarCollapsed"
+                :aria-label="sidebarToggleLabel"
+                :title="sidebarToggleLabel"
+                @click="toggleSidebar"
+              >
+                <svg
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    :d="sidebarCollapsed ? 'M9 6l6 6-6 6' : 'M15 6l-6 6 6 6'"
+                  />
+                </svg>
+              </button>
+            </div>
+            <p
+              v-if="!sidebarCollapsed"
+              class="mt-2 text-xs leading-5 text-slate-400"
+            >
               {{ t('llmOps.shell.subtitle') }}
             </p>
           </div>
 
-          <nav class="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+          <nav
+            :class="[
+              'flex-1 overflow-y-auto py-4',
+              sidebarCollapsed ? 'space-y-3 px-2' : 'space-y-5 px-3'
+            ]"
+          >
             <section v-for="group in navGroups" :key="group.key">
-              <p
-                class="px-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500"
+              <button
+                type="button"
+                class="llm-nav-group-button flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-semibold"
+                :class="{
+                  'is-expanded': isNavGroupExpanded(group.key)
+                }"
+                :aria-expanded="
+                  !sidebarCollapsed && isNavGroupExpanded(group.key)
+                "
+                :title="sidebarCollapsed ? group.label : ''"
+                @click="toggleNavGroup(group.key)"
               >
-                {{ group.label }}
-              </p>
-              <div class="mt-2 space-y-1">
+                <svg
+                  class="nav-icon"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path v-for="path in group.icon" :key="path" :d="path" />
+                </svg>
+                <span v-if="!sidebarCollapsed" class="min-w-0 flex-1 truncate">
+                  {{ group.label }}
+                </span>
+                <svg
+                  v-if="!sidebarCollapsed"
+                  class="nav-group-chevron"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path d="M9 6l6 6-6 6" />
+                </svg>
+              </button>
+              <div
+                v-if="!sidebarCollapsed && isNavGroupExpanded(group.key)"
+                class="nav-group-items mt-1 space-y-1"
+              >
                 <button
                   v-for="item in group.items"
                   :key="item.key"
                   type="button"
                   class="llm-nav-item flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
                   :class="{ 'is-active': activeSection === item.key }"
-                  @click="activeSection = item.key"
+                  :title="sidebarCollapsed ? item.label : ''"
+                  @click="selectNavItem(group.key, item.key)"
                 >
                   <svg
                     class="nav-icon"
@@ -47,7 +132,12 @@
                   >
                     <path v-for="path in item.icon" :key="path" :d="path" />
                   </svg>
-                  <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
+                  <span
+                    v-if="!sidebarCollapsed"
+                    class="min-w-0 flex-1 truncate"
+                  >
+                    {{ item.label }}
+                  </span>
                 </button>
               </div>
             </section>
@@ -55,7 +145,10 @@
         </aside>
 
         <main
-          class="llm-ops-content min-w-0 flex-1 lg:ml-72"
+          :class="[
+            'llm-ops-content min-w-0 flex-1',
+            sidebarCollapsed ? 'lg:ml-20' : 'lg:ml-72'
+          ]"
         >
           <header class="llm-ops-header px-5 py-3 lg:px-7">
             <div class="page-hero">
@@ -279,7 +372,7 @@
                     <span class="text-sm text-slate-500">
                       {{
                         t('llmOps.monitor.channelCount', {
-                          count: channels.length
+                          count: operationalChannelCount
                         })
                       }}
                     </span>
@@ -451,7 +544,9 @@
                               : t('llmOps.monitor.lowestProcurementChannel')
                           }}
                         </th>
-                        <th class="table-head">Agione</th>
+                        <th class="table-head">
+                          {{ currentPlatformListingLabel }}
+                        </th>
                         <th class="table-head text-right">
                           {{
                             simulation.channel
@@ -486,7 +581,8 @@
                         </td>
                         <td class="table-cell">{{ row.provider_name }}</td>
                         <td class="table-cell text-right font-mono">
-                          {{ row.coverage_count }} / {{ channels.length }}
+                          {{ row.coverage_count }} /
+                          {{ operationalChannelCount }}
                         </td>
                         <td class="table-cell">
                           {{
@@ -556,6 +652,41 @@
               @listings-updated="mergeResaleListings"
               @action="openListingActionDrawer"
               @open-workspace="openResalePublishingWorkspace"
+            />
+
+            <CollectionHealthPanel
+              v-else-if="activeSection === 'collectionHealth'"
+              :sources="providerCollectionSources"
+              :runs="collectionRuns"
+            />
+
+            <ChannelPriceMatrixPanel
+              v-else-if="activeSection === 'channelMatrix'"
+              :summary="summary"
+              :channels="channels"
+            />
+
+            <ModelWorkbenchPanel
+              v-else-if="activeSection === 'modelWorkbench'"
+              :summary="summary"
+              :models="models"
+              :channels="channels"
+              :price-items="modelPriceItems"
+              :channel-price-items="channelPriceItems"
+              :listings="listings"
+              :records="records"
+            />
+
+            <ListingRiskPanel
+              v-else-if="activeSection === 'listingRisk'"
+              :summary="summary"
+            />
+
+            <PriceChangePanel
+              v-else-if="activeSection === 'priceChanges'"
+              :channel-history="channelPriceHistory"
+              :listing-history="listingPriceHistory"
+              :price-items="modelPriceItems"
             />
 
             <ResaleWorkflowConfigPanel
@@ -672,9 +803,14 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
 import AuditLogPanel from '@/components/llm-ops/AuditLogPanel.vue'
 import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
+import ChannelPriceMatrixPanel from '@/components/llm-ops/ChannelPriceMatrixPanel.vue'
+import CollectionHealthPanel from '@/components/llm-ops/CollectionHealthPanel.vue'
 import CollectionRunLogPanel from '@/components/llm-ops/CollectionRunLogPanel.vue'
 import GlobalConfigPanel from '@/components/llm-ops/GlobalConfigPanel.vue'
+import ListingRiskPanel from '@/components/llm-ops/ListingRiskPanel.vue'
+import ModelWorkbenchPanel from '@/components/llm-ops/ModelWorkbenchPanel.vue'
 import MetaModelManagement from '@/components/llm-ops/MetaModelManagement.vue'
+import PriceChangePanel from '@/components/llm-ops/PriceChangePanel.vue'
 import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
 import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
 import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
@@ -687,15 +823,26 @@ import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 
 const LIST_PAGE_SIZE = 200
 const LIST_PARAMS = { page_size: LIST_PAGE_SIZE }
+const PRICE_HISTORY_PAGE_SIZE = 120
 const DATA_HEAVY_SECTIONS = new Set([
   'channels',
+  'channelMatrix',
+  'collectionHealth',
+  'listingRisk',
   'metaModels',
+  'modelWorkbench',
+  'priceChanges',
   'providers',
   'reconciler',
   'reseller'
 ])
 const sectionKeys = new Set([
   'monitor',
+  'collectionHealth',
+  'channelMatrix',
+  'modelWorkbench',
+  'listingRisk',
+  'priceChanges',
   'metaModels',
   'providers',
   'taskLogs',
@@ -706,7 +853,12 @@ const sectionKeys = new Set([
   'reconciler',
   'audit'
 ])
+const NAV_GROUP_STORAGE_KEY = 'llm_ops_expanded_nav_groups'
 const activeSection = ref(initialActiveSection())
+const sidebarCollapsed = ref(
+  localStorage.getItem('llm_ops_sidebar_collapsed') === 'true'
+)
+const expandedNavGroupKeys = ref(readExpandedNavGroupKeys())
 const loading = ref(false)
 const backgroundLoading = ref(false)
 const secondaryDataLoaded = ref(false)
@@ -720,10 +872,12 @@ const models = ref([])
 const channels = ref([])
 const channelPrices = ref([])
 const channelPriceItems = ref([])
+const channelPriceHistory = ref([])
 const modelPriceItems = ref([])
 const resalePlatforms = ref([])
 const resaleWorkflowConfig = ref(null)
 const listings = ref([])
+const listingPriceHistory = ref([])
 const records = ref([])
 const summary = ref({})
 const supportedDisplayCurrencies = new Set(['CNY', 'USD'])
@@ -750,6 +904,12 @@ const displayCurrencyOptions = computed(() => [
   { label: t('llmOps.currency.usd'), value: 'USD' }
 ])
 
+const sidebarToggleLabel = computed(() =>
+  sidebarCollapsed.value
+    ? t('llmOps.toolbar.expandSidebar')
+    : t('llmOps.toolbar.collapseSidebar')
+)
+
 const simulationStatusOptions = computed(() => [
   { label: t('llmOps.filters.priority'), value: 'priority' },
   { label: t('llmOps.filters.allModels'), value: 'all' },
@@ -770,10 +930,15 @@ const monitorStatusLabelKeys = {
 
 const navIcons = {
   audit: ['M4 5h16', 'M4 12h16', 'M4 19h10'],
+  channelMatrix: ['M4 6h16', 'M4 12h16', 'M4 18h16', 'M8 6v12', 'M16 6v12'],
   channels: ['M4 7h16', 'M7 7v10', 'M17 7v10', 'M4 17h16'],
+  collectionHealth: ['M4 13l4 4L20 5', 'M4 19h16'],
   globalConfig: ['M4 7h16', 'M7 7v10', 'M17 7v10', 'M4 17h16', 'M9 12h6'],
+  listingRisk: ['M12 4l8 14H4L12 4Z', 'M12 9v4', 'M12 16h.01'],
   metaModels: ['M12 3l8 4-8 4-8-4 8-4Z', 'M4 12l8 4 8-4', 'M4 17l8 4 8-4'],
+  modelWorkbench: ['M5 5h14v14H5Z', 'M8 9h8', 'M8 13h8', 'M8 17h5'],
   monitor: ['M4 19V5', 'M8 19v-6', 'M12 19v-9', 'M16 19v-4', 'M20 19V8'],
+  priceChanges: ['M4 16l5-5 4 4 7-8', 'M4 20h16'],
   providers: ['M5 5h14v14H5Z', 'M9 9h6', 'M9 13h6', 'M9 17h3'],
   reconciler: [
     'M4 7h16',
@@ -806,6 +971,27 @@ const navItems = computed(() => [
     icon: navIcons.monitor
   },
   {
+    key: 'collectionHealth',
+    label: t('llmOps.nav.collectionHealth.label'),
+    eyebrow: 'Health',
+    description: t('llmOps.nav.collectionHealth.description'),
+    icon: navIcons.collectionHealth
+  },
+  {
+    key: 'modelWorkbench',
+    label: t('llmOps.nav.modelWorkbench.label'),
+    eyebrow: 'Workbench',
+    description: t('llmOps.nav.modelWorkbench.description'),
+    icon: navIcons.modelWorkbench
+  },
+  {
+    key: 'priceChanges',
+    label: t('llmOps.nav.priceChanges.label'),
+    eyebrow: 'Changes',
+    description: t('llmOps.nav.priceChanges.description'),
+    icon: navIcons.priceChanges
+  },
+  {
     key: 'metaModels',
     label: t('llmOps.nav.metaModels.label'),
     eyebrow: 'Meta Models',
@@ -834,6 +1020,13 @@ const navItems = computed(() => [
     icon: navIcons.channels
   },
   {
+    key: 'channelMatrix',
+    label: t('llmOps.nav.channelMatrix.label'),
+    eyebrow: 'Matrix',
+    description: t('llmOps.nav.channelMatrix.description'),
+    icon: navIcons.channelMatrix
+  },
+  {
     key: 'reseller',
     label: t('llmOps.nav.reseller.label'),
     eyebrow: 'Reseller',
@@ -846,6 +1039,13 @@ const navItems = computed(() => [
     eyebrow: 'Workflow',
     description: t('llmOps.nav.workflow.description'),
     icon: navIcons.workflow
+  },
+  {
+    key: 'listingRisk',
+    label: t('llmOps.nav.listingRisk.label'),
+    eyebrow: 'Risk',
+    description: t('llmOps.nav.listingRisk.description'),
+    icon: navIcons.listingRisk
   },
   {
     key: 'globalConfig',
@@ -875,10 +1075,13 @@ function findNavItem(key) {
 }
 
 function createNavGroup(key, labelKey, itemKeys) {
+  const items = itemKeys.map(findNavItem).filter(Boolean)
+
   return {
     key,
     label: t(labelKey),
-    items: itemKeys.map(findNavItem).filter(Boolean)
+    icon: items[0]?.icon || [],
+    items
   }
 }
 
@@ -893,6 +1096,13 @@ const navGroups = computed(() =>
       'channels',
       'reseller',
       'workflow'
+    ]),
+    createNavGroup('dashboards', 'llmOps.navGroups.dashboards', [
+      'collectionHealth',
+      'channelMatrix',
+      'modelWorkbench',
+      'listingRisk',
+      'priceChanges'
     ]),
     createNavGroup('governance', 'llmOps.navGroups.governance', [
       'reconciler',
@@ -965,6 +1175,13 @@ const agionePlatform = computed(
     activeResalePlatforms.value[0] ||
     null
 )
+const currentPlatformListingLabel = computed(() => {
+  const platformName =
+    summary.value.agione?.platform_name ||
+    agionePlatform.value?.name ||
+    'Agione'
+  return t('llmOps.monitor.platformListed', { platform: platformName })
+})
 
 const showPlatformControl = computed(() =>
   ['monitor', 'reseller'].includes(activeSection.value)
@@ -986,6 +1203,10 @@ const procurementRows = computed(() => summary.value.procurement || [])
 const agioneDiagnostics = computed(
   () => summary.value.agione?.diagnostics || []
 )
+const summaryKpis = computed(() => summary.value.kpis || {})
+const diagnosticCounts = computed(
+  () => summary.value.agione?.diagnostic_counts || {}
+)
 const exchangeRate = computed(() =>
   Number(summary.value.currency?.usd_to_cny_rate || 7.15)
 )
@@ -1003,6 +1224,22 @@ const activeModels = computed(() =>
 
 const activeModelIds = computed(
   () => new Set(activeModels.value.map((model) => String(model.id)))
+)
+
+const operationalModelCount = computed(() =>
+  numberOrFallback(summaryKpis.value.active_models, activeModels.value.length)
+)
+const operationalChannelCount = computed(() =>
+  numberOrFallback(summaryKpis.value.active_channels, channels.value.length)
+)
+const enabledPriceSourceCount = computed(() =>
+  numberOrFallback(
+    summaryKpis.value.enabled_price_sources,
+    providerCollectionSources.value.length
+  )
+)
+const reconciliationAnomalyCount = computed(() =>
+  numberOrFallback(summaryKpis.value.reconciliation_anomalies, 0)
 )
 
 const agioneListingRows = computed(() => {
@@ -1082,7 +1319,13 @@ const enrichedProcurementRows = computed(() =>
   })
 )
 
-const listedCount = computed(() => agioneListingModelIds.value.size)
+const localListedCount = computed(() => agioneListingModelIds.value.size)
+const listedCount = computed(() =>
+  numberOrFallback(
+    summaryKpis.value.current_platform_listed_models,
+    localListedCount.value
+  )
+)
 const procuredCount = computed(
   () => enrichedProcurementRows.value.filter((row) => row.best_channel).length
 )
@@ -1108,19 +1351,49 @@ const nonLowestRows = computed(() =>
 const lowCoverageRows = computed(() =>
   enrichedProcurementRows.value.filter((row) => row.status_priority === 4)
 )
+const readyCount = computed(() =>
+  numberOrFallback(summaryKpis.value.ready_models, readyRows.value.length)
+)
+const missingChannelCount = computed(() =>
+  numberOrFallback(
+    diagnosticCounts.value.missing_channel,
+    missingChannelRows.value.length
+  )
+)
+const currencyMismatchCount = computed(() =>
+  numberOrFallback(
+    diagnosticCounts.value.currency_mismatch,
+    currencyMismatchRows.value.length
+  )
+)
+const unlistedCount = computed(() =>
+  numberOrFallback(diagnosticCounts.value.unlisted, unlistedRows.value.length)
+)
+const nonLowestCount = computed(() =>
+  numberOrFallback(
+    diagnosticCounts.value.not_lowest,
+    nonLowestRows.value.length
+  )
+)
+const lowCoverageCount = computed(() =>
+  numberOrFallback(
+    diagnosticCounts.value.low_coverage,
+    lowCoverageRows.value.length
+  )
+)
 
 const kpiCards = computed(() => {
-  const modelCount = activeModels.value.length
-  const channelCount = channels.value.length
+  const modelCount = operationalModelCount.value
+  const channelCount = operationalChannelCount.value
   const procurementRate = percentage(procuredCount.value, modelCount)
   const listingRate = percentage(listedCount.value, modelCount)
-  const readyRate = percentage(readyRows.value.length, modelCount)
+  const readyRate = percentage(readyCount.value, modelCount)
   return [
     {
       label: t('llmOps.kpi.ready.label'),
-      value: `${readyRows.value.length}/${modelCount}`,
+      value: `${readyCount.value}/${modelCount}`,
       badge: `${readyRate}%`,
-      hint: t('llmOps.kpi.ready.hint', { count: readyRows.value.length }),
+      hint: t('llmOps.kpi.ready.hint', { count: readyCount.value }),
       progress: readyRate,
       tone: readyRate >= 80 ? 'good' : 'warn',
       barClass: 'bg-emerald-500'
@@ -1130,8 +1403,8 @@ const kpiCards = computed(() => {
       value: `${procuredCount.value}/${modelCount}`,
       badge: `${procurementRate}%`,
       hint: t('llmOps.kpi.procurement.hint', {
-        missing: missingChannelRows.value.length,
-        currency: currencyMismatchRows.value.length
+        missing: missingChannelCount.value,
+        currency: currencyMismatchCount.value
       }),
       progress: procurementRate,
       tone: procurementRate >= 80 ? 'good' : 'warn',
@@ -1142,8 +1415,8 @@ const kpiCards = computed(() => {
       value: `${listedCount.value}/${modelCount}`,
       badge: `${listingRate}%`,
       hint: t('llmOps.kpi.listing.hint', {
-        unlisted: unlistedRows.value.length,
-        nonLowest: nonLowestRows.value.length
+        unlisted: unlistedCount.value,
+        nonLowest: nonLowestCount.value
       }),
       progress: listingRate,
       tone: listingRate >= 80 ? 'good' : 'warn',
@@ -1153,7 +1426,7 @@ const kpiCards = computed(() => {
       label: t('llmOps.kpi.channels.label'),
       value: channelCount,
       badge: t('llmOps.kpi.channels.badge', {
-        count: providerCollectionSources.value.length
+        count: enabledPriceSourceCount.value
       }),
       hint: t('llmOps.kpi.channels.hint'),
       progress: channelCount ? 100 : 0,
@@ -1162,19 +1435,16 @@ const kpiCards = computed(() => {
     },
     {
       label: t('llmOps.kpi.reconciliation.label'),
-      value: summary.value.kpis?.reconciliation_anomalies || 0,
-      badge:
-        summary.value.kpis?.reconciliation_anomalies || 0
-          ? t('llmOps.status.needsHandling')
-          : t('llmOps.status.normal'),
+      value: reconciliationAnomalyCount.value,
+      badge: reconciliationAnomalyCount.value
+        ? t('llmOps.status.needsHandling')
+        : t('llmOps.status.normal'),
       hint: t('llmOps.kpi.reconciliation.hint'),
-      progress: summary.value.kpis?.reconciliation_anomalies || 0 ? 100 : 0,
-      tone:
-        summary.value.kpis?.reconciliation_anomalies || 0 ? 'danger' : 'good',
-      barClass:
-        summary.value.kpis?.reconciliation_anomalies || 0
-          ? 'bg-rose-500'
-          : 'bg-emerald-500'
+      progress: reconciliationAnomalyCount.value ? 100 : 0,
+      tone: reconciliationAnomalyCount.value ? 'danger' : 'good',
+      barClass: reconciliationAnomalyCount.value
+        ? 'bg-rose-500'
+        : 'bg-emerald-500'
     }
   ]
 })
@@ -1183,36 +1453,36 @@ const actionItems = computed(() => [
   {
     label: t('llmOps.queue.fillChannelPrice.label'),
     hint: t('llmOps.queue.fillChannelPrice.hint'),
-    value: missingChannelRows.value.length,
-    tone: missingChannelRows.value.length ? 'danger' : 'good',
+    value: missingChannelCount.value,
+    tone: missingChannelCount.value ? 'danger' : 'good',
     section: 'channels'
   },
   {
     label: t('llmOps.queue.configureExchange.label'),
     hint: t('llmOps.queue.configureExchange.hint'),
-    value: currencyMismatchRows.value.length,
-    tone: currencyMismatchRows.value.length ? 'warn' : 'good',
+    value: currencyMismatchCount.value,
+    tone: currencyMismatchCount.value ? 'warn' : 'good',
     section: 'channels'
   },
   {
     label: t('llmOps.queue.publishToPlatform.label'),
     hint: t('llmOps.queue.publishToPlatform.hint'),
-    value: unlistedRows.value.length,
-    tone: unlistedRows.value.length ? 'warn' : 'good',
+    value: unlistedCount.value,
+    tone: unlistedCount.value ? 'warn' : 'good',
     section: 'reseller'
   },
   {
     label: t('llmOps.queue.switchLowestChannel.label'),
     hint: t('llmOps.queue.switchLowestChannel.hint'),
-    value: nonLowestRows.value.length,
-    tone: nonLowestRows.value.length ? 'warn' : 'good',
+    value: nonLowestCount.value,
+    tone: nonLowestCount.value ? 'warn' : 'good',
     section: 'reseller'
   },
   {
     label: t('llmOps.queue.addChannelCoverage.label'),
     hint: t('llmOps.queue.addChannelCoverage.hint'),
-    value: lowCoverageRows.value.length,
-    tone: lowCoverageRows.value.length ? 'warn' : 'good',
+    value: lowCoverageCount.value,
+    tone: lowCoverageCount.value ? 'warn' : 'good',
     section: 'channels'
   },
   {
@@ -1233,8 +1503,8 @@ const actionItems = computed(() => [
   {
     label: t('llmOps.queue.handleReconciliation.label'),
     hint: t('llmOps.queue.handleReconciliation.hint'),
-    value: summary.value.kpis?.reconciliation_anomalies || 0,
-    tone: summary.value.kpis?.reconciliation_anomalies || 0 ? 'danger' : 'good',
+    value: reconciliationAnomalyCount.value,
+    tone: reconciliationAnomalyCount.value ? 'danger' : 'good',
     section: 'reconciler'
   }
 ])
@@ -1276,34 +1546,38 @@ const channelCoverageRows = computed(() =>
         ...channel,
         covered,
         best_count: bestCount,
-        coverage_rate: percentage(covered, activeModels.value.length)
+        coverage_rate: percentage(covered, operationalModelCount.value)
       }
     })
     .sort((left, right) => right.covered - left.covered)
 )
 
-const providerCoverageRows = computed(() =>
-  providers.value.map((provider) => {
-    const providerModels = activeModels.value.filter(
-      (model) => String(model.provider) === String(provider.id)
-    )
-    const modelIds = new Set(providerModels.map((model) => String(model.id)))
-    const providerRows = enrichedProcurementRows.value.filter((row) =>
-      modelIds.has(String(row.model_id))
-    )
-    const procured = providerRows.filter((row) => row.best_channel).length
-    const listed = providerRows.filter((row) => row.is_agione_listed).length
-    const ready = providerRows.filter((row) => row.status_priority === 5).length
-    return {
-      name: provider.name,
-      model_count: providerModels.length,
-      procured_count: procured,
-      listed_count: listed,
-      todo_count: Math.max(providerModels.length - ready, 0),
-      ready_rate: percentage(ready, providerModels.length)
-    }
+const providerCoverageRows = computed(() => {
+  const rowsByProvider = new Map()
+  enrichedProcurementRows.value.forEach((row) => {
+    const providerName = row.provider_name || '-'
+    const rows = rowsByProvider.get(providerName) || []
+    rows.push(row)
+    rowsByProvider.set(providerName, rows)
   })
-)
+  return Array.from(rowsByProvider.entries())
+    .map(([providerName, providerRows]) => {
+      const procured = providerRows.filter((row) => row.best_channel).length
+      const listed = providerRows.filter((row) => row.is_agione_listed).length
+      const ready = providerRows.filter(
+        (row) => row.status_priority === 5
+      ).length
+      return {
+        name: providerName,
+        model_count: providerRows.length,
+        procured_count: procured,
+        listed_count: listed,
+        todo_count: Math.max(providerRows.length - ready, 0),
+        ready_rate: percentage(ready, providerRows.length)
+      }
+    })
+    .sort((left, right) => right.model_count - left.model_count)
+})
 
 const filteredProcurementRows = computed(() => {
   const rows = enrichedProcurementRows.value
@@ -1387,6 +1661,14 @@ async function fetchList(request, params = {}) {
   return results
 }
 
+async function fetchFirstPage(request, params = {}) {
+  const response = await request({
+    ...params,
+    page: 1
+  })
+  return paginationResults(paginationPayload(response))
+}
+
 function errorMessage(error, fallback) {
   return (
     error?.response?.data?.detail ||
@@ -1401,6 +1683,63 @@ function monitorModelSubtitle(row) {
   const code = String(row.model_code || '').trim()
   if (code && code !== name) return code
   return ''
+}
+
+function readExpandedNavGroupKeys() {
+  try {
+    const rawValue = localStorage.getItem(NAV_GROUP_STORAGE_KEY)
+    const parsedValue = JSON.parse(rawValue || '[]')
+
+    if (!Array.isArray(parsedValue)) return []
+
+    return parsedValue.filter((item) => typeof item === 'string')
+  } catch {
+    return []
+  }
+}
+
+function persistExpandedNavGroupKeys(keys) {
+  localStorage.setItem(NAV_GROUP_STORAGE_KEY, JSON.stringify(keys))
+}
+
+function isNavGroupExpanded(key) {
+  return expandedNavGroupKeys.value.includes(key)
+}
+
+function setExpandedNavGroupKeys(keys) {
+  expandedNavGroupKeys.value = keys
+  persistExpandedNavGroupKeys(keys)
+}
+
+function toggleNavGroup(key) {
+  const expandedKeys = new Set(expandedNavGroupKeys.value)
+  const shouldExpand = sidebarCollapsed.value || !isNavGroupExpanded(key)
+
+  if (sidebarCollapsed.value) {
+    sidebarCollapsed.value = false
+    localStorage.setItem('llm_ops_sidebar_collapsed', 'false')
+  }
+
+  if (shouldExpand) {
+    expandedKeys.add(key)
+  } else {
+    expandedKeys.delete(key)
+  }
+
+  setExpandedNavGroupKeys(Array.from(expandedKeys))
+}
+
+function selectNavItem(groupKey, itemKey) {
+  activeSection.value = itemKey
+  setExpandedNavGroupKeys([groupKey])
+}
+
+function toggleSidebar() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem(
+    'llm_ops_sidebar_collapsed',
+    sidebarCollapsed.value ? 'true' : 'false'
+  )
 }
 
 async function refreshAll() {
@@ -1488,8 +1827,25 @@ async function refreshSectionData(section) {
     await Promise.all([refreshChannelPricingData(), refreshModelPriceItems()])
     return
   }
-  if (section === 'reseller') {
+  if (section === 'channelMatrix') {
+    await refreshChannelPricingData()
+    return
+  }
+  if (section === 'reseller' || section === 'listingRisk') {
     await Promise.all([refreshModelPriceItems(), refreshResaleListings()])
+    return
+  }
+  if (section === 'modelWorkbench') {
+    await Promise.all([
+      refreshModelPriceItems(),
+      refreshChannelPricingData(),
+      refreshResaleListings(),
+      refreshReconciliationRecords()
+    ])
+    return
+  }
+  if (section === 'priceChanges') {
+    await Promise.all([refreshModelPriceItems(), refreshPriceHistoryData()])
     return
   }
   if (section === 'reconciler') {
@@ -1524,6 +1880,19 @@ async function refreshResaleListings() {
 
 async function refreshReconciliationRecords() {
   records.value = await fetchList(llmOpsApi.listReconciliationRecords)
+}
+
+async function refreshPriceHistoryData() {
+  const [channelHistoryData, listingHistoryData] = await Promise.all([
+    fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
+      page_size: PRICE_HISTORY_PAGE_SIZE
+    }),
+    fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
+      page_size: PRICE_HISTORY_PAGE_SIZE
+    })
+  ])
+  channelPriceHistory.value = channelHistoryData
+  listingPriceHistory.value = listingHistoryData
 }
 
 async function refreshLight() {
@@ -1661,6 +2030,12 @@ async function loadResaleWorkflowConfig(
 function percentage(value, total) {
   if (!total) return 0
   return Math.round((Number(value || 0) / Number(total)) * 100)
+}
+
+function numberOrFallback(value, fallback = 0) {
+  const numberValue = Number(value)
+  if (Number.isFinite(numberValue)) return numberValue
+  return Number(fallback || 0)
 }
 
 function isLowestListing(listing, bestChannel, options) {
@@ -2134,9 +2509,9 @@ onBeforeUnmount(() => {
   --ui-duration-fast: 150ms;
   --ui-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ui-font-heading: Manrope, Inter, system-ui, sans-serif;
-  --ui-font-body: Inter, "Noto Sans SC", system-ui, sans-serif;
-  --ui-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
-    monospace;
+  --ui-font-body: Inter, 'Noto Sans SC', system-ui, sans-serif;
+  --ui-font-mono:
+    'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   padding: 0 !important;
 }
 
@@ -2975,11 +3350,17 @@ onBeforeUnmount(() => {
   border-right: 1px solid var(--ui-sidebar-border);
   box-shadow: var(--ui-shadow-xs);
   color: var(--ui-sidebar-text-active);
+  transition: width 180ms var(--ui-ease-out);
 }
 
 .llm-ops-sidebar-brand {
   border-bottom: 1px solid var(--ui-sidebar-border);
   padding-bottom: var(--ui-space-card);
+}
+
+.llm-ops-sidebar.is-collapsed .llm-ops-sidebar-brand {
+  padding-left: 14px;
+  padding-right: 14px;
 }
 
 .llm-ops-sidebar-brand p:first-child {
@@ -2998,6 +3379,32 @@ onBeforeUnmount(() => {
   color: var(--ui-sidebar-text);
 }
 
+.sidebar-toggle-button {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.72);
+  border: 1px solid var(--ui-sidebar-border);
+  border-radius: var(--ui-radius-control);
+  color: var(--ui-sidebar-text);
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-out),
+    color var(--ui-duration-fast) var(--ui-ease-out);
+  width: 30px;
+}
+
+.sidebar-toggle-button:hover {
+  background: var(--ui-sidebar-hover-bg);
+  color: var(--ui-sidebar-text-active);
+}
+
+.sidebar-toggle-button svg {
+  height: 16px;
+  width: 16px;
+}
+
+.llm-nav-group-button,
 .llm-nav-item,
 .llm-mobile-nav-item {
   border-radius: var(--ui-radius-control);
@@ -3008,6 +3415,7 @@ onBeforeUnmount(() => {
     box-shadow var(--ui-duration-fast) var(--ui-ease-out);
 }
 
+.llm-nav-group-button:hover,
 .llm-nav-item:hover,
 .llm-mobile-nav-item:hover {
   background: var(--ui-sidebar-hover-bg);
@@ -3021,6 +3429,39 @@ onBeforeUnmount(() => {
   box-shadow: var(--ui-shadow-xs);
 }
 
+.nav-group-chevron {
+  height: 14px;
+  transition: transform var(--ui-duration-fast) var(--ui-ease-out);
+  width: 14px;
+}
+
+.llm-nav-group-button.is-expanded .nav-group-chevron {
+  transform: rotate(90deg);
+}
+
+.nav-group-items {
+  border-left: 1px solid var(--ui-sidebar-border);
+  margin-left: 18px;
+  padding-left: 10px;
+}
+
+.nav-group-items .llm-nav-item {
+  font-size: 13px;
+  padding-left: 10px;
+}
+
+.llm-ops-sidebar.is-collapsed .llm-nav-item {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.llm-ops-sidebar.is-collapsed .llm-nav-group-button {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .llm-mobile-nav-item {
   background: var(--ui-bg-muted);
   color: var(--ui-text-secondary);
@@ -3029,6 +3470,7 @@ onBeforeUnmount(() => {
 .llm-ops-content {
   background: var(--ui-bg-page);
   border-left: 0;
+  transition: margin-left 180ms var(--ui-ease-out);
 }
 
 .llm-ops-header {
