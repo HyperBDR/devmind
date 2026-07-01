@@ -1,5 +1,6 @@
 import axios from 'axios'
 import apiConfig from '@/config/api'
+import { shouldKeepAuthStateOnError } from '@/api/authErrors'
 
 function getCookie(name) {
   const value = `; ${document.cookie}`
@@ -30,6 +31,17 @@ const processQueue = (error, token = null) => {
     }
   })
   failedQueue = []
+}
+
+const clearStoredAuth = () => {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+}
+
+const redirectToLogin = () => {
+  if (window.location.pathname !== '/login') {
+    window.location.href = '/login'
+  }
 }
 
 api.interceptors.request.use(
@@ -69,9 +81,8 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !originalRequest._retry) {
       // If refresh endpoint returns 401, token is invalid, redirect to login
       if (originalRequest.url?.includes('/token/refresh')) {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
+        clearStoredAuth()
+        redirectToLogin()
         return Promise.reject(error)
       }
 
@@ -140,11 +151,11 @@ api.interceptors.response.use(
             throw new Error('No access token in refresh response')
           }
         } catch (refreshError) {
-          // Refresh failed, clear tokens and redirect to login
           processQueue(refreshError, null)
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
+          if (!shouldKeepAuthStateOnError(refreshError)) {
+            clearStoredAuth()
+            redirectToLogin()
+          }
           return Promise.reject(refreshError)
         } finally {
           isRefreshing = false
@@ -152,9 +163,8 @@ api.interceptors.response.use(
       } else {
         // No refresh token, redirect to login
         isRefreshing = false
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
+        clearStoredAuth()
+        redirectToLogin()
       }
     }
 
