@@ -255,8 +255,8 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(item.comparison_status, "below_official")
         self.assertEqual(item.delta_amount, Decimal("-0.500000"))
         self.assertEqual(item.delta_percent, Decimal("-20.0000"))
-        self.assertEqual(item.source.source_category, "supplier")
-        self.assertEqual(item.source.channel, self.channel)
+        self.assertIsNone(item.source)
+        self.assertFalse(PriceCollectionSource.objects.exists())
 
     def test_sync_uses_selected_procurement_price_source(self):
         official_source = PriceCollectionSource.objects.create(

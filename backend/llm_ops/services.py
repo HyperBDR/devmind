@@ -1270,7 +1270,7 @@ def sync_channel_price_items(
     price: ChannelModelPrice,
 ) -> list[ChannelPriceItem]:
     """Sync normalized channel price items from one channel/model config."""
-    source = ensure_channel_price_source(price.channel)
+    source = price.price_source
     payloads = channel_price_item_payloads(price, source=source)
     now = timezone.now()
     ChannelPriceItem.objects.filter(
@@ -1315,36 +1315,10 @@ def sync_channel_price_items(
     return items
 
 
-def ensure_channel_price_source(
-    channel: ProcurementChannel,
-) -> PriceCollectionSource:
-    """Ensure a supplier price source exists for one procurement channel."""
-    source, _ = PriceCollectionSource.objects.update_or_create(
-        slug=f"{channel.code}-supplier",
-        defaults={
-            "name": f"{channel.name} 供应商价格",
-            "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
-            "source_category": (
-                PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
-            ),
-            "source_owner_type": PriceCollectionSource.SOURCE_OWNER_SUPPLIER,
-            "collection_method": (
-                PriceCollectionSource.COLLECTION_METHOD_API_SYNC
-            ),
-            "channel": channel,
-            "endpoint_url": channel.api_endpoint,
-            "currency": normalize_currency(channel.currency) or "USD",
-            "is_enabled": channel.is_active,
-            "updates_model_prices": False,
-        },
-    )
-    return source
-
-
 def channel_price_item_payloads(
     price: ChannelModelPrice,
     *,
-    source: PriceCollectionSource,
+    source: PriceCollectionSource | None,
 ) -> list[dict]:
     """Build normalized channel price item payloads for a model config."""
     channel = price.channel

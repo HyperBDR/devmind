@@ -1639,43 +1639,66 @@ function priceDiffClass(price, avg) {
 const selectedMetaModelPriceItems = computed(() => {
   const metaModelId = form.value.modelId
   if (!metaModelId) return []
-  return (props.priceItems || []).filter(
-    (item) => String(item.meta_model) === String(metaModelId)
-  )
+  return (props.priceItems || []).filter((item) => {
+    if (String(item.meta_model || '') === String(metaModelId)) return true
+    const model = modelById.value.get(String(item.model || ''))
+    return String(model?.meta_model || '') === String(metaModelId)
+  })
 })
 
 const marketAvg = computed(() => {
-  const refs = selectedMetaModelPriceItems.value
-  if (!refs.length) return { in: 0, out: 0, cacheIn: 0 }
-  let inSum = 0
-  let outSum = 0
-  let cacheInSum = 0
-  let inCount = 0
-  let outCount = 0
-  let cacheInCount = 0
-  refs.forEach((it) => {
-    const value = convertToDisplay(it.unit_price, it.currency)
-    if (value === null) return
-    if (it.dimension === 'text_input') {
-      inSum += value
-      inCount += 1
-    }
-    if (it.dimension === 'text_output') {
-      outSum += value
-      outCount += 1
-    }
-    if (it.dimension === 'cache_input') {
-      cacheInSum += value
-      cacheInCount += 1
-    }
+  const samples = {
+    in: [],
+    out: [],
+    cacheIn: []
+  }
+  selectedMetaModelPriceItems.value.forEach((item) => {
+    const spec = priceSpecForItemDimension(item.dimension)
+    if (!spec || item.is_current === false) return
+    addMarketSample(samples[spec.marketKey], item.unit_price, item.currency)
+  })
+  RESALE_PRICE_DIMENSION_SPECS.forEach((spec) => {
+    if (samples[spec.marketKey].length) return
+    selectedMetaModelProcurements.value.forEach((procurement) => {
+      ;(procurement.options || []).forEach((option) => {
+        const price = channelPriceValue(
+          option,
+          procurement.model_id,
+          spec.itemDimension,
+          option[spec.costField]
+        )
+        addMarketSample(
+          samples[spec.marketKey],
+          price.value,
+          price.currency || option.currency
+        )
+      })
+    })
   })
   return {
-    in: inCount > 0 ? Number((inSum / inCount).toFixed(4)) : 0,
-    out: outCount > 0 ? Number((outSum / outCount).toFixed(4)) : 0,
-    cacheIn:
-      cacheInCount > 0 ? Number((cacheInSum / cacheInCount).toFixed(4)) : 0
+    in: averageMarketSamples(samples.in),
+    out: averageMarketSamples(samples.out),
+    cacheIn: averageMarketSamples(samples.cacheIn)
   }
 })
+
+function priceSpecForItemDimension(dimension) {
+  return RESALE_PRICE_DIMENSION_SPECS.find(
+    (spec) => spec.itemDimension === dimension
+  )
+}
+
+function addMarketSample(samples, value, currency) {
+  const converted = convertToDisplay(value, currency)
+  if (converted === null || converted <= 0) return
+  samples.push(converted)
+}
+
+function averageMarketSamples(samples) {
+  if (!samples.length) return 0
+  const sum = samples.reduce((total, value) => total + value, 0)
+  return Number((sum / samples.length).toFixed(4))
+}
 
 const priceMetricConfigs = Object.fromEntries(
   RESALE_PRICE_DIMENSION_SPECS.map((item) => [
