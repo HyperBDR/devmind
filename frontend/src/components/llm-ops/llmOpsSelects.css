@@ -1,0 +1,228 @@
+body.llm-ops-theme {
+  --llm-select-height: 2.5rem;
+  --llm-select-height-sm: 2rem;
+  --llm-select-bg: var(--ui-bg-card, #ffffff);
+  --llm-select-bg-hover: var(--ui-bg-subtle, #fafafa);
+  --llm-select-border: var(--ui-border-default, #dedee3);
+  --llm-select-border-hover: var(--ui-border-interactive, #8f8f8f);
+  --llm-select-ring: color-mix(
+    in srgb,
+    var(--ui-color-primary, #5f4ecf) 16%,
+    transparent
+  );
+}
+
+body.llm-ops-theme .compact-select {
+  min-width: 0 !important;
+}
+
+body.llm-ops-theme .compact-select-trigger,
+body.llm-ops-theme .searchable-trigger,
+body.llm-ops-theme .field-select,
+body.llm-ops-theme .workflow-node-select,
+body.llm-ops-theme .pagination-select,
+body.llm-ops-theme .export-format-select,
+body.llm-ops-theme .config-field select,
+body.llm-ops-theme select.field-input {
+  min-height: var(--llm-select-height) !important;
+  border: 1px solid var(--llm-select-border) !important;
+  border-radius: var(--ui-radius-control, 8px) !important;
+  background-color: var(--llm-select-bg) !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
+  font-family: var(--ui-font-body, Inter, system-ui, sans-serif) !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.25rem !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+  transition:
+    background-color var(--ui-duration-fast, 150ms) var(--ui-ease-out, ease),
+    border-color var(--ui-duration-fast, 150ms) var(--ui-ease-out, ease),
+    box-shadow var(--ui-duration-fast, 150ms) var(--ui-ease-out, ease),
+    color var(--ui-duration-fast, 150ms) var(--ui-ease-out, ease) !important;
+}
+
+body.llm-ops-theme .compact-select-trigger,
+body.llm-ops-theme .searchable-trigger {
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: var(--ui-space-inline, 8px) !important;
+  padding: 0.5rem 0.75rem !important;
+}
+
+body.llm-ops-theme .field-select,
+body.llm-ops-theme .workflow-node-select,
+body.llm-ops-theme .pagination-select,
+body.llm-ops-theme .export-format-select,
+body.llm-ops-theme .config-field select,
+body.llm-ops-theme select.field-input {
+  appearance: none !important;
+  background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6L8 10L12 6' stroke='%237a7a85' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-position: right 0.625rem center !important;
+  background-repeat: no-repeat !important;
+  background-size: 1rem 1rem !important;
+  padding-left: 0.75rem !important;
+  padding-right: 2rem !important;
+}
+
+body.llm-ops-theme .compact-select-sm {
+  min-height: var(--llm-select-height-sm) !important;
+  padding: 0.375rem 0.625rem !important;
+  font-size: 0.75rem !important;
+  line-height: 1rem !important;
+}
+
+body.llm-ops-theme .compact-select-trigger:hover:not(:disabled),
+body.llm-ops-theme .searchable-trigger:hover:not(:disabled),
+body.llm-ops-theme .field-select:hover:not(:disabled),
+body.llm-ops-theme .workflow-node-select:hover:not(:disabled),
+body.llm-ops-theme .pagination-select:hover:not(:disabled),
+body.llm-ops-theme .export-format-select:hover:not(:disabled),
+body.llm-ops-theme .config-field select:hover:not(:disabled),
+body.llm-ops-theme select.field-input:hover:not(:disabled) {
+  border-color: var(--llm-select-border-hover) !important;
+  background-color: var(--llm-select-bg-hover) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+}
+
+body.llm-ops-theme .compact-select-trigger:focus,
+body.llm-ops-theme .compact-select-trigger:focus-visible,
+body.llm-ops-theme .searchable-trigger:focus,
+body.llm-ops-theme .searchable-trigger:focus-visible,
+body.llm-ops-theme .field-select:focus,
+body.llm-ops-theme .workflow-node-select:focus,
+body.llm-ops-theme .pagination-select:focus,
+body.llm-ops-theme .export-format-select:focus,
+body.llm-ops-theme .config-field select:focus,
+body.llm-ops-theme select.field-input:focus {
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background-color: var(--llm-select-bg) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--llm-select-ring) !important;
+}
+
+body.llm-ops-theme .compact-select-disabled,
+body.llm-ops-theme .compact-select-trigger:disabled,
+body.llm-ops-theme .searchable-trigger:disabled,
+body.llm-ops-theme .field-select:disabled,
+body.llm-ops-theme .workflow-node-select:disabled,
+body.llm-ops-theme .pagination-select:disabled,
+body.llm-ops-theme .export-format-select:disabled,
+body.llm-ops-theme .config-field select:disabled,
+body.llm-ops-theme select.field-input:disabled {
+  cursor: not-allowed !important;
+  border-color: var(--ui-border-soft, #ededf0) !important;
+  background-color: var(--ui-bg-muted, #f5f5f6) !important;
+  color: var(--ui-text-muted, #7a7a85) !important;
+  box-shadow: none !important;
+}
+
+body.llm-ops-theme .compact-select-caret,
+body.llm-ops-theme .dropdown-caret {
+  color: var(--ui-text-muted, #7a7a85) !important;
+  font-size: 0.75rem !important;
+  line-height: 1 !important;
+}
+
+body.llm-ops-theme .compact-select-menu,
+body.llm-ops-theme .searchable-menu {
+  z-index: 70 !important;
+  overflow: hidden !important;
+  border: 1px solid var(--ui-border-default, #dedee3) !important;
+  border-radius: var(--ui-radius-card, 12px) !important;
+  background-color: var(--ui-bg-card, #ffffff) !important;
+  padding: 0.375rem !important;
+  box-shadow: var(--ui-shadow-card, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+}
+
+body.llm-ops-theme .compact-select-menu {
+  overflow-y: auto !important;
+}
+
+body.llm-ops-theme .searchable-list {
+  border-top-color: var(--ui-border-soft, #ededf0) !important;
+  padding: 0.25rem !important;
+}
+
+body.llm-ops-theme .compact-select-search,
+body.llm-ops-theme .searchable-input {
+  min-height: var(--llm-select-height-sm) !important;
+  border: 1px solid var(--ui-border-default, #dedee3) !important;
+  border-radius: var(--ui-radius-control, 8px) !important;
+  background-color: var(--ui-bg-subtle, #fafafa) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.25rem !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+body.llm-ops-theme .compact-select-search:focus,
+body.llm-ops-theme .searchable-input:focus {
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background-color: var(--ui-bg-card, #ffffff) !important;
+  box-shadow: 0 0 0 3px var(--llm-select-ring) !important;
+}
+
+body.llm-ops-theme .compact-select-option,
+body.llm-ops-theme .searchable-option {
+  min-height: 2rem !important;
+  border-radius: var(--ui-radius-control, 8px) !important;
+  padding: 0.5rem 0.625rem !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
+  font-size: 0.8125rem !important;
+  font-weight: 600 !important;
+  line-height: 1.25rem !important;
+}
+
+body.llm-ops-theme .compact-select-option:hover:not(:disabled),
+body.llm-ops-theme .searchable-option:hover {
+  background-color: var(--ui-bg-subtle, #fafafa) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+}
+
+body.llm-ops-theme .compact-select-option-active,
+body.llm-ops-theme .searchable-option-active {
+  background-color: var(--ui-color-primary-subtle, #f0eefb) !important;
+  color: var(--ui-color-primary-hover, #5140bd) !important;
+}
+
+body.llm-ops-theme .compact-select-option-disabled {
+  color: var(--ui-text-muted, #7a7a85) !important;
+}
+
+body.llm-ops-theme .compact-select-option-group {
+  min-height: auto !important;
+  background: transparent !important;
+  padding: 0.5rem 0.625rem 0.25rem !important;
+}
+
+body.llm-ops-theme .compact-select-group-label,
+body.llm-ops-theme .searchable-meta {
+  color: var(--ui-text-muted, #7a7a85) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.08em !important;
+}
+
+body.llm-ops-theme .compact-select-check,
+body.llm-ops-theme .searchable-meta-actions button {
+  color: var(--ui-color-primary, #5f4ecf) !important;
+}
+
+body.llm-ops-theme .compact-select-badge,
+body.llm-ops-theme .option-provider {
+  border: 1px solid var(--ui-border-default, #dedee3) !important;
+  border-radius: var(--ui-radius-pill, 9999px) !important;
+  background-color: var(--ui-bg-muted, #f5f5f6) !important;
+  color: var(--ui-text-muted, #7a7a85) !important;
+  font-size: 0.6875rem !important;
+  font-weight: 600 !important;
+}
+
+body.llm-ops-theme .compact-select-empty,
+body.llm-ops-theme .searchable-empty {
+  color: var(--ui-text-muted, #7a7a85) !important;
+  font-size: 0.75rem !important;
+}

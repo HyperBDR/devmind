@@ -3,10 +3,10 @@ body.llm-ops-theme .modal-footer {
   flex-direction: column !important;
   align-items: stretch !important;
   gap: 1rem !important;
-  border-top: 1px solid #e2e8f0 !important;
-  background: linear-gradient(180deg, #fcfdff, #f8fafc) !important;
+  border-top: 1px solid var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-subtle, #fafbfc) !important;
   padding: 1rem 1.5rem 1.5rem !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  box-shadow: none !important;
 }
 
 body.llm-ops-theme .modal-footer-status {
@@ -25,7 +25,7 @@ body.llm-ops-theme .modal-footer-note {
   display: block !important;
   font-size: 0.75rem !important;
   line-height: 1.25rem !important;
-  color: #64748b !important;
+  color: var(--ui-text-muted, #71717a) !important;
 }
 
 body.llm-ops-theme .modal-footer-actions {
@@ -51,16 +51,20 @@ body.llm-ops-theme .status-inline {
   min-height: 2.75rem !important;
   align-items: center !important;
   gap: 0.75rem !important;
-  border: 1px solid #dbe4f0 !important;
-  border-radius: 0.875rem !important;
-  background: #ffffff !important;
+  border: 1px solid var(--ui-border-default, #e4e4e7) !important;
+  border-radius: var(--ui-radius-card, 12px) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
   padding: 0.625rem 0.875rem !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .status-inline.active {
-  border-color: #bbf7d0 !important;
-  background: #f0fdf4 !important;
+  border-color: color-mix(
+    in srgb,
+    var(--ui-color-success, #059669) 28%,
+    var(--ui-border-default, #e4e4e7)
+  ) !important;
+  background: var(--ui-color-success-subtle, #ecfdf5) !important;
 }
 
 body.llm-ops-theme .status-switch {
@@ -69,21 +73,21 @@ body.llm-ops-theme .status-switch {
   width: 2.5rem !important;
   align-items: center !important;
   border-radius: 9999px !important;
-  background: #cbd5e1 !important;
+  background: var(--ui-border-interactive, #8f8f8f) !important;
   padding: 0.125rem !important;
   transition: background-color 150ms ease !important;
 }
 
 body.llm-ops-theme .status-inline.active .status-switch {
-  background: #22c55e !important;
+  background: var(--ui-color-success, #059669) !important;
 }
 
 body.llm-ops-theme .status-switch-dot {
   height: 1.125rem !important;
   width: 1.125rem !important;
   border-radius: 9999px !important;
-  background: #ffffff !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.16) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
   transition: transform 150ms ease !important;
 }
 

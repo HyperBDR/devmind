@@ -3,7 +3,7 @@ body.llm-ops-theme .icon-mark {
   height: 0.875rem !important;
   width: 0.875rem !important;
   flex-shrink: 0 !important;
-  border-radius: 0.25rem !important;
+  border-radius: 4px !important;
   background-color: currentColor !important;
 }
 
@@ -14,29 +14,27 @@ body.llm-ops-theme .add-listing-button {
   align-items: center !important;
   justify-content: center !important;
   gap: 0.5rem !important;
-  border-radius: 0.75rem !important;
-  border: 1px solid #4f46e5 !important;
-  background: linear-gradient(135deg, #5b4bdb, #4338ca) !important;
+  border-radius: var(--ui-radius-control, 8px) !important;
+  border: 1px solid var(--ui-color-primary, #5f4ecf) !important;
+  background: var(--ui-color-primary, #5f4ecf) !important;
   padding: 0.5rem 0.875rem !important;
   font-size: 0.875rem !important;
   font-weight: 600 !important;
   line-height: 1.25rem !important;
-  color: #ffffff !important;
-  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.18) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
   transition:
     background-color 150ms ease,
     border-color 150ms ease,
     box-shadow 150ms ease,
-    color 150ms ease,
-    transform 150ms ease !important;
+    color 150ms ease !important;
 }
 
 body.llm-ops-theme .btn-primary:hover:not(:disabled),
 body.llm-ops-theme .add-listing-button:hover:not(:disabled) {
-  border-color: #4338ca !important;
-  background: linear-gradient(135deg, #4f46e5, #3730a3) !important;
-  box-shadow: 0 10px 24px rgba(79, 70, 229, 0.24) !important;
-  transform: translateY(-1px) !important;
+  border-color: var(--ui-color-primary-hover, #5140bd) !important;
+  background: var(--ui-color-primary-hover, #5140bd) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-secondary,
@@ -47,89 +45,87 @@ body.llm-ops-theme .batch-action {
   align-items: center !important;
   justify-content: center !important;
   gap: 0.5rem !important;
-  border-radius: 0.75rem !important;
-  border: 1px solid #dbe4f0 !important;
-  background: #ffffff !important;
+  border-radius: var(--ui-radius-control, 8px) !important;
+  border: 1px solid var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
   padding: 0.5rem 0.875rem !important;
   font-size: 0.875rem !important;
   font-weight: 600 !important;
   line-height: 1.25rem !important;
-  color: #334155 !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
   transition:
     background-color 150ms ease,
     border-color 150ms ease,
     box-shadow 150ms ease,
-    color 150ms ease,
-    transform 150ms ease !important;
+    color 150ms ease !important;
 }
 
 body.llm-ops-theme .btn-secondary:hover:not(:disabled),
 body.llm-ops-theme .header-back:hover:not(:disabled),
 body.llm-ops-theme .batch-action:hover:not(:disabled) {
-  border-color: #cbd5e1 !important;
-  background: #f8fafc !important;
-  color: #0f172a !important;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
-  transform: translateY(-1px) !important;
+  border-color: var(--ui-border-interactive, #8f8f8f) !important;
+  background: var(--ui-bg-muted, #f4f5f8) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .refresh-action-button {
   min-width: 5.5rem !important;
-  border-color: #cbd5e1 !important;
-  background: #ffffff !important;
-  color: #334155 !important;
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
   font-weight: 700 !important;
 }
 
 body.llm-ops-theme .refresh-action-button:hover:not(:disabled) {
-  border-color: #a5b4fc !important;
-  background: #eef2ff !important;
-  color: #4338ca !important;
-  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.12) !important;
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background: var(--ui-color-primary-subtle, #f0eefb) !important;
+  color: var(--ui-color-primary-hover, #5140bd) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .refresh-action-button:disabled {
   cursor: wait !important;
-  border-color: #e2e8f0 !important;
-  background: #f8fafc !important;
-  color: #94a3b8 !important;
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-muted, #f4f5f8) !important;
+  color: var(--ui-text-muted, #71717a) !important;
 }
 
 body.llm-ops-theme .btn-action-create,
 body.llm-ops-theme .btn-action-save,
 body.llm-ops-theme .btn-action-submit,
 body.llm-ops-theme .btn-action-confirm {
-  border-color: #4f46e5 !important;
-  background: linear-gradient(135deg, #5b4bdb, #4338ca) !important;
-  color: #ffffff !important;
-  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.18) !important;
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background: var(--ui-color-primary, #5f4ecf) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-action-create:hover:not(:disabled),
 body.llm-ops-theme .btn-action-save:hover:not(:disabled),
 body.llm-ops-theme .btn-action-submit:hover:not(:disabled),
 body.llm-ops-theme .btn-action-confirm:hover:not(:disabled) {
-  border-color: #4338ca !important;
-  background: linear-gradient(135deg, #4f46e5, #3730a3) !important;
-  color: #ffffff !important;
-  box-shadow: 0 10px 24px rgba(79, 70, 229, 0.24) !important;
+  border-color: var(--ui-color-primary-hover, #5140bd) !important;
+  background: var(--ui-color-primary-hover, #5140bd) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-action-refresh,
 body.llm-ops-theme .btn-action-sync {
-  border-color: #bfdbfe !important;
-  background: #eff6ff !important;
-  color: #1d4ed8 !important;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.06) !important;
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-color-info-subtle, #eff6ff) !important;
+  color: var(--ui-color-info, #2563eb) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-action-refresh:hover:not(:disabled),
 body.llm-ops-theme .btn-action-sync:hover:not(:disabled) {
-  border-color: #93c5fd !important;
-  background: #dbeafe !important;
-  color: #1e40af !important;
-  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12) !important;
+  border-color: var(--ui-color-info, #2563eb) !important;
+  background: var(--ui-color-info-subtle, #eff6ff) !important;
+  color: var(--ui-color-info, #2563eb) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-action-import,
@@ -153,10 +149,10 @@ body.llm-ops-theme .btn-action-edit,
 body.llm-ops-theme .btn-action-view,
 body.llm-ops-theme .btn-action-neutral,
 body.llm-ops-theme .btn-action-cancel {
-  border-color: #dbe4f0 !important;
-  background: #ffffff !important;
-  color: #334155 !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-action-config:hover:not(:disabled),
@@ -164,10 +160,10 @@ body.llm-ops-theme .btn-action-edit:hover:not(:disabled),
 body.llm-ops-theme .btn-action-view:hover:not(:disabled),
 body.llm-ops-theme .btn-action-neutral:hover:not(:disabled),
 body.llm-ops-theme .btn-action-cancel:hover:not(:disabled) {
-  border-color: #cbd5e1 !important;
-  background: #f8fafc !important;
-  color: #0f172a !important;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+  border-color: var(--ui-border-interactive, #8f8f8f) !important;
+  background: var(--ui-bg-muted, #f4f5f8) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .btn-action-warning {
@@ -208,10 +204,10 @@ body.llm-ops-theme .batch-action {
 }
 
 body.llm-ops-theme .batch-action-primary {
-  border-color: #4f46e5 !important;
-  background: linear-gradient(135deg, #5b4bdb, #4338ca) !important;
-  color: #ffffff !important;
-  box-shadow: 0 8px 20px rgba(79, 70, 229, 0.16) !important;
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background: var(--ui-color-primary, #5f4ecf) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
 }
 
 body.llm-ops-theme .batch-action-success {
@@ -256,7 +252,7 @@ body.llm-ops-theme .btn-danger:hover:not(:disabled) {
   background: #ffe4e6 !important;
   color: #9f1239 !important;
   box-shadow: 0 4px 12px rgba(190, 24, 93, 0.1) !important;
-  transform: translateY(-1px) !important;
+  transform: none !important;
 }
 
 body.llm-ops-theme .btn-ghost {
@@ -339,7 +335,7 @@ body.llm-ops-theme .operation-icon-button {
 }
 
 body.llm-ops-theme .operation-icon-button:hover:not(:disabled) {
-  transform: translateY(-1px) !important;
+  transform: none !important;
 }
 
 body.llm-ops-theme .operation-icon {
@@ -437,4 +433,120 @@ body.llm-ops-theme .link-btn:disabled,
 body.llm-ops-theme .danger-link-btn:disabled {
   background: transparent !important;
   color: #94a3b8 !important;
+}
+
+body.llm-ops-theme .btn-primary,
+body.llm-ops-theme .add-listing-button,
+body.llm-ops-theme .btn-action-create,
+body.llm-ops-theme .btn-action-save,
+body.llm-ops-theme .btn-action-submit,
+body.llm-ops-theme .btn-action-confirm,
+body.llm-ops-theme .batch-action-primary {
+  border-color: var(--ui-color-primary, #5f4ecf) !important;
+  background: var(--ui-color-primary, #5f4ecf) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+}
+
+body.llm-ops-theme .btn-primary:hover:not(:disabled),
+body.llm-ops-theme .add-listing-button:hover:not(:disabled),
+body.llm-ops-theme .btn-action-create:hover:not(:disabled),
+body.llm-ops-theme .btn-action-save:hover:not(:disabled),
+body.llm-ops-theme .btn-action-submit:hover:not(:disabled),
+body.llm-ops-theme .btn-action-confirm:hover:not(:disabled),
+body.llm-ops-theme .batch-action-primary:hover:not(:disabled) {
+  border-color: var(--ui-color-primary-hover, #5140bd) !important;
+  background: var(--ui-color-primary-hover, #5140bd) !important;
+  color: var(--ui-text-on-brand, #ffffff) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+  transform: none !important;
+}
+
+body.llm-ops-theme .btn-secondary,
+body.llm-ops-theme .header-back,
+body.llm-ops-theme .batch-action,
+body.llm-ops-theme .btn-action-config,
+body.llm-ops-theme .btn-action-edit,
+body.llm-ops-theme .btn-action-view,
+body.llm-ops-theme .btn-action-neutral,
+body.llm-ops-theme .btn-action-cancel {
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-card, #ffffff) !important;
+  color: var(--ui-text-secondary, #3f3f46) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+}
+
+body.llm-ops-theme .btn-secondary:hover:not(:disabled),
+body.llm-ops-theme .header-back:hover:not(:disabled),
+body.llm-ops-theme .batch-action:hover:not(:disabled),
+body.llm-ops-theme .btn-action-config:hover:not(:disabled),
+body.llm-ops-theme .btn-action-edit:hover:not(:disabled),
+body.llm-ops-theme .btn-action-view:hover:not(:disabled),
+body.llm-ops-theme .btn-action-neutral:hover:not(:disabled),
+body.llm-ops-theme .btn-action-cancel:hover:not(:disabled) {
+  border-color: var(--ui-border-interactive, #8f8f8f) !important;
+  background: var(--ui-bg-muted, #f4f5f8) !important;
+  color: var(--ui-text-primary, #18181b) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+  transform: none !important;
+}
+
+body.llm-ops-theme .btn-action-warning,
+body.llm-ops-theme .batch-action-warn {
+  border-color: color-mix(
+    in srgb,
+    var(--ui-color-warning, #d97706) 28%,
+    var(--ui-border-default, #e4e4e7)
+  ) !important;
+  background: var(--ui-color-warning-subtle, #fffbeb) !important;
+  color: var(--ui-color-warning, #d97706) !important;
+}
+
+body.llm-ops-theme .btn-action-danger,
+body.llm-ops-theme .batch-action-danger,
+body.llm-ops-theme .btn-danger,
+body.llm-ops-theme .btn-text-danger,
+body.llm-ops-theme .danger-link-btn {
+  border-color: color-mix(
+    in srgb,
+    var(--ui-color-destructive, #e11d48) 24%,
+    var(--ui-border-default, #e4e4e7)
+  ) !important;
+  background: var(--ui-color-destructive-subtle, #fff1f2) !important;
+  color: var(--ui-color-destructive, #e11d48) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+}
+
+body.llm-ops-theme .btn-action-refresh,
+body.llm-ops-theme .btn-action-sync,
+body.llm-ops-theme .link-btn {
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-color-info-subtle, #eff6ff) !important;
+  color: var(--ui-color-info, #2563eb) !important;
+  box-shadow: var(--ui-shadow-xs, 0 1px 2px rgba(24, 24, 27, 0.04)) !important;
+}
+
+body.llm-ops-theme .operation-icon-button:hover:not(:disabled) {
+  transform: none !important;
+}
+
+body.llm-ops-theme .btn-primary:disabled,
+body.llm-ops-theme .add-listing-button:disabled {
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-muted, #f4f5f8) !important;
+  color: var(--ui-text-muted, #71717a) !important;
+}
+
+body.llm-ops-theme .btn-secondary:disabled,
+body.llm-ops-theme .btn-danger:disabled,
+body.llm-ops-theme .btn-ghost:disabled,
+body.llm-ops-theme .btn-text-danger:disabled,
+body.llm-ops-theme .batch-action:disabled,
+body.llm-ops-theme .header-back:disabled,
+body.llm-ops-theme .link-btn:disabled,
+body.llm-ops-theme .danger-link-btn:disabled {
+  border-color: var(--ui-border-default, #e4e4e7) !important;
+  background: var(--ui-bg-muted, #f4f5f8) !important;
+  color: var(--ui-text-muted, #71717a) !important;
+  box-shadow: none !important;
 }
