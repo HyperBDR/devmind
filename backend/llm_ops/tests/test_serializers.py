@@ -7,6 +7,7 @@ from llm_ops.models import (
     LLMProvider,
     MetaModel,
     ModelPriceItem,
+    PriceCollectionRun,
     PriceCollectionSource,
     ProcurementChannel,
     ResalePlatform,
@@ -282,6 +283,58 @@ class PriceCollectionSourceSerializerTests(TestCase):
         source = serializer.save()
         self.assertEqual(source.slug, "price-source-2")
 
+    def test_create_maps_owner_type_and_keeps_slug_unique(self):
+        PriceCollectionSource.objects.create(
+            name="Existing Supplier",
+            slug="supplier-api",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        serializer = PriceCollectionSourceSerializer(
+            data={
+                "name": "Supplier API",
+                "slug": "supplier-api",
+                "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                "source_owner_type": (
+                    PriceCollectionSource.SOURCE_OWNER_SUPPLIER
+                ),
+                "currency": "USD",
+                "is_enabled": True,
+                "updates_model_prices": True,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        source = serializer.save()
+        self.assertEqual(
+            source.source_category,
+            PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        self.assertEqual(source.slug, "supplier-api-2")
+
+    def test_manual_import_method_defaults_owner_type(self):
+        serializer = PriceCollectionSourceSerializer(
+            data={
+                "name": "Manual Import",
+                "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+                "source_category": (
+                    PriceCollectionSource.SOURCE_CATEGORY_MANUAL
+                ),
+                "collection_method": (
+                    PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT
+                ),
+                "currency": "CNY",
+                "is_enabled": True,
+                "updates_model_prices": False,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        source = serializer.save()
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_INTERNAL,
+        )
+
     def test_create_generates_slug_for_chinese_name(self):
         serializer = PriceCollectionSourceSerializer(
             data={
@@ -349,6 +402,48 @@ class PriceCollectionSourceSerializerTests(TestCase):
         self.assertEqual(data["source_owner_type"], "cloud_provider_official")
         self.assertEqual(data["collection_method"], "unknown")
         self.assertEqual(data["business_source_category"], "cloud_hosted")
+
+    def test_source_representation_includes_stable_summary_fields(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Official",
+            slug="openai-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://openai.com/api/pricing/",
+            updates_model_prices=True,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            source=source,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            model=model,
+            meta_model=model.meta_model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("0.150000"),
+            price_fingerprint="openai-input",
+        )
+        PriceCollectionRun.objects.create(
+            source=source,
+            status=PriceCollectionRun.STATUS_SUCCEEDED,
+        )
+
+        data = PriceCollectionSourceSerializer(source).data
+
+        self.assertEqual(data["model_count"], 1)
+        self.assertEqual(data["price_item_count"], 1)
+        self.assertEqual(data["latest_run_status"], "succeeded")
+        self.assertTrue(data["capabilities"]["can_collect_prices"])
+        self.assertTrue(data["capabilities"]["updates_model_prices"])
 
 
 class LLMModelSerializerTests(TestCase):
@@ -428,6 +523,33 @@ class ManualPriceImportRequestSerializerTests(TestCase):
             serializer.validated_data["provider"],
             model_provider,
         )
+        self.assertFalse(serializer.validated_data["updates_model_prices"])
+
+    def test_accepts_existing_source_without_bound_provider(self):
+        source = PriceCollectionSource.objects.create(
+            name="Agione Manual Sheet",
+            slug="agione-manual-sheet",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+            currency="CNY",
+        )
+
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "source": source.id,
+                "rows": [
+                    {
+                        "model_code": "deepseek-r1",
+                        "model_name": "DeepSeek R1",
+                        "provider_code": "deepseek",
+                        "input_price_per_million": "4.000000",
+                    }
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        self.assertIsNone(serializer.validated_data.get("provider"))
         self.assertFalse(serializer.validated_data["updates_model_prices"])
 
     def test_new_manual_source_import_never_promotes_model_prices(self):

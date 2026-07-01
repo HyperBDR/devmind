@@ -199,6 +199,12 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
             payload["models"][0]["price_rows"][0]["values"]["output_price"],
             "7",
         )
+        self.assertEqual(
+            payload["models"][0]["price_rows"][0]["values"][
+                "cache_hit_input_price"
+            ],
+            "0.35",
+        )
 
     def test_aliyun_vendor_skill_extracts_seven_column_qwen_rows(self):
         payload = run_vendor_pricing_skill(
@@ -237,11 +243,13 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["values"]["input_token_range"], "0-128000")
         self.assertEqual(rows[0]["values"]["input_price"], "9")
+        self.assertEqual(rows[0]["values"]["cache_hit_input_price"], "0.9")
         self.assertEqual(
             rows[1]["values"]["input_token_range"],
             "128000-256000",
         )
         self.assertEqual(rows[1]["values"]["output_price"], "90")
+        self.assertEqual(rows[1]["values"]["cache_hit_input_price"], "1.5")
 
     def test_aliyun_vendor_skill_filters_non_model_rows(self):
         payload = run_vendor_pricing_skill(

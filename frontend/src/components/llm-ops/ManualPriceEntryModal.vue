@@ -447,12 +447,6 @@ watch(
     if (open) {
       modelMode.value = isManualSource.value ? 'custom' : 'existing'
       form.value = defaults()
-      if (!form.value.model_id && props.models.length) {
-        const matched = props.models.find(
-          (model) => String(model.provider) === String(props.source?.provider)
-        )
-        form.value.model_id = matched?.id || ''
-      }
     }
   }
 )
@@ -560,7 +554,6 @@ function clearInactivePrices() {
 }
 
 function buildModelOptions() {
-  const sourceProvider = props.source?.provider
   const sortedModels = props.models.slice().sort((left, right) => {
     const providerCompare = String(left.provider_name || '').localeCompare(
       String(right.provider_name || '')
@@ -568,29 +561,7 @@ function buildModelOptions() {
     if (providerCompare !== 0) return providerCompare
     return String(left.name || '').localeCompare(String(right.name || ''))
   })
-  const preferred = sortedModels.filter(
-    (model) => String(model.provider) === String(sourceProvider)
-  )
-  const others = sortedModels.filter(
-    (model) => String(model.provider) !== String(sourceProvider)
-  )
-  if (!sourceProvider || !preferred.length) {
-    return sortedModels.map(modelOption)
-  }
-  return [
-    {
-      label: t('llmOps.manualPriceEntry.groups.currentProvider'),
-      value: '__group_preferred',
-      type: 'group'
-    },
-    ...preferred.map(modelOption),
-    {
-      label: t('llmOps.manualPriceEntry.groups.otherModels'),
-      value: '__group_others',
-      type: 'group'
-    },
-    ...others.map(modelOption)
-  ]
+  return sortedModels.map(modelOption)
 }
 
 function resolveModelProviderId(model) {
@@ -600,8 +571,7 @@ function resolveModelProviderId(model) {
 }
 
 function buildMetaModelOptions() {
-  const sourceProvider = props.source?.provider
-  const rows = props.metaModels
+  return props.metaModels
     .map((model) => {
       const vendor = resolveCanonicalMetaVendor(model, props.providers)
       return {
@@ -619,29 +589,7 @@ function buildMetaModelOptions() {
         String(right.name || right.code || '')
       )
     })
-  const preferred = rows.filter(
-    (model) => String(model.resolved_vendor) === String(sourceProvider)
-  )
-  const others = rows.filter(
-    (model) => String(model.resolved_vendor) !== String(sourceProvider)
-  )
-  if (!sourceProvider || !preferred.length) {
-    return rows.map(metaModelOption)
-  }
-  return [
-    {
-      label: t('llmOps.manualPriceEntry.groups.currentProvider'),
-      value: '__group_preferred_meta',
-      type: 'group'
-    },
-    ...preferred.map(metaModelOption),
-    {
-      label: t('llmOps.manualPriceEntry.groups.otherModels'),
-      value: '__group_other_meta',
-      type: 'group'
-    },
-    ...others.map(metaModelOption)
-  ]
+    .map(metaModelOption)
 }
 
 function modelOption(model) {

@@ -41,7 +41,9 @@
             </span>
           </label>
           <div class="source-context">
-            <span>{{ t('llmOps.manualPriceImport.fields.provider') }}</span>
+            <span>
+              {{ t('llmOps.manualPriceImport.fields.defaultProvider') }}
+            </span>
             <strong>
               {{ selectedSourceProvider?.name || '-' }}
             </strong>
@@ -85,6 +87,7 @@
               </p>
               <p class="mt-2 text-xs leading-5 text-slate-500">
                 model_code、model_name、modality、currency、source_url、
+                provider_code、provider_name、
                 input_price_per_million、output_price_per_million、
                 cache_input_price_per_million、image_output_price_per_image、
                 audio_input_price_per_second、audio_output_price_per_second、
@@ -273,7 +276,11 @@ const sourceOptions = computed(() => [
     .map((source) => ({
       label: source.name,
       value: source.id,
-      description: source.provider_name || source.relation_name || '',
+      description:
+        source.channel_name ||
+        source.relation_name ||
+        source.provider_name ||
+        '',
       badge: source.category_label || source.source_category || ''
     }))
 ])
@@ -300,7 +307,7 @@ const sourceStatusText = computed(() => {
     return t('llmOps.manualPriceImport.validation.sourceRequired')
   }
   if (!selectedSourceProvider.value) {
-    return t('llmOps.manualPriceImport.validation.sourceProviderRequired')
+    return t('llmOps.manualPriceImport.validation.sourceProviderOptional')
   }
   return t('llmOps.manualPriceImport.validation.sourceReady', {
     name: selectedSource.value.name
@@ -311,10 +318,7 @@ const parsedRows = computed(() => parsed.value.rows)
 const parseErrors = computed(() => parsed.value.errors)
 const canSubmit = computed(
   () =>
-    form.value.source &&
-    selectedSourceProvider.value &&
-    parsedRows.value.length &&
-    !parseErrors.value.length
+    form.value.source && parsedRows.value.length && !parseErrors.value.length
 )
 
 watch(
@@ -343,8 +347,7 @@ function defaultForm() {
 }
 
 function firstImportSourceId() {
-  const source = props.sources.find((item) => item.provider)
-  return source?.id || props.sources[0]?.id || ''
+  return props.sources[0]?.id || ''
 }
 
 function close() {
@@ -356,14 +359,17 @@ async function submit() {
   if (!canSubmit.value) return
   saving.value = true
   try {
-    await llmOpsApi.importManualPrices({
+    const payload = {
       ...form.value,
-      provider: selectedSourceProvider.value.id,
       source_name: selectedSource.value.name,
       source_url: selectedSource.value.endpoint_url || '',
       updates_model_prices: false,
       rows: parsedRows.value.map((row) => cleanRow(row))
-    })
+    }
+    if (selectedSourceProvider.value?.id) {
+      payload.provider = selectedSourceProvider.value.id
+    }
+    await llmOpsApi.importManualPrices(payload)
     emit('imported')
   } finally {
     saving.value = false
@@ -426,8 +432,16 @@ function normalizeHeader(header) {
   const aliases = {
     code: 'model_code',
     model: 'model_code',
+    provider: 'provider',
+    provider_code: 'provider_code',
+    provider_name: 'provider_name',
+    model_provider: 'model_provider',
+    model_source: 'model_source',
     '\u6a21\u578b\u7f16\u7801': 'model_code',
     '\u6a21\u578b\u540d\u79f0': 'model_name',
+    '\u6a21\u578b\u5382\u5546': 'provider_name',
+    '\u5382\u5546': 'provider_name',
+    '\u5382\u5546\u7f16\u7801': 'provider_code',
     '\u7c7b\u578b': 'modality',
     '\u5e01\u79cd': 'currency',
     '\u8f93\u5165\u4ef7\u683c': 'input_price_per_million',

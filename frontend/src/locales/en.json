@@ -1324,9 +1324,9 @@
       }
     },
     "providerManagement": {
-      "title": "Provider Model Prices",
+      "title": "Service Price Sources",
       "modelsCount": "{count} meta models",
-      "empty": "No providers match the current filters.",
+      "empty": "No price sources match the current filters.",
       "actions": {
         "add": "Add",
         "addOfficialSource": "Add official source",
@@ -1349,12 +1349,12 @@
         "allStatuses": "All statuses",
         "allTypes": "All types",
         "inactiveOnly": "Inactive only",
-        "searchPlaceholder": "Search provider, model, price source, or URL"
+        "searchPlaceholder": "Search service, model, price source, or URL"
       },
       "table": {
         "actions": "Actions",
         "metaModels": "Linked meta models",
-        "source": "Provider",
+        "source": "Service / price source",
         "status": "Status",
         "type": "Price source"
       },
@@ -1364,12 +1364,12 @@
           "label": "Covered meta models"
         },
         "official": {
-          "hint": "Published directly by meta model providers",
+          "hint": "Published directly by official services",
           "label": "Official sources"
         },
         "sources": {
-          "hint": "Meta model providers with price data",
-          "label": "Providers"
+          "hint": "Service price sources with model prices",
+          "label": "Price sources"
         },
         "supplierManual": {
           "hint": "Cloud hosted {cloudHosted} · supplier {supplier} · internal {internal}",
@@ -1386,12 +1386,12 @@
       },
       "relation": {
         "forwardingChannel": "Forwarding channel",
-        "metaProvider": "Meta model provider",
+        "metaProvider": "Linked meta model provider",
         "needsOwner": "Ownership needs completion",
         "unbound": "Unbound source"
       },
       "unboundSources": {
-        "hint": "Price sources not yet linked to a provider, model, or price item",
+        "hint": "Price sources not yet linked to models or price items",
         "name": "Unbound price sources"
       },
       "sourceMode": {
@@ -1402,7 +1402,7 @@
         "dedicatedCollect": "Dedicated collection",
         "manualImport": "Manual import",
         "manualMaintenance": "Manual maintenance",
-        "pending": "Pending adapter",
+        "pending": "Collection not configured",
         "supplierMaintenance": "Supplier maintained"
       },
       "sourceStatus": {
@@ -1423,7 +1423,7 @@
           "label": "Manual maintenance"
         },
         "pending": {
-          "label": "Pending adapter"
+          "label": "Collection not configured"
         },
         "syncing": {
           "hint": "Refresh again later",
@@ -1436,7 +1436,7 @@
         "exists": "This official source has already been added.",
         "existsBadge": "Added",
         "loading": "Loading official sources.",
-        "provider": "Provider",
+        "provider": "Official provider",
         "ready": "Confirm to create the official price source.",
         "slug": "System slug",
         "source": "Price source",
@@ -1500,7 +1500,10 @@
       },
       "help": {
         "autoSlug": "The system slug will be generated after creation: {slug}",
-        "endpointUrl": "Official pricing page, supplier price API, or manual price source URL."
+        "endpointUrl": "Official pricing page, supplier price API, or manual price source URL.",
+        "officialSlugLocked": "Official collection source slugs are used by collectors and cannot be changed.",
+        "officialSlugPreset": "The system slug is filled after selecting an official provider.",
+        "slug": "Use lowercase letters, numbers, and hyphens only. It is normalized on save."
       },
       "actions": {
         "cancel": "Cancel",
@@ -1520,6 +1523,7 @@
         "cloudProvider": "Cloud provider official",
         "internal": "Internal",
         "modelProvider": "Model provider official",
+        "official": "Official pricing",
         "supplier": "Supplier",
         "unknown": "Unknown"
       },
@@ -1546,7 +1550,9 @@
         "exists": "This official source has already been added.",
         "existsBadge": "Added",
         "loading": "Loading official sources.",
+        "onlyOfficial": "Only official pricing requires an official provider.",
         "ready": "Confirm to create the official price source.",
+        "selectProvider": "Select an official provider.",
         "slug": "System slug",
         "source": "Price source",
         "url": "Price URL"
@@ -1642,7 +1648,7 @@
         "dedicatedCollect": "Dedicated collection",
         "manualImport": "Manual import",
         "manualMaintenance": "Manual maintenance",
-        "pending": "Pending adapter",
+        "pending": "Collection not configured",
         "supplierMaintenance": "Supplier maintained"
       }
     },
@@ -1755,7 +1761,7 @@
         "selectMetaModel": "Select a meta model."
       },
       "groups": {
-        "currentProvider": "Current price source provider",
+        "currentProvider": "Default model provider",
         "otherModels": "Other models"
       },
       "fallback": {
@@ -1776,6 +1782,7 @@
       "emptyPreview": "Paste a price table with headers to show the preview.",
       "fields": {
         "currency": "Default currency",
+        "defaultProvider": "Default model provider",
         "provider": "Model provider",
         "source": "Model price source",
         "sourceCategory": "Pricing scope",
@@ -1818,7 +1825,8 @@
         "video": "Video"
       },
       "validation": {
-        "sourceProviderRequired": "This price source is not bound to a model provider and cannot be imported in bulk.",
+        "sourceProviderOptional": "No default model provider is set; rows will be matched by provider_code / provider_name or existing models.",
+        "sourceProviderRequired": "This price source has no default model provider.",
         "sourceReady": "Prices will be imported into \"{name}\".",
         "sourceRequired": "Select an existing model price source."
       },

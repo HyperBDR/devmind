@@ -149,7 +149,7 @@
           </thead>
           <tbody>
             <tr
-              v-for="provider in filteredProviderRows"
+              v-for="provider in filteredSourceProviderRows"
               :key="provider.id"
               class="cursor-pointer"
               @click="selectedProvider = provider"
@@ -238,7 +238,7 @@
                 </div>
               </td>
             </tr>
-            <tr v-if="!filteredProviderRows.length">
+            <tr v-if="!filteredSourceProviderRows.length">
               <td class="table-cell text-slate-500" colspan="5">
                 {{ t('llmOps.providerManagement.empty') }}
               </td>
@@ -390,6 +390,17 @@ import ManualPriceEntryModal from '@/components/llm-ops/ManualPriceEntryModal.vu
 import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
 import ProviderPricingDrawer from '@/components/llm-ops/ProviderPricingDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
+import {
+  canApiSyncPriceSource as canApiSyncSource,
+  canCollectPriceSource as canCollectSource,
+  canManualEntryPriceSource as canManualEntrySource,
+  isEntryPriceSource as isEntrySource,
+  isModelsDevPriceSource as isModelsDevSource,
+  normalizePriceSourceCategory as businessSourceCategory,
+  priceSourceCategory,
+  priceSourceCategoryRank as categoryRank,
+  priceSourceCollectionMethod as sourceCollectionMethod
+} from '@/utils/llmOpsPriceSources'
 
 const props = defineProps({
   providers: {
@@ -430,6 +441,7 @@ const emit = defineEmits(['refresh'])
 const { showSuccess, showError } = useToast()
 const { t } = useI18n()
 
+// Workspace state
 const selectedProvider = ref(null)
 const editingSource = ref(null)
 const priceEntrySource = ref(null)
@@ -489,6 +501,7 @@ const sourceStatusFilterOptions = computed(() => [
   }
 ])
 
+// Source rows
 const sourceRows = computed(() =>
   props.sources
     .map((source) => buildSourceRow(source))
@@ -502,78 +515,15 @@ const sourceRows = computed(() =>
 
 const entrySourceRows = computed(() => sourceRows.value.filter(isEntrySource))
 
-const providerRows = computed(() =>
-  props.providers
-    .map((provider) => buildProviderRow(provider))
-    .filter(
-      (provider) =>
-        provider.covered_model_count > 0 ||
-        provider.source_count > 0 ||
-        provider.price_item_count > 0
-    )
-    .sort((left, right) => String(left.name).localeCompare(String(right.name)))
+const sourceProviderRows = computed(() =>
+  entrySourceRows.value.map((source) => buildSourceProviderRow(source))
 )
 
-const unboundSourceRows = computed(() => {
-  const assignedSourceIds = new Set(
-    providerRows.value.flatMap((provider) => provider.source_ids)
-  )
-  return sourceRows.value.filter(
-    (source) => !assignedSourceIds.has(String(source.id))
-  )
-})
-
-const unboundProviderRow = computed(() => {
-  const sources = unboundSourceRows.value.filter(isEntrySource)
-  if (!sources.length) return null
-
-  const provider = {
-    id: '__unbound_price_sources__',
-    code: 'unbound-price-sources',
-    name: t('llmOps.providerManagement.unboundSources.name'),
-    is_active: sources.some((source) => source.is_enabled),
-    is_unbound_sources: true
-  }
-  const categoryKeys = sourceCategoryKeysForProvider(provider, sources, [])
-  const status = providerStatus(provider, sources)
-
-  return {
-    ...provider,
-    category_badges: categoryKeys.map((key) => ({
-      key,
-      ...sourceCategory(key)
-    })),
-    category_keys: categoryKeys,
-    covered_model_count: 0,
-    meta_model_ids: [],
-    price_item_count: 0,
-    primary_source: primaryProviderSource(sources),
-    source_count: sources.length,
-    source_ids: sources.map((source) => String(source.id)),
-    status_label: status.label,
-    status_tone: status.tone,
-    filter_is_active: status.filterActive,
-    search_text: [
-      provider.name,
-      provider.code,
-      t('llmOps.providerManagement.unboundSources.hint'),
-      ...sources.map((source) => source.search_text)
-    ]
-      .filter(Boolean)
-      .join(' ')
-      .toLowerCase()
-  }
-})
-
-const tableProviderRows = computed(() => [
-  ...providerRows.value,
-  ...(unboundProviderRow.value ? [unboundProviderRow.value] : [])
-])
-
+// Metrics
 const sourceMetrics = computed(() => {
   const coveredMetaModelIds = new Set()
-  providerRows.value.forEach((provider) => {
-    provider.meta_model_ids.forEach((id) => coveredMetaModelIds.add(id))
+  entrySourceRows.value.forEach((source) => {
+    source.meta_model_ids.forEach((id) => coveredMetaModelIds.add(id))
   })
 
   const official = entrySourceRows.value.filter(
@@ -592,7 +542,7 @@ const sourceMetrics = computed(() => {
   return [
     {
       label: t('llmOps.providerManagement.metrics.sources.label'),
-      value: providerRows.value.length,
+      value: entrySourceRows.value.length,
       hint: t('llmOps.providerManagement.metrics.sources.hint')
     },
     {
@@ -617,9 +567,10 @@ const sourceMetrics = computed(() => {
   ]
 })
 
-const filteredProviderRows = computed(() => {
+// Filters
+const filteredSourceProviderRows = computed(() => {
   const keyword = sourceSearch.value.trim().toLowerCase()
-  return tableProviderRows.value.filter((provider) => {
+  return sourceProviderRows.value.filter((provider) => {
     if (sourceStatusFilter.value === 'active' && !provider.filter_is_active) {
       return false
     }
@@ -641,6 +592,7 @@ const hasSyncablePriceSources = computed(() =>
   sourceRows.value.some((source) => source.can_collect && source.is_enabled)
 )
 
+// Official reset state
 const officialResetProviderOptions = computed(() =>
   sourceRows.value
     .filter(
@@ -678,243 +630,71 @@ const officialResetLegacySources = computed(
   () => officialResetPreview.value?.stats?.legacy_source_slugs || []
 )
 
+// Drawer selection
 const selectedProviderModels = computed(() => {
   if (!selectedProvider.value) return []
-  if (selectedProvider.value.is_unbound_sources) return []
-  return modelsForProvider(selectedProvider.value)
+  return modelsForSourceIds(selectedProviderSourceIds.value)
 })
 
 const selectedProviderPriceItems = computed(() => {
   if (!selectedProvider.value) return []
-  if (selectedProvider.value.is_unbound_sources) return []
-  return priceItemsForProvider(selectedProvider.value)
+  return priceItemsForSourceIds(selectedProviderSourceIds.value)
 })
 
 const selectedProviderSources = computed(() => {
   if (!selectedProvider.value) return []
-  if (selectedProvider.value.is_unbound_sources) {
-    return unboundSourceRows.value
-  }
-  const sourceIds = new Set(
-    selectedProviderPriceItems.value
-      .map((item) => String(item.source || ''))
-      .filter(Boolean)
-  )
-  return sourceRows.value.filter(
-    (source) =>
-      sourceMatchesProvider(source, selectedProvider.value) ||
-      sourceIds.has(String(source.id))
-  )
+  const sourceIds = selectedProviderSourceIds.value
+  return sourceRows.value.filter((source) => sourceIds.has(String(source.id)))
 })
 
-function buildProviderRow(provider) {
-  const models = modelsForProvider(provider)
-  const priceItems = priceItemsForProvider(provider)
-  const sources = sourcesForProvider(provider, priceItems)
-  const entrySources = sources.filter(isEntrySource)
-  const metaModelIds = metaModelIdsForProvider(models, priceItems)
-  const categoryKeys = sourceCategoryKeysForProvider(
-    provider,
-    entrySources,
-    priceItems
-  )
-  const status = providerStatus(provider, entrySources)
+const selectedProviderSourceIds = computed(
+  () => new Set(selectedProvider.value?.source_ids || [])
+)
 
+function buildSourceProviderRow(source) {
   return {
-    ...provider,
-    category_badges: categoryKeys.map((key) => ({
-      key,
-      ...sourceCategory(key)
-    })),
-    category_keys: categoryKeys,
-    covered_model_count: metaModelIds.length,
-    meta_model_ids: metaModelIds,
-    price_item_count: priceItems.length,
-    primary_source: primaryProviderSource(entrySources),
-    output_source_count: Math.max(sources.length - entrySources.length, 0),
-    source_count: entrySources.length,
-    source_ids: sources.map((source) => String(source.id)),
-    status_label: status.label,
-    status_tone: status.tone,
-    filter_is_active: status.filterActive,
-    search_text: buildProviderSearchText(provider, models, sources, priceItems)
+    id: `source-${source.id}`,
+    name: source.name,
+    code: source.slug,
+    category_badges: [
+      {
+        key: source.business_source_category,
+        label: source.category_label,
+        tone: source.category_tone
+      }
+    ],
+    category_keys: [source.business_source_category],
+    covered_model_count: source.covered_model_count,
+    meta_model_ids: source.meta_model_ids,
+    price_item_count: source.price_item_count,
+    primary_source: source,
+    source_count: 1,
+    source_ids: [String(source.id)],
+    status_label: source.status_label,
+    status_tone: source.status_tone,
+    filter_is_active: source.is_enabled,
+    search_text: source.search_text
   }
 }
 
-function primaryProviderSource(sources) {
-  return (
-    sources.find(
-      (source) =>
-        source.business_source_category === 'official_provider' &&
-        source.can_collect &&
-        String(source.slug || '') === `${source.provider_code}-official`
-    ) ||
-    sources.find(
-      (source) =>
-        source.business_source_category === 'official_provider' &&
-        source.can_collect
-    ) ||
-    sources.find((source) => source.can_collect) ||
-    sources.find((source) => source.can_manual_entry && source.is_enabled) ||
-    sources.find((source) => source.can_manual_entry) ||
-    sources.find((source) => source.is_enabled) ||
-    sources[0] ||
-    null
-  )
-}
-
-function modelsForProvider(provider) {
-  const providerSourceIds = sourceIdsForProvider(provider)
+function modelsForSourceIds(sourceIds) {
   const pricedModelIds = new Set(
-    props.priceItems
-      .filter(
-        (item) =>
-          item.is_current !== false &&
-          priceItemMatchesProvider(item, provider, providerSourceIds)
-      )
+    priceItemsForSourceIds(sourceIds)
       .map((item) => String(item.model || ''))
       .filter(Boolean)
   )
   return props.models.filter(
     (model) =>
-      sourceMatchesProvider(sourceForRecord(model), provider) ||
+      sourceIds.has(String(model.source || '')) ||
       pricedModelIds.has(String(model.id))
   )
 }
 
-function priceItemsForProvider(provider) {
-  const providerSourceIds = sourceIdsForProvider(provider)
+function priceItemsForSourceIds(sourceIds) {
   return props.priceItems.filter(
     (item) =>
-      item.is_current !== false &&
-      priceItemMatchesProvider(item, provider, providerSourceIds)
+      item.is_current !== false && sourceIds.has(String(item.source || ''))
   )
-}
-
-function priceItemMatchesProvider(item, provider, providerSourceIds = null) {
-  if (!item || !provider) return false
-  if (String(item.provider || '') === String(provider.id)) return true
-  const sourceIds = providerSourceIds || sourceIdsForProvider(provider)
-  return sourceIds.has(String(item.source || ''))
-}
-
-function sourceIdsForProvider(provider) {
-  return new Set(
-    sourceRows.value
-      .filter((source) => sourceMatchesProvider(source, provider))
-      .map((source) => String(source.id))
-  )
-}
-
-function sourceForRecord(record) {
-  if (!record?.source) return null
-  return sourceRows.value.find(
-    (source) => String(source.id) === String(record.source || '')
-  )
-}
-
-function sourcesForProvider(provider, priceItems) {
-  const sourceIds = new Set(
-    priceItems.map((item) => String(item.source || '')).filter(Boolean)
-  )
-  return sourceRows.value.filter(
-    (source) =>
-      sourceMatchesProvider(source, provider) ||
-      sourceIds.has(String(source.id))
-  )
-}
-
-function sourceMatchesProvider(source, provider) {
-  if (!source || !provider) return false
-  return (
-    String(source.provider || '') === String(provider.id) ||
-    String(source.provider_code || '') === String(provider.code)
-  )
-}
-
-function metaModelIdsForProvider(models, priceItems) {
-  const ids = [
-    ...models.map((model) => model.meta_model || model.meta_model_code),
-    ...priceItems.map((item) => item.meta_model || item.meta_model_code)
-  ]
-    .map((id) => String(id || ''))
-    .filter(Boolean)
-  return Array.from(new Set(ids))
-}
-
-function sourceCategoryKeysForProvider(provider, sources, priceItems) {
-  const sourceKeys = sources
-    .filter(
-      (source) =>
-        provider?.is_unbound_sources || sourceMatchesProvider(source, provider)
-    )
-    .map((source) => source.business_source_category)
-  const keys = [
-    ...sourceKeys,
-    ...priceItems.map((item) => businessSourceCategory(item))
-  ].filter(Boolean)
-  const uniqueKeys = Array.from(new Set(keys))
-  return uniqueKeys.length
-    ? uniqueKeys.sort((left, right) => categoryRank(left) - categoryRank(right))
-    : ['unknown']
-}
-
-function providerStatus(provider, sources) {
-  const hasEnabledSource = sources.some((source) => source.is_enabled)
-  if (!provider.is_active || (sources.length > 0 && !hasEnabledSource)) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.inactive.label'),
-      tone: 'muted',
-      filterActive: false
-    }
-  }
-  if (!sources.length) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.pending.label'),
-      tone: 'warn',
-      filterActive: true
-    }
-  }
-  return {
-    label: t('llmOps.providerManagement.sourceStatus.active.label'),
-    tone: 'ok',
-    filterActive: true
-  }
-}
-
-function buildProviderSearchText(provider, models, sources, priceItems) {
-  return [
-    provider.name,
-    provider.code,
-    provider.website,
-    ...sources.map((source) => source.search_text),
-    ...models.map((model) =>
-      [
-        model.name,
-        model.code,
-        model.meta_model_name,
-        model.meta_model_code,
-        model.provider_name,
-        model.meta_model_vendor_name
-      ]
-        .filter(Boolean)
-        .join(' ')
-    ),
-    ...priceItems.map((item) =>
-      [
-        item.meta_model_name,
-        item.meta_model_code,
-        item.source_name,
-        item.source_channel_name,
-        item.source_provider_name
-      ]
-        .filter(Boolean)
-        .join(' ')
-    )
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
 }
 
 function buildSourceRow(source) {
@@ -1004,6 +784,7 @@ function dimensionCount(items) {
   return new Set(dimensions).size
 }
 
+// Actions
 function handleManualImported() {
   showManualImportModal.value = false
   emit('refresh')
@@ -1185,60 +966,27 @@ async function deleteSource(source) {
   }
 }
 
-function businessSourceCategory(source) {
-  return (
-    source?.business_source_category || source?.source_category || 'unknown'
-  )
-}
-
 function sourceCategory(category) {
-  const labels = {
-    official_provider: {
-      label: t('llmOps.providerManagement.category.officialProvider'),
-      tone: 'official'
-    },
-    supplier: {
-      label: t('llmOps.providerManagement.category.supplier'),
-      tone: 'supplier'
-    },
-    manual: {
-      label: t('llmOps.providerManagement.category.internal'),
-      tone: 'manual'
-    },
-    cloud_hosted: {
-      label: t('llmOps.providerManagement.category.cloudHosted'),
-      tone: 'cloud'
-    },
-    unknown: {
-      label: t('llmOps.providerManagement.category.unknown'),
-      tone: 'unknown'
-    }
-  }
-  return labels[category] || labels.unknown
-}
-
-function categoryRank(category) {
-  const ranks = {
-    official_provider: 1,
-    cloud_hosted: 2,
-    supplier: 3,
-    manual: 4,
-    unknown: 4
-  }
-  return ranks[category] || 9
+  return priceSourceCategory(category, {
+    official_provider: t('llmOps.providerManagement.category.officialProvider'),
+    supplier: t('llmOps.providerManagement.category.supplier'),
+    manual: t('llmOps.providerManagement.category.internal'),
+    cloud_hosted: t('llmOps.providerManagement.category.cloudHosted'),
+    unknown: t('llmOps.providerManagement.category.unknown')
+  })
 }
 
 function sourceRelation(source) {
-  if (source.provider_name) {
-    return {
-      name: source.provider_name,
-      hint: t('llmOps.providerManagement.relation.metaProvider')
-    }
-  }
   if (source.channel_name) {
     return {
       name: source.channel_name,
       hint: t('llmOps.providerManagement.relation.forwardingChannel')
+    }
+  }
+  if (source.provider_name) {
+    return {
+      name: source.provider_name,
+      hint: t('llmOps.providerManagement.relation.metaProvider')
     }
   }
   return {
@@ -1333,32 +1081,6 @@ function sourceStatus(source, latestRun) {
   }
 }
 
-function canCollectSource(source) {
-  return Boolean(
-    source.can_collect_prices &&
-      sourceCollectionMethod(source) === 'auto_collect' &&
-      source.updates_model_prices
-  )
-}
-
-function isEntrySource(source) {
-  return (
-    canCollectSource(source) ||
-    canManualEntrySource(source) ||
-    canApiSyncSource(source)
-  )
-}
-
-function canApiSyncSource(source) {
-  return sourceCollectionMethod(source) === 'api_sync'
-}
-
-function canManualEntrySource(source) {
-  return ['manual_entry', 'manual_import', 'unknown'].includes(
-    sourceCollectionMethod(source)
-  )
-}
-
 function collectActionLabel(source) {
   if (canCollectSource(source)) {
     return t('llmOps.providerManagement.actions.syncPrice')
@@ -1380,26 +1102,6 @@ function collectModeLabel(source) {
     return t('llmOps.providerManagement.collectMode.dedicatedCollector')
   }
   return t('llmOps.providerManagement.collectMode.pending')
-}
-
-function sourceCollectionMethod(source) {
-  const method = source?.collection_method
-  if (method && method !== 'unknown') return method
-  if (source?.source_type === 'yunce') return 'api_sync'
-  if (
-    source?.source_category === 'official_provider' &&
-    source?.updates_model_prices
-  ) {
-    return 'auto_collect'
-  }
-  if (source?.source_category === 'manual') return 'manual_entry'
-  return method || 'unknown'
-}
-
-function isModelsDevSource(source) {
-  return String(source?.endpoint_url || '')
-    .toLowerCase()
-    .includes('models.dev/api.json')
 }
 
 function latestRunForSource(sourceId) {

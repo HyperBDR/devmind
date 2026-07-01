@@ -433,6 +433,34 @@ class LLMOpsPricingServiceTests(TestCase):
         item = ModelPriceItem.objects.get(source=source)
         self.assertEqual(item.model, self.model)
 
+    def test_manual_import_without_source_provider_uses_model_owner(self):
+        source = PriceCollectionSource.objects.create(
+            name="Agione Sheet",
+            slug="agione-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+
+        import_manual_model_prices(
+            source=source,
+            provider=None,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+
+        item = ModelPriceItem.objects.get(source=source)
+        self.assertEqual(item.provider, self.provider)
+        self.assertEqual(item.model, self.model)
+
     def test_manual_source_import_never_promotes_model_prices(self):
         aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
         deepseek = LLMProvider.objects.create(

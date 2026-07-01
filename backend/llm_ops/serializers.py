@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from decimal import Decimal
 
 from django.utils.text import slugify
@@ -68,7 +70,11 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
     )
     business_source_category = serializers.SerializerMethodField()
     business_source_category_label = serializers.SerializerMethodField()
+    capabilities = serializers.SerializerMethodField()
     can_collect_prices = serializers.SerializerMethodField()
+    latest_run_status = serializers.SerializerMethodField()
+    model_count = serializers.SerializerMethodField()
+    price_item_count = serializers.SerializerMethodField()
 
     class Meta:
         model = PriceCollectionSource
@@ -82,31 +88,19 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         category = self.get_business_source_category(instance)
         return price_role_label(category)
 
+    def get_capabilities(self, instance):
+        can_collect_prices = self.get_can_collect_prices(instance)
+        return {
+            "can_collect_prices": can_collect_prices,
+            "updates_model_prices": bool(instance.updates_model_prices),
+            "has_endpoint": bool(instance.endpoint_url),
+        }
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         data["source_owner_type"] = source_owner_type_for_source(instance)
         data["collection_method"] = collection_method_for_source(instance)
         return data
-
-    def validate(self, attrs):
-        source_owner_type = attrs.get("source_owner_type")
-        if source_owner_type and not attrs.get("source_category"):
-            attrs["source_category"] = legacy_category_for_source_owner_type(
-                source_owner_type
-            )
-        collection_method = attrs.get("collection_method")
-        if (
-            collection_method
-            in (
-                PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY,
-                PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT,
-            )
-            and not attrs.get("source_owner_type")
-        ):
-            attrs["source_owner_type"] = (
-                PriceCollectionSource.SOURCE_OWNER_INTERNAL
-            )
-        return attrs
 
     def get_can_collect_prices(self, instance):
         from .source_collectors import source_supports_code_collection
@@ -116,8 +110,22 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
             and source_supports_code_collection(instance)
         )
 
+    def get_latest_run_status(self, instance):
+        return (
+            instance.collection_runs.order_by("-started_at", "-id")
+            .values_list("status", flat=True)
+            .first()
+        )
+
+    def get_model_count(self, instance):
+        return instance.models.count()
+
+    def get_price_item_count(self, instance):
+        return instance.model_price_items.count()
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        self._apply_classification_defaults(attrs)
         requested_slug = attrs.get("slug")
         if self.instance and "slug" not in self.initial_data:
             return attrs
@@ -131,6 +139,67 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
             instance_id=getattr(self.instance, "id", None),
         )
         return attrs
+
+    def _apply_classification_defaults(self, attrs):
+        source_owner_type = attrs.get("source_owner_type")
+        source_category = attrs.get("source_category")
+        if (
+            source_owner_type
+            and source_owner_type != PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+            and (
+                not source_category
+                or source_category
+                == PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
+            )
+        ):
+            attrs["source_category"] = legacy_category_for_source_owner_type(
+                source_owner_type
+            )
+
+        collection_method = attrs.get("collection_method")
+        if collection_method in (
+            PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY,
+            PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT,
+        ):
+            owner_type = self._effective_value(attrs, "source_owner_type")
+            if (
+                not owner_type
+                or owner_type == PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+            ):
+                attrs["source_owner_type"] = (
+                    PriceCollectionSource.SOURCE_OWNER_INTERNAL
+                )
+
+        owner_type = self._effective_value(attrs, "source_owner_type")
+        if (
+            not owner_type
+            or owner_type == PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+        ):
+            source_category = self._effective_value(attrs, "source_category")
+            provider = self._effective_value(attrs, "provider")
+            attrs["source_owner_type"] = default_source_owner_type_for_values(
+                source_category,
+                provider,
+            )
+
+        collection_method = self._effective_value(
+            attrs,
+            "collection_method",
+        )
+        if (
+            not collection_method
+            or collection_method
+            == PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
+        ):
+            attrs["collection_method"] = default_collection_method_for_values(
+                self._effective_value(attrs, "source_category"),
+                self._effective_value(attrs, "source_type"),
+            )
+
+    def _effective_value(self, attrs, field_name):
+        if field_name in attrs:
+            return attrs[field_name]
+        return getattr(self.instance, field_name, None)
 
 
 def unique_price_source_slug(
@@ -1016,6 +1085,37 @@ def legacy_category_for_source_owner_type(source_owner_type):
     return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
 
 
+def default_source_owner_type_for_values(source_category, provider):
+    """Return the default publisher type for serializer-created sources."""
+    if source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+        return PriceCollectionSource.SOURCE_OWNER_INTERNAL
+    if source_category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
+        return PriceCollectionSource.SOURCE_OWNER_SUPPLIER
+    if (
+        source_category
+        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        provider_code = str(getattr(provider, "code", "") or "").lower()
+        return source_owner_type_for_provider_code(provider_code)
+    return PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+
+
+def default_collection_method_for_values(source_category, source_type):
+    """Return the default maintenance method for serializer-created sources."""
+    if (
+        source_category
+        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+    if source_category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
+        if source_type == PriceCollectionSource.SOURCE_TYPE_YUNCE:
+            return PriceCollectionSource.COLLECTION_METHOD_API_SYNC
+        return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
+    if source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+        return PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
+    return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
+
+
 def source_owner_type_for_provider_code(provider_code):
     """Return the default source owner type for official provider configs."""
     if str(provider_code or "").lower() in {
@@ -1634,6 +1734,11 @@ class ManualPriceImportRowSerializer(serializers.Serializer):
 
     model_code = serializers.CharField(max_length=150)
     model_name = serializers.CharField(max_length=255, required=False)
+    provider = serializers.CharField(required=False, allow_blank=True)
+    provider_code = serializers.CharField(required=False, allow_blank=True)
+    provider_name = serializers.CharField(required=False, allow_blank=True)
+    model_provider = serializers.CharField(required=False, allow_blank=True)
+    model_source = serializers.CharField(required=False, allow_blank=True)
     modality = serializers.ChoiceField(
         choices=LLMModel.MODALITY_CHOICES,
         required=False,
@@ -1744,15 +1849,6 @@ class ManualPriceImportRequestSerializer(serializers.Serializer):
         if source is not None:
             if source.provider_id and provider is None:
                 attrs["provider"] = source.provider
-            if not source.provider_id and provider is None:
-                raise serializers.ValidationError(
-                    {
-                        "source": (
-                            "Selected price source must be bound to a "
-                            "provider, or provider must be provided."
-                        )
-                    }
-                )
             attrs.setdefault("source_name", source.name)
             attrs.setdefault("source_url", source.endpoint_url)
             if not self.initial_data.get("currency"):

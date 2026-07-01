@@ -691,7 +691,8 @@ import { useToast } from '@/composables/useToast'
 import { llmOpsApi } from '@/api/llmOps'
 import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 
-const FULL_LIST_PARAMS = { page_size: 10000 }
+const LIST_PAGE_SIZE = 200
+const LIST_PARAMS = { page_size: LIST_PAGE_SIZE }
 const DATA_HEAVY_SECTIONS = new Set([
   'channels',
   'metaModels',
@@ -1352,8 +1353,44 @@ const monitorTableRows = computed(() => {
 })
 
 function extract(response) {
+  if (Array.isArray(response)) return response
   const data = response?.data?.data || response?.data || []
   return Array.isArray(data.results) ? data.results : data
+}
+
+function paginationPayload(response) {
+  return response?.data?.data || response?.data || []
+}
+
+function paginationResults(payload) {
+  if (Array.isArray(payload?.results)) return payload.results
+  return Array.isArray(payload) ? payload : []
+}
+
+async function fetchList(request, params = {}) {
+  const firstResponse = await request({
+    ...LIST_PARAMS,
+    ...params,
+    page: 1
+  })
+  const firstPayload = paginationPayload(firstResponse)
+  const results = paginationResults(firstPayload)
+  const total = Number(firstPayload?.count || results.length)
+  const totalPages = Math.max(1, Math.ceil(total / LIST_PAGE_SIZE))
+
+  if (!firstPayload?.results || totalPages <= 1) {
+    return results
+  }
+
+  const pageRequests = []
+  for (let page = 2; page <= totalPages; page += 1) {
+    pageRequests.push(request({ ...LIST_PARAMS, ...params, page }))
+  }
+  const pageResponses = await Promise.all(pageRequests)
+  pageResponses.forEach((response) => {
+    results.push(...paginationResults(paginationPayload(response)))
+  })
+  return results
 }
 
 function errorMessage(error, fallback) {
@@ -1395,12 +1432,12 @@ async function refreshCoreData() {
     platformRes,
     summaryRes
   ] = await Promise.all([
-    llmOpsApi.listCollectionSources(FULL_LIST_PARAMS),
-    llmOpsApi.listCollectionRuns(FULL_LIST_PARAMS),
-    llmOpsApi.listProviders(FULL_LIST_PARAMS),
-    llmOpsApi.listModels(FULL_LIST_PARAMS),
-    llmOpsApi.listChannels(FULL_LIST_PARAMS),
-    llmOpsApi.listResalePlatforms(FULL_LIST_PARAMS),
+    fetchList(llmOpsApi.listCollectionSources),
+    fetchList(llmOpsApi.listCollectionRuns),
+    fetchList(llmOpsApi.listProviders),
+    fetchList(llmOpsApi.listModels),
+    fetchList(llmOpsApi.listChannels),
+    fetchList(llmOpsApi.listResalePlatforms),
     llmOpsApi.getSummary(summaryParams())
   ])
   sources.value = extract(sourceRes)
@@ -1467,66 +1504,59 @@ async function refreshSectionData(section) {
 }
 
 async function refreshMetaModels() {
-  const response = await llmOpsApi.listMetaModels(FULL_LIST_PARAMS)
-  metaModels.value = extract(response)
+  metaModels.value = await fetchList(llmOpsApi.listMetaModels)
 }
 
 async function refreshChannelPricingData() {
-  const [priceRes, itemRes] = await Promise.all([
-    llmOpsApi.listChannelModelPrices(FULL_LIST_PARAMS),
-    llmOpsApi.listChannelPriceItems({
-      ...FULL_LIST_PARAMS,
+  const [prices, items] = await Promise.all([
+    fetchList(llmOpsApi.listChannelModelPrices),
+    fetchList(llmOpsApi.listChannelPriceItems, {
       is_current: 'true'
     })
   ])
-  channelPrices.value = extract(priceRes)
-  channelPriceItems.value = extract(itemRes)
+  channelPrices.value = prices
+  channelPriceItems.value = items
 }
 
 async function refreshModelPriceItems() {
-  const response = await llmOpsApi.listModelPriceItems({
-    ...FULL_LIST_PARAMS,
+  modelPriceItems.value = await fetchList(llmOpsApi.listModelPriceItems, {
     is_current: 'true'
   })
-  modelPriceItems.value = extract(response)
 }
 
 async function refreshResaleListings() {
-  const response = await llmOpsApi.listResaleListings(FULL_LIST_PARAMS)
-  listings.value = extract(response)
+  listings.value = await fetchList(llmOpsApi.listResaleListings)
 }
 
 async function refreshReconciliationRecords() {
-  const response = await llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS)
-  records.value = extract(response)
+  records.value = await fetchList(llmOpsApi.listReconciliationRecords)
 }
 
 async function refreshLight() {
-  const [priceRes, channelPriceItemRes, listingRes, recordRes, summaryRes] =
+  const [prices, channelPriceItemsData, listingData, recordData, summaryRes] =
     await Promise.all([
-      llmOpsApi.listChannelModelPrices(FULL_LIST_PARAMS),
-      llmOpsApi.listChannelPriceItems({
-        ...FULL_LIST_PARAMS,
+      fetchList(llmOpsApi.listChannelModelPrices),
+      fetchList(llmOpsApi.listChannelPriceItems, {
         is_current: 'true'
       }),
-      llmOpsApi.listResaleListings(FULL_LIST_PARAMS),
-      llmOpsApi.listReconciliationRecords(FULL_LIST_PARAMS),
+      fetchList(llmOpsApi.listResaleListings),
+      fetchList(llmOpsApi.listReconciliationRecords),
       llmOpsApi.getSummary(summaryParams())
     ])
-  channelPrices.value = extract(priceRes)
-  channelPriceItems.value = extract(channelPriceItemRes)
-  listings.value = extract(listingRes)
-  records.value = extract(recordRes)
+  channelPrices.value = prices
+  channelPriceItems.value = channelPriceItemsData
+  listings.value = listingData
+  records.value = recordData
   summary.value = extract(summaryRes)
 }
 
 async function refreshCollectionRuns() {
-  const [sourceRes, runRes] = await Promise.all([
-    llmOpsApi.listCollectionSources(FULL_LIST_PARAMS),
-    llmOpsApi.listCollectionRuns(FULL_LIST_PARAMS)
+  const [sourceData, runData] = await Promise.all([
+    fetchList(llmOpsApi.listCollectionSources),
+    fetchList(llmOpsApi.listCollectionRuns)
   ])
-  sources.value = extract(sourceRes)
-  collectionRuns.value = extract(runRes)
+  sources.value = sourceData
+  collectionRuns.value = runData
 }
 
 async function loadResaleWorkflowConfig(

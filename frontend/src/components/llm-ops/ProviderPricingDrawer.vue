@@ -88,120 +88,7 @@
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
             <div>
-              <h3 class="panel-title">模型价格源</h3>
-              <p class="mt-1 text-xs text-slate-500">
-                维护该厂商下的原厂、供货商和人工价格来源。
-              </p>
-            </div>
-          </div>
-          <div class="overflow-x-auto">
-            <table class="data-table provider-source-table">
-              <colgroup>
-                <col class="source-name-col" />
-                <col class="source-type-col" />
-                <col class="source-status-col" />
-                <col class="source-action-col" />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th class="table-head">价格源</th>
-                  <th class="table-head">类型</th>
-                  <th class="table-head">状态</th>
-                  <th class="table-head">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="source in managementSourceRows" :key="source.id">
-                  <td class="table-cell">
-                    <div class="min-w-0">
-                      <p class="truncate font-medium text-slate-900">
-                        {{ source.name }}
-                      </p>
-                      <p class="mt-1 truncate font-mono text-xs text-slate-400">
-                        {{ source.slug }}
-                      </p>
-                      <a
-                        v-if="source.endpoint_url"
-                        class="source-link mt-1"
-                        :href="source.endpoint_url"
-                        rel="noopener noreferrer"
-                        target="_blank"
-                        :title="source.endpoint_url"
-                      >
-                        {{ source.endpoint_url }}
-                      </a>
-                    </div>
-                  </td>
-                  <td class="table-cell text-center">
-                    <span :class="['source-badge', source.category_tone]">
-                      {{ source.category_label }}
-                    </span>
-                  </td>
-                  <td class="table-cell text-center">
-                    <span
-                      :class="[source.is_enabled ? 'badge-ok' : 'badge-muted']"
-                    >
-                      {{ source.is_enabled ? '已启用' : '已停用' }}
-                    </span>
-                    <p class="mt-1 text-xs text-slate-400">
-                      {{ source.price_item_count }} 个价格项
-                    </p>
-                  </td>
-                  <td class="table-cell">
-                    <div class="source-actions">
-                      <OperationIconButton
-                        icon="edit"
-                        label="编辑价格源"
-                        @click.stop="$emit('edit-source', source)"
-                      />
-                      <OperationIconButton
-                        icon="powerOff"
-                        :label="source.is_enabled ? '停用价格源' : '启用价格源'"
-                        @click.stop="$emit('toggle-source', source)"
-                      />
-                      <OperationIconButton
-                        v-if="source.can_manual_entry"
-                        icon="manual"
-                        label="配置模型价格"
-                        tone="primary"
-                        @click.stop="$emit('manual-entry-source', source)"
-                      />
-                      <OperationIconButton
-                        v-if="source.can_collect"
-                        icon="collect"
-                        :label="source.collect_action_label || '同步价格'"
-                        :disabled="
-                          !source.is_enabled ||
-                          String(collectingSourceId || '') === String(source.id)
-                        "
-                        @click.stop="$emit('collect-source', source)"
-                      />
-                      <OperationIconButton
-                        icon="delete"
-                        label="删除价格源"
-                        tone="danger"
-                        :disabled="
-                          String(deletingSourceId || '') === String(source.id)
-                        "
-                        @click.stop="$emit('delete-source', source)"
-                      />
-                    </div>
-                  </td>
-                </tr>
-                <tr v-if="!managementSourceRows.length">
-                  <td class="table-cell text-slate-500" colspan="4">
-                    当前厂商还没有模型价格源。
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="panel overflow-hidden p-0">
-          <div class="table-toolbar">
-            <div>
-              <h3 class="panel-title">厂商模型价格</h3>
+              <h3 class="panel-title">服务商模型价格</h3>
               <p class="mt-1 text-xs text-slate-500">
                 按模型汇总输入、输出、缓存等核心价格，减少逐维度展开带来的噪音。
               </p>
@@ -301,16 +188,21 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
+import {
+  canCollectPriceSource,
+  canManualEntryPriceSource,
+  isLegacyOfficialModelSource as baseIsLegacyOfficialModelSource,
+  isProviderOfficialPriceSource as baseIsProviderOfficialPriceSource,
+  normalizePriceSourceCategory as businessSourceCategory,
+  officialProviderCodeFromSlug as baseOfficialProviderCodeFromSlug,
+  preferredPriceSource,
+  priceSourceCategoryLabel as sourceCategoryLabel,
+  priceSourceCategoryRank as categoryRank,
+  priceSourceGroupKey as basePriceSourceGroupKey,
+  priceSourceTone as sourceTone
+} from '@/utils/llmOpsPriceSources'
 
-defineEmits([
-  'close',
-  'manual-entry-source',
-  'edit-source',
-  'toggle-source',
-  'collect-source',
-  'delete-source'
-])
+defineEmits(['close'])
 
 const props = defineProps({
   provider: {
@@ -375,17 +267,6 @@ const categoryFilterOptions = computed(() => {
 
 const sourceRows = computed(() =>
   aggregatePriceSources(props.sources, props.priceItems)
-)
-
-const managementSourceRows = computed(() =>
-  props.sources
-    .map((source) => buildManagementSourceRow(source))
-    .sort((left, right) => {
-      const leftRank = categoryRank(businessSourceCategory(left))
-      const rightRank = categoryRank(businessSourceCategory(right))
-      if (leftRank !== rightRank) return leftRank - rightRank
-      return String(left.name || '').localeCompare(String(right.name || ''))
-    })
 )
 
 const primarySource = computed(() => preferredPriceSource(sourceRows.value))
@@ -642,10 +523,10 @@ function buildAggregateSource(group, priceItems) {
     source_group_ids: sourceIds,
     source_count: sorted.length,
     updated_at: latestUpdate || primary.updated_at,
-    can_collect: Boolean(
-      sorted.find((source) => source.can_collect)?.can_collect
+    can_collect: sorted.some((source) => canCollectPriceSource(source)),
+    can_manual_entry: sorted.some((source) =>
+      canManualEntryPriceSource(source)
     ),
-    can_manual_entry: sorted.some((source) => source.can_manual_entry),
     collect_action_label: primary.collect_action_label,
     price_item_count: priceItems.filter(
       (item) =>
@@ -655,52 +536,16 @@ function buildAggregateSource(group, priceItems) {
   }
 }
 
-function buildManagementSourceRow(source) {
-  const category = businessSourceCategory(source)
-  return {
-    ...source,
-    category_label: sourceCategoryLabel(category),
-    category_tone: sourceTone(category),
-    price_item_count: props.priceItems.filter(
-      (item) =>
-        String(item.source || '') === String(source.id) &&
-        item.is_current !== false
-    ).length
-  }
-}
-
 function priceSourceGroupKey(source) {
-  const providerCode = String(source?.provider_code || '').trim()
-  const drawerProviderCode = String(props.provider?.code || '').trim()
-  if (businessSourceCategory(source) === 'official_provider') {
-    return `official:${
-      providerCode || drawerProviderCode || officialProviderCodeFromSlug(source)
-    }`
-  }
-  return `source:${source?.id || source?.slug || 'unknown'}`
+  return basePriceSourceGroupKey(source, props.provider?.code || '')
 }
 
 function isLegacyOfficialModelSource(source) {
-  if (businessSourceCategory(source) !== 'official_provider') return false
-  const providerCode = String(
-    source?.provider_code ||
-      props.provider?.code ||
-      officialProviderCodeFromSlug(source)
-  ).trim()
-  if (!providerCode) return false
-  const slug = String(source?.slug || '')
-  return slug !== `${providerCode}-official` && slug.endsWith('-official')
+  return baseIsLegacyOfficialModelSource(source, props.provider?.code || '')
 }
 
 function isProviderOfficialSource(source) {
-  const providerCode = String(source?.provider_code || '').trim()
-  const drawerProviderCode = String(props.provider?.code || '').trim()
-  const expectedCode = providerCode || drawerProviderCode
-  return (
-    expectedCode &&
-    businessSourceCategory(source) === 'official_provider' &&
-    String(source?.slug || '') === `${expectedCode}-official`
-  )
+  return baseIsProviderOfficialPriceSource(source, props.provider?.code || '')
 }
 
 function aggregateSourceName(source) {
@@ -723,13 +568,7 @@ function aggregateSourceSlug(source) {
 }
 
 function officialProviderCodeFromSlug(source) {
-  const slug = String(source?.slug || '')
-  if (!slug.endsWith('-official')) return ''
-  const providerCode = String(props.provider?.code || '').trim()
-  if (providerCode && slug.startsWith(`${providerCode}-`)) {
-    return providerCode
-  }
-  return ''
+  return baseOfficialProviderCodeFromSlug(source, props.provider?.code || '')
 }
 
 function dimensionLabel(dimension) {
@@ -944,65 +783,6 @@ function formatDateTime(value) {
   if (!value) return '-'
   return new Date(value).toLocaleString()
 }
-
-function preferredPriceSource(sources) {
-  return (
-    sources.find(
-      (source) => businessSourceCategory(source) === 'official_provider'
-    ) ||
-    sources.find((source) => String(source.slug || '').endsWith('-official')) ||
-    sources.find((source) => source.updates_model_prices) ||
-    sources.find((source) => source.endpoint_url) ||
-    null
-  )
-}
-
-function businessSourceCategory(item, model = {}, source = null) {
-  return (
-    item?.business_source_category ||
-    item?.price_role ||
-    model?.business_source_category ||
-    model?.price_role ||
-    source?.business_source_category ||
-    item?.source_category ||
-    model?.source_category ||
-    source?.source_category ||
-    'unknown'
-  )
-}
-
-function sourceCategoryLabel(category) {
-  const labels = {
-    official_provider: '原厂',
-    cloud_hosted: '云托管',
-    supplier: '供货商',
-    manual: '内部维护',
-    unknown: '其他'
-  }
-  return labels[category] || '其他'
-}
-
-function sourceTone(category) {
-  const tones = {
-    official_provider: 'official',
-    cloud_hosted: 'cloud',
-    supplier: 'supplier',
-    manual: 'manual',
-    unknown: 'unknown'
-  }
-  return tones[category] || 'unknown'
-}
-
-function categoryRank(category) {
-  const ranks = {
-    official_provider: 1,
-    cloud_hosted: 2,
-    supplier: 3,
-    manual: 4,
-    unknown: 5
-  }
-  return ranks[category] || 9
-}
 </script>
 
 <style scoped>
@@ -1053,30 +833,6 @@ function categoryRank(category) {
 
 .pricing-source-table .time-col {
   width: 18%;
-}
-
-.provider-source-table .source-name-col {
-  width: 38%;
-}
-
-.provider-source-table .source-type-col {
-  width: 18%;
-}
-
-.provider-source-table .source-status-col {
-  width: 14%;
-}
-
-.provider-source-table .source-action-col {
-  width: 30%;
-}
-
-.source-actions {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
 }
 
 .field-input {
