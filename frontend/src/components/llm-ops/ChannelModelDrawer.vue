@@ -955,7 +955,7 @@ const availableModelGroups = computed(() => {
       if (model.modality) {
         group.modalities.add(model.modality)
       }
-      group.providerCount = group.models.length
+      group.providerCount = uniqueProviderModelsForGroup(group).length
       groups.set(key, group)
     })
   return Array.from(groups.values())
@@ -1418,7 +1418,7 @@ function handleVendorChange() {
 
 function providerOptionsForModelGroup(group) {
   if (!group) return []
-  return group.models
+  return uniqueProviderModelsForGroup(group)
     .slice()
     .sort((left, right) =>
       purchaseSourceLabel(left).localeCompare(purchaseSourceLabel(right))
@@ -1436,6 +1436,29 @@ function providerOptionsForModelGroup(group) {
         model.currency
       ].join(' ')
     }))
+}
+
+function uniqueProviderModelsForGroup(group) {
+  if (!group?.models?.length) return []
+  const modelsByUpstream = new Map()
+  group.models.forEach((model) => {
+    const key = providerOptionIdentityKey(model)
+    const current = modelsByUpstream.get(key)
+    if (!current || providerOptionScore(model) > providerOptionScore(current)) {
+      modelsByUpstream.set(key, model)
+    }
+  })
+  return Array.from(modelsByUpstream.values())
+}
+
+function providerOptionIdentityKey(model) {
+  const sourceId = String(model?.source || '').trim()
+  if (sourceId) return `source:${sourceId}`
+  return `model:${model?.id || model?.code || model?.name || ''}`
+}
+
+function providerOptionScore(model) {
+  return providerPriceSummary(model).length
 }
 
 function isModelSelected(key) {
@@ -1470,8 +1493,9 @@ function clearSelectedModels() {
 
 function ensureDefaultProvider(group) {
   if (selectedProviderByModelKey.value[group.key]) return
-  if (group.models.length !== 1) return
-  selectBatchPriceSourceModel(group.key, group.models[0].id)
+  const options = uniqueProviderModelsForGroup(group)
+  if (options.length !== 1) return
+  selectBatchPriceSourceModel(group.key, options[0].id)
 }
 
 function removeSelectedProvider(key) {

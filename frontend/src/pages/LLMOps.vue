@@ -596,7 +596,7 @@
               :price-items="modelPriceItems"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
-              @refresh="refreshAll"
+              @refresh="refreshProviderManagementData"
             />
 
             <MetaModelManagement
@@ -605,7 +605,7 @@
               :providers="providers"
               :models="models"
               :price-items="modelPriceItems"
-              @refresh="refreshAll"
+              @refresh="refreshMetaModelManagementData"
             />
 
             <ChannelManagement
@@ -618,7 +618,7 @@
               :price-items="modelPriceItems"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
-              @refresh="refreshAll"
+              @refresh="refreshChannelManagementData"
             />
 
             <ReconciliationPanel
@@ -893,8 +893,7 @@ const navGroups = computed(() =>
     createNavGroup('overview', 'llmOps.navGroups.overview', ['monitor']),
     createNavGroup('catalog', 'llmOps.navGroups.catalog', [
       'metaModels',
-      'providers',
-      'taskLogs'
+      'providers'
     ]),
     createNavGroup('distribution', 'llmOps.navGroups.distribution', [
       'channels',
@@ -904,7 +903,8 @@ const navGroups = computed(() =>
     createNavGroup('governance', 'llmOps.navGroups.governance', [
       'reconciler',
       'audit',
-      'globalConfig'
+      'globalConfig',
+      'taskLogs'
     ])
   ].filter((group) => group.items.length > 0)
 )
@@ -1559,6 +1559,94 @@ async function refreshCollectionRuns() {
   collectionRuns.value = runData
 }
 
+async function refreshProviderManagementData() {
+  try {
+    const [
+      sourceData,
+      runData,
+      providerData,
+      modelData,
+      metaModelData,
+      priceItemData,
+      summaryRes
+    ] = await Promise.all([
+      fetchList(llmOpsApi.listCollectionSources),
+      fetchList(llmOpsApi.listCollectionRuns),
+      fetchList(llmOpsApi.listProviders),
+      fetchList(llmOpsApi.listModels),
+      fetchList(llmOpsApi.listMetaModels),
+      fetchList(llmOpsApi.listModelPriceItems, {
+        is_current: 'true'
+      }),
+      llmOpsApi.getSummary(summaryParams())
+    ])
+    sources.value = sourceData
+    collectionRuns.value = runData
+    providers.value = providerData
+    models.value = modelData
+    metaModels.value = metaModelData
+    modelPriceItems.value = priceItemData
+    summary.value = extract(summaryRes)
+  } catch (error) {
+    showError(errorMessage(error, '刷新价格源数据失败。'))
+  }
+}
+
+async function refreshMetaModelManagementData() {
+  try {
+    const [providerData, modelData, metaModelData, priceItemData, summaryRes] =
+      await Promise.all([
+        fetchList(llmOpsApi.listProviders),
+        fetchList(llmOpsApi.listModels),
+        fetchList(llmOpsApi.listMetaModels),
+        fetchList(llmOpsApi.listModelPriceItems, {
+          is_current: 'true'
+        }),
+        llmOpsApi.getSummary(summaryParams())
+      ])
+    providers.value = providerData
+    models.value = modelData
+    metaModels.value = metaModelData
+    modelPriceItems.value = priceItemData
+    summary.value = extract(summaryRes)
+  } catch (error) {
+    showError(errorMessage(error, '刷新元模型数据失败。'))
+  }
+}
+
+async function refreshChannelManagementData() {
+  try {
+    const [channelData, summaryRes] = await Promise.all([
+      fetchList(llmOpsApi.listChannels),
+      llmOpsApi.getSummary(summaryParams()),
+      refreshChannelPricingData()
+    ])
+    channels.value = channelData
+    summary.value = extract(summaryRes)
+    refreshResaleListings().catch((error) => {
+      showError(errorMessage(error, '刷新转售列表失败。'))
+    })
+  } catch (error) {
+    showError(errorMessage(error, '刷新渠道数据失败。'))
+  }
+}
+
+async function refreshPlatformData() {
+  try {
+    const [platformData, listingData, summaryRes] = await Promise.all([
+      fetchList(llmOpsApi.listResalePlatforms),
+      fetchList(llmOpsApi.listResaleListings),
+      llmOpsApi.getSummary(summaryParams())
+    ])
+    resalePlatforms.value = platformData
+    listings.value = listingData
+    summary.value = extract(summaryRes)
+    await loadResaleWorkflowConfig()
+  } catch (error) {
+    showError(errorMessage(error, '刷新转售平台数据失败。'))
+  }
+}
+
 async function loadResaleWorkflowConfig(
   platformId = selectedResalePlatformId.value
 ) {
@@ -1756,7 +1844,7 @@ function handleWorkflowConfigSaved(payload) {
 
 function handlePlatformSaved() {
   closePlatformModal()
-  refreshAll()
+  refreshPlatformData()
 }
 
 function mergeResaleListings(updatedItems) {

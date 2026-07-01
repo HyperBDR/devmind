@@ -127,11 +127,7 @@
               <span>
                 {{ t('llmOps.manualPriceEntry.fields.provider') }}
               </span>
-              <strong>
-                {{
-                  selectedSourceProvider?.name || source?.provider_name || '-'
-                }}
-              </strong>
+              <strong>{{ selectedMetaModelProviderName }}</strong>
             </div>
             <div class="readonly-field">
               <span>
@@ -344,11 +340,31 @@ const selectedMetaModel = computed(() =>
   )
 )
 
-const selectedSourceProvider = computed(() => {
-  const sourceProviderId = sourceProviderIdValue()
-  if (!sourceProviderId) return null
-  return props.providers.find(
-    (provider) => String(provider.id) === String(sourceProviderId)
+const selectedMetaModelOwner = computed(() => {
+  if (!selectedMetaModel.value) {
+    return { providerId: '', code: '', name: '' }
+  }
+  const owner = resolveCanonicalMetaOwner(
+    selectedMetaModel.value,
+    props.providers
+  )
+  const provider = props.providers.find(
+    (item) =>
+      String(item.code || '').toLowerCase() ===
+      String(owner.code || '').toLowerCase()
+  )
+  return {
+    providerId: provider?.id || '',
+    code: owner.code || selectedMetaModel.value.owner_code || '',
+    name: owner.name || selectedMetaModel.value.owner_name || ''
+  }
+})
+
+const selectedMetaModelProviderName = computed(() => {
+  return (
+    selectedMetaModelOwner.value.name ||
+    selectedMetaModelOwner.value.code ||
+    '-'
   )
 })
 
@@ -429,7 +445,11 @@ const validationMessage = computed(() => {
     if (!selectedMetaModel.value) {
       return t('llmOps.manualPriceEntry.validation.selectMetaModel')
     }
-    if (!sourceProviderIdValue()) {
+    if (
+      !selectedMetaModelOwner.value.providerId &&
+      !selectedMetaModelOwner.value.code &&
+      !selectedMetaModelOwner.value.name
+    ) {
       return t('llmOps.manualPriceEntry.validation.customModelProvider')
     }
   }
@@ -511,13 +531,16 @@ function resolveImportSelection() {
       row: buildImportRow(selectedModel.value)
     }
   }
+  const owner = selectedMetaModelOwner.value
   const model = {
     code: selectedMetaModel.value.code,
     name: selectedMetaModel.value.name || selectedMetaModel.value.code,
-    modality: selectedMetaModel.value.modality || 'text'
+    modality: selectedMetaModel.value.modality || 'text',
+    provider_code: owner.code,
+    provider_name: owner.name
   }
   return {
-    providerId: sourceProviderIdValue(),
+    providerId: owner.providerId,
     row: buildImportRow(model)
   }
 }
@@ -532,6 +555,9 @@ function buildImportRow(model) {
   }
   if (model.provider_code) {
     row.provider_code = model.provider_code
+  }
+  if (model.provider_name) {
+    row.provider_name = model.provider_name
   }
   activePriceFields.value.forEach((field) => {
     const value = normalizePrice(form.value[field.key])
@@ -569,10 +595,6 @@ function buildModelOptions() {
 function resolveModelProviderId(model) {
   if (!model) return ''
   return model.provider || ''
-}
-
-function sourceProviderIdValue() {
-  return props.source?.provider || props.source?.provider_id || ''
 }
 
 function buildMetaModelOptions() {
