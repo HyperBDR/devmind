@@ -2679,6 +2679,16 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(diagnostic["status"], "low_coverage")
         self.assertTrue(diagnostic["is_agione_listed"])
         self.assertTrue(diagnostic["has_lowest_listing"])
+        self.assertEqual(response.data["kpis"]["active_models"], 1)
+        self.assertEqual(response.data["kpis"]["active_channels"], 1)
+        self.assertEqual(
+            response.data["kpis"]["current_platform_listings"],
+            1,
+        )
+        self.assertEqual(
+            response.data["kpis"]["current_platform_listed_models"],
+            1,
+        )
         self.assertEqual(
             response.data["point_conversion"]["points_per_currency_unit"],
             100.0,
@@ -2746,6 +2756,14 @@ class LLMOpsViewTests(TestCase):
         diagnostic = response.data["agione"]["diagnostics"][0]
         self.assertFalse(diagnostic["is_agione_listed"])
         self.assertEqual(diagnostic["status"], "unlisted")
+        self.assertEqual(
+            response.data["kpis"]["current_platform_listings"],
+            0,
+        )
+        self.assertEqual(
+            response.data["kpis"]["current_platform_listed_models"],
+            0,
+        )
 
     def test_summary_converts_cross_currency_channel_options(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")

@@ -746,7 +746,9 @@
       "displayCurrency": "Display currency",
       "resalePlatform": "Resale platform",
       "platformConfig": "Platform settings",
-      "createPlatform": "New platform"
+      "createPlatform": "New platform",
+      "collapseSidebar": "Collapse sidebar",
+      "expandSidebar": "Expand sidebar"
     },
     "currency": {
       "cny": "CNY",
@@ -756,12 +758,25 @@
       "overview": "Overview",
       "catalog": "Models & Sources",
       "distribution": "Channels & Resale",
+      "dashboards": "Operations Dashboards",
       "governance": "Governance"
     },
     "nav": {
       "monitor": {
         "label": "Operations Overview",
         "description": "Track model pricing, channel coverage, procurement paths, and key operating metrics."
+      },
+      "collectionHealth": {
+        "label": "Collection Health",
+        "description": "Review source freshness, success rate, and collection failures."
+      },
+      "modelWorkbench": {
+        "label": "Model Workbench",
+        "description": "Inspect standard prices, channel prices, listings, and reconciliation by model."
+      },
+      "priceChanges": {
+        "label": "Price Changes",
+        "description": "Track channel procurement, listing, and standard price changes."
       },
       "metaModels": {
         "label": "Meta Models",
@@ -779,9 +794,17 @@
         "label": "Forwarding Channels",
         "description": "Maintain channels and manage enabled provider models and pricing policies inside each channel."
       },
+      "channelMatrix": {
+        "label": "Channel Matrix",
+        "description": "Compare each model across procurement channels and coverage gaps."
+      },
       "reseller": {
         "label": "Resale Platforms",
         "description": "Manage listing prices, credit conversion, and procurement channels."
+      },
+      "listingRisk": {
+        "label": "Listing Risks",
+        "description": "Handle low margin, non-lowest-channel, unlisted, and FX risks."
       },
       "workflow": {
         "label": "Workflow Settings",
@@ -843,7 +866,8 @@
       "providerMatrixTitle": "Provider Model Operations Coverage",
       "modelCount": "{count} models",
       "channelCoverage": "Channel coverage",
-      "agioneListed": "Listed on Agione",
+      "agioneListed": "Listed on current platform",
+      "platformListed": "Listed on {platform}",
       "todo": "To do",
       "focusTableTitle": "Priority Model Operations Table",
       "focusTableSubtitle": "Prioritizes models missing channel prices, listings, lowest-price routing, or coverage.",

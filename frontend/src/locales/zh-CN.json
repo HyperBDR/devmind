@@ -756,7 +756,9 @@
       "displayCurrency": "显示货币",
       "resalePlatform": "挂售平台",
       "platformConfig": "平台配置",
-      "createPlatform": "新建平台"
+      "createPlatform": "新建平台",
+      "collapseSidebar": "折叠侧边栏",
+      "expandSidebar": "展开侧边栏"
     },
     "currency": {
       "cny": "CNY",
@@ -766,12 +768,25 @@
       "overview": "运营概览",
       "catalog": "模型与价格源",
       "distribution": "渠道与挂售",
+      "dashboards": "运营看板",
       "governance": "治理与对账"
     },
     "nav": {
       "monitor": {
         "label": "运营总览",
         "description": "汇总模型价格、渠道覆盖、采购路径和关键运营指标。"
+      },
+      "collectionHealth": {
+        "label": "采集健康度",
+        "description": "查看价格源采集新鲜度、成功率和失败风险。"
+      },
+      "modelWorkbench": {
+        "label": "模型工作台",
+        "description": "按模型汇总标准价、渠道价、挂售与对账记录。"
+      },
+      "priceChanges": {
+        "label": "价格变化",
+        "description": "追踪渠道采购价、挂售价和标准价格项的变化。"
       },
       "metaModels": {
         "label": "元模型库",
@@ -789,9 +804,17 @@
         "label": "转发渠道",
         "description": "维护渠道，并在渠道内管理可启用转发的服务商模型和价格策略。"
       },
+      "channelMatrix": {
+        "label": "渠道比价矩阵",
+        "description": "横向比较每个模型在各采购渠道的价格和覆盖状态。"
+      },
       "reseller": {
         "label": "挂售平台",
         "description": "管理挂售定价、积分换算与供货渠道。"
+      },
+      "listingRisk": {
+        "label": "挂售风险榜",
+        "description": "集中处理低毛利、非最低价、未挂售和汇率风险。"
       },
       "workflow": {
         "label": "流程配置",
@@ -853,7 +876,8 @@
       "providerMatrixTitle": "厂商模型运营覆盖",
       "modelCount": "{count} 个模型",
       "channelCoverage": "渠道覆盖",
-      "agioneListed": "Agione 已挂售",
+      "agioneListed": "当前平台已挂售",
+      "platformListed": "{platform} 已挂售",
       "todo": "待处理",
       "focusTableTitle": "重点模型运营表",
       "focusTableSubtitle": "优先展示缺渠道价、未挂售、非最低价和覆盖偏少的模型",

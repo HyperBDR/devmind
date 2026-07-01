@@ -173,6 +173,13 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/channel-price-items/`, paramsOrEmpty(params))
   },
 
+  listChannelModelPriceHistory(params) {
+    return apiClient.get(
+      `${base}/channel-model-price-history/`,
+      paramsOrEmpty(params)
+    )
+  },
+
   bulkUpsertChannelModelPrices(items) {
     return apiClient.post(`${base}/channel-model-prices/bulk-upsert/`, {
       items
@@ -217,6 +224,13 @@ export const llmOpsApi = {
 
   listResaleListings(params) {
     return apiClient.get(`${base}/resale-listings/`, paramsOrEmpty(params))
+  },
+
+  listResaleListingPriceHistory(params) {
+    return apiClient.get(
+      `${base}/resale-listing-price-history/`,
+      paramsOrEmpty(params)
+    )
   },
 
   bulkUpsertResaleListings(items) {

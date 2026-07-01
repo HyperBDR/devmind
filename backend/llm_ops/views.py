@@ -2801,6 +2801,12 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         agione_listed_model_count = len(
             {listing.model_id for listing in selected_platform_listing_rows}
         )
+        selected_platform_listing_count = len(selected_platform_listing_rows)
+        enabled_price_source_count = (
+            PriceCollectionSource.objects.filter(is_enabled=True)
+            .exclude(source_type=PriceCollectionSource.SOURCE_TYPE_AGIONE)
+            .count()
+        )
 
         status_counts = {
             item["status"]: item["count"]
@@ -2815,8 +2821,25 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "models": LLMModel.objects.count(),
                     "channels": ProcurementChannel.objects.count(),
                     "listings": ResaleListing.objects.count(),
+                    "active_providers": LLMProvider.objects.filter(
+                        is_active=True,
+                    ).count(),
                     "active_models": total_models,
+                    "active_channels": len(channels),
+                    "active_resale_platforms": ResalePlatform.objects.filter(
+                        is_active=True,
+                    ).count(),
+                    "active_listings": ResaleListing.objects.filter(
+                        is_active=True,
+                    ).count(),
+                    "enabled_price_sources": enabled_price_source_count,
                     "agione_listed_models": agione_listed_model_count,
+                    "current_platform_listings": (
+                        selected_platform_listing_count
+                    ),
+                    "current_platform_listed_models": (
+                        agione_listed_model_count
+                    ),
                     "ready_models": ready_count,
                     "reconciliation_anomalies": (
                         UsageReconciliationRecord.objects.exclude(
