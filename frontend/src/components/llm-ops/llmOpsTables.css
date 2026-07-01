@@ -1,45 +1,45 @@
 body.llm-ops-theme .data-table,
 body.llm-ops-theme .preview-table {
   width: 100%;
-  border-collapse: separate;
+  border-collapse: collapse;
   border-spacing: 0;
-  color: #475569;
+  color: var(--ui-text-secondary, #3f3f46);
   font-size: 13px;
   line-height: 1.45;
 }
 
 body.llm-ops-theme .data-table thead,
 body.llm-ops-theme .preview-table thead {
-  background: #f8fafc;
+  background: var(--ui-bg-subtle, #fafbfc);
 }
 
 body.llm-ops-theme .data-table tbody,
 body.llm-ops-theme .preview-table tbody {
-  background: #ffffff;
+  background: var(--ui-bg-card, #ffffff);
 }
 
 body.llm-ops-theme .data-table tbody tr,
 body.llm-ops-theme .preview-table tbody tr {
-  background: #ffffff;
+  background: var(--ui-bg-card, #ffffff);
   transition: background-color 0.14s ease;
 }
 
 body.llm-ops-theme .data-table tbody tr:hover,
 body.llm-ops-theme .preview-table tbody tr:hover {
-  background: #f8fafc;
+  background: var(--ui-bg-subtle, #fafbfc);
 }
 
 body.llm-ops-theme .data-table th,
 body.llm-ops-theme .data-table .table-head,
 body.llm-ops-theme .preview-table th {
   height: 40px;
-  border-bottom: 1px solid #e2e8f0;
-  background: #f8fafc;
-  color: #64748b;
+  border-bottom: 1px solid var(--ui-border-default, #e4e4e7);
+  background: var(--ui-bg-subtle, #fafbfc);
+  color: var(--ui-text-muted, #71717a);
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.025em;
-  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
   padding: 0.625rem 1rem;
   text-align: center;
   text-transform: uppercase;
@@ -49,8 +49,8 @@ body.llm-ops-theme .preview-table th {
 body.llm-ops-theme .data-table td,
 body.llm-ops-theme .data-table .table-cell,
 body.llm-ops-theme .preview-table td {
-  border-bottom: 1px solid #f1f5f9;
-  color: #475569;
+  border-bottom: 1px solid var(--ui-border-soft, #f0f0f2);
+  color: var(--ui-text-secondary, #3f3f46);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.45;
@@ -79,30 +79,30 @@ body.llm-ops-theme .data-table .font-mono,
 body.llm-ops-theme .preview-table .font-mono,
 body.llm-ops-theme .model-code,
 body.llm-ops-theme .sku-code {
-  color: #64748b;
+  color: var(--ui-text-muted, #71717a);
   font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+    var(--ui-font-mono, "IBM Plex Mono"), ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 12px;
   letter-spacing: 0;
 }
 
 body.llm-ops-theme .data-table .font-medium,
 body.llm-ops-theme .preview-table .font-medium {
-  color: #0f172a;
+  color: var(--ui-text-primary, #18181b);
   font-weight: 600;
 }
 
 body.llm-ops-theme .data-table td[colspan],
 body.llm-ops-theme .preview-table td[colspan] {
-  color: #94a3b8;
+  color: var(--ui-text-muted, #71717a);
   font-size: 13px;
   padding: 1.5rem 1rem;
   text-align: center;
 }
 
 body.llm-ops-theme .data-table .detail-cell {
-  background: #f8fafc;
+  background: var(--ui-bg-subtle, #fafbfc);
   padding: 0.875rem 1rem;
 }
 

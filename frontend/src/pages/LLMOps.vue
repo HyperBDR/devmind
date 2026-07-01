@@ -1,11 +1,11 @@
 <template>
   <AppLayout :show-sidebar="false" :full-bleed="true">
-    <div class="h-full min-h-[calc(100vh-4rem)] bg-slate-50">
+    <div class="llm-ops-page h-full min-h-[calc(100vh-4rem)] bg-slate-50">
       <div class="flex h-full min-h-[calc(100vh-4rem)] w-full gap-0">
         <aside
-          class="fixed bottom-0 left-0 top-16 z-20 hidden w-72 flex-col overflow-hidden bg-slate-950 text-white shadow-sm lg:flex"
+          class="llm-ops-sidebar fixed bottom-0 left-0 top-16 z-20 hidden w-72 flex-col overflow-hidden text-white lg:flex"
         >
-          <div class="border-b border-slate-800 px-5 py-5">
+          <div class="llm-ops-sidebar-brand px-5 py-5">
             <p
               class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-300"
             >
@@ -31,12 +31,8 @@
                   v-for="item in group.items"
                   :key="item.key"
                   type="button"
-                  class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition"
-                  :class="
-                    activeSection === item.key
-                      ? 'bg-agione-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:bg-slate-900 hover:text-white'
-                  "
+                  class="llm-nav-item flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
+                  :class="{ 'is-active': activeSection === item.key }"
                   @click="activeSection = item.key"
                 >
                   <svg
@@ -59,9 +55,9 @@
         </aside>
 
         <main
-          class="min-w-0 flex-1 border-l border-slate-200 bg-white shadow-sm lg:ml-72"
+          class="llm-ops-content min-w-0 flex-1 lg:ml-72"
         >
-          <header class="border-b border-slate-200 px-5 py-3 lg:px-7">
+          <header class="llm-ops-header px-5 py-3 lg:px-7">
             <div class="page-hero">
               <div class="page-hero-copy">
                 <div class="space-y-3 lg:hidden">
@@ -76,12 +72,8 @@
                         v-for="item in group.items"
                         :key="item.key"
                         type="button"
-                        class="rounded-lg px-3 py-2 text-xs font-semibold"
-                        :class="
-                          activeSection === item.key
-                            ? 'bg-agione-600 text-white'
-                            : 'bg-slate-100 text-slate-600'
-                        "
+                        class="llm-mobile-nav-item px-3 py-2 text-xs font-semibold"
+                        :class="{ 'is-active': activeSection === item.key }"
                         @click="activeSection = item.key"
                       >
                         {{ item.label }}
@@ -180,7 +172,7 @@
           <div
             v-else
             :class="[
-              'px-5 py-5 lg:px-7',
+              'llm-ops-body px-5 py-5 lg:px-7',
               activeSection === 'audit'
                 ? 'flex h-[calc(100vh-10.75rem)] min-h-0 flex-col'
                 : 'space-y-6'
@@ -198,7 +190,7 @@
                       <p class="text-xs font-medium text-slate-500">
                         {{ item.label }}
                       </p>
-                      <p class="mt-2 text-2xl font-semibold text-slate-900">
+                      <p class="kpi-value mt-2 text-2xl font-semibold">
                         {{ item.value }}
                       </p>
                     </div>
@@ -669,6 +661,7 @@
 <script setup>
 import '@/components/llm-ops/llmOpsButtons.css'
 import '@/components/llm-ops/llmOpsModals.css'
+import '@/components/llm-ops/llmOpsSelects.css'
 import '@/components/llm-ops/llmOpsTables.css'
 
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -2039,6 +2032,50 @@ onBeforeUnmount(() => {
 
 <style scoped>
 :global(body.llm-ops-theme) {
+  --ui-bg-page: #ffffff;
+  --ui-bg-card: #ffffff;
+  --ui-bg-muted: #f5f5f6;
+  --ui-bg-subtle: #fafafa;
+  --ui-sidebar-bg: #020617;
+  --ui-sidebar-border: #1e293b;
+  --ui-sidebar-active-bg: #5f4ecf;
+  --ui-sidebar-hover-bg: #0f172a;
+  --ui-sidebar-text: #94a3b8;
+  --ui-sidebar-text-active: #ffffff;
+  --ui-sidebar-text-muted: #64748b;
+  --ui-text-primary: #18181b;
+  --ui-text-secondary: #3f3f46;
+  --ui-text-muted: #7a7a85;
+  --ui-text-on-brand: #ffffff;
+  --ui-color-primary: #5f4ecf;
+  --ui-color-primary-hover: #5140bd;
+  --ui-color-primary-subtle: #f0eefb;
+  --ui-color-info: #2563eb;
+  --ui-color-info-subtle: #eff6ff;
+  --ui-color-success: #059669;
+  --ui-color-success-subtle: #ecfdf5;
+  --ui-color-warning: #d97706;
+  --ui-color-warning-subtle: #fffbeb;
+  --ui-color-destructive: #e11d48;
+  --ui-color-destructive-subtle: #fff1f2;
+  --ui-border-default: #dedee3;
+  --ui-border-soft: #ededf0;
+  --ui-border-interactive: #8f8f8f;
+  --ui-radius-control: 8px;
+  --ui-radius-card: 12px;
+  --ui-radius-pill: 9999px;
+  --ui-space-inline: 8px;
+  --ui-space-control: 12px;
+  --ui-space-card: 20px;
+  --ui-space-section: 24px;
+  --ui-shadow-xs: 0 1px 2px rgba(24, 24, 27, 0.04);
+  --ui-shadow-card: 0 1px 2px rgba(24, 24, 27, 0.04);
+  --ui-duration-fast: 150ms;
+  --ui-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ui-font-heading: Manrope, Inter, system-ui, sans-serif;
+  --ui-font-body: Inter, "Noto Sans SC", system-ui, sans-serif;
+  --ui-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+    monospace;
   padding: 0 !important;
 }
 
@@ -2494,11 +2531,10 @@ onBeforeUnmount(() => {
 }
 
 .refresh-action-button:hover:not(:disabled) {
-  border-color: #a5b4fc;
-  background-color: #eef2ff;
-  color: #4338ca;
-  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.12);
-  transform: translateY(-1px);
+  border-color: var(--ui-color-primary);
+  background-color: var(--ui-color-primary-subtle);
+  color: var(--ui-color-primary-hover);
+  box-shadow: var(--ui-shadow-xs);
 }
 
 .refresh-action-button:disabled {
@@ -2853,8 +2889,8 @@ onBeforeUnmount(() => {
 }
 
 .status-pill.info {
-  background-color: #000;
-  color: #000;
+  background-color: var(--ui-color-info-subtle);
+  color: var(--ui-color-info);
 }
 
 .status-pill.warn {
@@ -2865,5 +2901,304 @@ onBeforeUnmount(() => {
 .status-pill.danger {
   background-color: #fff1f2;
   color: #be123c;
+}
+
+.llm-ops-page {
+  background: var(--ui-bg-page);
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-body);
+}
+
+.llm-ops-sidebar {
+  background: var(--ui-sidebar-bg);
+  border-right: 1px solid var(--ui-sidebar-border);
+  box-shadow: var(--ui-shadow-xs);
+  color: var(--ui-sidebar-text-active);
+}
+
+.llm-ops-sidebar-brand {
+  border-bottom: 1px solid var(--ui-sidebar-border);
+  padding-bottom: var(--ui-space-card);
+}
+
+.llm-ops-sidebar-brand p:first-child {
+  color: #8b7dd1;
+  letter-spacing: 0.18em;
+}
+
+.llm-ops-sidebar-brand h1 {
+  color: var(--ui-sidebar-text-active);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.llm-ops-sidebar-brand p:last-child {
+  color: var(--ui-sidebar-text);
+}
+
+.llm-nav-item,
+.llm-mobile-nav-item {
+  border-radius: var(--ui-radius-control);
+  color: var(--ui-sidebar-text);
+  transition:
+    background-color var(--ui-duration-fast) var(--ui-ease-out),
+    color var(--ui-duration-fast) var(--ui-ease-out),
+    box-shadow var(--ui-duration-fast) var(--ui-ease-out);
+}
+
+.llm-nav-item:hover,
+.llm-mobile-nav-item:hover {
+  background: var(--ui-sidebar-hover-bg);
+  color: var(--ui-sidebar-text-active);
+}
+
+.llm-nav-item.is-active,
+.llm-mobile-nav-item.is-active {
+  background: var(--ui-sidebar-active-bg);
+  color: var(--ui-sidebar-text-active);
+  box-shadow: var(--ui-shadow-xs);
+}
+
+.llm-mobile-nav-item {
+  background: var(--ui-bg-muted);
+  color: var(--ui-text-secondary);
+}
+
+.llm-ops-content {
+  background: var(--ui-bg-page);
+  border-left: 0;
+}
+
+.llm-ops-header {
+  background: var(--ui-bg-card);
+  border-bottom: 1px solid var(--ui-border-default);
+}
+
+.llm-ops-body {
+  background: var(--ui-bg-page);
+}
+
+.page-hero {
+  gap: var(--ui-space-control);
+  min-height: 7.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+
+.page-hero-eyebrow {
+  display: none;
+}
+
+.page-hero-title {
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-heading);
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.page-hero-description {
+  color: var(--ui-text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 36rem;
+  white-space: normal;
+}
+
+.panel,
+.kpi-card,
+.coverage-row,
+.provider-card {
+  background: var(--ui-bg-card);
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-card);
+  box-shadow: none;
+}
+
+.panel {
+  padding: var(--ui-space-card);
+}
+
+.kpi-card {
+  min-height: 8.75rem;
+  padding: var(--ui-space-card);
+}
+
+.kpi-value {
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-mono);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.kpi-tone,
+.badge-ok,
+.badge-muted,
+.status-pill {
+  border-radius: var(--ui-radius-pill);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.kpi-tone.good,
+.badge-ok,
+.status-pill.success {
+  background: var(--ui-color-success-subtle);
+  color: var(--ui-color-success);
+}
+
+.kpi-tone.warn,
+.status-pill.warn {
+  background: var(--ui-color-warning-subtle);
+  color: var(--ui-color-warning);
+}
+
+.kpi-tone.danger,
+.status-pill.danger {
+  background: var(--ui-color-destructive-subtle);
+  color: var(--ui-color-destructive);
+}
+
+.badge-muted {
+  background: var(--ui-bg-muted);
+  border-color: var(--ui-border-default);
+  color: var(--ui-text-muted);
+}
+
+.status-pill.info {
+  background: var(--ui-color-info-subtle);
+  color: var(--ui-color-info);
+}
+
+.table-toolbar {
+  background: var(--ui-bg-card);
+  border-bottom-color: var(--ui-border-default);
+  padding: var(--ui-space-control) var(--ui-space-card);
+}
+
+.panel-title {
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.data-table {
+  background: var(--ui-bg-card);
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.data-table tr {
+  background: var(--ui-bg-card);
+}
+
+.table-head {
+  background: var(--ui-bg-subtle);
+  border-bottom: 1px solid var(--ui-border-default);
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+}
+
+.table-cell {
+  border-bottom: 1px solid var(--ui-border-soft);
+  color: var(--ui-text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.currency-control,
+.field-sm,
+.page-toolbar-chip {
+  background: var(--ui-bg-card);
+  border: 1px solid var(--ui-border-interactive);
+  border-radius: var(--ui-radius-control);
+  color: var(--ui-text-muted);
+}
+
+.currency-control select,
+.metric-line strong {
+  color: var(--ui-text-primary);
+  font-family: var(--ui-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.action-row {
+  background: var(--ui-bg-card);
+  border: 1px solid var(--ui-border-default);
+  border-radius: var(--ui-radius-card);
+}
+
+.action-row:hover {
+  background: var(--ui-bg-subtle);
+  border-color: var(--ui-border-interactive);
+}
+
+.metric-line {
+  color: var(--ui-text-muted);
+  font-size: 13px;
+}
+
+.icon-mark {
+  border-radius: 4px;
+}
+
+.llm-ops-sidebar nav p {
+  color: var(--ui-sidebar-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.llm-ops-sidebar .nav-icon {
+  color: currentColor;
+}
+
+.llm-nav-item.is-active .nav-icon {
+  color: var(--ui-sidebar-text-active);
+}
+
+.llm-ops-body {
+  padding-top: var(--ui-space-section);
+}
+
+.llm-ops-body .grid:first-child {
+  gap: var(--ui-space-card);
+}
+
+.llm-ops-body .panel .text-agione-600 {
+  color: var(--ui-text-muted);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.llm-ops-body .panel h3 {
+  color: var(--ui-text-primary);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.coverage-row,
+.provider-card {
+  background: var(--ui-bg-card);
+  padding: var(--ui-space-card);
+}
+
+.page-toolbar-control,
+.page-toolbar-button,
+.page-toolbar-chip {
+  min-height: 44px;
 }
 </style>
