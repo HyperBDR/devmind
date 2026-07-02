@@ -879,7 +879,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue(MetaModel.objects.filter(id=meta.id).exists())
 
-    @patch("llm_ops.views.run_model_price_sync_agent.delay")
+    @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collects_official_provider(self, mock_delay):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
@@ -909,13 +909,40 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["provider_code"], "aliyun")
         self.assertEqual(response.data["source_id"], source.id)
         mock_delay.assert_called_once_with(
-            source_ids=[source.id],
+            source_id=source.id,
             verify_source=True,
         )
         audit = AuditLog.objects.get(target_id=str(source.id))
         self.assertEqual(audit.action, AuditLog.ACTION_COLLECT)
         self.assertEqual(audit.category, AuditLog.CATEGORY_COLLECTION)
         self.assertEqual(audit.metadata["task_id"], "task-123")
+
+    @patch("llm_ops.views.collect_price_source_prices.delay")
+    def test_collection_source_collects_code_backed_supplier(self, mock_delay):
+        source = PriceCollectionSource.objects.create(
+            name="SiliconFlow Pricing",
+            slug="siliconflow-pricing",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://siliconflow.cn/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        mock_delay.return_value.id = "task-siliconflow"
+
+        response = self.client.post(
+            reverse("collection-source-collect", args=[source.id]),
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.data["task_id"], "task-siliconflow")
+        self.assertEqual(response.data["source_id"], source.id)
+        mock_delay.assert_called_once_with(
+            source_id=source.id,
+            verify_source=True,
+        )
 
     @patch("llm_ops.views.run_model_price_sync_agent.delay")
     def test_collection_sources_sync_all_submits_supported_sources(
@@ -949,15 +976,12 @@ class LLMOpsViewTests(TestCase):
             is_enabled=True,
             updates_model_prices=True,
         )
-        openai = LLMProvider.objects.create(name="OpenAI", code="openai")
-        openai_source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
-            provider=openai,
-            source_category=(
-                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-            ),
-            endpoint_url="https://openai.com/api/pricing/",
+        siliconflow_source = PriceCollectionSource.objects.create(
+            name="SiliconFlow Pricing",
+            slug="siliconflow-pricing",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://siliconflow.cn/pricing",
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -970,10 +994,10 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["source_count"], 2)
         self.assertEqual(
             response.data["source_ids"],
-            [aliyun_source.id, openai_source.id],
+            [aliyun_source.id, siliconflow_source.id],
         )
         mock_delay.assert_called_once_with(
-            source_ids=[aliyun_source.id, openai_source.id],
+            source_ids=[aliyun_source.id, siliconflow_source.id],
             verify_source=True,
         )
         audit = AuditLog.objects.get(
@@ -983,7 +1007,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(audit.metadata["task_id"], "task-all")
         self.assertEqual(
             audit.metadata["source_ids"],
-            [aliyun_source.id, openai_source.id],
+            [aliyun_source.id, siliconflow_source.id],
         )
 
     @patch("llm_ops.views.run_model_price_sync_agent.delay")
@@ -996,7 +1020,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 400)
         mock_delay.assert_not_called()
 
-    def test_official_provider_options_include_aliyun_presets(self):
+    def test_official_provider_options_follow_collector_implementations(self):
         response = self.client.get(
             reverse("collection-source-official-provider-options")
         )
@@ -1005,10 +1029,31 @@ class LLMOpsViewTests(TestCase):
         provider_codes = {
             item["provider_code"] for item in response.data["results"]
         }
-        self.assertIn("aliyun", provider_codes)
-        self.assertIn("aliyun-wanx", provider_codes)
-        self.assertIn("baidu", provider_codes)
-        self.assertIn("volcengine", provider_codes)
+        self.assertEqual({"aliyun", "deepseek"}, provider_codes)
+
+    def test_auto_sync_options_include_supplier_collectors(self):
+        response = self.client.get(
+            reverse("collection-source-auto-sync-options")
+        )
+
+        self.assertEqual(response.status_code, 200)
+        provider_codes = {
+            item["provider_code"] for item in response.data["results"]
+        }
+        self.assertEqual({"aliyun", "deepseek", "siliconflow"}, provider_codes)
+        siliconflow = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "siliconflow"
+        )
+        self.assertEqual(
+            siliconflow["source_category"],
+            PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        )
+        self.assertEqual(
+            siliconflow["source_url"],
+            "https://siliconflow.cn/pricing",
+        )
 
     def test_ensure_official_provider_source_creates_aliyun_source(self):
         response = self.client.post(
@@ -1075,7 +1120,20 @@ class LLMOpsViewTests(TestCase):
             1,
         )
 
-    @patch("llm_ops.views.run_model_price_sync_agent.delay")
+    def test_ensure_official_provider_source_rejects_unimplemented_source(
+        self,
+    ):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "baidu"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unsupported official provider", response.data["detail"])
+        self.assertFalse(LLMProvider.objects.filter(code="baidu").exists())
+
+    @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_rejects_disabled_source(
         self,
         mock_delay,
@@ -1106,7 +1164,7 @@ class LLMOpsViewTests(TestCase):
         )
         mock_delay.assert_not_called()
 
-    @patch("llm_ops.views.run_model_price_sync_agent.delay")
+    @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_rejects_unsupported_source(
         self,
         mock_delay,
@@ -1140,7 +1198,7 @@ class LLMOpsViewTests(TestCase):
         mock_delay.assert_not_called()
 
     @patch("llm_ops.views.source_supports_code_collection")
-    @patch("llm_ops.views.run_model_price_sync_agent.delay")
+    @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_does_not_require_provider(
         self,
         mock_delay,
@@ -1169,7 +1227,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["provider_code"], "")
         self.assertEqual(response.data["source_id"], source.id)
         mock_delay.assert_called_once_with(
-            source_ids=[source.id],
+            source_id=source.id,
             verify_source=True,
         )
 

@@ -10,7 +10,7 @@ from llm_ops.collection_services import (
     upsert_collected_offering,
 )
 from llm_ops.collectors import CollectedModelPricing, NormalizedPriceRow
-from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
+from llm_ops.global_config import price_sync_source_queryset
 from llm_ops.models import (
     LLMProvider,
     MetaModel,
@@ -31,9 +31,9 @@ from llm_ops.source_collectors.official import (
 
 
 class PriceSourceCollectorRegistryTests(TestCase):
-    def test_all_official_configs_have_registered_collectors(self):
+    def test_official_collectors_follow_price_source_implementations(self):
         self.assertEqual(
-            set(OFFICIAL_PROVIDER_CONFIGS),
+            {"aliyun", "deepseek"},
             set(SUPPORTED_OFFICIAL_PROVIDER_CODES),
         )
 
@@ -103,7 +103,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
         self.assertEqual(collector.collector_id, "official_provider:deepseek")
         self.assertTrue(source_supports_code_collection(source))
 
-    def test_baidu_official_provider_source_dispatches_to_collector(self):
+    def test_unimplemented_official_source_is_not_supported(self):
         provider = LLMProvider.objects.create(name="百度", code="baidu")
         source = PriceCollectionSource.objects.create(
             name="Baidu Official",
@@ -120,9 +120,8 @@ class PriceSourceCollectorRegistryTests(TestCase):
 
         collector = get_price_source_collector(source)
 
-        self.assertIsNotNone(collector)
-        self.assertEqual(collector.collector_id, "official_provider:baidu")
-        self.assertTrue(source_supports_code_collection(source))
+        self.assertIsNone(collector)
+        self.assertFalse(source_supports_code_collection(source))
 
     def test_model_level_official_source_is_not_supported(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
@@ -198,6 +197,49 @@ class PriceSourceCollectorRegistryTests(TestCase):
             verify_source=False,
         )
         self.assertEqual(result, {"models": 2})
+
+    def test_price_sync_queryset_includes_code_backed_supplier_source(self):
+        aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
+        aliyun_source = PriceCollectionSource.objects.create(
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=aliyun,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        siliconflow_source = PriceCollectionSource.objects.create(
+            name="SiliconFlow Pricing",
+            slug="siliconflow-pricing",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://siliconflow.cn/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        unsupported_source = PriceCollectionSource.objects.create(
+            name="Supplier Sheet",
+            slug="supplier-sheet",
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            endpoint_url="https://example.com/pricing",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        source_ids = set(
+            price_sync_source_queryset().values_list("id", flat=True)
+        )
+
+        self.assertIn(aliyun_source.id, source_ids)
+        self.assertIn(siliconflow_source.id, source_ids)
+        self.assertNotIn(unsupported_source.id, source_ids)
 
     def test_unknown_official_provider_does_not_match_collector(self):
         provider = LLMProvider.objects.create(

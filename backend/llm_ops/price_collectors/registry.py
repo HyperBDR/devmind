@@ -15,6 +15,11 @@ PRICE_CATALOG_COLLECTORS: dict[str, VendorPriceCatalogCollector] = {
 }
 
 
+def registered_vendor_price_collector_codes() -> tuple[str, ...]:
+    """Return provider codes with a concrete price catalog collector."""
+    return tuple(sorted(PRICE_CATALOG_COLLECTORS))
+
+
 def vendor_price_collector_exists(provider_code: str) -> bool:
     """Return whether a formal catalog collector exists for a provider."""
     return normalize_provider_code(provider_code) in PRICE_CATALOG_COLLECTORS

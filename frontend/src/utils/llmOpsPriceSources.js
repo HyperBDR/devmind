@@ -73,6 +73,9 @@ export function priceSourceCollectionMethod(source) {
   if (method && method !== 'unknown') return method
 
   if (source?.source_type === 'yunce') return 'api_sync'
+  if (source?.can_collect_prices && source?.updates_model_prices) {
+    return 'auto_collect'
+  }
   if (
     normalizePriceSourceCategory(source) === 'official_provider' &&
     source?.updates_model_prices
@@ -88,11 +91,7 @@ export function priceSourceCollectionMethod(source) {
 export function canCollectPriceSource(source) {
   if (!source) return false
   if (source.can_collect === true) return true
-  return Boolean(
-    source.can_collect_prices &&
-      priceSourceCollectionMethod(source) === 'auto_collect' &&
-      source.updates_model_prices
-  )
+  return Boolean(source.can_collect_prices && source.updates_model_prices)
 }
 
 export function canApiSyncPriceSource(source) {
@@ -101,6 +100,7 @@ export function canApiSyncPriceSource(source) {
 
 export function canManualEntryPriceSource(source) {
   if (!source) return false
+  if (canCollectPriceSource(source)) return false
   if (source.can_manual_entry === true) return true
   return ['manual_entry', 'manual_import', 'unknown'].includes(
     priceSourceCollectionMethod(source)

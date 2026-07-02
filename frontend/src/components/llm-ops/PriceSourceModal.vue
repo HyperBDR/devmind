@@ -80,44 +80,30 @@
             </label>
             <label class="field-group">
               <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.sourceOwnerType') }}
+                {{ t('llmOps.priceSourceModal.fields.syncMode') }}
               </span>
-              <CompactSelect
-                v-model="sourceOwnerTypeSelection"
-                :options="sourceOwnerTypeOptions"
-              />
+              <CompactSelect v-model="syncMode" :options="syncModeOptions" />
             </label>
             <label class="field-group">
               <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.collectionMethod') }}
+                {{ t('llmOps.priceSourceModal.fields.autoSyncSource') }}
               </span>
               <CompactSelect
-                v-model="form.collection_method"
-                :options="collectionMethodOptions"
-              />
-            </label>
-            <label
-              class="field-group"
-            >
-              <span class="field-label">
-                {{ t('llmOps.priceSourceModal.fields.officialProvider') }}
-              </span>
-              <CompactSelect
-                v-model="selectedOfficialProviderCode"
+                v-model="selectedAutoSyncSourceCode"
                 :disabled="
-                  !shouldUseOfficialPreset ||
-                  loadingOfficialProviderOptions ||
+                  !shouldCreateAutoSyncPreset ||
+                  loadingAutoSyncSourceOptions ||
                   saving
                 "
-                :options="officialProviderSelectOptions"
+                :options="autoSyncSourceSelectOptions"
                 class-name="w-full"
                 :menu-min-width="360"
                 :placeholder="
-                  t('llmOps.priceSourceModal.officialPreset.selectProvider')
+                  t('llmOps.priceSourceModal.autoSyncPreset.selectSource')
                 "
               />
               <span class="field-help">
-                {{ officialProviderHelpText }}
+                {{ autoSyncSourceHelpText }}
               </span>
             </label>
             <label class="field-group">
@@ -229,23 +215,18 @@ const { t } = useI18n()
 
 const saving = ref(false)
 const form = ref(defaults())
-const officialProviderOptions = ref([])
-const selectedOfficialProviderCode = ref('')
-const loadingOfficialProviderOptions = ref(false)
-const officialSourceOwnerTypes = [
-  'model_provider_official',
-  'cloud_provider_official'
-]
-const visibleSourceOwnerTypes = ['supplier', 'internal']
-const sourceOwnerOfficialOption = 'official'
+const autoSyncSourceOptions = ref([])
+const selectedAutoSyncSourceCode = ref('')
+const loadingAutoSyncSourceOptions = ref(false)
 const isEditing = computed(() => Boolean(props.source?.id))
-const shouldUseOfficialPreset = computed(
-  () =>
-    !isEditing.value &&
-    officialSourceOwnerTypes.includes(form.value.source_owner_type)
+const isAutoSyncMode = computed(
+  () => form.value.source_owner_type !== 'internal'
+)
+const shouldCreateAutoSyncPreset = computed(
+  () => !isEditing.value && isAutoSyncMode.value
 )
 const canEditSlug = computed(
-  () => !shouldUseOfficialPreset.value && !isStableOfficialSource.value
+  () => !shouldCreateAutoSyncPreset.value && !isStableOfficialSource.value
 )
 const isStableOfficialSource = computed(() => {
   if (!isEditing.value) return false
@@ -258,14 +239,14 @@ const isStableOfficialSource = computed(() => {
   )
 })
 const slugHelpText = computed(() => {
-  if (shouldUseOfficialPreset.value && !selectedOfficialProviderOption.value) {
-    return t('llmOps.priceSourceModal.help.officialSlugPreset')
+  if (shouldCreateAutoSyncPreset.value && !selectedAutoSyncSourceOption.value) {
+    return t('llmOps.priceSourceModal.help.autoSyncSlugPreset')
   }
   if (isStableOfficialSource.value) {
-    return t('llmOps.priceSourceModal.help.officialSlugLocked')
+    return t('llmOps.priceSourceModal.help.autoSyncSlugLocked')
   }
-  if (shouldUseOfficialPreset.value) {
-    return t('llmOps.priceSourceModal.help.officialSlugLocked')
+  if (shouldCreateAutoSyncPreset.value) {
+    return t('llmOps.priceSourceModal.help.autoSyncSlugLocked')
   }
   if (isEditing.value) {
     return t('llmOps.priceSourceModal.help.slug')
@@ -275,127 +256,103 @@ const slugHelpText = computed(() => {
   })
 })
 const sourceSlugLabel = computed(() => {
-  if (shouldUseOfficialPreset.value && selectedOfficialProviderOption.value) {
-    return selectedOfficialProviderOption.value.source_slug || '-'
+  if (shouldCreateAutoSyncPreset.value && selectedAutoSyncSourceOption.value) {
+    return selectedAutoSyncSourceOption.value.source_slug || '-'
   }
   return autoSlug(form.value.name || '')
 })
-const sourceOwnerTypeOptions = computed(() => [
+const syncModeOptions = computed(() => [
   {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.official'),
-    value: sourceOwnerOfficialOption
+    label: t('llmOps.priceSourceModal.syncModes.auto'),
+    value: 'auto'
   },
   {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.supplier'),
-    value: 'supplier'
-  },
-  {
-    label: t('llmOps.priceSourceModal.sourceOwnerTypes.internal'),
-    value: 'internal'
+    label: t('llmOps.priceSourceModal.syncModes.manual'),
+    value: 'manual'
   }
 ])
 
-const sourceOwnerTypeSelection = computed({
+const syncMode = computed({
   get() {
-    if (officialSourceOwnerTypes.includes(form.value.source_owner_type)) {
-      return sourceOwnerOfficialOption
-    }
-    if (visibleSourceOwnerTypes.includes(form.value.source_owner_type)) {
-      return form.value.source_owner_type
-    }
-    return 'internal'
+    return form.value.source_owner_type === 'internal' ? 'manual' : 'auto'
   },
   set(value) {
-    if (value === sourceOwnerOfficialOption) {
-      selectedOfficialProviderCode.value = ''
-      form.value.source_owner_type = sourceOwnerTypeForOfficialProvider(
-        { provider_code: selectedOfficialProviderCode.value }
-      )
-      form.value.collection_method = 'auto_collect'
+    if (value === 'manual') {
+      selectedAutoSyncSourceCode.value = ''
+      form.value = {
+        ...form.value,
+        source_owner_type: 'internal',
+        source_category: 'manual',
+        collection_method: 'manual_entry',
+        updates_model_prices: false
+      }
       return
     }
-    selectedOfficialProviderCode.value = ''
-    form.value.source_owner_type = value
-    if (['supplier', 'internal'].includes(value)) {
-      form.value.collection_method = 'manual_entry'
+    selectedAutoSyncSourceCode.value = ''
+    form.value = {
+      ...form.value,
+      source_owner_type: 'supplier',
+      source_category: 'supplier',
+      collection_method: 'unknown',
+      updates_model_prices: true
+    }
+    if (!autoSyncSourceOptions.value.length) {
+      loadAutoSyncSourceOptions()
     }
   }
 })
-
-const collectionMethodOptions = computed(() => [
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.autoCollect'),
-    value: 'auto_collect'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.manualEntry'),
-    value: 'manual_entry'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.manualImport'),
-    value: 'manual_import'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.apiSync'),
-    value: 'api_sync'
-  },
-  {
-    label: t('llmOps.priceSourceModal.collectionMethods.unknown'),
-    value: 'unknown'
-  }
-])
 
 const currencyOptions = computed(() => [
   { label: t('llmOps.priceSourceModal.currencies.cny'), value: 'CNY' },
   { label: t('llmOps.priceSourceModal.currencies.usd'), value: 'USD' }
 ])
 
-const officialProviderSelectOptions = computed(() =>
-  officialProviderOptions.value.map((option) => ({
-    value: option.provider_code,
+const autoSyncSourceSelectOptions = computed(() =>
+  autoSyncSourceOptions.value.map((option) => ({
+    value: option.option_code || option.provider_code,
     label: option.provider_name,
     description: option.source_name,
     badge: option.source_exists
-      ? t('llmOps.priceSourceModal.officialPreset.existsBadge')
+      ? t('llmOps.priceSourceModal.autoSyncPreset.existsBadge')
       : option.currency
   }))
 )
 
-const selectedOfficialProviderOption = computed(() =>
-  officialProviderOptions.value.find(
+const selectedAutoSyncSourceOption = computed(() =>
+  autoSyncSourceOptions.value.find(
     (option) =>
-      String(option.provider_code) ===
-      String(selectedOfficialProviderCode.value)
+      String(option.option_code || option.provider_code) ===
+      String(selectedAutoSyncSourceCode.value)
   )
 )
 
-const officialProviderStatus = computed(() => {
-  if (loadingOfficialProviderOptions.value) {
-    return t('llmOps.priceSourceModal.officialPreset.loading')
+const autoSyncSourceStatus = computed(() => {
+  if (loadingAutoSyncSourceOptions.value) {
+    return t('llmOps.priceSourceModal.autoSyncPreset.loading')
   }
-  const option = selectedOfficialProviderOption.value
-  if (!option && officialProviderOptions.value.length) {
-    return t('llmOps.priceSourceModal.officialPreset.selectProvider')
+  const option = selectedAutoSyncSourceOption.value
+  if (!option && autoSyncSourceOptions.value.length) {
+    return t('llmOps.priceSourceModal.autoSyncPreset.selectSource')
   }
-  if (!option) return t('llmOps.priceSourceModal.officialPreset.empty')
+  if (!option) return t('llmOps.priceSourceModal.autoSyncPreset.empty')
   if (option.source_exists) {
-    return t('llmOps.priceSourceModal.officialPreset.exists')
+    return t('llmOps.priceSourceModal.autoSyncPreset.exists')
   }
-  return t('llmOps.priceSourceModal.officialPreset.ready')
+  return t('llmOps.priceSourceModal.autoSyncPreset.ready')
 })
 
-const officialProviderHelpText = computed(() => {
-  if (!shouldUseOfficialPreset.value) {
-    return t('llmOps.priceSourceModal.officialPreset.onlyOfficial')
+const autoSyncSourceHelpText = computed(() => {
+  if (!shouldCreateAutoSyncPreset.value) {
+    return t('llmOps.priceSourceModal.autoSyncPreset.manualMode')
   }
-  return officialProviderStatus.value
+  return autoSyncSourceStatus.value
 })
 
 const saveDisabled = computed(
   () =>
-    shouldUseOfficialPreset.value &&
-    (!selectedOfficialProviderOption.value ||
-      selectedOfficialProviderOption.value.source_exists)
+    shouldCreateAutoSyncPreset.value &&
+    (!selectedAutoSyncSourceOption.value ||
+      selectedAutoSyncSourceOption.value.source_exists)
 )
 
 watch(
@@ -407,17 +364,30 @@ watch(
 )
 
 watch(
-  () => [props.open, form.value.source_owner_type, isEditing.value],
-  ([open]) => {
-    if (open && shouldUseOfficialPreset.value) {
-      loadOfficialProviderOptions()
+  () => props.open,
+  (open) => {
+    if (open && shouldCreateAutoSyncPreset.value) {
+      loadAutoSyncSourceOptions()
     }
   }
 )
 
-watch(selectedOfficialProviderOption, (option) => {
-  if (!shouldUseOfficialPreset.value || !option) return
-  applyOfficialProviderOption(option)
+watch(
+  () => form.value.source_owner_type,
+  () => {
+    if (
+      props.open &&
+      shouldCreateAutoSyncPreset.value &&
+      !autoSyncSourceOptions.value.length
+    ) {
+      loadAutoSyncSourceOptions()
+    }
+  }
+)
+
+watch(selectedAutoSyncSourceOption, (option) => {
+  if (!shouldCreateAutoSyncPreset.value || !option) return
+  applyAutoSyncSourceOption(option)
 })
 
 function defaults() {
@@ -458,8 +428,8 @@ function close() {
 async function save() {
   saving.value = true
   try {
-    if (shouldUseOfficialPreset.value) {
-      await saveOfficialProviderSource()
+    if (shouldCreateAutoSyncPreset.value) {
+      await saveAutoSyncSource()
       return
     }
     const submittedSlug = canEditSlug.value
@@ -470,9 +440,12 @@ async function save() {
       slug: submittedSlug,
       source_type: props.source?.source_type || 'custom'
     }
-    payload.source_category = legacyCategoryForSourceOwnerType(
-      payload.source_owner_type
-    )
+    if (!isAutoSyncMode.value) {
+      payload.source_category = 'manual'
+      payload.source_owner_type = 'internal'
+      payload.collection_method = 'manual_entry'
+      payload.updates_model_prices = false
+    }
     if (isEditing.value) {
       await llmOpsApi.updateCollectionSource(props.source.id, payload)
       showSuccess(t('llmOps.priceSourceModal.messages.updated'))
@@ -488,55 +461,62 @@ async function save() {
   }
 }
 
-async function saveOfficialProviderSource() {
-  const option = selectedOfficialProviderOption.value
+async function saveAutoSyncSource() {
+  const option = selectedAutoSyncSourceOption.value
   if (!option || option.source_exists) return
 
-  const response = await llmOpsApi.ensureOfficialProviderSource(
-    option.provider_code
-  )
-  const payload = response?.data?.data || response?.data || {}
-  const sourceName = payload.source?.name || option.source_name
+  let sourceName = option.source_name
+  if (option.source_category === 'official_provider') {
+    const response = await llmOpsApi.ensureOfficialProviderSource(
+      option.provider_code
+    )
+    const payload = response?.data?.data || response?.data || {}
+    sourceName = payload.source?.name || sourceName
+  } else {
+    await llmOpsApi.createCollectionSource(autoSyncSourcePayload(option))
+  }
   showSuccess(
-    t('llmOps.priceSourceModal.messages.officialCreated', {
+    t('llmOps.priceSourceModal.messages.autoSyncCreated', {
       name: sourceName
     })
   )
   emit('saved')
 }
 
-async function loadOfficialProviderOptions() {
-  if (loadingOfficialProviderOptions.value) return
-  loadingOfficialProviderOptions.value = true
+async function loadAutoSyncSourceOptions() {
+  if (loadingAutoSyncSourceOptions.value) return
+  loadingAutoSyncSourceOptions.value = true
   try {
-    const response = await llmOpsApi.listOfficialProviderSourceOptions()
+    const response = await llmOpsApi.listAutoSyncSourceOptions()
     const payload = response?.data?.data || response?.data || {}
     const options = Array.isArray(payload.results) ? payload.results : []
-    officialProviderOptions.value = options
+    autoSyncSourceOptions.value = options
     const current = options.find(
       (option) =>
-        String(option.provider_code) ===
-        String(selectedOfficialProviderCode.value)
+        String(option.option_code || option.provider_code) ===
+        String(selectedAutoSyncSourceCode.value)
     )
-    selectedOfficialProviderCode.value = current?.provider_code || ''
-    if (current) applyOfficialProviderOption(current)
+    selectedAutoSyncSourceCode.value =
+      current?.option_code || current?.provider_code || ''
+    if (current) applyAutoSyncSourceOption(current)
   } catch (error) {
     showError(
       errorMessage(
         error,
-        t('llmOps.priceSourceModal.errors.loadOfficialSources')
+        t('llmOps.priceSourceModal.errors.loadAutoSyncSources')
       )
     )
   } finally {
-    loadingOfficialProviderOptions.value = false
+    loadingAutoSyncSourceOptions.value = false
   }
 }
 
-function applyOfficialProviderOption(option) {
+function applyAutoSyncSourceOption(option) {
   form.value = {
     ...form.value,
-    source_owner_type: sourceOwnerTypeForOfficialProvider(option),
-    collection_method: 'auto_collect',
+    source_category: option.source_category || 'supplier',
+    source_owner_type: option.source_owner_type || 'supplier',
+    collection_method: option.collection_method || 'unknown',
     name: option.source_name || option.provider_name || form.value.name,
     slug: option.source_slug || form.value.slug,
     currency: option.currency || form.value.currency,
@@ -545,13 +525,20 @@ function applyOfficialProviderOption(option) {
   }
 }
 
-function legacyCategoryForSourceOwnerType(value) {
-  if (officialSourceOwnerTypes.includes(value)) {
-    return 'official_provider'
+function autoSyncSourcePayload(option) {
+  return {
+    name: option.source_name,
+    slug: option.source_slug,
+    source_type: 'custom',
+    source_category: option.source_category,
+    source_owner_type: option.source_owner_type,
+    collection_method: option.collection_method || 'unknown',
+    endpoint_url: option.source_url || '',
+    currency: option.currency || 'CNY',
+    is_enabled: true,
+    updates_model_prices: true,
+    notes: form.value.notes || ''
   }
-  if (value === 'supplier') return 'supplier'
-  if (value === 'internal') return 'manual'
-  return 'unknown'
 }
 
 function sourceOwnerTypeFromLegacyCategory(value) {
@@ -559,14 +546,6 @@ function sourceOwnerTypeFromLegacyCategory(value) {
   if (value === 'supplier') return 'supplier'
   if (value === 'manual') return 'internal'
   return 'unknown'
-}
-
-function sourceOwnerTypeForOfficialProvider(option) {
-  const code = String(option?.provider_code || '').toLowerCase()
-  if (['aliyun', 'aliyun-wanx', 'baidu', 'volcengine'].includes(code)) {
-    return 'cloud_provider_official'
-  }
-  return 'model_provider_official'
 }
 
 function errorMessage(error, fallback) {

@@ -116,6 +116,10 @@ def normalize_meta_model_name(value, canonical_code):
     name = str(value or "").strip()
     if not name:
         return canonical_code
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    if ":" in name:
+        name = name.split(":", 1)[0]
     name = re.sub(r"\s+\d{4}-\d{2}-\d{2}$", "", name)
     name = re.sub(r"\s+\d{8}$", "", name)
     name = re.sub(r"\s+\d{6}$", "", name)

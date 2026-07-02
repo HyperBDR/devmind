@@ -418,6 +418,69 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
             "1",
         )
 
+    def test_siliconflow_provider_adapter_skips_free_models(self):
+        payload = collect_vendor_price_catalog(
+            "siliconflow",
+            {
+                "provider_name": "SiliconFlow",
+                "currency": "CNY",
+                "raw_html": siliconflow_html(
+                    [
+                        {
+                            "playgroundName": (
+                                "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+                            ),
+                            "playgroundSort": 80100,
+                            "skuName": "free-text-model.online",
+                            "componentCode": "input-tokens",
+                            "coordinateDesc": "",
+                            "price_scenario": "活动价",
+                            "realTimePriceCnyUnit": "0",
+                            "unitZhCnName": "K tokens",
+                        },
+                        {
+                            "playgroundName": (
+                                "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+                            ),
+                            "playgroundSort": 80100,
+                            "skuName": "free-text-model.online",
+                            "componentCode": "output-tokens",
+                            "coordinateDesc": "",
+                            "price_scenario": "活动价",
+                            "realTimePriceCnyUnit": "0",
+                            "unitZhCnName": "K tokens",
+                        },
+                        {
+                            "playgroundName": "deepseek-ai/DeepSeek-V4-Pro",
+                            "playgroundSort": 81000,
+                            "skuName": "deepseek-ai/deepseek-v4-pro.online",
+                            "componentCode": "input-tokens",
+                            "coordinateDesc": "",
+                            "price_scenario": "兜底价",
+                            "realTimePriceCnyUnit": "0.012000",
+                            "unitZhCnName": "K tokens",
+                        },
+                        {
+                            "playgroundName": "deepseek-ai/DeepSeek-V4-Pro",
+                            "playgroundSort": 81000,
+                            "skuName": "deepseek-ai/deepseek-v4-pro.online",
+                            "componentCode": "output-tokens",
+                            "coordinateDesc": "",
+                            "price_scenario": "兜底价",
+                            "realTimePriceCnyUnit": "0.024000",
+                            "unitZhCnName": "K tokens",
+                        },
+                    ]
+                ),
+            },
+        )
+
+        self.assertEqual(payload["total_models"], 1)
+        self.assertEqual(
+            payload["models"][0]["model_id"],
+            "deepseek-ai/DeepSeek-V4-Pro",
+        )
+
     def test_aliyun_vendor_skill_extracts_unconfigured_page_rows(self):
         payload = run_vendor_pricing_skill(
             "aliyun",

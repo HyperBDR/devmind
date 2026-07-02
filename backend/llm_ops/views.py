@@ -17,6 +17,7 @@ from .collection_services import (
     ensure_supported_official_provider_source,
     official_provider_source_slug,
     reset_official_price_catalog,
+    supported_auto_sync_source_options,
     supported_official_provider_options,
     sync_configured_official_model_prices,
     sync_meta_models_from_models_dev,
@@ -86,7 +87,7 @@ from .services import (
     sync_channel_price_items,
 )
 from .source_collectors import source_supports_code_collection
-from .tasks import run_model_price_sync_agent
+from .tasks import collect_price_source_prices, run_model_price_sync_agent
 from .workflow_config import (
     merge_resale_workflow_config,
     validate_resale_workflow_config,
@@ -241,6 +242,19 @@ class PriceCollectionSourceViewSet(
 
     @action(
         detail=False,
+        methods=["get"],
+        url_path="auto-sync-options",
+        url_name="auto-sync-options",
+    )
+    def auto_sync_options(self, request):
+        """List price source presets backed by collection code."""
+        return Response(
+            {"results": supported_auto_sync_source_options()},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=False,
         methods=["post"],
         url_path="official-provider",
         url_name="ensure-official-provider",
@@ -312,8 +326,8 @@ class PriceCollectionSourceViewSet(
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if source_supports_code_collection(source):
-            task = run_model_price_sync_agent.delay(
-                source_ids=[source.id],
+            task = collect_price_source_prices.delay(
+                source_id=source.id,
                 verify_source=True,
             )
             record_audit_log(

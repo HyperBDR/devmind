@@ -7,10 +7,12 @@ from llm_ops.models import (
     LLMProvider,
     MetaModel,
     ModelPriceItem,
+    ModelSku,
     PriceCollectionRun,
     PriceCollectionSource,
     ProcurementChannel,
     ResalePlatform,
+    SourceSkuOffering,
 )
 from llm_ops.serializers import (
     LLMModelSerializer,
@@ -402,22 +404,22 @@ class PriceCollectionSourceSerializerTests(TestCase):
         self.assertEqual(data["business_source_category"], "cloud_hosted")
 
     def test_source_representation_includes_stable_summary_fields(self):
-        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
         source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
+            name="DeepSeek Official",
+            slug="deepseek-official",
             provider=provider,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://openai.com/api/pricing/",
+            endpoint_url="https://api-docs.deepseek.com/quick_start/pricing",
             updates_model_prices=True,
         )
         model = LLMModel.objects.create(
             provider=provider,
             source=source,
-            name="GPT-4o mini",
-            code="gpt-4o-mini",
+            name="DeepSeek Chat",
+            code="deepseek-chat",
         )
         ModelPriceItem.objects.create(
             provider=provider,
@@ -426,9 +428,9 @@ class PriceCollectionSourceSerializerTests(TestCase):
             source=source,
             dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
             billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
-            currency="USD",
+            currency="CNY",
             unit_price=Decimal("0.150000"),
-            price_fingerprint="openai-input",
+            price_fingerprint="deepseek-input",
         )
         PriceCollectionRun.objects.create(
             source=source,
@@ -442,6 +444,24 @@ class PriceCollectionSourceSerializerTests(TestCase):
         self.assertEqual(data["latest_run_status"], "succeeded")
         self.assertTrue(data["capabilities"]["can_collect_prices"])
         self.assertTrue(data["capabilities"]["updates_model_prices"])
+
+    def test_supplier_collector_representation_infers_auto_collect(self):
+        source = PriceCollectionSource.objects.create(
+            name="SiliconFlow Pricing",
+            slug="siliconflow-pricing",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            source_owner_type=PriceCollectionSource.SOURCE_OWNER_SUPPLIER,
+            collection_method=PriceCollectionSource.COLLECTION_METHOD_UNKNOWN,
+            endpoint_url="https://siliconflow.cn/pricing",
+            currency="CNY",
+            updates_model_prices=True,
+        )
+
+        data = PriceCollectionSourceSerializer(source).data
+
+        self.assertEqual(data["source_category"], "supplier")
+        self.assertEqual(data["collection_method"], "auto_collect")
+        self.assertTrue(data["capabilities"]["can_collect_prices"])
 
 
 class LLMModelSerializerTests(TestCase):
@@ -577,7 +597,7 @@ class ManualPriceImportRequestSerializerTests(TestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         self.assertFalse(serializer.validated_data["updates_model_prices"])
 
-    def test_existing_official_source_manual_import_never_promotes_prices(self):
+    def test_manual_import_never_promotes_prices(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         source = PriceCollectionSource.objects.create(
             name="OpenAI Official",
@@ -673,6 +693,28 @@ class ModelPriceItemSerializerTests(TestCase):
             input_price_per_million=Decimal("4"),
             output_price_per_million=Decimal("16"),
         )
+        source = PriceCollectionSource.objects.create(
+            name="DeepSeek Official",
+            slug="deepseek-official",
+            provider=deepseek,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+        )
+        sku = ModelSku.objects.create(
+            meta_model=model.meta_model,
+            provider=deepseek,
+            canonical_sku_code=model.code,
+            upstream_model_name=model.code,
+            display_name=model.name,
+            variant_type=ModelSku.VARIANT_OFFICIAL,
+        )
+        offering = SourceSkuOffering.objects.create(
+            source=source,
+            sku=sku,
+            provider=deepseek,
+            exposed_model_name=model.code,
+        )
         wrong_meta = MetaModel.objects.create(
             name="阿里云 DeepSeek R1 250528",
             code="aliyun-deepseek-r1-250528",
@@ -685,6 +727,9 @@ class ModelPriceItemSerializerTests(TestCase):
             data={
                 "provider": deepseek.id,
                 "model": model.id,
+                "sku": sku.id,
+                "offering": offering.id,
+                "source": source.id,
                 "meta_model": wrong_meta.id,
                 "dimension": ModelPriceItem.DIMENSION_TEXT_INPUT,
                 "billing_unit": ModelPriceItem.UNIT_PER_1M_TOKENS,

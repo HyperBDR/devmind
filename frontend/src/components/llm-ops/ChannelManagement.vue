@@ -179,6 +179,7 @@
     <ChannelModelDrawer
       :channel="selectedChannelForModels"
       :providers="providers"
+      :meta-models="metaModels"
       :models="models"
       :channel-prices="channelPrices"
       :channel-price-items="channelPriceItems"
@@ -264,6 +265,10 @@ const props = defineProps({
   providers: {
     type: Array,
     required: true
+  },
+  metaModels: {
+    type: Array,
+    default: () => []
   },
   models: {
     type: Array,
