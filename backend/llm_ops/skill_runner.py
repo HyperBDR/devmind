@@ -115,10 +115,13 @@ def standard_catalog_run_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     metadata = {
         "catalog_schema_version": payload.get("schema_version") or "",
         "catalog_source_type": payload.get("source_type") or "",
+        "vendor_catalog_provider": provider.get("code") or "",
+        "vendor_catalog_model_count": len(payload.get("models") or []),
         "vendor_skill_provider": provider.get("code") or "",
         "vendor_skill_model_count": len(payload.get("models") or []),
     }
     if raw_payload.get("collector"):
+        metadata["vendor_catalog_collector"] = raw_payload["collector"]
         metadata["vendor_skill_collector"] = raw_payload["collector"]
     return metadata
 

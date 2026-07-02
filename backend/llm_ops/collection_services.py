@@ -27,8 +27,14 @@ from .models import (
     LLMProvider,
     MetaModel,
     ModelPriceItem,
+    ModelSku,
     PriceCollectionRun,
     PriceCollectionSource,
+    SourceSkuOffering,
+)
+from .price_collectors import (
+    collect_vendor_price_catalog,
+    vendor_price_collector_exists,
 )
 from .services import (
     find_aggregated_model,
@@ -48,7 +54,7 @@ SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = tuple(
     sorted(OFFICIAL_PROVIDER_CONFIGS.keys())
 )
 DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES: tuple[str, ...] = ()
-FULL_CATALOG_VENDOR_SKILL_PROVIDER_CODES = (
+FULL_CATALOG_PROVIDER_CODES = (
     "aliyun",
     "baidu",
     "volcengine",
@@ -196,7 +202,7 @@ def sync_yunce_model_prices(
                         skipped_provider_names.append(item.model_source)
                     continue
 
-                upsert_result = upsert_collected_model(
+                upsert_result = upsert_collected_offering(
                     item,
                     source=source,
                     source_url=catalog.source_url,
@@ -207,19 +213,17 @@ def sync_yunce_model_prices(
                         collected_model_code(item),
                     )
                     continue
-                model, created = upsert_result
+                offering, created = upsert_result
                 _, changed = upsert_collected_snapshot(
                     item,
                     source=source,
                     run=run,
-                    model=model,
-                    provider=model.provider,
+                    offering=offering,
                 )
                 sync_model_price_items(
                     item,
                     source=source,
-                    model=model,
-                    provider=model.provider,
+                    offering=offering,
                     source_url=catalog.source_url,
                 )
                 stats["models"] += 1
@@ -242,6 +246,106 @@ def sync_yunce_model_prices(
                 "skipped_provider_names": sorted(
                     set(skipped_provider_names),
                 ),
+                "skipped_model_codes": sorted(
+                    set(stats["skipped_model_codes"]),
+                ),
+            }
+            run.save()
+        return stats
+    except Exception as exc:
+        run.status = PriceCollectionRun.STATUS_FAILED
+        run.finished_at = timezone.now()
+        run.error_message = str(exc)
+        run.collected_count = stats["models"]
+        run.created_count = stats["created"]
+        run.updated_count = stats["updated"]
+        run.skipped_count = stats["skipped"]
+        run.save()
+        raise
+
+
+def sync_vendor_price_source_catalog(
+    *,
+    provider_code: str,
+    source: PriceCollectionSource,
+    verify_source: bool = True,
+) -> dict[str, int | list[str]]:
+    """Collect a non-official vendor price source through an adapter."""
+    if not source.is_enabled:
+        raise ValueError("Price collection source is disabled.")
+    source_url = source.endpoint_url or ""
+    run = PriceCollectionRun.objects.create(source=source)
+    stats = {
+        "models": 0,
+        "created": 0,
+        "updated": 0,
+        "skipped": 0,
+        "changed": 0,
+        "unchanged": 0,
+        "skipped_model_codes": [],
+    }
+    try:
+        standard_catalog = collect_vendor_price_catalog(
+            provider_code,
+            {
+                "provider_name": source.name,
+                "currency": source.currency or "CNY",
+                "source_url": source_url,
+                "model_codes": [],
+                "verify_source": verify_source,
+            },
+        )
+        catalog = standard_catalog_to_collected_catalog(standard_catalog)
+        with transaction.atomic():
+            for item in catalog.models:
+                model_code = collected_model_code(item)
+                meta_model = existing_meta_model_for_collected_item(item)
+                if meta_model is None:
+                    stats["skipped"] += 1
+                    stats["skipped_model_codes"].append(model_code)
+                    continue
+                upsert_result = upsert_collected_offering(
+                    item,
+                    source=source,
+                    source_url=catalog.source_url,
+                    meta_model=meta_model,
+                )
+                if upsert_result is None:
+                    stats["skipped"] += 1
+                    stats["skipped_model_codes"].append(model_code)
+                    continue
+                offering, created = upsert_result
+                _, changed = upsert_collected_snapshot(
+                    item,
+                    source=source,
+                    run=run,
+                    offering=offering,
+                )
+                sync_model_price_items(
+                    item,
+                    source=source,
+                    offering=offering,
+                    source_url=catalog.source_url,
+                )
+                stats["models"] += 1
+                stats["created" if created else "updated"] += 1
+                stats["changed" if changed else "unchanged"] += 1
+
+            source.last_collected_at = timezone.now()
+            source.save(update_fields=["last_collected_at", "updated_at"])
+            run.status = PriceCollectionRun.STATUS_SUCCEEDED
+            run.finished_at = timezone.now()
+            run.collected_count = stats["models"]
+            run.created_count = stats["created"]
+            run.updated_count = stats["updated"]
+            run.skipped_count = stats["skipped"]
+            run.metadata = {
+                **standard_catalog_run_metadata(standard_catalog),
+                "source_url": catalog.source_url,
+                "total_models": catalog.total_models,
+                "currency": source.currency or "CNY",
+                "changed_count": stats["changed"],
+                "unchanged_count": stats["unchanged"],
                 "skipped_model_codes": sorted(
                     set(stats["skipped_model_codes"]),
                 ),
@@ -401,7 +505,7 @@ def sync_official_provider_model_prices(
                 if meta_model is None:
                     skipped_codes.append(model_code)
                     continue
-                upsert_result = upsert_collected_model(
+                upsert_result = upsert_collected_offering(
                     item,
                     source=source,
                     source_url=catalog.source_url,
@@ -410,19 +514,17 @@ def sync_official_provider_model_prices(
                 if upsert_result is None:
                     skipped_codes.append(model_code)
                     continue
-                model, created = upsert_result
+                offering, created = upsert_result
                 _, changed = upsert_collected_snapshot(
                     item,
                     source=source,
                     run=run,
-                    model=model,
-                    provider=model.provider,
+                    offering=offering,
                 )
                 sync_model_price_items(
                     item,
                     source=source,
-                    model=model,
-                    provider=model.provider,
+                    offering=offering,
                     source_url=catalog.source_url,
                 )
                 stats["models"] = int(stats["models"]) + 1
@@ -485,12 +587,33 @@ def collect_official_provider_price_catalog(
     verify_source: bool,
 ) -> tuple[CollectedPricingCatalog, dict | None]:
     """Collect an official provider catalog through the JSON contract."""
+    if vendor_price_collector_exists(provider.code):
+        collector_model_codes = (
+            None
+            if (
+                verify_source
+                and provider.code in FULL_CATALOG_PROVIDER_CODES
+            )
+            else target_model_codes
+        )
+        standard_catalog = collect_official_provider_standard_catalog(
+            provider=provider,
+            source=source,
+            verify_source=verify_source,
+            model_codes=collector_model_codes,
+            source_url=source_url,
+        )
+        return (
+            standard_catalog_to_collected_catalog(standard_catalog),
+            standard_catalog,
+        )
+
     if vendor_pricing_skill_exists(provider.code):
         skill_model_codes = (
             None
             if (
                 verify_source
-                and provider.code in FULL_CATALOG_VENDOR_SKILL_PROVIDER_CODES
+                and provider.code in FULL_CATALOG_PROVIDER_CODES
             )
             else target_model_codes
         )
@@ -526,9 +649,13 @@ def collect_official_provider_standard_catalog(
     """Collect official prices as standard JSON without persistence."""
     if provider.code not in OFFICIAL_PROVIDER_CONFIGS:
         raise ValueError(f"Unsupported official provider: {provider.code}")
-    if not vendor_pricing_skill_exists(provider.code):
+    if not (
+        vendor_price_collector_exists(provider.code)
+        or vendor_pricing_skill_exists(provider.code)
+    ):
         raise ValueError(
-            f"No vendor pricing skill is available for {provider.code}."
+            "No vendor price catalog collector is available for "
+            f"{provider.code}."
         )
     if source.provider_id != provider.id:
         raise ValueError("Price source does not belong to the provider.")
@@ -540,16 +667,20 @@ def collect_official_provider_standard_catalog(
         source,
         config,
     )
+    vendor_payload = {
+        "provider_code": provider.code,
+        "provider_name": provider.name,
+        "currency": source.currency or config.currency,
+        "source_url": resolved_source_url,
+        "model_codes": sorted(target_model_codes),
+        "verify_source": verify_source,
+    }
+    if vendor_price_collector_exists(provider.code):
+        return collect_vendor_price_catalog(provider.code, vendor_payload)
+
     return run_vendor_pricing_skill(
         provider.code,
-        {
-            "provider_code": provider.code,
-            "provider_name": provider.name,
-            "currency": source.currency or config.currency,
-            "source_url": resolved_source_url,
-            "model_codes": sorted(target_model_codes),
-            "verify_source": verify_source,
-        },
+        vendor_payload,
     )
 
 
@@ -1014,7 +1145,10 @@ def ensure_official_model_source(
             "currency": currency or "USD",
             "is_enabled": True,
             "updates_model_prices": True,
-            "notes": ("官方公开价格采集源；" "该来源只对应一个模型。"),
+            "notes": (
+                "官方公开价格采集源；"
+                "该来源只对应一个模型。"
+            ),
         },
     )
     if created:
@@ -1035,7 +1169,10 @@ def ensure_official_model_source(
         ),
         "currency": currency or source.currency or "USD",
         "updates_model_prices": True,
-        "notes": ("官方公开价格采集源；该来源只对应一个模型。"),
+        "notes": (
+            "官方公开价格采集源；"
+            "该来源只对应一个模型。"
+        ),
     }
     if not source.endpoint_url:
         desired_fields["endpoint_url"] = source_url
@@ -1388,6 +1525,178 @@ def is_legacy_aliyun_pricing_url(provider_code: str, url: str) -> bool:
     return url in ALIYUN_LEGACY_PRICING_SOURCE_URLS
 
 
+def upsert_collected_offering(
+    item: CollectedModelPricing,
+    *,
+    source: PriceCollectionSource,
+    source_url: str,
+    meta_model: MetaModel | None = None,
+) -> tuple[SourceSkuOffering, bool] | None:
+    """Upsert the final SKU/offering identity for one collected price."""
+    meta_model = meta_model or existing_meta_model_for_collected_item(item)
+    if meta_model is None:
+        return None
+    provider = resolve_collected_provider(item, source=source)
+    sku = upsert_collected_sku(
+        item,
+        provider=provider,
+        meta_model=meta_model,
+        source=source,
+        source_url=source_url,
+    )
+    offering, created = upsert_collected_source_offering(
+        item,
+        source=source,
+        sku=sku,
+        provider=provider,
+        source_url=source_url,
+    )
+    upsert_legacy_model_for_offering(
+        item,
+        source=source,
+        offering=offering,
+        source_url=source_url,
+    )
+    return offering, created
+
+
+def upsert_collected_sku(
+    item: CollectedModelPricing,
+    *,
+    provider: LLMProvider,
+    meta_model: MetaModel,
+    source: PriceCollectionSource,
+    source_url: str,
+) -> ModelSku:
+    """Upsert a provider SKU without confirming runtime routing."""
+    sku_code = collected_model_code(item)
+    upstream_name = collected_model_raw_code(item) or sku_code
+    display_name = item.name or upstream_name
+    sku, created = ModelSku.objects.get_or_create(
+        provider=provider,
+        canonical_sku_code=sku_code,
+        region=sku_region(item),
+        mode=sku_mode(item),
+        api_type=sku_api_type(item),
+        defaults={
+            "meta_model": meta_model,
+            "upstream_model_name": upstream_name,
+            "display_name": display_name,
+            "variant_type": sku_variant_type(source),
+            "capabilities": {},
+            "evidence": sku_evidence(source=source, source_url=source_url),
+            "routing_status": ModelSku.ROUTING_CANDIDATE,
+            "is_routable": False,
+            "is_active": True,
+        },
+    )
+    changed_fields = []
+    routing_locked = sku.routing_status == ModelSku.ROUTING_LOCKED
+    if not routing_locked and sku.meta_model_id != meta_model.id:
+        sku.meta_model = meta_model
+        changed_fields.append("meta_model")
+    if not routing_locked and not sku.display_name and display_name:
+        sku.display_name = display_name
+        changed_fields.append("display_name")
+    if created is False and not routing_locked:
+        if not sku.upstream_model_name and upstream_name:
+            sku.upstream_model_name = upstream_name
+            changed_fields.append("upstream_model_name")
+    variant_type = sku_variant_type(source)
+    if (
+        not routing_locked
+        and sku.variant_type == ModelSku.VARIANT_UNKNOWN
+        and variant_type != ModelSku.VARIANT_UNKNOWN
+    ):
+        sku.variant_type = variant_type
+        changed_fields.append("variant_type")
+    evidence = dict(sku.evidence or {})
+    evidence.update(sku_evidence(source=source, source_url=source_url))
+    if evidence != (sku.evidence or {}):
+        sku.evidence = evidence
+        changed_fields.append("evidence")
+    if changed_fields:
+        changed_fields.append("updated_at")
+        sku.save(update_fields=changed_fields)
+    return sku
+
+
+def upsert_collected_source_offering(
+    item: CollectedModelPricing,
+    *,
+    source: PriceCollectionSource,
+    sku: ModelSku,
+    provider: LLMProvider,
+    source_url: str,
+) -> tuple[SourceSkuOffering, bool]:
+    """Upsert the source-facing offering for one collected SKU."""
+    exposed_model_name = source_exposed_model_name(item, sku)
+    offering, created = SourceSkuOffering.objects.get_or_create(
+        source=source,
+        sku=sku,
+        exposed_model_name=exposed_model_name,
+        defaults={
+            "provider": provider,
+            "pricing_method": SourceSkuOffering.METHOD_COLLECTED,
+            "evidence": offering_evidence(
+                source=source,
+                sku=sku,
+                source_url=source_url,
+            ),
+            "is_active": True,
+        },
+    )
+    changed_fields = []
+    if offering.provider_id != provider.id:
+        offering.provider = provider
+        changed_fields.append("provider")
+    if not offering.is_active:
+        offering.is_active = True
+        changed_fields.append("is_active")
+    evidence = dict(offering.evidence or {})
+    evidence.update(
+        offering_evidence(
+            source=source,
+            sku=sku,
+            source_url=source_url,
+        )
+    )
+    if evidence != (offering.evidence or {}):
+        offering.evidence = evidence
+        changed_fields.append("evidence")
+    if not created and changed_fields:
+        changed_fields.append("updated_at")
+        offering.save(update_fields=changed_fields)
+    return offering, created
+
+
+def sku_region(item: CollectedModelPricing) -> str:
+    """Return explicit SKU region identity from collector metadata."""
+    raw_detail = item.raw_detail or {}
+    model_info = raw_detail.get("model_info") or {}
+    if not isinstance(model_info, dict):
+        model_info = {}
+    value = (
+        raw_detail.get("sku_region")
+        or raw_detail.get("deployment_region")
+        or model_info.get("sku_region")
+        or model_info.get("deployment_region")
+    )
+    return str(value or "").strip()
+
+
+def sku_mode(item: CollectedModelPricing) -> str:
+    """Return SKU mode identity from collector metadata."""
+    return str(item.mode or "").strip()
+
+
+def sku_api_type(item: CollectedModelPricing) -> str:
+    """Return SKU API type identity from collector metadata."""
+    raw_detail = item.raw_detail or {}
+    value = raw_detail.get("api_type") or raw_detail.get("endpoint_type")
+    return str(value or "").strip()
+
+
 def upsert_collected_model(
     item: CollectedModelPricing,
     *,
@@ -1426,11 +1735,24 @@ def upsert_collected_model(
                 code=model_code,
             )
         if existing is None:
-            return LLMModel.objects.create(**{**lookup, **defaults}), True
+            model = LLMModel.objects.create(**{**lookup, **defaults})
+            ensure_model_sku_for_model(
+                model,
+                item=item,
+                source=source,
+                source_url=source_url,
+            )
+            return model, True
         changed_fields = update_model_from_defaults(existing, defaults)
         if changed_fields:
             changed_fields.append("updated_at")
             existing.save(update_fields=changed_fields)
+        ensure_model_sku_for_model(
+            existing,
+            item=item,
+            source=source,
+            source_url=source_url,
+        )
         return existing, False
 
     model = find_aggregated_model(
@@ -1446,14 +1768,18 @@ def upsert_collected_model(
             source,
             meta_model=meta_model,
         )
-        return (
-            LLMModel.objects.create(
-                provider=provider,
-                code=model_code,
-                **create_defaults,
-            ),
-            True,
+        model = LLMModel.objects.create(
+            provider=provider,
+            code=model_code,
+            **create_defaults,
         )
+        ensure_model_sku_for_model(
+            model,
+            item=item,
+            source=source,
+            source_url=source_url,
+        )
+        return model, True
 
     changed_fields = update_aggregated_model_identity(
         model,
@@ -1466,7 +1792,317 @@ def upsert_collected_model(
     if changed_fields:
         changed_fields.append("updated_at")
         model.save(update_fields=changed_fields)
+    ensure_model_sku_for_model(
+        model,
+        item=item,
+        source=source,
+        source_url=source_url,
+    )
     return model, False
+
+
+def ensure_model_sku_for_model(
+    model: LLMModel,
+    *,
+    item: CollectedModelPricing,
+    source: PriceCollectionSource,
+    source_url: str,
+) -> ModelSku:
+    """Ensure a provider SKU exists without making it routable by default."""
+    sku_code = collected_model_code(item)
+    upstream_name = collected_model_raw_code(item) or sku_code
+    display_name = item.name or upstream_name
+    sku, created = ModelSku.objects.get_or_create(
+        provider=model.provider,
+        canonical_sku_code=sku_code,
+        region="",
+        mode="",
+        api_type="",
+        defaults={
+            "meta_model": model.meta_model,
+            "upstream_model_name": upstream_name,
+            "display_name": display_name,
+            "variant_type": sku_variant_type(source),
+            "capabilities": {},
+            "evidence": sku_evidence(source=source, source_url=source_url),
+            "routing_status": ModelSku.ROUTING_CANDIDATE,
+            "is_routable": False,
+            "is_active": True,
+        },
+    )
+    changed_fields = []
+    routing_locked = sku.routing_status == ModelSku.ROUTING_LOCKED
+    if not routing_locked and sku.meta_model_id != model.meta_model_id:
+        sku.meta_model = model.meta_model
+        changed_fields.append("meta_model")
+    if not routing_locked and not sku.display_name and display_name:
+        sku.display_name = display_name
+        changed_fields.append("display_name")
+    if created is False and not routing_locked:
+        if not sku.upstream_model_name and upstream_name:
+            sku.upstream_model_name = upstream_name
+            changed_fields.append("upstream_model_name")
+    variant_type = sku_variant_type(source)
+    if (
+        not routing_locked
+        and sku.variant_type == ModelSku.VARIANT_UNKNOWN
+        and variant_type != ModelSku.VARIANT_UNKNOWN
+    ):
+        sku.variant_type = variant_type
+        changed_fields.append("variant_type")
+    evidence = dict(sku.evidence or {})
+    evidence.update(sku_evidence(source=source, source_url=source_url))
+    if evidence != (sku.evidence or {}):
+        sku.evidence = evidence
+        changed_fields.append("evidence")
+    if changed_fields:
+        changed_fields.append("updated_at")
+        sku.save(update_fields=changed_fields)
+
+    if model.sku_id != sku.id:
+        model.sku = sku
+        model.save(update_fields=["sku", "updated_at"])
+    return sku
+
+
+def sku_variant_type(source: PriceCollectionSource) -> str:
+    """Return SKU variant type from its collection source classification."""
+    if source.source_owner_type == (
+        PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    ):
+        return ModelSku.VARIANT_CLOUD_HOSTED
+    if source.source_category == (
+        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return ModelSku.VARIANT_OFFICIAL
+    if source.source_category == (
+        PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    ):
+        return ModelSku.VARIANT_RESELLER
+    return ModelSku.VARIANT_UNKNOWN
+
+
+def sku_evidence(*, source: PriceCollectionSource, source_url: str) -> dict:
+    """Return auditable evidence used to create or update a SKU."""
+    return {
+        "source_id": source.id,
+        "source_slug": source.slug,
+        "source_url": source_url,
+    }
+
+
+def ensure_source_sku_offering(
+    *,
+    source: PriceCollectionSource,
+    model: LLMModel,
+    item: CollectedModelPricing,
+    source_url: str,
+) -> SourceSkuOffering | None:
+    """Ensure the price source has an offering for the model SKU."""
+    if model.sku_id is None:
+        return None
+    exposed_model_name = source_exposed_model_name(item, model.sku)
+    offering, created = SourceSkuOffering.objects.get_or_create(
+        source=source,
+        sku=model.sku,
+        exposed_model_name=exposed_model_name,
+        defaults={
+            "provider": model.provider,
+            "pricing_method": SourceSkuOffering.METHOD_COLLECTED,
+            "evidence": offering_evidence(
+                source=source,
+                sku=model.sku,
+                source_url=source_url,
+            ),
+            "is_active": True,
+        },
+    )
+    changed_fields = []
+    if offering.provider_id != model.provider_id:
+        offering.provider = model.provider
+        changed_fields.append("provider")
+    if not offering.is_active:
+        offering.is_active = True
+        changed_fields.append("is_active")
+    evidence = dict(offering.evidence or {})
+    evidence.update(
+        offering_evidence(
+            source=source,
+            sku=model.sku,
+            source_url=source_url,
+        )
+    )
+    if evidence != (offering.evidence or {}):
+        offering.evidence = evidence
+        changed_fields.append("evidence")
+    if created is False and changed_fields:
+        changed_fields.append("updated_at")
+        offering.save(update_fields=changed_fields)
+    return offering
+
+
+def source_exposed_model_name(
+    item: CollectedModelPricing,
+    sku: ModelSku | None,
+) -> str:
+    """Return the model name exposed by this source for routing."""
+    raw_detail = item.raw_detail or {}
+    model_info = raw_detail.get("model_info") or {}
+    if not isinstance(model_info, dict):
+        model_info = {}
+    for candidate in (
+        raw_detail.get("exposed_model_name"),
+        raw_detail.get("source_model_id"),
+        raw_detail.get("published_model_id"),
+        raw_detail.get("model_id"),
+        model_info.get("exposed_model_name"),
+        model_info.get("source_model_id"),
+        model_info.get("model_id"),
+        item.model_id,
+        sku.canonical_sku_code if sku else "",
+    ):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def upsert_legacy_model_for_offering(
+    item: CollectedModelPricing,
+    *,
+    source: PriceCollectionSource,
+    offering: SourceSkuOffering,
+    source_url: str,
+) -> LLMModel | None:
+    """Keep the legacy model table in sync for existing API consumers."""
+    model_code = collected_model_code(item)
+    provider = offering.provider
+    meta_model = offering.sku.meta_model
+    defaults = model_defaults_from_collected_item(
+        item,
+        source=source,
+        source_url=source_url,
+    )
+    defaults["source"] = source
+    defaults["sku"] = offering.sku
+    defaults["meta_model"] = meta_model
+    defaults["price_role"] = price_role_for_source(
+        source,
+        meta_model=meta_model,
+    )
+
+    if source.updates_model_prices:
+        lookup = {
+            "provider": provider,
+            "source": source,
+            "code": model_code,
+        }
+        model = LLMModel.objects.filter(**lookup).first()
+        if model is None:
+            model = legacy_official_model_for_provider_source(
+                provider=provider,
+                source=source,
+                code=model_code,
+            )
+        if model is None:
+            return LLMModel.objects.create(**{**lookup, **defaults})
+        previous_source_id = model.source_id
+        changed_fields = update_model_from_defaults(model, defaults)
+        if changed_fields:
+            changed_fields.append("updated_at")
+            model.save(update_fields=changed_fields)
+        close_legacy_current_price_items(
+            model=model,
+            previous_source_id=previous_source_id,
+            source=source,
+        )
+        return model
+
+    model = find_aggregated_model(
+        provider=provider,
+        code=model_code,
+        meta_model=meta_model,
+        source=source,
+    )
+    if model is None:
+        create_defaults = model_identity_defaults_from_collected_item(item)
+        create_defaults["meta_model"] = meta_model
+        create_defaults["sku"] = offering.sku
+        create_defaults["price_role"] = price_role_for_source(
+            source,
+            meta_model=meta_model,
+        )
+        return LLMModel.objects.create(
+            provider=provider,
+            code=model_code,
+            **create_defaults,
+        )
+
+    changed_fields = update_aggregated_model_identity(
+        model,
+        meta_model=meta_model,
+        name=item.name or item.model_id,
+        modality=modality_from_source_type(item.source_model_type),
+        currency=item.currency or source.currency or "USD",
+        current_source=source,
+    )
+    if model.sku_id != offering.sku_id:
+        model.sku = offering.sku
+        changed_fields.append("sku")
+    if changed_fields:
+        changed_fields.append("updated_at")
+        model.save(update_fields=changed_fields)
+    return model
+
+
+def close_legacy_current_price_items(
+    *,
+    model: LLMModel,
+    previous_source_id: int | None,
+    source: PriceCollectionSource,
+) -> None:
+    """Close current legacy price items after moving a model source."""
+    if previous_source_id in {None, source.id}:
+        return
+    ModelPriceItem.objects.filter(
+        model=model,
+        source_id=previous_source_id,
+        is_current=True,
+    ).update(
+        is_current=False,
+        effective_to=timezone.now(),
+    )
+
+
+def legacy_model_for_offering(
+    offering: SourceSkuOffering,
+) -> LLMModel | None:
+    """Return the legacy model row linked to an offering, when present."""
+    return (
+        LLMModel.objects.filter(
+            provider=offering.provider,
+            source=offering.source,
+            sku=offering.sku,
+        )
+        .order_by("id")
+        .first()
+    )
+
+
+def offering_evidence(
+    *,
+    source: PriceCollectionSource,
+    sku: ModelSku | None,
+    source_url: str,
+) -> dict:
+    """Return evidence proving a source offers one SKU."""
+    return {
+        "source_id": source.id,
+        "source_slug": source.slug,
+        "source_url": source_url,
+        "sku_id": sku.id if sku else None,
+        "sku_code": sku.canonical_sku_code if sku else "",
+    }
 
 
 def legacy_official_model_for_provider_source(
@@ -1576,7 +2212,11 @@ def resolve_collected_provider(
     source: PriceCollectionSource,
 ) -> LLMProvider:
     """Resolve the provider row a collected model should attach to."""
-    if source.provider_id:
+    if (
+        source.provider_id
+        and source.source_category
+        != PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    ):
         return source.provider
 
     candidate_labels = [
@@ -1628,21 +2268,20 @@ def upsert_collected_snapshot(
     *,
     source: PriceCollectionSource,
     run: PriceCollectionRun,
-    model: LLMModel,
-    provider: LLMProvider,
+    offering: SourceSkuOffering,
 ) -> tuple[CollectedModelPriceSnapshot, bool]:
-    """Persist the latest normalized source payload for one model."""
+    """Persist the latest normalized source payload for one offering."""
     rows = normalized_rows_payload(item)
     payload = collected_payload(
         item,
         run=run,
-        model=model,
-        provider=provider,
+        offering=offering,
         rows=rows,
     )
     fingerprint = price_fingerprint(payload)
     existing = CollectedModelPriceSnapshot.objects.filter(
         source=source,
+        offering=offering,
         source_platform_id=str(item.platform_id),
     ).first()
     changed = existing is None or existing.price_fingerprint != fingerprint
@@ -1658,6 +2297,7 @@ def upsert_collected_snapshot(
     payload["price_fingerprint"] = fingerprint
     snapshot, _ = CollectedModelPriceSnapshot.objects.update_or_create(
         source=source,
+        offering=offering,
         source_platform_id=str(item.platform_id),
         defaults=payload,
     )
@@ -1680,16 +2320,17 @@ def collected_payload(
     item: CollectedModelPricing,
     *,
     run: PriceCollectionRun,
-    model: LLMModel,
-    provider: LLMProvider,
+    offering: SourceSkuOffering,
     rows: list[dict],
 ) -> dict:
     """Build common collected price payload fields."""
     return {
         "run": run,
-        "provider": provider,
-        "model": model,
-        "meta_model": model.meta_model,
+        "provider": offering.provider,
+        "model": legacy_model_for_offering(offering),
+        "sku": offering.sku,
+        "offering": offering,
+        "meta_model": offering.sku.meta_model,
         "source_model_id": collected_model_code(item),
         "source_model_name": item.name or item.model_id,
         "source_model_type": item.source_model_type,
@@ -1733,6 +2374,7 @@ def create_collected_price_history(
     now = timezone.now()
     CollectedModelPriceHistory.objects.filter(
         source=source,
+        offering=payload["offering"],
         source_platform_id=source_platform_id,
         is_current=True,
     ).update(
@@ -1744,6 +2386,8 @@ def create_collected_price_history(
         run=payload["run"],
         provider=payload["provider"],
         model=payload["model"],
+        sku=payload["sku"],
+        offering=payload["offering"],
         meta_model=payload["meta_model"],
         source_platform_id=source_platform_id,
         source_model_id=payload["source_model_id"],
@@ -1767,16 +2411,14 @@ def sync_model_price_items(
     item: CollectedModelPricing,
     *,
     source: PriceCollectionSource,
-    model: LLMModel,
-    provider: LLMProvider,
+    offering: SourceSkuOffering,
     source_url: str,
 ) -> list[ModelPriceItem]:
     """Persist normalized official price items for display and comparison."""
     payloads = model_price_item_payloads(
         item,
         source=source,
-        model=model,
-        provider=provider,
+        offering=offering,
         source_url=source_url,
     )
     if not payloads:
@@ -1784,17 +2426,10 @@ def sync_model_price_items(
 
     now = timezone.now()
     current_filter = {
-        "model": model,
+        "offering": offering,
+        "source": source,
         "is_current": True,
     }
-    if source.source_category == (
-        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-    ):
-        current_filter["source__source_category"] = (
-            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-        )
-    else:
-        current_filter["source"] = source
     ModelPriceItem.objects.filter(**current_filter).update(
         is_current=False,
         effective_to=now,
@@ -1804,7 +2439,7 @@ def sync_model_price_items(
         fingerprint = model_price_item_fingerprint(payload)
         payload["price_fingerprint"] = fingerprint
         price_item, _ = ModelPriceItem.objects.update_or_create(
-            model=model,
+            offering=offering,
             dimension=payload["dimension"],
             billing_unit=payload["billing_unit"],
             currency=payload["currency"],
@@ -1823,8 +2458,7 @@ def model_price_item_payloads(
     item: CollectedModelPricing,
     *,
     source: PriceCollectionSource,
-    model: LLMModel,
-    provider: LLMProvider,
+    offering: SourceSkuOffering,
     source_url: str,
 ) -> list[dict]:
     """Convert normalized source rows into durable price item payloads."""
@@ -1835,8 +2469,7 @@ def model_price_item_payloads(
                 item,
                 row,
                 source=source,
-                model=model,
-                provider=provider,
+                offering=offering,
                 source_url=source_url,
                 row_index=index,
             )
@@ -1849,23 +2482,25 @@ def price_item_payloads_from_row(
     row,
     *,
     source: PriceCollectionSource,
-    model: LLMModel,
-    provider: LLMProvider,
+    offering: SourceSkuOffering,
     source_url: str,
     row_index: int,
 ) -> list[dict]:
     """Convert one normalized row into one or more price item payloads."""
     values = row.values or {}
+    sku = offering.sku
     common = {
-        "provider": provider,
-        "model": model,
-        "meta_model": model.meta_model,
+        "provider": offering.provider,
+        "sku": sku,
+        "offering": offering,
+        "model": legacy_model_for_offering(offering),
+        "meta_model": sku.meta_model,
         "source": source,
         "price_role": price_role_for_source(
             source,
-            meta_model=model.meta_model,
+            meta_model=sku.meta_model,
         ),
-        "currency": item.currency or source.currency or "USD",
+        "currency": row_price_currency(item, row, source),
         "source_url": source_url,
         "raw_payload": {
             "kind": row.kind,
@@ -1876,7 +2511,12 @@ def price_item_payloads_from_row(
     }
 
     if row.kind in {"text_token", "text_unit"}:
-        return token_price_item_payloads(item, values, common)
+        return token_price_item_payloads(
+            item,
+            values,
+            common,
+            spec=row_price_spec(row),
+        )
     if row.kind == "image_token":
         return image_token_price_item_payloads(item, values, common)
     if row.kind in {"image_size", "image_unit"}:
@@ -1924,6 +2564,8 @@ def token_price_item_payloads(
     item: CollectedModelPricing,
     values: dict,
     common: dict,
+    *,
+    spec: dict | None = None,
 ) -> list[dict]:
     """Build token input/output price item payloads."""
     payloads = []
@@ -1944,6 +2586,7 @@ def token_price_item_payloads(
                 dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(input_price, item.unit),
+                spec=spec,
                 tier_start=input_range[0],
                 tier_end=input_range[1],
             )
@@ -1955,6 +2598,7 @@ def token_price_item_payloads(
                 dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(output_price, item.unit),
+                spec=spec,
                 tier_start=output_range[0],
                 tier_end=output_range[1],
             )
@@ -1966,11 +2610,47 @@ def token_price_item_payloads(
                 dimension=ModelPriceItem.DIMENSION_CACHE_INPUT,
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(cache_price, item.unit),
+                spec=spec,
                 tier_start=input_range[0],
                 tier_end=input_range[1],
             )
         )
     return payloads
+
+
+def row_price_currency(
+    item: CollectedModelPricing,
+    row,
+    source: PriceCollectionSource,
+) -> str:
+    """Return row-specific currency, falling back to item/source currency."""
+    values = row.values or {}
+    raw = row.raw or {}
+    return str(
+        values.get("currency")
+        or raw.get("currency")
+        or item.currency
+        or source.currency
+        or "USD"
+    ).upper()
+
+
+def row_price_spec(row) -> dict:
+    """Return display/audit metadata that distinguishes price variants."""
+    values = row.values or {}
+    raw = row.raw or {}
+    spec = {}
+    for key in (
+        "currency",
+        "deployment_scope",
+        "region",
+        "market",
+        "billing_scope",
+    ):
+        value = values.get(key) or raw.get(key)
+        if value:
+            spec[key] = value
+    return spec
 
 
 def image_token_price_item_payloads(
@@ -2158,6 +2838,10 @@ def model_price_item_fingerprint(payload: dict) -> str:
     """Return a stable fingerprint for one normalized price item."""
     price_payload = {
         "source": payload.get("source").id if payload.get("source") else None,
+        "sku": payload.get("sku").id if payload.get("sku") else None,
+        "offering": (
+            payload.get("offering").id if payload.get("offering") else None
+        ),
         "dimension": payload["dimension"],
         "billing_unit": payload["billing_unit"],
         "currency": payload["currency"],
@@ -2346,7 +3030,8 @@ def ensure_official_source(*, provider: LLMProvider):
             "is_enabled": True,
             "updates_model_prices": True,
             "notes": (
-                "官方公开价格采集源；价格按官方币种入库，" "不做跨币种换算。"
+                "官方公开价格采集源；价格按官方币种入库，"
+                "不做跨币种换算。"
             ),
         },
     )
@@ -2368,7 +3053,8 @@ def ensure_official_source(*, provider: LLMProvider):
         "currency": config.currency,
         "updates_model_prices": True,
         "notes": (
-            "官方公开价格采集源；价格按官方币种入库，" "不做跨币种换算。"
+            "官方公开价格采集源；价格按官方币种入库，"
+            "不做跨币种换算。"
         ),
     }
     if not source.endpoint_url or is_legacy_aliyun_pricing_url(

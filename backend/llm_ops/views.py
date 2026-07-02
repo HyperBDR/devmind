@@ -868,6 +868,8 @@ class ModelPriceItemViewSet(
             "provider",
             "model",
             "model__meta_model",
+            "sku",
+            "offering",
             "source",
         )
         provider = self.request.query_params.get("provider")
@@ -890,6 +892,7 @@ class ModelPriceItemViewSet(
             queryset = queryset.filter(is_current=is_current == "true")
         return queryset.order_by(
             "provider__name",
+            "sku__display_name",
             "model__name",
             "dimension",
             "tier_start",
@@ -2647,7 +2650,9 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "model_name": listing.model.name,
                     "model_code": listing.model.code,
                     "channel_id": listing.channel_id,
-                    "channel_name": (channel.name if channel else "自动最优"),
+                    "channel_name": (
+                        channel.name if channel else "自动最优"
+                    ),
                     "currency": (
                         currency_context.display_currency
                         if not requires_currency_conversion
@@ -3016,6 +3021,8 @@ class ManualPriceImportAPIView(LLMOpsPermissionMixin, APIView):
                     "provider",
                     "meta_model",
                     "model",
+                    "sku",
+                    "offering",
                     "source",
                     "source__channel",
                     "source__provider",

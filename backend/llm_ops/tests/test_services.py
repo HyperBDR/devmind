@@ -10,11 +10,13 @@ from llm_ops.models import (
     LLMProvider,
     MetaModel,
     ModelPriceItem,
+    ModelSku,
     PriceCollectionSource,
     ProcurementChannel,
     ResaleListing,
     ResaleListingPriceHistory,
     ResalePlatform,
+    SourceSkuOffering,
 )
 from llm_ops.services import (
     calculate_channel_model_cost,
@@ -369,6 +371,85 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].base_price_item, official_item)
         self.assertEqual(items[0].unit_price, Decimal("1.250000"))
         self.assertEqual(cost, Decimal("1.250000"))
+
+    def test_sync_uses_selected_source_offering_price_items(self):
+        first_source = PriceCollectionSource.objects.create(
+            name="Supplier One",
+            slug="supplier-one",
+            provider=self.provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        selected_source = PriceCollectionSource.objects.create(
+            name="Supplier Two",
+            slug="supplier-two",
+            provider=self.provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        sku = ModelSku.objects.create(
+            provider=self.provider,
+            meta_model=self.model.meta_model,
+            canonical_sku_code="gpt-4o",
+            upstream_model_name="gpt-4o",
+            display_name="GPT-4o",
+        )
+        first_offering = SourceSkuOffering.objects.create(
+            source=first_source,
+            sku=sku,
+            provider=self.provider,
+            exposed_model_name="gpt-4o",
+        )
+        selected_offering = SourceSkuOffering.objects.create(
+            source=selected_source,
+            sku=sku,
+            provider=self.provider,
+            exposed_model_name="gpt-4o",
+        )
+        ModelPriceItem.objects.create(
+            provider=self.provider,
+            sku=sku,
+            offering=first_offering,
+            meta_model=self.model.meta_model,
+            source=first_source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("9"),
+            price_fingerprint="first-source-input",
+            is_current=True,
+        )
+        selected_item = ModelPriceItem.objects.create(
+            provider=self.provider,
+            sku=sku,
+            offering=selected_offering,
+            meta_model=self.model.meta_model,
+            source=selected_source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("3"),
+            price_fingerprint="selected-source-input",
+            is_current=True,
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=selected_source,
+            settlement_ratio=Decimal("0.5"),
+        )
+
+        items = sync_channel_price_items(price)
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            input_tokens=1_000_000,
+        )
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].base_price_item, selected_item)
+        self.assertEqual(items[0].unit_price, Decimal("1.500000"))
+        self.assertEqual(cost, Decimal("1.500000"))
 
     def test_marks_channel_item_comparison_unknown_for_currency_mismatch(self):
         ModelPriceItem.objects.create(

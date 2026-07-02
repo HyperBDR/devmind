@@ -710,8 +710,8 @@ OFFICIAL_PROVIDER_CONFIGS = {
     "deepseek": OfficialProviderConfig(
         provider_code="deepseek",
         provider_label="DeepSeek",
-        source_url="https://api-docs.deepseek.com/quick_start/pricing",
-        currency="USD",
+        source_url="https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+        currency="CNY",
         models=(
             OfficialPriceSpec(
                 model_id="deepseek-v4-flash",
@@ -723,9 +723,9 @@ OFFICIAL_PROVIDER_CONFIGS = {
                     "deepseek-v3.2",
                     "deepseek-v3.2-exp",
                 ),
-                input_per_million=Decimal("0.28"),
-                output_per_million=Decimal("0.42"),
-                cache_input_per_million=Decimal("0.028"),
+                input_per_million=Decimal("1"),
+                output_per_million=Decimal("2"),
+                cache_input_per_million=Decimal("0.02"),
                 display_name="DeepSeek V4 Flash",
             ),
             OfficialPriceSpec(
@@ -736,9 +736,9 @@ OFFICIAL_PROVIDER_CONFIGS = {
                     "deepseek-r1",
                     "deepseek-r1-0528",
                 ),
-                input_per_million=Decimal("3.50"),
-                output_per_million=Decimal("7"),
-                cache_input_per_million=Decimal("0.35"),
+                input_per_million=Decimal("3"),
+                output_per_million=Decimal("6"),
+                cache_input_per_million=Decimal("0.025"),
                 display_name="DeepSeek V4 Pro",
             ),
         ),

@@ -572,7 +572,8 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
         if existing is None and name:
             normalised = name.strip().lower().replace(" ", "")
             for meta in all_meta:
-                if (meta.name or "").strip().lower().replace(" ", "") == normalised:
+                meta_name = (meta.name or "").strip().lower()
+                if meta_name.replace(" ", "") == normalised:
                     existing = meta
                     break
     if existing is not None:
@@ -788,8 +789,23 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         source="meta_model.owner_website",
         read_only=True,
     )
-    model_name = serializers.CharField(source="model.name", read_only=True)
-    model_code = serializers.CharField(source="model.code", read_only=True)
+    model_name = serializers.SerializerMethodField()
+    model_code = serializers.SerializerMethodField()
+    sku_display_name = serializers.CharField(
+        source="sku.display_name",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_code = serializers.CharField(
+        source="sku.canonical_sku_code",
+        read_only=True,
+        allow_null=True,
+    )
+    offering_exposed_model_name = serializers.CharField(
+        source="offering.exposed_model_name",
+        read_only=True,
+        allow_null=True,
+    )
     source_name = serializers.CharField(
         source="source.name",
         read_only=True,
@@ -840,11 +856,12 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data["meta_model"] = validated_data["model"].meta_model
+        meta_model = price_item_meta_model(validated_data)
+        source = price_item_source(validated_data)
+        validated_data["meta_model"] = meta_model
         validated_data["price_role"] = price_role_for_source(
-            validated_data.get("source")
-            or validated_data["model"].source,
-            meta_model=validated_data["meta_model"],
+            source,
+            meta_model=meta_model,
         )
         validated_data.setdefault(
             "price_fingerprint",
@@ -853,12 +870,12 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        model = validated_data.get("model", instance.model)
-        validated_data["meta_model"] = model.meta_model
+        meta_model = price_item_meta_model(validated_data, instance=instance)
+        source = price_item_source(validated_data, instance=instance)
+        validated_data["meta_model"] = meta_model
         validated_data["price_role"] = price_role_for_source(
-            validated_data.get("source", instance.source)
-            or model.source,
-            meta_model=validated_data["meta_model"],
+            source,
+            meta_model=meta_model,
         )
         if price_item_fingerprint_fields_touched(validated_data):
             validated_data["price_fingerprint"] = model_price_item_fingerprint(
@@ -873,9 +890,23 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
     def get_business_source_category_label(self, instance):
         return price_role_label(self.get_business_source_category(instance))
 
+    def get_model_name(self, instance):
+        if instance.model_id:
+            return instance.model.name
+        if instance.sku_id:
+            return instance.sku.display_name
+        return ""
+
+    def get_model_code(self, instance):
+        if instance.model_id:
+            return instance.model.code
+        if instance.sku_id:
+            return instance.sku.canonical_sku_code
+        return ""
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        source = instance.source or getattr(instance.model, "source", None)
+        source = price_item_source({}, instance=instance)
         data["price_role"] = price_role_for_source(
             source,
             meta_model=instance.meta_model,
@@ -1075,6 +1106,9 @@ def source_owner_type_for_provider_code(provider_code):
 def price_item_fingerprint_fields_touched(data: dict) -> bool:
     """Return whether a price-affecting field changed."""
     fields = {
+        "model",
+        "sku",
+        "offering",
         "source",
         "dimension",
         "billing_unit",
@@ -1088,6 +1122,45 @@ def price_item_fingerprint_fields_touched(data: dict) -> bool:
     return bool(fields.intersection(data.keys()))
 
 
+def price_item_meta_model(
+    data: dict,
+    *,
+    instance: ModelPriceItem | None = None,
+) -> MetaModel:
+    """Resolve the meta model for model-, SKU-, or offering-based prices."""
+    model = data.get("model", getattr(instance, "model", None))
+    if model is not None:
+        return model.meta_model
+    sku = data.get("sku", getattr(instance, "sku", None))
+    offering = data.get("offering", getattr(instance, "offering", None))
+    if sku is None and offering is not None:
+        sku = offering.sku
+    if sku is not None:
+        return sku.meta_model
+    raise serializers.ValidationError(
+        {"model": "model, sku, or offering is required."}
+    )
+
+
+def price_item_source(
+    data: dict,
+    *,
+    instance: ModelPriceItem | None = None,
+):
+    """Resolve the price source for model-, SKU-, or offering-based prices."""
+    if "source" in data:
+        return data["source"]
+    if instance is not None and instance.source_id:
+        return instance.source
+    offering = data.get("offering", getattr(instance, "offering", None))
+    if offering is not None:
+        return offering.source
+    model = data.get("model", getattr(instance, "model", None))
+    if model is not None:
+        return model.source
+    return None
+
+
 def model_price_item_fingerprint(
     data: dict,
     *,
@@ -1097,6 +1170,8 @@ def model_price_item_fingerprint(
     return stable_fingerprint(
         {
             "source": related_id(data, "source", instance),
+            "sku": related_id(data, "sku", instance),
+            "offering": related_id(data, "offering", instance),
             "dimension": data.get(
                 "dimension",
                 getattr(instance, "dimension", ""),
@@ -1105,7 +1180,10 @@ def model_price_item_fingerprint(
                 "billing_unit",
                 getattr(instance, "billing_unit", ""),
             ),
-            "currency": data.get("currency", getattr(instance, "currency", "")),
+            "currency": data.get(
+                "currency",
+                getattr(instance, "currency", ""),
+            ),
             "unit_price": str(
                 data.get("unit_price", getattr(instance, "unit_price", "")),
             ),
@@ -1114,7 +1192,11 @@ def model_price_item_fingerprint(
                 getattr(instance, "tier_type", ""),
             ),
             "tier_start": str(
-                data.get("tier_start", getattr(instance, "tier_start", "")) or ""
+                data.get(
+                    "tier_start",
+                    getattr(instance, "tier_start", ""),
+                )
+                or ""
             ),
             "tier_end": str(
                 data.get("tier_end", getattr(instance, "tier_end", "")) or ""

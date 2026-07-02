@@ -175,7 +175,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
             payload["schema_version"],
             "llm_ops.model_price_catalog.v1",
         )
-        self.assertEqual(payload["source_type"], "vendor_python_skill")
+        self.assertEqual(payload["source_type"], "provider_adapter")
         self.assertEqual(payload["provider"]["code"], "aliyun")
         self.assertGreater(payload["total_models"], 0)
         self.assertEqual(provider.models.count(), 0)
