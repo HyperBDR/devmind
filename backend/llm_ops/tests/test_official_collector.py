@@ -109,7 +109,8 @@ class OfficialCollectionSyncTests(TestCase):
             code=identity["code"],
             defaults={
                 "name": identity["name"],
-                "vendor": provider,
+                "owner_code": provider.code,
+                "owner_name": provider.name,
                 "aliases": identity["aliases"],
             },
         )
@@ -1190,24 +1191,24 @@ class OfficialCollectionSyncTests(TestCase):
         )
         input_item = ModelPriceItem.objects.get(
             source=source,
-            model__code="deepseek-v3",
+            model__code="deepseek-v4-flash",
             dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
         )
         cache_item = ModelPriceItem.objects.get(
             source=source,
-            model__code="deepseek-v3",
+            model__code="deepseek-v4-flash",
             dimension=ModelPriceItem.DIMENSION_CACHE_INPUT,
         )
         output_item = ModelPriceItem.objects.get(
             source=source,
-            model__code="deepseek-v3",
+            model__code="deepseek-v4-flash",
             dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
         )
-        self.assertGreaterEqual(stats["models"], 5)
-        self.assertEqual(source.currency, "USD")
-        self.assertEqual(input_item.unit_price, Decimal("0.280000"))
-        self.assertEqual(cache_item.unit_price, Decimal("0.028000"))
-        self.assertEqual(output_item.unit_price, Decimal("0.420000"))
+        self.assertGreaterEqual(stats["models"], 2)
+        self.assertEqual(source.currency, "CNY")
+        self.assertEqual(input_item.unit_price, Decimal("1.000000"))
+        self.assertEqual(cache_item.unit_price, Decimal("0.020000"))
+        self.assertEqual(output_item.unit_price, Decimal("2.000000"))
 
     def test_sync_aliyun_wanx_prices_uses_image_and_video_units(self):
         provider = LLMProvider.objects.get(code="aliyun-wanx")
@@ -1356,7 +1357,7 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(model.input_price_per_million, Decimal("0.800000"))
         self.assertEqual(model.output_price_per_million, Decimal("2.000000"))
 
-    def test_sync_official_prices_records_vendor_skill_catalog_metadata(self):
+    def test_sync_official_prices_records_provider_adapter_metadata(self):
         provider = LLMProvider.objects.get(code="aliyun")
 
         sync_official_provider_model_prices(
@@ -1371,7 +1372,12 @@ class OfficialCollectionSyncTests(TestCase):
         )
         self.assertEqual(
             run.metadata["catalog_source_type"],
-            "vendor_python_skill",
+            "provider_adapter",
+        )
+        self.assertEqual(run.metadata["vendor_catalog_provider"], "aliyun")
+        self.assertEqual(
+            run.metadata["vendor_catalog_collector"],
+            "llm_ops.price_collectors.official_config",
         )
         self.assertEqual(run.metadata["vendor_skill_provider"], "aliyun")
 

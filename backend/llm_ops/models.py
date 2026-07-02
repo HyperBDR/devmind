@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from hyperbdr_dashboard.encryption import encryption_service
@@ -376,6 +377,189 @@ class MetaModel(models.Model):
         return self.name
 
 
+class ModelSku(models.Model):
+    """Provider-deployed SKU used for pricing and runtime routing."""
+
+    VARIANT_OFFICIAL = "official"
+    VARIANT_CLOUD_HOSTED = "cloud_hosted"
+    VARIANT_ALIAS = "alias"
+    VARIANT_RESELLER = "reseller"
+    VARIANT_UNKNOWN = "unknown"
+
+    VARIANT_CHOICES = (
+        (VARIANT_OFFICIAL, "Official"),
+        (VARIANT_CLOUD_HOSTED, "Cloud Hosted"),
+        (VARIANT_ALIAS, "Alias"),
+        (VARIANT_RESELLER, "Reseller"),
+        (VARIANT_UNKNOWN, "Unknown"),
+    )
+
+    ROUTING_CANDIDATE = "candidate"
+    ROUTING_CONFIRMED = "confirmed"
+    ROUTING_LOCKED = "locked"
+
+    ROUTING_STATUS_CHOICES = (
+        (ROUTING_CANDIDATE, "Candidate"),
+        (ROUTING_CONFIRMED, "Confirmed"),
+        (ROUTING_LOCKED, "Locked"),
+    )
+
+    meta_model = models.ForeignKey(
+        MetaModel,
+        related_name="skus",
+        on_delete=models.CASCADE,
+    )
+    provider = models.ForeignKey(
+        LLMProvider,
+        related_name="model_skus",
+        on_delete=models.CASCADE,
+    )
+    canonical_sku_code = models.CharField(max_length=255, db_index=True)
+    upstream_model_name = models.CharField(max_length=255)
+    display_name = models.CharField(max_length=255)
+    variant_type = models.CharField(
+        max_length=50,
+        choices=VARIANT_CHOICES,
+        default=VARIANT_UNKNOWN,
+    )
+    region = models.CharField(max_length=80, blank=True, default="")
+    mode = models.CharField(max_length=80, blank=True, default="")
+    api_type = models.CharField(max_length=80, blank=True, default="")
+    capabilities = models.JSONField(blank=True, default=dict)
+    evidence = models.JSONField(blank=True, default=dict)
+    routing_status = models.CharField(
+        max_length=30,
+        choices=ROUTING_STATUS_CHOICES,
+        default=ROUTING_CANDIDATE,
+        db_index=True,
+    )
+    is_routable = models.BooleanField(default=False, db_index=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__name", "display_name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "provider",
+                    "canonical_sku_code",
+                    "region",
+                    "mode",
+                    "api_type",
+                ],
+                name="uq_llm_ops_model_sku_identity",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.provider.name} / {self.upstream_model_name}"
+
+
+class SourceSkuOffering(models.Model):
+    """A price source or channel offering for one model SKU."""
+
+    METHOD_COLLECTED = "collected"
+    METHOD_MANUAL = "manual"
+    METHOD_DERIVED_DISCOUNT = "derived_discount"
+
+    METHOD_CHOICES = (
+        (METHOD_COLLECTED, "Collected"),
+        (METHOD_MANUAL, "Manual"),
+        (METHOD_DERIVED_DISCOUNT, "Derived Discount"),
+    )
+
+    source = models.ForeignKey(
+        PriceCollectionSource,
+        related_name="sku_offerings",
+        on_delete=models.CASCADE,
+    )
+    sku = models.ForeignKey(
+        ModelSku,
+        related_name="offerings",
+        on_delete=models.CASCADE,
+    )
+    provider = models.ForeignKey(
+        LLMProvider,
+        related_name="sku_offerings",
+        on_delete=models.CASCADE,
+    )
+    exposed_model_name = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    pricing_method = models.CharField(
+        max_length=50,
+        choices=METHOD_CHOICES,
+        default=METHOD_COLLECTED,
+    )
+    upstream_offering = models.ForeignKey(
+        "self",
+        related_name="derived_offerings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    discount_rules = models.JSONField(blank=True, default=dict)
+    evidence = models.JSONField(blank=True, default=dict)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["source__name", "sku__display_name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "sku", "exposed_model_name"],
+                name="uq_llm_ops_source_sku_offering",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.source.name} / {self.sku.upstream_model_name}"
+
+    def clean(self):
+        """Validate derived offering chains."""
+        super().clean()
+        if self.upstream_offering_id is None:
+            return
+        if self.pk and self.upstream_offering_id == self.pk:
+            raise ValidationError(
+                {
+                    "upstream_offering": (
+                        "Source SKU offering cannot reference itself."
+                    )
+                }
+            )
+        if self.pk and self.has_upstream_cycle():
+            raise ValidationError(
+                {
+                    "upstream_offering": (
+                        "Source SKU offering upstream chain has a cycle."
+                    )
+                }
+            )
+
+    def has_upstream_cycle(self) -> bool:
+        """Return whether the upstream offering chain loops back here."""
+        seen_ids = {self.pk}
+        upstream = self.upstream_offering
+        while upstream is not None:
+            if upstream.pk in seen_ids:
+                return True
+            seen_ids.add(upstream.pk)
+            upstream = upstream.upstream_offering
+        return False
+
+    def save(self, *args, **kwargs):
+        """Validate offering chains before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 class LLMModel(models.Model):
     """Provider-specific price record for one canonical model."""
 
@@ -405,6 +589,13 @@ class LLMModel(models.Model):
         MetaModel,
         related_name="provider_prices",
         on_delete=models.CASCADE,
+    )
+    sku = models.ForeignKey(
+        ModelSku,
+        related_name="legacy_models",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
     )
     provider = models.ForeignKey(
         LLMProvider,
@@ -578,9 +769,25 @@ class ModelPriceItem(models.Model):
         related_name="price_items",
         on_delete=models.CASCADE,
     )
+    sku = models.ForeignKey(
+        ModelSku,
+        related_name="price_items",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    offering = models.ForeignKey(
+        SourceSkuOffering,
+        related_name="price_items",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
     model = models.ForeignKey(
         LLMModel,
         related_name="price_items",
+        blank=True,
+        null=True,
         on_delete=models.CASCADE,
     )
     meta_model = models.ForeignKey(
@@ -630,6 +837,19 @@ class ModelPriceItem(models.Model):
     source_url = models.URLField(max_length=1000, blank=True, default="")
     raw_payload = models.JSONField(blank=True, default=dict)
     price_fingerprint = models.CharField(max_length=64, db_index=True)
+    derived_from_price_item = models.ForeignKey(
+        "self",
+        related_name="derived_price_items",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    base_price_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
     is_current = models.BooleanField(default=True, db_index=True)
     effective_from = models.DateTimeField(auto_now_add=True)
     effective_to = models.DateTimeField(blank=True, null=True)
@@ -639,34 +859,39 @@ class ModelPriceItem(models.Model):
     class Meta:
         ordering = [
             "provider__name",
-            "model__name",
+            "sku__display_name",
             "dimension",
             "tier_start",
             "id",
         ]
         indexes = [
             models.Index(fields=["meta_model", "dimension", "is_current"]),
-            models.Index(fields=["model", "dimension", "is_current"]),
+            models.Index(fields=["sku", "dimension", "is_current"]),
+            models.Index(fields=["offering", "dimension", "is_current"]),
             models.Index(fields=["provider", "is_current"]),
         ]
         constraints = [
             models.UniqueConstraint(
                 fields=[
-                    "model",
+                    "offering",
                     "dimension",
                     "billing_unit",
                     "currency",
                     "price_fingerprint",
                 ],
-                name="uq_llm_ops_model_price_item_fingerprint",
+                name="uq_llm_ops_offering_price_item_fingerprint",
             )
         ]
 
     def __str__(self) -> str:
-        return f"{self.model.name} / {self.dimension}"
+        if self.sku_id:
+            return f"{self.sku.display_name} / {self.dimension}"
+        if self.model_id:
+            return f"{self.model.name} / {self.dimension}"
+        return self.dimension
 
     def save(self, *args, **kwargs):
-        """Ensure direct price item creation links a canonical model."""
+        """Ensure direct legacy price item creation links a meta model."""
         _ensure_meta_model_from_model(self, kwargs)
         super().save(*args, **kwargs)
 
@@ -743,6 +968,20 @@ class CollectedModelPriceSnapshot(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
+    sku = models.ForeignKey(
+        ModelSku,
+        related_name="collected_price_snapshots",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    offering = models.ForeignKey(
+        SourceSkuOffering,
+        related_name="collected_price_snapshots",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
     meta_model = models.ForeignKey(
         MetaModel,
         related_name="collected_price_snapshots",
@@ -781,8 +1020,8 @@ class CollectedModelPriceSnapshot(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["source", "source_platform_id"],
-                name="uq_llm_ops_source_platform_snapshot",
+                fields=["source", "offering", "source_platform_id"],
+                name="uq_llm_ops_offering_platform_snapshot",
             )
         ]
 
@@ -814,6 +1053,20 @@ class CollectedModelPriceHistory(models.Model):
     )
     model = models.ForeignKey(
         LLMModel,
+        related_name="collected_price_history",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    sku = models.ForeignKey(
+        ModelSku,
+        related_name="collected_price_history",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    offering = models.ForeignKey(
+        SourceSkuOffering,
         related_name="collected_price_history",
         blank=True,
         null=True,
@@ -852,8 +1105,13 @@ class CollectedModelPriceHistory(models.Model):
         ordering = ["-effective_from", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["source", "source_platform_id", "price_fingerprint"],
-                name="uq_llm_ops_price_history_fingerprint",
+                fields=[
+                    "source",
+                    "offering",
+                    "source_platform_id",
+                    "price_fingerprint",
+                ],
+                name="uq_llm_ops_offering_history_fingerprint",
             )
         ]
 

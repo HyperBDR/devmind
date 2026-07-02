@@ -696,7 +696,9 @@ def import_manual_model_prices(
         "updates_model_prices": effective_updates_model_prices,
     }
     run.save()
-    changed_price_item_ids = affected_price_item_ids | deactivated_price_item_ids
+    changed_price_item_ids = (
+        affected_price_item_ids | deactivated_price_item_ids
+    )
     current_price_item_ids = set(
         ModelPriceItem.objects.filter(
             id__in=changed_price_item_ids,
@@ -1393,40 +1395,66 @@ def current_model_price_items_for_channel_price(
     price: ChannelModelPrice,
 ) -> list[ModelPriceItem]:
     """Return current price items for the selected procurement source."""
-    queryset = ModelPriceItem.objects.filter(
-        model=price.model,
-        is_current=True,
+    rows = current_price_items_for_model(
+        price.model,
+        source_id=price.price_source_id,
     )
-    if price.price_source_id:
-        queryset = queryset.filter(source_id=price.price_source_id)
-    rows = list(queryset.order_by("dimension", "tier_start", "id"))
     if rows:
         return rows
+    if price.price_source_id:
+        rows = fallback_price_items_for_meta_model(
+            price.model,
+            source_id=price.price_source_id,
+        )
+        if rows:
+            return rows
     return fallback_price_items_for_meta_model(price.model)
+
+
+def current_price_items_for_model(
+    model: LLMModel,
+    *,
+    source_id: int | None = None,
+) -> list[ModelPriceItem]:
+    """Return current price items directly linked to a legacy model."""
+    queryset = ModelPriceItem.objects.filter(
+        model=model,
+        is_current=True,
+    )
+    if source_id:
+        queryset = queryset.filter(source_id=source_id)
+    return list(queryset.order_by("dimension", "tier_start", "id"))
 
 
 def fallback_price_items_for_meta_model(
     model: LLMModel,
+    *,
+    source_id: int | None = None,
 ) -> list[ModelPriceItem]:
     """Return the best current flat price item group for a meta model."""
     if not model.meta_model_id:
         return []
 
+    queryset = ModelPriceItem.objects.filter(
+        meta_model_id=model.meta_model_id,
+        is_current=True,
+        unit_price__gt=ZERO,
+    )
+    if source_id:
+        queryset = queryset.filter(source_id=source_id)
     rows = list(
-        ModelPriceItem.objects.filter(
-            meta_model_id=model.meta_model_id,
-            is_current=True,
-            unit_price__gt=ZERO,
+        queryset.select_related("offering", "sku", "source").order_by(
+            "dimension",
+            "tier_start",
+            "id",
         )
-        .select_related("source")
-        .order_by("dimension", "tier_start", "id")
     )
     if not rows:
         return []
 
     groups: dict[str, list[ModelPriceItem]] = {}
     for item in rows:
-        key = str(item.source_id or item.model_id)
+        key = price_item_group_key(item)
         groups.setdefault(key, []).append(item)
 
     return sorted(
@@ -1434,6 +1462,17 @@ def fallback_price_items_for_meta_model(
         key=price_item_group_score,
         reverse=True,
     )[0]
+
+
+def price_item_group_key(item: ModelPriceItem) -> str:
+    """Return the identity used to compare coherent price item groups."""
+    if item.offering_id:
+        return f"offering:{item.offering_id}"
+    if item.sku_id:
+        return f"sku:{item.source_id or ''}:{item.sku_id}"
+    if item.model_id:
+        return f"model:{item.source_id or ''}:{item.model_id}"
+    return f"source:{item.source_id or ''}"
 
 
 def price_item_group_score(rows: list[ModelPriceItem]) -> tuple:
@@ -1657,8 +1696,19 @@ def matching_base_price_item(
     spec: dict,
 ) -> ModelPriceItem | None:
     """Find the current official item matching one channel price item."""
-    return ModelPriceItem.objects.filter(
+    direct_item = ModelPriceItem.objects.filter(
         model=model,
+        dimension=dimension,
+        billing_unit=billing_unit,
+        spec=spec or {},
+        is_current=True,
+    ).order_by("tier_start", "id").first()
+    if direct_item is not None:
+        return direct_item
+    if not model.meta_model_id:
+        return None
+    return ModelPriceItem.objects.filter(
+        meta_model_id=model.meta_model_id,
         dimension=dimension,
         billing_unit=billing_unit,
         spec=spec or {},

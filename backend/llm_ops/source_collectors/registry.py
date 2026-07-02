@@ -4,10 +4,12 @@ from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult, PriceSourceCollector
 from .official import build_official_provider_collectors
+from .siliconflow import SiliconFlowPriceSourceCollector
 
 
 PRICE_SOURCE_COLLECTORS: tuple[PriceSourceCollector, ...] = (
     *build_official_provider_collectors(),
+    SiliconFlowPriceSourceCollector(),
 )
 
 
