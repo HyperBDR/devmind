@@ -34,6 +34,7 @@ from .models import (
 )
 from .price_collectors import (
     collect_vendor_price_catalog,
+    registered_vendor_price_collector_codes,
     vendor_price_collector_exists,
 )
 from .services import (
@@ -51,7 +52,9 @@ from .skill_runner import (
 )
 
 SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = tuple(
-    sorted(OFFICIAL_PROVIDER_CONFIGS.keys())
+    code
+    for code in registered_vendor_price_collector_codes()
+    if code in OFFICIAL_PROVIDER_CONFIGS
 )
 DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES: tuple[str, ...] = ()
 FULL_CATALOG_PROVIDER_CODES = (
@@ -89,6 +92,21 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     },
 }
 
+AUTO_SYNC_SOURCE_DEFAULTS = {
+    "siliconflow": {
+        "name": "硅基流动",
+        "source_name": "硅基流动价格页",
+        "source_slug": "siliconflow-pricing",
+        "source_url": "https://siliconflow.cn/pricing",
+        "currency": "CNY",
+        "source_category": PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+        "source_owner_type": PriceCollectionSource.SOURCE_OWNER_SUPPLIER,
+        "collection_method": (
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+        ),
+    },
+}
+
 MODELS_DEV_META_SOURCE_PROVIDERS = {
     "alibaba",
     "alibaba-cn",
@@ -118,6 +136,13 @@ MODELS_DEV_META_SOURCE_PROVIDERS = {
 def source_owner_type_for_provider(provider: LLMProvider) -> str:
     """Return the publisher type for provider official price sources."""
     if str(provider.code or "").lower() in CLOUD_PROVIDER_OFFICIAL_CODES:
+        return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+
+
+def source_owner_type_for_provider_code(provider_code: str) -> str:
+    """Return the publisher type for one official provider code."""
+    if str(provider_code or "").lower() in CLOUD_PROVIDER_OFFICIAL_CODES:
         return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
 
@@ -800,9 +825,74 @@ def supported_official_provider_options() -> list[dict]:
                     else config.source_url
                 ),
                 "currency": source.currency if source else config.currency,
+                "option_code": provider_code,
+                "source_category": (
+                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+                ),
+                "source_owner_type": source_owner_type_for_provider_code(
+                    provider_code
+                ),
+                "collection_method": (
+                    PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+                ),
+                "updates_model_prices": True,
             }
         )
     return options
+
+
+def supported_auto_sync_source_options() -> list[dict]:
+    """Return source presets backed by concrete collection code."""
+    options = supported_official_provider_options()
+    supplier_codes = [
+        code
+        for code in registered_vendor_price_collector_codes()
+        if code not in OFFICIAL_PROVIDER_CONFIGS
+    ]
+    supplier_slugs = [
+        AUTO_SYNC_SOURCE_DEFAULTS[code]["source_slug"]
+        for code in supplier_codes
+        if code in AUTO_SYNC_SOURCE_DEFAULTS
+    ]
+    sources = {
+        source.slug: source
+        for source in PriceCollectionSource.objects.filter(
+            slug__in=supplier_slugs
+        )
+    }
+    for source_code in supplier_codes:
+        defaults = AUTO_SYNC_SOURCE_DEFAULTS.get(source_code)
+        if not defaults:
+            continue
+        source_slug = defaults["source_slug"]
+        source = sources.get(source_slug)
+        options.append(
+            {
+                "option_code": source_code,
+                "provider_code": source_code,
+                "provider_name": defaults["name"],
+                "provider_exists": False,
+                "source_id": source.id if source else None,
+                "source_slug": source_slug,
+                "source_name": (
+                    source.name if source else defaults["source_name"]
+                ),
+                "source_exists": source is not None,
+                "source_url": (
+                    source.endpoint_url
+                    if source and source.endpoint_url
+                    else defaults["source_url"]
+                ),
+                "currency": (
+                    source.currency if source else defaults["currency"]
+                ),
+                "source_category": defaults["source_category"],
+                "source_owner_type": defaults["source_owner_type"],
+                "collection_method": defaults["collection_method"],
+                "updates_model_prices": True,
+            }
+        )
+    return sorted(options, key=lambda item: item["source_name"])
 
 
 def ensure_supported_official_provider_source(

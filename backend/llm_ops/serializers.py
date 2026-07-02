@@ -1035,6 +1035,11 @@ def collection_method_for_source(source):
         return method
     if source.source_type == PriceCollectionSource.SOURCE_TYPE_YUNCE:
         return PriceCollectionSource.COLLECTION_METHOD_API_SYNC
+    if source.updates_model_prices:
+        from .source_collectors import source_supports_code_collection
+
+        if source_supports_code_collection(source):
+            return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
     if (
         source.source_category
         == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER

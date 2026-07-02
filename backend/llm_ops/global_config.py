@@ -7,7 +7,7 @@ import re
 from typing import Optional
 
 from .models import LLMOpsGlobalConfig, PriceCollectionSource
-from .collectors.official import OFFICIAL_PROVIDER_CONFIGS
+from .source_collectors.official import SUPPORTED_OFFICIAL_PROVIDER_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ MODEL_PRICE_SYNC_AGENT_TASK_NAME = "llm_ops_model_price_sync_agent"
 MODEL_PRICE_SYNC_AGENT_TASK = "llm_ops.tasks.run_model_price_sync_agent"
 PRICE_SOURCE_TASK_PREFIX = "llm_ops_price_source_collect_"
 PRICE_SOURCE_TASK = "llm_ops.tasks.collect_price_source_prices"
-SUPPORTED_PRICE_SYNC_PROVIDER_CODES = tuple(sorted(OFFICIAL_PROVIDER_CONFIGS))
+SUPPORTED_PRICE_SYNC_PROVIDER_CODES = SUPPORTED_OFFICIAL_PROVIDER_CODES
 
 
 def price_source_task_name(source_id: int) -> str:
@@ -171,14 +171,18 @@ def price_sync_task_source_ids(config: LLMOpsGlobalConfig) -> list[int] | None:
 
 def price_sync_source_queryset():
     """Return sources currently supported by runtime price sync."""
-    return PriceCollectionSource.objects.filter(
-        provider__code__in=SUPPORTED_PRICE_SYNC_PROVIDER_CODES,
-        slug__in=official_provider_source_slugs(),
-        source_category=(
-            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-        ),
-        updates_model_prices=True,
+    from .source_collectors import source_supports_code_collection
+
+    candidate_sources = (
+        PriceCollectionSource.objects.filter(updates_model_prices=True)
+        .select_related("provider")
     )
+    supported_source_ids = [
+        source.id
+        for source in candidate_sources
+        if source_supports_code_collection(source)
+    ]
+    return PriceCollectionSource.objects.filter(id__in=supported_source_ids)
 
 
 def official_provider_source_slugs() -> tuple[str, ...]:

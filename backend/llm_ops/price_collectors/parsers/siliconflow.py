@@ -28,6 +28,7 @@ COMPONENT_PRICE_KEYS = {
     "output-tokens": "output_price",
     "cached-input-tokens": "cache_hit_input_price",
 }
+PRICE_VALUE_KEYS = tuple(COMPONENT_PRICE_KEYS.values())
 UPSTREAM_PROVIDER_ALIASES = {
     "deepseek-ai": "DeepSeek",
     "zai-org": "智谱",
@@ -155,7 +156,12 @@ def extract_models(page_html: str) -> list[dict[str, Any]]:
         )
         row[price_key] = price
 
-    return [normalize_grouped_model(item) for item in grouped.values()]
+    models = []
+    for item in grouped.values():
+        normalized = normalize_grouped_model(item)
+        if normalized["price_rows"]:
+            models.append(normalized)
+    return models
 
 
 def extract_pricing_api_items(page_html: str) -> list[dict[str, Any]]:
@@ -301,6 +307,8 @@ def normalize_grouped_model(item: dict[str, Any]) -> dict[str, Any]:
     """Convert grouped component prices into standard model rows."""
     rows = []
     for row_key, row in item["price_rows"].items():
+        if not row_has_positive_price(row):
+            continue
         normalized = dict(row)
         token_range = token_range_from_coordinate(row_key)
         if token_range:
@@ -317,6 +325,18 @@ def normalize_grouped_model(item: dict[str, Any]) -> dict[str, Any]:
         "price_rows": rows,
         "notes": "SiliconFlow supplier token prices.",
     }
+
+
+def row_has_positive_price(row: dict[str, Any]) -> bool:
+    """Return whether a SiliconFlow row has at least one real price."""
+    for key in PRICE_VALUE_KEYS:
+        value = row.get(key)
+        try:
+            if Decimal(str(value)) > 0:
+                return True
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+    return False
 
 
 def token_range_from_coordinate(value: str) -> str:

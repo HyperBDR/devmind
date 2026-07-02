@@ -17,10 +17,11 @@ from llm_ops.catalog_maintenance import (
     resolve_orphan_meta_models,
 )
 from llm_ops.collection_services import (
+    SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
     reset_official_price_catalog,
+    supported_auto_sync_source_options,
     supported_official_provider_options,
 )
-from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
 from llm_ops.management.commands.cleanup_llm_ops_seed_prices import (
     build_cleanup_plan,
     execute_cleanup,
@@ -79,7 +80,12 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
     """Catalog maintenance is separate from seed bootstrap."""
 
     def test_resolve_orphan_meta_models_uses_canonical_owner_rules(self):
-        MetaModel.objects.create(name="DeepSeek R1", code="deepseek-r1")
+        meta = MetaModel.objects.create(name="DeepSeek R1", code="deepseek-r1")
+        MetaModel.objects.filter(id=meta.id).update(
+            owner_code="",
+            owner_name="",
+            owner_website="",
+        )
 
         stats = resolve_orphan_meta_models()
 
@@ -88,11 +94,14 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
         self.assertEqual(meta.owner_code, "deepseek")
 
     def test_normalize_meta_model_catalog_repairs_stale_owner(self):
-        MetaModel.objects.create(
+        meta = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
+        )
+        MetaModel.objects.filter(id=meta.id).update(
             owner_code="aliyun",
             owner_name="阿里云",
+            owner_website="",
         )
 
         stats = normalize_meta_model_catalog()
@@ -267,8 +276,18 @@ class LLMOpsOfficialProviderOptionTests(TestCase):
         options = supported_official_provider_options()
 
         provider_codes = {option["provider_code"] for option in options}
-        self.assertIn("aliyun", provider_codes)
-        self.assertIn("baidu", provider_codes)
+        self.assertEqual({"aliyun", "deepseek"}, provider_codes)
+        self.assertFalse(LLMProvider.objects.exists())
+        self.assertFalse(PriceCollectionSource.objects.exists())
+
+    def test_auto_sync_source_options_do_not_create_rows(self):
+        options = supported_auto_sync_source_options()
+
+        provider_codes = {option["provider_code"] for option in options}
+        self.assertEqual(
+            {"aliyun", "deepseek", "siliconflow"},
+            provider_codes,
+        )
         self.assertFalse(LLMProvider.objects.exists())
         self.assertFalse(PriceCollectionSource.objects.exists())
 
@@ -526,7 +545,7 @@ class LLMOpsOfficialPriceResetCommandTests(TestCase):
             "legacy_source_slugs": [],
         }
         mock_sync.return_value = {}
-        provider_codes = sorted(OFFICIAL_PROVIDER_CONFIGS)
+        provider_codes = sorted(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
 
         call_command(
             "reset_llm_ops_official_prices",

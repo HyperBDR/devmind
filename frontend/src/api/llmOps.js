@@ -25,6 +25,10 @@ export const llmOpsApi = {
     )
   },
 
+  listAutoSyncSourceOptions() {
+    return apiClient.get(`${base}/collection-sources/auto-sync-options/`)
+  },
+
   ensureOfficialProviderSource(providerCode) {
     return apiClient.post(`${base}/collection-sources/official-provider/`, {
       provider_code: providerCode

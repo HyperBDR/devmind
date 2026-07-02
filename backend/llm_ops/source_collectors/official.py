@@ -3,11 +3,14 @@ from __future__ import annotations
 from llm_ops.collection_services import sync_official_provider_model_prices
 from llm_ops.collectors.official import OFFICIAL_PROVIDER_CONFIGS
 from llm_ops.models import PriceCollectionSource
+from llm_ops.price_collectors import registered_vendor_price_collector_codes
 
 from .base import CollectorResult
 
 SUPPORTED_OFFICIAL_PROVIDER_CODES = tuple(
-    sorted(OFFICIAL_PROVIDER_CONFIGS.keys())
+    code
+    for code in registered_vendor_price_collector_codes()
+    if code in OFFICIAL_PROVIDER_CONFIGS
 )
 
 

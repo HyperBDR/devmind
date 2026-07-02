@@ -314,10 +314,14 @@
                       <span class="truncate">无可用上游</span>
                     </div>
                     <div v-if="item.model" class="batch-price-preview">
-                      <span>上游 {{ upstreamPriceSummary(item.model) }}</span>
+                      <span>
+                        上游 {{ batchUpstreamPriceSummary(item.model) }}
+                      </span>
                       <strong>
                         成本
-                        {{ pendingDraftPriceSummary(newDraft, item.model) }}
+                        {{
+                          batchPendingDraftPriceSummary(newDraft, item.model)
+                        }}
                       </strong>
                     </div>
                     <div v-else class="batch-price-preview muted">
@@ -771,6 +775,10 @@ const props = defineProps({
     type: Array,
     required: true
   },
+  metaModels: {
+    type: Array,
+    default: () => []
+  },
   models: {
     type: Array,
     required: true
@@ -912,12 +920,69 @@ const configuredIdentityKeys = computed(() => {
   return keys
 })
 
+const metaModelById = computed(() => {
+  const items = new Map()
+  props.metaModels.forEach((model) => {
+    if (model?.id !== undefined && model?.id !== null) {
+      items.set(String(model.id), model)
+    }
+  })
+  return items
+})
+
+const metaModelByCode = computed(() => {
+  const items = new Map()
+  props.metaModels.forEach((model) => {
+    const code = normalizeSearch(model?.code || '')
+    if (code) {
+      items.set(code, model)
+    }
+  })
+  return items
+})
+
+const candidateMetaModelGroups = computed(() => {
+  const groups = new Map()
+  baseAvailableModels.value.forEach((model) => {
+    const metaModel = metaModelForSourceModel(model)
+    if (!metaModel) return
+
+    const key = metaModelIdentityKey(metaModel)
+    const group = groups.get(key) || {
+      key,
+      metaModel,
+      name: metaModelDisplayName(metaModel),
+      code: metaModel.code || model.meta_model_code || '',
+      ownerCode: metaModel.owner_code || model.meta_model_owner_code || '',
+      ownerName: metaModel.owner_name || model.meta_model_owner_name || '',
+      modality: metaModel.modality || model.modality,
+      modalities: new Set(),
+      models: []
+    }
+    group.models.push(model)
+    const modality = metaModel.modality || model.modality
+    if (modality) {
+      group.modalities.add(modality)
+    }
+    group.providerCount = uniqueProviderModelsForGroup(group).length
+    groups.set(key, group)
+  })
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      modalitySummary: Array.from(group.modalities)
+        .map((modality) => modalityLabel(modality))
+        .join(' / ')
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+})
+
 const vendorOptions = computed(() => {
   const vendors = new Map()
-  baseAvailableModels.value.forEach((model) => {
-    const key = modelVendorKey(model)
+  candidateMetaModelGroups.value.forEach((group) => {
+    const key = metaModelVendorKey(group)
     const vendor = vendors.get(key) || {
-      label: modelVendorName(model),
+      label: metaModelVendorName(group),
       value: key,
       count: 0
     }
@@ -934,38 +999,11 @@ const vendorOptions = computed(() => {
 })
 
 const availableModelGroups = computed(() => {
-  const groups = new Map()
-  baseAvailableModels.value
-    .filter(
-      (model) =>
-        !selectedVendorKey.value ||
-        modelVendorKey(model) === selectedVendorKey.value
-    )
-    .forEach((model) => {
-      const key = modelMetaIdentityKey(model)
-      const group = groups.get(key) || {
-        key,
-        name: modelDisplayName(model),
-        code: model.meta_model_code || model.code,
-        modality: model.modality,
-        modalities: new Set(),
-        models: []
-      }
-      group.models.push(model)
-      if (model.modality) {
-        group.modalities.add(model.modality)
-      }
-      group.providerCount = uniqueProviderModelsForGroup(group).length
-      groups.set(key, group)
-    })
-  return Array.from(groups.values())
-    .map((group) => ({
-      ...group,
-      modalitySummary: Array.from(group.modalities)
-        .map((modality) => modalityLabel(modality))
-        .join(' / ')
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name))
+  return candidateMetaModelGroups.value.filter(
+    (group) =>
+      !selectedVendorKey.value ||
+      metaModelVendorKey(group) === selectedVendorKey.value
+  )
 })
 
 const availableModelCount = computed(() => availableModelGroups.value.length)
@@ -1525,23 +1563,43 @@ function normalizeSearch(value) {
     .replace(/\s+/g, '')
 }
 
-function modelVendorKey(model) {
-  return normalizeSearch(
-    model.meta_model_owner_code ||
-      model.meta_model_owner_name ||
-      model.provider_code ||
-      model.provider_name ||
-      'unknown'
-  )
+function metaModelForSourceModel(model) {
+  const metaId = String(model?.meta_model || '').trim()
+  if (metaId && metaModelById.value.has(metaId)) {
+    return metaModelById.value.get(metaId)
+  }
+  const metaCode = normalizeSearch(model?.meta_model_code || '')
+  if (metaCode && metaModelByCode.value.has(metaCode)) {
+    return metaModelByCode.value.get(metaCode)
+  }
+  return null
 }
 
-function modelVendorName(model) {
+function metaModelIdentityKey(metaModel) {
+  const id = String(metaModel?.id || '').trim()
+  if (id) return id
+  return normalizeSearch(metaModel?.code || metaModel?.name || '')
+}
+
+function metaModelVendorKey(group) {
+  return normalizeSearch(group.ownerCode || group.ownerName || 'unknown')
+}
+
+function metaModelVendorName(group) {
+  return group.ownerName || group.ownerCode || '未归属厂商'
+}
+
+function stripModelNamespace(value) {
+  const text = String(value || '').trim()
+  if (!text.includes('/')) return text
+  return text.split('/').pop() || text
+}
+
+function metaModelDisplayName(metaModel) {
   return (
-    model.meta_model_owner_name ||
-    model.meta_model_owner_code ||
-    model.provider_name ||
-    model.provider_code ||
-    '未归属厂商'
+    stripModelNamespace(metaModel?.name) ||
+    stripModelNamespace(metaModel?.code) ||
+    ''
   )
 }
 
@@ -1552,7 +1610,12 @@ function modelMetaIdentityKey(model) {
 }
 
 function modelDisplayName(model) {
-  return model?.meta_model_name || model?.name || model?.code || ''
+  return (
+    stripModelNamespace(model?.meta_model_name) ||
+    stripModelNamespace(model?.name) ||
+    stripModelNamespace(model?.code) ||
+    ''
+  )
 }
 
 function modelOptionSearchText(option) {
@@ -1590,7 +1653,7 @@ function modelOptionMeta(option) {
   if (normalizeSearch(option.code) !== normalizeSearch(option.name)) {
     parts.push(option.code)
   }
-  parts.push(`${option.providerCount} 个可选上游`)
+  parts.push(`${option.providerCount} 个上游价格源`)
   return parts.filter(Boolean).join(' · ')
 }
 
@@ -1924,11 +1987,22 @@ function upstreamPriceSummary(model) {
     .join(' · ')
 }
 
-function pendingDraftPriceSummary(draft, model) {
+function batchUpstreamPriceSummary(model) {
+  const rows = providerPriceSummary(model)
+  if (!rows.length) return '-'
+  return rows
+    .map((item) => `${item.label} ${priceNumberText(item, model)}`)
+    .join(' · ')
+}
+
+function batchPendingDraftPriceSummary(draft, model) {
   const rows = draftPricePreview(draft, model)
   if (!rows.length) return '-'
   return rows
-    .map((item) => `${previewPriceLabel(item.label)} ${priceText(item, model)}`)
+    .map(
+      (item) =>
+        `${previewPriceLabel(item.label)} ${priceNumberText(item, model)}`
+    )
     .join(' · ')
 }
 
@@ -1963,6 +2037,25 @@ function priceText(item, model) {
     return '不适用'
   }
   return '缺价格'
+}
+
+function priceNumberText(item, model) {
+  if (!item) return '-'
+  if (item.missingReason) return item.missingReason
+  if (item.value === null || item.value === undefined || item.value === '') {
+    return '-'
+  }
+  if (Number(item.value) !== 0) {
+    const displayValue = convertCurrencyAmount(item.value, item.currency)
+    if (displayValue === null) {
+      return Number(item.value).toFixed(4)
+    }
+    return displayValue.toFixed(4)
+  }
+  if (isNotApplicablePrice(item, model)) {
+    return '不适用'
+  }
+  return '0.0000'
 }
 
 function isNotApplicablePrice(item, model) {

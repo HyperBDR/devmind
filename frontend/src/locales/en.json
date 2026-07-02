@@ -1500,8 +1500,8 @@
         "edit": "Edit Model Price Source"
       },
       "description": {
-        "create": "Create an official, supplier, or manually maintained price source for later price entry and collection.",
-        "edit": "Maintain the source name, pricing scope, price URL, and enabled status."
+        "create": "Create an official collector, supplier, or manually maintained price source for later price entry and collection.",
+        "edit": "Maintain the source name, type, price URL, and enabled status."
       },
       "sections": {
         "basic": "Basic information",
@@ -1511,14 +1511,16 @@
       },
       "fields": {
         "category": "Pricing scope",
+        "autoSyncSource": "Sync source",
         "collectionMethod": "Maintenance method",
         "currency": "Default currency",
         "endpointUrl": "Price URL",
         "name": "Price source name",
-        "officialProvider": "Official provider",
+        "officialProvider": "Official collector",
         "slug": "System slug",
-        "sourceOwnerType": "Source owner",
-        "sourceType": "Source mode"
+        "sourceOwnerType": "Price source type",
+        "sourceType": "Source mode",
+        "syncMode": "Sync mode"
       },
       "placeholders": {
         "name": "Example: Yunce / Alibaba Bailian East China line",
@@ -1527,8 +1529,10 @@
       "help": {
         "autoSlug": "The system slug will be generated after creation: {slug}",
         "endpointUrl": "Official pricing page, supplier price API, or manual price source URL.",
+        "autoSyncSlugLocked": "Auto-sync source slugs are used by collectors and cannot be changed.",
+        "autoSyncSlugPreset": "The system slug is filled after selecting a sync source.",
         "officialSlugLocked": "Official collection source slugs are used by collectors and cannot be changed.",
-        "officialSlugPreset": "The system slug is filled after selecting an official provider.",
+        "officialSlugPreset": "The system slug is filled after selecting an official collector.",
         "slug": "Use lowercase letters, numbers, and hyphens only. It is normalized on save."
       },
       "actions": {
@@ -1549,8 +1553,8 @@
         "cloudProvider": "Cloud provider official",
         "internal": "Internal",
         "modelProvider": "Model provider official",
-        "official": "Official pricing",
-        "supplier": "Supplier",
+        "official": "Official collector",
+        "supplier": "Supplier pricing",
         "unknown": "Unknown"
       },
       "collectionMethods": {
@@ -1559,6 +1563,10 @@
         "manualEntry": "Manual entry",
         "manualImport": "Manual import",
         "unknown": "Unknown"
+      },
+      "syncModes": {
+        "auto": "Auto sync",
+        "manual": "Manual maintenance"
       },
       "categories": {
         "manual": "Manual maintenance",
@@ -1572,24 +1580,35 @@
       },
       "officialPreset": {
         "currency": "Currency",
-        "empty": "No official price source presets are available.",
-        "exists": "This official source has already been added.",
+        "empty": "No official collectors are available to add.",
+        "exists": "This official collector has already been added.",
         "existsBadge": "Added",
-        "loading": "Loading official sources.",
-        "onlyOfficial": "Only official pricing requires an official provider.",
-        "ready": "Confirm to create the official price source.",
-        "selectProvider": "Select an official provider.",
+        "loading": "Loading official collectors.",
+        "onlyOfficial": "Only official collector sources require a collector.",
+        "ready": "Confirm to create the official collector source.",
+        "selectProvider": "Select an official collector.",
         "slug": "System slug",
         "source": "Price source",
         "url": "Price URL"
       },
+      "autoSyncPreset": {
+        "empty": "No auto-sync sources are available to add.",
+        "exists": "This sync source has already been added.",
+        "existsBadge": "Added",
+        "loading": "Loading sync sources.",
+        "manualMode": "Manual maintenance does not need a sync source.",
+        "ready": "Confirm to create the auto-sync price source.",
+        "selectSource": "Select a sync source."
+      },
       "messages": {
+        "autoSyncCreated": "Auto-sync price source \"{name}\" added",
         "created": "Model price source created",
-        "officialCreated": "Official price source \"{name}\" added",
+        "officialCreated": "Official collector source \"{name}\" added",
         "updated": "Model price source updated"
       },
       "errors": {
-        "loadOfficialSources": "Failed to load official price sources",
+        "loadAutoSyncSources": "Failed to load auto-sync sources",
+        "loadOfficialSources": "Failed to load official collectors",
         "save": "Failed to save model price source"
       }
     },

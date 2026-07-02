@@ -736,6 +736,7 @@
               v-else-if="activeSection === 'channels'"
               :channels="channels"
               :providers="providers"
+              :meta-models="metaModels"
               :models="models"
               :channel-prices="channelPrices"
               :channel-price-items="channelPriceItems"
