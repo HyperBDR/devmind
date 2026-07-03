@@ -999,6 +999,7 @@
         "costPrice": "成本价",
         "retailPrice": "终端售卖价",
         "floor": "下限 {value}",
+        "belowFloor": "低于下限 {value}，请重新修改",
         "average": "均价",
         "referenceTitle": "最低参考定价 = 成本价 × (1 + 服务费率 + 平台抽佣比例)；当前服务费率 {serviceFee}；当前平台抽佣比例 {commission}；参考价 {reference}",
         "costFormulaTitle": "成本价 = 供应商成本价 × 折扣；{formula}",

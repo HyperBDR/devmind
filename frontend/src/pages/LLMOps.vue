@@ -2356,7 +2356,10 @@ async function handleResaleWorkspacePublished(payload) {
     return
   }
   const publishListings = changedListings.filter(
-    (item) => Number(item.priceIn) > 0 && Number(item.priceOut) > 0
+    (item) =>
+      !item.priceBelowReference &&
+      Number(item.priceIn) > 0 &&
+      Number(item.priceOut) > 0
   )
   const items = publishListings.map(mapWorkspaceListingToPayload)
   if (!items.length) {

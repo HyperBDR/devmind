@@ -1997,7 +1997,9 @@ function priceSummaryText(rows, model = null, limit = 3) {
 function dedupePriceSummaryRows(rows) {
   const seen = new Set()
   return (rows || []).filter((item) => {
-    const key = String(item?.label || '').trim().toLowerCase()
+    const key = String(item?.label || '')
+      .trim()
+      .toLowerCase()
     if (!key || seen.has(key)) return false
     seen.add(key)
     return true
@@ -2007,19 +2009,26 @@ function dedupePriceSummaryRows(rows) {
 function batchUpstreamPriceSummary(model) {
   const rows = providerPriceSummary(model)
   if (!rows.length) return '-'
-  return rows
-    .map((item) => `${item.label} ${priceNumberText(item, model)}`)
-    .join(' · ')
+  return batchPriceSummaryText(rows, model)
 }
 
 function batchPendingDraftPriceSummary(draft, model) {
   const rows = draftPricePreview(draft, model)
   if (!rows.length) return '-'
-  return rows
-    .map(
-      (item) =>
-        `${previewPriceLabel(item.label)} ${priceNumberText(item, model)}`
-    )
+  return batchPriceSummaryText(
+    rows.map((item) => ({
+      ...item,
+      label: previewPriceLabel(item.label)
+    })),
+    model
+  )
+}
+
+function batchPriceSummaryText(rows, model) {
+  const items = dedupePriceSummaryRows(rows).slice(0, 3)
+  if (!items.length) return '-'
+  return items
+    .map((item) => `${item.label} ${priceNumberText(item, model)}`)
     .join(' · ')
 }
 
@@ -2493,7 +2502,7 @@ function modalityLabel(modality) {
 }
 
 .add-model-layout {
-  @apply grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,0.42fr)] xl:items-start;
+  @apply grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.24fr)] xl:items-start;
 }
 
 .add-model-main {
@@ -2521,7 +2530,7 @@ function modalityLabel(modality) {
 }
 
 .channel-performance-panel {
-  @apply h-full rounded-lg border border-slate-200 bg-white px-3 py-3;
+  @apply rounded-lg border border-slate-200 bg-white px-3 py-2.5;
 }
 
 .channel-performance-title {
@@ -2569,7 +2578,7 @@ function modalityLabel(modality) {
 }
 
 .batch-selection-row {
-  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(9rem,0.8fr)_minmax(11rem,0.9fr)_minmax(0,1.35fr)] xl:items-center;
+  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(7.5rem,0.58fr)_minmax(9.5rem,0.62fr)_minmax(0,1.8fr)] xl:items-center;
 }
 
 .batch-model-main {
