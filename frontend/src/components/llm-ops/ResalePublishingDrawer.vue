@@ -199,6 +199,7 @@ const canPublish = computed(() => {
   if (!changedListings.length) return false
   return changedListings.every(
     (l) =>
+      !l.priceBelowReference &&
       Number.isFinite(Number(l.priceIn)) &&
       Number.isFinite(Number(l.priceOut)) &&
       Number(l.priceIn) > 0 &&

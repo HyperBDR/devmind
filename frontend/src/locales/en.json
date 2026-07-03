@@ -989,6 +989,7 @@
         "costPrice": "Cost price",
         "retailPrice": "Retail price",
         "floor": "Floor {value}",
+        "belowFloor": "Below floor {value}. Please revise.",
         "average": "Average",
         "referenceTitle": "Minimum reference price = cost price × (1 + service fee rate + platform commission rate); current service fee {serviceFee}; current platform commission {commission}; reference price {reference}",
         "costFormulaTitle": "Cost price = supplier cost price × discount; {formula}",

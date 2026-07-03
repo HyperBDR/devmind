@@ -433,16 +433,50 @@
                     <p class="pricing-card-caption text-emerald-600">
                       {{ t('llmOps.publishingWorkspace.pricing.retailPrice') }}
                     </p>
-                    <div class="terminal-price-control">
+                    <div
+                      class="terminal-price-control"
+                      :class="
+                        isBelowReferencePrice(
+                          dimension.priceRaw,
+                          dimension.referencePriceRaw
+                        )
+                          ? 'terminal-price-control-error'
+                          : ''
+                      "
+                    >
                       <span>{{ currencySymbol }}</span>
                       <input
                         :value="dimension.priceText"
                         type="number"
                         step="0.01"
                         min="0"
+                        :aria-invalid="
+                          isBelowReferencePrice(
+                            dimension.priceRaw,
+                            dimension.referencePriceRaw
+                          )
+                            ? 'true'
+                            : 'false'
+                        "
                         @input="onPriceInput(row, dimension.key, $event)"
+                        @change="onPriceCommit(row, dimension.key, $event)"
                       />
                     </div>
+                    <p
+                      v-if="
+                        isBelowReferencePrice(
+                          dimension.priceRaw,
+                          dimension.referencePriceRaw
+                        )
+                      "
+                      class="terminal-price-error"
+                    >
+                      {{
+                        t('llmOps.publishingWorkspace.pricing.belowFloor', {
+                          value: currencySymbol + dimension.referencePriceText
+                        })
+                      }}
+                    </p>
                   </div>
                   <div class="terminal-price-meta">
                     <p
@@ -1172,15 +1206,9 @@ const chainRows = computed(() => {
         priceInRaw: state.priceInRaw ?? null,
         priceOutRaw: state.priceOutRaw ?? null,
         priceCacheInRaw: state.priceCacheInRaw ?? 0,
-        priceIn:
-          state.priceInRaw !== null && state.priceInRaw !== undefined
-            ? Number(state.priceInRaw).toFixed(2)
-            : '',
-        priceOut:
-          state.priceOutRaw !== null && state.priceOutRaw !== undefined
-            ? Number(state.priceOutRaw).toFixed(2)
-            : '',
-        priceCacheIn: Number(state.priceCacheInRaw ?? 0).toFixed(2),
+        priceIn: editablePriceInputText(state.priceInRaw),
+        priceOut: editablePriceInputText(state.priceOutRaw),
+        priceCacheIn: editablePriceInputText(state.priceCacheInRaw ?? 0),
         isLowest: false
       }
     })
@@ -1425,7 +1453,25 @@ function onMarginCommit(row, event) {
 }
 
 function onPriceInput(row, key, event) {
-  const rawPrice = Number(event?.target?.value)
+  const rawValue = event?.target?.value ?? ''
+  const patch = pricePatchForDimension(key, rawValue)
+  if (rawValue === '') {
+    updateChainState(row, patch)
+    emitChange()
+    return
+  }
+  const rawPrice = Number(rawValue)
+  if (!Number.isFinite(rawPrice) || rawPrice < 0) return
+  patch.margin = normalizeMargin(marginFromRowPrices(row, patch) ?? row.margin)
+  updateChainState(row, patch)
+  emitChange()
+}
+
+function onPriceCommit(row, key, event) {
+  const rawValue = event?.target?.value ?? ''
+  if (rawValue === '') return
+  const rawPrice = Number(rawValue)
+  if (!Number.isFinite(rawPrice) || rawPrice < 0) return
   const price = applyPriceChange(row, key, rawPrice)
   if (
     event?.target &&
@@ -1437,16 +1483,23 @@ function onPriceInput(row, key, event) {
   }
 }
 
+function pricePatchForDimension(key, value) {
+  const patch = {}
+  if (key === 'input') {
+    patch.priceInRaw = value
+  } else if (key === 'cache') {
+    patch.priceCacheInRaw = value
+  } else {
+    patch.priceOutRaw = value
+  }
+  return patch
+}
+
 function applyPriceChange(row, key, rawPrice) {
   const dimension = priceDimensions(row).find((item) => item.key === key)
   const cost = dimension?.costRaw ?? 0
-  const referencePrice = Number(dimension?.referencePriceRaw)
   const inputPrice = Number.isFinite(rawPrice) ? rawPrice : 0
-  const price =
-    Number.isFinite(referencePrice) && referencePrice > 0
-      ? Math.max(inputPrice, referencePrice)
-      : inputPrice
-  const formattedPrice = formatEditablePrice(price)
+  const formattedPrice = formatEditablePrice(inputPrice)
   const margin =
     Number(cost) > 0
       ? ((Number(formattedPrice) - Number(cost)) / Number(cost)) * 100
@@ -1500,6 +1553,14 @@ function formatEditablePrice(value) {
   return Number(amount.toFixed(2))
 }
 
+function editablePriceInputText(value) {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return ''
+  return amount.toFixed(2)
+}
+
 function formatMinimumPrice(value) {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return 0
@@ -1546,12 +1607,19 @@ function referencePriceTitle(dimension) {
 }
 
 function isBelowReferencePrice(price, referencePrice) {
+  if (price === null || price === undefined || price === '') return false
   const priceValue = Number(price)
   const referenceValue = Number(referencePrice)
   if (!Number.isFinite(priceValue) || !Number.isFinite(referenceValue)) {
     return false
   }
   return priceValue + 0.000001 < referenceValue
+}
+
+function rowHasBelowReferencePrice(row) {
+  return priceDimensions(row).some((dimension) =>
+    isBelowReferencePrice(dimension.priceRaw, dimension.referencePriceRaw)
+  )
 }
 
 function autoApproveStatus(margin) {
@@ -1978,6 +2046,7 @@ function workspacePayload() {
       priceOut: row.priceOutRaw,
       priceCacheIn: row.priceCacheInRaw,
       margin: row.margin,
+      priceBelowReference: rowHasBelowReferencePrice(row),
       hasChanges: listingRowHasChanges(row)
     }))
   }
@@ -2770,6 +2839,29 @@ defineExpose({
 .terminal-price-control:focus-within {
   border-color: #86efac;
   box-shadow: 0 0 0 2px #dcfce7;
+}
+
+.terminal-price-control-error,
+.terminal-price-control-error:focus-within {
+  border-color: #f87171;
+  box-shadow: 0 0 0 2px #fee2e2;
+}
+
+.terminal-price-control-error span {
+  border-right-color: #fecaca;
+  color: #dc2626;
+}
+
+.terminal-price-control-error input {
+  color: #991b1b;
+}
+
+.terminal-price-error {
+  margin-top: 0.25rem;
+  color: #dc2626;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.3;
 }
 
 .terminal-price-control span {
