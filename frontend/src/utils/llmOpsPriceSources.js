@@ -76,12 +76,6 @@ export function priceSourceCollectionMethod(source) {
   if (source?.can_collect_prices && source?.updates_model_prices) {
     return 'auto_collect'
   }
-  if (
-    normalizePriceSourceCategory(source) === 'official_provider' &&
-    source?.updates_model_prices
-  ) {
-    return 'auto_collect'
-  }
   if (normalizePriceSourceCategory(source) === 'manual') {
     return 'manual_entry'
   }

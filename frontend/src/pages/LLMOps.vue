@@ -242,20 +242,22 @@
                       size="sm"
                     />
                   </div>
-                  <button
-                    type="button"
-                    class="btn-secondary page-toolbar-button btn-action-config"
-                    @click="openPlatformModal(agionePlatform)"
-                  >
-                    {{ t('llmOps.toolbar.platformConfig') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="btn-primary page-toolbar-button btn-action-create"
-                    @click="openPlatformModal(null)"
-                  >
-                    {{ t('llmOps.toolbar.createPlatform') }}
-                  </button>
+                  <div class="page-toolbar-button-group">
+                    <button
+                      type="button"
+                      class="btn-secondary page-toolbar-button btn-action-config"
+                      @click="openPlatformModal(agionePlatform)"
+                    >
+                      {{ t('llmOps.toolbar.platformConfig') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-primary page-toolbar-button btn-action-create"
+                      @click="openPlatformModal(null)"
+                    >
+                      {{ t('llmOps.toolbar.createPlatform') }}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2938,11 +2940,22 @@ onBeforeUnmount(() => {
 }
 
 .page-toolbar-control {
+  min-width: 0;
   min-height: 2.5rem;
   gap: 0.5rem;
   border-radius: 10px;
-  padding: 0.375rem 0.5rem;
+  padding: 0 0.5rem;
   white-space: nowrap;
+}
+
+.page-hero-group .compact-select {
+  min-width: 0;
+}
+
+.page-hero-group .compact-select-sm {
+  min-height: 2.5rem !important;
+  padding-bottom: 0.5rem !important;
+  padding-top: 0.5rem !important;
 }
 
 .page-toolbar-control > span {
@@ -2955,6 +2968,14 @@ onBeforeUnmount(() => {
   min-height: 2.5rem;
   border-radius: 10px;
   padding: 0.375rem 0.625rem;
+  white-space: nowrap;
+}
+
+.page-toolbar-button-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.5rem;
   white-space: nowrap;
 }
 
@@ -3016,6 +3037,11 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.page-toolbar-chip {
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
 }
 
 @media (min-width: 1280px) {
@@ -3117,10 +3143,7 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   border-width: 1px;
   border-color: #e2e8f0;
-  padding-left: 0.75rem;
-  padding-right: 0.75rem;
-  padding-top: 0.5rem;
-  padding-bottom: 0.5rem;
+  padding: 0 0.75rem;
   font-weight: 500;
   color: #64748b;
 }
@@ -3629,6 +3652,13 @@ onBeforeUnmount(() => {
   color: var(--ui-text-muted);
 }
 
+.page-toolbar-control.currency-control,
+.page-toolbar-chip {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .currency-control select,
 .metric-line strong {
   color: var(--ui-text-primary);
@@ -3703,6 +3733,6 @@ onBeforeUnmount(() => {
 .page-toolbar-control,
 .page-toolbar-button,
 .page-toolbar-chip {
-  min-height: 44px;
+  min-height: 40px;
 }
 </style>

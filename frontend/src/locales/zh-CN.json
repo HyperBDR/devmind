@@ -1392,7 +1392,7 @@
         "metaModels": "关联元模型",
         "source": "服务商 / 价格源",
         "status": "状态",
-        "type": "价格来源"
+        "type": "同步方式"
       },
       "metrics": {
         "metaModels": {
@@ -1443,7 +1443,7 @@
       },
       "sourceStatus": {
         "active": {
-          "hint": "可参与采集和计算",
+          "hint": "参与采集，并进入后续平均价格计算",
           "label": "启用"
         },
         "failed": {
@@ -1451,12 +1451,16 @@
           "label": "采集失败"
         },
         "inactive": {
-          "hint": "不会参与采集",
+          "hint": "不参与采集，也不进入后续平均价格计算",
           "label": "停用"
         },
         "manual": {
           "hint": "通过录入或 Excel 导入更新",
           "label": "手动维护"
+        },
+        "notAdapted": {
+          "hint": "已登记官方价格页，暂未接入自动采集",
+          "label": "未适配"
         },
         "pending": {
           "label": "未配置采集"
@@ -1465,6 +1469,11 @@
           "hint": "请稍后刷新",
           "label": "同步中"
         }
+      },
+      "sourceSyncMode": {
+        "auto": "自动同步",
+        "manual": "手动同步",
+        "pending": "未配置"
       },
       "officialSourceModal": {
         "currency": "币种",
@@ -1612,6 +1621,7 @@
       },
       "messages": {
         "autoSyncCreated": "自动同步价格源「{name}」已添加",
+        "autoSyncExists": "价格源「{name}」已存在，已刷新列表",
         "created": "模型价格源已创建",
         "officialCreated": "官方采集源「{name}」已添加",
         "updated": "模型价格源已更新"
@@ -2146,6 +2156,7 @@
       "categories": {
         "all": "全部类型",
         "officialProvider": "原厂",
+        "cloudHosted": "云托管",
         "supplier": "供货商",
         "manual": "人工",
         "unknown": "其他"

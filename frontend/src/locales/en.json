@@ -1382,7 +1382,7 @@
         "metaModels": "Linked meta models",
         "source": "Service / price source",
         "status": "Status",
-        "type": "Price source"
+        "type": "Sync mode"
       },
       "metrics": {
         "metaModels": {
@@ -1433,7 +1433,7 @@
       },
       "sourceStatus": {
         "active": {
-          "hint": "Participates in collection and calculation",
+          "hint": "Participates in collection and later average price calculations",
           "label": "Active"
         },
         "failed": {
@@ -1441,12 +1441,16 @@
           "label": "Collection failed"
         },
         "inactive": {
-          "hint": "Does not participate in collection",
+          "hint": "Excluded from collection and later average price calculations",
           "label": "Inactive"
         },
         "manual": {
           "hint": "Updated through manual entry or Excel import",
           "label": "Manual maintenance"
+        },
+        "notAdapted": {
+          "hint": "Official price page is registered; auto collection is not implemented yet",
+          "label": "Not adapted"
         },
         "pending": {
           "label": "Collection not configured"
@@ -1455,6 +1459,11 @@
           "hint": "Refresh again later",
           "label": "Syncing"
         }
+      },
+      "sourceSyncMode": {
+        "auto": "Auto sync",
+        "manual": "Manual sync",
+        "pending": "Not configured"
       },
       "officialSourceModal": {
         "currency": "Currency",
@@ -1602,6 +1611,7 @@
       },
       "messages": {
         "autoSyncCreated": "Auto-sync price source \"{name}\" added",
+        "autoSyncExists": "Price source \"{name}\" already exists; list refreshed",
         "created": "Model price source created",
         "officialCreated": "Official collector source \"{name}\" added",
         "updated": "Model price source updated"
@@ -2136,6 +2146,7 @@
       "categories": {
         "all": "All types",
         "officialProvider": "Official",
+        "cloudHosted": "Cloud hosted",
         "supplier": "Supplier",
         "manual": "Manual",
         "unknown": "Other"

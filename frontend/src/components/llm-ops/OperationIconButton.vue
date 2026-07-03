@@ -3,8 +3,8 @@
     class="operation-icon-button inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent bg-transparent p-0 transition hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0"
     :class="toneClass"
     :aria-label="label"
+    :aria-describedby="tooltipId"
     :disabled="disabled"
-    :title="label"
     :type="type"
     @click="$emit('click', $event)"
   >
@@ -23,11 +23,14 @@
     <span v-if="visibleLabel" class="operation-icon-label">
       {{ visibleLabel }}
     </span>
+    <span :id="tooltipId" class="operation-icon-tooltip" role="tooltip">
+      {{ label }}
+    </span>
   </button>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, getCurrentInstance } from 'vue'
 
 const props = defineProps({
   disabled: {
@@ -58,9 +61,13 @@ const props = defineProps({
 
 defineEmits(['click'])
 
+const instance = getCurrentInstance()
+const tooltipId = `operation-icon-tooltip-${instance?.uid || 'fallback'}`
+
 const iconMap = {
   add: ['M12 5v14', 'M5 12h14'],
   approve: ['M20 6 9 17l-5-5'],
+  back: ['M15 18l-6-6 6-6'],
   collect: ['M21 12a9 9 0 1 1-2.64-6.36', 'M21 3v6h-6'],
   config: [
     'M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z',
@@ -68,6 +75,7 @@ const iconMap = {
   ],
   delete: ['M3 6h18', 'M8 6V4h8v2', 'M6 6l1 14h10l1-14'],
   edit: ['M12 20h9', 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z'],
+  import: ['M12 3v12', 'M7 10l5 5 5-5', 'M5 21h14', 'M5 17h14'],
   manual: [
     'M8 6h13',
     'M8 12h13',
@@ -82,6 +90,7 @@ const iconMap = {
   price: ['M12 1v22', 'M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6'],
   reject: ['M18 6 6 18', 'M6 6l12 12'],
   remove: ['M18 6 6 18', 'M6 6l12 12'],
+  reset: ['M21 12a9 9 0 1 1-2.64-6.36', 'M21 3v6h-6', 'M12 7v5l3 2'],
   submit: ['M22 2 11 13', 'M22 2 15 22l-4-9-9-4Z'],
   toggleOff: ['M18 12H6'],
   toggleOn: ['M5 12l4 4L19 6'],
@@ -106,6 +115,7 @@ const toneClass = computed(() => {
 <style scoped>
 .operation-icon-button {
   display: inline-flex;
+  position: relative;
   width: 2rem;
   height: 2rem;
   align-items: center;
@@ -131,6 +141,13 @@ const toneClass = computed(() => {
   transform: none;
 }
 
+.operation-icon-button:hover:not(:disabled) .operation-icon-tooltip,
+.operation-icon-button:focus-visible .operation-icon-tooltip {
+  opacity: 1;
+  transform: translate(-50%, -0.375rem);
+  visibility: visible;
+}
+
 .operation-icon {
   width: 1rem;
   height: 1rem;
@@ -144,6 +161,45 @@ const toneClass = computed(() => {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
+}
+
+.operation-icon-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  z-index: 20;
+  max-width: 8rem;
+  overflow: hidden;
+  border-radius: 0.375rem;
+  background: #111827;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  opacity: 0;
+  padding: 0.25rem 0.5rem;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  transform: translate(-50%, -0.125rem);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.operation-icon-tooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-color: #111827 transparent transparent;
+  border-style: solid;
+  border-width: 0.25rem 0.25rem 0;
+  content: '';
+  transform: translateX(-50%);
 }
 
 .operation-icon-default {

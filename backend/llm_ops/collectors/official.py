@@ -253,6 +253,16 @@ OFFICIAL_PROVIDER_CONFIGS = {
             ),
         ),
     ),
+    "azure-openai": OfficialProviderConfig(
+        provider_code="azure-openai",
+        provider_label="Azure OpenAI",
+        source_url=(
+            "https://azure.microsoft.com/en-us/pricing/details/"
+            "azure-openai/#pricing"
+        ),
+        currency="USD",
+        models=(),
+    ),
     "anthropic": OfficialProviderConfig(
         provider_code="anthropic",
         provider_label="Anthropic",

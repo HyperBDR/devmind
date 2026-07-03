@@ -26,6 +26,7 @@ class PriceCollectionSource(models.Model):
     CLOUD_PROVIDER_OFFICIAL_CODES = {
         "aliyun",
         "aliyun-wanx",
+        "azure-openai",
         "baidu",
         "volcengine",
     }

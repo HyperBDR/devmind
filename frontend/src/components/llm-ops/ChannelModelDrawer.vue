@@ -1959,32 +1959,49 @@ function moneyOrStatus(value, currency = 'USD') {
 
 function compactCostSummary(row) {
   if (row?.priceItems?.length) {
-    return sortPriceItems(row.priceItems)
-      .map(
-        (item) =>
-          `${priceItemDisplayLabel(item.dimension)} ${moneyOrStatus(
-            item.unit_price,
-            item.currency
-          )}`
-      )
-      .join(' · ')
+    return priceSummaryText(
+      sortPriceItems(row.priceItems).map((item) => ({
+        label: priceItemDisplayLabel(item.dimension),
+        value: item.unit_price,
+        currency: item.currency
+      }))
+    )
   }
   const previewItems = draftPricePreview(row?.draft, row?.model)
   if (!previewItems.length) return '成本待生成'
-  return previewItems
-    .map(
-      (item) =>
-        `${previewPriceLabel(item.label)} ${priceText(item, row?.model)}`
-    )
-    .join(' · ')
+  return priceSummaryText(
+    previewItems.map((item) => ({
+      label: previewPriceLabel(item.label),
+      value: item.value,
+      currency: item.currency,
+      missingReason: item.missingReason || ''
+    })),
+    row?.model
+  )
 }
 
 function upstreamPriceSummary(model) {
   const rows = providerPriceSummary(model)
   if (!rows.length) return '-'
-  return rows
-    .map((item) => `${item.label} ${priceText(item, model)}`)
+  return priceSummaryText(rows, model)
+}
+
+function priceSummaryText(rows, model = null, limit = 3) {
+  const items = dedupePriceSummaryRows(rows).slice(0, limit)
+  if (!items.length) return '-'
+  return items
+    .map((item) => `${item.label} ${summaryPriceText(item, model)}`)
     .join(' · ')
+}
+
+function dedupePriceSummaryRows(rows) {
+  const seen = new Set()
+  return (rows || []).filter((item) => {
+    const key = String(item?.label || '').trim().toLowerCase()
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function batchUpstreamPriceSummary(model) {
@@ -2039,7 +2056,28 @@ function priceText(item, model) {
   return '缺价格'
 }
 
-function priceNumberText(item, model) {
+function summaryPriceText(item, model) {
+  if (!item) return '-'
+  if (item.missingReason) return item.missingReason
+  if (item.value === null || item.value === undefined || item.value === '') {
+    return '-'
+  }
+  if (Number(item.value) !== 0) {
+    return priceNumberText(item, model, 2)
+  }
+  if (isNotApplicablePrice(item, model)) {
+    return '不适用'
+  }
+  return '缺价格'
+}
+
+function fixedNumber(value, digits = 4) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toFixed(digits)
+}
+
+function priceNumberText(item, model, digits = 4) {
   if (!item) return '-'
   if (item.missingReason) return item.missingReason
   if (item.value === null || item.value === undefined || item.value === '') {
@@ -2048,14 +2086,14 @@ function priceNumberText(item, model) {
   if (Number(item.value) !== 0) {
     const displayValue = convertCurrencyAmount(item.value, item.currency)
     if (displayValue === null) {
-      return Number(item.value).toFixed(4)
+      return fixedNumber(item.value, digits)
     }
-    return displayValue.toFixed(4)
+    return fixedNumber(displayValue, digits)
   }
   if (isNotApplicablePrice(item, model)) {
     return '不适用'
   }
-  return '0.0000'
+  return fixedNumber(0, digits)
 }
 
 function isNotApplicablePrice(item, model) {
@@ -2864,7 +2902,7 @@ function modalityLabel(modality) {
 
 .price-cell p,
 .price-cell span {
-  @apply grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-2 text-xs;
+  @apply grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-start gap-2 text-xs;
 }
 
 .price-cell em {
@@ -2872,7 +2910,11 @@ function modalityLabel(modality) {
 }
 
 .price-cell strong {
-  @apply min-w-0 truncate font-semibold text-slate-800;
+  @apply min-w-0 font-semibold leading-5 text-slate-800;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .price-cell span strong {

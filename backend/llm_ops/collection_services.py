@@ -56,7 +56,20 @@ SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = tuple(
     for code in registered_vendor_price_collector_codes()
     if code in OFFICIAL_PROVIDER_CONFIGS
 )
+MANUAL_OFFICIAL_SOURCE_PROVIDER_CODES: tuple[str, ...] = ()
+SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES = tuple(
+    sorted(
+        {
+            *SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
+            *MANUAL_OFFICIAL_SOURCE_PROVIDER_CODES,
+        }
+    )
+)
 DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES: tuple[str, ...] = ()
+AZURE_OPENAI_PRICING_SOURCE_URL = (
+    "https://azure.microsoft.com/en-us/pricing/details/"
+    "azure-openai/#pricing"
+)
 FULL_CATALOG_PROVIDER_CODES = (
     "aliyun",
     "baidu",
@@ -65,6 +78,7 @@ FULL_CATALOG_PROVIDER_CODES = (
 CLOUD_PROVIDER_OFFICIAL_CODES = {
     "aliyun",
     "aliyun-wanx",
+    "azure-openai",
     "baidu",
     "volcengine",
 }
@@ -89,6 +103,17 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
         "name": "火山方舟",
         "website": "https://ark.cn-beijing.volces.com/",
         "notes": "元模型厂商。",
+    },
+    "azure-openai": {
+        "name": "Azure OpenAI",
+        "website": (
+            "https://azure.microsoft.com/en-us/products/"
+            "ai-services/openai-service"
+        ),
+        "notes": "云厂商托管 OpenAI 模型的官方价格源。",
+        "source_name": "Azure OpenAI 官方价格",
+        "source_url": AZURE_OPENAI_PRICING_SOURCE_URL,
+        "currency": "USD",
     },
 }
 
@@ -790,10 +815,17 @@ def sync_configured_official_model_prices(
     selected_provider_codes = provider_codes or list(
         DEFAULT_OFFICIAL_PRICE_SYNC_PROVIDER_CODES
     )
+    supported_codes = set(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    if provider_codes:
+        supported_codes.update(
+            code
+            for code, config in OFFICIAL_PROVIDER_CONFIGS.items()
+            if config.models
+        )
     selected_provider_codes = [
         code
         for code in selected_provider_codes
-        if code in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES
+        if code in supported_codes
     ]
     queryset = LLMProvider.objects.filter(
         code__in=selected_provider_codes,
@@ -822,7 +854,14 @@ def sync_configured_official_model_prices(
 
 def supported_official_provider_options() -> list[dict]:
     """Return official provider source presets available to operators."""
-    provider_codes = list(SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES)
+    return official_provider_options_for_codes(
+        SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES,
+    )
+
+
+def official_provider_options_for_codes(provider_codes) -> list[dict]:
+    """Return official source presets for selected provider codes."""
+    provider_codes = list(provider_codes)
     providers = {
         provider.code: provider
         for provider in LLMProvider.objects.filter(code__in=provider_codes)
@@ -840,12 +879,14 @@ def supported_official_provider_options() -> list[dict]:
 
     options = []
     for provider_code in provider_codes:
-        config = OFFICIAL_PROVIDER_CONFIGS[provider_code]
         defaults = official_provider_defaults(provider_code)
         provider = providers.get(provider_code)
         source_slug = official_provider_source_slug(provider_code)
         source = sources.get(source_slug)
         provider_name = provider.name if provider else defaults["name"]
+        collection_method = official_provider_collection_method(
+            provider_code,
+        )
         options.append(
             {
                 "provider_code": provider_code,
@@ -854,15 +895,21 @@ def supported_official_provider_options() -> list[dict]:
                 "source_id": source.id if source else None,
                 "source_slug": source_slug,
                 "source_name": (
-                    source.name if source else f"{provider_name} 官方价格"
+                    source.name
+                    if source
+                    else official_provider_default_source_name(provider_code)
                 ),
                 "source_exists": source is not None,
                 "source_url": (
                     source.endpoint_url
                     if source and source.endpoint_url
-                    else config.source_url
+                    else official_provider_source_url(provider_code)
                 ),
-                "currency": source.currency if source else config.currency,
+                "currency": (
+                    source.currency
+                    if source
+                    else official_provider_currency(provider_code)
+                ),
                 "option_code": provider_code,
                 "source_category": (
                     PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
@@ -870,9 +917,7 @@ def supported_official_provider_options() -> list[dict]:
                 "source_owner_type": source_owner_type_for_provider_code(
                     provider_code
                 ),
-                "collection_method": (
-                    PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
-                ),
+                "collection_method": collection_method,
                 "updates_model_prices": True,
             }
         )
@@ -880,8 +925,10 @@ def supported_official_provider_options() -> list[dict]:
 
 
 def supported_auto_sync_source_options() -> list[dict]:
-    """Return source presets backed by concrete collection code."""
-    options = supported_official_provider_options()
+    """Return source presets operators can add from the source modal."""
+    options = official_provider_options_for_codes(
+        SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES,
+    )
     supplier_codes = [
         code
         for code in registered_vendor_price_collector_codes()
@@ -938,7 +985,7 @@ def ensure_supported_official_provider_source(
 ) -> tuple[LLMProvider, PriceCollectionSource, bool, bool]:
     """Ensure an operator-selected official provider source exists."""
     provider_code = str(provider_code or "").strip()
-    if provider_code not in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES:
+    if provider_code not in SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES:
         raise ValueError("Unsupported official provider source.")
 
     defaults = official_provider_defaults(provider_code)
@@ -963,7 +1010,10 @@ def ensure_supported_official_provider_source(
     source_created = not PriceCollectionSource.objects.filter(
         slug=official_provider_source_slug(provider_code)
     ).exists()
-    source = ensure_official_source(provider=provider)
+    if provider_code in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES:
+        source = ensure_official_source(provider=provider)
+    else:
+        source = ensure_manual_official_source(provider=provider)
     return provider, source, provider_created, source_created
 
 
@@ -973,7 +1023,7 @@ def official_provider_source_slug(provider_code: str) -> str:
 
 
 def official_provider_defaults(provider_code: str) -> dict[str, str]:
-    """Return display defaults for an implemented official provider."""
+    """Return display defaults for a supported official source."""
     if provider_code in OFFICIAL_SOURCE_PROVIDER_DEFAULTS:
         return OFFICIAL_SOURCE_PROVIDER_DEFAULTS[provider_code]
     config = OFFICIAL_PROVIDER_CONFIGS[provider_code]
@@ -982,6 +1032,44 @@ def official_provider_defaults(provider_code: str) -> dict[str, str]:
         "website": config.source_url,
         "notes": "元模型厂商。",
     }
+
+
+def official_provider_source_url(provider_code: str) -> str:
+    """Return the pricing URL for one official source preset."""
+    defaults = OFFICIAL_SOURCE_PROVIDER_DEFAULTS.get(provider_code, {})
+    if defaults.get("source_url"):
+        return defaults["source_url"]
+    return OFFICIAL_PROVIDER_CONFIGS[provider_code].source_url
+
+
+def official_provider_currency(provider_code: str) -> str:
+    """Return the default currency for one official source preset."""
+    defaults = OFFICIAL_SOURCE_PROVIDER_DEFAULTS.get(provider_code, {})
+    if defaults.get("currency"):
+        return defaults["currency"]
+    return OFFICIAL_PROVIDER_CONFIGS[provider_code].currency
+
+
+def official_provider_source_name(
+    provider: LLMProvider,
+    provider_code: str,
+) -> str:
+    """Return the canonical source name for one official source."""
+    defaults = official_provider_defaults(provider_code)
+    return defaults.get("source_name") or f"{provider.name} 官方价格"
+
+
+def official_provider_default_source_name(provider_code: str) -> str:
+    """Return the default source display name for one provider code."""
+    defaults = official_provider_defaults(provider_code)
+    return defaults.get("source_name") or f"{defaults['name']} 官方价格"
+
+
+def official_provider_collection_method(provider_code: str) -> str:
+    """Return whether the official source has backend collection code."""
+    if provider_code in SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES:
+        return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+    return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
 
 
 def reset_official_price_catalog(
@@ -3273,6 +3361,66 @@ def ensure_official_source(*, provider: LLMProvider):
         source.endpoint_url,
     ):
         desired_fields["endpoint_url"] = config.source_url
+    for field, value in desired_fields.items():
+        if getattr(source, field) != value:
+            setattr(source, field, value)
+            changed_fields.append(field)
+    if changed_fields:
+        changed_fields.append("updated_at")
+        source.save(update_fields=changed_fields)
+    return source
+
+
+def ensure_manual_official_source(*, provider: LLMProvider):
+    """Ensure an official source exists without backend collection code."""
+    provider_code = provider.code
+    owner_type = source_owner_type_for_provider(provider)
+    source_slug = official_provider_source_slug(provider_code)
+    source_name = official_provider_source_name(provider, provider_code)
+    source, created = PriceCollectionSource.objects.get_or_create(
+        slug=source_slug,
+        defaults={
+            "provider": provider,
+            "name": source_name,
+            "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            "source_category": (
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            "source_owner_type": owner_type,
+            "collection_method": (
+                PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
+            ),
+            "endpoint_url": official_provider_source_url(provider_code),
+            "currency": official_provider_currency(provider_code),
+            "is_enabled": True,
+            "updates_model_prices": True,
+            "notes": (
+                "官方公开价格页；当前仅作为"
+                "价格源记录维护。"
+            ),
+        },
+    )
+    if created:
+        return source
+
+    desired_fields = {
+        "provider": provider,
+        "name": source_name,
+        "source_type": PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+        "source_category": (
+            PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        ),
+        "source_owner_type": owner_type,
+        "collection_method": PriceCollectionSource.COLLECTION_METHOD_UNKNOWN,
+        "currency": official_provider_currency(provider_code),
+        "updates_model_prices": True,
+    }
+    if not source.endpoint_url:
+        desired_fields["endpoint_url"] = official_provider_source_url(
+            provider_code,
+        )
+
+    changed_fields = []
     for field, value in desired_fields.items():
         if getattr(source, field) != value:
             setattr(source, field, value)

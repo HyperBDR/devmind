@@ -4,12 +4,14 @@ from typing import Any
 
 from .base import VendorPriceCatalogCollector
 from .parsers.aliyun import AliyunPriceCatalogCollector
+from .parsers.azure_openai import AzureOpenAIPriceCatalogCollector
 from .parsers.deepseek import DeepSeekPriceCatalogCollector
 from .parsers.siliconflow import SiliconFlowPriceCatalogCollector
 
 
 PRICE_CATALOG_COLLECTORS: dict[str, VendorPriceCatalogCollector] = {
     "aliyun": AliyunPriceCatalogCollector(),
+    "azure-openai": AzureOpenAIPriceCatalogCollector(),
     "deepseek": DeepSeekPriceCatalogCollector(),
     "siliconflow": SiliconFlowPriceCatalogCollector(),
 }
