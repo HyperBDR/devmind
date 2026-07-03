@@ -436,9 +436,9 @@
                     <div class="terminal-price-control">
                       <span>{{ currencySymbol }}</span>
                       <input
-                        :value="dimension.priceRaw"
+                        :value="dimension.priceText"
                         type="number"
-                        step="0.0001"
+                        step="0.01"
                         min="0"
                         @input="onPriceInput(row, dimension.key, $event)"
                       />
@@ -741,10 +741,6 @@ const procurementByMetaModel = computed(() => {
   return map
 })
 
-const availableMetaModelIds = computed(
-  () => new Set(procurementByMetaModel.value.keys())
-)
-
 const selectedMetaModel = computed(() => {
   if (!form.value.modelId) return null
   return metaModelById.value.get(String(form.value.modelId)) || null
@@ -770,7 +766,6 @@ const metaVendorOptions = computed(() => {
   metaModelRows.value.forEach((model) => {
     const id = model.owner_key
     if (!id) return
-    if (!availableMetaModelIds.value.has(String(model.id))) return
     const key = String(id)
     if (map.has(key)) return
     map.set(key, {
@@ -799,7 +794,6 @@ const baseModelOptions = computed(() => {
   const metaVendorId = form.value.metaVendorId
   return metaModelRows.value
     .filter((item) => {
-      if (!availableMetaModelIds.value.has(String(item.id))) return false
       if (!metaVendorId) return true
       return String(item.owner_key) === String(metaVendorId)
     })
@@ -1180,13 +1174,13 @@ const chainRows = computed(() => {
         priceCacheInRaw: state.priceCacheInRaw ?? 0,
         priceIn:
           state.priceInRaw !== null && state.priceInRaw !== undefined
-            ? Number(state.priceInRaw).toFixed(4)
+            ? Number(state.priceInRaw).toFixed(2)
             : '',
         priceOut:
           state.priceOutRaw !== null && state.priceOutRaw !== undefined
-            ? Number(state.priceOutRaw).toFixed(4)
+            ? Number(state.priceOutRaw).toFixed(2)
             : '',
-        priceCacheIn: Number(state.priceCacheInRaw ?? 0).toFixed(4),
+        priceCacheIn: Number(state.priceCacheInRaw ?? 0).toFixed(2),
         isLowest: false
       }
     })
@@ -1330,9 +1324,18 @@ function hydrateInitialListings(initialModelId) {
       nextState[row.uniqueId] = {
         ...nextState[row.uniqueId],
         selected: true,
-        priceInRaw: priceIn ?? row.priceInRaw,
-        priceOutRaw: priceOut ?? row.priceOutRaw,
-        priceCacheInRaw: priceCacheIn ?? row.priceCacheInRaw,
+        priceInRaw:
+          priceIn !== null && priceIn !== undefined
+            ? formatEditablePrice(priceIn)
+            : row.priceInRaw,
+        priceOutRaw:
+          priceOut !== null && priceOut !== undefined
+            ? formatEditablePrice(priceOut)
+            : row.priceOutRaw,
+        priceCacheInRaw:
+          priceCacheIn !== null && priceCacheIn !== undefined
+            ? formatEditablePrice(priceCacheIn)
+            : row.priceCacheInRaw,
         margin: marginFromListingPrices(row, priceIn, priceOut, priceCacheIn)
       }
     })
@@ -1382,7 +1385,7 @@ function clampMarginToReference(value) {
 function priceFromMargin(cost, margin) {
   const costValue = Number(cost) || 0
   const marginValue = Number(margin) || 0
-  return Number((costValue * (1 + marginValue / 100)).toFixed(4))
+  return formatEditablePrice(costValue * (1 + marginValue / 100))
 }
 
 function pricePatchForMargin(row, margin, options = {}) {
@@ -1443,24 +1446,25 @@ function applyPriceChange(row, key, rawPrice) {
     Number.isFinite(referencePrice) && referencePrice > 0
       ? Math.max(inputPrice, referencePrice)
       : inputPrice
+  const formattedPrice = formatEditablePrice(price)
   const margin =
     Number(cost) > 0
-      ? ((Number(price) - Number(cost)) / Number(cost)) * 100
+      ? ((Number(formattedPrice) - Number(cost)) / Number(cost)) * 100
       : row.margin
   const patch = {}
   if (key === 'input') {
-    patch.priceInRaw = price
+    patch.priceInRaw = formattedPrice
   } else if (key === 'cache') {
-    patch.priceCacheInRaw = price
+    patch.priceCacheInRaw = formattedPrice
   } else {
-    patch.priceOutRaw = price
+    patch.priceOutRaw = formattedPrice
   }
   patch.margin = normalizeMargin(
     marginFromRowPrices(row, patch) ?? margin ?? row.margin
   )
   updateChainState(row, patch)
   emitChange()
-  return price
+  return formattedPrice
 }
 
 function formatCredit(price) {
@@ -1490,6 +1494,18 @@ function formatMoneyAmount(value) {
   return `${currencySymbol.value}${num.toFixed(4)}`
 }
 
+function formatEditablePrice(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return 0
+  return Number(amount.toFixed(2))
+}
+
+function formatMinimumPrice(value) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return 0
+  return Number((Math.ceil(amount * 100) / 100).toFixed(2))
+}
+
 function formatDiscount(value) {
   const ratio = normalizeDiscountRatio(value)
   return `${(ratio * 100).toFixed(1).replace(/\.0$/, '')}%`
@@ -1517,7 +1533,7 @@ function referencePriceForCost(cost) {
 function referencePriceText(value) {
   const amount = Number(value)
   if (!Number.isFinite(amount)) return '-'
-  return amount.toFixed(4)
+  return amount.toFixed(2)
 }
 
 function referencePriceTitle(dimension) {
@@ -1609,7 +1625,7 @@ function costFormulaTitle(row, key) {
 function marketAverageText(avg) {
   const value = Number(avg)
   if (!Number.isFinite(value) || value <= 0) return '-'
-  return `${currencySymbol.value}${value.toFixed(4)}`
+  return `${currencySymbol.value}${value.toFixed(2)}`
 }
 
 function priceDiffText(price, avg) {
@@ -1639,7 +1655,7 @@ function priceDiffAmountText(price, avg) {
   if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0) return ''
   const diff = p - a
   const prefix = diff > 0 ? '+' : diff < 0 ? '-' : ''
-  return `${prefix}${currencySymbol.value}${Math.abs(diff).toFixed(4)}`
+  return `${prefix}${currencySymbol.value}${Math.abs(diff).toFixed(2)}`
 }
 
 function priceDiffClass(price, avg) {
@@ -1736,6 +1752,9 @@ const priceMetricConfigs = Object.fromEntries(
 function priceDimensions(row) {
   return ['input', 'output', 'cache'].map((key) => {
     const config = priceMetricConfigs[key]
+    const referencePrice = formatMinimumPrice(
+      referencePriceForCost(row[config.costRawField])
+    )
     return {
       key,
       label: config.label,
@@ -1745,10 +1764,8 @@ function priceDimensions(row) {
       costRaw: row[config.costRawField],
       costText: row[config.costTextField],
       marketAverage: marketAvg.value[config.marketKey] || 0,
-      referencePriceRaw: referencePriceForCost(row[config.costRawField]),
-      referencePriceText: referencePriceText(
-        referencePriceForCost(row[config.costRawField])
-      )
+      referencePriceRaw: referencePrice,
+      referencePriceText: referencePriceText(referencePrice)
     }
   })
 }
@@ -1898,7 +1915,7 @@ function comparablePrice(value, options = {}) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed)) return options.emptyAsZero ? 0 : null
   const normalized = Math.abs(parsed) < 0.00005 ? 0 : parsed
-  return Number(normalized.toFixed(4))
+  return Number(normalized.toFixed(2))
 }
 
 function listingForRow(row) {

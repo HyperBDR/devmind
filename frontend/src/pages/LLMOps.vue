@@ -1765,6 +1765,7 @@ async function refreshCoreData(section = activeSection.value) {
     sourceRes,
     runRes,
     providerRes,
+    metaModelRes,
     modelRes,
     channelRes,
     platformRes,
@@ -1773,6 +1774,7 @@ async function refreshCoreData(section = activeSection.value) {
     fetchList(llmOpsApi.listCollectionSources),
     fetchList(llmOpsApi.listCollectionRuns),
     fetchList(llmOpsApi.listProviders),
+    fetchList(llmOpsApi.listMetaModels),
     shouldLoadModels ? fetchList(llmOpsApi.listModels) : Promise.resolve([]),
     fetchList(llmOpsApi.listChannels),
     fetchList(llmOpsApi.listResalePlatforms),
@@ -1781,6 +1783,7 @@ async function refreshCoreData(section = activeSection.value) {
   sources.value = extract(sourceRes)
   collectionRuns.value = extract(runRes)
   providers.value = extract(providerRes)
+  metaModels.value = extract(metaModelRes)
   if (shouldLoadModels) {
     models.value = extract(modelRes)
   }
@@ -1841,7 +1844,11 @@ async function refreshSectionData(section) {
     return
   }
   if (section === 'reseller' || section === 'listingRisk') {
-    await Promise.all([refreshModelPriceItems(), refreshResaleListings()])
+    await Promise.all([
+      refreshChannelPricingData(),
+      refreshModelPriceItems(),
+      refreshResaleListings()
+    ])
     return
   }
   if (section === 'modelWorkbench') {
@@ -1881,6 +1888,31 @@ async function refreshModelPriceItems() {
 
 async function refreshResaleListings() {
   listings.value = await fetchList(llmOpsApi.listResaleListings)
+}
+
+function preloadResalePublishingData() {
+  const tasks = []
+  if (!metaModels.value.length) {
+    tasks.push(
+      fetchList(llmOpsApi.listMetaModels).then((items) => {
+        metaModels.value = items
+      })
+    )
+  }
+  if (!channelPrices.value.length || !channelPriceItems.value.length) {
+    tasks.push(refreshChannelPricingData())
+  }
+  if (!modelPriceItems.value.length) {
+    tasks.push(refreshModelPriceItems())
+  }
+  if (!listings.value.length) {
+    tasks.push(refreshResaleListings())
+  }
+  if (!tasks.length) return
+
+  Promise.all(tasks).catch((error) => {
+    showError(errorMessage(error, '加载发布工作台数据失败。'))
+  })
 }
 
 async function refreshReconciliationRecords() {
@@ -1946,11 +1978,13 @@ async function refreshProviderManagementData() {
 
 async function refreshMetaModelManagementData() {
   try {
-    const [providerData, summaryRes] = await Promise.all([
+    const [providerData, metaModelData, summaryRes] = await Promise.all([
       fetchList(llmOpsApi.listProviders),
+      fetchList(llmOpsApi.listMetaModels),
       llmOpsApi.getSummary(summaryParams())
     ])
     providers.value = providerData
+    metaModels.value = metaModelData
     summary.value = extract(summaryRes)
   } catch (error) {
     showError(errorMessage(error, '刷新元模型数据失败。'))
@@ -2278,11 +2312,13 @@ function openListingActionDrawer({ modelId, kind }) {
   if (!['create', 'view', 'edit'].includes(kind)) return
   resalePublishingInitialModelId.value = modelId || null
   resalePublishingDrawerOpen.value = true
+  preloadResalePublishingData()
 }
 
 function openResalePublishingWorkspace(payload = {}) {
   resalePublishingInitialModelId.value = payload?.modelId || null
   resalePublishingDrawerOpen.value = true
+  preloadResalePublishingData()
 }
 
 function mapWorkspaceListingToPayload(item) {
