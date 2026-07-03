@@ -420,7 +420,7 @@ export function useAgioneListingRows({
   const trendActionHint = computed(() => {
     if (!selectedTrendOption.value) return '先选择采购渠道后再生成上架价格。'
     if (selectedOptionIsListed.value && selectedOptionIsLowest.value) {
-      return '当前渠道已经上架且是最低采购渠道，可直接更新利润率后的售价。'
+      return '当前渠道已经上架且是最低采购渠道，可直接更新收益率后的售价。'
     }
     if (selectedOptionIsListed.value) {
       return '当前渠道已经上架，本次操作会更新该渠道的挂售价格。'

@@ -734,7 +734,12 @@ function listingPriceMetrics(row) {
   }).map((spec) => ({
     key: spec.key,
     label: spec.label,
-    retail: listingAmountText(row.status_listing?.[spec.retailField]),
+    retail: listingAmountText(
+      listingDisplayAmount(
+        row.status_listing?.[spec.retailField],
+        row.status_listing?.currency
+      )
+    ),
     points: listingPointText(
       row.status_listing?.[spec.retailField],
       row.status_listing?.currency
@@ -763,6 +768,14 @@ function listingPointText(value, currency) {
   )
   if (converted === null) return '-'
   return String(Math.round(converted * rate))
+}
+
+function listingDisplayAmount(value, currency) {
+  return convertPointCurrencyAmount(
+    value,
+    currency,
+    props.displayCurrency || 'CNY'
+  )
 }
 
 function listingCurrency(row) {
@@ -981,7 +994,10 @@ function listingUnifiedMarginRate(row) {
         row.lowest_option?.[spec.costField]
       )
     }).map((spec) => ({
-      price: row.status_listing?.[spec.retailField],
+      price: listingDisplayAmount(
+        row.status_listing?.[spec.retailField],
+        row.status_listing?.currency
+      ),
       cost: row.lowest_option?.[spec.costField]
     }))
   )

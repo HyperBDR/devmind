@@ -132,14 +132,11 @@
       <div v-show="isSupplyChainExpanded">
         <div class="supply-grid supply-grid-header">
           <div>{{ t('llmOps.publishingWorkspace.supply.chain') }}</div>
-          <div>{{ t('llmOps.publishingWorkspace.pricing.cost') }}</div>
-          <div>{{ t('llmOps.publishingWorkspace.pricing.price') }}</div>
-          <div>
-            {{
-              t('llmOps.publishingWorkspace.pricing.finalPoint', {
-                point: pointUnitLabel
-              })
-            }}
+          <div
+            v-for="dimension in supplyCostDimensions"
+            :key="`supply-head-${dimension.key}`"
+          >
+            {{ dimension.label }}
           </div>
         </div>
 
@@ -211,61 +208,17 @@
                 </span>
               </label>
 
-              <div class="supply-metric-column">
-                <div
-                  v-for="dim in priceDimensions(row)"
-                  :key="`cost-${row.uniqueId}-${dim.key}`"
-                  class="supply-metric-row"
-                >
-                  <span class="supply-metric-label">
-                    {{ dim.shortLabel }}
-                  </span>
-                  <span class="supply-metric-value text-slate-900">
-                    {{ dim.costText }}
-                  </span>
-                </div>
-              </div>
-
-              <div class="supply-metric-column">
-                <span class="text-slate-500 lg:hidden">
-                  {{ t('llmOps.publishingWorkspace.pricing.price') }}
+              <div
+                v-for="dim in priceDimensions(row)"
+                :key="`cost-${row.uniqueId}-${dim.key}`"
+                class="supply-cost-cell"
+              >
+                <span class="supply-metric-label">
+                  {{ dim.label }}
                 </span>
-                <template v-if="row.selected">
-                  <div
-                    v-for="dim in priceDimensions(row)"
-                    :key="`price-${row.uniqueId}-${dim.key}`"
-                    class="supply-metric-row"
-                  >
-                    <span class="supply-metric-label">
-                      {{ dim.shortLabel }}
-                    </span>
-                    <span class="supply-metric-value text-emerald-600">
-                      {{ dim.priceText || '-' }}
-                    </span>
-                  </div>
-                </template>
-                <span v-else class="supply-metric-empty">-</span>
-              </div>
-
-              <div class="supply-metric-column">
-                <span class="text-slate-500 lg:hidden">
-                  {{ pointUnitLabel }}
+                <span class="supply-metric-value text-slate-900">
+                  {{ dim.costText }}
                 </span>
-                <template v-if="row.selected">
-                  <div
-                    v-for="dim in priceDimensions(row)"
-                    :key="`credit-${row.uniqueId}-${dim.key}`"
-                    class="supply-metric-row"
-                  >
-                    <span class="supply-metric-label">
-                      {{ dim.shortLabel }}
-                    </span>
-                    <span class="supply-metric-value text-agione-600">
-                      {{ formatCredit(dim.priceRaw) }}
-                    </span>
-                  </div>
-                </template>
-                <span v-else class="supply-metric-empty">-</span>
               </div>
             </div>
           </div>
@@ -684,6 +637,11 @@ const resizeStartWidth = ref(0)
 const MIN_SIDEBAR_WIDTH = 340
 const MAX_SIDEBAR_WIDTH = 560
 
+const supplyCostDimensions = RESALE_PRICE_DIMENSION_SPECS.map((item) => ({
+  key: item.key,
+  label: item.label
+}))
+
 const workbenchGridStyle = computed(() => ({
   '--performance-sidebar-width': `${sidebarWidth.value}px`
 }))
@@ -998,6 +956,13 @@ watch(
 )
 
 watch(
+  () => props.displayCurrency,
+  (next, previous) => {
+    migrateChainStateCurrency(previous, next)
+  }
+)
+
+watch(
   () => supplierOptions.value.map((item) => item.id).join(','),
   () => {
     if (
@@ -1024,17 +989,22 @@ function onModelChange() {
   isSupplyChainExpanded.value = true
 }
 
-function convertToDisplay(amount, currency) {
-  if (amount === null || amount === undefined) return null
-  const source = String(currency || 'USD').toUpperCase()
-  const target = currencyLabel.value.toUpperCase()
+function convertCurrencyAmount(amount, sourceCurrency, targetCurrency) {
+  if (amount === null || amount === undefined || amount === '') return null
+  const source = String(sourceCurrency || '').toUpperCase()
+  const target = String(targetCurrency || '').toUpperCase()
   const num = Number(amount)
-  if (!Number.isFinite(num)) return null
+  if (!Number.isFinite(num) || !source || !target) return null
   if (source === target) return num
-  const rate = Number(globalPricing.value.exchangeRate || 7.23)
+  const rate = Number(globalPricing.value.exchangeRate || 0)
+  if (!Number.isFinite(rate) || rate <= 0) return null
   if (source === 'USD' && target === 'CNY') return num * rate
   if (source === 'CNY' && target === 'USD') return num / rate
   return null
+}
+
+function convertToDisplay(amount, currency) {
+  return convertCurrencyAmount(amount, currency || 'USD', currencyLabel.value)
 }
 
 function channelPriceItemKey(channelId, modelId, dimension) {
@@ -1157,6 +1127,22 @@ const chainRows = computed(() => {
       )
       const uniqueId = `${option.channel_id}-${procurement.model_id}`
       const state = getChainState(uniqueId)
+      const margin = normalizeMargin(
+        state.margin ??
+          state.marginIn ??
+          state.marginOut ??
+          state.marginCacheIn ??
+          20
+      )
+      const previewPriceInRaw = priceFromMargin(inDisplay ?? 0, margin)
+      const previewPriceOutRaw = priceFromMargin(outDisplay ?? 0, margin)
+      const previewPriceCacheInRaw = priceFromMargin(
+        cacheInDisplay ?? 0,
+        margin
+      )
+      const priceInRaw = state.priceInRaw ?? previewPriceInRaw
+      const priceOutRaw = state.priceOutRaw ?? previewPriceOutRaw
+      const priceCacheInRaw = state.priceCacheInRaw ?? previewPriceCacheInRaw
       return {
         uniqueId,
         channelId: option.channel_id,
@@ -1196,19 +1182,13 @@ const chainRows = computed(() => {
         rpmLimit: numberOrNull(option.rpm_limit),
         latencyMs: numberOrNull(option.latency_ms),
         selected: Boolean(state.selected),
-        margin: normalizeMargin(
-          state.margin ??
-            state.marginIn ??
-            state.marginOut ??
-            state.marginCacheIn ??
-            20
-        ),
-        priceInRaw: state.priceInRaw ?? null,
-        priceOutRaw: state.priceOutRaw ?? null,
-        priceCacheInRaw: state.priceCacheInRaw ?? 0,
-        priceIn: editablePriceInputText(state.priceInRaw),
-        priceOut: editablePriceInputText(state.priceOutRaw),
-        priceCacheIn: editablePriceInputText(state.priceCacheInRaw ?? 0),
+        margin,
+        priceInRaw,
+        priceOutRaw,
+        priceCacheInRaw,
+        priceIn: editablePriceInputText(priceInRaw),
+        priceOut: editablePriceInputText(priceOutRaw),
+        priceCacheIn: editablePriceInputText(priceCacheInRaw),
         isLowest: false
       }
     })
@@ -1271,6 +1251,7 @@ function syncSelectedChain() {
     const state = { ...(nextState[row.uniqueId] || {}) }
     const margin = normalizeMargin(state.margin ?? row.margin)
     state.margin = margin
+    state.currency = currencyLabel.value.toUpperCase()
     if (state.priceInRaw === null || state.priceInRaw === undefined) {
       state.priceInRaw = priceFromMargin(row.costInRaw, margin)
     }
@@ -1295,9 +1276,35 @@ function updateChainState(row, patch) {
     ...chainState.value,
     [row.uniqueId]: {
       ...getChainState(row.uniqueId),
+      currency: currencyLabel.value.toUpperCase(),
       ...patch
     }
   }
+}
+
+function migrateChainStateCurrency(previousCurrency, nextCurrency) {
+  const source = String(previousCurrency || '').toUpperCase()
+  const target = String(nextCurrency || '').toUpperCase()
+  if (!source || !target || source === target) return
+  const nextState = {}
+  const priceFields = ['priceInRaw', 'priceOutRaw', 'priceCacheInRaw']
+  Object.entries(chainState.value).forEach(([key, state]) => {
+    const stateCurrency = String(state.currency || source).toUpperCase()
+    const migrated = { ...state, currency: target }
+    priceFields.forEach((field) => {
+      const converted = convertCurrencyAmount(
+        state[field],
+        stateCurrency,
+        target
+      )
+      if (converted !== null) {
+        migrated[field] = formatEditablePrice(converted)
+      }
+    })
+    nextState[key] = migrated
+  })
+  chainState.value = nextState
+  emitChange()
 }
 
 function handleChainSelection(row, event) {
@@ -1352,6 +1359,7 @@ function hydrateInitialListings(initialModelId) {
       nextState[row.uniqueId] = {
         ...nextState[row.uniqueId],
         selected: true,
+        currency: currencyLabel.value.toUpperCase(),
         priceInRaw:
           priceIn !== null && priceIn !== undefined
             ? formatEditablePrice(priceIn)
@@ -1521,9 +1529,20 @@ function applyPriceChange(row, key, rawPrice) {
 }
 
 function formatCredit(price) {
-  const amount = Number(price) || 0
+  const amount = Number(price)
   const rate = Number(globalPricing.value.creditRatio) || 0
-  return formatRoundedPoints(amount * rate)
+  if (!Number.isFinite(amount) || rate <= 0) return '0'
+  const converted = convertPointCurrencyAmount(
+    amount,
+    currencyLabel.value,
+    props.pointConversion?.currency || platformCurrencyLabel.value
+  )
+  if (converted === null) return '-'
+  return formatRoundedPoints(converted * rate)
+}
+
+function convertPointCurrencyAmount(value, sourceCurrency, targetCurrency) {
+  return convertCurrencyAmount(value, sourceCurrency, targetCurrency)
 }
 
 function formatRoundedPoints(value) {
@@ -2042,6 +2061,7 @@ function workspacePayload() {
       channelId: row.channelId,
       metaModelId: row.metaModelId,
       modelId: row.modelId,
+      currency: currencyLabel.value.toUpperCase(),
       priceIn: row.priceInRaw,
       priceOut: row.priceOutRaw,
       priceCacheIn: row.priceCacheInRaw,
@@ -2681,6 +2701,10 @@ defineExpose({
   line-height: 1.2;
 }
 
+.supply-grid-header > div {
+  min-width: 0;
+}
+
 .supply-grid-row {
   display: flex;
   flex-direction: column;
@@ -3147,19 +3171,14 @@ defineExpose({
   white-space: nowrap;
 }
 
-.supply-metric-column {
-  display: grid;
-  gap: 0.375rem;
-  color: #334155;
-  font-size: 12px;
-}
-
-.supply-metric-row {
+.supply-cost-cell {
   display: grid;
   grid-template-columns: 4.25rem minmax(0, 1fr);
   align-items: baseline;
   column-gap: 0.5rem;
   min-height: 1.25rem;
+  color: #334155;
+  font-size: 12px;
 }
 
 .supply-metric-label {
@@ -3182,19 +3201,17 @@ defineExpose({
   font-weight: 700;
 }
 
-.supply-metric-empty {
-  display: block;
-  color: #94a3b8;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
-  font-weight: 700;
-  text-align: right;
-}
-
 @media (min-width: 1024px) {
   .supply-grid-header {
     display: grid;
+  }
+
+  .supply-grid-header > div:first-child {
+    padding-left: 1.5rem;
+  }
+
+  .supply-grid-header > div:not(:first-child) {
+    text-align: right;
   }
 
   .supply-grid-row {
@@ -3206,8 +3223,17 @@ defineExpose({
     padding-left: 1.5rem;
   }
 
-  .supply-metric-column {
+  .supply-cost-cell {
+    display: block;
     text-align: right;
+  }
+
+  .supply-cost-cell .supply-metric-value {
+    display: block;
+  }
+
+  .supply-cost-cell .supply-metric-label {
+    display: none;
   }
 }
 

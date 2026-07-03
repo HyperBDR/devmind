@@ -648,7 +648,7 @@
               :summary="summary"
               :platform-count="activeResalePlatforms.length"
               :point-conversion="pointConversion"
-              :display-currency="displayCurrency"
+              :display-currency="summaryDisplayCurrency"
               :exchange-rate="exchangeRate"
               @refresh="refreshLight"
               @listings-updated="mergeResaleListings"
@@ -784,7 +784,7 @@
       :channel-price-items="channelPriceItems"
       :listings="listings"
       :point-conversion="pointConversion"
-      :display-currency="displayCurrency"
+      :display-currency="summaryDisplayCurrency"
       :exchange-rate="exchangeRate"
       :workflow-config="workflowConfigForWorkspace"
       @saved="handleResaleWorkspacePublished"
@@ -1213,6 +1213,11 @@ const diagnosticCounts = computed(
 )
 const exchangeRate = computed(() =>
   Number(summary.value.currency?.usd_to_cny_rate || 7.15)
+)
+const summaryDisplayCurrency = computed(() =>
+  normalizeDisplayCurrency(
+    summary.value.currency?.display_currency || displayCurrency.value
+  )
 )
 const exchangeRateLabel = computed(() => {
   const currency = summary.value.currency
@@ -2328,7 +2333,7 @@ function mapWorkspaceListingToPayload(item) {
     platform: agionePlatform.value?.id,
     model: item.modelId,
     channel: item.channelId,
-    currency: displayCurrency.value,
+    currency: normalizeDisplayCurrency(item.currency || displayCurrency.value),
     retail_input_price_per_million: inApi.toFixed(6),
     retail_output_price_per_million: outApi.toFixed(6),
     retail_cache_input_price_per_million:

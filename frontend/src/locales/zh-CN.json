@@ -1018,16 +1018,16 @@
         "latency": "首字延迟 (Latency · 越低越好)"
       },
       "margin": {
-        "title": "统一利润期望",
-        "description": "Input / Output / Cache 按同一利润率推导各自售价。",
-        "input": "统一利润率",
-        "axisLabel": "统一利润率 {value}",
-        "noAutoApprove": "未配置免审利润率",
+        "title": "统一收益率",
+        "description": "Input / Output / Cache 按同一收益率推导各自售价。",
+        "input": "统一收益率",
+        "axisLabel": "统一收益率 {value}",
+        "noAutoApprove": "未配置免审收益率",
         "autoApproveInactive": "免审阈值未生效",
         "withinAutoApprove": "免审范围内（<= {value}）",
         "aboveAutoApprove": "超出免审上限（> {value}）",
-        "minTitle": "最低利润率下限",
-        "autoApproveTitle": "免审利润率上限",
+        "minTitle": "最低收益率下限",
+        "autoApproveTitle": "免审收益率上限",
         "minSource": "成本价 × (1 + 服务费率 + 平台抽佣比例)",
         "autoApproveSource": "平台配置的自动免审阈值，仅影响审批判断",
         "platformFloor": "平台下限",
@@ -1168,7 +1168,7 @@
         },
         "setMargin": {
           "subtitle": "生成上架价格",
-          "title": "设置利润率"
+          "title": "设置收益率"
         },
         "submit": {
           "subtitle": "进入判断",
@@ -1181,7 +1181,7 @@
       },
       "policy": {
         "approvalPath": "审核路径",
-        "autoApproveThreshold": "利润率 <= {rate}",
+        "autoApproveThreshold": "收益率 <= {rate}",
         "autoApproveHint": "命中后跳过审核",
         "autoPath": "是否启用免审",
         "postApprovalAction": "通过后上线方式",
@@ -1980,7 +1980,7 @@
           "channel": "上架渠道",
           "cost": "成本",
           "currency": "币种",
-          "margin": "利润率",
+          "margin": "收益率",
           "metaModel": "元模型",
           "model": "模型",
           "modelCode": "模型 Code",
@@ -1999,7 +1999,7 @@
         "cost": "成本",
         "retail": "售价",
         "points": "积分",
-        "margin": "利润率",
+        "margin": "收益率",
         "status": "状态",
         "actions": "操作"
       },
@@ -2035,7 +2035,7 @@
           "delta": "需处理"
         },
         "averageMargin": {
-          "label": "整体平均利润率",
+          "label": "整体平均收益率",
           "hint": "按 Input / Output / Cached 统一估算",
           "delta": "参考"
         }
@@ -2049,7 +2049,7 @@
       "marginTone": {
         "high": "太高：当前 {value}，高于自动审批上限 {limit}",
         "low": "太低：当前 {value}，低于平台成本下限 {floor}",
-        "muted": "暂无利润率",
+        "muted": "暂无收益率",
         "ok": "合适：当前 {value}，平台下限 {floor}，自动审批上限 {limit}"
       },
       "supply": {
