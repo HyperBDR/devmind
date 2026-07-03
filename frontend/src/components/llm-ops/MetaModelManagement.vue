@@ -83,13 +83,16 @@
             :class="{ active: vendorRowActive(row) }"
             @click="openVendorModelsDrawer(row)"
           >
-            <div class="min-w-0">
-              <p class="truncate text-sm font-semibold text-slate-900">
-                {{ row.name }}
-              </p>
-              <p class="mt-1 font-mono text-xs text-slate-400">
-                {{ row.code || '-' }}
-              </p>
+            <div class="vendor-name-cell">
+              <ProviderIcon :provider="row.code || row.name" size="lg" />
+              <div class="min-w-0">
+                <p class="truncate text-sm font-semibold text-slate-900">
+                  {{ row.name }}
+                </p>
+                <p class="mt-1 font-mono text-xs text-slate-400">
+                  {{ row.code || '-' }}
+                </p>
+              </div>
             </div>
             <div class="metric-stack">
               <p class="metric-value">
@@ -151,12 +154,19 @@
             <p class="drawer-eyebrow">
               {{ t('llmOps.metaModelManagement.drawer.eyebrow') }}
             </p>
-            <h3 class="drawer-title">
-              {{
-                selectedVendorRow?.name ||
-                t('llmOps.metaModelManagement.drawer.fallbackTitle')
-              }}
-            </h3>
+            <div class="vendor-drawer-title-row">
+              <ProviderIcon
+                v-if="selectedVendorRow"
+                :provider="selectedVendorRow.code || selectedVendorRow.name"
+                size="lg"
+              />
+              <h3 class="drawer-title">
+                {{
+                  selectedVendorRow?.name ||
+                  t('llmOps.metaModelManagement.drawer.fallbackTitle')
+                }}
+              </h3>
+            </div>
             <p class="mt-1 font-mono text-xs text-slate-500">
               {{ selectedVendorRow?.code || '-' }}
             </p>
@@ -384,6 +394,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import ProviderIcon from '@/components/llm/ProviderIcon.vue'
 import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
@@ -1114,6 +1125,14 @@ function errorMessage(error, fallback) {
 
 .vendor-row-static {
   @apply cursor-default hover:bg-white;
+}
+
+.vendor-name-cell {
+  @apply flex min-w-0 items-center gap-3;
+}
+
+.vendor-drawer-title-row {
+  @apply flex min-w-0 items-center gap-2;
 }
 
 .metric-pair {
