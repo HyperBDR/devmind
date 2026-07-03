@@ -53,20 +53,6 @@
             }}
           </button>
           <button
-            class="btn-secondary btn-action-import"
-            type="button"
-            @click="showManualImportModal = true"
-          >
-            {{ t('llmOps.providerManagement.actions.bulkImport') }}
-          </button>
-          <button
-            class="btn-secondary btn-action-danger"
-            type="button"
-            @click="openOfficialResetModal"
-          >
-            重置官方价格
-          </button>
-          <button
             class="btn-primary source-primary-button btn-action-create"
             type="button"
             @click="showPriceSourceModal = true"
@@ -164,13 +150,9 @@
               </td>
 
               <td class="table-cell">
-                <div class="flex flex-wrap justify-center gap-1.5">
-                  <span
-                    v-for="category in provider.category_badges"
-                    :key="category.key"
-                    :class="['source-badge', category.tone]"
-                  >
-                    {{ category.label }}
+                <div class="flex justify-center">
+                  <span :class="['source-badge', provider.sync_mode_tone]">
+                    {{ provider.sync_mode_label }}
                   </span>
                 </div>
               </td>
@@ -211,6 +193,15 @@
                     "
                   />
                   <OperationIconButton
+                    v-if="canManualImportSource(provider.primary_source)"
+                    icon="import"
+                    :label="t('llmOps.providerManagement.actions.bulkImport')"
+                    tone="success"
+                    @click.stop="
+                      openManualImportFromProvider(provider.primary_source)
+                    "
+                  />
+                  <OperationIconButton
                     v-if="provider.primary_source?.can_collect"
                     icon="collect"
                     :label="
@@ -223,6 +214,15 @@
                         String(provider.primary_source.id)
                     "
                     @click.stop="collectSource(provider.primary_source)"
+                  />
+                  <OperationIconButton
+                    v-if="canOfficialResetSource(provider.primary_source)"
+                    icon="reset"
+                    label="重置官方价格"
+                    tone="danger"
+                    @click.stop="
+                      openOfficialResetModal(provider.primary_source)
+                    "
                   />
                   <OperationIconButton
                     icon="delete"
@@ -251,8 +251,9 @@
     <ManualPriceImportModal
       :open="showManualImportModal"
       :providers="providers"
-      :sources="entrySourceRows"
-      @close="showManualImportModal = false"
+      :sources="manualImportSourceRows"
+      :initial-source-id="manualImportSourceId"
+      @close="closeManualImportModal"
       @imported="handleManualImported"
     />
     <PriceSourceModal
@@ -291,7 +292,7 @@
             <select
               v-model="officialResetScope"
               class="field-input"
-              :disabled="officialResetBusy"
+              :disabled="officialResetBusy || officialResetScopeLocked"
               @change="officialResetPreview = null"
             >
               <option value="all">全部官方来源</option>
@@ -445,10 +446,12 @@ const { t } = useI18n()
 const selectedProvider = ref(null)
 const editingSource = ref(null)
 const priceEntrySource = ref(null)
+const manualImportSourceId = ref('')
 const showPriceSourceModal = ref(false)
 const showManualImportModal = ref(false)
 const showOfficialResetModal = ref(false)
 const officialResetScope = ref('all')
+const officialResetScopeLocked = ref(false)
 const officialResetPreview = ref(null)
 const officialResetPreviewing = ref(false)
 const officialResetExecuting = ref(false)
@@ -514,6 +517,10 @@ const sourceRows = computed(() =>
 )
 
 const entrySourceRows = computed(() => sourceRows.value.filter(isEntrySource))
+
+const manualImportSourceRows = computed(() =>
+  entrySourceRows.value.filter(canManualImportSource)
+)
 
 const sourceProviderRows = computed(() =>
   entrySourceRows.value.map((source) => buildSourceProviderRow(source))
@@ -656,13 +663,6 @@ function buildSourceProviderRow(source) {
     id: `source-${source.id}`,
     name: source.name,
     code: source.slug,
-    category_badges: [
-      {
-        key: source.business_source_category,
-        label: source.category_label,
-        tone: source.category_tone
-      }
-    ],
     category_keys: [source.business_source_category],
     covered_model_count: source.covered_model_count,
     meta_model_ids: source.meta_model_ids,
@@ -672,6 +672,8 @@ function buildSourceProviderRow(source) {
     source_ids: [String(source.id)],
     status_label: source.status_label,
     status_tone: source.status_tone,
+    sync_mode_label: source.sync_mode_label,
+    sync_mode_tone: source.sync_mode_tone,
     filter_is_active: source.is_enabled,
     search_text: source.search_text
   }
@@ -704,6 +706,7 @@ function buildSourceRow(source) {
   const currentItems = currentPriceItemsForSource(source.id)
   const latestRun = latestRunForSource(source.id)
   const status = sourceStatus(source, latestRun)
+  const syncMode = sourceSyncMode(source)
   const metaModelIds = metaModelIdsForSource(source, currentItems)
 
   return {
@@ -717,6 +720,8 @@ function buildSourceRow(source) {
     status_label: status.label,
     status_tone: status.tone,
     status_hint: status.hint,
+    sync_mode_label: syncMode.label,
+    sync_mode_tone: syncMode.tone,
     meta_model_ids: metaModelIds,
     covered_model_count: metaModelIds.length,
     price_item_count: currentItems.length,
@@ -786,8 +791,13 @@ function dimensionCount(items) {
 
 // Actions
 function handleManualImported() {
-  showManualImportModal.value = false
+  closeManualImportModal()
   emit('refresh')
+}
+
+function closeManualImportModal() {
+  showManualImportModal.value = false
+  manualImportSourceId.value = ''
 }
 
 function closePriceSourceModal() {
@@ -805,9 +815,12 @@ function handlePriceEntrySaved(payload) {
   emit('manual-price-saved', payload)
 }
 
-function openOfficialResetModal() {
-  officialResetScope.value = 'all'
+function openOfficialResetModal(source = null) {
+  const canResetSource = canOfficialResetSource(source)
+  officialResetScope.value = canResetSource ? source.provider_code : 'all'
+  officialResetScopeLocked.value = canResetSource
   officialResetPreview.value = null
+  selectedProvider.value = null
   showOfficialResetModal.value = true
 }
 
@@ -815,6 +828,7 @@ function closeOfficialResetModal() {
   if (officialResetBusy.value) return
   showOfficialResetModal.value = false
   officialResetPreview.value = null
+  officialResetScopeLocked.value = false
 }
 
 function officialResetPayload(extra = {}) {
@@ -861,6 +875,7 @@ async function executeOfficialReset() {
     )
     showOfficialResetModal.value = false
     officialResetPreview.value = null
+    officialResetScopeLocked.value = false
     emit('refresh')
   } catch (error) {
     showError(errorMessage(error, '重置官方价格失败。'))
@@ -872,6 +887,13 @@ async function executeOfficialReset() {
 function openManualEntryFromProvider(source) {
   selectedProvider.value = null
   priceEntrySource.value = source
+}
+
+function openManualImportFromProvider(source) {
+  if (!canManualImportSource(source)) return
+  selectedProvider.value = null
+  manualImportSourceId.value = source.id
+  showManualImportModal.value = true
 }
 
 function editSourceFromProvider(source) {
@@ -1039,18 +1061,11 @@ function sourceStatus(source, latestRun) {
       hint: t('llmOps.providerManagement.sourceStatus.inactive.hint')
     }
   }
-  if (canManualEntrySource(source)) {
+  if (isOfficialCollectionPendingSource(source)) {
     return {
-      label: t('llmOps.providerManagement.sourceStatus.manual.label'),
-      tone: 'info',
-      hint: t('llmOps.providerManagement.sourceStatus.manual.hint')
-    }
-  }
-  if (canApiSyncSource(source)) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.active.label'),
-      tone: 'ok',
-      hint: collectModeLabel(source)
+      label: t('llmOps.providerManagement.sourceStatus.notAdapted.label'),
+      tone: 'warn',
+      hint: t('llmOps.providerManagement.sourceStatus.notAdapted.hint')
     }
   }
   if (!canCollectSource(source)) {
@@ -1081,6 +1096,29 @@ function sourceStatus(source, latestRun) {
   }
 }
 
+function sourceSyncMode(source) {
+  if (canCollectSource(source) || canApiSyncSource(source)) {
+    return {
+      label: t('llmOps.providerManagement.sourceSyncMode.auto'),
+      tone: 'auto'
+    }
+  }
+  if (
+    canManualEntrySource(source) ||
+    canManualImportSource(source) ||
+    ['manual_entry', 'manual_import'].includes(sourceCollectionMethod(source))
+  ) {
+    return {
+      label: t('llmOps.providerManagement.sourceSyncMode.manual'),
+      tone: 'manual'
+    }
+  }
+  return {
+    label: t('llmOps.providerManagement.sourceSyncMode.pending'),
+    tone: 'unknown'
+  }
+}
+
 function collectActionLabel(source) {
   if (canCollectSource(source)) {
     return t('llmOps.providerManagement.actions.syncPrice')
@@ -1102,6 +1140,28 @@ function collectModeLabel(source) {
     return t('llmOps.providerManagement.collectMode.dedicatedCollector')
   }
   return t('llmOps.providerManagement.collectMode.pending')
+}
+
+function canManualImportSource(source) {
+  return source?.business_source_category === 'manual'
+}
+
+function isOfficialCollectionPendingSource(source) {
+  return Boolean(
+    source?.business_source_category === 'official_provider' &&
+      source?.updates_model_prices &&
+      !canCollectSource(source)
+  )
+}
+
+function canOfficialResetSource(source) {
+  const providerCode = String(source?.provider_code || '').trim()
+  return Boolean(
+    providerCode &&
+      source?.business_source_category === 'official_provider' &&
+      String(source?.slug || '') === `${providerCode}-official` &&
+      canCollectSource(source)
+  )
 }
 
 function latestRunForSource(sourceId) {
@@ -1191,15 +1251,15 @@ function apiPayload(response) {
 }
 
 .source-name-col {
-  width: 34%;
+  width: 32%;
 }
 
 .source-type-col {
-  width: 10%;
+  width: 14%;
 }
 
 .source-model-col {
-  width: 22%;
+  width: 20%;
 }
 
 .source-status-col {
@@ -1321,6 +1381,10 @@ function apiPayload(response) {
 }
 
 .source-badge.official {
+  @apply border-emerald-100 bg-emerald-50 text-emerald-700;
+}
+
+.source-badge.auto {
   @apply border-emerald-100 bg-emerald-50 text-emerald-700;
 }
 

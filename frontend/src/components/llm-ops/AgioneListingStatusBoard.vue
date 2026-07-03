@@ -300,19 +300,15 @@
               </td>
               <td class="table-cell action-cell">
                 <div class="row-actions">
-                  <button
+                  <OperationIconButton
                     v-for="action in rowStateActions(row)"
                     :key="action.kind"
-                    type="button"
-                    :class="[
-                      'row-action-button',
-                      rowActionMenuItemClass(action.tone)
-                    ]"
+                    :icon="rowActionIcon(action.kind)"
+                    :label="action.label"
+                    :tone="action.tone"
                     :disabled="savingListings"
                     @click="emitAction(row, action.kind)"
-                  >
-                    {{ rowActionVisibleLabel(action) }}
-                  </button>
+                  />
                 </div>
               </td>
             </tr>
@@ -362,6 +358,7 @@ import { computed, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
+import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 import { useToast } from '@/composables/useToast'
 import { useAgioneListingRows } from '@/composables/useAgioneListingRows'
 import {
@@ -433,8 +430,7 @@ const pageSizeOptions = [10, 20, 50]
 const listingStatusOptions = computed(() => [
   { label: t('llmOps.listingBoard.filters.actionable'), value: 'actionable' },
   { label: t('llmOps.listingBoard.filters.all'), value: 'all' },
-  { label: t('llmOps.listingBoard.filters.listed'), value: 'listed' },
-  { label: t('llmOps.listingBoard.filters.unlisted'), value: 'unlisted' }
+  { label: t('llmOps.listingBoard.filters.listed'), value: 'listed' }
 ])
 
 const unusedModelId = ref('')
@@ -475,8 +471,6 @@ const filteredListingRows = computed(() => {
         if (!isActionableRow(row)) return false
       } else if (listingStatusFilter.value === 'listed') {
         if (!row.is_listed) return false
-      } else if (listingStatusFilter.value === 'unlisted') {
-        if (row.is_listed) return false
       } else if (listingStatusFilter.value === 'all') {
         // visible rows only
       } else {
@@ -591,31 +585,26 @@ function actionTone(kind) {
   )
 }
 
-function rowActionVisibleLabel(action) {
+function rowActionIcon(kind) {
   return (
     {
-      abandon_update: t('llmOps.listingBoard.rowActions.abandonUpdate'),
-      confirm_offline: t('llmOps.listingBoard.rowActions.confirmOffline'),
-      confirm_publish: t('llmOps.listingBoard.rowActions.confirmPublish'),
-      confirm_update: t('llmOps.listingBoard.rowActions.confirmUpdate'),
-      delete: t('llmOps.listingBoard.rowActions.delete'),
-      direct_offline: t('llmOps.listingBoard.rowActions.directOffline'),
-      edit: t('llmOps.listingBoard.rowActions.edit'),
-      mark_offline_exception: t(
-        'llmOps.listingBoard.rowActions.markOfflineException'
-      ),
-      reject_offline: t('llmOps.listingBoard.rowActions.rejectOffline'),
-      republish: t('llmOps.listingBoard.rowActions.republish'),
-      request_offline: t('llmOps.listingBoard.rowActions.requestOffline'),
-      start_edit: t('llmOps.listingBoard.rowActions.edit'),
-      submit: t('llmOps.listingBoard.rowActions.submit'),
-      withdraw: t('llmOps.listingBoard.rowActions.withdraw')
-    }[action.kind] || action.label
+      abandon_update: 'remove',
+      confirm_offline: 'powerOff',
+      confirm_publish: 'approve',
+      confirm_update: 'approve',
+      create: 'add',
+      delete: 'delete',
+      direct_offline: 'powerOff',
+      edit: 'edit',
+      mark_offline_exception: 'reject',
+      reject_offline: 'reject',
+      republish: 'submit',
+      request_offline: 'offlineRequest',
+      start_edit: 'edit',
+      submit: 'submit',
+      withdraw: 'withdraw'
+    }[kind] || 'edit'
   )
-}
-
-function rowActionMenuItemClass(tone) {
-  return `row-action-menu-item-${tone || 'default'}`
 }
 
 function batchActionClass(tone) {
@@ -696,8 +685,6 @@ const listingEmptyText = computed(() => {
     return t('llmOps.listingBoard.empty.actionable')
   if (listingStatusFilter.value === 'listed')
     return t('llmOps.listingBoard.empty.listed')
-  if (listingStatusFilter.value === 'unlisted')
-    return t('llmOps.listingBoard.empty.unlisted')
   return t('llmOps.listingBoard.empty.default')
 })
 
@@ -1893,6 +1880,7 @@ function workflowSuccessText(kind) {
 }
 
 .listing-board-toolbar {
+  --listing-control-height: 2.5rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1924,7 +1912,7 @@ function workflowSuccessText(kind) {
 }
 
 .listing-search-input {
-  height: 2rem;
+  height: var(--listing-control-height, 2.5rem);
   width: 12rem;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -1983,7 +1971,7 @@ function workflowSuccessText(kind) {
 }
 
 .export-format-select {
-  height: 2rem;
+  height: var(--listing-control-height, 2.5rem);
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #ffffff;
@@ -1999,7 +1987,10 @@ function workflowSuccessText(kind) {
 }
 
 .export-listing-button {
-  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--listing-control-height, 2.5rem);
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #ffffff;
@@ -2022,7 +2013,7 @@ function workflowSuccessText(kind) {
 }
 
 .pagination-select {
-  height: 2rem;
+  height: var(--listing-control-height, 2.5rem);
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #ffffff;
@@ -2099,8 +2090,22 @@ function workflowSuccessText(kind) {
 
 .listing-table th:first-child,
 .listing-table td:first-child,
-.listing-table th:last-child,
+.listing-table th:last-child {
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
+
 .listing-table .action-cell {
+  padding-left: 0.375rem;
+  padding-right: 0.375rem;
+}
+
+.listing-table th:nth-child(5),
+.listing-table td:nth-child(5),
+.listing-table th:nth-child(6),
+.listing-table td:nth-child(6),
+.listing-table th:nth-child(7),
+.listing-table td:nth-child(7) {
   padding-left: 0.5rem;
   padding-right: 0.5rem;
 }
@@ -2123,7 +2128,7 @@ function workflowSuccessText(kind) {
 
 .cost-col,
 .retail-col {
-  width: 14%;
+  width: 12%;
 }
 
 .point-col {
@@ -2139,15 +2144,16 @@ function workflowSuccessText(kind) {
 }
 
 .action-col {
-  width: 10%;
+  width: 12%;
+  min-width: 9.25rem;
 }
 
 .metric-stack {
   display: grid;
-  gap: 0.375rem;
+  gap: 0.25rem;
   margin-left: auto;
   margin-right: auto;
-  max-width: 12rem;
+  max-width: 9.25rem;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
@@ -2156,9 +2162,9 @@ function workflowSuccessText(kind) {
 
 .metric-line {
   display: grid;
-  grid-template-columns: 4rem minmax(0, 1fr);
+  grid-template-columns: 3rem minmax(0, 1fr);
   align-items: baseline;
-  column-gap: 0.5rem;
+  column-gap: 0.25rem;
   min-height: 1.375rem;
   color: #475569;
 }
@@ -2172,7 +2178,7 @@ function workflowSuccessText(kind) {
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
-  text-align: left;
+  text-align: right;
   text-transform: uppercase;
 }
 
@@ -2269,7 +2275,7 @@ function workflowSuccessText(kind) {
 
 .status-filter-chip {
   display: inline-flex;
-  min-height: 2rem;
+  min-height: var(--listing-control-height, 2.5rem);
   align-items: center;
   justify-content: center;
   border-radius: 8px;
@@ -2296,7 +2302,8 @@ function workflowSuccessText(kind) {
 
 .add-listing-button {
   display: inline-flex;
-  height: 2rem;
+  height: var(--listing-control-height, 2.5rem);
+  min-height: var(--listing-control-height, 2.5rem) !important;
   align-items: center;
   justify-content: center;
   min-width: 5.5rem;
@@ -2316,7 +2323,8 @@ function workflowSuccessText(kind) {
 
 .batch-action {
   display: inline-flex;
-  height: 2rem;
+  height: var(--listing-control-height, 2.5rem);
+  min-height: var(--listing-control-height, 2.5rem) !important;
   align-items: center;
   justify-content: center;
   min-width: 4.5rem;
@@ -2396,7 +2404,7 @@ function workflowSuccessText(kind) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 2rem;
+  min-height: var(--listing-control-height, 2.5rem);
   border-radius: 8px;
   border: 1px solid #cbd5e1;
   background-color: #fff;
@@ -2496,100 +2504,18 @@ function workflowSuccessText(kind) {
 
 .action-cell {
   overflow: visible;
+  vertical-align: middle;
 }
 
 .row-actions {
-  display: grid;
-  grid-template-columns: minmax(5.75rem, 6.5rem);
-  gap: 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  justify-content: center;
   margin-left: auto;
   margin-right: auto;
-  max-width: 6.5rem;
+  max-width: 9rem;
   min-width: 0;
-}
-
-.row-action-button {
-  display: inline-flex;
-  min-height: 2rem;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background-color: #fff;
-  padding: 0 0.5rem;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
   white-space: nowrap;
-  transition:
-    background-color 150ms ease,
-    border-color 150ms ease,
-    color 150ms ease;
-}
-
-.row-action-menu-item-default {
-  border-color: #cbd5e1;
-  background-color: #fff;
-  color: #475569;
-}
-
-.row-action-menu-item-primary {
-  border-color: #c7d2fe;
-  background-color: #eef2ff;
-  color: #3730a3;
-}
-
-.row-action-menu-item-success {
-  border-color: #a7f3d0;
-  background-color: #ecfdf5;
-  color: #047857;
-}
-
-.row-action-menu-item-warn {
-  border-color: #fed7aa;
-  background-color: #fff7ed;
-  color: #b45309;
-}
-
-.row-action-menu-item-danger {
-  border-color: #fecdd3;
-  background-color: #fff1f2;
-  color: #be123c;
-}
-
-.row-action-button:hover:not(:disabled) {
-  border-color: #94a3b8;
-  background-color: #f8fafc;
-  color: #334155;
-}
-
-.row-action-menu-item-primary:hover:not(:disabled) {
-  border-color: #818cf8;
-  background-color: #e0e7ff;
-  color: #312e81;
-}
-
-.row-action-menu-item-warn:hover:not(:disabled) {
-  border-color: #fdba74;
-  background-color: #ffedd5;
-  color: #9a3412;
-}
-
-.row-action-menu-item-danger:hover:not(:disabled) {
-  border-color: #fda4af;
-  background-color: #ffe4e6;
-  color: #9f1239;
-}
-
-.row-action-menu-item-success:hover:not(:disabled) {
-  border-color: #6ee7b7;
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
-.row-action-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
 }
 </style>

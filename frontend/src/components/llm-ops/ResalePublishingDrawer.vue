@@ -32,18 +32,11 @@
           >
             <header class="publishing-drawer-header">
               <div class="flex min-w-0 flex-1 items-center gap-3">
-                <button type="button" class="header-back" @click="tryClose">
-                  <svg viewBox="0 0 20 20" fill="currentColor" class="h-4 w-4">
-                    <path
-                      fill-rule="evenodd"
-                      d="M12.79 5.23a.75.75 0 0 1 0 1.06L9.06 10l3.73 3.71a.75.75 0 1 1-1.06 1.06l-4.25-4.25a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 0z"
-                      clip-rule="evenodd"
-                    />
-                  </svg>
-                  <span class="sr-only">
-                    {{ t('llmOps.publishingDrawer.back') }}
-                  </span>
-                </button>
+                <OperationIconButton
+                  icon="back"
+                  :label="t('llmOps.publishingDrawer.back')"
+                  @click="tryClose"
+                />
                 <div class="min-w-0 flex-1">
                   <p
                     class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-600"
@@ -114,6 +107,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 import ResalePublishingWorkspace from '@/components/llm-ops/ResalePublishingWorkspace.vue'
 import { useToast } from '@/composables/useToast'
 

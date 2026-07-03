@@ -351,8 +351,7 @@ const autoSyncSourceHelpText = computed(() => {
 const saveDisabled = computed(
   () =>
     shouldCreateAutoSyncPreset.value &&
-    (!selectedAutoSyncSourceOption.value ||
-      selectedAutoSyncSourceOption.value.source_exists)
+    !selectedAutoSyncSourceOption.value
 )
 
 watch(
@@ -463,7 +462,7 @@ async function save() {
 
 async function saveAutoSyncSource() {
   const option = selectedAutoSyncSourceOption.value
-  if (!option || option.source_exists) return
+  if (!option) return
 
   let sourceName = option.source_name
   if (option.source_category === 'official_provider') {
@@ -472,13 +471,18 @@ async function saveAutoSyncSource() {
     )
     const payload = response?.data?.data || response?.data || {}
     sourceName = payload.source?.name || sourceName
-  } else {
+  } else if (!option.source_exists) {
     await llmOpsApi.createCollectionSource(autoSyncSourcePayload(option))
   }
   showSuccess(
-    t('llmOps.priceSourceModal.messages.autoSyncCreated', {
-      name: sourceName
-    })
+    t(
+      option.source_exists
+        ? 'llmOps.priceSourceModal.messages.autoSyncExists'
+        : 'llmOps.priceSourceModal.messages.autoSyncCreated',
+      {
+        name: sourceName
+      }
+    )
   )
   emit('saved')
 }

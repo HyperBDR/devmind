@@ -26,6 +26,7 @@ from .yunce import (
 
 
 MODELS_DEV_API_URL = "https://models.dev/api.json"
+MODELS_DEV_MODELS_URL = "https://models.dev/models.json"
 MODELS_DEV_PROVIDER_KEYS = {
     "aliyun": ("alibaba-cn", "alibaba"),
     "anthropic": ("anthropic",),
@@ -251,6 +252,16 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 display_name="Text Embedding Ada 002",
             ),
         ),
+    ),
+    "azure-openai": OfficialProviderConfig(
+        provider_code="azure-openai",
+        provider_label="Azure OpenAI",
+        source_url=(
+            "https://azure.microsoft.com/en-us/pricing/details/"
+            "azure-openai/#pricing"
+        ),
+        currency="USD",
+        models=(),
     ),
     "anthropic": OfficialProviderConfig(
         provider_code="anthropic",

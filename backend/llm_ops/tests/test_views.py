@@ -1029,7 +1029,10 @@ class LLMOpsViewTests(TestCase):
         provider_codes = {
             item["provider_code"] for item in response.data["results"]
         }
-        self.assertEqual({"aliyun", "deepseek"}, provider_codes)
+        self.assertEqual(
+            {"aliyun", "azure-openai", "deepseek"},
+            provider_codes,
+        )
 
     def test_auto_sync_options_include_supplier_collectors(self):
         response = self.client.get(
@@ -1040,7 +1043,29 @@ class LLMOpsViewTests(TestCase):
         provider_codes = {
             item["provider_code"] for item in response.data["results"]
         }
-        self.assertEqual({"aliyun", "deepseek", "siliconflow"}, provider_codes)
+        self.assertEqual(
+            {"aliyun", "azure-openai", "deepseek", "siliconflow"},
+            provider_codes,
+        )
+        azure = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "azure-openai"
+        )
+        self.assertEqual(
+            azure["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            azure["collection_method"],
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertEqual(azure["currency"], "USD")
+        self.assertEqual(
+            azure["source_url"],
+            "https://azure.microsoft.com/en-us/pricing/details/"
+            "azure-openai/#pricing",
+        )
         siliconflow = next(
             item
             for item in response.data["results"]
@@ -1092,6 +1117,52 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(audit.action, AuditLog.ACTION_CREATE)
         self.assertEqual(audit.category, AuditLog.CATEGORY_CONFIGURATION)
         self.assertEqual(audit.metadata["provider_code"], "aliyun")
+
+    def test_ensure_official_provider_source_creates_azure_openai_source(
+        self,
+    ):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "azure-openai"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(
+            response.data["source"]["slug"],
+            "azure-openai-official",
+        )
+        self.assertEqual(
+            response.data["source"]["provider_code"],
+            "azure-openai",
+        )
+        self.assertEqual(response.data["source"]["currency"], "USD")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        self.assertEqual(
+            response.data["source"]["collection_method"],
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        provider = LLMProvider.objects.get(code="azure-openai")
+        source = PriceCollectionSource.objects.get(
+            slug="azure-openai-official",
+        )
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://azure.microsoft.com/en-us/pricing/details/"
+            "azure-openai/#pricing",
+        )
 
     def test_ensure_official_provider_source_is_idempotent(self):
         first = self.client.post(

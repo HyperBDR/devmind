@@ -131,6 +131,79 @@ ALIYUN_QWEN37_HTML = """
 </table>
 """
 
+AZURE_OPENAI_RETAIL_ITEMS = [
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI",
+        "skuName": "gpt 4o 0513 Input global",
+        "meterName": "gpt 4o 0513 Input global Tokens",
+        "unitOfMeasure": "1K",
+        "retailPrice": 0.005,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI",
+        "skuName": "gpt 4o 0513 Output global",
+        "meterName": "gpt 4o 0513 Output global Tokens",
+        "unitOfMeasure": "1K",
+        "retailPrice": 0.015,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI",
+        "skuName": "gpt 4o 0806 cached Inp glbl",
+        "meterName": "gpt 4o 0806 cached Inp glbl Tokens",
+        "unitOfMeasure": "1K",
+        "retailPrice": 0.00125,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI",
+        "skuName": "gpt-4o-0806-Inp-regnl",
+        "meterName": "gpt-4o-0806-Inp-regnl Tokens",
+        "unitOfMeasure": "1K",
+        "retailPrice": 0.00275,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI",
+        "skuName": "gpt-4o-0806-Outp-regnl",
+        "meterName": "gpt-4o-0806-Outp-regnl Tokens",
+        "unitOfMeasure": "1K",
+        "retailPrice": 0.011,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI GPT5",
+        "skuName": "GPT 5 outpt Glbl",
+        "meterName": "GPT 5 outpt Glbl 1M Tokens",
+        "unitOfMeasure": "1M",
+        "retailPrice": 10.0,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+    {
+        "serviceName": "Foundry Models",
+        "productName": "Azure OpenAI GPT5",
+        "skuName": "GPT 5 inp Glbl",
+        "meterName": "GPT 5 inp Glbl 1M Tokens",
+        "unitOfMeasure": "1M",
+        "retailPrice": 1.25,
+        "currencyCode": "USD",
+        "armRegionName": "eastus",
+    },
+]
+
 ALIYUN_TIERED_HTML = """
 <table>
   <tr>
@@ -378,6 +451,43 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
         self.assertEqual(
             pro["price_rows"][0]["values"]["output_price"],
             "6",
+        )
+
+    def test_azure_openai_provider_adapter_extracts_retail_prices(self):
+        self.assertTrue(vendor_price_collector_exists("azure-openai"))
+
+        payload = collect_vendor_price_catalog(
+            "azure-openai",
+            {
+                "provider_name": "Azure OpenAI",
+                "currency": "USD",
+                "raw_retail_items": AZURE_OPENAI_RETAIL_ITEMS,
+            },
+        )
+
+        self.assertEqual(payload["source_type"], "provider_adapter")
+        self.assertEqual(payload["provider"]["code"], "azure-openai")
+        self.assertEqual(payload["provider"]["currency"], "USD")
+        self.assertEqual(payload["total_models"], 3)
+        models = {item["model_id"]: item for item in payload["models"]}
+        gpt4o = models["gpt-4o-0513"]
+        self.assertEqual(
+            gpt4o["price_rows"][0]["values"]["input_price"],
+            "5",
+        )
+        self.assertEqual(
+            gpt4o["price_rows"][0]["values"]["output_price"],
+            "15",
+        )
+        gpt5 = models["gpt-5"]
+        self.assertEqual(
+            gpt5["price_rows"][0]["values"]["input_price"],
+            "1.25",
+        )
+        self.assertEqual(gpt5["price_rows"][0]["values"]["output_price"], "10")
+        self.assertEqual(
+            payload["raw_payload"]["collector"],
+            "llm_ops.price_collectors.azure_openai",
         )
 
     def test_siliconflow_provider_adapter_extracts_supplier_prices(self):

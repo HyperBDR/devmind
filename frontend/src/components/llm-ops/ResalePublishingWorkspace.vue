@@ -1351,6 +1351,15 @@ function marginFromListingPrices(row, priceIn, priceOut, priceCacheIn) {
   return normalizeMargin(margin ?? 20)
 }
 
+function marginFromRowPrices(row, patch = {}) {
+  return marginFromListingPrices(
+    row,
+    patch.priceInRaw ?? row.priceInRaw,
+    patch.priceOutRaw ?? row.priceOutRaw,
+    patch.priceCacheInRaw ?? row.priceCacheInRaw
+  )
+}
+
 function normalizeMargin(value) {
   const margin = Number(value)
   if (!Number.isFinite(margin)) return 0
@@ -1415,7 +1424,12 @@ function onMarginCommit(row, event) {
 function onPriceInput(row, key, event) {
   const rawPrice = Number(event?.target?.value)
   const price = applyPriceChange(row, key, rawPrice)
-  if (event?.target && Number.isFinite(price)) {
+  if (
+    event?.target &&
+    Number.isFinite(price) &&
+    Number.isFinite(rawPrice) &&
+    price !== rawPrice
+  ) {
     event.target.value = price
   }
 }
@@ -1433,8 +1447,7 @@ function applyPriceChange(row, key, rawPrice) {
     Number(cost) > 0
       ? ((Number(price) - Number(cost)) / Number(cost)) * 100
       : row.margin
-  const nextMargin = normalizeMargin(margin)
-  const patch = pricePatchForMargin(row, nextMargin)
+  const patch = {}
   if (key === 'input') {
     patch.priceInRaw = price
   } else if (key === 'cache') {
@@ -1442,6 +1455,9 @@ function applyPriceChange(row, key, rawPrice) {
   } else {
     patch.priceOutRaw = price
   }
+  patch.margin = normalizeMargin(
+    marginFromRowPrices(row, patch) ?? margin ?? row.margin
+  )
   updateChainState(row, patch)
   emitChange()
   return price
@@ -1640,6 +1656,7 @@ const selectedMetaModelPriceItems = computed(() => {
   const metaModelId = form.value.modelId
   if (!metaModelId) return []
   return (props.priceItems || []).filter((item) => {
+    if (item.source_is_enabled === false) return false
     if (String(item.meta_model || '') === String(metaModelId)) return true
     const model = modelById.value.get(String(item.model || ''))
     return String(model?.meta_model || '') === String(metaModelId)

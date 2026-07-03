@@ -280,6 +280,10 @@ const categoryOptions = computed(() => [
     label: t('llmOps.taskLogs.categories.officialProvider'),
     value: 'official_provider'
   },
+  {
+    label: t('llmOps.taskLogs.categories.cloudHosted'),
+    value: 'cloud_hosted'
+  },
   { label: t('llmOps.taskLogs.categories.supplier'), value: 'supplier' },
   { label: t('llmOps.taskLogs.categories.manual'), value: 'manual' },
   { label: t('llmOps.taskLogs.categories.unknown'), value: 'unknown' }
@@ -415,12 +419,35 @@ function sourceForRun(run) {
 }
 
 function sourceCategory(run, source) {
-  return (
+  const rawCategory =
     source?.business_source_category ||
     source?.source_category ||
     run?.source_category ||
     'unknown'
-  )
+  return normalizeSourceCategory(rawCategory, source)
+}
+
+function normalizeSourceCategory(category, source = null) {
+  const normalized = String(category || '').trim().toLowerCase()
+  if (normalized === 'official_provider') {
+    return normalizeOfficialSourceCategory(source)
+  }
+  if (normalized === 'model_provider_official') return 'official_provider'
+  if (normalized === 'cloud_provider_official') return 'cloud_hosted'
+  if (normalized === 'internal') return 'manual'
+  if (normalized === 'manual_entry') return 'manual'
+  if (normalized === 'manual_import') return 'manual'
+  if (normalized === 'api_sync') return 'supplier'
+  if (['cloud_hosted', 'supplier', 'manual'].includes(normalized)) {
+    return normalized
+  }
+  return 'unknown'
+}
+
+function normalizeOfficialSourceCategory(source) {
+  const ownerType = String(source?.source_owner_type || '').toLowerCase()
+  if (ownerType === 'cloud_provider_official') return 'cloud_hosted'
+  return 'official_provider'
 }
 
 function sourceLabel(run, source) {
@@ -453,16 +480,18 @@ function statusTone(status) {
 
 function categoryLabel(category) {
   const labels = {
+    cloud_hosted: t('llmOps.taskLogs.categories.cloudHosted'),
     manual: t('llmOps.taskLogs.categories.manual'),
     official_provider: t('llmOps.taskLogs.categories.officialProvider'),
     supplier: t('llmOps.taskLogs.categories.supplier'),
     unknown: t('llmOps.taskLogs.categories.unknown')
   }
-  return labels[category] || category || labels.unknown
+  return labels[category] || labels.unknown
 }
 
 function categoryTone(category) {
   if (category === 'official_provider') return 'tone-primary'
+  if (category === 'cloud_hosted') return 'tone-success'
   if (category === 'supplier') return 'tone-info'
   if (category === 'manual') return 'tone-warn'
   return 'tone-neutral'

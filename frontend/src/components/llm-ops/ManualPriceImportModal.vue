@@ -250,6 +250,10 @@ const props = defineProps({
   sources: {
     type: Array,
     default: () => []
+  },
+  initialSourceId: {
+    type: [Number, String],
+    default: ''
   }
 })
 
@@ -327,7 +331,7 @@ watch(
     if (open) {
       form.value = defaultForm()
       rawTable.value = ''
-      form.value.source = firstImportSourceId()
+      form.value.source = resolvedInitialSourceId()
     }
   }
 )
@@ -348,6 +352,13 @@ function defaultForm() {
 
 function firstImportSourceId() {
   return props.sources[0]?.id || ''
+}
+
+function resolvedInitialSourceId() {
+  const matched = props.sources.find(
+    (source) => String(source.id) === String(props.initialSourceId || '')
+  )
+  return matched?.id || firstImportSourceId()
 }
 
 function close() {

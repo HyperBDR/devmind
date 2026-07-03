@@ -552,44 +552,49 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(model.output_price_per_million, Decimal("0.287000"))
 
     @patch("llm_ops.collectors.official.requests.get")
-    def test_sync_meta_models_from_models_dev_is_idempotent(self, mock_get):
+    def test_sync_meta_models_from_models_dev_reads_models_json(
+        self,
+        mock_get,
+    ):
         mock_get.return_value = MockPricingResponse(
             """
             {
-              "openai": {
-                "id": "openai",
-                "name": "OpenAI",
-                "models": {
-                  "openai/gpt-real-test": {
-                    "id": "openai/gpt-real-test",
-                    "name": "GPT Real Test",
-                    "family": "gpt-mini",
-                    "reasoning": false,
-                    "tool_call": true,
-                    "structured_output": true,
-                    "release_date": "2024-07-18",
-                    "last_updated": "2024-07-18",
-                    "modalities": {
-                      "input": ["text", "image"],
-                      "output": ["text"]
-                    },
-                    "limit": {"context": 128000, "output": 16384}
+              "openai/gpt-real-test": {
+                "id": "openai/gpt-real-test",
+                "name": "GPT Real Test",
+                "description": "A verified OpenAI model.",
+                "family": "gpt-mini",
+                "reasoning": false,
+                "tool_call": true,
+                "structured_output": true,
+                "temperature": true,
+                "release_date": "2024-07-18",
+                "last_updated": "2024-07-18",
+                "modalities": {
+                  "input": ["text", "image"],
+                  "output": ["text"]
+                },
+                "limit": {"context": 128000, "output": 16384},
+                "links": [
+                  {
+                    "label": "Model card",
+                    "url": "https://example.com/card",
+                    "type": "model_card"
                   }
-                }
+                ]
               },
-              "supplier": {
-                "id": "supplier",
-                "name": "Supplier",
-                "models": {
-                  "openai/gpt-real-test": {
-                    "id": "openai/gpt-real-test",
-                    "name": "GPT Real Test"
-                  },
-                  "meta-llama/llama-3.3-70b-instruct-fp8-fast": {
-                    "id": "meta-llama/llama-3.3-70b-instruct-fp8-fast",
-                    "name": "Supplier Llama Variant"
-                  }
-                }
+              "microsoft/mai-code-1-flash": {
+                "id": "microsoft/mai-code-1-flash",
+                "name": "MAI-Code-1-Flash",
+                "family": "mai",
+                "reasoning": true,
+                "tool_call": true,
+                "structured_output": true,
+                "modalities": {
+                  "input": ["text"],
+                  "output": ["text"]
+                },
+                "limit": {"context": 256000, "output": 128000}
               }
             }
             """,
@@ -600,7 +605,8 @@ class OfficialCollectionSyncTests(TestCase):
         second_stats = sync_meta_models_from_models_dev()
 
         meta = MetaModel.objects.get(code="gpt-real-test")
-        self.assertEqual(stats["models"], 1)
+        microsoft = MetaModel.objects.get(code="mai-code-1-flash")
+        self.assertEqual(stats["models"], 2)
         self.assertEqual(second_stats["created"], 0)
         self.assertEqual(
             MetaModel.objects.filter(code="gpt-real-test").count(),
@@ -614,9 +620,75 @@ class OfficialCollectionSyncTests(TestCase):
         self.assertEqual(meta.modality, MetaModel.MODALITY_MULTIMODAL)
         self.assertEqual(meta.context_window, 128000)
         self.assertIn("tool_calling", meta.capabilities["features"])
+        self.assertIn("temperature", meta.capabilities["features"])
         self.assertEqual(
             meta.metadata["models_dev"]["source_url"],
-            "https://models.dev/api.json",
+            "https://models.dev/models.json",
+        )
+        self.assertEqual(
+            meta.metadata["models_dev"]["description"],
+            "A verified OpenAI model.",
+        )
+        self.assertEqual(
+            meta.metadata["models_dev"]["logo_path"],
+            "/src/assets/provider-icons/models-dev/labs/openai.svg",
+        )
+        self.assertEqual(
+            meta.metadata["models_dev"]["links"][0]["type"],
+            "model_card",
+        )
+        self.assertEqual(microsoft.owner_code, "microsoft")
+        self.assertEqual(microsoft.owner_name, "Microsoft")
+        self.assertEqual(
+            microsoft.metadata["models_dev"]["lab"],
+            "microsoft",
+        )
+
+    @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_meta_models_from_models_dev_keeps_api_json_compatibility(
+        self,
+        mock_get,
+    ):
+        mock_get.return_value = MockPricingResponse(
+            """
+            {
+              "openai": {
+                "id": "openai",
+                "name": "OpenAI",
+                "models": {
+                  "openai/gpt-real-test": {
+                    "id": "openai/gpt-real-test",
+                    "name": "GPT Real Test",
+                    "family": "gpt-mini",
+                    "tool_call": true
+                  }
+                }
+              },
+              "openrouter": {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "models": {
+                  "openai/gpt-router-noise": {
+                    "id": "openai/gpt-router-noise",
+                    "name": "GPT Router Noise"
+                  }
+                }
+              }
+            }
+            """,
+            content_type="application/json",
+        )
+
+        stats = sync_meta_models_from_models_dev(
+            source_url="https://models.dev/api.json",
+        )
+
+        self.assertEqual(stats["models"], 1)
+        self.assertTrue(
+            MetaModel.objects.filter(code="gpt-real-test").exists(),
+        )
+        self.assertFalse(
+            MetaModel.objects.filter(code="gpt-router-noise").exists(),
         )
 
     @patch("llm_ops.collectors.official.requests.get")

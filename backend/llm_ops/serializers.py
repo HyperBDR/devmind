@@ -831,6 +831,11 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    source_is_enabled = serializers.BooleanField(
+        source="source.is_enabled",
+        read_only=True,
+        allow_null=True,
+    )
     business_source_category = serializers.SerializerMethodField()
     business_source_category_label = serializers.SerializerMethodField()
 
@@ -1023,7 +1028,13 @@ def source_owner_type_for_source(source):
         return PriceCollectionSource.SOURCE_OWNER_UNKNOWN
 
     provider_code = str(getattr(source.provider, "code", "") or "").lower()
-    if provider_code in {"aliyun", "aliyun-wanx", "baidu", "volcengine"}:
+    if provider_code in {
+        "aliyun",
+        "aliyun-wanx",
+        "azure-openai",
+        "baidu",
+        "volcengine",
+    }:
         return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
 
@@ -1040,12 +1051,6 @@ def collection_method_for_source(source):
 
         if source_supports_code_collection(source):
             return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
-    if (
-        source.source_category
-        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-        and source.updates_model_prices
-    ):
-        return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
     if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
         return PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
     return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
@@ -1101,6 +1106,7 @@ def source_owner_type_for_provider_code(provider_code):
     if str(provider_code or "").lower() in {
         "aliyun",
         "aliyun-wanx",
+        "azure-openai",
         "baidu",
         "volcengine",
     }:

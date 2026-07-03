@@ -276,7 +276,10 @@ class LLMOpsOfficialProviderOptionTests(TestCase):
         options = supported_official_provider_options()
 
         provider_codes = {option["provider_code"] for option in options}
-        self.assertEqual({"aliyun", "deepseek"}, provider_codes)
+        self.assertEqual(
+            {"aliyun", "azure-openai", "deepseek"},
+            provider_codes,
+        )
         self.assertFalse(LLMProvider.objects.exists())
         self.assertFalse(PriceCollectionSource.objects.exists())
 
@@ -285,7 +288,7 @@ class LLMOpsOfficialProviderOptionTests(TestCase):
 
         provider_codes = {option["provider_code"] for option in options}
         self.assertEqual(
-            {"aliyun", "deepseek", "siliconflow"},
+            {"aliyun", "azure-openai", "deepseek", "siliconflow"},
             provider_codes,
         )
         self.assertFalse(LLMProvider.objects.exists())

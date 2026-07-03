@@ -676,6 +676,36 @@ class ModelPriceItemSerializerTests(TestCase):
         self.assertEqual(data["price_role"], "cloud_hosted")
         self.assertEqual(data["meta_model_owner_name"], "DeepSeek")
         self.assertEqual(data["meta_model_owner_code"], "deepseek")
+        self.assertTrue(data["source_is_enabled"])
+
+    def test_price_item_serializes_disabled_source_state(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="Inactive Source",
+            slug="inactive-source",
+            provider=provider,
+            is_enabled=False,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-4o",
+            code="gpt-4o",
+        )
+        item = ModelPriceItem.objects.create(
+            provider=provider,
+            model=model,
+            meta_model=model.meta_model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("2.5"),
+            price_fingerprint="inactive-source-input",
+        )
+
+        data = ModelPriceItemSerializer(item).data
+
+        self.assertFalse(data["source_is_enabled"])
 
     def test_price_item_meta_model_follows_canonical_model(self):
         deepseek = LLMProvider.objects.create(

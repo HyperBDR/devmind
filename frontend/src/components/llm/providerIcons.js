@@ -1,10 +1,17 @@
-const LOCAL_PROVIDER_ICON_MODULES = import.meta.glob(
+const LOCAL_LOBEHUB_PROVIDER_ICON_MODULES = import.meta.glob(
   '/src/assets/provider-icons/lobehub/*.svg',
+  { eager: true, import: 'default' }
+)
+const LOCAL_MODELS_DEV_LAB_ICON_MODULES = import.meta.glob(
+  '/src/assets/provider-icons/models-dev/labs/*.svg',
   { eager: true, import: 'default' }
 )
 
 const LOCAL_PROVIDER_ICON_URLS = Object.fromEntries(
-  Object.entries(LOCAL_PROVIDER_ICON_MODULES).map(([filePath, iconUrl]) => {
+  Object.entries({
+    ...LOCAL_LOBEHUB_PROVIDER_ICON_MODULES,
+    ...LOCAL_MODELS_DEV_LAB_ICON_MODULES
+  }).map(([filePath, iconUrl]) => {
     const fileName = filePath.split('/').pop() || ''
     const providerSlug = fileName.replace(/\.svg$/, '')
     return [providerSlug, iconUrl]
@@ -19,7 +26,11 @@ const PROVIDER_ICON_ALIASES = {
   claude: 'anthropic',
   dashscope: 'qwen',
   meta_llama: 'meta',
+  moonshotai: 'kimi',
   nvidia_nim: 'nvidia',
+  siliconflow: 'siliconcloud',
+  tencent: 'hunyuan',
+  zhipuai: 'zhipu',
   zai: 'zhipu'
 }
 

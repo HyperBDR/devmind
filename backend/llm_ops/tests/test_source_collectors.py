@@ -33,7 +33,7 @@ from llm_ops.source_collectors.official import (
 class PriceSourceCollectorRegistryTests(TestCase):
     def test_official_collectors_follow_price_source_implementations(self):
         self.assertEqual(
-            {"aliyun", "deepseek"},
+            {"aliyun", "azure-openai", "deepseek"},
             set(SUPPORTED_OFFICIAL_PROVIDER_CODES),
         )
 
@@ -101,6 +101,36 @@ class PriceSourceCollectorRegistryTests(TestCase):
 
         self.assertIsNotNone(collector)
         self.assertEqual(collector.collector_id, "official_provider:deepseek")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_azure_openai_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(
+            name="Azure OpenAI",
+            code="azure-openai",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Azure OpenAI Official",
+            slug="azure-openai-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://azure.microsoft.com/en-us/pricing/details/"
+                "azure-openai/#pricing"
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(
+            collector.collector_id,
+            "official_provider:azure-openai",
+        )
         self.assertTrue(source_supports_code_collection(source))
 
     def test_unimplemented_official_source_is_not_supported(self):
