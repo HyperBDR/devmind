@@ -113,6 +113,13 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/meta-models/`, paramsOrEmpty(params))
   },
 
+  listMetaModelOwnerSummary(params) {
+    return apiClient.get(
+      `${base}/meta-models/owner-summary/`,
+      paramsOrEmpty(params)
+    )
+  },
+
   syncMetaModels() {
     return apiClient.post(`${base}/meta-models/sync/`)
   },

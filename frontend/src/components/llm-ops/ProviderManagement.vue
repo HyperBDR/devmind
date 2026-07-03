@@ -138,7 +138,7 @@
               v-for="provider in filteredSourceProviderRows"
               :key="provider.id"
               class="cursor-pointer"
-              @click="selectedProvider = provider"
+              @click="openSourceDetail(provider)"
             >
               <td class="table-cell">
                 <p class="truncate font-medium text-slate-900">
@@ -357,26 +357,26 @@
       :open="Boolean(priceEntrySource)"
       :source="priceEntrySource"
       :providers="providers"
-      :meta-models="metaModels"
-      :models="models"
+      :meta-models="priceEntryMetaModels"
+      :models="priceEntryModels"
       @close="priceEntrySource = null"
       @saved="handlePriceEntrySaved"
     />
-    <ProviderPricingDrawer
-      :provider="selectedProvider"
-      :models="selectedProviderModels"
-      :sources="selectedProviderSources"
+    <SourcePriceDrawer
+      :source="selectedProvider?.primary_source || null"
+      :models="[]"
       :price-items="selectedProviderPriceItems"
-      :display-currency="displayCurrency"
-      :exchange-rate="exchangeRate"
-      :collecting-source-id="collectingSourceId"
-      :deleting-source-id="deletingSourceId"
+      :deleting="
+        String(deletingSourceId || '') ===
+        String(selectedProvider?.primary_source?.id || '')
+      "
+      :loading="selectedProviderLoading"
+      :page="selectedProviderPage"
+      :page-size="selectedProviderPageSize"
+      :total-items="selectedProviderTotal"
       @close="selectedProvider = null"
-      @manual-entry-source="openManualEntryFromProvider"
-      @edit-source="editSourceFromProvider"
-      @toggle-source="toggleSource"
-      @collect-source="collectSource"
-      @delete-source="deleteSource"
+      @delete="deleteSource"
+      @page-change="loadSelectedProviderPriceItems"
     />
   </section>
 </template>
@@ -389,7 +389,7 @@ import { useToast } from '@/composables/useToast'
 import ManualPriceImportModal from '@/components/llm-ops/ManualPriceImportModal.vue'
 import ManualPriceEntryModal from '@/components/llm-ops/ManualPriceEntryModal.vue'
 import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
-import ProviderPricingDrawer from '@/components/llm-ops/ProviderPricingDrawer.vue'
+import SourcePriceDrawer from '@/components/llm-ops/SourcePriceDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 import {
   canApiSyncPriceSource as canApiSyncSource,
@@ -461,6 +461,13 @@ const deletingSourceId = ref(null)
 const sourceSearch = ref('')
 const sourceCategoryFilter = ref('all')
 const sourceStatusFilter = ref('all')
+const selectedProviderLoading = ref(false)
+const selectedProviderPage = ref(1)
+const selectedProviderPageSize = ref(50)
+const selectedProviderTotal = ref(0)
+const selectedProviderPriceItems = ref([])
+const localPriceEntryMetaModels = ref([])
+const localPriceEntryModels = ref([])
 
 const sourceCategoryFilterOptions = computed(() => [
   {
@@ -504,6 +511,14 @@ const sourceStatusFilterOptions = computed(() => [
   }
 ])
 
+const priceEntryMetaModels = computed(() =>
+  props.metaModels.length ? props.metaModels : localPriceEntryMetaModels.value
+)
+
+const priceEntryModels = computed(() =>
+  props.models.length ? props.models : localPriceEntryModels.value
+)
+
 // Source rows
 const sourceRows = computed(() =>
   props.sources
@@ -528,11 +543,6 @@ const sourceProviderRows = computed(() =>
 
 // Metrics
 const sourceMetrics = computed(() => {
-  const coveredMetaModelIds = new Set()
-  entrySourceRows.value.forEach((source) => {
-    source.meta_model_ids.forEach((id) => coveredMetaModelIds.add(id))
-  })
-
   const official = entrySourceRows.value.filter(
     (source) => source.business_source_category === 'official_provider'
   ).length
@@ -554,7 +564,10 @@ const sourceMetrics = computed(() => {
     },
     {
       label: t('llmOps.providerManagement.metrics.metaModels.label'),
-      value: coveredMetaModelIds.size,
+      value: entrySourceRows.value.reduce(
+        (total, source) => total + Number(source.covered_model_count || 0),
+        0
+      ),
       hint: t('llmOps.providerManagement.metrics.metaModels.hint')
     },
     {
@@ -637,27 +650,6 @@ const officialResetLegacySources = computed(
   () => officialResetPreview.value?.stats?.legacy_source_slugs || []
 )
 
-// Drawer selection
-const selectedProviderModels = computed(() => {
-  if (!selectedProvider.value) return []
-  return modelsForSourceIds(selectedProviderSourceIds.value)
-})
-
-const selectedProviderPriceItems = computed(() => {
-  if (!selectedProvider.value) return []
-  return priceItemsForSourceIds(selectedProviderSourceIds.value)
-})
-
-const selectedProviderSources = computed(() => {
-  if (!selectedProvider.value) return []
-  const sourceIds = selectedProviderSourceIds.value
-  return sourceRows.value.filter((source) => sourceIds.has(String(source.id)))
-})
-
-const selectedProviderSourceIds = computed(
-  () => new Set(selectedProvider.value?.source_ids || [])
-)
-
 function buildSourceProviderRow(source) {
   return {
     id: `source-${source.id}`,
@@ -665,6 +657,8 @@ function buildSourceProviderRow(source) {
     code: source.slug,
     category_keys: [source.business_source_category],
     covered_model_count: source.covered_model_count,
+    collect_mode_label: source.collect_mode_label,
+    collect_mode_tone: source.collect_mode_tone,
     meta_model_ids: source.meta_model_ids,
     price_item_count: source.price_item_count,
     primary_source: source,
@@ -679,35 +673,19 @@ function buildSourceProviderRow(source) {
   }
 }
 
-function modelsForSourceIds(sourceIds) {
-  const pricedModelIds = new Set(
-    priceItemsForSourceIds(sourceIds)
-      .map((item) => String(item.model || ''))
-      .filter(Boolean)
-  )
-  return props.models.filter(
-    (model) =>
-      sourceIds.has(String(model.source || '')) ||
-      pricedModelIds.has(String(model.id))
-  )
-}
-
-function priceItemsForSourceIds(sourceIds) {
-  return props.priceItems.filter(
-    (item) =>
-      item.is_current !== false && sourceIds.has(String(item.source || ''))
-  )
-}
-
 function buildSourceRow(source) {
   const relation = sourceRelation(source)
   const categoryKey = businessSourceCategory(source)
   const category = sourceCategory(categoryKey)
-  const currentItems = currentPriceItemsForSource(source.id)
   const latestRun = latestRunForSource(source.id)
   const status = sourceStatus(source, latestRun)
   const syncMode = sourceSyncMode(source)
-  const metaModelIds = metaModelIdsForSource(source, currentItems)
+  const modelCount = Number(
+    source.current_meta_model_count || source.model_count || 0
+  )
+  const priceItemCount = Number(
+    source.current_price_item_count || source.price_item_count || 0
+  )
 
   return {
     ...source,
@@ -722,19 +700,20 @@ function buildSourceRow(source) {
     status_hint: status.hint,
     sync_mode_label: syncMode.label,
     sync_mode_tone: syncMode.tone,
-    meta_model_ids: metaModelIds,
-    covered_model_count: metaModelIds.length,
-    price_item_count: currentItems.length,
-    dimension_count: dimensionCount(currentItems),
+    meta_model_ids: [],
+    covered_model_count: modelCount,
+    price_item_count: priceItemCount,
+    dimension_count: 0,
     can_collect: canCollectSource(source),
     can_manual_entry: canManualEntrySource(source),
     collect_action_label: collectActionLabel(source),
     collect_mode_label: collectModeLabel(source),
-    search_text: buildSourceSearchText(source, relation, category, currentItems)
+    collect_mode_tone: collectModeTone(source),
+    search_text: buildSourceSearchText(source, relation, category)
   }
 }
 
-function buildSourceSearchText(source, relation, category, currentItems) {
+function buildSourceSearchText(source, relation, category) {
   return [
     source.name,
     source.slug,
@@ -743,50 +722,11 @@ function buildSourceSearchText(source, relation, category, currentItems) {
     category.label,
     source.provider_name,
     source.channel_name,
-    source.endpoint_url,
-    ...currentItems.map((item) =>
-      [
-        item.meta_model_name,
-        item.meta_model_code,
-        item.meta_model_owner_name,
-        item.meta_model_owner_code,
-        item.provider_name,
-        item.dimension
-      ]
-        .filter(Boolean)
-        .join(' ')
-    )
+    source.endpoint_url
   ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase()
-}
-
-function currentPriceItemsForSource(sourceId) {
-  return props.priceItems.filter(
-    (item) =>
-      String(item.source) === String(sourceId) && item.is_current !== false
-  )
-}
-
-function metaModelIdsForSource(source, items) {
-  const ids = items
-    .map((item) =>
-      String(item.meta_model || item.meta_model_code || item.model || '')
-    )
-    .filter(Boolean)
-  if (ids.length) return Array.from(new Set(ids))
-
-  return props.models
-    .filter((model) => String(model.source) === String(source.id))
-    .map((model) => String(model.meta_model || model.id))
-}
-
-function dimensionCount(items) {
-  const dimensions = items
-    .map((item) => `${item.dimension}:${item.billing_unit || ''}`)
-    .filter(Boolean)
-  return new Set(dimensions).size
 }
 
 // Actions
@@ -813,6 +753,42 @@ function handleSourceSaved() {
 function handlePriceEntrySaved(payload) {
   priceEntrySource.value = null
   emit('manual-price-saved', payload)
+}
+
+async function openSourceDetail(provider) {
+  selectedProvider.value = provider
+  selectedProviderPage.value = 1
+  selectedProviderPriceItems.value = []
+  selectedProviderTotal.value = 0
+  await loadSelectedProviderPriceItems(1)
+}
+
+async function loadSelectedProviderPriceItems(
+  page = selectedProviderPage.value
+) {
+  const source = selectedProvider.value?.primary_source
+  if (!source?.id) return
+  selectedProviderLoading.value = true
+  try {
+    const response = await llmOpsApi.listModelPriceItems({
+      source: source.id,
+      is_current: 'true',
+      page,
+      page_size: selectedProviderPageSize.value
+    })
+    const payload = paginationPayload(response)
+    selectedProviderPriceItems.value = paginationResults(payload)
+    selectedProviderTotal.value = Number(
+      payload?.count || selectedProviderPriceItems.value.length
+    )
+    selectedProviderPage.value = page
+  } catch (error) {
+    selectedProviderPriceItems.value = []
+    selectedProviderTotal.value = 0
+    showError(errorMessage(error, '加载价格源明细失败。'))
+  } finally {
+    selectedProviderLoading.value = false
+  }
 }
 
 function openOfficialResetModal(source = null) {
@@ -884,8 +860,9 @@ async function executeOfficialReset() {
   }
 }
 
-function openManualEntryFromProvider(source) {
+async function openManualEntryFromProvider(source) {
   selectedProvider.value = null
+  await ensurePriceEntryCatalogLoaded()
   priceEntrySource.value = source
 }
 
@@ -896,23 +873,33 @@ function openManualImportFromProvider(source) {
   showManualImportModal.value = true
 }
 
+async function ensurePriceEntryCatalogLoaded() {
+  const requests = []
+  if (!priceEntryMetaModels.value.length) {
+    requests.push(
+      fetchAllPages(llmOpsApi.listMetaModels).then((rows) => {
+        localPriceEntryMetaModels.value = rows
+      })
+    )
+  }
+  if (!priceEntryModels.value.length) {
+    requests.push(
+      fetchAllPages(llmOpsApi.listModels).then((rows) => {
+        localPriceEntryModels.value = rows
+      })
+    )
+  }
+  if (!requests.length) return
+  try {
+    await Promise.all(requests)
+  } catch (error) {
+    showError(errorMessage(error, '加载手工录价模型目录失败。'))
+  }
+}
+
 function editSourceFromProvider(source) {
   selectedProvider.value = null
   editingSource.value = source
-}
-
-async function toggleSource(source) {
-  if (!source?.id) return
-  try {
-    await llmOpsApi.updateCollectionSource(source.id, {
-      is_enabled: !source.is_enabled
-    })
-    emit('refresh')
-  } catch (error) {
-    showError(
-      errorMessage(error, t('llmOps.providerManagement.errors.saveFailed'))
-    )
-  }
 }
 
 async function collectSource(source) {
@@ -1053,7 +1040,7 @@ function sourceConfigSummary(source, relation = sourceRelation(source)) {
     .join(' · ')
 }
 
-function sourceStatus(source, latestRun) {
+function sourceStatus(source, latestRun = null) {
   if (!source.is_enabled) {
     return {
       label: t('llmOps.providerManagement.sourceStatus.inactive.label'),
@@ -1092,7 +1079,7 @@ function sourceStatus(source, latestRun) {
   return {
     label: t('llmOps.providerManagement.sourceStatus.active.label'),
     tone: 'ok',
-    hint: t('llmOps.providerManagement.sourceStatus.active.hint')
+    hint: collectModeLabel(source)
   }
 }
 
@@ -1179,6 +1166,13 @@ function latestRunForSource(sourceId) {
   return rows[0] || null
 }
 
+function collectModeTone(source) {
+  if (canCollectSource(source)) return 'auto'
+  if (canApiSyncSource(source) || source.source_type === 'yunce') return 'api'
+  if (canManualEntrySource(source)) return 'manual'
+  return 'unknown'
+}
+
 function errorMessage(error, fallback) {
   return (
     error?.response?.data?.detail ||
@@ -1190,6 +1184,38 @@ function errorMessage(error, fallback) {
 
 function apiPayload(response) {
   return response?.data?.data || response?.data || {}
+}
+
+function paginationPayload(response) {
+  return response?.data?.data || response?.data || []
+}
+
+function paginationResults(payload) {
+  if (Array.isArray(payload?.results)) return payload.results
+  return Array.isArray(payload) ? payload : []
+}
+
+async function fetchAllPages(request, params = {}) {
+  const firstResponse = await request({
+    ...params,
+    page: 1,
+    page_size: 200
+  })
+  const firstPayload = paginationPayload(firstResponse)
+  const results = paginationResults(firstPayload)
+  const total = Number(firstPayload?.count || results.length)
+  const totalPages = Math.max(1, Math.ceil(total / 200))
+  if (!firstPayload?.results || totalPages <= 1) return results
+
+  const pageRequests = []
+  for (let page = 2; page <= totalPages; page += 1) {
+    pageRequests.push(request({ ...params, page, page_size: 200 }))
+  }
+  const pageResponses = await Promise.all(pageRequests)
+  pageResponses.forEach((response) => {
+    results.push(...paginationResults(paginationPayload(response)))
+  })
+  return results
 }
 </script>
 
@@ -1386,6 +1412,10 @@ function apiPayload(response) {
 
 .source-badge.auto {
   @apply border-emerald-100 bg-emerald-50 text-emerald-700;
+}
+
+.source-badge.api {
+  @apply border-sky-100 bg-sky-50 text-sky-700;
 }
 
 .source-badge.supplier {

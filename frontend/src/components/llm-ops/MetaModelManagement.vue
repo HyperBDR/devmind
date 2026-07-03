@@ -222,7 +222,7 @@
               <p class="drawer-result-note">
                 {{
                   t('llmOps.metaModelManagement.summary.modelResult', {
-                    total: vendorMetaRows.length,
+                    total: drawerTotal,
                     active: selectedVendorActiveCount
                   })
                 }}
@@ -260,6 +260,11 @@
                   </tr>
                 </thead>
                 <tbody>
+                  <tr v-if="drawerLoading">
+                    <td class="table-cell text-slate-500" colspan="5">
+                      加载中...
+                    </td>
+                  </tr>
                   <tr v-for="item in paginatedVendorMetaRows" :key="item.id">
                     <td class="table-cell">
                       <div
@@ -344,7 +349,7 @@
                       </div>
                     </td>
                   </tr>
-                  <tr v-if="!vendorMetaRows.length">
+                  <tr v-if="!drawerLoading && !vendorMetaRows.length">
                     <td class="table-cell text-slate-500" colspan="5">
                       {{ t('llmOps.metaModelManagement.empty.models') }}
                     </td>
@@ -352,11 +357,11 @@
                 </tbody>
               </table>
             </div>
-            <div v-if="vendorMetaRows.length" class="pagination-bar">
+            <div v-if="drawerTotal" class="pagination-bar">
               <p class="text-xs text-slate-500">
                 {{
                   t('llmOps.metaModelManagement.pagination.summary', {
-                    total: vendorMetaRows.length,
+                    total: drawerTotal,
                     current: safeCurrentPage,
                     pages: totalPages
                   })
@@ -389,7 +394,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
@@ -429,6 +434,11 @@ const currentPage = ref(1)
 const selectedVendorId = ref('')
 const showVendorModelsDrawer = ref(false)
 const syncingMetaModels = ref(false)
+const ownerRows = ref([])
+const drawerRows = ref([])
+const drawerTotal = ref(0)
+const drawerLoading = ref(false)
+const ownerSummaryLoading = ref(false)
 
 const statusOptions = computed(() => [
   {
@@ -472,63 +482,7 @@ const pageSizeOptions = computed(() => [
   }
 ])
 
-const rows = computed(() =>
-  props.metaModels.map((item) => {
-    const skuCount = props.models.filter(
-      (model) => String(model.meta_model) === String(item.id)
-    ).length
-    const canonicalVendor = resolveCanonicalMetaOwner(item, props.providers)
-    return {
-      ...item,
-      owner_key: item.owner_code || canonicalVendor.code,
-      owner_code: item.owner_code || canonicalVendor.code,
-      owner_name: item.owner_name || canonicalVendor.name,
-      sku_count: skuCount
-    }
-  })
-)
-
-const vendorRows = computed(() => {
-  const map = new Map()
-  props.providers.forEach((provider) => {
-    map.set(String(provider.code), {
-      id: provider.code,
-      name: provider.name,
-      code: provider.code,
-      meta_model_count: 0,
-      sku_count: 0
-    })
-  })
-  rows.value.forEach((item) => {
-    if (!item.owner_key) {
-      // The backend canonical resolver guarantees every meta
-      // model has an owner. Rows without one are skipped so
-      // the UI never shows an "unbound" owner bucket.
-      return
-    }
-    const key = String(item.owner_key)
-    if (!map.has(key)) {
-      map.set(key, {
-        id: key,
-        name: item.owner_name || key,
-        code: item.owner_code || key,
-        meta_model_count: 0,
-        sku_count: 0
-      })
-    }
-    const row = map.get(key)
-    row.meta_model_count += 1
-    row.sku_count += item.sku_count
-  })
-  return Array.from(map.values())
-    .filter((row) => row.meta_model_count > 0)
-    .sort((left, right) => {
-      if (right.meta_model_count !== left.meta_model_count) {
-        return right.meta_model_count - left.meta_model_count
-      }
-      return String(left.name).localeCompare(String(right.name))
-    })
-})
+const vendorRows = computed(() => ownerRows.value)
 
 const filteredVendorRows = computed(() => {
   const keyword = vendorSearchKeyword.value.trim().toLowerCase()
@@ -548,86 +502,57 @@ const selectedVendorRow = computed(() =>
   )
 )
 
-const vendorMetaRows = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
-  return rows.value
-    .filter((item) => {
-      if (!selectedVendorId.value) {
-        return false
-      }
-      if (String(item.owner_key || '') !== String(selectedVendorId.value)) {
-        return false
-      }
-      if (statusFilter.value && item.status !== statusFilter.value) {
-        return false
-      }
-      if (modalityFilter.value && item.modality !== modalityFilter.value) {
-        return false
-      }
-      if (!keyword) return true
-      return searchableText(item).includes(keyword)
-    })
-    .sort((left, right) => {
-      const leftTime = releaseDateTime(left.release_date)
-      const rightTime = releaseDateTime(right.release_date)
-      if (rightTime !== leftTime) {
-        return rightTime - leftTime
-      }
-      return String(left.name).localeCompare(String(right.name))
-    })
-})
+const vendorMetaRows = computed(() => drawerRows.value)
 
 const totalPages = computed(() =>
-  Math.max(1, Math.ceil(vendorMetaRows.value.length / Number(pageSize.value)))
+  Math.max(1, Math.ceil(drawerTotal.value / Number(pageSize.value)))
 )
 
 const safeCurrentPage = computed(() =>
   Math.min(Math.max(Number(currentPage.value) || 1, 1), totalPages.value)
 )
 
-const paginatedVendorMetaRows = computed(() => {
-  const size = Number(pageSize.value)
-  const start = (safeCurrentPage.value - 1) * size
-  return vendorMetaRows.value.slice(start, start + size)
-})
+const paginatedVendorMetaRows = computed(() => vendorMetaRows.value)
 
 // resolveCanonicalVendor / canonicalMetaOwnerCode moved to
 // frontend/src/utils/llmOpsMeta.js for reuse across the
 // immersive publishing workspace and the meta model library.
 
 const metricCards = computed(() => {
-  const active = props.metaModels.filter((item) => item.status === 'active')
-  const deprecated = props.metaModels.filter(
-    (item) => item.status === 'deprecated'
+  const totalModels = ownerRows.value.reduce(
+    (total, row) => total + Number(row.meta_model_count || 0),
+    0
   )
-  const boundVendorIds = new Set(
-    props.metaModels
-      .map((item) => item.owner_code)
-      .filter((vendor) => vendor !== null && vendor !== undefined)
-      .map(String)
+  const activeModels = ownerRows.value.reduce(
+    (total, row) => total + Number(row.active_model_count || 0),
+    0
   )
   return [
     {
       label: t('llmOps.metaModelManagement.metrics.metaModels.label'),
-      value: props.metaModels.length,
+      value: ownerSummaryLoading.value ? '-' : totalModels,
       hint: t('llmOps.metaModelManagement.metrics.metaModels.hint')
     },
     {
       label: t('llmOps.metaModelManagement.metrics.boundVendors.label'),
-      value: boundVendorIds.size,
+      value: ownerSummaryLoading.value ? '-' : ownerRows.value.length,
       hint: t('llmOps.metaModelManagement.metrics.boundVendors.hint')
     },
     {
       label: t('llmOps.metaModelManagement.metrics.status.label'),
-      value: `${active.length}/${deprecated.length}`,
+      value: ownerSummaryLoading.value
+        ? '-'
+        : `${activeModels}/${Math.max(totalModels - activeModels, 0)}`,
       hint: t('llmOps.metaModelManagement.metrics.status.hint')
     }
   ]
 })
 
-const selectedVendorActiveCount = computed(
-  () => vendorMetaRows.value.filter((item) => item.status === 'active').length
-)
+const selectedVendorActiveCount = computed(() => {
+  if (statusFilter.value === 'active') return drawerTotal.value
+  if (statusFilter.value) return 0
+  return Number(selectedVendorRow.value?.active_model_count || 0)
+})
 
 const syncActionLabel = computed(() =>
   syncingMetaModels.value
@@ -651,6 +576,7 @@ function openVendorModelsDrawer(row) {
   selectedVendorId.value = row?.id ? String(row.id) : ''
   currentPage.value = 1
   showVendorModelsDrawer.value = Boolean(selectedVendorId.value)
+  fetchVendorMetaModels()
 }
 
 function closeVendorModelsDrawer() {
@@ -659,18 +585,66 @@ function closeVendorModelsDrawer() {
 
 function goToPreviousPage() {
   currentPage.value = Math.max(safeCurrentPage.value - 1, 1)
+  fetchVendorMetaModels()
 }
 
 function goToNextPage() {
   currentPage.value = Math.min(safeCurrentPage.value + 1, totalPages.value)
+  fetchVendorMetaModels()
 }
 
-watch(
-  [searchKeyword, statusFilter, modalityFilter, selectedVendorId, pageSize],
-  () => {
-    currentPage.value = 1
+watch([searchKeyword, statusFilter, modalityFilter, pageSize], () => {
+  currentPage.value = 1
+  if (showVendorModelsDrawer.value) fetchVendorMetaModels()
+})
+
+onMounted(() => {
+  fetchOwnerSummary()
+})
+
+async function fetchOwnerSummary() {
+  ownerSummaryLoading.value = true
+  try {
+    const response = await llmOpsApi.listMetaModelOwnerSummary()
+    ownerRows.value = paginationResults(paginationPayload(response))
+  } catch (error) {
+    showError(errorMessage(error, '加载元模型厂商汇总失败。'))
+  } finally {
+    ownerSummaryLoading.value = false
   }
-)
+}
+
+async function fetchVendorMetaModels() {
+  if (!selectedVendorId.value) return
+  drawerLoading.value = true
+  try {
+    const response = await llmOpsApi.listMetaModels({
+      owner: selectedVendorId.value,
+      status: statusFilter.value || undefined,
+      modality: modalityFilter.value || undefined,
+      search: searchKeyword.value.trim() || undefined,
+      page: safeCurrentPage.value,
+      page_size: Number(pageSize.value) || 20
+    })
+    const payload = paginationPayload(response)
+    drawerRows.value = paginationResults(payload).map((item) => {
+      const canonicalVendor = resolveCanonicalMetaOwner(item, props.providers)
+      return {
+        ...item,
+        owner_key: item.owner_code || canonicalVendor.code,
+        owner_code: item.owner_code || canonicalVendor.code,
+        owner_name: item.owner_name || canonicalVendor.name
+      }
+    })
+    drawerTotal.value = Number(payload?.count || drawerRows.value.length)
+  } catch (error) {
+    drawerRows.value = []
+    drawerTotal.value = 0
+    showError(errorMessage(error, '加载元模型明细失败。'))
+  } finally {
+    drawerLoading.value = false
+  }
+}
 
 async function syncMetaModels() {
   syncingMetaModels.value = true
@@ -682,24 +656,14 @@ async function syncMetaModels() {
         count: stats.models || 0
       })
     )
+    await fetchOwnerSummary()
+    if (showVendorModelsDrawer.value) await fetchVendorMetaModels()
     emit('refresh')
   } catch (error) {
     showError(errorMessage(error, t('llmOps.metaModelManagement.errors.sync')))
   } finally {
     syncingMetaModels.value = false
   }
-}
-
-function searchableText(item) {
-  return [
-    item.name,
-    item.code,
-    item.family,
-    item.owner_name,
-    ...(Array.isArray(item.aliases) ? item.aliases : [])
-  ]
-    .join(' ')
-    .toLowerCase()
 }
 
 function vendorRowActive(row) {
@@ -813,12 +777,6 @@ function releaseDateLabel(value) {
   return String(value).slice(0, 10)
 }
 
-function releaseDateTime(value) {
-  if (!value) return 0
-  const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? 0 : parsed
-}
-
 function compactTokenLabel(value) {
   const numeric = Number(value || 0)
   if (!numeric) return '-'
@@ -864,6 +822,15 @@ function statusTone(value) {
     unknown: 'muted'
   }
   return tones[value] || 'muted'
+}
+
+function paginationPayload(response) {
+  return response?.data?.data || response?.data || []
+}
+
+function paginationResults(payload) {
+  if (Array.isArray(payload?.results)) return payload.results
+  return Array.isArray(payload) ? payload : []
 }
 
 function errorMessage(error, fallback) {
@@ -1121,6 +1088,10 @@ function errorMessage(error, fallback) {
 
 .vendor-row.active {
   @apply bg-indigo-50;
+}
+
+.vendor-name-cell {
+  @apply flex min-w-0 items-center gap-3;
 }
 
 .vendor-row-static {

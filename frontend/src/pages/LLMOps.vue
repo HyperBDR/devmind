@@ -827,6 +827,7 @@ import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 const LIST_PAGE_SIZE = 200
 const LIST_PARAMS = { page_size: LIST_PAGE_SIZE }
 const PRICE_HISTORY_PAGE_SIZE = 120
+const LIGHT_CORE_SECTIONS = new Set(['metaModels', 'providers'])
 const DATA_HEAVY_SECTIONS = new Set([
   'channels',
   'channelMatrix',
@@ -1749,7 +1750,7 @@ async function refreshAll() {
   loading.value = true
   const section = activeSection.value
   try {
-    await refreshCoreData()
+    await refreshCoreData(section)
     await refreshSectionData(section)
   } finally {
     loading.value = false
@@ -1758,7 +1759,8 @@ async function refreshAll() {
   refreshSecondaryData({ force: true, silent: true })
 }
 
-async function refreshCoreData() {
+async function refreshCoreData(section = activeSection.value) {
+  const shouldLoadModels = !LIGHT_CORE_SECTIONS.has(section)
   const [
     sourceRes,
     runRes,
@@ -1771,7 +1773,7 @@ async function refreshCoreData() {
     fetchList(llmOpsApi.listCollectionSources),
     fetchList(llmOpsApi.listCollectionRuns),
     fetchList(llmOpsApi.listProviders),
-    fetchList(llmOpsApi.listModels),
+    shouldLoadModels ? fetchList(llmOpsApi.listModels) : Promise.resolve([]),
     fetchList(llmOpsApi.listChannels),
     fetchList(llmOpsApi.listResalePlatforms),
     llmOpsApi.getSummary(summaryParams())
@@ -1779,7 +1781,9 @@ async function refreshCoreData() {
   sources.value = extract(sourceRes)
   collectionRuns.value = extract(runRes)
   providers.value = extract(providerRes)
-  models.value = extract(modelRes)
+  if (shouldLoadModels) {
+    models.value = extract(modelRes)
+  }
   channels.value = extract(channelRes)
   resalePlatforms.value = extract(platformRes)
   summary.value = extract(summaryRes)
@@ -1800,9 +1804,7 @@ async function refreshSecondaryData({ force = false, silent = false } = {}) {
   backgroundLoading.value = true
   try {
     await Promise.all([
-      refreshMetaModels(),
       refreshChannelPricingData(),
-      refreshModelPriceItems(),
       refreshResaleListings(),
       refreshReconciliationRecords()
     ])
@@ -1822,8 +1824,12 @@ async function refreshSecondaryData({ force = false, silent = false } = {}) {
 
 async function refreshSectionData(section) {
   if (!DATA_HEAVY_SECTIONS.has(section)) return
-  if (section === 'providers' || section === 'metaModels') {
-    await Promise.all([refreshMetaModels(), refreshModelPriceItems()])
+  if (section === 'providers') {
+    await refreshProviderManagementData()
+    return
+  }
+  if (section === 'metaModels') {
+    await refreshMetaModelManagementData()
     return
   }
   if (section === 'channels') {
@@ -1854,10 +1860,6 @@ async function refreshSectionData(section) {
   if (section === 'reconciler') {
     await refreshReconciliationRecords()
   }
-}
-
-async function refreshMetaModels() {
-  metaModels.value = await fetchList(llmOpsApi.listMetaModels)
 }
 
 async function refreshChannelPricingData() {
@@ -1927,31 +1929,15 @@ async function refreshCollectionRuns() {
 
 async function refreshProviderManagementData() {
   try {
-    const [
-      sourceData,
-      runData,
-      providerData,
-      modelData,
-      metaModelData,
-      priceItemData,
-      summaryRes
-    ] = await Promise.all([
+    const [sourceData, runData, providerData, summaryRes] = await Promise.all([
       fetchList(llmOpsApi.listCollectionSources),
       fetchList(llmOpsApi.listCollectionRuns),
       fetchList(llmOpsApi.listProviders),
-      fetchList(llmOpsApi.listModels),
-      fetchList(llmOpsApi.listMetaModels),
-      fetchList(llmOpsApi.listModelPriceItems, {
-        is_current: 'true'
-      }),
       llmOpsApi.getSummary(summaryParams())
     ])
     sources.value = sourceData
     collectionRuns.value = runData
     providers.value = providerData
-    models.value = modelData
-    metaModels.value = metaModelData
-    modelPriceItems.value = priceItemData
     summary.value = extract(summaryRes)
   } catch (error) {
     showError(errorMessage(error, '刷新价格源数据失败。'))
@@ -1960,20 +1946,11 @@ async function refreshProviderManagementData() {
 
 async function refreshMetaModelManagementData() {
   try {
-    const [providerData, modelData, metaModelData, priceItemData, summaryRes] =
-      await Promise.all([
-        fetchList(llmOpsApi.listProviders),
-        fetchList(llmOpsApi.listModels),
-        fetchList(llmOpsApi.listMetaModels),
-        fetchList(llmOpsApi.listModelPriceItems, {
-          is_current: 'true'
-        }),
-        llmOpsApi.getSummary(summaryParams())
-      ])
+    const [providerData, summaryRes] = await Promise.all([
+      fetchList(llmOpsApi.listProviders),
+      llmOpsApi.getSummary(summaryParams())
+    ])
     providers.value = providerData
-    models.value = modelData
-    metaModels.value = metaModelData
-    modelPriceItems.value = priceItemData
     summary.value = extract(summaryRes)
   } catch (error) {
     showError(errorMessage(error, '刷新元模型数据失败。'))
@@ -2152,6 +2129,15 @@ watch(activeSection, (section) => {
   ) {
     refreshSectionData(section).catch((error) => {
       showError(errorMessage(error, '加载当前页面数据失败。'))
+    })
+  }
+  if (
+    !LIGHT_CORE_SECTIONS.has(section) &&
+    !models.value.length &&
+    !loading.value
+  ) {
+    refreshCoreData(section).catch((error) => {
+      showError(errorMessage(error, '加载基础模型数据失败。'))
     })
   }
 })

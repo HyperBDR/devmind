@@ -214,17 +214,43 @@ class PriceCollectionSourceViewSet(
     serializer_class = PriceCollectionSourceSerializer
 
     def get_queryset(self):
-        return (
+        queryset = (
             PriceCollectionSource.objects.select_related(
                 "provider",
                 "channel",
             )
+            .annotate(
+                current_price_item_count=Count(
+                    "model_price_items",
+                    filter=Q(model_price_items__is_current=True),
+                ),
+                current_meta_model_count=Count(
+                    "model_price_items__meta_model",
+                    filter=Q(model_price_items__is_current=True),
+                    distinct=True,
+                ),
+            )
             .prefetch_related(
                 "models__meta_model",
             )
-            .order_by(
-                "source_category", "provider__name", "channel__name", "id"
+        )
+        search = self.request.query_params.get("search")
+        source_category = self.request.query_params.get("source_category")
+        is_enabled = self.request.query_params.get("is_enabled")
+        if source_category:
+            queryset = queryset.filter(source_category=source_category)
+        if is_enabled in {"true", "false"}:
+            queryset = queryset.filter(is_enabled=is_enabled == "true")
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(slug__icontains=search)
+                | Q(provider__name__icontains=search)
+                | Q(provider__code__icontains=search)
+                | Q(channel__name__icontains=search)
             )
+        return queryset.order_by(
+            "source_category", "provider__name", "channel__name", "id"
         )
 
     @action(
@@ -765,8 +791,23 @@ class MetaModelViewSet(
             .exclude(owner_code="")
         )
         owner = self.request.query_params.get("owner")
+        status_filter = self.request.query_params.get("status")
+        modality = self.request.query_params.get("modality")
+        search = self.request.query_params.get("search")
         if owner:
             queryset = queryset.filter(owner_code=owner)
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        if modality:
+            queryset = queryset.filter(modality=modality)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(code__icontains=search)
+                | Q(family__icontains=search)
+                | Q(owner_name__icontains=search)
+                | Q(owner_code__icontains=search)
+            )
         return queryset.order_by("name", "id")
 
     def destroy(self, request, *args, **kwargs):
@@ -796,6 +837,52 @@ class MetaModelViewSet(
         normalize_meta_model_catalog()
         resolve_orphan_meta_models()
         return super().list(request, *args, **kwargs)
+
+    @action(
+        detail=False,
+        methods=["get"],
+        url_path="owner-summary",
+        url_name="owner-summary",
+    )
+    def owner_summary(self, request):
+        """Return one lightweight row per canonical model owner."""
+        queryset = self.get_queryset()
+        search = request.query_params.get("owner_search")
+        if search:
+            queryset = queryset.filter(
+                Q(owner_name__icontains=search)
+                | Q(owner_code__icontains=search)
+            )
+        rows = (
+            queryset.values("owner_code", "owner_name")
+            .annotate(
+                meta_model_count=Count("id", distinct=True),
+                active_model_count=Count(
+                    "id",
+                    filter=Q(status=MetaModel.STATUS_ACTIVE),
+                    distinct=True,
+                ),
+                sku_count=Count("provider_prices", distinct=True),
+            )
+            .order_by("-meta_model_count", "owner_name", "owner_code")
+        )
+        return Response(
+            {
+                "results": [
+                    {
+                        "id": row["owner_code"],
+                        "code": row["owner_code"],
+                        "name": row["owner_name"] or row["owner_code"],
+                        "meta_model_count": row["meta_model_count"],
+                        "active_model_count": row["active_model_count"],
+                        "sku_count": row["sku_count"],
+                    }
+                    for row in rows
+                    if row["owner_code"]
+                ]
+            },
+            status=status.HTTP_200_OK,
+        )
 
     def retrieve(self, request, *args, **kwargs):
         from .catalog_maintenance import (
@@ -843,10 +930,25 @@ class LLMModelViewSet(
         )
         provider = self.request.query_params.get("provider")
         meta_model = self.request.query_params.get("meta_model")
+        source = self.request.query_params.get("source")
+        search = self.request.query_params.get("search")
         if provider:
             queryset = queryset.filter(provider_id=provider)
         if meta_model:
             queryset = queryset.filter(meta_model_id=meta_model)
+        if source:
+            queryset = queryset.filter(source_id=source)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search)
+                | Q(code__icontains=search)
+                | Q(meta_model__name__icontains=search)
+                | Q(meta_model__code__icontains=search)
+                | Q(provider__name__icontains=search)
+                | Q(provider__code__icontains=search)
+                | Q(source__name__icontains=search)
+                | Q(source__slug__icontains=search)
+            )
         return queryset.order_by("meta_model__name", "provider__name", "id")
 
     def destroy(self, request, *args, **kwargs):
@@ -892,6 +994,7 @@ class ModelPriceItemViewSet(
         source = self.request.query_params.get("source")
         dimension = self.request.query_params.get("dimension")
         is_current = self.request.query_params.get("is_current")
+        search = self.request.query_params.get("search")
         if provider:
             queryset = queryset.filter(provider_id=provider)
         if meta_model:
@@ -904,6 +1007,18 @@ class ModelPriceItemViewSet(
             queryset = queryset.filter(dimension=dimension)
         if is_current in {"true", "false"}:
             queryset = queryset.filter(is_current=is_current == "true")
+        if search:
+            queryset = queryset.filter(
+                Q(meta_model__name__icontains=search)
+                | Q(meta_model__code__icontains=search)
+                | Q(model__name__icontains=search)
+                | Q(model__code__icontains=search)
+                | Q(provider__name__icontains=search)
+                | Q(provider__code__icontains=search)
+                | Q(source__name__icontains=search)
+                | Q(source__slug__icontains=search)
+                | Q(dimension__icontains=search)
+            )
         return queryset.order_by(
             "provider__name",
             "sku__display_name",

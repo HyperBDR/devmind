@@ -56,7 +56,7 @@
           </div>
           <div class="summary-card">
             <p>{{ t('llmOps.sourcePriceDrawer.summary.currentItems') }}</p>
-            <strong>{{ sourceItemRows.length }}</strong>
+            <strong>{{ totalItems || sourceItemRows.length }}</strong>
           </div>
           <div class="summary-card">
             <p>{{ t('llmOps.sourcePriceDrawer.summary.currency') }}</p>
@@ -131,6 +131,11 @@
                 </tr>
               </thead>
               <tbody>
+                <tr v-if="loading">
+                  <td class="table-cell text-slate-500" colspan="3">
+                    加载中...
+                  </td>
+                </tr>
                 <template v-for="row in filteredModelRows" :key="row.key">
                   <tr>
                     <td class="table-cell">
@@ -167,13 +172,36 @@
                     </td>
                   </tr>
                 </template>
-                <tr v-if="!filteredModelRows.length">
+                <tr v-if="!loading && !filteredModelRows.length">
                   <td class="table-cell text-slate-500" colspan="3">
                     {{ t('llmOps.sourcePriceDrawer.empty.noRows') }}
                   </td>
                 </tr>
               </tbody>
             </table>
+          </div>
+          <div v-if="totalItems" class="pagination-bar">
+            <p class="text-xs text-slate-500">
+              第 {{ page }} / {{ totalPages }} 页，共 {{ totalItems }} 条
+            </p>
+            <div class="flex items-center gap-2">
+              <button
+                class="btn-secondary pagination-btn"
+                type="button"
+                :disabled="page <= 1 || loading"
+                @click="$emit('page-change', page - 1)"
+              >
+                上一页
+              </button>
+              <button
+                class="btn-secondary pagination-btn"
+                type="button"
+                :disabled="page >= totalPages || loading"
+                @click="$emit('page-change', page + 1)"
+              >
+                下一页
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -185,7 +213,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-defineEmits(['close', 'delete', 'refresh'])
+defineEmits(['close', 'delete', 'refresh', 'page-change'])
 
 const props = defineProps({
   source: {
@@ -203,6 +231,22 @@ const props = defineProps({
   deleting: {
     type: Boolean,
     default: false
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  },
+  page: {
+    type: Number,
+    default: 1
+  },
+  pageSize: {
+    type: Number,
+    default: 50
+  },
+  totalItems: {
+    type: Number,
+    default: 0
   }
 })
 
@@ -304,6 +348,10 @@ const sourceAddressLabel = computed(() => {
 
 const priceHeaderLabel = computed(() =>
   t('llmOps.sourcePriceDrawer.table.price')
+)
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(Number(props.totalItems || 0) / props.pageSize))
 )
 
 function buildRawItemRow(item) {
@@ -680,6 +728,14 @@ function formatDateTime(value) {
 
 .token-price-row strong {
   @apply truncate text-right font-mono font-semibold text-slate-800;
+}
+
+.pagination-bar {
+  @apply flex flex-col gap-3 border-t border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
+}
+
+.pagination-btn {
+  @apply px-3 py-1.5 text-xs;
 }
 
 .btn-secondary {
