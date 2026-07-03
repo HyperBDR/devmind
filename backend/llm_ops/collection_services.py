@@ -11,7 +11,7 @@ from django.utils import timezone
 from .collectors import CollectedModelPricing, CollectedPricingCatalog
 from .collectors.official import (
     ALIYUN_LEGACY_PRICING_SOURCE_URLS,
-    MODELS_DEV_API_URL,
+    MODELS_DEV_MODELS_URL,
     OFFICIAL_PROVIDER_CONFIGS,
     collect_official_pricing_catalog,
     fetch_source_payload,
@@ -131,6 +131,44 @@ MODELS_DEV_META_SOURCE_PROVIDERS = {
     "zai",
     "zhipuai",
 }
+
+MODELS_DEV_LAB_OWNER_DEFAULTS = {
+    "alibaba": ("aliyun", "阿里巴巴", "https://www.alibaba.com/"),
+    "anthropic": ("anthropic", "Anthropic", "https://anthropic.com/"),
+    "cohere": ("cohere", "Cohere", "https://cohere.com/"),
+    "deepreinforce": (
+        "deepreinforce",
+        "Deepreinforce",
+        "https://deepreinforce.ai/",
+    ),
+    "deepseek": ("deepseek", "DeepSeek", "https://api.deepseek.com/"),
+    "google": ("google", "Google", "https://ai.google.dev/"),
+    "meta": ("meta", "Meta", "https://ai.meta.com/"),
+    "microsoft": ("microsoft", "Microsoft", "https://microsoft.ai/"),
+    "minimax": ("minimax", "MiniMax", "https://api.minimax.io/"),
+    "mistral": ("mistral", "Mistral AI", "https://mistral.ai/"),
+    "moonshotai": (
+        "kimi",
+        "Kimi（月之暗面）",
+        "https://api.moonshot.cn/",
+    ),
+    "nvidia": ("nvidia", "NVIDIA", "https://www.nvidia.com/"),
+    "openai": ("openai", "OpenAI", "https://api.openai.com/"),
+    "perplexity": (
+        "perplexity",
+        "Perplexity",
+        "https://www.perplexity.ai/",
+    ),
+    "sakana": ("sakana", "Sakana AI", "https://sakana.ai/"),
+    "sarvam": ("sarvam", "Sarvam AI", "https://www.sarvam.ai/"),
+    "stepfun": ("stepfun", "阶跃星辰", "https://www.stepfun.com/"),
+    "tencent": ("tencent", "腾讯混元", "https://hunyuan.tencent.com/"),
+    "xai": ("xai", "xAI", "https://x.ai/api"),
+    "xiaomi": ("xiaomi", "Xiaomi", "https://www.mi.com/"),
+    "zhipuai": ("zhipu", "智谱", "https://open.bigmodel.cn/"),
+}
+
+MODELS_DEV_LOGO_ASSET_PREFIX = "/src/assets/provider-icons/models-dev"
 
 
 def source_owner_type_for_provider(provider: LLMProvider) -> str:
@@ -1295,13 +1333,12 @@ def collected_model_code_from_value(value: str) -> str:
 
 def sync_meta_models_from_models_dev(
     *,
-    source_url: str = MODELS_DEV_API_URL,
+    source_url: str = MODELS_DEV_MODELS_URL,
     timeout: int = 20,
 ) -> dict[str, int]:
     """Fetch models.dev and upsert canonical meta-model identities."""
     from .constants import (
         canonical_meta_model_identity,
-        meta_model_owner_payload,
     )
 
     payload = fetch_source_payload(source_url, timeout)
@@ -1318,41 +1355,70 @@ def sync_meta_models_from_models_dev(
     }
     seen_codes = set()
     with transaction.atomic():
-        for provider_payload in iter_models_dev_meta_sources(source_json):
-            if not isinstance(provider_payload, dict):
+        for model_payload in iter_models_dev_meta_model_payloads(
+            source_json,
+        ):
+            if not isinstance(model_payload, dict):
+                stats["skipped"] += 1
                 continue
-            models = provider_payload.get("models", {})
-            if not isinstance(models, dict):
+            reported_code = models_dev_meta_code(model_payload)
+            identity = canonical_meta_model_identity(
+                reported_code,
+                model_payload.get("name"),
+            )
+            code = identity["code"]
+            if not code or code in seen_codes:
+                stats["skipped"] += 1
                 continue
-            for model_payload in models.values():
-                if not isinstance(model_payload, dict):
-                    stats["skipped"] += 1
-                    continue
-                reported_code = models_dev_meta_code(model_payload)
-                identity = canonical_meta_model_identity(
-                    reported_code,
-                    model_payload.get("name"),
-                )
-                code = identity["code"]
-                if not code or code in seen_codes:
-                    stats["skipped"] += 1
-                    continue
-                owner = meta_model_owner_payload(code)
-                if not owner["owner_code"]:
-                    stats["skipped"] += 1
-                    continue
-                seen_codes.add(code)
-                _, created, changed = upsert_models_dev_meta_model(
-                    model_payload,
-                    code=code,
-                    identity=identity,
-                    owner=owner,
-                    source_url=source_url,
-                )
-                stats["models"] += 1
-                stats["created" if created else "updated"] += int(changed)
+            owner = models_dev_owner_payload(model_payload, code)
+            if not owner["owner_code"]:
+                stats["skipped"] += 1
+                continue
+            seen_codes.add(code)
+            _, created, changed = upsert_models_dev_meta_model(
+                model_payload,
+                code=code,
+                identity=identity,
+                owner=owner,
+                source_url=source_url,
+            )
+            stats["models"] += 1
+            stats["created" if created else "updated"] += int(changed)
         stats["deleted"] = cleanup_stale_models_dev_meta_models(seen_codes)
     return stats
+
+
+def iter_models_dev_meta_model_payloads(source_json: dict):
+    """Yield model rows from the public models.dev metadata endpoint."""
+    if is_models_dev_models_json(source_json):
+        for model_id in sorted(source_json):
+            model_payload = source_json[model_id]
+            if isinstance(model_payload, dict):
+                yield model_payload
+        return
+
+    for provider_payload in iter_models_dev_meta_sources(source_json):
+        if not isinstance(provider_payload, dict):
+            continue
+        models = provider_payload.get("models", {})
+        if not isinstance(models, dict):
+            continue
+        for model_payload in models.values():
+            yield model_payload
+
+
+def is_models_dev_models_json(source_json: dict) -> bool:
+    """Return whether a payload has the flat models.json shape."""
+    if not isinstance(source_json, dict) or not source_json:
+        return False
+    for key, value in source_json.items():
+        if not isinstance(value, dict):
+            return False
+        if value.get("models") is not None:
+            return False
+        if value.get("id") != key or "/" not in str(value.get("id") or ""):
+            return False
+    return True
 
 
 def iter_models_dev_meta_sources(source_json: dict):
@@ -1415,6 +1481,36 @@ def models_dev_meta_code(model_payload: dict) -> str:
     if "/" in raw_code:
         raw_code = raw_code.rsplit("/", 1)[-1]
     return normalize_model_code(raw_code)
+
+
+def models_dev_owner_payload(model_payload: dict, code: str) -> dict:
+    """Return local owner fields using model code then models.dev lab."""
+    from .constants import meta_model_owner_payload
+
+    owner = meta_model_owner_payload(code)
+    if owner["owner_code"]:
+        return owner
+
+    lab_key = models_dev_lab_key(model_payload)
+    lab_owner = MODELS_DEV_LAB_OWNER_DEFAULTS.get(lab_key)
+    if lab_owner is None:
+        return owner
+    owner_code, owner_name, owner_website = lab_owner
+    return {
+        "owner_code": owner_code,
+        "owner_name": owner_name,
+        "owner_website": owner_website,
+    }
+
+
+def models_dev_lab_key(model_payload: dict) -> str:
+    """Return the lab slug from a models.dev model id."""
+    model_id = str(model_payload.get("id") or "").strip()
+    if model_id.startswith("hf:"):
+        model_id = model_id[3:]
+    if "/" not in model_id:
+        return ""
+    return model_id.split("/", 1)[0].strip().lower()
 
 
 def upsert_models_dev_meta_model(
@@ -1573,6 +1669,7 @@ def models_dev_capabilities(model_payload: dict) -> dict:
         "reasoning": "reasoning",
         "structured_output": "structured_output",
         "tool_call": "tool_calling",
+        "temperature": "temperature",
         "open_weights": "open_weights",
     }
     features = [
@@ -1585,15 +1682,39 @@ def models_dev_capabilities(model_payload: dict) -> dict:
 
 def models_dev_metadata(model_payload: dict, source_url: str) -> dict:
     """Return source metadata stored under the models_dev key."""
+    lab = models_dev_lab_key(model_payload)
     return {
         "models_dev": {
             "id": model_payload.get("id") or "",
+            "lab": lab,
             "source_url": source_url,
+            "description": model_payload.get("description") or "",
             "release_date": model_payload.get("release_date") or "",
             "last_updated": model_payload.get("last_updated") or "",
             "knowledge": model_payload.get("knowledge") or "",
+            "modalities": model_payload.get("modalities") or {},
+            "links": model_payload.get("links") or [],
+            "weights": model_payload.get("weights") or [],
+            "benchmarks": model_payload.get("benchmarks") or [],
+            "open_weights": bool(model_payload.get("open_weights")),
+            "logo_url": models_dev_lab_logo_url(lab),
+            "logo_path": models_dev_lab_logo_path(lab),
         },
     }
+
+
+def models_dev_lab_logo_url(lab: str) -> str:
+    """Return the public models.dev lab logo URL for one lab."""
+    if not lab:
+        return ""
+    return f"https://models.dev/logos/labs/{lab}.svg"
+
+
+def models_dev_lab_logo_path(lab: str) -> str:
+    """Return the committed frontend asset path for one lab logo."""
+    if not lab:
+        return ""
+    return f"{MODELS_DEV_LOGO_ASSET_PREFIX}/labs/{lab}.svg"
 
 
 def official_source_url(

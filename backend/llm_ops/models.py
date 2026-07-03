@@ -177,7 +177,7 @@ class LLMOpsGlobalConfig(models.Model):
 
     DEFAULT_META_MODEL_SYNC_CRON = "35 2 * * *"
     DEFAULT_PRICE_COLLECTION_CRON = "15 1,7,13,19 * * *"
-    DEFAULT_META_MODEL_SOURCE_URL = "https://models.dev/api.json"
+    DEFAULT_META_MODEL_SOURCE_URL = "https://models.dev/models.json"
     ENCRYPTED_SECRET_PREFIX = "fernet:"
 
     singleton_key = models.CharField(

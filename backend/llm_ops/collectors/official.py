@@ -26,6 +26,7 @@ from .yunce import (
 
 
 MODELS_DEV_API_URL = "https://models.dev/api.json"
+MODELS_DEV_MODELS_URL = "https://models.dev/models.json"
 MODELS_DEV_PROVIDER_KEYS = {
     "aliyun": ("alibaba-cn", "alibaba"),
     "anthropic": ("anthropic",),
