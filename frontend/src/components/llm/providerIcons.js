@@ -9,8 +9,8 @@ const LOCAL_MODELS_DEV_LAB_ICON_MODULES = import.meta.glob(
 
 const LOCAL_PROVIDER_ICON_URLS = Object.fromEntries(
   Object.entries({
-    ...LOCAL_LOBEHUB_PROVIDER_ICON_MODULES,
-    ...LOCAL_MODELS_DEV_LAB_ICON_MODULES
+    ...LOCAL_MODELS_DEV_LAB_ICON_MODULES,
+    ...LOCAL_LOBEHUB_PROVIDER_ICON_MODULES
   }).map(([filePath, iconUrl]) => {
     const fileName = filePath.split('/').pop() || ''
     const providerSlug = fileName.replace(/\.svg$/, '')
@@ -19,9 +19,9 @@ const LOCAL_PROVIDER_ICON_URLS = Object.fromEntries(
 )
 
 const PROVIDER_ICON_ALIASES = {
-  amazon_nova: 'aws',
   alibaba_cloud: 'alibabacloud',
   aliyun: 'alibabacloud',
+  amazon_nova: 'aws',
   azure_openai: 'azure',
   claude: 'anthropic',
   dashscope: 'qwen',

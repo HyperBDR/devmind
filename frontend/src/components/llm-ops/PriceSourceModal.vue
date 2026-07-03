@@ -309,7 +309,7 @@ const currencyOptions = computed(() => [
 
 const autoSyncSourceSelectOptions = computed(() =>
   autoSyncSourceOptions.value.map((option) => ({
-    value: option.option_code || option.provider_code,
+    value: sourceOptionKey(option),
     label: option.provider_name,
     description: option.source_name,
     badge: option.source_exists
@@ -320,9 +320,7 @@ const autoSyncSourceSelectOptions = computed(() =>
 
 const selectedAutoSyncSourceOption = computed(() =>
   autoSyncSourceOptions.value.find(
-    (option) =>
-      String(option.option_code || option.provider_code) ===
-      String(selectedAutoSyncSourceCode.value)
+    (option) => sourceOptionKey(option) === selectedAutoSyncSourceCode.value
   )
 )
 
@@ -349,9 +347,7 @@ const autoSyncSourceHelpText = computed(() => {
 })
 
 const saveDisabled = computed(
-  () =>
-    shouldCreateAutoSyncPreset.value &&
-    !selectedAutoSyncSourceOption.value
+  () => shouldCreateAutoSyncPreset.value && !selectedAutoSyncSourceOption.value
 )
 
 watch(
@@ -465,7 +461,7 @@ async function saveAutoSyncSource() {
   if (!option) return
 
   let sourceName = option.source_name
-  if (option.source_category === 'official_provider') {
+  if (isStableOfficialOption(option)) {
     const response = await llmOpsApi.ensureOfficialProviderSource(
       option.provider_code
     )
@@ -496,12 +492,9 @@ async function loadAutoSyncSourceOptions() {
     const options = Array.isArray(payload.results) ? payload.results : []
     autoSyncSourceOptions.value = options
     const current = options.find(
-      (option) =>
-        String(option.option_code || option.provider_code) ===
-        String(selectedAutoSyncSourceCode.value)
+      (option) => sourceOptionKey(option) === selectedAutoSyncSourceCode.value
     )
-    selectedAutoSyncSourceCode.value =
-      current?.option_code || current?.provider_code || ''
+    selectedAutoSyncSourceCode.value = current ? sourceOptionKey(current) : ''
     if (current) applyAutoSyncSourceOption(current)
   } catch (error) {
     showError(
@@ -543,6 +536,25 @@ function autoSyncSourcePayload(option) {
     updates_model_prices: true,
     notes: form.value.notes || ''
   }
+}
+
+function sourceOptionKey(option) {
+  return String(
+    option?.source_slug ||
+      option?.option_code ||
+      option?.provider_code ||
+      option?.source_name ||
+      ''
+  )
+}
+
+function isStableOfficialOption(option) {
+  if (option?.source_category !== 'official_provider') return false
+  const providerCode = String(option.provider_code || '').trim()
+  return Boolean(
+    providerCode &&
+      String(option.source_slug || '') === `${providerCode}-official`
+  )
 }
 
 function sourceOwnerTypeFromLegacyCategory(value) {

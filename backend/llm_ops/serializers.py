@@ -72,6 +72,8 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
     business_source_category_label = serializers.SerializerMethodField()
     capabilities = serializers.SerializerMethodField()
     can_collect_prices = serializers.SerializerMethodField()
+    current_meta_model_count = serializers.SerializerMethodField()
+    current_price_item_count = serializers.SerializerMethodField()
     latest_run_status = serializers.SerializerMethodField()
     model_count = serializers.SerializerMethodField()
     price_item_count = serializers.SerializerMethodField()
@@ -109,6 +111,23 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
             instance.updates_model_prices
             and source_supports_code_collection(instance)
         )
+
+    def get_current_meta_model_count(self, instance):
+        value = getattr(instance, "current_meta_model_count", None)
+        if value is not None:
+            return value
+        return (
+            instance.model_price_items.filter(is_current=True)
+            .values("meta_model_id")
+            .distinct()
+            .count()
+        )
+
+    def get_current_price_item_count(self, instance):
+        value = getattr(instance, "current_price_item_count", None)
+        if value is not None:
+            return value
+        return instance.model_price_items.filter(is_current=True).count()
 
     def get_latest_run_status(self, instance):
         return (
