@@ -5,6 +5,7 @@
     @click.self="close"
   >
     <form
+      autocomplete="off"
       class="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="save"
     >
@@ -20,7 +21,7 @@
               {{ form.id ? '编辑挂售平台' : '新建挂售平台' }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
-              配置平台类型、区域、接口、抽佣、免审利润率和积分规则。
+              配置平台类型、区域、接口、抽佣、免审收益率和积分规则。
             </p>
           </div>
           <button
@@ -104,8 +105,17 @@
               <span class="field-label">API 接入地址</span>
               <input
                 v-model="form.api_endpoint"
+                autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
                 class="field"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                data-lpignore="true"
+                inputmode="url"
                 placeholder="https://api.example.com"
+                spellcheck="false"
                 type="url"
               />
             </label>
@@ -113,10 +123,17 @@
               <span class="field-label">平台 API Key</span>
               <input
                 v-model="form.api_key"
-                class="field font-mono"
                 autocomplete="off"
+                autocapitalize="off"
+                autocorrect="off"
+                class="field secret-field font-mono"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                data-lpignore="true"
                 placeholder="用于挂售接口鉴权"
-                type="password"
+                spellcheck="false"
+                type="text"
               />
               <span class="field-help">
                 用于调用挂售平台接口执行上架、改价和下架操作。
@@ -163,7 +180,7 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">免审最高利润率（%）</span>
+              <span class="field-label">免审最高收益率（%）</span>
               <input
                 v-model="form.auto_approve_max_margin_rate"
                 class="field"
@@ -464,6 +481,10 @@ async function save() {
 <style scoped>
 .field {
   @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.secret-field {
+  -webkit-text-security: disc;
 }
 
 .field-group {
