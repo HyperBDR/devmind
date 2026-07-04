@@ -82,17 +82,27 @@
           </colgroup>
           <thead>
             <tr>
-              <th class="table-head">{{ t('llmOps.taskLogs.table.status') }}</th>
-              <th class="table-head">{{ t('llmOps.taskLogs.table.source') }}</th>
-              <th class="table-head">{{ t('llmOps.taskLogs.table.category') }}</th>
+              <th class="table-head">
+                {{ t('llmOps.taskLogs.table.status') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.taskLogs.table.source') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.taskLogs.table.category') }}
+              </th>
               <th class="table-head">
                 {{ t('llmOps.taskLogs.table.startedAt') }}
               </th>
               <th class="table-head">
                 {{ t('llmOps.taskLogs.table.duration') }}
               </th>
-              <th class="table-head">{{ t('llmOps.taskLogs.table.result') }}</th>
-              <th class="table-head">{{ t('llmOps.taskLogs.table.detail') }}</th>
+              <th class="table-head">
+                {{ t('llmOps.taskLogs.table.result') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.taskLogs.table.detail') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -242,6 +252,7 @@
 </template>
 
 <script setup>
+import '@/components/llm-ops/collectionRunLogPanel.css'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -309,8 +320,7 @@ const enrichedRows = computed(() =>
       category,
       categoryLabel: categoryLabel(category),
       categoryTone: categoryTone(category),
-      hasDetails:
-        Boolean(run.error_message) || metadataEntries(run).length > 0,
+      hasDetails: Boolean(run.error_message) || metadataEntries(run).length > 0,
       providerLabel: providerLabel(run, source),
       sourceLabel: sourceLabel(run, source),
       statusLabel: statusLabel(run.status),
@@ -401,13 +411,10 @@ const summaryMetrics = computed(() => {
   ]
 })
 
-watch(
-  [searchKeyword, statusFilter, categoryFilter, pageSize],
-  () => {
-    currentPage.value = 1
-    expandedId.value = null
-  }
-)
+watch([searchKeyword, statusFilter, categoryFilter, pageSize], () => {
+  currentPage.value = 1
+  expandedId.value = null
+})
 
 watch(totalPages, (value) => {
   if (currentPage.value > value) currentPage.value = value
@@ -428,7 +435,9 @@ function sourceCategory(run, source) {
 }
 
 function normalizeSourceCategory(category, source = null) {
-  const normalized = String(category || '').trim().toLowerCase()
+  const normalized = String(category || '')
+    .trim()
+    .toLowerCase()
   if (normalized === 'official_provider') {
     return normalizeOfficialSourceCategory(source)
   }
@@ -451,11 +460,7 @@ function normalizeOfficialSourceCategory(source) {
 }
 
 function sourceLabel(run, source) {
-  return (
-    run?.source_name ||
-    source?.name ||
-    t('llmOps.taskLogs.deletedSource')
-  )
+  return run?.source_name || source?.name || t('llmOps.taskLogs.deletedSource')
 }
 
 function providerLabel(run, source) {
@@ -567,9 +572,7 @@ function formatDateTime(value) {
 
 function formatDuration(row) {
   const start = new Date(row.started_at || 0).getTime()
-  const end = row.finished_at
-    ? new Date(row.finished_at).getTime()
-    : Date.now()
+  const end = row.finished_at ? new Date(row.finished_at).getTime() : Date.now()
   if (!Number.isFinite(start) || !Number.isFinite(end) || !start) return '-'
   const seconds = Math.max(Math.round((end - start) / 1000), 0)
   if (seconds < 60) return `${seconds}s`
@@ -580,374 +583,3 @@ function formatDuration(row) {
   return `${hours}h ${minutes % 60}m`
 }
 </script>
-
-<style scoped>
-.collection-run-log-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.collection-log-summary-grid {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-@media (min-width: 1024px) {
-  .collection-log-summary-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
-.collection-log-metric {
-  border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
-  background: #ffffff;
-  padding: 1rem;
-}
-
-.collection-log-metric span {
-  color: #64748b;
-  display: block;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.collection-log-metric strong {
-  color: #0f172a;
-  display: block;
-  font-size: 1.75rem;
-  font-weight: 700;
-  line-height: 1.1;
-  margin-top: 0.35rem;
-}
-
-.collection-log-metric.tone-success {
-  border-color: #bbf7d0;
-}
-
-.collection-log-metric.tone-danger {
-  border-color: #fecdd3;
-}
-
-.collection-log-metric.tone-info {
-  border-color: #bae6fd;
-}
-
-.panel {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
-}
-
-.panel-title {
-  color: #0f172a;
-  font-size: 0.95rem;
-  font-weight: 700;
-  line-height: 1.4;
-}
-
-.collection-log-table-panel {
-  overflow: hidden;
-}
-
-.collection-log-toolbar,
-.collection-log-filters,
-.collection-log-footer {
-  align-items: center;
-  border-bottom: 1px solid #f1f5f9;
-  display: flex;
-  gap: 1rem;
-  justify-content: space-between;
-  padding: 1rem;
-}
-
-.collection-log-toolbar p {
-  color: #64748b;
-  font-size: 0.75rem;
-  margin-top: 0.25rem;
-}
-
-.collection-log-refresh {
-  align-items: center;
-  display: inline-flex;
-  gap: 0.4rem;
-  white-space: nowrap;
-}
-
-.collection-log-action-icon {
-  height: 1rem;
-  width: 1rem;
-}
-
-.collection-log-filters {
-  align-items: end;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 768px) {
-  .collection-log-filters {
-    grid-template-columns: minmax(0, 1fr) 12rem 12rem;
-  }
-}
-
-.collection-log-filter {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  min-width: 0;
-}
-
-.collection-log-filter span {
-  color: #475569;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.collection-log-input {
-  border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  color: #0f172a;
-  font-size: 0.875rem;
-  height: 2.5rem;
-  outline: none;
-  padding: 0 0.75rem;
-}
-
-.collection-log-input:focus {
-  border-color: #6a5ac7;
-  box-shadow: 0 0 0 3px rgb(106 90 199 / 0.12);
-}
-
-.collection-log-table-scroll {
-  overflow-x: auto;
-}
-
-.collection-log-table {
-  min-width: 960px;
-}
-
-.status-col {
-  width: 8rem;
-}
-
-.source-col {
-  width: 17rem;
-}
-
-.category-col {
-  width: 8rem;
-}
-
-.time-col {
-  width: 13rem;
-}
-
-.duration-col {
-  width: 7rem;
-}
-
-.detail-col {
-  width: 7rem;
-}
-
-.run-status-pill,
-.source-category-pill {
-  align-items: center;
-  border-radius: 999px;
-  display: inline-flex;
-  font-size: 0.75rem;
-  font-weight: 700;
-  justify-content: center;
-  min-height: 1.5rem;
-  padding: 0.2rem 0.6rem;
-  white-space: nowrap;
-}
-
-.run-status-pill.tone-success,
-.source-category-pill.tone-success {
-  background: #ecfdf5;
-  color: #047857;
-}
-
-.run-status-pill.tone-danger,
-.source-category-pill.tone-danger {
-  background: #fff1f2;
-  color: #be123c;
-}
-
-.run-status-pill.tone-info,
-.source-category-pill.tone-info {
-  background: #eff6ff;
-  color: #1d4ed8;
-}
-
-.source-category-pill.tone-primary {
-  background: #eef2ff;
-  color: #4f46e5;
-}
-
-.source-category-pill.tone-warn {
-  background: #fffbeb;
-  color: #b45309;
-}
-
-.run-status-pill.tone-neutral,
-.source-category-pill.tone-neutral {
-  background: #f1f5f9;
-  color: #475569;
-}
-
-.source-subtitle {
-  color: #64748b;
-  font-size: 0.75rem;
-  margin-top: 0.25rem;
-}
-
-.run-time,
-.run-duration {
-  color: #64748b;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
-  font-size: 0.75rem;
-}
-
-.run-result-grid {
-  display: grid;
-  gap: 0.25rem 0.75rem;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.run-result-grid span {
-  color: #64748b;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.run-result-grid strong {
-  color: #0f172a;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
-  font-size: 0.75rem;
-  margin-left: 0.25rem;
-}
-
-.collection-log-detail-button {
-  border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  color: #334155;
-  font-size: 0.75rem;
-  font-weight: 700;
-  min-height: 2rem;
-  padding: 0 0.65rem;
-}
-
-.collection-log-detail-button:not(:disabled):hover {
-  border-color: #6a5ac7;
-  color: #4a3eb0;
-}
-
-.collection-log-detail-button:disabled {
-  color: #94a3b8;
-  cursor: not-allowed;
-}
-
-.collection-log-detail-grid {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-@media (min-width: 900px) {
-  .collection-log-detail-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-.detail-block {
-  border: 1px solid #e2e8f0;
-  border-radius: 0.5rem;
-  background: #ffffff;
-  padding: 0.875rem;
-  text-align: left;
-}
-
-.detail-block h4 {
-  color: #0f172a;
-  font-size: 0.8rem;
-  font-weight: 700;
-  margin: 0 0 0.6rem;
-}
-
-.detail-error {
-  color: #be123c;
-  font-size: 0.8rem;
-  line-height: 1.6;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.metadata-list {
-  display: grid;
-  gap: 0.4rem 0.75rem;
-  grid-template-columns: max-content minmax(0, 1fr);
-  margin: 0;
-}
-
-.metadata-list dt {
-  color: #64748b;
-  font-size: 0.75rem;
-  font-weight: 700;
-}
-
-.metadata-list dd {
-  color: #0f172a;
-  font-size: 0.75rem;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.collection-log-footer {
-  border-bottom: 0;
-  border-top: 1px solid #f1f5f9;
-  color: #64748b;
-  font-size: 0.75rem;
-}
-
-.collection-log-pagination,
-.collection-log-pagination label {
-  align-items: center;
-  display: flex;
-  gap: 0.5rem;
-}
-
-.collection-log-page-label {
-  color: #334155;
-  font-weight: 700;
-  min-width: 4rem;
-  text-align: center;
-}
-
-.collection-log-page-button {
-  min-height: 2rem;
-  padding: 0 0.75rem;
-}
-
-@media (max-width: 767px) {
-  .collection-log-toolbar,
-  .collection-log-footer {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .collection-log-pagination {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-  }
-}
-</style>
