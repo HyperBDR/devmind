@@ -1,7 +1,7 @@
 <template>
   <div
     v-if="provider"
-    class="fixed inset-0 z-50 flex justify-end bg-slate-950/30"
+    class="provider-pricing-drawer fixed inset-0 z-50 flex justify-end bg-slate-950/30"
     @click.self="$emit('close')"
   >
     <aside class="h-full w-full max-w-5xl overflow-y-auto bg-white shadow-xl">
@@ -187,6 +187,7 @@
 </template>
 
 <script setup>
+import '@/components/llm-ops/providerPricingDrawer.css'
 import { computed, ref } from 'vue'
 import {
   canCollectPriceSource,
@@ -784,122 +785,3 @@ function formatDateTime(value) {
   return new Date(value).toLocaleString()
 }
 </script>
-
-<style scoped>
-.panel {
-  @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
-}
-
-.panel-title {
-  @apply text-sm font-semibold text-slate-900;
-}
-
-.table-toolbar {
-  @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
-}
-
-.data-table {
-  @apply min-w-full divide-y divide-slate-200;
-  table-layout: fixed;
-}
-
-.data-table tbody {
-  @apply divide-y divide-slate-100 bg-white;
-}
-
-.data-table tr {
-  @apply hover:bg-slate-50;
-}
-
-.table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
-}
-
-.table-cell {
-  @apply min-w-0 px-4 py-3 text-sm text-slate-600;
-}
-
-.pricing-source-table .model-col {
-  width: 34%;
-}
-
-.pricing-source-table .type-col {
-  width: 14%;
-}
-
-.pricing-source-table .price-col {
-  width: 34%;
-}
-
-.pricing-source-table .time-col {
-  width: 18%;
-}
-
-.field-input {
-  @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100;
-}
-
-.filter-tabs {
-  @apply inline-flex h-10 shrink-0 items-center rounded-lg border border-slate-200 bg-slate-50 p-1;
-}
-
-.filter-tab {
-  @apply inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm font-medium text-slate-500 transition hover:text-slate-800;
-}
-
-.filter-tab.is-active {
-  @apply bg-white text-slate-900 shadow-sm;
-}
-
-.filter-tab-count {
-  @apply font-mono text-xs text-slate-400;
-}
-
-.filter-tab.is-active .filter-tab-count {
-  @apply text-slate-500;
-}
-
-.source-link {
-  @apply block max-w-52 truncate font-medium text-indigo-600 hover:text-indigo-700 hover:underline;
-}
-
-.price-chip {
-  @apply inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-700;
-}
-
-.source-badge {
-  @apply rounded-full border px-2 py-1 text-xs font-medium;
-}
-
-.source-badge.official {
-  @apply border-emerald-100 bg-emerald-50 text-emerald-700;
-}
-
-.source-badge.supplier {
-  @apply border-indigo-100 bg-indigo-50 text-indigo-700;
-}
-
-.source-badge.cloud {
-  @apply border-sky-100 bg-sky-50 text-sky-700;
-}
-
-.source-badge.manual {
-  @apply border-amber-100 bg-amber-50 text-amber-700;
-}
-
-.source-badge.unknown {
-  @apply border-slate-200 bg-slate-100 text-slate-600;
-}
-
-.btn-secondary {
-  @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.badge-ok {
-  @apply rounded-full border border-emerald-100 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700;
-}
-
-.badge-muted {
-  @apply rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-500;
-}
-</style>

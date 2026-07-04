@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-5">
+  <section class="provider-management space-y-5">
     <div class="source-summary-strip">
       <div
         v-for="item in sourceMetrics"
@@ -382,9 +382,12 @@
 </template>
 
 <script setup>
+import '@/components/llm-ops/providerManagement.css'
+
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
+import { useProviderSourceRows } from '@/composables/useProviderSourceRows'
 import { useToast } from '@/composables/useToast'
 import ManualPriceImportModal from '@/components/llm-ops/ManualPriceImportModal.vue'
 import ManualPriceEntryModal from '@/components/llm-ops/ManualPriceEntryModal.vue'
@@ -392,16 +395,11 @@ import PriceSourceModal from '@/components/llm-ops/PriceSourceModal.vue'
 import SourcePriceDrawer from '@/components/llm-ops/SourcePriceDrawer.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 import {
-  canApiSyncPriceSource as canApiSyncSource,
-  canCollectPriceSource as canCollectSource,
-  canManualEntryPriceSource as canManualEntrySource,
-  isEntryPriceSource as isEntrySource,
-  isModelsDevPriceSource as isModelsDevSource,
-  normalizePriceSourceCategory as businessSourceCategory,
-  priceSourceCategory,
-  priceSourceCategoryRank as categoryRank,
-  priceSourceCollectionMethod as sourceCollectionMethod
-} from '@/utils/llmOpsPriceSources'
+  errorMessage,
+  fetchList,
+  paginationPayload,
+  paginationResults
+} from '@/utils/llmOpsPagination'
 
 const props = defineProps({
   providers: {
@@ -469,48 +467,6 @@ const selectedProviderPriceItems = ref([])
 const localPriceEntryMetaModels = ref([])
 const localPriceEntryModels = ref([])
 
-const sourceCategoryFilterOptions = computed(() => [
-  {
-    value: 'all',
-    label: t('llmOps.providerManagement.filters.allTypes')
-  },
-  {
-    value: 'official_provider',
-    label: t('llmOps.providerManagement.category.officialProvider')
-  },
-  {
-    value: 'supplier',
-    label: t('llmOps.providerManagement.category.supplier')
-  },
-  {
-    value: 'cloud_hosted',
-    label: t('llmOps.providerManagement.category.cloudHosted')
-  },
-  {
-    value: 'manual',
-    label: t('llmOps.providerManagement.category.internal')
-  },
-  {
-    value: 'unknown',
-    label: t('llmOps.providerManagement.category.unknown')
-  }
-])
-
-const sourceStatusFilterOptions = computed(() => [
-  {
-    value: 'all',
-    label: t('llmOps.providerManagement.filters.allStatuses')
-  },
-  {
-    value: 'active',
-    label: t('llmOps.providerManagement.filters.activeOnly')
-  },
-  {
-    value: 'inactive',
-    label: t('llmOps.providerManagement.filters.inactiveOnly')
-  }
-])
-
 const priceEntryMetaModels = computed(() =>
   props.metaModels.length ? props.metaModels : localPriceEntryMetaModels.value
 )
@@ -519,114 +475,23 @@ const priceEntryModels = computed(() =>
   props.models.length ? props.models : localPriceEntryModels.value
 )
 
-// Source rows
-const sourceRows = computed(() =>
-  props.sources
-    .map((source) => buildSourceRow(source))
-    .sort((left, right) => {
-      const leftRank = categoryRank(left.business_source_category)
-      const rightRank = categoryRank(right.business_source_category)
-      if (leftRank !== rightRank) return leftRank - rightRank
-      return String(left.name).localeCompare(String(right.name))
-    })
-)
-
-const entrySourceRows = computed(() => sourceRows.value.filter(isEntrySource))
-
-const manualImportSourceRows = computed(() =>
-  entrySourceRows.value.filter(canManualImportSource)
-)
-
-const sourceProviderRows = computed(() =>
-  entrySourceRows.value.map((source) => buildSourceProviderRow(source))
-)
-
-// Metrics
-const sourceMetrics = computed(() => {
-  const official = entrySourceRows.value.filter(
-    (source) => source.business_source_category === 'official_provider'
-  ).length
-  const supplier = entrySourceRows.value.filter(
-    (source) => source.business_source_category === 'supplier'
-  ).length
-  const cloudHosted = entrySourceRows.value.filter(
-    (source) => source.business_source_category === 'cloud_hosted'
-  ).length
-  const internal = entrySourceRows.value.filter(
-    (source) => source.business_source_category === 'manual'
-  ).length
-
-  return [
-    {
-      label: t('llmOps.providerManagement.metrics.sources.label'),
-      value: entrySourceRows.value.length,
-      hint: t('llmOps.providerManagement.metrics.sources.hint')
-    },
-    {
-      label: t('llmOps.providerManagement.metrics.metaModels.label'),
-      value: entrySourceRows.value.reduce(
-        (total, source) => total + Number(source.covered_model_count || 0),
-        0
-      ),
-      hint: t('llmOps.providerManagement.metrics.metaModels.hint')
-    },
-    {
-      label: t('llmOps.providerManagement.metrics.official.label'),
-      value: official,
-      hint: t('llmOps.providerManagement.metrics.official.hint')
-    },
-    {
-      label: t('llmOps.providerManagement.metrics.supplierManual.label'),
-      value: supplier + cloudHosted + internal,
-      hint: t('llmOps.providerManagement.metrics.supplierManual.hint', {
-        supplier,
-        cloudHosted,
-        internal
-      })
-    }
-  ]
+const {
+  filteredSourceProviderRows,
+  hasSyncablePriceSources,
+  manualImportSourceRows,
+  officialResetProviderOptions,
+  sourceCategoryFilterOptions,
+  sourceMetrics,
+  sourceStatusFilterOptions,
+  canManualImportSource,
+  canOfficialResetSource
+} = useProviderSourceRows({
+  props,
+  sourceSearch,
+  sourceCategoryFilter,
+  sourceStatusFilter,
+  t
 })
-
-// Filters
-const filteredSourceProviderRows = computed(() => {
-  const keyword = sourceSearch.value.trim().toLowerCase()
-  return sourceProviderRows.value.filter((provider) => {
-    if (sourceStatusFilter.value === 'active' && !provider.filter_is_active) {
-      return false
-    }
-    if (sourceStatusFilter.value === 'inactive' && provider.filter_is_active) {
-      return false
-    }
-    if (
-      sourceCategoryFilter.value !== 'all' &&
-      !provider.category_keys.includes(sourceCategoryFilter.value)
-    ) {
-      return false
-    }
-    if (!keyword) return true
-    return provider.search_text.includes(keyword)
-  })
-})
-
-const hasSyncablePriceSources = computed(() =>
-  sourceRows.value.some((source) => source.can_collect && source.is_enabled)
-)
-
-// Official reset state
-const officialResetProviderOptions = computed(() =>
-  sourceRows.value
-    .filter(
-      (source) =>
-        source.source_category === 'official_provider' &&
-        source.provider_code &&
-        String(source.slug || '') === `${source.provider_code}-official`
-    )
-    .map((source) => ({
-      code: source.provider_code,
-      label: source.provider_name || source.name || source.provider_code
-    }))
-    .sort((left, right) => left.label.localeCompare(right.label))
-)
 
 const officialResetBusy = computed(
   () => officialResetPreviewing.value || officialResetExecuting.value
@@ -649,85 +514,6 @@ const officialResetPreviewItems = computed(() => {
 const officialResetLegacySources = computed(
   () => officialResetPreview.value?.stats?.legacy_source_slugs || []
 )
-
-function buildSourceProviderRow(source) {
-  return {
-    id: `source-${source.id}`,
-    name: source.name,
-    code: source.slug,
-    category_keys: [source.business_source_category],
-    covered_model_count: source.covered_model_count,
-    collect_mode_label: source.collect_mode_label,
-    collect_mode_tone: source.collect_mode_tone,
-    meta_model_ids: source.meta_model_ids,
-    price_item_count: source.price_item_count,
-    primary_source: source,
-    source_count: 1,
-    source_ids: [String(source.id)],
-    status_label: source.status_label,
-    status_tone: source.status_tone,
-    sync_mode_label: source.sync_mode_label,
-    sync_mode_tone: source.sync_mode_tone,
-    filter_is_active: source.is_enabled,
-    search_text: source.search_text
-  }
-}
-
-function buildSourceRow(source) {
-  const relation = sourceRelation(source)
-  const categoryKey = businessSourceCategory(source)
-  const category = sourceCategory(categoryKey)
-  const latestRun = latestRunForSource(source.id)
-  const status = sourceStatus(source, latestRun)
-  const syncMode = sourceSyncMode(source)
-  const modelCount = Number(
-    source.current_meta_model_count || source.model_count || 0
-  )
-  const priceItemCount = Number(
-    source.current_price_item_count || source.price_item_count || 0
-  )
-
-  return {
-    ...source,
-    business_source_category: categoryKey,
-    category_label: category.label,
-    category_tone: category.tone,
-    relation_name: relation.name,
-    relation_hint: relation.hint,
-    config_summary: sourceConfigSummary(source, relation),
-    status_label: status.label,
-    status_tone: status.tone,
-    status_hint: status.hint,
-    sync_mode_label: syncMode.label,
-    sync_mode_tone: syncMode.tone,
-    meta_model_ids: [],
-    covered_model_count: modelCount,
-    price_item_count: priceItemCount,
-    dimension_count: 0,
-    can_collect: canCollectSource(source),
-    can_manual_entry: canManualEntrySource(source),
-    collect_action_label: collectActionLabel(source),
-    collect_mode_label: collectModeLabel(source),
-    collect_mode_tone: collectModeTone(source),
-    search_text: buildSourceSearchText(source, relation, category)
-  }
-}
-
-function buildSourceSearchText(source, relation, category) {
-  return [
-    source.name,
-    source.slug,
-    relation.name,
-    relation.hint,
-    category.label,
-    source.provider_name,
-    source.channel_name,
-    source.endpoint_url
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-}
 
 // Actions
 function handleManualImported() {
@@ -877,14 +663,14 @@ async function ensurePriceEntryCatalogLoaded() {
   const requests = []
   if (!priceEntryMetaModels.value.length) {
     requests.push(
-      fetchAllPages(llmOpsApi.listMetaModels).then((rows) => {
+      fetchList(llmOpsApi.listMetaModels).then((rows) => {
         localPriceEntryMetaModels.value = rows
       })
     )
   }
   if (!priceEntryModels.value.length) {
     requests.push(
-      fetchAllPages(llmOpsApi.listModels).then((rows) => {
+      fetchList(llmOpsApi.listModels).then((rows) => {
         localPriceEntryModels.value = rows
       })
     )
@@ -975,526 +761,7 @@ async function deleteSource(source) {
   }
 }
 
-function sourceCategory(category) {
-  return priceSourceCategory(category, {
-    official_provider: t('llmOps.providerManagement.category.officialProvider'),
-    supplier: t('llmOps.providerManagement.category.supplier'),
-    manual: t('llmOps.providerManagement.category.internal'),
-    cloud_hosted: t('llmOps.providerManagement.category.cloudHosted'),
-    unknown: t('llmOps.providerManagement.category.unknown')
-  })
-}
-
-function sourceRelation(source) {
-  if (source.channel_name) {
-    return {
-      name: source.channel_name,
-      hint: t('llmOps.providerManagement.relation.forwardingChannel')
-    }
-  }
-  if (source.provider_name) {
-    return {
-      name: source.provider_name,
-      hint: t('llmOps.providerManagement.relation.metaProvider')
-    }
-  }
-  return {
-    name: t('llmOps.providerManagement.relation.unbound'),
-    hint: t('llmOps.providerManagement.relation.needsOwner')
-  }
-}
-
-function sourceModeLabel(source) {
-  const type = source?.source_type || ''
-  const method = sourceCollectionMethod(source)
-
-  if (isModelsDevSource(source)) {
-    return t('llmOps.providerManagement.sourceMode.aggregateSync')
-  }
-  if (method === 'auto_collect') {
-    return t('llmOps.providerManagement.sourceMode.autoCollect')
-  }
-  if (method === 'manual_entry') {
-    return t('llmOps.providerManagement.sourceMode.manualMaintenance')
-  }
-  if (method === 'manual_import') {
-    return t('llmOps.providerManagement.sourceMode.manualImport')
-  }
-  if (method === 'api_sync') {
-    return t('llmOps.providerManagement.sourceMode.apiSync')
-  }
-
-  const labels = {
-    agione: 'Agione',
-    yunce: t('llmOps.providerManagement.sourceMode.dedicatedCollect'),
-    custom: t('llmOps.providerManagement.sourceMode.custom')
-  }
-  return (
-    labels[type] || type || t('llmOps.providerManagement.sourceMode.pending')
-  )
-}
-
-function sourceConfigSummary(source, relation = sourceRelation(source)) {
-  return [relation.hint, sourceModeLabel(source), source.currency]
-    .filter(Boolean)
-    .join(' · ')
-}
-
-function sourceStatus(source, latestRun = null) {
-  if (!source.is_enabled) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.inactive.label'),
-      tone: 'muted',
-      hint: t('llmOps.providerManagement.sourceStatus.inactive.hint')
-    }
-  }
-  if (isOfficialCollectionPendingSource(source)) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.notAdapted.label'),
-      tone: 'warn',
-      hint: t('llmOps.providerManagement.sourceStatus.notAdapted.hint')
-    }
-  }
-  if (!canCollectSource(source)) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.pending.label'),
-      tone: 'warn',
-      hint: collectModeLabel(source)
-    }
-  }
-  if (latestRun?.status === 'failed') {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.failed.label'),
-      tone: 'danger',
-      hint: t('llmOps.providerManagement.sourceStatus.failed.hint')
-    }
-  }
-  if (['running', 'pending', 'processing'].includes(latestRun?.status)) {
-    return {
-      label: t('llmOps.providerManagement.sourceStatus.syncing.label'),
-      tone: 'info',
-      hint: t('llmOps.providerManagement.sourceStatus.syncing.hint')
-    }
-  }
-  return {
-    label: t('llmOps.providerManagement.sourceStatus.active.label'),
-    tone: 'ok',
-    hint: collectModeLabel(source)
-  }
-}
-
-function sourceSyncMode(source) {
-  if (canCollectSource(source) || canApiSyncSource(source)) {
-    return {
-      label: t('llmOps.providerManagement.sourceSyncMode.auto'),
-      tone: 'auto'
-    }
-  }
-  if (
-    canManualEntrySource(source) ||
-    canManualImportSource(source) ||
-    ['manual_entry', 'manual_import'].includes(sourceCollectionMethod(source))
-  ) {
-    return {
-      label: t('llmOps.providerManagement.sourceSyncMode.manual'),
-      tone: 'manual'
-    }
-  }
-  return {
-    label: t('llmOps.providerManagement.sourceSyncMode.pending'),
-    tone: 'unknown'
-  }
-}
-
-function collectActionLabel(source) {
-  if (canCollectSource(source)) {
-    return t('llmOps.providerManagement.actions.syncPrice')
-  }
-  return t('llmOps.providerManagement.actions.notSupported')
-}
-
-function collectModeLabel(source) {
-  if (canCollectSource(source)) {
-    if (isModelsDevSource(source)) {
-      return 'models.dev'
-    }
-    return t('llmOps.providerManagement.collectMode.autoCollect')
-  }
-  if (canManualEntrySource(source)) {
-    return t('llmOps.providerManagement.collectMode.manualMaintenance')
-  }
-  if (canApiSyncSource(source) || source.source_type === 'yunce') {
-    return t('llmOps.providerManagement.collectMode.dedicatedCollector')
-  }
-  return t('llmOps.providerManagement.collectMode.pending')
-}
-
-function canManualImportSource(source) {
-  return source?.business_source_category === 'manual'
-}
-
-function isOfficialCollectionPendingSource(source) {
-  return Boolean(
-    source?.business_source_category === 'official_provider' &&
-      source?.updates_model_prices &&
-      !canCollectSource(source)
-  )
-}
-
-function canOfficialResetSource(source) {
-  const providerCode = String(source?.provider_code || '').trim()
-  return Boolean(
-    providerCode &&
-      source?.business_source_category === 'official_provider' &&
-      String(source?.slug || '') === `${providerCode}-official` &&
-      canCollectSource(source)
-  )
-}
-
-function latestRunForSource(sourceId) {
-  const rows = props.collectionRuns
-    .filter((run) => String(run.source) === String(sourceId))
-    .sort(
-      (left, right) =>
-        new Date(
-          right.finished_at || right.started_at || right.created_at || 0
-        ).getTime() -
-        new Date(
-          left.finished_at || left.started_at || left.created_at || 0
-        ).getTime()
-    )
-  return rows[0] || null
-}
-
-function collectModeTone(source) {
-  if (canCollectSource(source)) return 'auto'
-  if (canApiSyncSource(source) || source.source_type === 'yunce') return 'api'
-  if (canManualEntrySource(source)) return 'manual'
-  return 'unknown'
-}
-
-function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
-}
-
 function apiPayload(response) {
   return response?.data?.data || response?.data || {}
 }
-
-function paginationPayload(response) {
-  return response?.data?.data || response?.data || []
-}
-
-function paginationResults(payload) {
-  if (Array.isArray(payload?.results)) return payload.results
-  return Array.isArray(payload) ? payload : []
-}
-
-async function fetchAllPages(request, params = {}) {
-  const firstResponse = await request({
-    ...params,
-    page: 1,
-    page_size: 200
-  })
-  const firstPayload = paginationPayload(firstResponse)
-  const results = paginationResults(firstPayload)
-  const total = Number(firstPayload?.count || results.length)
-  const totalPages = Math.max(1, Math.ceil(total / 200))
-  if (!firstPayload?.results || totalPages <= 1) return results
-
-  const pageRequests = []
-  for (let page = 2; page <= totalPages; page += 1) {
-    pageRequests.push(request({ ...params, page, page_size: 200 }))
-  }
-  const pageResponses = await Promise.all(pageRequests)
-  pageResponses.forEach((response) => {
-    results.push(...paginationResults(paginationPayload(response)))
-  })
-  return results
-}
 </script>
-
-<style scoped>
-.panel {
-  @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
-}
-
-.panel-title {
-  @apply text-sm font-semibold text-slate-900;
-}
-
-.source-summary-strip {
-  @apply grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 shadow-sm sm:grid-cols-2 lg:grid-cols-4;
-}
-
-.source-summary-item {
-  @apply flex min-w-0 items-center gap-3 bg-white px-4 py-3;
-}
-
-.table-toolbar {
-  @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
-}
-
-.provider-toolbar-actions {
-  @apply flex flex-wrap justify-end gap-2;
-}
-
-.data-table {
-  @apply w-full min-w-full table-fixed divide-y divide-slate-200;
-}
-
-.data-table tbody {
-  @apply divide-y divide-slate-100 bg-white;
-}
-
-.data-table tr {
-  @apply hover:bg-slate-50;
-}
-
-.table-head {
-  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
-}
-
-.table-cell {
-  @apply min-w-0 px-4 py-3 text-center text-sm text-slate-600;
-}
-
-.table-url-cell {
-  @apply max-w-none;
-}
-
-.provider-table {
-  @apply w-full min-w-0;
-}
-
-.provider-actions {
-  @apply flex min-w-0 flex-nowrap items-center justify-center gap-1;
-}
-
-.source-name-col {
-  width: 32%;
-}
-
-.source-type-col {
-  width: 14%;
-}
-
-.source-model-col {
-  width: 20%;
-}
-
-.source-status-col {
-  width: 14%;
-}
-
-.source-action-col {
-  width: 20%;
-}
-
-.field-input {
-  @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100;
-}
-
-.field-group {
-  @apply flex min-w-0 flex-col gap-1.5;
-}
-
-.field-label {
-  @apply text-xs font-medium text-slate-500;
-}
-
-.official-source-detail {
-  @apply grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 md:grid-cols-2;
-}
-
-.official-source-detail div {
-  @apply min-w-0;
-}
-
-.official-source-detail span {
-  @apply block text-xs font-medium text-slate-500;
-}
-
-.official-source-detail strong {
-  @apply mt-1 block truncate text-sm font-semibold text-slate-900;
-}
-
-.official-source-detail strong.break-all {
-  @apply whitespace-normal;
-}
-
-.official-source-state {
-  @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500;
-}
-
-.btn-primary {
-  @apply inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.source-primary-button {
-  @apply h-9 rounded-md border border-indigo-500 bg-indigo-600 px-3.5 text-sm font-semibold shadow-sm shadow-indigo-100 hover:-translate-y-px hover:border-indigo-600 hover:bg-indigo-700 hover:shadow-md hover:shadow-indigo-100;
-}
-
-.source-primary-icon {
-  @apply h-4 w-4 shrink-0;
-}
-
-.source-primary-icon.is-spinning {
-  animation: source-sync-spin 0.9s linear infinite;
-}
-
-@keyframes source-sync-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.btn-secondary {
-  @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.btn-danger {
-  @apply inline-flex items-center gap-2 rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700 transition hover:border-rose-200 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60;
-}
-
-.link-btn {
-  @apply text-sm font-medium text-indigo-600 hover:text-indigo-700;
-}
-
-.link-btn:disabled {
-  @apply cursor-not-allowed text-slate-400 hover:text-slate-400;
-}
-
-.link-url {
-  @apply block truncate text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:underline;
-}
-
-.status-pill {
-  @apply inline-flex rounded-full border px-2 py-1 text-xs font-medium;
-}
-
-.status-pill.ok {
-  @apply border-emerald-100 bg-emerald-50 text-emerald-700;
-}
-
-.status-pill.info {
-  @apply border-sky-100 bg-sky-50 text-sky-700;
-}
-
-.status-pill.warn {
-  @apply border-amber-100 bg-amber-50 text-amber-700;
-}
-
-.status-pill.danger {
-  @apply border-rose-100 bg-rose-50 text-rose-700;
-}
-
-.status-pill.muted {
-  @apply border-slate-200 bg-slate-100 text-slate-600;
-}
-
-.source-badge {
-  @apply rounded-full border px-2 py-1 text-xs font-medium;
-}
-
-.source-badge.official {
-  @apply border-emerald-100 bg-emerald-50 text-emerald-700;
-}
-
-.source-badge.auto {
-  @apply border-emerald-100 bg-emerald-50 text-emerald-700;
-}
-
-.source-badge.api {
-  @apply border-sky-100 bg-sky-50 text-sky-700;
-}
-
-.source-badge.supplier {
-  @apply border-indigo-100 bg-indigo-50 text-indigo-700;
-}
-
-.source-badge.cloud {
-  @apply border-sky-100 bg-sky-50 text-sky-700;
-}
-
-.source-badge.manual {
-  @apply border-amber-100 bg-amber-50 text-amber-700;
-}
-
-.source-badge.unknown {
-  @apply border-slate-200 bg-slate-100 text-slate-600;
-}
-
-.reset-modal {
-  @apply flex max-h-[calc(100vh-3rem)] w-full max-w-3xl flex-col overflow-hidden rounded-xl bg-white shadow-xl;
-}
-
-.modal-header {
-  @apply flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4;
-}
-
-.modal-eyebrow {
-  @apply text-xs font-semibold uppercase tracking-[0.18em] text-rose-600;
-}
-
-.modal-title {
-  @apply mt-1 text-lg font-semibold text-slate-900;
-}
-
-.modal-desc {
-  @apply mt-1 text-sm leading-6 text-slate-500;
-}
-
-.reset-modal-body {
-  @apply space-y-4 overflow-y-auto px-5 py-4;
-}
-
-.reset-preview-grid {
-  @apply grid gap-2 sm:grid-cols-2 lg:grid-cols-4;
-}
-
-.reset-preview-item {
-  @apply rounded-lg border border-slate-200 bg-slate-50 px-3 py-2;
-}
-
-.reset-preview-item span {
-  @apply block text-xs text-slate-500;
-}
-
-.reset-preview-item strong {
-  @apply mt-1 block font-mono text-sm text-slate-900;
-}
-
-.reset-empty {
-  @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-500;
-}
-
-.reset-legacy-list {
-  @apply rounded-lg border border-amber-100 bg-amber-50 px-3 py-3;
-}
-
-.reset-legacy-list p {
-  @apply text-xs font-semibold text-amber-800;
-}
-
-.reset-legacy-list div {
-  @apply mt-2 flex max-h-32 flex-wrap gap-1.5 overflow-y-auto;
-}
-
-.reset-legacy-list span {
-  @apply rounded border border-amber-200 bg-white px-1.5 py-1 font-mono text-[11px] text-amber-800;
-}
-
-.modal-footer {
-  @apply flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-4;
-}
-</style>

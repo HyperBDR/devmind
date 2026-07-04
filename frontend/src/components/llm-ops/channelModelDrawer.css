@@ -1,0 +1,599 @@
+.channel-model-drawer .panel {
+  @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+}
+
+.channel-model-drawer .drawer-panel {
+  width: min(100vw, 1100px);
+  @apply h-full overflow-y-auto bg-white shadow-xl;
+}
+
+@media (min-width: 1280px) {
+  .channel-model-drawer .drawer-panel {
+    width: min(88vw, 1180px);
+  }
+}
+
+.channel-model-drawer .panel-title {
+  @apply text-sm font-semibold text-slate-900;
+}
+
+.channel-model-drawer .summary-pill {
+  @apply inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-medium text-slate-600;
+}
+
+.channel-model-drawer .dirty-badge {
+  @apply inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700;
+}
+
+.channel-model-drawer .change-chip {
+  @apply inline-flex items-center rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700;
+}
+
+.channel-model-drawer .add-model-layout {
+  @apply grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(13rem,0.24fr)] xl:items-start;
+}
+
+.channel-model-drawer .add-model-main {
+  @apply grid min-w-0 gap-3;
+}
+
+.channel-model-drawer .add-grid {
+  @apply grid gap-3 md:grid-cols-2 xl:grid-cols-1;
+}
+
+.channel-model-drawer .inline-cost-grid {
+  @apply grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 md:col-span-2 md:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)] xl:col-span-1;
+}
+
+.channel-model-drawer .cost-value-readonly {
+  @apply justify-between gap-3 border-indigo-100 bg-indigo-50 text-indigo-700;
+}
+
+.channel-model-drawer .cost-value-readonly strong {
+  @apply shrink-0 font-mono text-sm font-semibold;
+}
+
+.channel-model-drawer .fixed-cost-value-grid {
+  @apply grid gap-2;
+}
+
+.channel-model-drawer .channel-performance-panel {
+  @apply rounded-lg border border-slate-200 bg-white px-3 py-2.5;
+}
+
+.channel-model-drawer .channel-performance-title {
+  @apply mb-2 text-xs font-semibold text-slate-600;
+}
+
+.channel-model-drawer .channel-performance-grid {
+  @apply grid gap-3;
+}
+
+.channel-model-drawer .form-field {
+  @apply flex min-w-0 flex-col gap-1.5;
+}
+
+.channel-model-drawer .model-select-field {
+  @apply md:col-span-2 xl:col-span-1;
+}
+
+.channel-model-drawer .fixed-add-field {
+  @apply max-w-full;
+}
+
+.channel-model-drawer .batch-selection-panel {
+  @apply rounded-lg border border-slate-200 bg-white;
+}
+
+.channel-model-drawer .batch-selection-head {
+  @apply flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2;
+}
+
+.channel-model-drawer .batch-selection-head p {
+  @apply text-xs font-semibold text-slate-700;
+}
+
+.channel-model-drawer .batch-selection-head span {
+  @apply mt-0.5 block text-[11px] text-slate-400;
+}
+
+.channel-model-drawer .batch-selection-head button {
+  @apply shrink-0 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-500 transition hover:border-slate-300 hover:text-slate-700;
+}
+
+.channel-model-drawer .batch-selection-list {
+  @apply grid max-h-80 gap-0 overflow-y-auto divide-y divide-slate-100;
+}
+
+.channel-model-drawer .batch-selection-row {
+  @apply grid gap-2 px-3 py-2.5 xl:grid-cols-[minmax(7.5rem,0.58fr)_minmax(9.5rem,0.62fr)_minmax(0,1.8fr)] xl:items-center;
+}
+
+.channel-model-drawer .batch-model-main {
+  @apply min-w-0;
+}
+
+.channel-model-drawer .batch-model-main p {
+  @apply truncate text-sm font-semibold text-slate-900;
+}
+
+.channel-model-drawer .batch-model-main span {
+  @apply mt-0.5 block truncate font-mono text-[11px] text-slate-400;
+}
+
+.channel-model-drawer .batch-price-preview {
+  @apply grid min-w-0 gap-0.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs;
+}
+
+.channel-model-drawer .batch-price-preview span,
+.channel-model-drawer .batch-price-preview strong {
+  @apply truncate font-mono text-xs leading-5;
+}
+
+.channel-model-drawer .batch-price-preview span {
+  @apply text-slate-500;
+}
+
+.channel-model-drawer .batch-price-preview strong {
+  @apply font-semibold text-slate-800;
+}
+
+.channel-model-drawer .batch-price-preview.muted span,
+.channel-model-drawer .batch-price-preview.muted strong {
+  @apply font-sans text-slate-400;
+}
+
+.channel-model-drawer .pending-association {
+  @apply mt-3 grid gap-3 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2.5 xl:items-center;
+  grid-template-columns:
+    minmax(9rem, 0.8fr) minmax(0, 1.35fr) minmax(0, 1.35fr)
+    minmax(4.25rem, auto);
+}
+
+.channel-model-drawer .pending-main {
+  @apply min-w-0;
+}
+
+.channel-model-drawer .pending-price-compact {
+  @apply grid min-w-0 gap-1 rounded-lg border border-white bg-white/80 px-2.5 py-1.5 text-xs text-slate-500;
+}
+
+.channel-model-drawer .pending-price-compact span {
+  @apply font-medium text-slate-500;
+}
+
+.channel-model-drawer .pending-price-compact strong {
+  @apply whitespace-normal break-words font-mono text-xs font-semibold leading-5 text-slate-900;
+}
+
+@media (max-width: 1279px) {
+  .channel-model-drawer .pending-association {
+    grid-template-columns: 1fr;
+  }
+}
+
+.channel-model-drawer .searchable-select {
+  @apply relative min-w-0;
+}
+
+.channel-model-drawer .searchable-trigger {
+  @apply flex min-h-9 w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-left text-sm text-slate-800 outline-none transition hover:border-slate-300 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.channel-model-drawer .searchable-trigger:disabled {
+  @apply cursor-not-allowed bg-slate-50 text-slate-400 hover:border-slate-200;
+}
+
+.channel-model-drawer .dropdown-caret {
+  @apply shrink-0 text-sm leading-none text-slate-400;
+}
+
+.channel-model-drawer .searchable-menu {
+  @apply absolute left-0 right-0 top-[calc(100%+0.35rem)] z-30 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg;
+}
+
+.channel-model-drawer .searchable-input {
+  @apply m-2 w-[calc(100%-1rem)] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:bg-white focus:ring-4 focus:ring-indigo-50;
+}
+
+.channel-model-drawer .searchable-meta {
+  @apply flex items-center justify-between gap-3 border-t border-slate-100 px-3 py-1.5 text-[11px] font-medium text-slate-400;
+}
+
+.channel-model-drawer .searchable-meta-actions {
+  @apply inline-flex shrink-0 items-center gap-2;
+}
+
+.channel-model-drawer .searchable-meta-actions button {
+  @apply text-[11px] font-semibold text-indigo-600 transition hover:text-indigo-700;
+}
+
+.channel-model-drawer .searchable-list {
+  @apply max-h-72 overflow-y-auto border-t border-slate-100 p-1;
+}
+
+.channel-model-drawer .searchable-option {
+  @apply flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-slate-700 transition hover:bg-indigo-50 hover:text-indigo-700;
+}
+
+.channel-model-drawer .searchable-option-active {
+  @apply bg-indigo-50 text-indigo-700;
+}
+
+.channel-model-drawer .searchable-checkbox {
+  @apply flex h-4 w-4 shrink-0 items-center justify-center rounded border border-slate-300 bg-white text-[10px] font-bold text-white;
+}
+
+.channel-model-drawer .searchable-checkbox-checked {
+  @apply border-indigo-500 bg-indigo-600;
+}
+
+.channel-model-drawer .option-provider {
+  @apply max-w-28 shrink-0 truncate rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500;
+}
+
+.channel-model-drawer .searchable-empty {
+  @apply px-3 py-6 text-center text-xs text-slate-400;
+}
+
+.channel-model-drawer .field-label {
+  @apply block text-xs font-medium text-slate-500;
+}
+
+.channel-model-drawer .field-helper {
+  @apply text-xs leading-5 text-slate-400;
+}
+
+.channel-model-drawer .readonly-field {
+  @apply flex min-h-9 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-700;
+}
+
+.channel-model-drawer .fixed-price-note {
+  @apply flex min-h-10 items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500;
+}
+
+.channel-model-drawer .table-toolbar {
+  @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
+}
+
+.channel-model-drawer .field {
+  @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.channel-model-drawer .compact-field {
+  @apply min-h-9 px-2.5 py-1.5 text-sm;
+}
+
+.channel-model-drawer .field-sm {
+  @apply rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
+}
+
+.channel-model-drawer .percent-input-wrap {
+  @apply relative min-w-0;
+}
+
+.channel-model-drawer .percent-input-wrap span {
+  @apply pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-semibold text-slate-400;
+}
+
+.channel-model-drawer .icon-mark {
+  @apply inline-block h-3.5 w-3.5 shrink-0 rounded-sm bg-current;
+}
+
+.channel-model-drawer .data-table {
+  @apply min-w-full divide-y divide-slate-200;
+  table-layout: fixed;
+}
+
+.channel-model-drawer .data-table tbody {
+  @apply divide-y divide-slate-100 bg-white;
+}
+
+.channel-model-drawer .data-table tr {
+  @apply hover:bg-slate-50;
+}
+
+.channel-model-drawer .data-table .recently-added-row {
+  @apply bg-indigo-50/50 ring-1 ring-inset ring-indigo-100;
+}
+
+.channel-model-drawer .channel-model-cards {
+  @apply gap-3 p-3;
+}
+
+.channel-model-drawer .channel-model-card {
+  @apply rounded-lg border border-slate-200 bg-white p-3 shadow-sm;
+}
+
+.channel-model-drawer .channel-model-list-panel {
+  overflow: visible;
+}
+
+.channel-model-drawer .channel-model-summary-list {
+  @apply mt-3 grid gap-1.5 text-xs sm:grid-cols-[minmax(0,1fr)_max-content_max-content];
+}
+
+.channel-model-drawer .channel-model-summary-list div {
+  @apply min-w-0 rounded-md border border-slate-100 bg-slate-50 px-2 py-1;
+}
+
+.channel-model-drawer .channel-model-summary-list span {
+  @apply mr-1 text-slate-400;
+}
+
+.channel-model-drawer .channel-model-summary-list strong {
+  @apply font-medium text-slate-700;
+}
+
+.channel-model-drawer .channel-model-ability-summary strong {
+  @apply grid grid-cols-[2.25rem_minmax(0,1fr)] gap-1 font-mono text-[11px] leading-5;
+}
+
+.channel-model-drawer .channel-model-ability-summary em {
+  @apply not-italic text-slate-400;
+}
+
+.channel-model-drawer .channel-model-price-summary strong {
+  @apply grid grid-cols-[2.25rem_minmax(0,1fr)] gap-1 font-mono text-[11px] leading-5;
+}
+
+.channel-model-drawer .channel-model-price-summary em {
+  @apply not-italic text-slate-400;
+}
+
+.channel-model-drawer .channel-model-detail {
+  @apply mt-3 rounded-lg border border-dashed border-slate-200 bg-slate-50/40 px-3 py-2;
+}
+
+.channel-model-drawer .channel-model-detail summary {
+  @apply cursor-pointer select-none text-xs font-semibold text-indigo-600;
+}
+
+.channel-model-drawer .show-more-card {
+  @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-center text-sm font-medium text-indigo-600 transition hover:border-indigo-200 hover:bg-indigo-50;
+}
+
+.channel-model-drawer .recently-added-card {
+  @apply border-indigo-200 bg-indigo-50/40 ring-1 ring-inset ring-indigo-100;
+}
+
+.channel-model-drawer .card-field {
+  @apply rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2 text-xs text-slate-500;
+}
+
+.channel-model-drawer .empty-card {
+  @apply rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500;
+}
+
+.channel-model-drawer .table-head {
+  @apply whitespace-nowrap bg-slate-50 px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
+}
+
+.channel-model-drawer .table-cell {
+  @apply whitespace-nowrap px-4 py-3 text-sm text-slate-600;
+}
+
+.channel-model-drawer .channel-model-table .table-head {
+  @apply px-3 py-2 text-center text-[11px];
+}
+
+.channel-model-drawer .channel-model-table .table-cell {
+  @apply whitespace-normal px-3 py-2 align-middle;
+}
+
+.channel-model-drawer .channel-model-table .model-col {
+  width: 16%;
+}
+
+.channel-model-drawer .channel-model-table .source-col {
+  width: 18%;
+}
+
+.channel-model-drawer .channel-model-table .price-col {
+  width: 38%;
+}
+
+.channel-model-drawer .channel-model-table .ability-col {
+  width: 20%;
+}
+
+.channel-model-drawer .channel-model-table .action-col {
+  width: 6%;
+}
+
+.channel-model-drawer .channel-model-table .model-cell {
+  @apply min-w-0;
+}
+
+.channel-model-drawer .channel-model-table .model-name {
+  display: -webkit-box;
+  max-width: 10.5rem;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.channel-model-drawer .channel-model-table .model-code {
+  max-width: 10.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channel-model-drawer .source-cell {
+  @apply min-w-0 space-y-1.5;
+}
+
+.channel-model-drawer .source-cell p {
+  @apply truncate text-sm font-medium text-slate-800;
+}
+
+.channel-model-drawer .source-cell div {
+  @apply flex flex-wrap items-center gap-1.5;
+}
+
+.channel-model-drawer .price-cell {
+  @apply min-w-0 space-y-1;
+}
+
+.channel-model-drawer .price-cell p,
+.channel-model-drawer .price-cell span {
+  @apply grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-start gap-2 text-xs;
+}
+
+.channel-model-drawer .price-cell em {
+  @apply not-italic text-slate-400;
+}
+
+.channel-model-drawer .price-cell strong {
+  @apply min-w-0 font-semibold leading-5 text-slate-800;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.channel-model-drawer .price-cell span strong {
+  @apply font-medium text-slate-600;
+}
+
+.channel-model-drawer .ability-cell {
+  @apply grid gap-1 text-xs;
+}
+
+.channel-model-drawer .ability-cell span {
+  @apply grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-2;
+}
+
+.channel-model-drawer .ability-cell em {
+  @apply not-italic text-slate-400;
+}
+
+.channel-model-drawer .ability-cell strong {
+  @apply truncate text-right font-mono font-semibold text-slate-700;
+}
+
+.channel-model-drawer .ability-edit-cell {
+  @apply grid gap-1.5;
+}
+
+.channel-model-drawer .ability-edit-cell label {
+  @apply grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-1.5 text-xs font-medium text-slate-500;
+}
+
+.channel-model-drawer .table-performance-input {
+  @apply min-w-0;
+  padding: 0.25rem 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.channel-model-drawer .channel-model-input {
+  width: 5rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.channel-model-drawer .performance-input-grid {
+  @apply grid min-w-44 grid-cols-1 gap-1.5;
+}
+
+.channel-model-drawer .performance-input-field {
+  @apply grid grid-cols-[2.5rem_minmax(5.5rem,1fr)] items-center gap-1 text-xs text-slate-500;
+}
+
+.channel-model-drawer .performance-input {
+  min-width: 5.5rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.channel-model-drawer .currency-select {
+  width: 6.75rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.channel-model-drawer .price-mode-select {
+  width: 7.5rem;
+  padding: 0.25rem 0.4rem;
+  font-size: 0.75rem;
+  line-height: 1rem;
+}
+
+.channel-model-drawer .fixed-price-grid {
+  @apply grid min-w-36 max-w-xs grid-cols-1 gap-1.5;
+}
+
+.channel-model-drawer .fixed-price-field {
+  @apply flex items-center gap-1 text-xs text-slate-500;
+}
+
+.channel-model-drawer .price-chip {
+  @apply inline-flex max-w-full items-center gap-1 rounded-full px-2 py-1 text-xs font-medium;
+}
+
+.channel-model-drawer .price-chip-good {
+  @apply bg-emerald-50 text-emerald-700;
+}
+
+.channel-model-drawer .price-chip-neutral {
+  @apply bg-slate-100 text-slate-600;
+}
+
+.channel-model-drawer .price-chip-warn {
+  @apply bg-amber-50 text-amber-700;
+}
+
+.channel-model-drawer .price-chip-muted {
+  @apply bg-slate-50 text-slate-400;
+}
+
+.channel-model-drawer .source-badge {
+  @apply inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium;
+}
+
+.channel-model-drawer .source-badge.official {
+  @apply border-emerald-100 bg-emerald-50 text-emerald-700;
+}
+
+.channel-model-drawer .source-badge.supplier {
+  @apply border-indigo-100 bg-indigo-50 text-indigo-700;
+}
+
+.channel-model-drawer .source-badge.manual {
+  @apply border-amber-100 bg-amber-50 text-amber-700;
+}
+
+.channel-model-drawer .source-badge.unknown {
+  @apply border-slate-200 bg-slate-100 text-slate-600;
+}
+
+.channel-model-drawer .source-mini-link {
+  @apply inline-flex rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700;
+}
+
+.channel-model-drawer .btn-primary {
+  @apply inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+.channel-model-drawer .btn-secondary {
+  @apply inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+.channel-model-drawer .btn-toolbar {
+  @apply inline-flex min-h-8 items-center rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.channel-model-drawer .link-btn {
+  @apply whitespace-nowrap text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.channel-model-drawer .action-col {
+  width: 4.5rem;
+  min-width: 4.5rem;
+}
