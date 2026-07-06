@@ -5,6 +5,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 
@@ -93,16 +94,48 @@ def fetch_text(url: str) -> str:
     response.encoding = response.encoding or "utf-8"
     if str(response.encoding).lower() in {"iso-8859-1", "latin-1"}:
         response.encoding = "utf-8"
-    return response.text or ""
+    content = response.text or ""
+    scripts = fetch_linked_pricing_scripts(url, content)
+    return "\n".join([content, *scripts])
+
+
+def fetch_linked_pricing_scripts(url: str, content: str) -> list[str]:
+    """Fetch same-origin JS bundles that contain BigModel pricing rows."""
+    scripts = []
+    for path in re.findall(
+        r'<script[^>]+src=["\']([^"\']+\.js)["\']',
+        content,
+        flags=re.IGNORECASE,
+    ):
+        script_url = urljoin(url, path)
+        if not script_url.startswith("https://bigmodel.cn/"):
+            continue
+        try:
+            response = requests.get(
+                script_url,
+                headers={
+                    "Accept": "application/javascript,text/javascript,*/*",
+                    "User-Agent": "DevMind-LLMOpsPriceCollector/1.0",
+                },
+                timeout=20,
+            )
+            response.raise_for_status()
+        except requests.RequestException:
+            continue
+        response.encoding = response.encoding or "utf-8"
+        scripts.append(response.text or "")
+    return scripts
 
 
 def extract_models(content: str) -> list[dict[str, Any]]:
-    """Extract Zhipu text-token price rows from JSON and HTML tables."""
+    """Extract Zhipu text-token price rows from supported source formats."""
     models: dict[str, dict[str, Any]] = {}
     for document in extract_json_documents(content):
         for item in extract_models_from_json(document):
             upsert_model(models, item)
     for item in extract_models_from_tables(content):
+        upsert_model(models, item)
+    for item in extract_models_from_js_model_lists(content):
         upsert_model(models, item)
     return [
         item
@@ -337,6 +370,87 @@ def models_from_table(table_html: str) -> list[dict[str, Any]]:
         if item:
             models.append(item)
     return models
+
+
+def extract_models_from_js_model_lists(content: str) -> list[dict[str, Any]]:
+    """Extract model prices from BigModel Vue bundle modelList arrays."""
+    models = []
+    for fragment in extract_balanced_values(str(content or ""), "modelList"):
+        for item in js_objects_from_array(fragment):
+            model = model_from_js_object(item)
+            if model:
+                models.append(model)
+    return models
+
+
+def js_objects_from_array(fragment: str) -> list[str]:
+    """Return top-level object fragments from a JavaScript array literal."""
+    objects = []
+    index = 0
+    while index < len(fragment):
+        start = fragment.find("{", index)
+        if start < 0:
+            break
+        item = balanced_fragment(fragment, start)
+        if not item:
+            break
+        objects.append(item)
+        index = start + len(item)
+    return objects
+
+
+def model_from_js_object(fragment: str) -> dict[str, Any]:
+    """Build one model from a BigModel JavaScript pricing row."""
+    model_name = js_string_field(fragment, "name")
+    input_prices = js_string_array_field(fragment, "inPrice")
+    output_prices = js_string_array_field(fragment, "outPrice")
+    if not model_name or not input_prices or not output_prices:
+        return {}
+    return model_from_mapping(
+        {
+            "model": model_name,
+            "input": input_prices[0],
+            "output": output_prices[0],
+        }
+    )
+
+
+def js_string_field(fragment: str, key: str) -> str:
+    """Return one quoted JavaScript object string field."""
+    match = re.search(
+        rf"\b{re.escape(key)}\s*:\s*([\"'])(.*?)\1",
+        fragment,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return ""
+    return unescape_js_string(match.group(2))
+
+
+def js_string_array_field(fragment: str, key: str) -> list[str]:
+    """Return quoted strings from one JavaScript object array field."""
+    match = re.search(
+        rf"\b{re.escape(key)}\s*:\s*\[(.*?)\]",
+        fragment,
+        flags=re.DOTALL,
+    )
+    if not match:
+        return []
+    return [
+        unescape_js_string(item.group(2))
+        for item in re.finditer(r"([\"'])(.*?)\1", match.group(1))
+    ]
+
+
+def unescape_js_string(value: str) -> str:
+    """Decode common JavaScript string escapes used in pricing bundles."""
+    text = str(value or "")
+    if "\\" not in text:
+        return text
+    try:
+        return bytes(text, "utf-8").decode("unicode_escape")
+    except UnicodeDecodeError:
+        return text
 
 
 def parse_table_rows(table_html: str) -> list[list[str]]:

@@ -13,6 +13,7 @@ from llm_ops.collection_services import (
 from llm_ops.collectors import CollectedModelPricing, NormalizedPriceRow
 from llm_ops.global_config import price_sync_source_queryset
 from llm_ops.models import (
+    CollectedModelPriceHistory,
     LLMProvider,
     MetaModel,
     ModelPriceItem,
@@ -227,8 +228,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
             endpoint_url=(
-                "https://platform.minimaxi.com/subscribe/"
-                "token-plan?tab=api-enterprise"
+                "https://platform.minimaxi.com/docs/guides/pricing-paygo"
             ),
             collection_method=(
                 PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
@@ -498,8 +498,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
             endpoint_url=(
-                "https://platform.minimaxi.com/subscribe/"
-                "token-plan?tab=api-enterprise"
+                "https://platform.minimaxi.com/docs/guides/pricing-paygo"
             ),
             collection_method=(
                 PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
@@ -755,6 +754,54 @@ class PriceCollectionSkuPersistenceTests(TestCase):
         self.assertNotEqual(first_snapshot.id, second_snapshot.id)
         self.assertEqual(first_snapshot.offering, first_offering)
         self.assertEqual(second_snapshot.offering, second_offering)
+
+    def test_snapshot_rebuild_reuses_existing_price_history(self):
+        item = self.collected_item()
+        first_run = PriceCollectionRun.objects.create(source=self.source)
+        second_run = PriceCollectionRun.objects.create(source=self.source)
+        offering, _ = upsert_collected_offering(
+            item,
+            source=self.source,
+            source_url=self.source.endpoint_url,
+            meta_model=self.meta_model,
+        )
+        first_snapshot, first_changed = upsert_collected_snapshot(
+            item,
+            source=self.source,
+            run=first_run,
+            offering=offering,
+        )
+        first_history = CollectedModelPriceHistory.objects.get(
+            source=self.source,
+            offering=offering,
+            source_platform_id="deepseek-v4-flash",
+        )
+        first_snapshot.delete()
+
+        rebuilt_snapshot, second_changed = upsert_collected_snapshot(
+            item,
+            source=self.source,
+            run=second_run,
+            offering=offering,
+        )
+
+        self.assertTrue(first_changed)
+        self.assertFalse(second_changed)
+        self.assertEqual(
+            CollectedModelPriceHistory.objects.filter(
+                source=self.source,
+                offering=offering,
+                source_platform_id="deepseek-v4-flash",
+            ).count(),
+            1,
+        )
+        first_history.refresh_from_db()
+        self.assertTrue(first_history.is_current)
+        self.assertIsNone(first_history.effective_to)
+        self.assertEqual(
+            rebuilt_snapshot.price_fingerprint,
+            first_history.price_fingerprint,
+        )
 
     def test_source_sku_offering_rejects_upstream_cycle(self):
         item = self.collected_item()
