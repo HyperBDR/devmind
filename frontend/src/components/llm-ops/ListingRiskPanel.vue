@@ -76,6 +76,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 
+import { asArray } from '@/utils/llmOpsPagination'
+
 import CompactSelect from './CompactSelect.vue'
 
 const props = defineProps({
@@ -91,10 +93,12 @@ const riskFilterOptions = [
   { label: '需要汇率', value: 'currency_mismatch' }
 ]
 
-const diagnosticRows = computed(() => props.summary.agione?.diagnostics || [])
+const diagnosticRows = computed(() =>
+  asArray(props.summary.agione?.diagnostics)
+)
 const selectedPlatformId = computed(() => props.summary.agione?.platform_id)
 const listingRows = computed(() => {
-  const rows = props.summary.listings || []
+  const rows = asArray(props.summary.listings)
   if (!selectedPlatformId.value) return rows
   return rows.filter(
     (listing) =>

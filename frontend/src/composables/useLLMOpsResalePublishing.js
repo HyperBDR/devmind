@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 import { useToast } from '@/composables/useToast'
-import { errorMessage, extract } from '@/utils/llmOpsPagination'
+import { asArray, errorMessage, extract } from '@/utils/llmOpsPagination'
 
 const platformTypeLabelKeys = {
   agione: 'llmOps.resalePlatform.types.agione',
@@ -51,7 +51,7 @@ export function useLLMOpsResalePublishing({
   const resalePublishingInitialModelId = ref(null)
 
   const activeResalePlatforms = computed(() =>
-    resalePlatforms.value.filter((item) => item.is_active !== false)
+    asArray(resalePlatforms.value).filter((item) => item.is_active !== false)
   )
 
   const resalePlatformOptions = computed(() =>
@@ -139,7 +139,9 @@ export function useLLMOpsResalePublishing({
 
   function mergeResaleListings(updatedItems) {
     if (!Array.isArray(updatedItems) || !updatedItems.length) return
-    const byId = new Map(listings.value.map((item) => [String(item.id), item]))
+    const byId = new Map(
+      asArray(listings.value).map((item) => [String(item.id), item])
+    )
     updatedItems.forEach((item) => {
       if (item?.id) byId.set(String(item.id), item)
     })
@@ -181,7 +183,9 @@ export function useLLMOpsResalePublishing({
     if (!Array.isArray(updatedItems) || !updatedItems.length) {
       return currentItems
     }
-    const byId = new Map(currentItems.map((item) => [String(item.id), item]))
+    const byId = new Map(
+      asArray(currentItems).map((item) => [String(item.id), item])
+    )
     updatedItems.forEach((item) => {
       if (item?.id) byId.set(String(item.id), item)
     })
@@ -191,7 +195,7 @@ export function useLLMOpsResalePublishing({
   function removeById(currentItems, ids) {
     if (!Array.isArray(ids) || !ids.length) return currentItems
     const idSet = new Set(ids.map((id) => String(id)))
-    return currentItems.filter((item) => !idSet.has(String(item.id)))
+    return asArray(currentItems).filter((item) => !idSet.has(String(item.id)))
   }
 
   function openListingActionDrawer({ modelId, kind }) {
@@ -265,7 +269,7 @@ export function useLLMOpsResalePublishing({
     }
     try {
       const response = await llmOpsApi.bulkUpsertResaleListings(items)
-      const submittedListings = extract(response)
+      const submittedListings = asArray(extract(response))
       const autoConfirmedCount = await confirmAutoApprovedListings(
         submittedListings,
         publishListings

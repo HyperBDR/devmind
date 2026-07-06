@@ -104,6 +104,8 @@
 <script setup>
 import { computed, ref } from 'vue'
 
+import { asArray } from '@/utils/llmOpsPagination'
+
 import CompactSelect from './CompactSelect.vue'
 
 const props = defineProps({
@@ -120,7 +122,7 @@ const statusFilterOptions = [
   { label: '多渠道覆盖', value: 'ready' }
 ]
 
-const rows = computed(() => props.summary.agione?.diagnostics || [])
+const rows = computed(() => asArray(props.summary.agione?.diagnostics))
 const visibleChannels = computed(() =>
   props.channels.filter((channel) => channel.is_active !== false)
 )

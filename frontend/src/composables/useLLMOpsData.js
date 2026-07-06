@@ -7,6 +7,8 @@ import {
   LIGHT_CORE_SECTIONS
 } from '@/composables/useLLMOpsNavigation'
 import {
+  asArray,
+  asObject,
   errorMessage,
   extract,
   fetchFirstPage,
@@ -47,10 +49,10 @@ export function useLLMOpsData() {
   )
 
   const providerCollectionSources = computed(() =>
-    sources.value.filter((item) => item.source_type !== 'agione')
+    asArray(sources.value).filter((item) => item.source_type !== 'agione')
   )
 
-  const procurementRows = computed(() => summary.value.procurement || [])
+  const procurementRows = computed(() => asArray(summary.value.procurement))
   const exchangeRate = computed(() =>
     Number(summary.value.currency?.usd_to_cny_rate || 7.15)
   )
@@ -100,16 +102,16 @@ export function useLLMOpsData() {
       fetchList(llmOpsApi.listResalePlatforms),
       llmOpsApi.getSummary(summaryParams())
     ])
-    sources.value = extract(sourceRes)
-    collectionRuns.value = extract(runRes)
-    providers.value = extract(providerRes)
-    metaModels.value = extract(metaModelRes)
+    sources.value = asArray(extract(sourceRes))
+    collectionRuns.value = asArray(extract(runRes))
+    providers.value = asArray(extract(providerRes))
+    metaModels.value = asArray(extract(metaModelRes))
     if (shouldLoadModels) {
-      models.value = extract(modelRes)
+      models.value = asArray(extract(modelRes))
     }
-    channels.value = extract(channelRes)
-    resalePlatforms.value = extract(platformRes)
-    summary.value = extract(summaryRes)
+    channels.value = asArray(extract(channelRes))
+    resalePlatforms.value = asArray(extract(platformRes))
+    summary.value = normalizeSummary(extract(summaryRes))
     await loadResaleWorkflowConfig()
   }
 
@@ -196,36 +198,40 @@ export function useLLMOpsData() {
         is_current: 'true'
       })
     ])
-    channelPrices.value = prices
-    channelPriceItems.value = items
+    channelPrices.value = asArray(prices)
+    channelPriceItems.value = asArray(items)
   }
 
   async function refreshModelPriceItems() {
-    modelPriceItems.value = await fetchList(llmOpsApi.listModelPriceItems, {
+    const items = await fetchList(llmOpsApi.listModelPriceItems, {
       is_current: 'true'
     })
+    modelPriceItems.value = asArray(items)
   }
 
   async function refreshResaleListings() {
-    listings.value = await fetchList(llmOpsApi.listResaleListings)
+    listings.value = asArray(await fetchList(llmOpsApi.listResaleListings))
   }
 
   function preloadResalePublishingData() {
     const tasks = []
-    if (!metaModels.value.length) {
+    if (!asArray(metaModels.value).length) {
       tasks.push(
         fetchList(llmOpsApi.listMetaModels).then((items) => {
-          metaModels.value = items
+          metaModels.value = asArray(items)
         })
       )
     }
-    if (!channelPrices.value.length || !channelPriceItems.value.length) {
+    if (
+      !asArray(channelPrices.value).length ||
+      !asArray(channelPriceItems.value).length
+    ) {
       tasks.push(refreshChannelPricingData())
     }
-    if (!modelPriceItems.value.length) {
+    if (!asArray(modelPriceItems.value).length) {
       tasks.push(refreshModelPriceItems())
     }
-    if (!listings.value.length) {
+    if (!asArray(listings.value).length) {
       tasks.push(refreshResaleListings())
     }
     if (!tasks.length) return
@@ -236,7 +242,9 @@ export function useLLMOpsData() {
   }
 
   async function refreshReconciliationRecords() {
-    records.value = await fetchList(llmOpsApi.listReconciliationRecords)
+    records.value = asArray(
+      await fetchList(llmOpsApi.listReconciliationRecords)
+    )
   }
 
   async function refreshPriceHistoryData() {
@@ -248,8 +256,8 @@ export function useLLMOpsData() {
         page_size: PRICE_HISTORY_PAGE_SIZE
       })
     ])
-    channelPriceHistory.value = channelHistoryData
-    listingPriceHistory.value = listingHistoryData
+    channelPriceHistory.value = asArray(channelHistoryData)
+    listingPriceHistory.value = asArray(listingHistoryData)
   }
 
   async function refreshLight() {
@@ -263,11 +271,11 @@ export function useLLMOpsData() {
         fetchList(llmOpsApi.listReconciliationRecords),
         llmOpsApi.getSummary(summaryParams())
       ])
-    channelPrices.value = prices
-    channelPriceItems.value = channelPriceItemsData
-    listings.value = listingData
-    records.value = recordData
-    summary.value = extract(summaryRes)
+    channelPrices.value = asArray(prices)
+    channelPriceItems.value = asArray(channelPriceItemsData)
+    listings.value = asArray(listingData)
+    records.value = asArray(recordData)
+    summary.value = normalizeSummary(extract(summaryRes))
   }
 
   async function refreshCollectionRuns() {
@@ -289,10 +297,10 @@ export function useLLMOpsData() {
           llmOpsApi.getSummary(summaryParams())
         ]
       )
-      sources.value = sourceData
-      collectionRuns.value = runData
-      providers.value = providerData
-      summary.value = extract(summaryRes)
+      sources.value = asArray(sourceData)
+      collectionRuns.value = asArray(runData)
+      providers.value = asArray(providerData)
+      summary.value = normalizeSummary(extract(summaryRes))
     } catch (error) {
       showError(errorMessage(error, '刷新价格源数据失败。'))
     }
@@ -305,9 +313,9 @@ export function useLLMOpsData() {
         fetchList(llmOpsApi.listMetaModels),
         llmOpsApi.getSummary(summaryParams())
       ])
-      providers.value = providerData
-      metaModels.value = metaModelData
-      summary.value = extract(summaryRes)
+      providers.value = asArray(providerData)
+      metaModels.value = asArray(metaModelData)
+      summary.value = normalizeSummary(extract(summaryRes))
     } catch (error) {
       showError(errorMessage(error, '刷新元模型数据失败。'))
     }
@@ -320,8 +328,8 @@ export function useLLMOpsData() {
         llmOpsApi.getSummary(summaryParams()),
         refreshChannelPricingData()
       ])
-      channels.value = channelData
-      summary.value = extract(summaryRes)
+      channels.value = asArray(channelData)
+      summary.value = normalizeSummary(extract(summaryRes))
       refreshResaleListings().catch((error) => {
         showError(errorMessage(error, '刷新转售列表失败。'))
       })
@@ -337,9 +345,9 @@ export function useLLMOpsData() {
         fetchList(llmOpsApi.listResaleListings),
         llmOpsApi.getSummary(summaryParams())
       ])
-      resalePlatforms.value = platformData
-      listings.value = listingData
-      summary.value = extract(summaryRes)
+      resalePlatforms.value = asArray(platformData)
+      listings.value = asArray(listingData)
+      summary.value = normalizeSummary(extract(summaryRes))
       await loadResaleWorkflowConfig()
     } catch (error) {
       showError(errorMessage(error, '刷新转售平台数据失败。'))
@@ -365,7 +373,7 @@ export function useLLMOpsData() {
 
   async function refreshSummary() {
     const summaryRes = await llmOpsApi.getSummary(summaryParams())
-    summary.value = extract(summaryRes)
+    summary.value = normalizeSummary(extract(summaryRes))
   }
 
   function summaryParams() {
@@ -429,4 +437,22 @@ function normalizeDisplayCurrency(value) {
 function readStorage(key) {
   if (typeof localStorage === 'undefined') return ''
   return localStorage.getItem(key) || ''
+}
+
+function normalizeSummary(value) {
+  const summary = asObject(value)
+  const agione = asObject(summary.agione)
+  return {
+    ...summary,
+    agione: {
+      ...agione,
+      diagnostic_counts: asObject(agione.diagnostic_counts),
+      diagnostics: asArray(agione.diagnostics)
+    },
+    currency: asObject(summary.currency),
+    kpis: asObject(summary.kpis),
+    listings: asArray(summary.listings),
+    procurement: asArray(summary.procurement),
+    status_counts: asObject(summary.status_counts)
+  }
 }
