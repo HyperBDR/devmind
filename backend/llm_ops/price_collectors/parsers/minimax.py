@@ -15,7 +15,7 @@ from .common import (
 
 
 PRICING_URL = (
-    "https://platform.minimaxi.com/subscribe/token-plan?tab=api-enterprise"
+    "https://platform.minimaxi.com/docs/guides/pricing-paygo"
 )
 DEFAULT_CURRENCY = "CNY"
 

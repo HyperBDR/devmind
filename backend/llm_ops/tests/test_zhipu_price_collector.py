@@ -53,6 +53,28 @@ ZHIPU_SHELL_HTML = """
 </html>
 """
 
+ZHIPU_BUNDLE_MODEL_LIST = """
+newModel:{model:[{
+  modelName:"文本模型",
+  unit2:"百万tokens",
+  modelList:[
+    {
+      name:"GLM-5.2",
+      upDownText:["1M"],
+      inPrice:["8元"],
+      outPrice:["28元"],
+      hit:["2元"]
+    },
+    {
+      name:"",
+      upDownText:["输入长度 [32+)"],
+      inPrice:["8元"],
+      outPrice:["28元"]
+    }
+  ]
+}]}
+"""
+
 
 class ZhipuPriceCatalogCollectorTests(SimpleTestCase):
     def test_extract_models_from_structured_pricing_json(self):
@@ -76,6 +98,14 @@ class ZhipuPriceCatalogCollectorTests(SimpleTestCase):
         self.assertEqual(models[0]["model_id"], "glm-4.7")
         self.assertEqual(models[0]["input_price_per_million"], "0.5")
         self.assertEqual(models[0]["output_price_per_million"], "2")
+
+    def test_extract_models_from_bigmodel_bundle_model_list(self):
+        models = extract_models(ZHIPU_BUNDLE_MODEL_LIST)
+
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0]["model_id"], "glm-5.2")
+        self.assertEqual(models[0]["input_price_per_million"], "8")
+        self.assertEqual(models[0]["output_price_per_million"], "28")
 
     def test_js_shell_without_model_prices_returns_empty_catalog(self):
         payload = collect_vendor_price_catalog(

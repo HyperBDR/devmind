@@ -42,8 +42,11 @@ VOLCENGINE_PRICING_SOURCE_URL = (
     "https://www.volcengine.com/docs/82379/1544106?lang=zh"
 )
 MINIMAX_PRICING_SOURCE_URL = (
-    "https://platform.minimaxi.com/subscribe/token-plan?tab=api-enterprise"
+    "https://platform.minimaxi.com/docs/guides/pricing-paygo"
 )
+MINIMAX_LEGACY_PRICING_SOURCE_URLS = {
+    "https://platform.minimaxi.com/subscribe/token-plan?tab=api-enterprise",
+}
 ZHIPU_PRICING_SOURCE_URL = "https://bigmodel.cn/pricing"
 ALIYUN_LEGACY_PRICING_SOURCE_URLS = {
     "https://help.aliyun.com/zh/model-studio/model-price",

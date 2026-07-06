@@ -5,13 +5,14 @@ import json
 import re
 from decimal import Decimal, InvalidOperation
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .collectors import CollectedModelPricing, CollectedPricingCatalog
 from .collectors.official import (
     ALIYUN_LEGACY_PRICING_SOURCE_URLS,
     BAIDU_PRICING_SOURCE_URL,
+    MINIMAX_LEGACY_PRICING_SOURCE_URLS,
     MINIMAX_PRICING_SOURCE_URL,
     MODELS_DEV_MODELS_URL,
     OFFICIAL_PROVIDER_CONFIGS,
@@ -410,6 +411,13 @@ def sync_vendor_price_source_catalog(
     if not source.is_enabled:
         raise ValueError("Price collection source is disabled.")
     source_url = source.endpoint_url or ""
+    if (
+        provider_code in OFFICIAL_PROVIDER_CONFIGS
+        and is_legacy_official_pricing_url(provider_code, source_url)
+    ):
+        source_url = OFFICIAL_PROVIDER_CONFIGS[provider_code].source_url
+        source.endpoint_url = source_url
+        source.save(update_fields=["endpoint_url", "updated_at"])
     provider_name = (
         source.provider.name
         if source.provider_id and source.provider
@@ -1876,9 +1884,17 @@ def official_source_url(
 ) -> str:
     """Return the effective official source URL for collection."""
     endpoint_url = source.endpoint_url or config.source_url
-    if is_legacy_aliyun_pricing_url(provider.code, endpoint_url):
+    if is_legacy_official_pricing_url(provider.code, endpoint_url):
         return config.source_url
     return endpoint_url
+
+
+def is_legacy_official_pricing_url(provider_code: str, url: str) -> bool:
+    """Return whether a persisted URL should follow current config."""
+    return (
+        is_legacy_aliyun_pricing_url(provider_code, url)
+        or is_legacy_minimax_pricing_url(provider_code, url)
+    )
 
 
 def is_legacy_aliyun_pricing_url(provider_code: str, url: str) -> bool:
@@ -1886,6 +1902,13 @@ def is_legacy_aliyun_pricing_url(provider_code: str, url: str) -> bool:
     if provider_code not in {"aliyun", "aliyun-wanx"}:
         return False
     return url in ALIYUN_LEGACY_PRICING_SOURCE_URLS
+
+
+def is_legacy_minimax_pricing_url(provider_code: str, url: str) -> bool:
+    """Return whether a persisted MiniMax URL should follow current config."""
+    if provider_code != "minimax":
+        return False
+    return url in MINIMAX_LEGACY_PRICING_SOURCE_URLS
 
 
 def upsert_collected_offering(
@@ -2666,7 +2689,15 @@ def upsert_collected_snapshot(
         source_platform_id=str(item.platform_id),
     ).first()
     changed = existing is None or existing.price_fingerprint != fingerprint
-    if changed:
+    has_matching_history = collected_price_history_exists(
+        source=source,
+        offering=offering,
+        source_platform_id=str(item.platform_id),
+        price_hash=fingerprint,
+    )
+    if existing is None and has_matching_history:
+        changed = False
+    if existing is None or changed:
         create_collected_price_history(
             payload,
             source=source,
@@ -2683,6 +2714,22 @@ def upsert_collected_snapshot(
         defaults=payload,
     )
     return snapshot, changed
+
+
+def collected_price_history_exists(
+    *,
+    source: PriceCollectionSource,
+    offering: SourceSkuOffering,
+    source_platform_id: str,
+    price_hash: str,
+) -> bool:
+    """Return whether one collected history fingerprint already exists."""
+    return CollectedModelPriceHistory.objects.filter(
+        source=source,
+        offering=offering,
+        source_platform_id=source_platform_id,
+        price_fingerprint=price_hash,
+    ).exists()
 
 
 def normalized_rows_payload(item: CollectedModelPricing) -> list[dict]:
@@ -2753,6 +2800,24 @@ def create_collected_price_history(
 ) -> CollectedModelPriceHistory:
     """Insert a history row and close the previous current version."""
     now = timezone.now()
+    lookup = {
+        "source": source,
+        "offering": payload["offering"],
+        "source_platform_id": source_platform_id,
+        "price_fingerprint": price_hash,
+    }
+    existing_history = CollectedModelPriceHistory.objects.filter(
+        **lookup,
+    ).first()
+    if existing_history is not None:
+        return activate_collected_price_history(
+            existing_history,
+            source=source,
+            offering=payload["offering"],
+            source_platform_id=source_platform_id,
+            now=now,
+        )
+
     CollectedModelPriceHistory.objects.filter(
         source=source,
         offering=payload["offering"],
@@ -2762,30 +2827,66 @@ def create_collected_price_history(
         is_current=False,
         effective_to=now,
     )
-    return CollectedModelPriceHistory.objects.create(
+    try:
+        with transaction.atomic():
+            return CollectedModelPriceHistory.objects.create(
+                source=source,
+                run=payload["run"],
+                provider=payload["provider"],
+                model=payload["model"],
+                sku=payload["sku"],
+                offering=payload["offering"],
+                meta_model=payload["meta_model"],
+                source_platform_id=source_platform_id,
+                source_model_id=payload["source_model_id"],
+                source_model_name=payload["source_model_name"],
+                source_model_type=payload["source_model_type"],
+                source_provider_name=payload["source_provider_name"],
+                currency=payload["currency"],
+                billing_unit=payload["billing_unit"],
+                billing_mode=payload["billing_mode"],
+                normalized_price_rows=payload["normalized_price_rows"],
+                raw_price_info=payload["raw_price_info"],
+                raw_detail=payload["raw_detail"],
+                price_fingerprint=price_hash,
+                changed_fields=changed_fields(previous, payload),
+                effective_from=now,
+                is_current=True,
+            )
+    except IntegrityError:
+        existing_history = CollectedModelPriceHistory.objects.get(**lookup)
+        return activate_collected_price_history(
+            existing_history,
+            source=source,
+            offering=payload["offering"],
+            source_platform_id=source_platform_id,
+            now=now,
+        )
+
+
+def activate_collected_price_history(
+    history: CollectedModelPriceHistory,
+    *,
+    source: PriceCollectionSource,
+    offering: SourceSkuOffering,
+    source_platform_id: str,
+    now,
+) -> CollectedModelPriceHistory:
+    """Make one existing collected history row current."""
+    CollectedModelPriceHistory.objects.filter(
         source=source,
-        run=payload["run"],
-        provider=payload["provider"],
-        model=payload["model"],
-        sku=payload["sku"],
-        offering=payload["offering"],
-        meta_model=payload["meta_model"],
+        offering=offering,
         source_platform_id=source_platform_id,
-        source_model_id=payload["source_model_id"],
-        source_model_name=payload["source_model_name"],
-        source_model_type=payload["source_model_type"],
-        source_provider_name=payload["source_provider_name"],
-        currency=payload["currency"],
-        billing_unit=payload["billing_unit"],
-        billing_mode=payload["billing_mode"],
-        normalized_price_rows=payload["normalized_price_rows"],
-        raw_price_info=payload["raw_price_info"],
-        raw_detail=payload["raw_detail"],
-        price_fingerprint=price_hash,
-        changed_fields=changed_fields(previous, payload),
-        effective_from=now,
         is_current=True,
+    ).exclude(id=history.id).update(
+        is_current=False,
+        effective_to=now,
     )
+    if not history.is_current or history.effective_to is not None:
+        history.is_current = True
+        history.effective_to = None
+        history.save(update_fields=["is_current", "effective_to"])
+    return history
 
 
 def sync_model_price_items(
@@ -3438,7 +3539,7 @@ def ensure_official_source(*, provider: LLMProvider):
             "不做跨币种换算。"
         ),
     }
-    if not source.endpoint_url or is_legacy_aliyun_pricing_url(
+    if not source.endpoint_url or is_legacy_official_pricing_url(
         provider.code,
         source.endpoint_url,
     ):

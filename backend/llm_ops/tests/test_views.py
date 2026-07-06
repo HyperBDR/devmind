@@ -1167,8 +1167,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(minimax["currency"], "CNY")
         self.assertEqual(
             minimax["source_url"],
-            "https://platform.minimaxi.com/subscribe/"
-            "token-plan?tab=api-enterprise",
+            "https://platform.minimaxi.com/docs/guides/pricing-paygo",
         )
         volcengine = next(
             item
@@ -1408,8 +1407,7 @@ class LLMOpsViewTests(TestCase):
         self.assertTrue(source.updates_model_prices)
         self.assertEqual(
             source.endpoint_url,
-            "https://platform.minimaxi.com/subscribe/"
-            "token-plan?tab=api-enterprise",
+            "https://platform.minimaxi.com/docs/guides/pricing-paygo",
         )
 
     def test_ensure_official_provider_source_creates_volcengine_source(self):
