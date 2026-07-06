@@ -11,8 +11,12 @@ from django.utils import timezone
 from .collectors import CollectedModelPricing, CollectedPricingCatalog
 from .collectors.official import (
     ALIYUN_LEGACY_PRICING_SOURCE_URLS,
+    BAIDU_PRICING_SOURCE_URL,
+    MINIMAX_PRICING_SOURCE_URL,
     MODELS_DEV_MODELS_URL,
     OFFICIAL_PROVIDER_CONFIGS,
+    VOLCENGINE_PRICING_SOURCE_URL,
+    ZHIPU_PRICING_SOURCE_URL,
     collect_official_pricing_catalog,
     fetch_source_payload,
     normalize_model_code,
@@ -96,14 +100,30 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
         "notes": "元模型厂商。",
     },
     "baidu": {
-        "name": "百度",
+        "name": "百度千帆",
         "website": "https://cloud.baidu.com/",
         "notes": "元模型厂商。",
+        "source_name": "百度千帆官方价格",
+        "source_url": BAIDU_PRICING_SOURCE_URL,
+        "currency": "CNY",
     },
     "volcengine": {
         "name": "火山方舟",
         "website": "https://ark.cn-beijing.volces.com/",
         "notes": "元模型厂商。",
+        "source_name": "火山方舟官方价格",
+        "source_url": VOLCENGINE_PRICING_SOURCE_URL,
+        "currency": "CNY",
+    },
+    "anthropic": {
+        "name": "Anthropic",
+        "website": "https://anthropic.com/",
+        "notes": "元模型厂商。",
+        "source_name": "Anthropic 官方价格",
+        "source_url": (
+            "https://docs.anthropic.com/en/docs/about-claude/pricing"
+        ),
+        "currency": "USD",
     },
     "azure-openai": {
         "name": "Azure OpenAI",
@@ -115,6 +135,33 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
         "source_name": "Azure OpenAI 官方价格",
         "source_url": AZURE_OPENAI_PRICING_SOURCE_URL,
         "currency": "USD",
+    },
+    "google": {
+        "name": "Google",
+        "website": "https://ai.google.dev/",
+        "notes": "元模型厂商。",
+        "source_name": "Google Gemini 官方价格",
+        "source_url": (
+            "https://cloud.google.com/gemini-enterprise-agent-platform/"
+            "generative-ai/pricing?hl=en"
+        ),
+        "currency": "USD",
+    },
+    "minimax": {
+        "name": "MiniMax",
+        "website": "https://api.minimax.io/",
+        "notes": "元模型厂商。",
+        "source_name": "MiniMax 官方价格",
+        "source_url": MINIMAX_PRICING_SOURCE_URL,
+        "currency": "CNY",
+    },
+    "zhipu": {
+        "name": "智谱",
+        "website": "https://open.bigmodel.cn/",
+        "notes": "元模型厂商。",
+        "source_name": "智谱 BigModel 官方价格",
+        "source_url": ZHIPU_PRICING_SOURCE_URL,
+        "currency": "CNY",
     },
 }
 
@@ -386,16 +433,20 @@ def sync_vendor_price_source_catalog(
             "model_codes": [],
             "verify_source": verify_source,
         }
-        try:
-            standard_catalog = collect_vendor_price_catalog(
-                provider_code,
-                vendor_payload,
-            )
-        except ValueError as exc:
+        if not vendor_price_collector_exists(provider_code):
             raise ValueError(
                 "Vendor price catalog collector not found for provider "
                 f"'{provider_code}'."
-            ) from exc
+            )
+        standard_catalog = collect_vendor_price_catalog(
+            provider_code,
+            vendor_payload,
+        )
+        if not standard_catalog.get("models"):
+            raise ValueError(
+                "Vendor price catalog collector returned no models for "
+                f"provider '{provider_code}'."
+            )
         catalog = standard_catalog_to_collected_catalog(standard_catalog)
         with transaction.atomic():
             for item in catalog.models:

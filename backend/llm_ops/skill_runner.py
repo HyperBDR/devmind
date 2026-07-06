@@ -123,6 +123,14 @@ def standard_catalog_run_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     if raw_payload.get("collector"):
         metadata["vendor_catalog_collector"] = raw_payload["collector"]
         metadata["vendor_skill_collector"] = raw_payload["collector"]
+    if "fallback_used" in raw_payload:
+        metadata["vendor_catalog_fallback_used"] = bool(
+            raw_payload.get("fallback_used")
+        )
+    if raw_payload.get("fallback_reason"):
+        metadata["vendor_catalog_fallback_reason"] = str(
+            raw_payload.get("fallback_reason")
+        )
     return metadata
 
 

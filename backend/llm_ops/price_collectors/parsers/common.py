@@ -37,6 +37,24 @@ def sync_official_vendor_catalog(
         vendor.get("provider_name") or config.provider_label
     ).strip()
     currency = str(vendor.get("currency") or config.currency).strip()
+    raw_payload = {
+        "provider_code": provider_code,
+        "collector": "llm_ops.price_collectors.official_config",
+        "model_codes": sorted(model_codes),
+        "source_url": source_url,
+        "verify_source": verify_source,
+        "timeout": timeout,
+    }
+    if "fallback_used" in vendor:
+        raw_payload["fallback_used"] = as_bool(
+            vendor.get("fallback_used"),
+            default=False,
+        )
+    if vendor.get("fallback_reason"):
+        raw_payload["fallback_reason"] = str(
+            vendor.get("fallback_reason")
+        ).strip()
+
     return collected_catalog_to_standard_catalog(
         catalog=catalog,
         provider_code=provider_code,
@@ -47,14 +65,7 @@ def sync_official_vendor_catalog(
             f"Collected {catalog.total_models} {provider_code} official "
             "model price rows."
         ),
-        raw_payload={
-            "provider_code": provider_code,
-            "collector": "llm_ops.price_collectors.official_config",
-            "model_codes": sorted(model_codes),
-            "source_url": source_url,
-            "verify_source": verify_source,
-            "timeout": timeout,
-        },
+        raw_payload=raw_payload,
     )
 
 
