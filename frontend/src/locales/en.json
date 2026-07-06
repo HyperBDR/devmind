@@ -1394,6 +1394,14 @@
           "hint": "Published directly by official services",
           "label": "Official sources"
         },
+        "autoSources": {
+          "hint": "Maintained by registered collection adapters",
+          "label": "Automatic sources"
+        },
+        "manualSources": {
+          "hint": "Maintained through manual entry or import",
+          "label": "Manual sources"
+        },
         "sources": {
           "hint": "Service price sources with model prices",
           "label": "Price sources"

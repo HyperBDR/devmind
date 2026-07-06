@@ -76,6 +76,10 @@
 
 <script setup>
 import { computed } from 'vue'
+import {
+  priceSourceCollectionMethod,
+  priceSourceCollectionMethodLabel
+} from '@/utils/llmOpsPriceSources'
 
 const props = defineProps({
   sources: { type: Array, default: () => [] },
@@ -200,13 +204,8 @@ function healthRank(tone) {
 }
 
 function sourceCategoryLabel(source) {
-  const labels = {
-    official_provider: '官方源',
-    supplier: '供应商',
-    manual: '手工',
-    unknown: '未知'
-  }
-  return labels[source.source_category] || source.source_category || '-'
+  const method = priceSourceCollectionMethod(source)
+  return priceSourceCollectionMethodLabel(method)
 }
 
 function statusLabel(status) {

@@ -297,7 +297,7 @@
                       <span>{{ modelOptionMeta(item.group) }}</span>
                     </div>
                     <CompactSelect
-                      v-if="item.options.length"
+                      v-if="item.options?.length"
                       :model-value="
                         selectedProviderByModelKey[item.group.key] || ''
                       "
@@ -518,7 +518,7 @@
                   <div class="card-field">
                     <span>渠道成本价</span>
                     <div
-                      v-if="row.priceItems.length"
+                      v-if="row.priceItems?.length"
                       class="mt-1 flex flex-wrap gap-1"
                     >
                       <span
@@ -784,7 +784,7 @@ const props = defineProps({
   },
   providers: {
     type: Array,
-    required: true
+    default: () => []
   },
   metaModels: {
     type: Array,
@@ -792,11 +792,11 @@ const props = defineProps({
   },
   models: {
     type: Array,
-    required: true
+    default: () => []
   },
   channelPrices: {
     type: Array,
-    required: true
+    default: () => []
   },
   channelPriceItems: {
     type: Array,

@@ -22,6 +22,28 @@ const CATEGORY_RANKS = {
   unknown: 5
 }
 
+const OWNER_TYPE_LABELS = {
+  model_provider_official: '模型厂商官方',
+  cloud_provider_official: '云厂商官方',
+  supplier: '供应商',
+  internal: '内部维护',
+  unknown: '未知'
+}
+
+const COLLECTION_METHOD_LABELS = {
+  auto_collect: '自动采集',
+  api_sync: '接口同步',
+  manual_entry: '手动录入',
+  manual_import: '手动导入',
+  unknown: '待配置'
+}
+
+const COLLECTION_GROUP_RANKS = {
+  auto: 1,
+  manual: 2,
+  unknown: 3
+}
+
 export function normalizePriceSourceCategory(item, model = {}, source = null) {
   return (
     item?.business_source_category ||
@@ -33,6 +55,28 @@ export function normalizePriceSourceCategory(item, model = {}, source = null) {
     model?.source_category ||
     source?.source_category ||
     'unknown'
+  )
+}
+
+export function priceSourceOwnerType(source) {
+  const ownerType = source?.source_owner_type
+  if (ownerType && ownerType !== 'unknown') return ownerType
+
+  const category = source?.source_category || source?.business_source_category
+  if (category === 'supplier') return 'supplier'
+  if (category === 'manual') return 'internal'
+  if (category === 'cloud_hosted') return 'cloud_provider_official'
+  if (category === 'official_provider') return 'model_provider_official'
+  return ownerType || 'unknown'
+}
+
+export function priceSourceOwnerTypeLabel(ownerType, labels = {}) {
+  const key = ownerType || 'unknown'
+  return (
+    labels[key] ||
+    OWNER_TYPE_LABELS[key] ||
+    labels.unknown ||
+    OWNER_TYPE_LABELS.unknown
   )
 }
 
@@ -76,16 +120,41 @@ export function priceSourceCollectionMethod(source) {
   if (source?.can_collect_prices && source?.updates_model_prices) {
     return 'auto_collect'
   }
-  if (normalizePriceSourceCategory(source) === 'manual') {
+  if (priceSourceOwnerType(source) === 'internal') {
     return 'manual_entry'
   }
   return method || 'unknown'
 }
 
+export function priceSourceCollectionMethodLabel(method, labels = {}) {
+  const key = method || 'unknown'
+  return (
+    labels[key] ||
+    COLLECTION_METHOD_LABELS[key] ||
+    labels.unknown ||
+    COLLECTION_METHOD_LABELS.unknown
+  )
+}
+
+export function priceSourceCollectionGroup(source) {
+  const method = priceSourceCollectionMethod(source)
+  if (['auto_collect', 'api_sync'].includes(method)) return 'auto'
+  if (['manual_entry', 'manual_import'].includes(method)) return 'manual'
+  return 'unknown'
+}
+
+export function priceSourceCollectionGroupRank(group) {
+  return COLLECTION_GROUP_RANKS[group || 'unknown'] || 9
+}
+
 export function canCollectPriceSource(source) {
   if (!source) return false
   if (source.can_collect === true) return true
-  return Boolean(source.can_collect_prices && source.updates_model_prices)
+  return Boolean(
+    source.can_collect_prices &&
+      source.updates_model_prices &&
+      priceSourceCollectionMethod(source) === 'auto_collect'
+  )
 }
 
 export function canApiSyncPriceSource(source) {
@@ -96,6 +165,7 @@ export function canManualEntryPriceSource(source) {
   if (!source) return false
   if (canCollectPriceSource(source)) return false
   if (source.can_manual_entry === true) return true
+  if (priceSourceOwnerType(source) === 'internal') return true
   return ['manual_entry', 'manual_import', 'unknown'].includes(
     priceSourceCollectionMethod(source)
   )

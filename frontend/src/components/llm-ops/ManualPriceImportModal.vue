@@ -237,6 +237,10 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import {
+  priceSourceCollectionMethod,
+  priceSourceCollectionMethodLabel
+} from '@/utils/llmOpsPriceSources'
 
 const props = defineProps({
   open: {
@@ -285,7 +289,9 @@ const sourceOptions = computed(() => [
         source.relation_name ||
         source.provider_name ||
         '',
-      badge: source.category_label || source.source_category || ''
+      badge: priceSourceCollectionMethodLabel(
+        priceSourceCollectionMethod(source)
+      )
     }))
 ])
 
@@ -300,11 +306,10 @@ const selectedSourceProvider = computed(() => {
     (provider) => String(provider.id) === String(providerId || '')
   )
 })
-const sourceCategoryLabel = computed(
-  () =>
-    selectedSource.value?.category_label ||
-    selectedSource.value?.source_category ||
-    '-'
+const sourceCategoryLabel = computed(() =>
+  priceSourceCollectionMethodLabel(
+    priceSourceCollectionMethod(selectedSource.value)
+  )
 )
 const sourceStatusText = computed(() => {
   if (!selectedSource.value) {

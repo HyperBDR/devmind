@@ -236,9 +236,19 @@ class PriceCollectionSourceViewSet(
         )
         search = self.request.query_params.get("search")
         source_category = self.request.query_params.get("source_category")
+        source_owner_type = self.request.query_params.get(
+            "source_owner_type"
+        )
+        collection_method = self.request.query_params.get(
+            "collection_method"
+        )
         is_enabled = self.request.query_params.get("is_enabled")
         if source_category:
             queryset = queryset.filter(source_category=source_category)
+        if source_owner_type:
+            queryset = queryset.filter(source_owner_type=source_owner_type)
+        if collection_method:
+            queryset = queryset.filter(collection_method=collection_method)
         if is_enabled in {"true", "false"}:
             queryset = queryset.filter(is_enabled=is_enabled == "true")
         if search:
@@ -250,7 +260,11 @@ class PriceCollectionSourceViewSet(
                 | Q(channel__name__icontains=search)
             )
         return queryset.order_by(
-            "source_category", "provider__name", "channel__name", "id"
+            "collection_method",
+            "source_owner_type",
+            "provider__name",
+            "channel__name",
+            "id",
         )
 
     @action(
@@ -660,6 +674,12 @@ class PriceCollectionRunViewSet(
         source = self.request.query_params.get("source")
         status_value = self.request.query_params.get("status")
         source_category = self.request.query_params.get("source_category")
+        source_owner_type = self.request.query_params.get(
+            "source_owner_type"
+        )
+        collection_method = self.request.query_params.get(
+            "collection_method"
+        )
         provider = self.request.query_params.get("provider")
         keyword = self.request.query_params.get("q")
         if source:
@@ -668,6 +688,14 @@ class PriceCollectionRunViewSet(
             queryset = queryset.filter(status=status_value)
         if source_category:
             queryset = queryset.filter(source__source_category=source_category)
+        if source_owner_type:
+            queryset = queryset.filter(
+                source__source_owner_type=source_owner_type,
+            )
+        if collection_method:
+            queryset = queryset.filter(
+                source__collection_method=collection_method,
+            )
         if provider:
             provider_query = Q(source__provider__code__icontains=provider) | Q(
                 source__provider__name__icontains=provider

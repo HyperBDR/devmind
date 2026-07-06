@@ -812,12 +812,12 @@ function apiPayload(response) {
   @apply border-slate-200 bg-slate-100 text-slate-600;
 }
 
-:global(body.llm-ops-theme) .manual-price-modal-footer.modal-footer {
+:global(body.llm-ops-theme .manual-price-modal-footer.modal-footer) {
   gap: 0.75rem !important;
   padding: 0.75rem 1.25rem !important;
 }
 
-:global(body.llm-ops-theme) .manual-price-modal-actions.modal-footer-actions {
+:global(body.llm-ops-theme .manual-price-modal-actions.modal-footer-actions) {
   gap: 0.5rem !important;
 }
 

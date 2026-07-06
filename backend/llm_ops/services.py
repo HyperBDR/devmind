@@ -63,6 +63,11 @@ MANUAL_MODEL_PRICE_FIELDS = {
     ),
 }
 
+MANUAL_COLLECTION_METHODS = {
+    PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY,
+    PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT,
+}
+
 
 @dataclass(frozen=True)
 class UnitPrices:
@@ -276,16 +281,10 @@ def price_role_for_source(
     """Map a price source to the business role of one model row."""
     if source is None:
         return LLMModel.PRICE_ROLE_UNKNOWN
-    category = source.source_category
-    if (
-        category
-        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-        and meta_model is not None
-    ):
-        category = business_source_category_for_source_model(
-            source=source,
-            meta_model=meta_model,
-        )
+    category = business_source_category_for_source_model(
+        source=source,
+        meta_model=meta_model,
+    )
     if (
         category
         == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
@@ -316,21 +315,66 @@ def business_source_category_for_source_model(
     source: PriceCollectionSource,
     meta_model: MetaModel | None,
 ) -> str:
-    """Return official only when the source provider matches the owner."""
-    raw_category = source.source_category
+    """Return the display/business role from source owner metadata."""
+    owner_type = source_owner_type_for_source(source)
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_SUPPLIER:
+        return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_INTERNAL:
+        return PriceCollectionSource.SOURCE_CATEGORY_MANUAL
     if (
-        raw_category
-        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        owner_type
+        == PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     ):
-        return raw_category
+        return LLMModel.PRICE_ROLE_CLOUD_HOSTED
+    if (
+        owner_type
+        != PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+    ):
+        return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
 
     source_owner_code = str(getattr(source.provider, "code", "") or "")
     model_owner_code = canonical_owner_code_for_meta_model(meta_model)
     if not source_owner_code or not model_owner_code:
-        return raw_category
+        return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
     if source_owner_code == model_owner_code:
-        return raw_category
+        return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
     return LLMModel.PRICE_ROLE_CLOUD_HOSTED
+
+
+def source_owner_type_for_source(source: PriceCollectionSource) -> str:
+    """Return source owner metadata, with legacy category fallback."""
+    owner_type = getattr(source, "source_owner_type", "")
+    if owner_type and owner_type != PriceCollectionSource.SOURCE_OWNER_UNKNOWN:
+        return owner_type
+
+    if (
+        source.source_category
+        == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    ):
+        return PriceCollectionSource.SOURCE_OWNER_SUPPLIER
+    if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+        return PriceCollectionSource.SOURCE_OWNER_INTERNAL
+    if (
+        source.source_category
+        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    ):
+        return PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+
+    provider_code = str(getattr(source.provider, "code", "") or "").lower()
+    if provider_code in PriceCollectionSource.CLOUD_PROVIDER_OFFICIAL_CODES:
+        return PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
+    return PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+
+
+def is_manual_price_source(source: PriceCollectionSource) -> bool:
+    """Return whether a source is maintained through manual workflows."""
+    method = getattr(source, "collection_method", "")
+    if method in MANUAL_COLLECTION_METHODS:
+        return True
+    return (
+        source_owner_type_for_source(source)
+        == PriceCollectionSource.SOURCE_OWNER_INTERNAL
+    )
 
 
 def find_aggregated_model(
@@ -377,8 +421,11 @@ def preferred_aggregated_model(
         return None
 
     def sort_key(model: LLMModel) -> tuple[int, int, int, int]:
-        category = (
-            model.source.source_category
+        role = (
+            price_role_for_source(
+                model.source,
+                meta_model=model.meta_model,
+            )
             if model.source_id and model.source is not None
             else ""
         )
@@ -386,17 +433,18 @@ def preferred_aggregated_model(
             bool(current_source_id)
             and model.source_id == current_source_id
         )
-        if category == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER:
+        if role == LLMModel.PRICE_ROLE_OFFICIAL:
             category_rank = 0
-        elif category == "":
+        elif role == "":
             category_rank = 1
-        elif category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+        elif role == LLMModel.PRICE_ROLE_MANUAL:
             category_rank = 2 if is_current_source else 3
-        elif category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
+        elif role in (
+            LLMModel.PRICE_ROLE_SUPPLIER,
+            LLMModel.PRICE_ROLE_CLOUD_HOSTED,
+        ):
             category_rank = 4 if is_current_source else 5
-        elif model.price_role == LLMModel.PRICE_ROLE_CLOUD_HOSTED:
-            category_rank = 4 if is_current_source else 5
-        elif category == PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN:
+        elif role == LLMModel.PRICE_ROLE_UNKNOWN:
             category_rank = 6
         else:
             category_rank = 7
@@ -556,10 +604,7 @@ def import_manual_model_prices(
     """Import manually maintained model prices into durable price tables."""
     now = timezone.now()
     effective_updates_model_prices = updates_model_prices
-    if (
-        source.source_category
-        == PriceCollectionSource.SOURCE_CATEGORY_MANUAL
-    ):
+    if is_manual_price_source(source):
         effective_updates_model_prices = False
     run = source.collection_runs.create(status="running")
     created_count = 0
@@ -1480,13 +1525,19 @@ def price_item_group_score(rows: list[ModelPriceItem]) -> tuple:
     if not rows:
         return (0, 0, 0)
     first = rows[0]
-    category = ""
+    role = ""
     if first.source_id:
-        category = first.source.source_category
+        meta_model = first.meta_model or getattr(
+            first.model,
+            "meta_model",
+            None,
+        )
+        role = price_role_for_source(first.source, meta_model=meta_model)
     category_score = {
-        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER: 300,
-        PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER: 200,
-    }.get(category, 0)
+        LLMModel.PRICE_ROLE_OFFICIAL: 300,
+        LLMModel.PRICE_ROLE_CLOUD_HOSTED: 250,
+        LLMModel.PRICE_ROLE_SUPPLIER: 200,
+    }.get(role, 0)
     latest = max((item.effective_from for item in rows), default=None)
     latest_score = latest.timestamp() if latest else 0
     return (category_score, len(rows), latest_score)

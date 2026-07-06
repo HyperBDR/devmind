@@ -251,6 +251,7 @@ import BaseLoading from '@/components/ui/BaseLoading.vue'
 import { llmAdminApi } from '@/admin/api'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
+import { priceSourceCollectionMethod } from '@/utils/llmOpsPriceSources'
 
 const props = defineProps({
   sources: {
@@ -436,17 +437,7 @@ function sourceSupportsRuntimePriceSync(source) {
 }
 
 function sourceCollectionMethod(source) {
-  const method = source?.collection_method
-  if (method && method !== 'unknown') return method
-  if (
-    source?.source_category === 'official_provider' &&
-    source?.updates_model_prices
-  ) {
-    return 'auto_collect'
-  }
-  if (source?.source_category === 'manual') return 'manual_entry'
-  if (source?.source_type === 'yunce') return 'api_sync'
-  return method || 'unknown'
+  return priceSourceCollectionMethod(source)
 }
 
 function normalizeLLMConfigOption(row) {

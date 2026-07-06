@@ -103,6 +103,9 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -155,6 +158,9 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -194,6 +200,9 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -226,6 +235,9 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -258,17 +270,22 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
             {"models": 1, "changed": 1},
         )
 
-    def test_explicit_source_ids_keep_supported_official_sources(self):
-        openai = LLMProvider.objects.create(name="OpenAI", code="openai")
+    def test_explicit_source_ids_keep_supported_auto_sources(self):
+        provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
-            name="OpenAI Official",
-            slug="openai-official",
-            provider=openai,
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=provider,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://openai.com/api/pricing/",
-            currency="USD",
+            endpoint_url=(
+                "https://help.aliyun.com/zh/model-studio/model-pricing"
+            ),
+            currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -276,7 +293,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
 
         self.assertEqual(runner.list_configured_sources(), [source])
 
-    def test_explicit_source_ids_skip_model_level_official_sources(self):
+    def test_explicit_source_ids_skip_non_auto_sources(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
             name="Aliyun Qwen Plus Official",
@@ -330,7 +347,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         config.save()
         runner = ModelPriceSyncAgentRunner(config=config)
 
-        self.assertEqual(runner.list_configured_sources(), [source])
+        self.assertEqual(runner.list_configured_sources(), [])
 
     def test_execute_returns_noop_when_global_collection_disabled(self):
         config = LLMOpsGlobalConfig.get_solo()
@@ -401,6 +418,9 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=False,
             updates_model_prices=True,
         )
@@ -428,6 +448,9 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )

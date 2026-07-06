@@ -213,6 +213,7 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
             attrs["collection_method"] = default_collection_method_for_values(
                 self._effective_value(attrs, "source_category"),
                 self._effective_value(attrs, "source_type"),
+                self._effective_value(attrs, "source_owner_type"),
             )
 
     def _effective_value(self, attrs, field_name):
@@ -950,20 +951,29 @@ def canonical_owner_code_for_meta_model(meta_model):
 
 
 def business_source_category_for_source_model(*, source, meta_model):
-    """Return official only when the source provider matches the owner."""
-    raw_category = source.source_category
+    """Return display/business category from source owner metadata."""
+    owner_type = source_owner_type_for_source(source)
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_SUPPLIER:
+        return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_INTERNAL:
+        return PriceCollectionSource.SOURCE_CATEGORY_MANUAL
     if (
-        raw_category
-        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        owner_type
+        == PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     ):
-        return raw_category
+        return LLMModel.PRICE_ROLE_CLOUD_HOSTED
+    if (
+        owner_type
+        != PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+    ):
+        return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
 
     source_owner_code = str(getattr(source.provider, "code", "") or "")
     model_owner_code = canonical_owner_code_for_meta_model(meta_model)
     if not source_owner_code or not model_owner_code:
-        return raw_category
+        return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
     if source_owner_code == model_owner_code:
-        return raw_category
+        return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
     return LLMModel.PRICE_ROLE_CLOUD_HOSTED
 
 
@@ -992,16 +1002,25 @@ def business_source_category_for_price_item(item):
 
 def business_source_category_for_catalog(source):
     """Return the business category for a whole price catalog."""
-    raw_category = source.source_category
+    owner_type = source_owner_type_for_source(source)
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_SUPPLIER:
+        return PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_INTERNAL:
+        return PriceCollectionSource.SOURCE_CATEGORY_MANUAL
     if (
-        raw_category
-        != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+        owner_type
+        == PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     ):
-        return raw_category
+        return LLMModel.PRICE_ROLE_CLOUD_HOSTED
+    if (
+        owner_type
+        != PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+    ):
+        return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
 
     models = list(source.models.select_related("meta_model"))
     if not models:
-        return raw_category
+        return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
 
     for model in models:
         category = business_source_category_for_source_model(
@@ -1013,7 +1032,7 @@ def business_source_category_for_catalog(source):
             != PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
         ):
             return category
-    return raw_category
+    return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
 
 
 def price_role_label(category):
@@ -1070,7 +1089,10 @@ def collection_method_for_source(source):
 
         if source_supports_code_collection(source):
             return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
-    if source.source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
+    if (
+        source_owner_type_for_source(source)
+        == PriceCollectionSource.SOURCE_OWNER_INTERNAL
+    ):
         return PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
     return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
 
@@ -1104,17 +1126,16 @@ def default_source_owner_type_for_values(source_category, provider):
     return PriceCollectionSource.SOURCE_OWNER_UNKNOWN
 
 
-def default_collection_method_for_values(source_category, source_type):
+def default_collection_method_for_values(
+    source_category,
+    source_type,
+    source_owner_type=None,
+):
     """Return the default maintenance method for serializer-created sources."""
-    if (
-        source_category
-        == PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
-    ):
-        return PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
-    if source_category == PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER:
-        if source_type == PriceCollectionSource.SOURCE_TYPE_YUNCE:
-            return PriceCollectionSource.COLLECTION_METHOD_API_SYNC
-        return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN
+    if source_type == PriceCollectionSource.SOURCE_TYPE_YUNCE:
+        return PriceCollectionSource.COLLECTION_METHOD_API_SYNC
+    if source_owner_type == PriceCollectionSource.SOURCE_OWNER_INTERNAL:
+        return PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
     if source_category == PriceCollectionSource.SOURCE_CATEGORY_MANUAL:
         return PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
     return PriceCollectionSource.COLLECTION_METHOD_UNKNOWN

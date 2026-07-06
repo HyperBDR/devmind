@@ -8,7 +8,11 @@ import {
   normalizePriceSourceCategory as businessSourceCategory,
   priceSourceCategory,
   priceSourceCategoryRank as categoryRank,
-  priceSourceCollectionMethod as sourceCollectionMethod
+  priceSourceCollectionGroup,
+  priceSourceCollectionGroupRank,
+  priceSourceCollectionMethod as sourceCollectionMethod,
+  priceSourceOwnerType,
+  priceSourceOwnerTypeLabel
 } from '@/utils/llmOpsPriceSources'
 
 export function useProviderSourceRows({
@@ -24,24 +28,16 @@ export function useProviderSourceRows({
       label: t('llmOps.providerManagement.filters.allTypes')
     },
     {
-      value: 'official_provider',
-      label: t('llmOps.providerManagement.category.officialProvider')
-    },
-    {
-      value: 'supplier',
-      label: t('llmOps.providerManagement.category.supplier')
-    },
-    {
-      value: 'cloud_hosted',
-      label: t('llmOps.providerManagement.category.cloudHosted')
+      value: 'auto',
+      label: t('llmOps.providerManagement.sourceSyncMode.auto')
     },
     {
       value: 'manual',
-      label: t('llmOps.providerManagement.category.internal')
+      label: t('llmOps.providerManagement.sourceSyncMode.manual')
     },
     {
       value: 'unknown',
-      label: t('llmOps.providerManagement.category.unknown')
+      label: t('llmOps.providerManagement.sourceSyncMode.pending')
     }
   ])
 
@@ -64,6 +60,15 @@ export function useProviderSourceRows({
     props.sources
       .map((source) => buildSourceRow(source))
       .sort((left, right) => {
+        const leftGroupRank = priceSourceCollectionGroupRank(
+          left.collection_group
+        )
+        const rightGroupRank = priceSourceCollectionGroupRank(
+          right.collection_group
+        )
+        if (leftGroupRank !== rightGroupRank) {
+          return leftGroupRank - rightGroupRank
+        }
         const leftRank = categoryRank(left.business_source_category)
         const rightRank = categoryRank(right.business_source_category)
         if (leftRank !== rightRank) return leftRank - rightRank
@@ -82,17 +87,11 @@ export function useProviderSourceRows({
   )
 
   const sourceMetrics = computed(() => {
-    const official = entrySourceRows.value.filter(
-      (source) => source.business_source_category === 'official_provider'
+    const auto = entrySourceRows.value.filter(
+      (source) => source.collection_group === 'auto'
     ).length
-    const supplier = entrySourceRows.value.filter(
-      (source) => source.business_source_category === 'supplier'
-    ).length
-    const cloudHosted = entrySourceRows.value.filter(
-      (source) => source.business_source_category === 'cloud_hosted'
-    ).length
-    const internal = entrySourceRows.value.filter(
-      (source) => source.business_source_category === 'manual'
+    const manual = entrySourceRows.value.filter(
+      (source) => source.collection_group === 'manual'
     ).length
 
     return [
@@ -110,18 +109,14 @@ export function useProviderSourceRows({
         hint: t('llmOps.providerManagement.metrics.metaModels.hint')
       },
       {
-        label: t('llmOps.providerManagement.metrics.official.label'),
-        value: official,
-        hint: t('llmOps.providerManagement.metrics.official.hint')
+        label: t('llmOps.providerManagement.metrics.autoSources.label'),
+        value: auto,
+        hint: t('llmOps.providerManagement.metrics.autoSources.hint')
       },
       {
-        label: t('llmOps.providerManagement.metrics.supplierManual.label'),
-        value: supplier + cloudHosted + internal,
-        hint: t('llmOps.providerManagement.metrics.supplierManual.hint', {
-          supplier,
-          cloudHosted,
-          internal
-        })
+        label: t('llmOps.providerManagement.metrics.manualSources.label'),
+        value: manual,
+        hint: t('llmOps.providerManagement.metrics.manualSources.hint')
       }
     ]
   })
@@ -155,12 +150,7 @@ export function useProviderSourceRows({
 
   const officialResetProviderOptions = computed(() =>
     sourceRows.value
-      .filter(
-        (source) =>
-          source.source_category === 'official_provider' &&
-          source.provider_code &&
-          String(source.slug || '') === `${source.provider_code}-official`
-      )
+      .filter((source) => canOfficialResetSource(source))
       .map((source) => ({
         code: source.provider_code,
         label: source.provider_name || source.name || source.provider_code
@@ -173,7 +163,7 @@ export function useProviderSourceRows({
       id: `source-${source.id}`,
       name: source.name,
       code: source.slug,
-      category_keys: [source.business_source_category],
+      category_keys: [source.collection_group],
       covered_model_count: source.covered_model_count,
       collect_mode_label: source.collect_mode_label,
       collect_mode_tone: source.collect_mode_tone,
@@ -195,6 +185,9 @@ export function useProviderSourceRows({
     const relation = sourceRelation(source)
     const categoryKey = businessSourceCategory(source)
     const category = sourceCategory(categoryKey)
+    const collectionGroup = priceSourceCollectionGroup(source)
+    const ownerType = priceSourceOwnerType(source)
+    const ownerLabel = sourceOwnerTypeLabel(ownerType)
     const latestRun = latestRunForSource(source.id)
     const status = sourceStatus(source, latestRun)
     const syncMode = sourceSyncMode(source)
@@ -210,6 +203,9 @@ export function useProviderSourceRows({
       business_source_category: categoryKey,
       category_label: category.label,
       category_tone: category.tone,
+      collection_group: collectionGroup,
+      source_owner_type: ownerType,
+      source_owner_type_label: ownerLabel,
       relation_name: relation.name,
       relation_hint: relation.hint,
       config_summary: sourceConfigSummary(source, relation),
@@ -227,17 +223,19 @@ export function useProviderSourceRows({
       collect_action_label: collectActionLabel(source),
       collect_mode_label: collectModeLabel(source),
       collect_mode_tone: collectModeTone(source),
-      search_text: buildSourceSearchText(source, relation, category)
+      search_text: buildSourceSearchText(source, relation, category, ownerLabel)
     }
   }
 
-  function buildSourceSearchText(source, relation, category) {
+  function buildSourceSearchText(source, relation, category, ownerLabel) {
     return [
       source.name,
       source.slug,
       relation.name,
       relation.hint,
       category.label,
+      ownerLabel,
+      sourceCollectionMethod(source),
       source.provider_name,
       source.channel_name,
       source.endpoint_url
@@ -255,6 +253,20 @@ export function useProviderSourceRows({
       supplier: t('llmOps.providerManagement.category.supplier'),
       manual: t('llmOps.providerManagement.category.internal'),
       cloud_hosted: t('llmOps.providerManagement.category.cloudHosted'),
+      unknown: t('llmOps.providerManagement.category.unknown')
+    })
+  }
+
+  function sourceOwnerTypeLabel(ownerType) {
+    return priceSourceOwnerTypeLabel(ownerType, {
+      model_provider_official: t(
+        'llmOps.providerManagement.category.officialProvider'
+      ),
+      cloud_provider_official: t(
+        'llmOps.providerManagement.category.cloudHosted'
+      ),
+      supplier: t('llmOps.providerManagement.category.supplier'),
+      internal: t('llmOps.providerManagement.category.internal'),
       unknown: t('llmOps.providerManagement.category.unknown')
     })
   }
@@ -309,7 +321,12 @@ export function useProviderSourceRows({
   }
 
   function sourceConfigSummary(source, relation = sourceRelation(source)) {
-    return [relation.hint, sourceModeLabel(source), source.currency]
+    return [
+      relation.hint,
+      sourceModeLabel(source),
+      sourceOwnerTypeLabel(priceSourceOwnerType(source)),
+      source.currency
+    ]
       .filter(Boolean)
       .join(' · ')
   }
@@ -404,12 +421,16 @@ export function useProviderSourceRows({
   }
 
   function canManualImportSource(source) {
-    return source?.business_source_category === 'manual'
+    return priceSourceCollectionGroup(source) === 'manual'
   }
 
   function isOfficialCollectionPendingSource(source) {
+    const ownerType = priceSourceOwnerType(source)
     return Boolean(
-      source?.business_source_category === 'official_provider' &&
+      ['model_provider_official', 'cloud_provider_official'].includes(
+        ownerType
+      ) &&
+        sourceCollectionMethod(source) === 'auto_collect' &&
         source?.updates_model_prices &&
         !canCollectSource(source)
     )
@@ -417,9 +438,12 @@ export function useProviderSourceRows({
 
   function canOfficialResetSource(source) {
     const providerCode = String(source?.provider_code || '').trim()
+    const ownerType = priceSourceOwnerType(source)
     return Boolean(
       providerCode &&
-        source?.business_source_category === 'official_provider' &&
+        ['model_provider_official', 'cloud_provider_official'].includes(
+          ownerType
+        ) &&
         String(source?.slug || '') === `${providerCode}-official` &&
         canCollectSource(source)
     )
