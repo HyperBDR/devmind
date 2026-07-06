@@ -1,6 +1,8 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { asArray, asObject } from '@/utils/llmOpsPagination'
+
 const monitorStatusLabelKeys = {
   currency_mismatch: 'llmOps.status.currencyMismatch',
   low_coverage: 'llmOps.status.lowCoverage',
@@ -36,22 +38,22 @@ export function useLLMOpsMonitor({
 
   const simulationChannelOptions = computed(() => [
     { label: t('llmOps.filters.allChannels'), value: '' },
-    ...channels.value.map((channel) => ({
+    ...asArray(channels.value).map((channel) => ({
       label: channel.name,
       value: channel.id
     }))
   ])
 
-  const agioneDiagnostics = computed(
-    () => summary.value.agione?.diagnostics || []
+  const agioneDiagnostics = computed(() =>
+    asArray(summary.value.agione?.diagnostics)
   )
-  const summaryKpis = computed(() => summary.value.kpis || {})
-  const diagnosticCounts = computed(
-    () => summary.value.agione?.diagnostic_counts || {}
+  const summaryKpis = computed(() => asObject(summary.value.kpis))
+  const diagnosticCounts = computed(() =>
+    asObject(summary.value.agione?.diagnostic_counts)
   )
 
   const activeModels = computed(() =>
-    models.value.filter((model) => model.is_active !== false)
+    asArray(models.value).filter((model) => model.is_active !== false)
   )
 
   const activeModelIds = computed(
@@ -62,12 +64,15 @@ export function useLLMOpsMonitor({
     numberOrFallback(summaryKpis.value.active_models, activeModels.value.length)
   )
   const operationalChannelCount = computed(() =>
-    numberOrFallback(summaryKpis.value.active_channels, channels.value.length)
+    numberOrFallback(
+      summaryKpis.value.active_channels,
+      asArray(channels.value).length
+    )
   )
   const enabledPriceSourceCount = computed(() =>
     numberOrFallback(
       summaryKpis.value.enabled_price_sources,
-      providerCollectionSources.value.length
+      asArray(providerCollectionSources.value).length
     )
   )
   const reconciliationAnomalyCount = computed(() =>
@@ -77,7 +82,7 @@ export function useLLMOpsMonitor({
   const agioneListingRows = computed(() => {
     const agioneId = agionePlatform.value?.id
     if (!agioneId) return []
-    return listings.value.filter(
+    return asArray(listings.value).filter(
       (listing) =>
         listing.is_active !== false &&
         String(listing.platform) === String(agioneId)
@@ -109,11 +114,12 @@ export function useLLMOpsMonitor({
       : procurementRows.value
     ).map((row) => {
       if (row.status) {
+        const options = asArray(row.options)
         return {
           ...row,
           best_channel: row.best_channel || null,
           display_channel: row.best_channel || null,
-          coverage_count: row.coverage_count ?? (row.options || []).length,
+          coverage_count: row.coverage_count ?? options.length,
           is_agione_listed: Boolean(row.is_agione_listed),
           has_lowest_listing: Boolean(row.has_lowest_listing),
           requires_currency_conversion: Boolean(
@@ -124,7 +130,7 @@ export function useLLMOpsMonitor({
           status_tone: monitorStatusTone(row.status)
         }
       }
-      const options = row.options || []
+      const options = asArray(row.options)
       const bestChannel = row.best_channel || null
       const coverageCount = options.length
       const agioneListings =
@@ -356,7 +362,7 @@ export function useLLMOpsMonitor({
 
   const latestCollectionRun = computed(
     () =>
-      collectionRuns.value
+      asArray(collectionRuns.value)
         .slice()
         .sort(
           (left, right) =>
@@ -371,20 +377,20 @@ export function useLLMOpsMonitor({
 
   const collectionAttentionCount = computed(
     () =>
-      collectionRuns.value.filter((run) =>
+      asArray(collectionRuns.value).filter((run) =>
         ['failed', 'running', 'pending', 'processing'].includes(run.status)
       ).length
   )
 
   const channelCoverageRows = computed(() =>
-    channels.value
+    asArray(channels.value)
       .map((channel) => {
-        const covered = procurementRows.value.filter((row) =>
-          (row.options || []).some(
+        const covered = asArray(procurementRows.value).filter((row) =>
+          asArray(row.options).some(
             (option) => String(option.channel_id) === String(channel.id)
           )
         ).length
-        const bestCount = procurementRows.value.filter(
+        const bestCount = asArray(procurementRows.value).filter(
           (row) => String(row.best_channel?.channel_id) === String(channel.id)
         ).length
         return {

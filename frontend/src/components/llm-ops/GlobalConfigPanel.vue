@@ -472,7 +472,7 @@ function formatDateTime(value) {
 }
 
 function extract(response) {
-  const payload = response?.data ?? response
+  const payload = response?.data?.data ?? response?.data ?? response
   return payload?.results ?? payload
 }
 

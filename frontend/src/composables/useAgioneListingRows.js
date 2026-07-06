@@ -1,5 +1,7 @@
 import { computed, unref } from 'vue'
+
 import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
+import { asArray } from '@/utils/llmOpsPagination'
 
 /**
  * Centralized derived state for the Agione resale listing workbench.
@@ -29,14 +31,14 @@ export function useAgioneListingRows({
 }) {
   const listingRows = computed(() => {
     const procurementByModel = new Map(
-      (unref(summaryRef)?.procurement || []).map((row) => [
+      asArray(unref(summaryRef)?.procurement).map((row) => [
         String(row.model_id),
         row
       ])
     )
     const listingsByModel = new Map()
     const platform = unref(agionePlatformRef)
-    const listings = unref(listingsRef) || []
+    const listings = asArray(unref(listingsRef))
     listings
       .filter(
         (listing) =>
@@ -49,10 +51,10 @@ export function useAgioneListingRows({
         listingsByModel.set(key, rows)
       })
 
-    return (unref(modelsRef) || []).flatMap((model) => {
+    return asArray(unref(modelsRef)).flatMap((model) => {
       const modelId = String(model.id)
       const procurement = procurementByModel.get(modelId) || {}
-      const options = procurement.options || []
+      const options = asArray(procurement.options)
       const lowestOption = procurement.best_channel || null
       const modelListings = listingsByModel.get(modelId) || []
       if (!options.length && !modelListings.length) return []
@@ -117,9 +119,9 @@ export function useAgioneListingRows({
         source_count: 0
       }
       group.rows.push(row)
-      group.options.push(...row.options)
-      group.listings.push(...row.listings)
-      group.active_listings.push(...row.active_listings)
+      group.options.push(...asArray(row.options))
+      group.listings.push(...asArray(row.listings))
+      group.active_listings.push(...asArray(row.active_listings))
       group.is_listed = group.is_listed || row.is_listed
       group.requires_currency_conversion =
         group.requires_currency_conversion || row.requires_currency_conversion
@@ -138,7 +140,7 @@ export function useAgioneListingRows({
               Number(left.estimated_cost || 0) -
               Number(right.estimated_cost || 0)
           )[0] || null
-      const activeOptions = group.active_listings
+      const activeOptions = asArray(group.active_listings)
         .map((listing) => listingOption(listing, lowestOption, options))
         .filter(Boolean)
       const cheapestActiveOption =
@@ -336,7 +338,7 @@ export function useAgioneListingRows({
     const normalizedRate = Number.isFinite(profitRate) ? profitRate : 0
     const lowestValue = Number(lowestChannelPrice.value?.value || 0)
     return trendChannelOptions.value.map((option) => {
-      const proposedValues = option.metric_values.map((item) => ({
+      const proposedValues = asArray(option.metric_values).map((item) => ({
         ...item,
         value: Number(item.value || 0) * (1 + normalizedRate / 100)
       }))
@@ -346,9 +348,9 @@ export function useAgioneListingRows({
           ?.value ??
         proposedValues[0]?.value ??
         0
-      const activeListing = selectedTrendRow.value?.active_listings.find(
-        (listing) => String(listing.channel) === String(option.channel_id)
-      )
+      const activeListing = asArray(
+        selectedTrendRow.value?.active_listings
+      ).find((listing) => String(listing.channel) === String(option.channel_id))
       const gapValue = Math.max(0, costValue - lowestValue)
       const gapPercent = lowestValue > 0 ? (gapValue / lowestValue) * 100 : 0
       return {
@@ -391,7 +393,7 @@ export function useAgioneListingRows({
 
   const selectedOptionIsListed = computed(() => {
     if (!selectedTrendOption.value || !selectedTrendRow.value) return false
-    return selectedTrendRow.value.active_listings.some(
+    return asArray(selectedTrendRow.value.active_listings).some(
       (listing) =>
         String(listing.channel) === String(selectedTrendOption.value.channel_id)
     )
@@ -457,7 +459,7 @@ export function useAgioneListingRows({
 
   function listingOption(listing, lowestOption, options) {
     if (!listing.channel) return lowestOption
-    return options.find(
+    return asArray(options).find(
       (option) => String(option.channel_id) === String(listing.channel)
     )
   }
@@ -474,7 +476,7 @@ export function useAgioneListingRows({
 
   function uniqueTrendOptions(options) {
     const byChannel = new Map()
-    options.forEach((option) => {
+    asArray(options).forEach((option) => {
       const key = String(option.channel_id || '')
       if (!key) return
       const current = byChannel.get(key)
@@ -660,7 +662,7 @@ export function useAgioneListingRows({
   }
 
   function activeListingChannels(row) {
-    const listings = row?.active_listings || []
+    const listings = asArray(row?.active_listings)
     if (!listings.length) return '-'
     return listings
       .map((listing) => listing.channel_name || '未指定渠道')

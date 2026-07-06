@@ -764,6 +764,7 @@
 import '@/components/llm-ops/channelModelDrawer.css'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
 import { llmOpsApi } from '@/api/llmOps'
 import {
   normalizeSearch,
@@ -774,6 +775,8 @@ import { useChannelModelNewDraft } from '@/composables/useChannelModelNewDraft'
 import { useChannelModelPricing } from '@/composables/useChannelModelPricing'
 import { useChannelModelRows } from '@/composables/useChannelModelRows'
 import { useChannelModelSelection } from '@/composables/useChannelModelSelection'
+import { asArray } from '@/utils/llmOpsPagination'
+
 import CompactSelect from './CompactSelect.vue'
 import OperationIconButton from './OperationIconButton.vue'
 
@@ -916,14 +919,14 @@ const saveButtonLabel = computed(() =>
 )
 
 const baseAvailableModels = computed(() =>
-  props.models.filter((model) => {
+  asArray(props.models).filter((model) => {
     return !configuredIdentityKeys.value.has(modelMetaIdentityKey(model))
   })
 )
 
 const configuredIdentityKeys = computed(() => {
   const keys = new Set()
-  props.models.forEach((model) => {
+  asArray(props.models).forEach((model) => {
     const draft = drafts.value[model.id]
     if (draft?.is_configured || shouldPersist(draft || {})) {
       keys.add(modelMetaIdentityKey(model))
@@ -934,7 +937,7 @@ const configuredIdentityKeys = computed(() => {
 
 const metaModelById = computed(() => {
   const items = new Map()
-  props.metaModels.forEach((model) => {
+  asArray(props.metaModels).forEach((model) => {
     if (model?.id !== undefined && model?.id !== null) {
       items.set(String(model.id), model)
     }
@@ -944,7 +947,7 @@ const metaModelById = computed(() => {
 
 const metaModelByCode = computed(() => {
   const items = new Map()
-  props.metaModels.forEach((model) => {
+  asArray(props.metaModels).forEach((model) => {
     const code = normalizeSearch(model?.code || '')
     if (code) {
       items.set(code, model)
@@ -986,6 +989,7 @@ const {
   selectVisibleModels,
   selectedCostModel,
   selectedModelCount,
+  selectedModelOptions,
   selectedResolvedModels,
   toggleModelSelection,
   vendorOptions
@@ -1062,12 +1066,12 @@ watch(
       return
     }
     const pricesByModel = new Map(
-      props.channelPrices
+      asArray(props.channelPrices)
         .filter((price) => String(price.channel) === String(props.channel.id))
         .map((price) => [String(price.model), price])
     )
     drafts.value = Object.fromEntries(
-      props.models.map((model) => [
+      asArray(props.models).map((model) => [
         model.id,
         draftDefaults(model, pricesByModel.get(String(model.id)))
       ])
