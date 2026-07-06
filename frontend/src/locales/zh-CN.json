@@ -1404,6 +1404,14 @@
           "hint": "由官方服务商直接发布",
           "label": "原厂源"
         },
+        "autoSources": {
+          "hint": "通过已注册采集实现自动维护",
+          "label": "自动源"
+        },
+        "manualSources": {
+          "hint": "通过录入或导入人工维护",
+          "label": "手动源"
+        },
         "sources": {
           "hint": "已接入模型价格的服务商价格源",
           "label": "价格源"

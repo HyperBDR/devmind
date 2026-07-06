@@ -150,7 +150,14 @@ def selected_price_collection_sources(config):
         queryset = queryset.none()
     else:
         queryset = queryset.filter(is_enabled=True)
-    return list(queryset.order_by("source_category", "name", "id"))
+    return list(
+        queryset.order_by(
+            "collection_method",
+            "source_owner_type",
+            "name",
+            "id",
+        )
+    )
 
 
 def price_sync_task_source_ids(config: LLMOpsGlobalConfig) -> list[int] | None:

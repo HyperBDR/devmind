@@ -42,6 +42,7 @@ from .services import (
     match_meta_model_by_alias_or_name,
     normalize_currency,
     price_role_for_source,
+    source_owner_type_for_source,
     update_aggregated_model_identity,
 )
 from .skill_runner import (
@@ -358,10 +359,15 @@ def sync_vendor_price_source_catalog(
     source: PriceCollectionSource,
     verify_source: bool = True,
 ) -> dict[str, int | list[str]]:
-    """Collect a non-official vendor price source through an adapter."""
+    """Collect an auto price source through a registered adapter."""
     if not source.is_enabled:
         raise ValueError("Price collection source is disabled.")
     source_url = source.endpoint_url or ""
+    provider_name = (
+        source.provider.name
+        if source.provider_id and source.provider
+        else source.name
+    )
     run = PriceCollectionRun.objects.create(source=source)
     stats = {
         "models": 0,
@@ -373,16 +379,23 @@ def sync_vendor_price_source_catalog(
         "skipped_model_codes": [],
     }
     try:
-        standard_catalog = collect_vendor_price_catalog(
-            provider_code,
-            {
-                "provider_name": source.name,
-                "currency": source.currency or "CNY",
-                "source_url": source_url,
-                "model_codes": [],
-                "verify_source": verify_source,
-            },
-        )
+        vendor_payload = {
+            "provider_name": provider_name,
+            "currency": source.currency or "CNY",
+            "source_url": source_url,
+            "model_codes": [],
+            "verify_source": verify_source,
+        }
+        try:
+            standard_catalog = collect_vendor_price_catalog(
+                provider_code,
+                vendor_payload,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "Vendor price catalog collector not found for provider "
+                f"'{provider_code}'."
+            ) from exc
         catalog = standard_catalog_to_collected_catalog(standard_catalog)
         with transaction.atomic():
             for item in catalog.models:
@@ -2165,18 +2178,17 @@ def ensure_model_sku_for_model(
 
 
 def sku_variant_type(source: PriceCollectionSource) -> str:
-    """Return SKU variant type from its collection source classification."""
-    if source.source_owner_type == (
+    """Return SKU variant type from source owner metadata."""
+    owner_type = source_owner_type_for_source(source)
+    if owner_type == (
         PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL
     ):
         return ModelSku.VARIANT_CLOUD_HOSTED
-    if source.source_category == (
-        PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+    if owner_type == (
+        PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
     ):
         return ModelSku.VARIANT_OFFICIAL
-    if source.source_category == (
-        PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
-    ):
+    if owner_type == PriceCollectionSource.SOURCE_OWNER_SUPPLIER:
         return ModelSku.VARIANT_RESELLER
     return ModelSku.VARIANT_UNKNOWN
 
@@ -2411,10 +2423,30 @@ def legacy_official_model_for_provider_source(
     code: str,
 ) -> LLMModel | None:
     """Return an existing model row that should move to provider source."""
+    official_owner_types = (
+        PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+    )
     official_model = (
         LLMModel.objects.filter(
             provider=provider,
             code=code,
+            source__source_owner_type__in=official_owner_types,
+        )
+        .exclude(source=source)
+        .order_by("id")
+        .first()
+    )
+    if official_model is not None:
+        return official_model
+
+    legacy_official_model = (
+        LLMModel.objects.filter(
+            provider=provider,
+            code=code,
+            source__source_owner_type=(
+                PriceCollectionSource.SOURCE_OWNER_UNKNOWN
+            ),
             source__source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
@@ -2423,8 +2455,8 @@ def legacy_official_model_for_provider_source(
         .order_by("id")
         .first()
     )
-    if official_model is not None:
-        return official_model
+    if legacy_official_model is not None:
+        return legacy_official_model
 
     return (
         LLMModel.objects.filter(
@@ -2511,10 +2543,9 @@ def resolve_collected_provider(
     source: PriceCollectionSource,
 ) -> LLMProvider:
     """Resolve the provider row a collected model should attach to."""
-    if (
-        source.provider_id
-        and source.source_category
-        != PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER
+    if source.provider_id and source_owner_type_for_source(source) in (
+        PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
     ):
         return source.provider
 

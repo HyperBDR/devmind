@@ -212,6 +212,10 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import {
+  priceSourceCollectionMethod,
+  priceSourceOwnerType
+} from '@/utils/llmOpsPriceSources'
 
 defineEmits(['close', 'delete', 'refresh', 'page-change'])
 
@@ -567,14 +571,7 @@ function modalityLabel(modality) {
 }
 
 function sourceOwnerType(source) {
-  const ownerType = source?.source_owner_type
-  if (ownerType && ownerType !== 'unknown') return ownerType
-  if (source?.source_category === 'official_provider') {
-    return 'model_provider_official'
-  }
-  if (source?.source_category === 'supplier') return 'supplier'
-  if (source?.source_category === 'manual') return 'internal'
-  return ownerType || 'unknown'
+  return priceSourceOwnerType(source)
 }
 
 function sourceOwnerTypeLabel(ownerType) {
@@ -616,17 +613,7 @@ function sourceModeLabel(source) {
 }
 
 function sourceCollectionMethod(source) {
-  const method = source?.collection_method
-  if (method && method !== 'unknown') return method
-  if (source?.source_type === 'yunce') return 'api_sync'
-  if (
-    source?.source_category === 'official_provider' &&
-    source?.updates_model_prices
-  ) {
-    return 'auto_collect'
-  }
-  if (source?.source_category === 'manual') return 'manual_entry'
-  return method || 'unknown'
+  return priceSourceCollectionMethod(source)
 }
 
 function formatDateTime(value) {

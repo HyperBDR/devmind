@@ -219,9 +219,7 @@ const autoSyncSourceOptions = ref([])
 const selectedAutoSyncSourceCode = ref('')
 const loadingAutoSyncSourceOptions = ref(false)
 const isEditing = computed(() => Boolean(props.source?.id))
-const isAutoSyncMode = computed(
-  () => form.value.source_owner_type !== 'internal'
-)
+const isAutoSyncMode = computed(() => syncMode.value === 'auto')
 const shouldCreateAutoSyncPreset = computed(
   () => !isEditing.value && isAutoSyncMode.value
 )
@@ -233,9 +231,13 @@ const isStableOfficialSource = computed(() => {
   const source = props.source || {}
   const providerCode = String(source.provider_code || '').trim()
   if (!providerCode) return false
+  const ownerType =
+    source.source_owner_type ||
+    sourceOwnerTypeFromLegacyCategory(source.source_category)
   return (
-    source.source_category === 'official_provider' &&
-    String(source.slug || '') === `${providerCode}-official`
+    ['model_provider_official', 'cloud_provider_official'].includes(
+      ownerType
+    ) && String(source.slug || '') === `${providerCode}-official`
   )
 })
 const slugHelpText = computed(() => {
@@ -274,6 +276,11 @@ const syncModeOptions = computed(() => [
 
 const syncMode = computed({
   get() {
+    if (
+      ['manual_entry', 'manual_import'].includes(form.value.collection_method)
+    ) {
+      return 'manual'
+    }
     return form.value.source_owner_type === 'internal' ? 'manual' : 'auto'
   },
   set(value) {
@@ -293,7 +300,7 @@ const syncMode = computed({
       ...form.value,
       source_owner_type: 'supplier',
       source_category: 'supplier',
-      collection_method: 'unknown',
+      collection_method: 'auto_collect',
       updates_model_prices: true
     }
     if (!autoSyncSourceOptions.value.length) {
@@ -394,7 +401,7 @@ function defaults() {
     endpoint_url: '',
     currency: 'CNY',
     is_enabled: true,
-    updates_model_prices: false,
+    updates_model_prices: true,
     notes: ''
   }
 }
@@ -549,7 +556,14 @@ function sourceOptionKey(option) {
 }
 
 function isStableOfficialOption(option) {
-  if (option?.source_category !== 'official_provider') return false
+  const ownerType =
+    option?.source_owner_type ||
+    sourceOwnerTypeFromLegacyCategory(option?.source_category)
+  if (
+    !['model_provider_official', 'cloud_provider_official'].includes(ownerType)
+  ) {
+    return false
+  }
   const providerCode = String(option.provider_code || '').trim()
   return Boolean(
     providerCode &&

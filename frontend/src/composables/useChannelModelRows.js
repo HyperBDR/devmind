@@ -10,7 +10,7 @@ export function useChannelModelRows({
 }) {
   const managedRows = computed(() => {
     if (!props.channel) return []
-    return props.models
+    return (props.models || [])
       .filter((model) => {
         const draft = drafts.value[model.id]
         return draft?.is_configured || shouldPersist(draft || {})
@@ -61,7 +61,7 @@ export function useChannelModelRows({
   function channelPriceItemsForModel(model, draft) {
     if (!props.channel || !draft?.id) return []
     return sortPriceItems(
-      props.channelPriceItems.filter(
+      (props.channelPriceItems || []).filter(
         (item) =>
           String(item.channel) === String(props.channel.id) &&
           String(item.model) === String(model.id) &&

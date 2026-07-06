@@ -64,7 +64,8 @@ class AuditLogAdmin(admin.ModelAdmin):
 class PriceCollectionSourceAdmin(admin.ModelAdmin):
     list_display = (
         "name",
-        "source_category",
+        "collection_method",
+        "source_owner_type",
         "provider",
         "channel",
         "slug",
@@ -73,7 +74,8 @@ class PriceCollectionSourceAdmin(admin.ModelAdmin):
         "is_enabled",
     )
     list_filter = (
-        "source_category",
+        "collection_method",
+        "source_owner_type",
         "provider",
         "channel",
         "source_type",

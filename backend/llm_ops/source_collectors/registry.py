@@ -3,13 +3,11 @@ from __future__ import annotations
 from llm_ops.models import PriceCollectionSource
 
 from .base import CollectorResult, PriceSourceCollector
-from .official import build_official_provider_collectors
-from .siliconflow import SiliconFlowPriceSourceCollector
+from .auto import AutoPriceSourceCollector
 
 
 PRICE_SOURCE_COLLECTORS: tuple[PriceSourceCollector, ...] = (
-    *build_official_provider_collectors(),
-    SiliconFlowPriceSourceCollector(),
+    AutoPriceSourceCollector(),
 )
 
 

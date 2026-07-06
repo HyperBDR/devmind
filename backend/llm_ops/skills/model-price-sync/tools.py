@@ -12,6 +12,9 @@ def build_model_price_sync_tools(runner_ref: Any) -> list[BaseTool]:
     @tool
     def list_configured_price_sources() -> dict[str, Any]:
         """List model price sources selected by runtime configuration."""
+        from llm_ops.source_collectors import source_supports_code_collection
+        from llm_ops.source_collectors.auto import auto_collection_adapter_code
+
         sources = runner_ref.list_configured_sources()
         return {
             "sources": [
@@ -23,6 +26,12 @@ def build_model_price_sync_tools(runner_ref: Any) -> list[BaseTool]:
                         source.provider.code if source.provider_id else ""
                     ),
                     "source_category": source.source_category,
+                    "source_owner_type": source.source_owner_type,
+                    "collection_method": source.collection_method,
+                    "adapter_code": auto_collection_adapter_code(source),
+                    "can_collect_prices": source_supports_code_collection(
+                        source
+                    ),
                     "endpoint_url": source.endpoint_url,
                     "currency": source.currency,
                     "is_enabled": source.is_enabled,

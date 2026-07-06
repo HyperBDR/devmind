@@ -25,19 +25,10 @@ from llm_ops.source_collectors import (
     get_price_source_collector,
     source_supports_code_collection,
 )
-from llm_ops.source_collectors.official import (
-    SUPPORTED_OFFICIAL_PROVIDER_CODES,
-)
 
 
 class PriceSourceCollectorRegistryTests(TestCase):
-    def test_official_collectors_follow_price_source_implementations(self):
-        self.assertEqual(
-            {"aliyun", "azure-openai", "deepseek"},
-            set(SUPPORTED_OFFICIAL_PROVIDER_CODES),
-        )
-
-    def test_official_provider_source_dispatches_to_provider_collector(self):
+    def test_auto_source_dispatches_to_registered_provider_parser(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
             name="Aliyun Official",
@@ -50,22 +41,24 @@ class PriceSourceCollectorRegistryTests(TestCase):
             endpoint_url=(
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
 
         collector = get_price_source_collector(source)
         self.assertIsNotNone(collector)
-        self.assertEqual(collector.collector_id, "official_provider:aliyun")
+        self.assertEqual(collector.collector_id, "auto_price_source")
         self.assertEqual(
             collector.__class__.__name__,
-            "AliyunOfficialPriceSourceCollector",
+            "AutoPriceSourceCollector",
         )
         self.assertTrue(source_supports_code_collection(source))
 
         with mock.patch(
-            "llm_ops.source_collectors.official."
-            "sync_official_provider_model_prices"
+            "llm_ops.collection_services.sync_vendor_price_source_catalog"
         ) as mock_sync:
             mock_sync.return_value = {"models": 1}
             result = collect_price_source(
@@ -74,7 +67,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
             )
 
         mock_sync.assert_called_once_with(
-            provider=provider,
+            provider_code="aliyun",
             source=source,
             verify_source=False,
         )
@@ -93,6 +86,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
             endpoint_url=(
                 "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
             ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -100,7 +96,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
         collector = get_price_source_collector(source)
 
         self.assertIsNotNone(collector)
-        self.assertEqual(collector.collector_id, "official_provider:deepseek")
+        self.assertEqual(collector.collector_id, "auto_price_source")
         self.assertTrue(source_supports_code_collection(source))
 
     def test_azure_openai_source_dispatches_to_official_collector(self):
@@ -120,6 +116,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
                 "https://azure.microsoft.com/en-us/pricing/details/"
                 "azure-openai/#pricing"
             ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -127,23 +126,26 @@ class PriceSourceCollectorRegistryTests(TestCase):
         collector = get_price_source_collector(source)
 
         self.assertIsNotNone(collector)
-        self.assertEqual(
-            collector.collector_id,
-            "official_provider:azure-openai",
-        )
+        self.assertEqual(collector.collector_id, "auto_price_source")
         self.assertTrue(source_supports_code_collection(source))
 
-    def test_unimplemented_official_source_is_not_supported(self):
-        provider = LLMProvider.objects.create(name="百度", code="baidu")
+    def test_auto_source_without_registered_parser_is_not_supported(self):
+        provider = LLMProvider.objects.create(
+            name="Unknown AI",
+            code="unknown-ai",
+        )
         source = PriceCollectionSource.objects.create(
-            name="Baidu Official",
-            slug="baidu-official",
+            name="Unknown Official",
+            slug="unknown-ai-official",
             provider=provider,
             source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             source_category=(
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
-            endpoint_url="https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+            endpoint_url="https://example.com/pricing",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -153,7 +155,7 @@ class PriceSourceCollectorRegistryTests(TestCase):
         self.assertIsNone(collector)
         self.assertFalse(source_supports_code_collection(source))
 
-    def test_model_level_official_source_is_not_supported(self):
+    def test_auto_collection_ignores_source_category(self):
         provider = LLMProvider.objects.create(name="阿里云", code="aliyun")
         source = PriceCollectionSource.objects.create(
             name="Aliyun Qwen Plus Official",
@@ -166,16 +168,19 @@ class PriceSourceCollectorRegistryTests(TestCase):
             endpoint_url=(
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
 
         collector = get_price_source_collector(source)
 
-        self.assertIsNone(collector)
-        self.assertFalse(source_supports_code_collection(source))
+        self.assertIsNotNone(collector)
+        self.assertTrue(source_supports_code_collection(source))
 
-    def test_supplier_source_does_not_support_code_collection(self):
+    def test_non_auto_source_does_not_support_code_collection(self):
         provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
         source = PriceCollectionSource.objects.create(
             name="SiliconFlow Sheet",
@@ -184,6 +189,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
             source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
             endpoint_url="https://example.com/pricing",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -204,6 +212,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
             source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
             endpoint_url="https://siliconflow.cn/pricing",
             currency="CNY",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -211,12 +222,11 @@ class PriceSourceCollectorRegistryTests(TestCase):
         collector = get_price_source_collector(source)
 
         self.assertIsNotNone(collector)
-        self.assertEqual(collector.collector_id, "supplier:siliconflow")
+        self.assertEqual(collector.collector_id, "auto_price_source")
         self.assertTrue(source_supports_code_collection(source))
 
         with mock.patch(
-            "llm_ops.source_collectors.siliconflow."
-            "sync_vendor_price_source_catalog"
+            "llm_ops.collection_services.sync_vendor_price_source_catalog"
         ) as mock_sync:
             mock_sync.return_value = {"models": 2}
             result = collect_price_source(source, verify_source=False)
@@ -241,6 +251,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
             endpoint_url=(
                 "https://help.aliyun.com/zh/model-studio/model-pricing"
             ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -250,6 +263,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
             source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
             endpoint_url="https://siliconflow.cn/pricing",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -259,6 +275,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
             source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
             source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
             endpoint_url="https://example.com/pricing",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
@@ -285,6 +304,9 @@ class PriceSourceCollectorRegistryTests(TestCase):
                 PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
             ),
             endpoint_url="https://example.com/pricing",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
             is_enabled=True,
             updates_model_prices=True,
         )
