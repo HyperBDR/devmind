@@ -41,6 +41,10 @@ BAIDU_PRICING_SOURCE_URL = "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya"
 VOLCENGINE_PRICING_SOURCE_URL = (
     "https://www.volcengine.com/docs/82379/1544106?lang=zh"
 )
+MINIMAX_PRICING_SOURCE_URL = (
+    "https://platform.minimaxi.com/subscribe/token-plan?tab=api-enterprise"
+)
+ZHIPU_PRICING_SOURCE_URL = "https://bigmodel.cn/pricing"
 ALIYUN_LEGACY_PRICING_SOURCE_URLS = {
     "https://help.aliyun.com/zh/model-studio/model-price",
     "https://help.aliyun.com/zh/model-studio/models",
@@ -338,7 +342,10 @@ OFFICIAL_PROVIDER_CONFIGS = {
     "google": OfficialProviderConfig(
         provider_code="google",
         provider_label="Google",
-        source_url="https://ai.google.dev/gemini-api/docs/pricing",
+        source_url=(
+            "https://cloud.google.com/gemini-enterprise-agent-platform/"
+            "generative-ai/pricing?hl=en"
+        ),
         currency="USD",
         models=(
             OfficialPriceSpec(
@@ -717,6 +724,20 @@ OFFICIAL_PROVIDER_CONFIGS = {
                 display_name="DeepSeek R1 0528",
             ),
         ),
+    ),
+    "minimax": OfficialProviderConfig(
+        provider_code="minimax",
+        provider_label="MiniMax",
+        source_url=MINIMAX_PRICING_SOURCE_URL,
+        currency="CNY",
+        models=(),
+    ),
+    "zhipu": OfficialProviderConfig(
+        provider_code="zhipu",
+        provider_label="智谱",
+        source_url=ZHIPU_PRICING_SOURCE_URL,
+        currency="CNY",
+        models=(),
     ),
     "deepseek": OfficialProviderConfig(
         provider_code="deepseek",

@@ -4,16 +4,28 @@ from typing import Any
 
 from .base import VendorPriceCatalogCollector
 from .parsers.aliyun import AliyunPriceCatalogCollector
+from .parsers.anthropic import AnthropicPriceCatalogCollector
 from .parsers.azure_openai import AzureOpenAIPriceCatalogCollector
+from .parsers.baidu import BaiduPriceCatalogCollector
 from .parsers.deepseek import DeepSeekPriceCatalogCollector
+from .parsers.google import GooglePriceCatalogCollector
+from .parsers.minimax import MiniMaxPriceCatalogCollector
 from .parsers.siliconflow import SiliconFlowPriceCatalogCollector
+from .parsers.volcengine import VolcEnginePriceCatalogCollector
+from .parsers.zhipu import ZhipuPriceCatalogCollector
 
 
 PRICE_CATALOG_COLLECTORS: dict[str, VendorPriceCatalogCollector] = {
     "aliyun": AliyunPriceCatalogCollector(),
+    "anthropic": AnthropicPriceCatalogCollector(),
     "azure-openai": AzureOpenAIPriceCatalogCollector(),
+    "baidu": BaiduPriceCatalogCollector(),
     "deepseek": DeepSeekPriceCatalogCollector(),
+    "google": GooglePriceCatalogCollector(),
+    "minimax": MiniMaxPriceCatalogCollector(),
     "siliconflow": SiliconFlowPriceCatalogCollector(),
+    "volcengine": VolcEnginePriceCatalogCollector(),
+    "zhipu": ZhipuPriceCatalogCollector(),
 }
 
 

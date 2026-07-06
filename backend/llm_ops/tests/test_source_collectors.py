@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from llm_ops.collection_services import (
+    sync_vendor_price_source_catalog,
     sync_model_price_items,
     upsert_collected_snapshot,
     upsert_collected_offering,
@@ -116,6 +117,175 @@ class PriceSourceCollectorRegistryTests(TestCase):
                 "https://azure.microsoft.com/en-us/pricing/details/"
                 "azure-openai/#pricing"
             ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "auto_price_source")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_anthropic_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(
+            name="Anthropic",
+            code="anthropic",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Anthropic Official",
+            slug="anthropic-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://docs.anthropic.com/en/docs/about-claude/pricing"
+            ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "auto_price_source")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_baidu_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(
+            name="百度千帆",
+            code="baidu",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Baidu Qianfan Official",
+            slug="baidu-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "auto_price_source")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_google_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(name="Google", code="google")
+        source = PriceCollectionSource.objects.create(
+            name="Google Gemini Official",
+            slug="google-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://cloud.google.com/gemini-enterprise-agent-platform/"
+                "generative-ai/pricing?hl=en"
+            ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "auto_price_source")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_minimax_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(
+            name="MiniMax",
+            code="minimax",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="MiniMax Official",
+            slug="minimax-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://platform.minimaxi.com/subscribe/"
+                "token-plan?tab=api-enterprise"
+            ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "auto_price_source")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_volcengine_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(
+            name="火山方舟",
+            code="volcengine",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="VolcEngine Official",
+            slug="volcengine-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://www.volcengine.com/docs/82379/1544106?lang=zh"
+            ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        collector = get_price_source_collector(source)
+
+        self.assertIsNotNone(collector)
+        self.assertEqual(collector.collector_id, "auto_price_source")
+        self.assertTrue(source_supports_code_collection(source))
+
+    def test_zhipu_source_dispatches_to_official_collector(self):
+        provider = LLMProvider.objects.create(
+            name="智谱",
+            code="zhipu",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Zhipu Official",
+            slug="zhipu-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://bigmodel.cn/pricing",
             collection_method=(
                 PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
             ),
@@ -313,6 +483,101 @@ class PriceSourceCollectorRegistryTests(TestCase):
 
         self.assertIsNone(get_price_source_collector(source))
         self.assertFalse(source_supports_code_collection(source))
+
+    def test_source_sync_fails_when_catalog_is_empty(self):
+        provider = LLMProvider.objects.create(
+            name="MiniMax",
+            code="minimax",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="MiniMax Official",
+            slug="minimax-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://platform.minimaxi.com/subscribe/"
+                "token-plan?tab=api-enterprise"
+            ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        with mock.patch(
+            "llm_ops.collection_services.collect_vendor_price_catalog"
+        ) as mock_collect:
+            mock_collect.return_value = {
+                "schema_version": "llm_ops.model_price_catalog.v1",
+                "source_type": "provider_adapter",
+                "source_url": source.endpoint_url,
+                "total_models": 0,
+                "provider": {
+                    "code": "minimax",
+                    "name": "MiniMax",
+                    "currency": "CNY",
+                },
+                "models": [],
+                "notes": "",
+                "raw_payload": {
+                    "collector": "llm_ops.price_collectors.minimax",
+                },
+            }
+            with self.assertRaisesMessage(
+                ValueError,
+                "returned no models",
+            ):
+                sync_vendor_price_source_catalog(
+                    provider_code="minimax",
+                    source=source,
+                    verify_source=True,
+                )
+
+        run = PriceCollectionRun.objects.get(source=source)
+        self.assertEqual(run.status, PriceCollectionRun.STATUS_FAILED)
+        self.assertIn("returned no models", run.error_message)
+
+    def test_source_sync_preserves_collector_value_errors(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="DeepSeek Official",
+            slug="deepseek-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url=(
+                "https://api-docs.deepseek.com/zh-cn/quick_start/pricing"
+            ),
+            collection_method=(
+                PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT
+            ),
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+
+        with mock.patch(
+            "llm_ops.collection_services.collect_vendor_price_catalog"
+        ) as mock_collect:
+            mock_collect.side_effect = ValueError("bad parser payload")
+            with self.assertRaisesMessage(ValueError, "bad parser payload"):
+                sync_vendor_price_source_catalog(
+                    provider_code="deepseek",
+                    source=source,
+                    verify_source=True,
+                )
+
+        run = PriceCollectionRun.objects.get(source=source)
+        self.assertEqual(run.status, PriceCollectionRun.STATUS_FAILED)
+        self.assertEqual(run.error_message, "bad parser payload")
 
 
 class PriceCollectionSkuPersistenceTests(TestCase):

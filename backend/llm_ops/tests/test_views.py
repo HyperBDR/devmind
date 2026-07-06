@@ -963,7 +963,7 @@ class LLMOpsViewTests(TestCase):
             is_enabled=True,
             updates_model_prices=True,
         )
-        PriceCollectionSource.objects.create(
+        aliyun_qwen_source = PriceCollectionSource.objects.create(
             name="Aliyun Qwen Plus Official",
             slug="aliyun-qwen-plus-official",
             provider=aliyun,
@@ -991,13 +991,21 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["task_id"], "task-all")
-        self.assertEqual(response.data["source_count"], 2)
+        self.assertEqual(response.data["source_count"], 3)
         self.assertEqual(
             response.data["source_ids"],
-            [aliyun_source.id, siliconflow_source.id],
+            [
+                aliyun_source.id,
+                aliyun_qwen_source.id,
+                siliconflow_source.id,
+            ],
         )
         mock_delay.assert_called_once_with(
-            source_ids=[aliyun_source.id, siliconflow_source.id],
+            source_ids=[
+                aliyun_source.id,
+                aliyun_qwen_source.id,
+                siliconflow_source.id,
+            ],
             verify_source=True,
         )
         audit = AuditLog.objects.get(
@@ -1007,7 +1015,11 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(audit.metadata["task_id"], "task-all")
         self.assertEqual(
             audit.metadata["source_ids"],
-            [aliyun_source.id, siliconflow_source.id],
+            [
+                aliyun_source.id,
+                aliyun_qwen_source.id,
+                siliconflow_source.id,
+            ],
         )
 
     @patch("llm_ops.views.run_model_price_sync_agent.delay")
@@ -1030,7 +1042,17 @@ class LLMOpsViewTests(TestCase):
             item["provider_code"] for item in response.data["results"]
         }
         self.assertEqual(
-            {"aliyun", "azure-openai", "deepseek"},
+            {
+                "aliyun",
+                "anthropic",
+                "azure-openai",
+                "baidu",
+                "deepseek",
+                "google",
+                "minimax",
+                "volcengine",
+                "zhipu",
+            },
             provider_codes,
         )
 
@@ -1044,7 +1066,18 @@ class LLMOpsViewTests(TestCase):
             item["provider_code"] for item in response.data["results"]
         }
         self.assertEqual(
-            {"aliyun", "azure-openai", "deepseek", "siliconflow"},
+            {
+                "aliyun",
+                "anthropic",
+                "azure-openai",
+                "baidu",
+                "deepseek",
+                "google",
+                "minimax",
+                "siliconflow",
+                "volcengine",
+                "zhipu",
+            },
             provider_codes,
         )
         azure = next(
@@ -1066,6 +1099,34 @@ class LLMOpsViewTests(TestCase):
             "https://azure.microsoft.com/en-us/pricing/details/"
             "azure-openai/#pricing",
         )
+        anthropic = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "anthropic"
+        )
+        self.assertEqual(
+            anthropic["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(anthropic["currency"], "USD")
+        self.assertEqual(
+            anthropic["source_url"],
+            "https://docs.anthropic.com/en/docs/about-claude/pricing",
+        )
+        baidu = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "baidu"
+        )
+        self.assertEqual(
+            baidu["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(baidu["currency"], "CNY")
+        self.assertEqual(
+            baidu["source_url"],
+            "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+        )
         siliconflow = next(
             item
             for item in response.data["results"]
@@ -1079,6 +1140,61 @@ class LLMOpsViewTests(TestCase):
             siliconflow["source_url"],
             "https://siliconflow.cn/pricing",
         )
+        google = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "google"
+        )
+        self.assertEqual(
+            google["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(google["currency"], "USD")
+        self.assertEqual(
+            google["source_url"],
+            "https://cloud.google.com/gemini-enterprise-agent-platform/"
+            "generative-ai/pricing?hl=en",
+        )
+        minimax = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "minimax"
+        )
+        self.assertEqual(
+            minimax["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(minimax["currency"], "CNY")
+        self.assertEqual(
+            minimax["source_url"],
+            "https://platform.minimaxi.com/subscribe/"
+            "token-plan?tab=api-enterprise",
+        )
+        volcengine = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "volcengine"
+        )
+        self.assertEqual(
+            volcengine["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(volcengine["currency"], "CNY")
+        self.assertEqual(
+            volcengine["source_url"],
+            "https://www.volcengine.com/docs/82379/1544106?lang=zh",
+        )
+        zhipu = next(
+            item
+            for item in response.data["results"]
+            if item["provider_code"] == "zhipu"
+        )
+        self.assertEqual(
+            zhipu["source_owner_type"],
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(zhipu["currency"], "CNY")
+        self.assertEqual(zhipu["source_url"], "https://bigmodel.cn/pricing")
 
     def test_ensure_official_provider_source_creates_aliyun_source(self):
         response = self.client.post(
@@ -1164,6 +1280,208 @@ class LLMOpsViewTests(TestCase):
             "azure-openai/#pricing",
         )
 
+    def test_ensure_official_provider_source_creates_baidu_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "baidu"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(response.data["source"]["slug"], "baidu-official")
+        self.assertEqual(response.data["source"]["provider_code"], "baidu")
+        self.assertEqual(response.data["source"]["currency"], "CNY")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        provider = LLMProvider.objects.get(code="baidu")
+        source = PriceCollectionSource.objects.get(slug="baidu-official")
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://cloud.baidu.com/doc/qianfan/s/wmh4sv6ya",
+        )
+
+    def test_ensure_official_provider_source_creates_anthropic_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "anthropic"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(
+            response.data["source"]["slug"],
+            "anthropic-official",
+        )
+        self.assertEqual(
+            response.data["source"]["provider_code"],
+            "anthropic",
+        )
+        self.assertEqual(response.data["source"]["currency"], "USD")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        provider = LLMProvider.objects.get(code="anthropic")
+        source = PriceCollectionSource.objects.get(slug="anthropic-official")
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://docs.anthropic.com/en/docs/about-claude/pricing",
+        )
+
+    def test_ensure_official_provider_source_creates_google_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "google"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(response.data["source"]["slug"], "google-official")
+        self.assertEqual(response.data["source"]["provider_code"], "google")
+        self.assertEqual(response.data["source"]["currency"], "USD")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        provider = LLMProvider.objects.get(code="google")
+        source = PriceCollectionSource.objects.get(slug="google-official")
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://cloud.google.com/gemini-enterprise-agent-platform/"
+            "generative-ai/pricing?hl=en",
+        )
+
+    def test_ensure_official_provider_source_creates_minimax_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "minimax"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(response.data["source"]["slug"], "minimax-official")
+        self.assertEqual(response.data["source"]["provider_code"], "minimax")
+        self.assertEqual(response.data["source"]["currency"], "CNY")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        provider = LLMProvider.objects.get(code="minimax")
+        source = PriceCollectionSource.objects.get(slug="minimax-official")
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://platform.minimaxi.com/subscribe/"
+            "token-plan?tab=api-enterprise",
+        )
+
+    def test_ensure_official_provider_source_creates_volcengine_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "volcengine"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(
+            response.data["source"]["slug"],
+            "volcengine-official",
+        )
+        self.assertEqual(
+            response.data["source"]["provider_code"],
+            "volcengine",
+        )
+        self.assertEqual(response.data["source"]["currency"], "CNY")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        provider = LLMProvider.objects.get(code="volcengine")
+        source = PriceCollectionSource.objects.get(
+            slug="volcengine-official",
+        )
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_CLOUD_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://www.volcengine.com/docs/82379/1544106?lang=zh",
+        )
+
+    def test_ensure_official_provider_source_creates_zhipu_source(self):
+        response = self.client.post(
+            reverse("collection-source-ensure-official-provider"),
+            {"provider_code": "zhipu"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(response.data["provider_created"])
+        self.assertTrue(response.data["source_created"])
+        self.assertEqual(response.data["source"]["slug"], "zhipu-official")
+        self.assertEqual(response.data["source"]["provider_code"], "zhipu")
+        self.assertEqual(response.data["source"]["currency"], "CNY")
+        self.assertTrue(response.data["source"]["can_collect_prices"])
+        provider = LLMProvider.objects.get(code="zhipu")
+        source = PriceCollectionSource.objects.get(slug="zhipu-official")
+        self.assertEqual(source.provider, provider)
+        self.assertEqual(
+            source.source_owner_type,
+            PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL,
+        )
+        self.assertEqual(
+            source.collection_method,
+            PriceCollectionSource.COLLECTION_METHOD_AUTO_COLLECT,
+        )
+        self.assertTrue(source.updates_model_prices)
+        self.assertEqual(
+            source.endpoint_url,
+            "https://bigmodel.cn/pricing",
+        )
+
     def test_ensure_official_provider_source_is_idempotent(self):
         first = self.client.post(
             reverse("collection-source-ensure-official-provider"),
@@ -1196,13 +1514,13 @@ class LLMOpsViewTests(TestCase):
     ):
         response = self.client.post(
             reverse("collection-source-ensure-official-provider"),
-            {"provider_code": "baidu"},
+            {"provider_code": "openai"},
             format="json",
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Unsupported official provider", response.data["detail"])
-        self.assertFalse(LLMProvider.objects.filter(code="baidu").exists())
+        self.assertFalse(LLMProvider.objects.filter(code="openai").exists())
 
     @patch("llm_ops.views.collect_price_source_prices.delay")
     def test_collection_source_collect_rejects_disabled_source(
@@ -1240,7 +1558,10 @@ class LLMOpsViewTests(TestCase):
         self,
         mock_delay,
     ):
-        provider = LLMProvider.objects.create(name="DeepSeek", code="deepseek")
+        provider = LLMProvider.objects.create(
+            name="Unknown AI",
+            code="unknown-ai",
+        )
         source = PriceCollectionSource.objects.create(
             name="SiliconFlow Sheet",
             slug="siliconflow-sheet",
