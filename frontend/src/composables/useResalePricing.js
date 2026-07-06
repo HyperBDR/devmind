@@ -238,7 +238,7 @@ export function useResalePricing({
     if (!workflowAutoApproveEnabled.value) {
       return {
         ok: true,
-        label: '免审路径已关闭'
+        label: t('llmOps.publishingWorkspace.margin.autoApproveDisabled')
       }
     }
     if (selectedPlatformAutoApproveLimit.value === null) {
@@ -306,6 +306,51 @@ export function useResalePricing({
     const value = Number(avg)
     if (!Number.isFinite(value) || value <= 0) return '-'
     return `${currencySymbol.value}${value.toFixed(2)}`
+  }
+
+  function priceAmountText(value) {
+    const amount = Number(value)
+    if (!Number.isFinite(amount)) return null
+    return `${currencySymbol.value}${amount.toFixed(2)}`
+  }
+
+  function priceAmountRows(dimensions, field, options = {}) {
+    const allowZero = options.allowZero === true
+    return dimensions
+      .map((dimension) => {
+        const amount = Number(dimension[field])
+        if (
+          !Number.isFinite(amount) ||
+          amount < 0 ||
+          (!allowZero && amount <= 0)
+        ) {
+          return null
+        }
+        return {
+          label: dimension.shortLabel || dimension.label,
+          raw: amount,
+          value: priceAmountText(amount)
+        }
+      })
+      .filter(Boolean)
+  }
+
+  function priceAmountSummary(rows) {
+    if (!rows.length) return '-'
+    const values = rows.map((row) => Number(row.raw))
+    const rounded = [...new Set(values.map((value) => value.toFixed(2)))]
+    if (rounded.length === 1) return `${currencySymbol.value}${rounded[0]}`
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    return [
+      `${currencySymbol.value}${min.toFixed(2)}`,
+      `${currencySymbol.value}${max.toFixed(2)}`
+    ].join('-')
+  }
+
+  function priceAmountDetails(rows) {
+    if (!rows.length) return '-'
+    return rows.map((row) => `${row.label} ${row.value}`).join(' / ')
   }
 
   function priceDiffText(price, avg) {
@@ -390,7 +435,9 @@ export function useResalePricing({
   }
 
   function marketMarginRefsFor(row) {
-    const margins = priceDimensions(row)
+    const dimensions = priceDimensions(row)
+    const marketRows = priceAmountRows(dimensions, 'marketAverage')
+    const margins = dimensions
       .map((dimension) => {
         const marketPrice = Number(dimension.marketAverage)
         const cost = Number(dimension.costRaw)
@@ -411,7 +458,9 @@ export function useResalePricing({
     return [
       {
         source: t('llmOps.publishingWorkspace.pricing.marketAverage'),
-        price: Number(average.toFixed(2))
+        price: Number(average.toFixed(2)),
+        displayValue: priceAmountSummary(marketRows),
+        titleValue: priceAmountDetails(marketRows)
       }
     ]
   }
@@ -430,39 +479,58 @@ export function useResalePricing({
     }
   }
 
-  function marginPolicyTooltip(type) {
+  function marginPolicyTooltip(type, row = null) {
     const isMin = type === 'min'
     const floor = referenceMarginFloor()
     const approveLimit = Number(selectedPlatformAutoApproveLimit.value)
+    const floorPriceRows = row
+      ? priceAmountRows(priceDimensions(row), 'referencePriceRaw', {
+          allowZero: true
+        })
+      : []
+    const floorSource = t('llmOps.publishingWorkspace.margin.feeBreakdown', {
+      serviceFee: formatRatioPercent(selectedPlatformServiceFeeRate.value),
+      commission: formatRatioPercent(selectedPlatformFeeRate.value)
+    })
+    let rows
+    if (isMin && floorPriceRows.length) {
+      rows = floorPriceRows.map((item) => ({
+        label: item.label,
+        value: item.value,
+        source: floorSource
+      }))
+    } else if (isMin) {
+      rows = [
+        {
+          label: t('llmOps.publishingWorkspace.margin.platformFloor'),
+          value: formatPercent(floor),
+          source: floorSource
+        }
+      ]
+    } else {
+      rows = [
+        {
+          label: t('llmOps.publishingWorkspace.margin.autoApproveLimit'),
+          value: Number.isFinite(approveLimit)
+            ? formatPercent(approveLimit)
+            : t('llmOps.publishingWorkspace.fallback.notConfigured'),
+          source: selectedPlatformLabel.value
+        }
+      ]
+    }
     return {
       title: isMin
         ? t('llmOps.publishingWorkspace.margin.minTitle')
         : t('llmOps.publishingWorkspace.margin.autoApproveTitle'),
+      captionKind: isMin ? 'floor' : 'auto_approve',
+      displayValue:
+        isMin && floorPriceRows.length
+          ? priceAmountSummary(floorPriceRows)
+          : undefined,
       source: isMin
         ? t('llmOps.publishingWorkspace.margin.minSource')
         : t('llmOps.publishingWorkspace.margin.autoApproveSource'),
-      rows: isMin
-        ? [
-            {
-              label: t('llmOps.publishingWorkspace.margin.platformFloor'),
-              value: formatPercent(floor),
-              source: t('llmOps.publishingWorkspace.margin.feeBreakdown', {
-                serviceFee: formatRatioPercent(
-                  selectedPlatformServiceFeeRate.value
-                ),
-                commission: formatRatioPercent(selectedPlatformFeeRate.value)
-              })
-            }
-          ]
-        : [
-            {
-              label: t('llmOps.publishingWorkspace.margin.autoApproveLimit'),
-              value: Number.isFinite(approveLimit)
-                ? formatPercent(approveLimit)
-                : t('llmOps.publishingWorkspace.fallback.notConfigured'),
-              source: selectedPlatformLabel.value
-            }
-          ]
+      rows
     }
   }
 

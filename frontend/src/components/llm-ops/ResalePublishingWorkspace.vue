@@ -508,7 +508,7 @@
                 :max="marginAxisRangeFor(row).max"
                 :value="row.margin"
                 :refs="marketMarginRefsFor(row)"
-                :lower-tooltip="marginPolicyTooltip('min')"
+                :lower-tooltip="marginPolicyTooltip('min', row)"
                 :upper-tooltip="marginPolicyTooltip('max')"
                 :label="
                   t('llmOps.publishingWorkspace.margin.axisLabel', {
