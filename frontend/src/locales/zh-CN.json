@@ -1021,7 +1021,9 @@
         "title": "统一收益率",
         "description": "Input / Output / Cache 按同一收益率推导各自售价。",
         "input": "统一收益率",
+        "sliderLabel": "统一收益率",
         "axisLabel": "统一收益率 {value}",
+        "autoApproveDisabled": "免审路径已关闭",
         "noAutoApprove": "未配置免审收益率",
         "autoApproveInactive": "免审阈值未生效",
         "withinAutoApprove": "免审范围内（<= {value}）",
@@ -1032,7 +1034,14 @@
         "autoApproveSource": "平台配置的自动免审阈值，仅影响审批判断",
         "platformFloor": "平台下限",
         "feeBreakdown": "服务费 {serviceFee} + 抽佣 {commission}",
-        "autoApproveLimit": "免审上限"
+        "autoApproveLimit": "免审上限",
+        "boundaryMarket": "市场",
+        "boundaryReference": "参考",
+        "boundaryLower": "下限",
+        "boundaryUpper": "上限",
+        "boundaryFloor": "下限",
+        "boundaryAutoApprove": "免审",
+        "boundaryTitle": "{scope}{boundary}"
       },
       "fallback": {
         "platform": "平台 {id}",

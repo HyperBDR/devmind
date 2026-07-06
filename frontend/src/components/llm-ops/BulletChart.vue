@@ -61,13 +61,13 @@
       <div
         class="range-ref-marker"
         :style="{ left: getMarkerPos(ref.price) + '%' }"
-        :title="`${ref.source}: ${formatDisplayValue(ref.price)}`"
+        :title="refTitle(ref)"
       >
         <div class="range-ref-label">
           {{ ref.source }}
         </div>
         <div class="range-ref-val">
-          {{ formatDisplayValue(ref.price) }}
+          {{ refDisplayValue(ref) }}
         </div>
       </div>
     </template>
@@ -76,7 +76,7 @@
       class="range-bar-marker"
       role="slider"
       tabindex="0"
-      :aria-label="label || '我方售价'"
+      :aria-label="label || t('llmOps.publishingWorkspace.margin.sliderLabel')"
       :aria-valuemin="axisMin"
       :aria-valuemax="axisMax"
       :aria-valuenow="Number(value) || 0"
@@ -100,6 +100,7 @@
 <script setup>
 import '@/components/llm-ops/bulletChart.css'
 import { computed, onBeforeUnmount, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   min: {
@@ -149,6 +150,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['change', 'update:value'])
+const { t } = useI18n()
 
 const rangeRef = ref(null)
 const isDragging = ref(false)
@@ -222,7 +224,11 @@ const axisRange = computed(() => {
 
 const axisMin = computed(() => axisRange.value.min)
 const axisMax = computed(() => axisRange.value.max)
-const boundaryLabel = computed(() => (hasBoundaryRange.value ? '市场' : '参考'))
+const boundaryLabel = computed(() =>
+  hasBoundaryRange.value
+    ? t('llmOps.publishingWorkspace.margin.boundaryMarket')
+    : t('llmOps.publishingWorkspace.margin.boundaryReference')
+)
 
 const boundaryZoneStyle = computed(() => {
   if (!hasBoundaryRange.value) return {}
@@ -243,8 +249,12 @@ const boundaryZoneStyle = computed(() => {
 const boundaryItems = computed(() => [
   {
     key: 'min',
-    title: `${boundaryLabel.value}下限`,
+    title: t('llmOps.publishingWorkspace.margin.boundaryTitle', {
+      scope: boundaryLabel.value,
+      boundary: t('llmOps.publishingWorkspace.margin.boundaryLower')
+    }),
     value: boundaryMin.value,
+    displayValue: props.lowerTooltip?.displayValue,
     percent: getMarkerPos(boundaryMin.value),
     markerClass: 'range-boundary-min',
     hitClass: 'range-boundary-hit-min',
@@ -252,8 +262,12 @@ const boundaryItems = computed(() => [
   },
   {
     key: 'max',
-    title: `${boundaryLabel.value}上限`,
+    title: t('llmOps.publishingWorkspace.margin.boundaryTitle', {
+      scope: boundaryLabel.value,
+      boundary: t('llmOps.publishingWorkspace.margin.boundaryUpper')
+    }),
     value: boundaryMax.value,
+    displayValue: props.upperTooltip?.displayValue,
     percent: getMarkerPos(boundaryMax.value),
     markerClass: 'range-boundary-max',
     hitClass: 'range-boundary-hit-max',
@@ -290,14 +304,32 @@ function getMarkerColor(price) {
 }
 
 function boundaryCaption(boundary) {
-  const title = boundary.tooltip?.title || boundary.title || ''
-  let prefix = boundary.key === 'min' ? '下限' : '上限'
-  if (title.includes('免审')) {
-    prefix = '免审'
-  } else if (title.includes('最低') || title.includes('下限')) {
-    prefix = '下限'
+  const prefix = boundaryCaptionPrefix(boundary)
+  return `${prefix} ${boundaryDisplayValue(boundary)}`
+}
+
+function boundaryCaptionPrefix(boundary) {
+  if (boundary.tooltip?.captionKind === 'auto_approve') {
+    return t('llmOps.publishingWorkspace.margin.boundaryAutoApprove')
   }
-  return `${prefix} ${formatDisplayValue(boundary.value)}`
+  if (boundary.tooltip?.captionKind === 'floor') {
+    return t('llmOps.publishingWorkspace.margin.boundaryFloor')
+  }
+  return boundary.key === 'min'
+    ? t('llmOps.publishingWorkspace.margin.boundaryLower')
+    : t('llmOps.publishingWorkspace.margin.boundaryUpper')
+}
+
+function boundaryDisplayValue(boundary) {
+  return boundary.displayValue || formatDisplayValue(boundary.value)
+}
+
+function refDisplayValue(ref) {
+  return ref.displayValue || formatDisplayValue(ref.price)
+}
+
+function refTitle(ref) {
+  return `${ref.source}: ${ref.titleValue || refDisplayValue(ref)}`
 }
 
 function getValueLabelStyle(price) {

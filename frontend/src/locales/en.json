@@ -1011,7 +1011,9 @@
         "title": "Unified Margin Target",
         "description": "Input, Output, and Cache prices are derived from the same margin rate.",
         "input": "Unified margin rate",
+        "sliderLabel": "Unified margin",
         "axisLabel": "Unified margin {value}",
+        "autoApproveDisabled": "Auto-approval path disabled",
         "noAutoApprove": "No auto-approval margin configured",
         "autoApproveInactive": "Auto-approval threshold inactive",
         "withinAutoApprove": "Within auto-approval range (<= {value})",
@@ -1022,7 +1024,14 @@
         "autoApproveSource": "Auto-approval threshold from platform settings; affects approval only",
         "platformFloor": "Platform floor",
         "feeBreakdown": "Service fee {serviceFee} + commission {commission}",
-        "autoApproveLimit": "Auto-approval limit"
+        "autoApproveLimit": "Auto-approval limit",
+        "boundaryMarket": "Market",
+        "boundaryReference": "Reference",
+        "boundaryLower": "Lower",
+        "boundaryUpper": "Upper",
+        "boundaryFloor": "Floor",
+        "boundaryAutoApprove": "Auto-approve",
+        "boundaryTitle": "{scope} {boundary}"
       },
       "fallback": {
         "platform": "Platform {id}",
