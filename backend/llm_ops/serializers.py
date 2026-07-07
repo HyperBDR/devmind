@@ -309,8 +309,8 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         secret_marker = object()
         secret = validated_data.pop("feishu_app_secret", secret_marker)
-        if secret not in (secret_marker, ""):
-            instance.set_feishu_app_secret(secret)
+        if secret is not secret_marker:
+            instance.set_feishu_app_secret(secret or "")
         return super().update(instance, validated_data)
 
     def to_representation(self, instance):

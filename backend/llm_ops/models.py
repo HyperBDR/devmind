@@ -253,9 +253,9 @@ class LLMOpsGlobalConfig(models.Model):
         if not value:
             return ""
         if value.startswith(cls.ENCRYPTED_SECRET_PREFIX):
-            encrypted = value[len(cls.ENCRYPTED_SECRET_PREFIX) :]
+            encrypted = value[len(cls.ENCRYPTED_SECRET_PREFIX):]
             return encryption_service.decrypt(encrypted)
-        return encryption_service.decrypt(value)
+        return value
 
     def set_feishu_app_secret(self, value: str) -> None:
         """Store the Feishu app secret in encrypted form."""

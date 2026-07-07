@@ -371,6 +371,19 @@ class LLMOpsViewTests(TestCase):
             "llm_ops.tasks.run_model_price_sync_agent",
         )
 
+    def test_global_config_plaintext_secret_falls_back_without_decrypt(self):
+        config = LLMOpsGlobalConfig.get_solo()
+        LLMOpsGlobalConfig.objects.filter(pk=config.pk).update(
+            feishu_app_secret="legacy-plaintext-secret"
+        )
+
+        config.refresh_from_db()
+
+        self.assertEqual(
+            config.get_feishu_app_secret(),
+            "legacy-plaintext-secret",
+        )
+
     def test_global_config_all_sources_writes_null_task_source_ids(self):
         from django_celery_beat.models import PeriodicTask
 
@@ -423,11 +436,10 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertEqual(json.loads(price_task.kwargs)["source_ids"], [])
 
-    def test_global_config_blank_secret_preserves_existing_secret(self):
+    def test_global_config_blank_secret_clears_existing_secret(self):
         config = LLMOpsGlobalConfig.get_solo()
         config.set_feishu_app_secret("existing-secret")
         config.save()
-        stored_secret = config.feishu_app_secret
 
         response = self.client.patch(
             reverse("llm-ops-global-config"),
@@ -440,8 +452,9 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         config.refresh_from_db()
-        self.assertEqual(config.feishu_app_secret, stored_secret)
-        self.assertEqual(config.get_feishu_app_secret(), "existing-secret")
+        self.assertEqual(config.feishu_app_secret, "")
+        self.assertEqual(config.get_feishu_app_secret(), "")
+        self.assertFalse(response.data["feishu_app_secret_configured"])
 
     def test_global_config_rejects_unknown_price_source_ids(self):
         response = self.client.patch(
