@@ -550,6 +550,81 @@ class LLMOpsPricingServiceTests(TestCase):
             {Decimal("1.000000"), Decimal("2.000000")},
         )
 
+    def test_channel_source_uses_highest_usage_range_price(self):
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Tiered Official",
+            slug="aliyun-tiered-official",
+            provider=self.provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            currency="CNY",
+        )
+        self.model.currency = "CNY"
+        self.model.save(update_fields=["currency"])
+        self.channel.currency = "CNY"
+        self.channel.save(update_fields=["currency"])
+        price_specs = [
+            (
+                "range-input-low",
+                ModelPriceItem.DIMENSION_TEXT_INPUT,
+                "0.2",
+                "0",
+                "128000",
+            ),
+            (
+                "range-input-high",
+                ModelPriceItem.DIMENSION_TEXT_INPUT,
+                "1.2",
+                "128000",
+                "256000",
+            ),
+            (
+                "range-output-low",
+                ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                "2",
+                "0",
+                "128000",
+            ),
+            (
+                "range-output-high",
+                ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                "12",
+                "128000",
+                "256000",
+            ),
+        ]
+        for fingerprint, dimension, unit_price, start, end in price_specs:
+            ModelPriceItem.objects.create(
+                provider=self.provider,
+                model=self.model,
+                meta_model=self.model.meta_model,
+                source=source,
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="CNY",
+                unit_price=Decimal(unit_price),
+                tier_type=ModelPriceItem.TIER_USAGE_RANGE,
+                tier_start=Decimal(start),
+                tier_end=Decimal(end),
+                price_fingerprint=fingerprint,
+                is_current=True,
+            )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+        )
+
+        unit_prices = resolve_channel_model_price(
+            self.channel,
+            self.model,
+            override=price,
+        )
+
+        self.assertEqual(unit_prices.input_per_million, Decimal("0.960000"))
+        self.assertEqual(unit_prices.output_per_million, Decimal("9.600000"))
+
     def test_marks_channel_item_comparison_unknown_for_currency_mismatch(self):
         ModelPriceItem.objects.create(
             provider=self.provider,

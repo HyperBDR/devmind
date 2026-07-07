@@ -1154,7 +1154,7 @@ def source_unit_prices_for_channel_model(
     *,
     override: ChannelModelPrice | None,
 ) -> UnitPrices | None:
-    """Resolve flat unit prices from the selected procurement source."""
+    """Resolve unit prices from the selected procurement source."""
     if not override:
         return None
 
@@ -1164,17 +1164,20 @@ def source_unit_prices_for_channel_model(
         override=override,
     )
     values = {}
+    grouped_items = {}
     for item in current_model_price_items_for_channel_price(override):
-        if item.tier_type != ModelPriceItem.TIER_FLAT:
+        grouped_items.setdefault(item.dimension, []).append(item)
+
+    for dimension, items in grouped_items.items():
+        item = selected_price_item_for_channel_model(items)
+        if item is None:
             continue
         unit_price = convert_currency_between(
             item.unit_price,
             item.currency,
             target_currency,
         )
-        values[item.dimension] = unit_price or decimal_or_zero(
-            item.unit_price
-        )
+        values[dimension] = unit_price or decimal_or_zero(item.unit_price)
 
     if not values:
         return None
@@ -1213,6 +1216,39 @@ def source_unit_prices_for_channel_model(
             ZERO,
         ),
     )
+
+
+def selected_price_item_for_channel_model(
+    items: list[ModelPriceItem],
+) -> ModelPriceItem | None:
+    """Select a flat item or the highest tiered unit price."""
+    if not items:
+        return None
+
+    flat_items = [
+        item for item in items if item.tier_type == ModelPriceItem.TIER_FLAT
+    ]
+    if flat_items:
+        return sorted(flat_items, key=lambda item: item.id)[0]
+
+    tiered_items = [
+        item
+        for item in items
+        if item.tier_type
+        in (ModelPriceItem.TIER_USAGE_RANGE, ModelPriceItem.TIER_VOLUME)
+    ]
+    if not tiered_items:
+        return None
+
+    return sorted(
+        tiered_items,
+        key=lambda item: (
+            decimal_or_zero(item.unit_price),
+            decimal_or_zero(item.tier_start),
+            item.id,
+        ),
+        reverse=True,
+    )[0]
 
 
 def calculate_usage_cost(
