@@ -702,6 +702,39 @@ class LLMOpsSeedCleanupCommandTests(TestCase):
 class LLMOpsPeriodicTasksTests(TestCase):
     """The Celery task and periodic entry are wired up correctly."""
 
+    @patch("llm_ops.catalog_maintenance.resolve_orphan_meta_models")
+    @patch("llm_ops.catalog_maintenance.normalize_meta_model_catalog")
+    @patch("llm_ops.collection_services.sync_meta_models_from_models_dev")
+    def test_meta_model_sync_task_runs_catalog_maintenance(
+        self,
+        mock_sync,
+        mock_normalize,
+        mock_resolve,
+    ):
+        from llm_ops.tasks import sync_meta_models_from_models_dev_task
+
+        mock_sync.return_value = {"models": 1}
+        mock_normalize.return_value = {"normalized": 1}
+        mock_resolve.return_value = {"resolved": 1}
+
+        result = sync_meta_models_from_models_dev_task.run(
+            source_url="https://example.com/api.json",
+        )
+
+        self.assertEqual(
+            result["meta_model_normalization"],
+            {"normalized": 1},
+        )
+        self.assertEqual(
+            result["meta_model_orphan_resolution"],
+            {"resolved": 1},
+        )
+        mock_sync.assert_called_once_with(
+            source_url="https://example.com/api.json",
+        )
+        mock_normalize.assert_called_once_with()
+        mock_resolve.assert_called_once_with()
+
     def test_register_periodic_tasks_registers_llm_ops_entries(self):
         from core.periodic_registry import TASK_REGISTRY
 

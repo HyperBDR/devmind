@@ -859,16 +859,6 @@ class MetaModelViewSet(
             )
         return super().destroy(request, *args, **kwargs)
 
-    def list(self, request, *args, **kwargs):
-        from .catalog_maintenance import (
-            normalize_meta_model_catalog,
-            resolve_orphan_meta_models,
-        )
-
-        normalize_meta_model_catalog()
-        resolve_orphan_meta_models()
-        return super().list(request, *args, **kwargs)
-
     @action(
         detail=False,
         methods=["get"],
@@ -877,13 +867,6 @@ class MetaModelViewSet(
     )
     def owner_summary(self, request):
         """Return one lightweight row per canonical model owner."""
-        from .catalog_maintenance import (
-            normalize_meta_model_catalog,
-            resolve_orphan_meta_models,
-        )
-
-        normalize_meta_model_catalog()
-        resolve_orphan_meta_models()
         queryset = self.get_queryset()
         search = request.query_params.get("owner_search")
         if search:
@@ -927,23 +910,17 @@ class MetaModelViewSet(
             status=status.HTTP_200_OK,
         )
 
-    def retrieve(self, request, *args, **kwargs):
+    @action(detail=False, methods=["post"], url_path="sync")
+    def sync(self, request):
+        """Refresh meta models from the public models.dev API."""
         from .catalog_maintenance import (
             normalize_meta_model_catalog,
             resolve_orphan_meta_models,
         )
 
-        normalize_meta_model_catalog()
-        resolve_orphan_meta_models()
-        return super().retrieve(request, *args, **kwargs)
-
-    @action(detail=False, methods=["post"], url_path="sync")
-    def sync(self, request):
-        """Refresh meta models from the public models.dev API."""
-        from .catalog_maintenance import normalize_meta_model_catalog
-
         stats = sync_meta_models_from_models_dev()
         stats["meta_model_normalization"] = normalize_meta_model_catalog()
+        stats["meta_model_orphan_resolution"] = resolve_orphan_meta_models()
         record_audit_log(
             request=request,
             action=AuditLog.ACTION_SYNC,

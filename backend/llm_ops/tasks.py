@@ -192,14 +192,20 @@ def sync_meta_models_from_models_dev_task(
     self,
     *,
     source_url: str | None = None,
-) -> dict[str, int]:
+) -> dict[str, object]:
     """Refresh canonical meta models from models.dev."""
+    from .catalog_maintenance import (
+        normalize_meta_model_catalog,
+        resolve_orphan_meta_models,
+    )
     from .collection_services import sync_meta_models_from_models_dev
 
     logger.info("llm_ops.sync_meta_models_from_models_dev start")
     try:
         kwargs = {"source_url": source_url} if source_url else {}
         results = sync_meta_models_from_models_dev(**kwargs)
+        results["meta_model_normalization"] = normalize_meta_model_catalog()
+        results["meta_model_orphan_resolution"] = resolve_orphan_meta_models()
     except Exception as exc:
         logger.exception("llm_ops.sync_meta_models_from_models_dev failed")
         if self.request.retries < self.max_retries:
