@@ -1,3 +1,4 @@
+from decimal import Decimal
 import json
 from unittest.mock import patch
 
@@ -26,6 +27,7 @@ from llm_ops.models import (
     ResalePlatform,
     ResaleWorkflowConfig,
 )
+from llm_ops.services import sync_channel_price_items
 
 
 class LLMOpsViewTests(TestCase):
@@ -1773,6 +1775,69 @@ class LLMOpsViewTests(TestCase):
             0.8,
         )
         self.assertEqual(row["best_channel"]["input_price_per_million"], 2.0)
+
+    def test_channel_ratio_update_resyncs_listed_price_items(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5 Mini",
+            code="gpt-5-mini",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Real Resource",
+            code="real-resource-ratio",
+            settlement_ratio="0.5996",
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        sync_channel_price_items(price)
+
+        item = ChannelPriceItem.objects.get(
+            channel=channel,
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            is_current=True,
+        )
+        self.assertEqual(item.unit_price, Decimal("0.599600"))
+
+        response = self.client.patch(
+            reverse("channel-detail", args=[channel.id]),
+            {"settlement_ratio": "0.4"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item.refresh_from_db()
+        self.assertFalse(item.is_current)
+        current_item = ChannelPriceItem.objects.get(
+            channel=channel,
+            model=model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            is_current=True,
+        )
+        self.assertEqual(current_item.unit_price, Decimal("0.400000"))
+
+        summary = self.client.get(
+            reverse("llm-ops-summary"),
+            {"display_currency": "USD"},
+        )
+        row = next(
+            item
+            for item in summary.data["procurement"]
+            if item["model_id"] == model.id
+        )
+        best = row["best_channel"]
+        self.assertEqual(best["base_input_price_per_million"], 1.0)
+        self.assertEqual(
+            best["input_price_per_million_settlement_ratio"],
+            0.4,
+        )
+        self.assertEqual(best["input_price_per_million"], 0.4)
 
     def test_summary_exposes_channel_model_performance_metrics(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
