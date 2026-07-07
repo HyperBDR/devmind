@@ -2968,27 +2968,42 @@ def sync_model_price_items(
         "source": source,
         "is_current": True,
     }
-    ModelPriceItem.objects.filter(**current_filter).update(
-        is_current=False,
-        effective_to=now,
-    )
     items = []
-    for payload in payloads:
-        fingerprint = model_price_item_fingerprint(payload)
-        payload["price_fingerprint"] = fingerprint
-        price_item, _ = ModelPriceItem.objects.update_or_create(
-            offering=offering,
-            dimension=payload["dimension"],
-            billing_unit=payload["billing_unit"],
-            currency=payload["currency"],
-            price_fingerprint=fingerprint,
-            defaults=payload,
+    with transaction.atomic():
+        old_current_ids = set(
+            ModelPriceItem.objects.filter(**current_filter).values_list(
+                "id",
+                flat=True,
+            )
         )
-        if not price_item.is_current or price_item.effective_to is not None:
-            price_item.is_current = True
-            price_item.effective_to = None
-            price_item.save(update_fields=["is_current", "effective_to"])
-        items.append(price_item)
+        for payload in payloads:
+            fingerprint = model_price_item_fingerprint(payload)
+            payload["price_fingerprint"] = fingerprint
+            price_item, _ = ModelPriceItem.objects.update_or_create(
+                offering=offering,
+                dimension=payload["dimension"],
+                billing_unit=payload["billing_unit"],
+                currency=payload["currency"],
+                price_fingerprint=fingerprint,
+                defaults=payload,
+            )
+            needs_reactivate = (
+                not price_item.is_current
+                or price_item.effective_to is not None
+            )
+            if needs_reactivate:
+                price_item.is_current = True
+                price_item.effective_to = None
+                price_item.save(update_fields=["is_current", "effective_to"])
+            items.append(price_item)
+
+        current_item_ids = {price_item.id for price_item in items}
+        stale_item_ids = old_current_ids - current_item_ids
+        if stale_item_ids:
+            ModelPriceItem.objects.filter(id__in=stale_item_ids).update(
+                is_current=False,
+                effective_to=now,
+            )
     return items
 
 

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest import mock
 
 from django.test import TestCase
 
@@ -777,6 +778,60 @@ class LLMOpsPricingServiceTests(TestCase):
             .get(),
             ModelPriceItem.DIMENSION_TEXT_OUTPUT,
         )
+
+    def test_manual_import_keeps_current_rows_when_write_fails(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Sheet",
+            slug="supplier-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+        import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+        current_item = ModelPriceItem.objects.get(
+            source=source,
+            model=self.model,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+
+        with mock.patch.object(
+            ModelPriceItem.objects,
+            "update_or_create",
+            side_effect=RuntimeError("write failed"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "write failed"):
+                import_manual_model_prices(
+                    source=source,
+                    provider=self.provider,
+                    rows=[
+                        {
+                            "model_code": "gpt-4o",
+                            "model_name": "GPT-4o",
+                            "currency": "USD",
+                            "output_price_per_million": Decimal("3.5"),
+                        }
+                    ],
+                    default_currency="USD",
+                    updates_model_prices=False,
+                )
+
+        current_item.refresh_from_db()
+        self.assertTrue(current_item.is_current)
+        self.assertIsNone(current_item.effective_to)
 
     def test_manual_import_omits_deactivated_items_from_affected_ids(self):
         source = PriceCollectionSource.objects.create(
