@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal, InvalidOperation
 import re
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -20,10 +22,15 @@ RETAIL_PRICES_API_URL = "https://prices.azure.com/api/retail/prices"
 DEFAULT_CURRENCY = "USD"
 DEFAULT_REGION = "eastus"
 PRODUCT_FILTER = "contains(productName, 'Azure OpenAI')"
+REQUEST_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "DevMind-LLMOpsPriceCollector/1.0",
+}
 EXCLUDED_TEXT_MARKERS = {
     " aud ",
     " audio ",
     " batch ",
+    " batch api ",
     " code-interpreter",
     " file-search",
     " fine tune",
@@ -32,17 +39,33 @@ EXCLUDED_TEXT_MARKERS = {
     " hosting",
     " image",
     " img ",
+    " pricing with batch api ",
+    " pp ",
+    " priority ",
+    " priority processing ",
+    " prty ",
     " realtime",
     " rt ",
     " transcribe",
     " training",
     " tts",
 }
+EXCLUDED_TEXT_PATTERNS = (
+    re.compile(r"\baud\d*\b"),
+    re.compile(r"\brt(?:ime)?\b"),
+    re.compile(r"\btcrb\b"),
+    re.compile(r"\btrscb\b"),
+)
 SCOPE_SCORES = {
     "global": 4,
     "regional": 3,
     "data_zone": 2,
     "unknown": 1,
+}
+CONTEXT_SCORES = {
+    "short_context": 3,
+    "unknown": 2,
+    "long_context": 1,
 }
 
 
@@ -98,31 +121,97 @@ def fetch_retail_prices(vendor: dict[str, Any]) -> list[dict[str, Any]]:
     currency = str(vendor.get("currency") or DEFAULT_CURRENCY).strip()
     query_filter = (
         f"{PRODUCT_FILTER} and armRegionName eq '{region}' "
-        f"and currencyCode eq '{currency or DEFAULT_CURRENCY}'"
+        f"and currencyCode eq '{currency or DEFAULT_CURRENCY}' "
+        "and priceType eq 'Consumption'"
     )
     params = {
         "api-version": "2023-01-01-preview",
         "$filter": query_filter,
     }
     timeout = int(vendor.get("timeout") or 30)
-    items: list[dict[str, Any]] = []
-    next_url = RETAIL_PRICES_API_URL
-    while next_url:
-        response = requests.get(
-            next_url,
-            params=params if next_url == RETAIL_PRICES_API_URL else None,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "DevMind-LLMOpsPriceCollector/1.0",
-            },
-            timeout=timeout,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        items.extend(payload.get("Items") or [])
-        next_url = payload.get("NextPageLink") or ""
-        params = None
+    max_pages = max(1, int(vendor.get("max_pages") or 100))
+    concurrent_pages = max(1, int(vendor.get("concurrent_pages") or 8))
+    first_payload = fetch_retail_price_page(params, timeout)
+    items: list[dict[str, Any]] = list(first_payload.get("Items") or [])
+    next_skip = skip_from_next_page_link(
+        str(first_payload.get("NextPageLink") or "")
+    )
+    if not next_skip and len(items) >= 1000:
+        next_skip = len(items)
+    if not next_skip or max_pages == 1:
+        return items
+
+    page_size = max(next_skip, len(items), 1)
+    fetched_pages = 1
+    current_skip = next_skip
+    stop_after_batch = False
+
+    while current_skip and fetched_pages < max_pages and not stop_after_batch:
+        remaining_pages = max_pages - fetched_pages
+        batch_size = min(concurrent_pages, remaining_pages)
+        skips = [
+            current_skip + page_size * index
+            for index in range(batch_size)
+        ]
+        for page_skip, payload in fetch_price_pages_concurrently(
+            params,
+            skips,
+            timeout,
+        ):
+            page_items = list(payload.get("Items") or [])
+            items.extend(page_items)
+            fetched_pages += 1
+            if len(page_items) < page_size:
+                stop_after_batch = True
+        current_skip = skips[-1] + page_size
     return items
+
+
+def fetch_price_pages_concurrently(
+    base_params: dict[str, str],
+    skips: list[int],
+    timeout: int,
+) -> list[tuple[int, dict[str, Any]]]:
+    """Fetch multiple Azure Retail Prices API pages concurrently."""
+    pages = []
+    with ThreadPoolExecutor(max_workers=len(skips)) as executor:
+        future_map = {
+            executor.submit(
+                fetch_retail_price_page,
+                {**base_params, "$skip": str(page_skip)},
+                timeout,
+            ): page_skip
+            for page_skip in skips
+        }
+        for future in as_completed(future_map):
+            pages.append((future_map[future], future.result()))
+    return sorted(pages, key=lambda item: item[0])
+
+
+def fetch_retail_price_page(
+    params: dict[str, str],
+    timeout: int,
+) -> dict[str, Any]:
+    """Fetch one page from Azure's public retail prices API."""
+    response = requests.get(
+        RETAIL_PRICES_API_URL,
+        params=params,
+        headers=REQUEST_HEADERS,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def skip_from_next_page_link(value: str) -> int:
+    """Extract the next Azure Retail Prices API skip offset."""
+    if not value:
+        return 0
+    query = parse_qs(urlparse(value).query)
+    try:
+        return int((query.get("$skip") or ["0"])[0])
+    except (TypeError, ValueError):
+        return 0
 
 
 def azure_region(vendor: dict[str, Any]) -> str:
@@ -207,6 +296,7 @@ def parse_retail_item(item: dict[str, Any]) -> dict[str, Any] | None:
         "dimension": dimension,
         "price": price,
         "scope": deployment_scope(normalized),
+        "context_window": context_window(normalized),
         "region": str(item.get("armRegionName") or "").strip(),
         "currency": str(item.get("currencyCode") or DEFAULT_CURRENCY).strip(),
         "meter_name": meter,
@@ -218,14 +308,28 @@ def is_text_token_meter(text: str, item: dict[str, Any]) -> bool:
     unit = str(item.get("unitOfMeasure") or "").strip().lower()
     if unit not in {"1k", "1m"}:
         return False
-    padded = f" {text} "
-    return not any(marker in padded for marker in EXCLUDED_TEXT_MARKERS)
+    item_text = " ".join(
+        [
+            text,
+            normalize_text(str(item.get("skuName") or "")),
+            normalize_text(str(item.get("productName") or "")),
+        ]
+    )
+    padded = f" {item_text} "
+    if any(marker in padded for marker in EXCLUDED_TEXT_MARKERS):
+        return False
+    return not any(
+        pattern.search(item_text) for pattern in EXCLUDED_TEXT_PATTERNS
+    )
 
 
 def price_dimension(text: str) -> str | None:
     """Return normalized input/output/cache dimension for one meter."""
     padded = f" {text} "
-    if any(marker in padded for marker in (" cached ", " cched ", " cchd ")):
+    if any(
+        marker in padded
+        for marker in (" cached ", " cched ", " cchd ", " ccchd ", " cd ")
+    ):
         return "cache"
     if any(
         marker in padded
@@ -244,9 +348,14 @@ def model_id_from_meter(meter: str, item: dict[str, Any]) -> str:
     """Extract an Azure OpenAI model ID from a meter name."""
     source = normalize_text(meter)
     source = re.sub(r"\b(tokens?|1k|1m|input|inp|inpt|output)\b", " ", source)
-    source = re.sub(r"\b(outp|outpt|opt|cached|cched|cchd)\b", " ", source)
+    source = re.sub(
+        r"\b(outp|outpt|opt|cached|cched|cchd|ccchd|cd)\b",
+        " ",
+        source,
+    )
     source = re.sub(r"\b(global|glbl|gl|regional|regnl|rgnl)\b", " ", source)
     source = re.sub(r"\b(data zone|dzone|dz|dzn)\b", " ", source)
+    source = re.sub(r"\b(shortco|short co|longco|long co)\b", " ", source)
     source = re.sub(r"\s+", " ", source).strip()
 
     match = re.search(
@@ -322,6 +431,16 @@ def deployment_scope(text: str) -> str:
     return "unknown"
 
 
+def context_window(text: str) -> str:
+    """Return Azure context window group from a meter name."""
+    padded = f" {text} "
+    if " shortco " in padded or " short co " in padded:
+        return "short_context"
+    if " longco " in padded or " long co " in padded:
+        return "long_context"
+    return "unknown"
+
+
 def upsert_dimension(
     models: dict[str, dict[str, Any]],
     parsed: dict[str, Any],
@@ -338,6 +457,7 @@ def upsert_dimension(
     model["aliases"].update(parsed["aliases"])
     row_key = (
         parsed["scope"],
+        parsed["context_window"],
         parsed["region"],
         parsed["currency"],
     )
@@ -345,10 +465,13 @@ def upsert_dimension(
         row_key,
         {
             "deployment_scope": parsed["scope"],
+            "context_window": parsed["context_window"],
             "region": parsed["region"],
             "currency": parsed["currency"],
         },
     )
+    if parsed["context_window"] != "unknown":
+        row["billing_scope"] = parsed["context_window"]
     if parsed["dimension"] == "input":
         row["input_price_per_million"] = parsed["price"]
     elif parsed["dimension"] == "output":
@@ -357,11 +480,16 @@ def upsert_dimension(
         row["cache_hit_price_per_million"] = parsed["price"]
 
 
-def row_score(row: dict[str, str]) -> tuple[int, int]:
-    """Rank Azure rows so global text prices become the default."""
+def row_score(row: dict[str, str]) -> tuple[int, int, int]:
+    """Rank Azure rows so global standard prices become the default."""
     scope = row.get("deployment_scope") or "unknown"
+    context = row.get("context_window") or "unknown"
     has_cache = int(bool(row.get("cache_hit_price_per_million")))
-    return SCOPE_SCORES.get(scope, 0), has_cache
+    return (
+        SCOPE_SCORES.get(scope, 0),
+        CONTEXT_SCORES.get(context, 0),
+        has_cache,
+    )
 
 
 def display_name(model_id: str) -> str:
@@ -371,7 +499,8 @@ def display_name(model_id: str) -> str:
 
 def normalize_text(value: str) -> str:
     """Normalize Azure meter text for matching."""
-    text = str(value or "").strip().lower()
-    text = text.replace("_", " ").replace("-", " ")
+    text = str(value or "").strip()
     text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
+    text = text.lower()
+    text = text.replace("_", " ").replace("-", " ")
     return re.sub(r"\s+", " ", text)

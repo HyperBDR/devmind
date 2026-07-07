@@ -1298,8 +1298,9 @@
       "pagination": {
         "next": "下一页",
         "pageSize": "{count} 条/页",
+        "pageSizeLabel": "每页",
         "previous": "上一页",
-        "summary": "共 {total} 条，第 {current} / {pages} 页"
+        "summary": "共 {total} 个元模型，第 {current} / {pages} 页"
       },
       "status": {
         "active": "可用",
@@ -1678,9 +1679,13 @@
       },
       "summary": {
         "currency": "默认币种",
-        "currentItems": "当前价格项",
-        "metaModels": "覆盖元模型",
+        "currentItems": "全部元模型",
+        "metaModels": "本页元模型",
         "status": "状态"
+      },
+      "pagination": {
+        "pageSize": "每页",
+        "summary": "第 {page} / {totalPages} 页，共 {total} 个元模型"
       },
       "status": {
         "disabled": "停用",

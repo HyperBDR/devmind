@@ -206,11 +206,6 @@
                 :options="modalityOptions"
                 class-name="control-select sm:w-40"
               />
-              <CompactSelect
-                v-model="pageSize"
-                :options="pageSizeOptions"
-                class-name="control-select sm:w-32"
-              />
               <input
                 v-model="searchKeyword"
                 class="control-field drawer-search"
@@ -367,7 +362,19 @@
                   })
                 }}
               </p>
-              <div class="flex items-center gap-2">
+              <div class="pagination-actions">
+                <label class="page-size-control">
+                  <span>
+                    {{
+                      t('llmOps.metaModelManagement.pagination.pageSizeLabel')
+                    }}
+                  </span>
+                  <CompactSelect
+                    v-model="pageSize"
+                    :options="pageSizeOptions"
+                    class-name="control-select page-size-select"
+                  />
+                </label>
                 <button
                   class="btn-secondary pagination-btn btn-action-neutral"
                   type="button"
@@ -436,7 +443,7 @@ const searchKeyword = ref('')
 const vendorSearchKeyword = ref('')
 const statusFilter = ref('')
 const modalityFilter = ref('')
-const pageSize = ref(20)
+const pageSize = ref(10)
 const currentPage = ref(1)
 const selectedVendorId = ref('')
 const showVendorModelsDrawer = ref(false)
@@ -631,7 +638,7 @@ async function fetchVendorMetaModels() {
       modality: modalityFilter.value || undefined,
       search: searchKeyword.value.trim() || undefined,
       page: safeCurrentPage.value,
-      page_size: Number(pageSize.value) || 20
+      page_size: Number(pageSize.value) || 10
     })
     const payload = paginationPayload(response)
     drawerRows.value = paginationResults(payload).map((item) => {

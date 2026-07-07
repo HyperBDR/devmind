@@ -1288,8 +1288,9 @@
       "pagination": {
         "next": "Next",
         "pageSize": "{count} / page",
+        "pageSizeLabel": "Per page",
         "previous": "Previous",
-        "summary": "{total} rows, page {current} / {pages}"
+        "summary": "{total} meta models, page {current} / {pages}"
       },
       "status": {
         "active": "Active",
@@ -1668,9 +1669,13 @@
       },
       "summary": {
         "currency": "Default currency",
-        "currentItems": "Current price items",
-        "metaModels": "Covered meta models",
+        "currentItems": "Total meta models",
+        "metaModels": "Meta models on page",
         "status": "Status"
+      },
+      "pagination": {
+        "pageSize": "Per page",
+        "summary": "Page {page} / {totalPages}, {total} meta models"
       },
       "status": {
         "disabled": "Inactive",

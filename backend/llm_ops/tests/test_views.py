@@ -110,6 +110,112 @@ class LLMOpsViewTests(TestCase):
             base_url="https://example.com/admin/api",
         )
 
+    def test_model_price_items_can_page_by_meta_model(self):
+        provider = LLMProvider.objects.create(
+            name="Azure OpenAI",
+            code="azure-openai",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Azure OpenAI Official",
+            slug="azure-openai-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+        )
+        gpt4o = MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+        gpt5 = MetaModel.objects.create(
+            code="gpt-5",
+            name="GPT-5",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            meta_model=gpt4o,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("2.500000"),
+            price_fingerprint="gpt-4o-input",
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            meta_model=gpt4o,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("10.000000"),
+            price_fingerprint="gpt-4o-output",
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            meta_model=gpt5,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("1.250000"),
+            price_fingerprint="gpt-5-input",
+        )
+
+        response = self.client.get(
+            reverse("model-price-item-list"),
+            {
+                "source": source.id,
+                "is_current": "true",
+                "group_by": "meta_model",
+                "page": 1,
+                "page_size": 1,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(len(response.data["results"]), 2)
+        self.assertEqual(
+            {
+                item["meta_model_code"]
+                for item in response.data["results"]
+            },
+            {"gpt-4o"},
+        )
+
+    def test_meta_model_owner_summary_migrates_qwen_to_alibaba(self):
+        qwen = MetaModel.objects.create(
+            code="qwen-max",
+            name="Qwen Max",
+        )
+        qwen_plus = MetaModel.objects.create(
+            code="qwen-plus",
+            name="Qwen Plus",
+        )
+        MetaModel.objects.filter(id=qwen.id).update(
+            owner_code="aliyun",
+            owner_name="阿里云",
+        )
+        MetaModel.objects.filter(id=qwen_plus.id).update(
+            owner_code="alibaba",
+            owner_name="阿里巴巴",
+        )
+
+        response = self.client.get(reverse("meta-model-owner-summary"))
+
+        self.assertEqual(response.status_code, 200)
+        rows = [
+            row
+            for row in response.data["results"]
+            if row["code"] == "alibaba"
+        ]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "阿里巴巴")
+        self.assertEqual(rows[0]["meta_model_count"], 2)
+
     def test_global_config_patch_syncs_periodic_tasks(self):
         from django_celery_beat.models import PeriodicTask
 

@@ -212,6 +212,18 @@
   @apply min-w-20 justify-center;
 }
 
+.meta-model-management .pagination-actions {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.meta-model-management .page-size-control {
+  @apply inline-flex items-center gap-2 text-xs font-medium text-slate-500;
+}
+
+.meta-model-management .page-size-select .compact-select-trigger {
+  @apply h-8 min-w-24 text-xs;
+}
+
 .meta-model-management .link-btn {
   @apply text-sm font-medium text-indigo-600 hover:text-indigo-700;
 }

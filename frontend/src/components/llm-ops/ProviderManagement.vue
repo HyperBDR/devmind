@@ -377,6 +377,7 @@
       @close="selectedProvider = null"
       @delete="deleteSource"
       @page-change="loadSelectedProviderPriceItems"
+      @page-size-change="handleSelectedProviderPageSizeChange"
     />
   </section>
 </template>
@@ -461,7 +462,7 @@ const sourceCategoryFilter = ref('all')
 const sourceStatusFilter = ref('all')
 const selectedProviderLoading = ref(false)
 const selectedProviderPage = ref(1)
-const selectedProviderPageSize = ref(50)
+const selectedProviderPageSize = ref(10)
 const selectedProviderTotal = ref(0)
 const selectedProviderPriceItems = ref([])
 const localPriceEntryMetaModels = ref([])
@@ -559,6 +560,7 @@ async function loadSelectedProviderPriceItems(
     const response = await llmOpsApi.listModelPriceItems({
       source: source.id,
       is_current: 'true',
+      group_by: 'meta_model',
       page,
       page_size: selectedProviderPageSize.value
     })
@@ -575,6 +577,12 @@ async function loadSelectedProviderPriceItems(
   } finally {
     selectedProviderLoading.value = false
   }
+}
+
+async function handleSelectedProviderPageSizeChange(pageSize) {
+  selectedProviderPageSize.value = pageSize
+  selectedProviderPage.value = 1
+  await loadSelectedProviderPriceItems(1)
 }
 
 function openOfficialResetModal(source = null) {

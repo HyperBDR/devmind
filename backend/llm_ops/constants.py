@@ -28,13 +28,29 @@ META_MODEL_OWNER_RULES = (
     ("gpt-image-", "openai", "OpenAI", "https://api.openai.com/"),
     ("claude-", "anthropic", "Anthropic", "https://api.anthropic.com/"),
     ("gemini-", "google", "Google", "https://ai.google.dev/"),
-    ("qwen", "aliyun", "阿里云", "https://dashscope.aliyuncs.com/"),
-    ("wan", "aliyun-wanx", "阿里云万象", "https://dashscope.aliyuncs.com/"),
-    ("wanx", "aliyun-wanx", "阿里云万象", "https://dashscope.aliyuncs.com/"),
+    ("qwen", "alibaba", "阿里巴巴", "https://dashscope.aliyuncs.com/"),
+    ("qwq", "alibaba", "阿里巴巴", "https://dashscope.aliyuncs.com/"),
+    (
+        "wan",
+        "aliyun-wanx",
+        "阿里云万象",
+        "https://dashscope.aliyuncs.com/",
+    ),
+    (
+        "wanx",
+        "aliyun-wanx",
+        "阿里云万象",
+        "https://dashscope.aliyuncs.com/",
+    ),
     ("doubao-", "volcengine", "火山", "https://ark.cn-beijing.volces.com/"),
     ("deepseek-", "deepseek", "DeepSeek", "https://api.deepseek.com/"),
     ("kimi-", "kimi", "Kimi（月之暗面）", "https://api.moonshot.cn/"),
-    ("moonshot-", "kimi", "Kimi（月之暗面）", "https://api.moonshot.cn/"),
+    (
+        "moonshot-",
+        "kimi",
+        "Kimi（月之暗面）",
+        "https://api.moonshot.cn/",
+    ),
     ("minimax-", "minimax", "MiniMax", "https://api.minimax.io/"),
     ("grok-", "xai", "xAI", "https://x.ai/api"),
     ("llama-", "meta", "Meta", "https://ai.meta.com/"),
@@ -149,6 +165,17 @@ def canonical_owner_for_model_code(model_code):
                 "website": url,
             }
     return None
+
+
+def canonical_owner_name_for_code(owner_code):
+    """Return the canonical display name for an owner code."""
+    normalized = str(owner_code or "").strip().lower()
+    if not normalized:
+        return ""
+    for _, code, name, _ in META_MODEL_OWNER_RULES:
+        if code == normalized:
+            return name
+    return ""
 
 
 def is_canonical_owner_code(owner_code):

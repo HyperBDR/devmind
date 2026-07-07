@@ -2,7 +2,7 @@
 //
 // Meta-model semantics:
 //   * Meta model = a real model family published by a model owner
-//     (OpenAI, Anthropic, Google, Aliyun, DeepSeek, Kimi, MiniMax, ...).
+//     (OpenAI, Anthropic, Google, Alibaba, DeepSeek, Kimi, MiniMax, ...).
 //   * Meta owner = the company that develops the model.
 //   * Supplier / price source = a third party that resells access
 //     (SiliconFlow, OpenRouter, Volcano Ark, ...). They are *never*
@@ -10,7 +10,8 @@
 
 const META_MODEL_OWNER_RULES = [
   { test: (code) => code.startsWith('deepseek-'), code: 'deepseek' },
-  { test: (code) => code.startsWith('qwen'), code: 'aliyun' },
+  { test: (code) => code.startsWith('qwen'), code: 'alibaba' },
+  { test: (code) => code.startsWith('qwq'), code: 'alibaba' },
   { test: (code) => code.startsWith('wanx'), code: 'aliyun-wanx' },
   { test: (code) => code.startsWith('wan'), code: 'aliyun-wanx' },
   { test: (code) => code.startsWith('doubao-'), code: 'volcengine' },

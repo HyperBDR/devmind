@@ -150,6 +150,7 @@ AUDIT_FIELD_ALLOWLIST: dict[str, tuple[str, ...]] = {
         "point_name",
         "points_per_currency_unit",
         "point_rounding_mode",
+        "point_decimal_places",
         "fee_rate",
         "service_fee_rate",
         "auto_approve_max_margin_rate",

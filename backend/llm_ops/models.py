@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator
 from django.db import models
 
 from hyperbdr_dashboard.encryption import encryption_service
@@ -1637,13 +1638,17 @@ class ResalePlatform(models.Model):
     point_name = models.CharField(max_length=50, default="积分")
     points_per_currency_unit = models.DecimalField(
         max_digits=14,
-        decimal_places=6,
+        decimal_places=2,
         default=100,
     )
     point_rounding_mode = models.CharField(
         max_length=20,
         choices=ROUNDING_CHOICES,
         default=ROUND_HALF_UP,
+    )
+    point_decimal_places = models.PositiveSmallIntegerField(
+        default=0,
+        validators=[MaxValueValidator(6)],
     )
     fee_rate = models.DecimalField(max_digits=8, decimal_places=4, default=0)
     service_fee_rate = models.DecimalField(

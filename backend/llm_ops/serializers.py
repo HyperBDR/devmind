@@ -1520,6 +1520,13 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_point_decimal_places(self, value):
+        if value > 6:
+            raise serializers.ValidationError(
+                "point_decimal_places must be between 0 and 6."
+            )
+        return value
+
     def validate_metadata(self, value):
         if value in (None, ""):
             return {}

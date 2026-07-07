@@ -2,6 +2,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from llm_ops.collection_services import (
     ensure_official_model_source,
@@ -17,13 +18,16 @@ from llm_ops.collectors.official import (
 )
 from llm_ops.constants import canonical_meta_model_identity
 from llm_ops.models import (
+    CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
     LLMModel,
     LLMProvider,
     MetaModel,
+    ModelSku,
     ModelPriceItem,
     PriceCollectionRun,
     PriceCollectionSource,
+    SourceSkuOffering,
 )
 from llm_ops.skill_runner import MODEL_PRICE_CATALOG_SCHEMA_VERSION
 
@@ -285,6 +289,77 @@ class OfficialCollectionSyncTests(TestCase):
             ModelPriceItem.objects.filter(
                 model=legacy_model,
                 source=provider_source,
+                is_current=True,
+            ).exists()
+        )
+
+    def test_sync_official_prices_closes_stale_current_source_rows(self):
+        provider = LLMProvider.objects.get(code="openai")
+        source = PriceCollectionSource.objects.get(slug="openai-official")
+        meta_model = MetaModel.objects.get(code="gpt-4o-mini")
+        stale_sku = ModelSku.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            canonical_sku_code="gpt-4omini",
+            upstream_model_name="gpt-4omini",
+            display_name="GPT-4omini",
+            variant_type=ModelSku.VARIANT_OFFICIAL,
+        )
+        stale_offering = SourceSkuOffering.objects.create(
+            source=source,
+            provider=provider,
+            sku=stale_sku,
+            exposed_model_name="gpt-4omini",
+        )
+        stale_item = ModelPriceItem.objects.create(
+            provider=provider,
+            sku=stale_sku,
+            offering=stale_offering,
+            meta_model=meta_model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("11.000000"),
+            price_fingerprint="stale-fingerprint",
+            is_current=True,
+        )
+        stale_history = CollectedModelPriceHistory.objects.create(
+            source=source,
+            provider=provider,
+            sku=stale_sku,
+            offering=stale_offering,
+            meta_model=meta_model,
+            source_platform_id="gpt-4omini",
+            source_model_id="gpt-4omini",
+            source_model_name="GPT-4omini",
+            source_model_type="text",
+            currency="USD",
+            price_fingerprint="stale-history-fingerprint",
+            effective_from=timezone.now(),
+            is_current=True,
+        )
+
+        stats = sync_official_provider_model_prices(
+            provider=provider,
+            verify_source=False,
+        )
+
+        stale_item.refresh_from_db()
+        stale_history.refresh_from_db()
+        self.assertFalse(stale_item.is_current)
+        self.assertFalse(stale_history.is_current)
+        self.assertGreaterEqual(stats["models"], 1)
+        self.assertEqual(
+            PriceCollectionRun.objects.latest("id").metadata[
+                "closed_stale_price_items"
+            ],
+            1,
+        )
+        self.assertTrue(
+            ModelPriceItem.objects.filter(
+                source=source,
+                meta_model__code="gpt-4o-mini",
                 is_current=True,
             ).exists()
         )
@@ -595,6 +670,17 @@ class OfficialCollectionSyncTests(TestCase):
                   "output": ["text"]
                 },
                 "limit": {"context": 256000, "output": 128000}
+              },
+              "alibaba/qwen-plus": {
+                "id": "alibaba/qwen-plus",
+                "name": "Qwen Plus",
+                "family": "qwen",
+                "tool_call": true,
+                "modalities": {
+                  "input": ["text"],
+                  "output": ["text"]
+                },
+                "limit": {"context": 1000000, "output": 8192}
               }
             }
             """,
@@ -606,7 +692,8 @@ class OfficialCollectionSyncTests(TestCase):
 
         meta = MetaModel.objects.get(code="gpt-real-test")
         microsoft = MetaModel.objects.get(code="mai-code-1-flash")
-        self.assertEqual(stats["models"], 2)
+        qwen = MetaModel.objects.get(code="qwen-plus")
+        self.assertEqual(stats["models"], 3)
         self.assertEqual(second_stats["created"], 0)
         self.assertEqual(
             MetaModel.objects.filter(code="gpt-real-test").count(),
@@ -639,6 +726,8 @@ class OfficialCollectionSyncTests(TestCase):
         )
         self.assertEqual(microsoft.owner_code, "microsoft")
         self.assertEqual(microsoft.owner_name, "Microsoft")
+        self.assertEqual(qwen.owner_code, "alibaba")
+        self.assertEqual(qwen.owner_name, "阿里巴巴")
         self.assertEqual(
             microsoft.metadata["models_dev"]["lab"],
             "microsoft",

@@ -203,17 +203,24 @@
               <input
                 v-model="form.points_per_currency_unit"
                 class="field"
-                min="0.000001"
-                step="0.000001"
+                min="0.01"
+                step="0.01"
                 type="number"
-                placeholder="例如：100"
+                placeholder="例如：100.00"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">积分取整方式</span>
+              <span class="field-label">积分舍入方式</span>
               <CompactSelect
                 v-model="form.point_rounding_mode"
                 :options="roundingModeOptions"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">保留小数位</span>
+              <CompactSelect
+                v-model="form.point_decimal_places"
+                :options="decimalPlaceOptions"
               />
             </label>
           </div>
@@ -333,8 +340,17 @@ const regionOptions = [
 ]
 const roundingModeOptions = [
   { label: '四舍五入', value: 'half_up' },
-  { label: '向上取整', value: 'up' },
-  { label: '向下取整', value: 'down' }
+  { label: '向上舍入', value: 'up' },
+  { label: '向下舍入', value: 'down' }
+]
+const decimalPlaceOptions = [
+  { label: '0 位', value: 0 },
+  { label: '1 位', value: 1 },
+  { label: '2 位', value: 2 },
+  { label: '3 位', value: 3 },
+  { label: '4 位', value: 4 },
+  { label: '5 位', value: 5 },
+  { label: '6 位', value: 6 }
 ]
 const metadataError = ref('')
 
@@ -364,8 +380,9 @@ function defaults() {
     service_fee_rate: '0',
     auto_approve_max_margin_rate: '100',
     point_name: '积分',
-    points_per_currency_unit: '100',
+    points_per_currency_unit: '100.00',
     point_rounding_mode: 'half_up',
+    point_decimal_places: 0,
     metadata: {},
     metadata_text: '',
     notes: '',
@@ -382,6 +399,11 @@ function platformToForm(platform) {
     environment: platform.environment || 'production',
     fee_rate: percentFromRatio(platform.fee_rate),
     service_fee_rate: percentFromRatio(platform.service_fee_rate),
+    points_per_currency_unit: formatDecimal(
+      platform.points_per_currency_unit,
+      2
+    ),
+    point_decimal_places: platform.point_decimal_places ?? 0,
     metadata: platform.metadata || {},
     metadata_text: formatMetadata(platform.metadata)
   }
@@ -415,13 +437,37 @@ function normalizePayload(payload) {
   clean.currency = String(clean.currency || 'CNY')
     .trim()
     .toUpperCase()
+  clean.points_per_currency_unit = normalizePointRatio(
+    clean.points_per_currency_unit
+  )
   clean.fee_rate = ratioFromPercent(clean.fee_rate)
   clean.service_fee_rate = ratioFromPercent(clean.service_fee_rate)
+  clean.point_decimal_places = normalizePointDecimalPlaces(
+    clean.point_decimal_places
+  )
   clean.metadata = parseMetadata(clean.metadata_text)
   delete clean.id
   delete clean.listing_count
   delete clean.metadata_text
   return clean
+}
+
+function formatDecimal(value, digits) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return ''
+  return numberValue.toFixed(digits)
+}
+
+function normalizePointRatio(value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return '0.00'
+  return Math.max(0, numberValue).toFixed(2)
+}
+
+function normalizePointDecimalPlaces(value) {
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return 0
+  return Math.min(6, Math.max(0, Math.trunc(numberValue)))
 }
 
 function parseMetadata(value) {

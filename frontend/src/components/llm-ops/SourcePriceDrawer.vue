@@ -182,9 +182,36 @@
           </div>
           <div v-if="totalItems" class="pagination-bar">
             <p class="text-xs text-slate-500">
-              第 {{ page }} / {{ totalPages }} 页，共 {{ totalItems }} 条
+              {{
+                t('llmOps.sourcePriceDrawer.pagination.summary', {
+                  page,
+                  totalPages,
+                  total: totalItems
+                })
+              }}
             </p>
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="page-size-control">
+                <span>
+                  {{ t('llmOps.sourcePriceDrawer.pagination.pageSize') }}
+                </span>
+                <select
+                  class="page-size-select"
+                  :value="pageSize"
+                  :disabled="loading"
+                  @change="
+                    $emit('page-size-change', Number($event.target.value))
+                  "
+                >
+                  <option
+                    v-for="option in pageSizeOptions"
+                    :key="option"
+                    :value="option"
+                  >
+                    {{ option }}
+                  </option>
+                </select>
+              </label>
               <button
                 class="btn-secondary pagination-btn"
                 type="button"
@@ -217,7 +244,7 @@ import {
   priceSourceOwnerType
 } from '@/utils/llmOpsPriceSources'
 
-defineEmits(['close', 'delete', 'refresh', 'page-change'])
+defineEmits(['close', 'delete', 'refresh', 'page-change', 'page-size-change'])
 
 const props = defineProps({
   source: {
@@ -254,6 +281,7 @@ const props = defineProps({
   }
 })
 
+const pageSizeOptions = [10, 20, 50]
 const { t, locale } = useI18n()
 const search = ref('')
 
@@ -723,6 +751,14 @@ function formatDateTime(value) {
 
 .pagination-btn {
   @apply px-3 py-1.5 text-xs;
+}
+
+.page-size-control {
+  @apply inline-flex items-center gap-2 text-xs font-medium text-slate-500;
+}
+
+.page-size-select {
+  @apply h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50 disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 .btn-secondary {

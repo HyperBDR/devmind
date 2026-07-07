@@ -93,17 +93,17 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "aliyun": {
         "name": "阿里云",
         "website": "https://dashscope.aliyuncs.com/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
     },
     "aliyun-wanx": {
         "name": "阿里云万象",
         "website": "https://dashscope.aliyuncs.com/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
     },
     "baidu": {
         "name": "百度千帆",
         "website": "https://cloud.baidu.com/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
         "source_name": "百度千帆官方价格",
         "source_url": BAIDU_PRICING_SOURCE_URL,
         "currency": "CNY",
@@ -111,7 +111,7 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "volcengine": {
         "name": "火山方舟",
         "website": "https://ark.cn-beijing.volces.com/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
         "source_name": "火山方舟官方价格",
         "source_url": VOLCENGINE_PRICING_SOURCE_URL,
         "currency": "CNY",
@@ -119,7 +119,7 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "anthropic": {
         "name": "Anthropic",
         "website": "https://anthropic.com/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
         "source_name": "Anthropic 官方价格",
         "source_url": (
             "https://docs.anthropic.com/en/docs/about-claude/pricing"
@@ -140,7 +140,7 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "google": {
         "name": "Google",
         "website": "https://ai.google.dev/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
         "source_name": "Google Gemini 官方价格",
         "source_url": (
             "https://cloud.google.com/gemini-enterprise-agent-platform/"
@@ -151,7 +151,7 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "minimax": {
         "name": "MiniMax",
         "website": "https://api.minimax.io/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
         "source_name": "MiniMax 官方价格",
         "source_url": MINIMAX_PRICING_SOURCE_URL,
         "currency": "CNY",
@@ -159,7 +159,7 @@ OFFICIAL_SOURCE_PROVIDER_DEFAULTS = {
     "zhipu": {
         "name": "智谱",
         "website": "https://open.bigmodel.cn/",
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
         "source_name": "智谱 BigModel 官方价格",
         "source_url": ZHIPU_PRICING_SOURCE_URL,
         "currency": "CNY",
@@ -207,7 +207,7 @@ MODELS_DEV_META_SOURCE_PROVIDERS = {
 }
 
 MODELS_DEV_LAB_OWNER_DEFAULTS = {
-    "alibaba": ("aliyun", "阿里巴巴", "https://www.alibaba.com/"),
+    "alibaba": ("alibaba", "阿里巴巴", "https://www.alibaba.com/"),
     "anthropic": ("anthropic", "Anthropic", "https://anthropic.com/"),
     "cohere": ("cohere", "Cohere", "https://cohere.com/"),
     "deepreinforce": (
@@ -314,6 +314,7 @@ def sync_yunce_model_prices(
         raise ValueError("Price collection source is disabled.")
     base_url = resolve_collection_base_url(source=source, base_url=base_url)
     run = PriceCollectionRun.objects.create(source=source)
+    active_offering_ids: set[int] = set()
     stats = {
         "models": 0,
         "created": 0,
@@ -363,10 +364,15 @@ def sync_yunce_model_prices(
                     offering=offering,
                     source_url=catalog.source_url,
                 )
+                active_offering_ids.add(offering.id)
                 stats["models"] += 1
                 stats["created" if created else "updated"] += 1
                 stats["changed" if changed else "unchanged"] += 1
 
+            stale_stats = close_stale_current_collected_prices(
+                source=source,
+                active_offering_ids=active_offering_ids,
+            )
             source.last_collected_at = timezone.now()
             source.save(update_fields=["last_collected_at", "updated_at"])
             run.status = PriceCollectionRun.STATUS_SUCCEEDED
@@ -386,6 +392,8 @@ def sync_yunce_model_prices(
                 "skipped_model_codes": sorted(
                     set(stats["skipped_model_codes"]),
                 ),
+                "closed_stale_price_items": stale_stats["price_items"],
+                "closed_stale_history": stale_stats["history"],
             }
             run.save()
         return stats
@@ -424,6 +432,7 @@ def sync_vendor_price_source_catalog(
         else source.name
     )
     run = PriceCollectionRun.objects.create(source=source)
+    active_offering_ids: set[int] = set()
     stats = {
         "models": 0,
         "created": 0,
@@ -487,10 +496,15 @@ def sync_vendor_price_source_catalog(
                     offering=offering,
                     source_url=catalog.source_url,
                 )
+                active_offering_ids.add(offering.id)
                 stats["models"] += 1
                 stats["created" if created else "updated"] += 1
                 stats["changed" if changed else "unchanged"] += 1
 
+            stale_stats = close_stale_current_collected_prices(
+                source=source,
+                active_offering_ids=active_offering_ids,
+            )
             source.last_collected_at = timezone.now()
             source.save(update_fields=["last_collected_at", "updated_at"])
             run.status = PriceCollectionRun.STATUS_SUCCEEDED
@@ -509,6 +523,8 @@ def sync_vendor_price_source_catalog(
                 "skipped_model_codes": sorted(
                     set(stats["skipped_model_codes"]),
                 ),
+                "closed_stale_price_items": stale_stats["price_items"],
+                "closed_stale_history": stale_stats["history"],
             }
             run.save()
         return stats
@@ -631,6 +647,7 @@ def sync_official_provider_model_prices(
         config=config,
     )
     run = PriceCollectionRun.objects.create(source=source)
+    active_offering_ids: set[int] = set()
     stats: dict[str, int | list[str]] = {
         "models": 0,
         "created": 0,
@@ -687,6 +704,7 @@ def sync_official_provider_model_prices(
                     offering=offering,
                     source_url=catalog.source_url,
                 )
+                active_offering_ids.add(offering.id)
                 stats["models"] = int(stats["models"]) + 1
                 key = "created" if created else "updated"
                 stats[key] = int(stats[key]) + 1
@@ -694,6 +712,10 @@ def sync_official_provider_model_prices(
                 stats[change_key] = int(stats[change_key]) + 1
 
             skipped_codes = sorted(set(skipped_codes))
+            stale_stats = close_stale_current_collected_prices(
+                source=source,
+                active_offering_ids=active_offering_ids,
+            )
             source.last_collected_at = timezone.now()
             source_update_fields = ["last_collected_at", "updated_at"]
             if collected_currency and source.currency != collected_currency:
@@ -714,6 +736,8 @@ def sync_official_provider_model_prices(
                 "changed_count": stats["changed"],
                 "unchanged_count": stats["unchanged"],
                 "skipped_model_codes": skipped_codes,
+                "closed_stale_price_items": stale_stats["price_items"],
+                "closed_stale_history": stale_stats["history"],
             }
             run_metadata.update(catalog_source_fetch_metadata(catalog))
             if standard_catalog is not None:
@@ -1102,7 +1126,7 @@ def official_provider_defaults(provider_code: str) -> dict[str, str]:
     return {
         "name": config.provider_label,
         "website": config.source_url,
-        "notes": "元模型厂商。",
+        "notes": "模型价格源厂商。",
     }
 
 
@@ -2887,6 +2911,38 @@ def activate_collected_price_history(
         history.effective_to = None
         history.save(update_fields=["is_current", "effective_to"])
     return history
+
+
+def close_stale_current_collected_prices(
+    *,
+    source: PriceCollectionSource,
+    active_offering_ids: set[int],
+) -> dict[str, int]:
+    """Close current collected rows for offerings absent from a fresh sync."""
+    now = timezone.now()
+    price_items = ModelPriceItem.objects.filter(
+        source=source,
+        is_current=True,
+    )
+    history = CollectedModelPriceHistory.objects.filter(
+        source=source,
+        is_current=True,
+    )
+    if active_offering_ids:
+        price_items = price_items.exclude(offering_id__in=active_offering_ids)
+        history = history.exclude(offering_id__in=active_offering_ids)
+    closed_price_items = price_items.update(
+        is_current=False,
+        effective_to=now,
+    )
+    closed_history = history.update(
+        is_current=False,
+        effective_to=now,
+    )
+    return {
+        "price_items": closed_price_items,
+        "history": closed_history,
+    }
 
 
 def sync_model_price_items(
