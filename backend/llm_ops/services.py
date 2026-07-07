@@ -1076,6 +1076,15 @@ def resolve_channel_model_price(
         audio_output_price = source_unit_prices.audio_output_per_second * ratio
         video_input_price = source_unit_prices.video_input_per_second * ratio
         video_output_price = source_unit_prices.video_output_per_second * ratio
+    elif override and override.price_source_id:
+        input_price = ZERO
+        output_price = ZERO
+        cache_input_price = ZERO
+        image_output_price = ZERO
+        audio_input_price = ZERO
+        audio_output_price = ZERO
+        video_input_price = ZERO
+        video_output_price = ZERO
 
     resolution_prices = model.video_resolution_prices or {}
     if video_resolution and video_resolution in resolution_prices:
@@ -1429,6 +1438,8 @@ def channel_price_item_payloads(
             )
             for base_item in base_items
         ]
+    if price.price_source_id:
+        return []
     return legacy_channel_price_item_payloads(
         price,
         currency=currency,
@@ -1440,19 +1451,23 @@ def current_model_price_items_for_channel_price(
     price: ChannelModelPrice,
 ) -> list[ModelPriceItem]:
     """Return current price items for the selected procurement source."""
-    rows = current_price_items_for_model(
-        price.model,
-        source_id=price.price_source_id,
-    )
-    if rows:
-        return rows
     if price.price_source_id:
-        rows = fallback_price_items_for_meta_model(
+        rows = current_price_items_for_model(
             price.model,
             source_id=price.price_source_id,
         )
         if rows:
-            return rows
+            return selected_price_item_group(rows, model=price.model)
+        return fallback_price_items_for_meta_model(
+            price.model,
+            source_id=price.price_source_id,
+        )
+
+    rows = current_price_items_for_model(
+        price.model,
+    )
+    if rows:
+        return selected_price_item_group(rows, model=price.model)
     return fallback_price_items_for_meta_model(price.model)
 
 
@@ -1497,6 +1512,15 @@ def fallback_price_items_for_meta_model(
     if not rows:
         return []
 
+    return selected_price_item_group(rows, model=model)
+
+
+def selected_price_item_group(
+    rows: list[ModelPriceItem],
+    *,
+    model: LLMModel | None = None,
+) -> list[ModelPriceItem]:
+    """Return the best coherent price item group from candidate rows."""
     groups: dict[str, list[ModelPriceItem]] = {}
     for item in rows:
         key = price_item_group_key(item)
@@ -1504,26 +1528,31 @@ def fallback_price_items_for_meta_model(
 
     return sorted(
         groups.values(),
-        key=price_item_group_score,
+        key=lambda group: price_item_group_score(group, model=model),
         reverse=True,
     )[0]
 
 
 def price_item_group_key(item: ModelPriceItem) -> str:
     """Return the identity used to compare coherent price item groups."""
+    spec_key = json.dumps(item.spec or {}, sort_keys=True)
     if item.offering_id:
-        return f"offering:{item.offering_id}"
+        return f"offering:{item.offering_id}:{spec_key}"
     if item.sku_id:
-        return f"sku:{item.source_id or ''}:{item.sku_id}"
+        return f"sku:{item.source_id or ''}:{item.sku_id}:{spec_key}"
     if item.model_id:
-        return f"model:{item.source_id or ''}:{item.model_id}"
-    return f"source:{item.source_id or ''}"
+        return f"model:{item.source_id or ''}:{item.model_id}:{spec_key}"
+    return f"source:{item.source_id or ''}:{spec_key}"
 
 
-def price_item_group_score(rows: list[ModelPriceItem]) -> tuple:
+def price_item_group_score(
+    rows: list[ModelPriceItem],
+    *,
+    model: LLMModel | None = None,
+) -> tuple:
     """Score fallback price groups like the frontend channel preview."""
     if not rows:
-        return (0, 0, 0)
+        return (0, 0, 0, 0)
     first = rows[0]
     role = ""
     if first.source_id:
@@ -1538,9 +1567,48 @@ def price_item_group_score(rows: list[ModelPriceItem]) -> tuple:
         LLMModel.PRICE_ROLE_CLOUD_HOSTED: 250,
         LLMModel.PRICE_ROLE_SUPPLIER: 200,
     }.get(role, 0)
+    alignment_score = price_item_group_alignment_score(rows, model)
     latest = max((item.effective_from for item in rows), default=None)
     latest_score = latest.timestamp() if latest else 0
-    return (category_score, len(rows), latest_score)
+    return (category_score, len(rows), alignment_score, latest_score)
+
+
+def price_item_group_alignment_score(
+    rows: list[ModelPriceItem],
+    model: LLMModel | None,
+) -> int:
+    """Prefer the group that matches the model's promoted base prices."""
+    if model is None:
+        return 0
+
+    field_map = {
+        ModelPriceItem.DIMENSION_TEXT_INPUT: "input_price_per_million",
+        ModelPriceItem.DIMENSION_TEXT_OUTPUT: "output_price_per_million",
+        ModelPriceItem.DIMENSION_CACHE_INPUT: "cache_input_price_per_million",
+        ModelPriceItem.DIMENSION_IMAGE_OUTPUT: "image_output_price_per_image",
+        ModelPriceItem.DIMENSION_AUDIO_INPUT: "audio_input_price_per_second",
+        ModelPriceItem.DIMENSION_AUDIO_OUTPUT: "audio_output_price_per_second",
+        ModelPriceItem.DIMENSION_VIDEO_INPUT: "video_input_price_per_second",
+        ModelPriceItem.DIMENSION_VIDEO_OUTPUT: "video_output_price_per_second",
+    }
+    score = 0
+    for item in rows:
+        field_name = field_map.get(item.dimension)
+        if not field_name:
+            continue
+        model_value = getattr(model, field_name, None)
+        if model_value is None:
+            continue
+        converted = convert_currency_between(
+            item.unit_price,
+            item.currency,
+            model.currency,
+        )
+        if converted is None:
+            continue
+        if decimal_or_zero(model_value) == decimal_or_zero(converted):
+            score += 1
+    return score
 
 
 def channel_price_payload_from_base_item(

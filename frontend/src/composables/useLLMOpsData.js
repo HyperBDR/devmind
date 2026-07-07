@@ -214,7 +214,7 @@ export function useLLMOpsData() {
   }
 
   function preloadResalePublishingData() {
-    const tasks = []
+    const tasks = [refreshChannelPricingData(), refreshSummary()]
     if (!asArray(metaModels.value).length) {
       tasks.push(
         fetchList(llmOpsApi.listMetaModels).then((items) => {
@@ -222,19 +222,12 @@ export function useLLMOpsData() {
         })
       )
     }
-    if (
-      !asArray(channelPrices.value).length ||
-      !asArray(channelPriceItems.value).length
-    ) {
-      tasks.push(refreshChannelPricingData())
-    }
     if (!asArray(modelPriceItems.value).length) {
       tasks.push(refreshModelPriceItems())
     }
     if (!asArray(listings.value).length) {
       tasks.push(refreshResaleListings())
     }
-    if (!tasks.length) return
 
     Promise.all(tasks).catch((error) => {
       showError(errorMessage(error, '加载发布工作台数据失败。'))

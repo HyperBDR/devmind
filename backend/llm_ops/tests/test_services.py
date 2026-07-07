@@ -318,7 +318,7 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].unit_price, Decimal("1.500000"))
         self.assertEqual(cost, Decimal("1.500000"))
 
-    def test_sync_falls_back_to_meta_model_price_items(self):
+    def test_sync_does_not_fallback_when_selected_source_has_no_items(self):
         official_source = PriceCollectionSource.objects.create(
             name="OpenAI Official Meta",
             slug="openai-official-meta",
@@ -342,7 +342,7 @@ class LLMOpsPricingServiceTests(TestCase):
             name="GPT-4o Official",
             code="gpt-4o-official",
         )
-        official_item = ModelPriceItem.objects.create(
+        ModelPriceItem.objects.create(
             provider=self.provider,
             model=official_model,
             source=official_source,
@@ -367,10 +367,8 @@ class LLMOpsPricingServiceTests(TestCase):
             input_tokens=1_000_000,
         )
 
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0].base_price_item, official_item)
-        self.assertEqual(items[0].unit_price, Decimal("1.250000"))
-        self.assertEqual(cost, Decimal("1.250000"))
+        self.assertEqual(items, [])
+        self.assertEqual(cost, Decimal("0.000000"))
 
     def test_sync_uses_selected_source_offering_price_items(self):
         first_source = PriceCollectionSource.objects.create(
@@ -450,6 +448,107 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].base_price_item, selected_item)
         self.assertEqual(items[0].unit_price, Decimal("1.500000"))
         self.assertEqual(cost, Decimal("1.500000"))
+
+    def test_sync_selects_price_group_matching_model_base_prices(self):
+        source = PriceCollectionSource.objects.create(
+            name="Aliyun Official",
+            slug="aliyun-official",
+            provider=self.provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            currency="CNY",
+        )
+        sku = ModelSku.objects.create(
+            provider=self.provider,
+            meta_model=self.model.meta_model,
+            canonical_sku_code="deepseek-v4-flash",
+            upstream_model_name="deepseek-v4-flash",
+            display_name="Deepseek V4 Flash",
+        )
+        offering = SourceSkuOffering.objects.create(
+            source=source,
+            sku=sku,
+            provider=self.provider,
+            exposed_model_name="deepseek-v4-flash",
+        )
+        self.model.input_price_per_million = Decimal("1")
+        self.model.output_price_per_million = Decimal("2")
+        self.model.currency = "CNY"
+        self.model.save(
+            update_fields=[
+                "input_price_per_million",
+                "output_price_per_million",
+                "currency",
+            ]
+        )
+        price_specs = [
+            (
+                "mainland-input",
+                ModelPriceItem.DIMENSION_TEXT_INPUT,
+                "1",
+                "中国内地",
+            ),
+            (
+                "mainland-output",
+                ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                "2",
+                "中国内地",
+            ),
+            (
+                "intl-input",
+                ModelPriceItem.DIMENSION_TEXT_INPUT,
+                "1.499",
+                "国际",
+            ),
+            (
+                "intl-output",
+                ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                "2.998",
+                "国际",
+            ),
+        ]
+        for fingerprint, dimension, unit_price, region in price_specs:
+            ModelPriceItem.objects.create(
+                provider=self.provider,
+                sku=sku,
+                offering=offering,
+                meta_model=self.model.meta_model,
+                source=source,
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="CNY",
+                unit_price=Decimal(unit_price),
+                spec={"deployment_scope": region},
+                price_fingerprint=fingerprint,
+                is_current=True,
+            )
+        cny_channel = ProcurementChannel.objects.create(
+            name="CNY Direct",
+            code="cny-direct",
+            currency="CNY",
+            settlement_ratio=Decimal("0.85"),
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=cny_channel,
+            model=self.model,
+            price_source=source,
+        )
+
+        items = sync_channel_price_items(price)
+        unit_prices = resolve_channel_model_price(
+            cny_channel,
+            self.model,
+            override=price,
+        )
+
+        self.assertEqual(len(items), 2)
+        self.assertEqual(unit_prices.input_per_million, Decimal("0.850000"))
+        self.assertEqual(unit_prices.output_per_million, Decimal("1.700000"))
+        self.assertEqual(
+            {item.base_price_item.unit_price for item in items},
+            {Decimal("1.000000"), Decimal("2.000000")},
+        )
 
     def test_marks_channel_item_comparison_unknown_for_currency_mismatch(self):
         ModelPriceItem.objects.create(
