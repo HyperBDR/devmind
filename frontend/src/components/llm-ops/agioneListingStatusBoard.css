@@ -712,7 +712,9 @@
 }
 
 .agione-listing-status-board .listing-table .table-head,
-.agione-listing-status-board .listing-table .table-cell {
+.agione-listing-status-board .listing-table .table-cell,
+.agione-listing-status-board .listing-table th,
+.agione-listing-status-board .listing-table td {
   text-align: center;
   vertical-align: middle;
 }
@@ -720,6 +722,7 @@
 .agione-listing-status-board .listing-table .table-cell > p {
   margin-left: auto;
   margin-right: auto;
+  text-align: center;
 }
 
 .agione-listing-status-board .listing-table .row-checkbox {
@@ -792,7 +795,10 @@
   gap: 0.25rem;
   margin-left: auto;
   margin-right: auto;
-  max-width: 9.25rem;
+  width: 100%;
+  max-width: none;
+  justify-items: center;
+  text-align: center;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
@@ -801,15 +807,17 @@
 
 .agione-listing-status-board .metric-line {
   display: grid;
-  grid-template-columns: 3rem minmax(0, 1fr);
+  grid-template-columns: max-content minmax(3.75rem, max-content);
   align-items: baseline;
-  column-gap: 0.25rem;
+  justify-content: center;
+  column-gap: 0.5rem;
   min-height: 1.375rem;
   color: #475569;
 }
 
 .agione-listing-status-board .metric-line-value {
   grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
 }
 
 .agione-listing-status-board .metric-label {
@@ -817,7 +825,7 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
-  text-align: right;
+  text-align: left;
   text-transform: uppercase;
 }
 
