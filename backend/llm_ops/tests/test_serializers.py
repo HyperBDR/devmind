@@ -1,9 +1,11 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
 
 from llm_ops.models import (
     LLMModel,
+    LLMOpsGlobalConfig,
     LLMProvider,
     MetaModel,
     ModelPriceItem,
@@ -16,6 +18,7 @@ from llm_ops.models import (
 )
 from llm_ops.serializers import (
     LLMModelSerializer,
+    LLMOpsGlobalConfigSerializer,
     ManualPriceImportRequestSerializer,
     ModelPriceItemSerializer,
     PriceCollectionSourceSerializer,
@@ -23,6 +26,41 @@ from llm_ops.serializers import (
     ResalePlatformSerializer,
     UsageReconciliationRecordSerializer,
 )
+
+
+class LLMOpsGlobalConfigSerializerTests(TestCase):
+    @patch("llm_ops.models.encryption_service.decrypt")
+    def test_plaintext_secret_falls_back_without_decrypt(self, mock_decrypt):
+        mock_decrypt.side_effect = AssertionError(
+            "Plaintext values should not be decrypted."
+        )
+        config = LLMOpsGlobalConfig.get_solo()
+        LLMOpsGlobalConfig.objects.filter(pk=config.pk).update(
+            feishu_app_secret="legacy-plaintext-secret"
+        )
+
+        config.refresh_from_db()
+
+        self.assertEqual(
+            config.get_feishu_app_secret(),
+            "legacy-plaintext-secret",
+        )
+
+    def test_blank_secret_clears_existing_secret(self):
+        config = LLMOpsGlobalConfig.get_solo()
+        config.set_feishu_app_secret("existing-secret")
+        config.save()
+
+        serializer = LLMOpsGlobalConfigSerializer(
+            config,
+            data={"feishu_app_secret": ""},
+            partial=True,
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        updated = serializer.save()
+        self.assertEqual(updated.feishu_app_secret, "")
+        self.assertEqual(updated.get_feishu_app_secret(), "")
 
 
 class ProcurementChannelSerializerTests(TestCase):
