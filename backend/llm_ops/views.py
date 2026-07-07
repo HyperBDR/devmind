@@ -1086,6 +1086,43 @@ class ProcurementChannelViewSet(
             ),
         ).order_by("name", "id")
 
+    def perform_update(self, serializer):
+        before = snapshot_instance(serializer.instance)
+        previous_ratio = _decimal_or_none(
+            serializer.instance.settlement_ratio,
+        )
+        previous_currency = serializer.instance.currency
+        with transaction.atomic():
+            channel = serializer.save()
+            record_audit_log(
+                request=self.request,
+                action=AuditLog.ACTION_UPDATE,
+                category=self.audit_category,
+                target=channel,
+                summary=f"Updated {channel}",
+                before=before,
+                after=snapshot_instance(channel),
+            )
+            if (
+                previous_ratio != _decimal_or_none(channel.settlement_ratio)
+                or previous_currency != channel.currency
+            ):
+                self._sync_listed_channel_price_items(channel)
+
+    def _sync_listed_channel_price_items(self, channel):
+        prices = ChannelModelPrice.objects.filter(
+            channel=channel,
+            is_listed=True,
+        ).select_related(
+            "channel",
+            "meta_model",
+            "model",
+            "model__provider",
+            "price_source",
+        )
+        for price in prices:
+            sync_channel_price_items(price)
+
     def perform_destroy(self, instance):
         """Delete channel-scoped records before removing the channel.
 
@@ -2130,6 +2167,12 @@ class UsageReconciliationRecordViewSet(
 
 def _as_float(value) -> float:
     return float(value or Decimal("0"))
+
+
+def _decimal_or_none(value) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    return Decimal(str(value))
 
 
 def _listing_submit_status(existing: ResaleListing | None) -> dict:

@@ -21,6 +21,18 @@ export function useResaleChainRows({
   t
 }) {
   function channelPriceValue(option, modelId, dimension, fallbackValue) {
+    const hasSummaryValue =
+      fallbackValue !== null &&
+      fallbackValue !== undefined &&
+      fallbackValue !== ''
+    if (hasSummaryValue) {
+      return {
+        value: fallbackValue,
+        currency: option.currency,
+        ratio: option.settlement_ratio
+      }
+    }
+
     const item = channelPriceItemsByKey.value.get(
       channelPriceItemKey(option.channel_id, modelId, dimension)
     )
