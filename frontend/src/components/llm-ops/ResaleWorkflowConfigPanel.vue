@@ -157,10 +157,10 @@
                     <option value="internal">
                       {{ t('llmOps.workflowConfig.approvalModes.internal') }}
                     </option>
-                    <option value="external">
+                    <option v-if="feishuApprovalAvailable" value="external">
                       {{ t('llmOps.workflowConfig.approvalModes.external') }}
                     </option>
-                    <option value="both">
+                    <option v-if="feishuApprovalAvailable" value="both">
                       {{ t('llmOps.workflowConfig.approvalModes.both') }}
                     </option>
                     <option
@@ -175,6 +175,12 @@
                 <span>{{
                   t('llmOps.workflowConfig.policy.reviewFallback')
                 }}</span>
+                <span
+                  v-if="!feishuApprovalAvailable"
+                  class="workflow-node-hint"
+                >
+                  {{ t('llmOps.workflowConfig.policy.feishuDisabledHint') }}
+                </span>
               </article>
             </div>
 
@@ -263,6 +269,7 @@ const loading = ref(false)
 const saving = ref(false)
 const workflow = ref(null)
 const localPlatformId = ref(props.platformId || '')
+const feishuApprovalAvailable = ref(false)
 
 const platformOptions = computed(() =>
   props.platforms.map((platform) => ({
@@ -352,10 +359,15 @@ async function loadConfig() {
   if (!localPlatformId.value) return
   loading.value = true
   try {
-    const response = await llmOpsApi.getResaleWorkflowConfig(
-      localPlatformId.value
+    const [response, globalResponse] = await Promise.all([
+      llmOpsApi.getResaleWorkflowConfig(localPlatformId.value),
+      llmOpsApi.getGlobalConfig()
+    ])
+    feishuApprovalAvailable.value = Boolean(
+      normalizeGlobalConfigPayload(globalResponse.data).feishu_approval_enabled
     )
     workflow.value = normalizeWorkflowPayload(response.data)
+    enforceFeishuApprovalAvailability()
     syncPolicyEdges()
   } catch (error) {
     showError(
@@ -374,6 +386,7 @@ async function saveConfig() {
   }
   saving.value = true
   try {
+    enforceFeishuApprovalAvailability()
     syncPolicyEdges()
     const response = await llmOpsApi.updateResaleWorkflowConfig(
       localPlatformId.value,
@@ -384,6 +397,7 @@ async function saveConfig() {
       }
     )
     workflow.value = normalizeWorkflowPayload(response.data)
+    enforceFeishuApprovalAvailability()
     syncPolicyEdges()
     showSuccess(t('llmOps.workflowConfig.messages.saved'))
     emit('saved', workflow.value)
@@ -405,6 +419,7 @@ async function resetConfig() {
       localPlatformId.value
     )
     workflow.value = normalizeWorkflowPayload(response.data)
+    enforceFeishuApprovalAvailability()
     syncPolicyEdges()
     showSuccess(t('llmOps.workflowConfig.messages.reset'))
     emit('saved', workflow.value)
@@ -420,6 +435,7 @@ async function resetConfig() {
 function syncPolicyEdges() {
   const config = editableConfig.value
   if (!config?.edges || !config?.nodes || !config?.policies) return
+  enforceFeishuApprovalAvailability()
   setNodeEnabled('auto_confirm', config.policies.auto_approve_enabled)
   setNodeEnabled('manual_review', config.policies.manual_confirm_required)
   setNodeEnabled('feishu_approval', config.policies.feishu_approval_enabled)
@@ -443,6 +459,9 @@ function onAutoApproveToggle() {
 function setApprovalMode(mode) {
   const config = editableConfig.value
   if (!config?.policies) return
+  if (!feishuApprovalAvailable.value && ['external', 'both'].includes(mode)) {
+    mode = 'internal'
+  }
   if (mode === 'disabled' && !config.policies.auto_approve_enabled) {
     config.policies.manual_confirm_required = true
     config.policies.feishu_approval_enabled = false
@@ -475,8 +494,14 @@ function hasPublishPath(policyState = {}) {
   return Boolean(
     policyState.auto_approve_enabled ||
       policyState.manual_confirm_required ||
-      policyState.feishu_approval_enabled
+      (feishuApprovalAvailable.value && policyState.feishu_approval_enabled)
   )
+}
+
+function enforceFeishuApprovalAvailability() {
+  const config = editableConfig.value
+  if (!config?.policies || feishuApprovalAvailable.value) return
+  config.policies.feishu_approval_enabled = false
 }
 
 function normalizeWorkflowPayload(payload) {
@@ -494,6 +519,11 @@ function normalizeWorkflowPayload(payload) {
     runtime: isPlainObject(config.runtime) ? config.runtime : {}
   }
   return next
+}
+
+function normalizeGlobalConfigPayload(payload) {
+  const source = isPlainObject(payload?.data) ? payload.data : payload
+  return isPlainObject(source) ? source : {}
 }
 
 function isPlainObject(value) {

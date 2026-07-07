@@ -1085,6 +1085,7 @@
         "llmConfigLoad": "加载 LLM 配置失败",
         "loadFailed": "加载全局配置失败",
         "resetFailed": "恢复默认配置失败",
+        "scheduleRequired": "请选择有效的执行周期",
         "saveFailed": "保存全局配置失败",
         "sourceRequired": "请至少选择一个模型价格源"
       },
@@ -1092,11 +1093,13 @@
         "approvalCode": "审批定义 Code",
         "cron": "执行周期",
         "llmConfig": "Agent 使用的 LLM 配置",
+        "schedule": "执行周期",
         "sourceUrl": "数据源 URL",
         "updatedAt": "最近更新"
       },
       "feishu": {
-        "description": "用于模型上架审核流程提交审批实例。",
+        "description": "启用后，模型上架流程可选择外部飞书审批路径。",
+        "enabledHint": "关闭后，上架流程配置中不会出现飞书审批选项。",
         "secretConfigured": "密钥已配置",
         "secretMissing": "未配置",
         "secretPlaceholder": "留空则保留当前密钥",
@@ -1121,6 +1124,20 @@
       "priceCollection": {
         "description": "同步官方或供货商模型价格数据。",
         "title": "模型价格采集"
+      },
+      "schedule": {
+        "addHour": "添加执行小时",
+        "custom": "自定义周期",
+        "customDescription": "当前周期超出可视化编辑范围，保存其它配置时会保留原周期；如需调整，请重新选择执行小时，之后统一在 05 分执行。",
+        "emptyHours": "请选择至少一个执行时间",
+        "fixedMinute": "修改后统一在所选小时的 05 分执行。",
+        "hours": "执行小时",
+        "optionDescription": "每天 {time} 执行",
+        "removeHour": "删除执行小时",
+        "reselect": "重新选择",
+        "selectHour": "选择执行小时",
+        "summarySelectedHours": "每天 {times} 执行",
+        "timeSeparator": "、"
       },
       "sourceModes": {
         "all": "全部启用的数据源",
@@ -1193,6 +1210,7 @@
         "autoApproveThreshold": "收益率 <= {rate}",
         "autoApproveHint": "命中后跳过审核",
         "autoPath": "是否启用免审",
+        "feishuDisabledHint": "飞书审批未在全局配置中启用",
         "postApprovalAction": "通过后上线方式",
         "publishPolicy": "通过后上线方式",
         "reviewFallback": "未命中免审时执行",

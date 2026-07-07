@@ -1411,6 +1411,12 @@ class ResaleWorkflowConfigViewSet(
             config = self._editable_config(
                 validate_resale_workflow_config(raw_config)
             )
+            config = self._apply_global_feishu_policy(config)
+            if not self._has_publish_path(config):
+                return Response(
+                    {"detail": "At least one publishing path must be enabled."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             instance, _created = ResaleWorkflowConfig.objects.update_or_create(
                 platform=platform,
                 defaults={
@@ -1429,13 +1435,15 @@ class ResaleWorkflowConfigViewSet(
         saved_config = (
             instance.config if instance and instance.is_active else None
         )
+        config = merge_resale_workflow_config(platform, saved_config)
+        config = self._apply_global_feishu_policy(config)
         return {
             "id": instance.id if instance else None,
             "platform": platform.id,
             "platform_name": platform.name,
             "is_active": instance.is_active if instance else True,
             "notes": instance.notes if instance else "",
-            "config": merge_resale_workflow_config(platform, saved_config),
+            "config": config,
             "updated_at": instance.updated_at if instance else None,
         }
 
@@ -1446,6 +1454,29 @@ class ResaleWorkflowConfigViewSet(
             "nodes": config.get("nodes", []),
             "edges": config.get("edges", []),
         }
+
+    def _apply_global_feishu_policy(self, config):
+        if LLMOpsGlobalConfig.get_solo().feishu_approval_enabled:
+            return config
+        config["policies"]["feishu_approval_enabled"] = False
+        for node in config.get("nodes", []):
+            if node.get("id") == "feishu_approval":
+                node["enabled"] = False
+        for edge in config.get("edges", []):
+            if edge.get("id") in ("gate_to_feishu", "feishu_to_online"):
+                edge["enabled"] = False
+        return config
+
+    def _has_publish_path(self, config):
+        policies = config.get("policies", {})
+        return any(
+            bool(policies.get(key))
+            for key in (
+                "auto_approve_enabled",
+                "manual_confirm_required",
+                "feishu_approval_enabled",
+            )
+        )
 
 
 class ResaleListingViewSet(

@@ -33,6 +33,7 @@ AUDIT_FIELD_ALLOWLIST: dict[str, tuple[str, ...]] = {
         "price_collection_enabled",
         "price_collection_source_ids",
         "price_collection_cron",
+        "feishu_approval_enabled",
         "feishu_app_id",
         "feishu_approval_code",
         "feishu_tenant_key",
