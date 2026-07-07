@@ -16,7 +16,6 @@ class LLMOpsMetaModelsApiTests(TestCase):
     """The /v1/llm-ops/meta-models/ endpoint stays correct end-to-end."""
 
     def setUp(self):
-        aliyun = LLMProvider.objects.create(name="阿里云", code="aliyun")
         deepseek = LLMProvider.objects.create(
             name="DeepSeek",
             code="deepseek",
@@ -28,9 +27,9 @@ class LLMOpsMetaModelsApiTests(TestCase):
         MetaModel.objects.create(
             name="Qwen Plus",
             code="qwen-plus",
-            owner_code=aliyun.code,
-            owner_name=aliyun.name,
-            owner_website=aliyun.website,
+            owner_code="alibaba",
+            owner_name="阿里巴巴",
+            owner_website="https://www.alibaba.com/",
         )
         MetaModel.objects.create(
             name="DeepSeek V3",
@@ -71,12 +70,12 @@ class LLMOpsMetaModelsApiTests(TestCase):
         unbound = [r for r in rows if not r["owner_code"]]
         self.assertEqual(unbound, [])
 
-    def test_filter_by_aliyun_does_not_leak_deepseek(self):
+    def test_filter_by_alibaba_does_not_leak_deepseek(self):
         view = MetaModelViewSet()
         view.action = "list"
         view.kwargs = {}
         view.request = type("R", (), {
-            "query_params": {"owner": "aliyun"},
+            "query_params": {"owner": "alibaba"},
         })()
         rows = self._serialize(view.get_queryset())
         leaked = [r for r in rows if r["code"].startswith("deepseek")]

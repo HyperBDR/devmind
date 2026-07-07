@@ -296,6 +296,7 @@ class ResalePlatformAdmin(admin.ModelAdmin):
         "currency",
         "has_api_key",
         "points_per_currency_unit",
+        "point_decimal_places",
         "fee_rate",
         "service_fee_rate",
         "auto_approve_max_margin_rate",

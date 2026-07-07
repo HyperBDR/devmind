@@ -1,3 +1,4 @@
+import { formatRoundedPoints } from '@/utils/pointRounding'
 import {
   averageMarginRate,
   isMarginAutoApprovable,
@@ -135,16 +136,7 @@ export function useResalePricing({
       props.pointConversion?.currency || platformCurrencyLabel.value
     )
     if (converted === null) return '-'
-    return formatRoundedPoints(converted * rate)
-  }
-
-  function formatRoundedPoints(value) {
-    const points = Number(value)
-    if (!Number.isFinite(points)) return '0'
-    const mode = props.pointConversion?.rounding_mode || 'half_up'
-    if (mode === 'up') return String(Math.ceil(points))
-    if (mode === 'down') return String(Math.floor(points))
-    return String(Math.round(points))
+    return formatRoundedPoints(converted * rate, props.pointConversion)
   }
 
   function formatReadonlyNumber(value, digits) {

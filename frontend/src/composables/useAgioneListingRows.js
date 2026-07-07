@@ -2,6 +2,7 @@ import { computed, unref } from 'vue'
 
 import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 import { asArray } from '@/utils/llmOpsPagination'
+import { formatRoundedPoints } from '@/utils/pointRounding'
 
 /**
  * Centralized derived state for the Agione resale listing workbench.
@@ -697,7 +698,11 @@ export function useAgioneListingRows({
       .map((item) => {
         const platformAmount = displayAmountToPlatformCurrency(item.value)
         if (platformAmount === null) return null
-        return `${item.label} ${Math.round(platformAmount * rate)} ${
+        const points = formatRoundedPoints(
+          platformAmount * rate,
+          unref(pointConversionRef)
+        )
+        return `${item.label} ${points} ${
           unref(pointConversionRef)?.point_name || '积分'
         }`
       })

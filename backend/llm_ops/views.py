@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, IntegerField, Q, Value
+from django.db.models import Count, IntegerField, Max, Q, Value
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
@@ -23,7 +23,10 @@ from .collection_services import (
     sync_meta_models_from_models_dev,
     sync_yunce_model_prices,
 )
-from .constants import SUPPLIER_SOURCE_OWNER_ALIASES
+from .constants import (
+    SUPPLIER_SOURCE_OWNER_ALIASES,
+    canonical_owner_name_for_code,
+)
 from .global_config import (
     price_sync_source_queryset,
     sync_global_config_to_beat,
@@ -874,6 +877,13 @@ class MetaModelViewSet(
     )
     def owner_summary(self, request):
         """Return one lightweight row per canonical model owner."""
+        from .catalog_maintenance import (
+            normalize_meta_model_catalog,
+            resolve_orphan_meta_models,
+        )
+
+        normalize_meta_model_catalog()
+        resolve_orphan_meta_models()
         queryset = self.get_queryset()
         search = request.query_params.get("owner_search")
         if search:
@@ -882,8 +892,9 @@ class MetaModelViewSet(
                 | Q(owner_code__icontains=search)
             )
         rows = (
-            queryset.values("owner_code", "owner_name")
+            queryset.values("owner_code")
             .annotate(
+                owner_name=Max("owner_name"),
                 meta_model_count=Count("id", distinct=True),
                 active_model_count=Count(
                     "id",
@@ -900,7 +911,11 @@ class MetaModelViewSet(
                     {
                         "id": row["owner_code"],
                         "code": row["owner_code"],
-                        "name": row["owner_name"] or row["owner_code"],
+                        "name": (
+                            canonical_owner_name_for_code(row["owner_code"])
+                            or row["owner_name"]
+                            or row["owner_code"]
+                        ),
                         "meta_model_count": row["meta_model_count"],
                         "active_model_count": row["active_model_count"],
                         "sku_count": row["sku_count"],
@@ -1006,6 +1021,12 @@ class ModelPriceItemViewSet(
     audit_category = AuditLog.CATEGORY_PRICING
     serializer_class = ModelPriceItemSerializer
 
+    def list(self, request, *args, **kwargs):
+        """List price items, optionally paginated by meta model."""
+        if request.query_params.get("group_by") == "meta_model":
+            return self.list_by_meta_model(request)
+        return super().list(request, *args, **kwargs)
+
     def get_queryset(self):
         queryset = ModelPriceItem.objects.select_related(
             "meta_model",
@@ -1055,6 +1076,30 @@ class ModelPriceItemViewSet(
             "tier_start",
             "id",
         )
+
+    def list_by_meta_model(self, request):
+        """Return price items for a page of distinct meta models."""
+        queryset = self.filter_queryset(self.get_queryset())
+        meta_models = MetaModel.objects.filter(
+            id__in=queryset.values("meta_model_id"),
+        ).order_by("name", "code", "id")
+        page = self.paginate_queryset(meta_models)
+        selected_meta_models = page if page is not None else meta_models
+        meta_model_ids = [item.id for item in selected_meta_models]
+        grouped_queryset = queryset.filter(
+            meta_model_id__in=meta_model_ids,
+        ).order_by(
+            "meta_model__name",
+            "sku__display_name",
+            "model__name",
+            "dimension",
+            "tier_start",
+            "id",
+        )
+        serializer = self.get_serializer(grouped_queryset, many=True)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
 
 
 class ProcurementChannelViewSet(
@@ -2473,6 +2518,7 @@ def _point_conversion_payload(platform: ResalePlatform | None):
             platform.points_per_currency_unit
         ),
         "rounding_mode": platform.point_rounding_mode,
+        "decimal_places": platform.point_decimal_places,
         "currency": platform.currency,
         "fee_rate": _as_float(platform.fee_rate),
         "service_fee_rate": _as_float(platform.service_fee_rate),

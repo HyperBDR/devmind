@@ -1,5 +1,6 @@
 import { computed } from 'vue'
 
+import { formatRoundedPoints } from '@/utils/pointRounding'
 import {
   averageMarginRate,
   RESALE_PRICE_DIMENSION_SPECS
@@ -226,7 +227,7 @@ export function useAgioneListingDisplay({
       props.pointConversion?.currency
     )
     if (converted === null) return '-'
-    return String(Math.round(converted * rate))
+    return formatRoundedPoints(converted * rate, props.pointConversion)
   }
 
   function listingDisplayAmount(value, currency) {

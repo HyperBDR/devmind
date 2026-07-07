@@ -54,6 +54,19 @@ class ResalePlatformSerializerTests(TestCase):
 
         self.assertTrue(serializer.is_valid(), serializer.errors)
 
+    def test_accepts_point_decimal_places(self):
+        serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Test",
+                "code": "agione-test",
+                "currency": "CNY",
+                "points_per_currency_unit": "100",
+                "point_decimal_places": 2,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
     def test_accepts_platform_metadata(self):
         serializer = ResalePlatformSerializer(
             data={
@@ -148,6 +161,33 @@ class ResalePlatformSerializerTests(TestCase):
 
         self.assertFalse(serializer.is_valid())
         self.assertIn("points_per_currency_unit", serializer.errors)
+
+    def test_rejects_point_rate_with_too_many_decimal_places(self):
+        serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Test",
+                "code": "agione-test",
+                "currency": "CNY",
+                "points_per_currency_unit": "100.123",
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("points_per_currency_unit", serializer.errors)
+
+    def test_rejects_too_many_point_decimal_places(self):
+        serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Test",
+                "code": "agione-test",
+                "currency": "CNY",
+                "points_per_currency_unit": "100",
+                "point_decimal_places": 7,
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("point_decimal_places", serializer.errors)
 
     def test_rejects_invalid_service_fee_rate(self):
         serializer = ResalePlatformSerializer(
@@ -904,6 +944,8 @@ class EnsureMetaModelForPriceDataTests(TestCase):
         from llm_ops.constants import canonical_owner_for_model_code
 
         cases = {
+            "qwen-plus": "alibaba",
+            "qwq-plus": "alibaba",
             "grok-4": "xai",
             "llama-3.3-70b-instruct": "meta",
             "mistral-large-latest": "mistral",
