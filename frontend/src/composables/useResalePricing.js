@@ -340,6 +340,12 @@ export function useResalePricing({
     ].join('-')
   }
 
+  function labeledPriceAmountSummary(rows) {
+    if (!rows.length) return '-'
+    if (rows.length === 1) return rows[0].value || '-'
+    return rows.map((row) => `${row.label} ${row.value}`).join(' / ')
+  }
+
   function priceAmountDetails(rows) {
     if (!rows.length) return '-'
     return rows.map((row) => `${row.label} ${row.value}`).join(' / ')
@@ -451,7 +457,11 @@ export function useResalePricing({
       {
         source: t('llmOps.publishingWorkspace.pricing.marketAverage'),
         price: Number(average.toFixed(2)),
-        displayValue: priceAmountSummary(marketRows),
+        displayValue: labeledPriceAmountSummary(marketRows),
+        rows: marketRows.map((row) => ({
+          label: row.label,
+          value: row.value
+        })),
         titleValue: priceAmountDetails(marketRows)
       }
     ]
