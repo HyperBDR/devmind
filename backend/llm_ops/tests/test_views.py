@@ -134,6 +134,7 @@ class LLMOpsViewTests(TestCase):
                 "price_collection_enabled": True,
                 "price_collection_source_ids": [source.id],
                 "price_collection_cron": "10 */6 * * *",
+                "feishu_approval_enabled": True,
                 "feishu_app_id": "cli_xxx",
                 "feishu_app_secret": "secret",
                 "feishu_approval_code": "approval_code",
@@ -147,6 +148,7 @@ class LLMOpsViewTests(TestCase):
         config = LLMOpsGlobalConfig.objects.get()
         self.assertEqual(config.updated_by, self.user)
         self.assertEqual(config.price_collection_source_ids, [source.id])
+        self.assertTrue(config.feishu_approval_enabled)
         self.assertNotEqual(config.feishu_app_secret, "secret")
         self.assertTrue(
             config.feishu_app_secret.startswith(
@@ -155,6 +157,7 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertEqual(config.get_feishu_app_secret(), "secret")
         self.assertNotIn("feishu_app_secret", response.data)
+        self.assertTrue(response.data["feishu_approval_enabled"])
         self.assertTrue(response.data["feishu_app_secret_configured"])
 
         meta_task = PeriodicTask.objects.get(
@@ -2640,6 +2643,81 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertEqual(patch_response.data["notes"], "disable auto approval")
         self.assertIn("runtime", patch_response.data["config"])
+
+    def test_resale_workflow_config_clears_feishu_when_global_disabled(self):
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        response = self.client.get(
+            reverse("resale-workflow-config-effective"),
+            {"platform": platform.id},
+        )
+        config = response.data["config"]
+        config["policies"]["feishu_approval_enabled"] = True
+        for node in config["nodes"]:
+            if node["id"] == "feishu_approval":
+                node["enabled"] = True
+        for edge in config["edges"]:
+            if edge["id"] in ("gate_to_feishu", "feishu_to_online"):
+                edge["enabled"] = True
+
+        patch_response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            {"config": config},
+            format="json",
+        )
+
+        self.assertEqual(patch_response.status_code, 200)
+        saved = ResaleWorkflowConfig.objects.get(platform=platform)
+        self.assertFalse(
+            saved.config["policies"]["feishu_approval_enabled"]
+        )
+        response_config = patch_response.data["config"]
+        self.assertFalse(
+            response_config["policies"]["feishu_approval_enabled"]
+        )
+        feishu_node = next(
+            node
+            for node in response_config["nodes"]
+            if node["id"] == "feishu_approval"
+        )
+        self.assertFalse(feishu_node["enabled"])
+        feishu_edges = [
+            edge
+            for edge in response_config["edges"]
+            if edge["id"] in ("gate_to_feishu", "feishu_to_online")
+        ]
+        self.assertTrue(feishu_edges)
+        self.assertTrue(all(not edge["enabled"] for edge in feishu_edges))
+
+    def test_resale_workflow_config_rejects_feishu_only_when_disabled(self):
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        response = self.client.get(
+            reverse("resale-workflow-config-effective"),
+            {"platform": platform.id},
+        )
+        config = response.data["config"]
+        config["policies"]["auto_approve_enabled"] = False
+        config["policies"]["manual_confirm_required"] = False
+        config["policies"]["feishu_approval_enabled"] = True
+
+        patch_response = self.client.patch(
+            f"{reverse('resale-workflow-config-effective')}"
+            f"?platform={platform.id}",
+            {"config": config},
+            format="json",
+        )
+
+        self.assertEqual(patch_response.status_code, 400)
+        self.assertIn("publishing path", str(patch_response.data))
+        self.assertFalse(
+            ResaleWorkflowConfig.objects.filter(platform=platform).exists()
+        )
 
     def test_resale_workflow_config_patch_requires_config(self):
         platform, _ = ResalePlatform.objects.get_or_create(

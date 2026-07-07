@@ -205,6 +205,7 @@ class LLMOpsGlobalConfig(models.Model):
         null=True,
         db_index=True,
     )
+    feishu_approval_enabled = models.BooleanField(default=False)
     feishu_app_id = models.CharField(max_length=255, blank=True, default="")
     feishu_app_secret = models.TextField(blank=True, default="")
     feishu_approval_code = models.CharField(

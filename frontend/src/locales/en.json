@@ -1075,6 +1075,7 @@
         "llmConfigLoad": "Failed to load LLM configurations",
         "loadFailed": "Failed to load global settings",
         "resetFailed": "Failed to restore default settings",
+        "scheduleRequired": "Select a valid execution schedule",
         "saveFailed": "Failed to save global settings",
         "sourceRequired": "Select at least one model price source"
       },
@@ -1082,11 +1083,13 @@
         "approvalCode": "Approval definition code",
         "cron": "Schedule",
         "llmConfig": "Agent LLM configuration",
+        "schedule": "Schedule",
         "sourceUrl": "Source URL",
         "updatedAt": "Last updated"
       },
       "feishu": {
-        "description": "Used to submit approval instances for model listing workflows.",
+        "description": "When enabled, listing workflows can use the external Feishu approval path.",
+        "enabledHint": "When disabled, Feishu approval options are hidden from workflow configuration.",
         "secretConfigured": "Secret configured",
         "secretMissing": "Not configured",
         "secretPlaceholder": "Leave blank to keep the current secret",
@@ -1111,6 +1114,20 @@
       "priceCollection": {
         "description": "Sync official or supplier model price data.",
         "title": "Model Price Collection"
+      },
+      "schedule": {
+        "addHour": "Add run hour",
+        "custom": "Custom schedule",
+        "customDescription": "The current schedule is outside the visual editor range. Saving other settings keeps it unchanged. Reselect run hours to switch it to minute 05.",
+        "emptyHours": "Select at least one run time",
+        "fixedMinute": "After changes, runs at minute 05 in each selected hour.",
+        "hours": "Run hours",
+        "optionDescription": "Runs daily at {time}",
+        "removeHour": "Remove run hour",
+        "reselect": "Reselect",
+        "selectHour": "Select run hour",
+        "summarySelectedHours": "Runs daily at {times}",
+        "timeSeparator": ", "
       },
       "sourceModes": {
         "all": "All enabled sources",
@@ -1183,6 +1200,7 @@
         "autoApproveThreshold": "Margin <= {rate}",
         "autoApproveHint": "Skip review when matched",
         "autoPath": "Enable auto-approval",
+        "feishuDisabledHint": "Feishu approval is not enabled in global settings",
         "postApprovalAction": "Post-approval action",
         "publishPolicy": "Post-approval action",
         "reviewFallback": "Used when auto-approval is not matched",

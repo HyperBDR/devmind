@@ -31,6 +31,7 @@ class LLMOpsGlobalConfigAdmin(admin.ModelAdmin):
         "meta_model_sync_enabled",
         "price_collection_enabled",
         "price_sync_llm_config_uuid",
+        "feishu_approval_enabled",
         "updated_by",
         "updated_at",
     )
