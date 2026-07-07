@@ -21,7 +21,8 @@
       class="range-boundary-hit"
       :class="boundary.hitClass"
       :style="{ left: boundary.percent + '%' }"
-      aria-hidden="true"
+      tabindex="0"
+      :aria-label="boundaryTitle(boundary)"
       @pointerdown.stop
     >
       <span class="range-boundary-marker" :class="boundary.markerClass" />
@@ -61,14 +62,37 @@
       <div
         class="range-ref-marker"
         :style="{ left: getMarkerPos(ref.price) + '%' }"
-        :title="refTitle(ref)"
+        tabindex="0"
+        :aria-label="refTitle(ref)"
       >
         <div class="range-ref-label">
           {{ ref.source }}
         </div>
-        <div class="range-ref-val">
-          {{ refDisplayValue(ref) }}
-        </div>
+        <span class="range-ref-tooltip">
+          <span class="range-ref-tooltip-title">
+            {{ ref.source }}
+          </span>
+          <span v-if="ref.rows?.length" class="range-ref-tooltip-rows">
+            <span
+              v-for="row in ref.rows"
+              :key="`${ref.source}-${row.label}`"
+              class="range-boundary-tooltip-row range-ref-tooltip-row-compact"
+            >
+              <span>{{ row.label }}</span>
+              <strong>{{ row.value || refDisplayValue(ref) }}</strong>
+              <em aria-hidden="true">&nbsp;</em>
+            </span>
+          </span>
+          <strong v-else class="range-ref-tooltip-value">
+            {{ refDisplayValue(ref) }}
+          </strong>
+          <span
+            v-if="ref.titleValue && !ref.rows?.length"
+            class="range-ref-tooltip-source"
+          >
+            {{ ref.titleValue }}
+          </span>
+        </span>
       </div>
     </template>
 
@@ -167,9 +191,17 @@ const hasBoundaryRange = computed(
 )
 
 const axisRange = computed(() => {
+  const value = Number(props.value)
+  const refValues = props.refs.map((ref) => Number(ref.price))
   if (hasBoundaryRange.value) {
-    const rawMin = Math.min(boundaryMin.value, boundaryMax.value)
-    const rawMax = Math.max(boundaryMin.value, boundaryMax.value)
+    const candidates = [
+      boundaryMin.value,
+      boundaryMax.value,
+      value,
+      ...refValues
+    ].filter((item) => Number.isFinite(item))
+    const rawMin = Math.min(...candidates)
+    const rawMax = Math.max(...candidates)
     if (rawMax === rawMin) {
       const padding = Math.max(Math.abs(rawMax) * 0.2, 1)
       return {
@@ -186,11 +218,9 @@ const axisRange = computed(() => {
     }
   }
 
-  const value = Number(props.value)
-  const candidates = [
-    value,
-    ...props.refs.map((ref) => Number(ref.price))
-  ].filter((item) => Number.isFinite(item))
+  const candidates = [value, ...refValues].filter((item) =>
+    Number.isFinite(item)
+  )
 
   if (!candidates.length) {
     if (!fallbackCenter.value && Number.isFinite(value) && value > 0) {
@@ -305,6 +335,7 @@ function getMarkerColor(price) {
 
 function boundaryCaption(boundary) {
   const prefix = boundaryCaptionPrefix(boundary)
+  if (boundary.tooltip?.captionKind === 'floor') return prefix
   return `${prefix} ${boundaryDisplayValue(boundary)}`
 }
 
@@ -326,6 +357,10 @@ function boundaryDisplayValue(boundary) {
 
 function refDisplayValue(ref) {
   return ref.displayValue || formatDisplayValue(ref.price)
+}
+
+function boundaryTitle(boundary) {
+  return `${boundary.title}: ${boundaryDisplayValue(boundary)}`
 }
 
 function refTitle(ref) {
