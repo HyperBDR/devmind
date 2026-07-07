@@ -951,40 +951,51 @@ def sync_manual_model_price_items(
         source=source,
         is_current=True,
     )
-    old_current_ids = set(current_queryset.values_list("id", flat=True))
-    current_queryset.update(is_current=False, effective_to=now)
 
     current_items = []
-    for payload in payloads:
-        fingerprint = stable_fingerprint(
-            {
-                "source": source.id,
-                "dimension": payload["dimension"],
-                "billing_unit": payload["billing_unit"],
-                "currency": payload["currency"],
-                "unit_price": str(payload["unit_price"]),
-                "tier_type": payload["tier_type"],
-                "tier_start": "",
-                "tier_end": "",
-                "spec": payload["spec"],
-            }
-        )
-        payload["price_fingerprint"] = fingerprint
-        price_item, _ = ModelPriceItem.objects.update_or_create(
-            model=model,
-            dimension=payload["dimension"],
-            billing_unit=payload["billing_unit"],
-            currency=payload["currency"],
-            price_fingerprint=fingerprint,
-            defaults=payload,
-        )
-        if not price_item.is_current or price_item.effective_to is not None:
-            price_item.is_current = True
-            price_item.effective_to = None
-            price_item.save(update_fields=["is_current", "effective_to"])
-        current_items.append(price_item)
+    with transaction.atomic():
+        old_current_ids = set(current_queryset.values_list("id", flat=True))
+        for payload in payloads:
+            fingerprint = stable_fingerprint(
+                {
+                    "source": source.id,
+                    "dimension": payload["dimension"],
+                    "billing_unit": payload["billing_unit"],
+                    "currency": payload["currency"],
+                    "unit_price": str(payload["unit_price"]),
+                    "tier_type": payload["tier_type"],
+                    "tier_start": "",
+                    "tier_end": "",
+                    "spec": payload["spec"],
+                }
+            )
+            payload["price_fingerprint"] = fingerprint
+            price_item, _ = ModelPriceItem.objects.update_or_create(
+                model=model,
+                dimension=payload["dimension"],
+                billing_unit=payload["billing_unit"],
+                currency=payload["currency"],
+                price_fingerprint=fingerprint,
+                defaults=payload,
+            )
+            needs_reactivate = (
+                not price_item.is_current
+                or price_item.effective_to is not None
+            )
+            if needs_reactivate:
+                price_item.is_current = True
+                price_item.effective_to = None
+                price_item.save(update_fields=["is_current", "effective_to"])
+            current_items.append(price_item)
 
-    current_item_ids = {item.id for item in current_items}
+        current_item_ids = {item.id for item in current_items}
+        stale_item_ids = old_current_ids - current_item_ids
+        if stale_item_ids:
+            ModelPriceItem.objects.filter(id__in=stale_item_ids).update(
+                is_current=False,
+                effective_to=now,
+            )
+
     return {
         "current_items": current_items,
         "deactivated_item_ids": sorted(old_current_ids - current_item_ids),

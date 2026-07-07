@@ -720,6 +720,45 @@ class PriceCollectionSkuPersistenceTests(TestCase):
         self.assertEqual(offerings.count(), 2)
         self.assertEqual(current_inputs.count(), 2)
 
+    def test_sync_price_items_keeps_current_rows_when_write_fails(self):
+        item = self.collected_item()
+        offering, _ = upsert_collected_offering(
+            item,
+            source=self.source,
+            source_url=self.source.endpoint_url,
+            meta_model=self.meta_model,
+        )
+        sync_model_price_items(
+            item,
+            source=self.source,
+            offering=offering,
+            source_url=self.source.endpoint_url,
+        )
+        current_item = ModelPriceItem.objects.get(
+            source=self.source,
+            offering=offering,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+
+        refreshed_item = self.collected_item()
+        refreshed_item.price_rows[0].values["input_price"] = "1.5"
+        with mock.patch.object(
+            ModelPriceItem.objects,
+            "update_or_create",
+            side_effect=RuntimeError("write failed"),
+        ):
+            with self.assertRaisesMessage(RuntimeError, "write failed"):
+                sync_model_price_items(
+                    refreshed_item,
+                    source=self.source,
+                    offering=offering,
+                    source_url=self.source.endpoint_url,
+                )
+
+        current_item.refresh_from_db()
+        self.assertTrue(current_item.is_current)
+        self.assertIsNone(current_item.effective_to)
+
     def test_snapshots_are_scoped_by_offering(self):
         first = self.collected_item(exposed_model_name="deepseek-chat")
         second = self.collected_item(exposed_model_name="deepseek-chat-fast")
