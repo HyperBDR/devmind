@@ -186,20 +186,16 @@ class LLMOpsViewTests(TestCase):
             {"gpt-4o"},
         )
 
-    def test_meta_model_owner_summary_migrates_qwen_to_alibaba(self):
-        qwen = MetaModel.objects.create(
+    def test_meta_model_owner_summary_reads_current_catalog(self):
+        MetaModel.objects.create(
             code="qwen-max",
             name="Qwen Max",
+            owner_code="alibaba",
+            owner_name="阿里巴巴",
         )
-        qwen_plus = MetaModel.objects.create(
+        MetaModel.objects.create(
             code="qwen-plus",
             name="Qwen Plus",
-        )
-        MetaModel.objects.filter(id=qwen.id).update(
-            owner_code="aliyun",
-            owner_name="阿里云",
-        )
-        MetaModel.objects.filter(id=qwen_plus.id).update(
             owner_code="alibaba",
             owner_name="阿里巴巴",
         )
@@ -215,6 +211,96 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["name"], "阿里巴巴")
         self.assertEqual(rows[0]["meta_model_count"], 2)
+
+    @patch("llm_ops.catalog_maintenance.resolve_orphan_meta_models")
+    @patch("llm_ops.catalog_maintenance.normalize_meta_model_catalog")
+    def test_meta_model_list_does_not_run_catalog_maintenance(
+        self,
+        mock_normalize,
+        mock_resolve,
+    ):
+        MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+
+        response = self.client.get(reverse("meta-model-list"))
+
+        self.assertEqual(response.status_code, 200)
+        mock_normalize.assert_not_called()
+        mock_resolve.assert_not_called()
+
+    @patch("llm_ops.catalog_maintenance.resolve_orphan_meta_models")
+    @patch("llm_ops.catalog_maintenance.normalize_meta_model_catalog")
+    def test_meta_model_detail_does_not_run_catalog_maintenance(
+        self,
+        mock_normalize,
+        mock_resolve,
+    ):
+        meta = MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+
+        response = self.client.get(
+            reverse("meta-model-detail", args=[meta.id]),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        mock_normalize.assert_not_called()
+        mock_resolve.assert_not_called()
+
+    @patch("llm_ops.catalog_maintenance.resolve_orphan_meta_models")
+    @patch("llm_ops.catalog_maintenance.normalize_meta_model_catalog")
+    def test_meta_model_owner_summary_does_not_run_catalog_maintenance(
+        self,
+        mock_normalize,
+        mock_resolve,
+    ):
+        MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+
+        response = self.client.get(reverse("meta-model-owner-summary"))
+
+        self.assertEqual(response.status_code, 200)
+        mock_normalize.assert_not_called()
+        mock_resolve.assert_not_called()
+
+    @patch("llm_ops.catalog_maintenance.resolve_orphan_meta_models")
+    @patch("llm_ops.catalog_maintenance.normalize_meta_model_catalog")
+    @patch("llm_ops.views.sync_meta_models_from_models_dev")
+    def test_meta_model_sync_runs_catalog_maintenance(
+        self,
+        mock_sync,
+        mock_normalize,
+        mock_resolve,
+    ):
+        mock_sync.return_value = {"models": 1}
+        mock_normalize.return_value = {"normalized": 1}
+        mock_resolve.return_value = {"resolved": 1}
+
+        response = self.client.post(reverse("meta-model-sync"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["meta_model_normalization"],
+            {"normalized": 1},
+        )
+        self.assertEqual(
+            response.data["meta_model_orphan_resolution"],
+            {"resolved": 1},
+        )
+        mock_sync.assert_called_once_with()
+        mock_normalize.assert_called_once_with()
+        mock_resolve.assert_called_once_with()
 
     def test_global_config_patch_syncs_periodic_tasks(self):
         from django_celery_beat.models import PeriodicTask
