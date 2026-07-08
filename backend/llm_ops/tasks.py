@@ -16,6 +16,8 @@ import logging
 
 from celery import shared_task
 
+from .llm_config import is_price_sync_llm_configuration_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,6 +52,13 @@ def run_model_price_sync_agent(
             source_task_id=getattr(self.request, "id", None),
         )
     except Exception as exc:
+        if is_price_sync_llm_configuration_error(exc):
+            logger.error(
+                "llm_ops.run_model_price_sync_agent configuration error: %s",
+                exc,
+                extra=log_extra,
+            )
+            raise
         logger.exception(
             "llm_ops.run_model_price_sync_agent failed",
             extra=log_extra,

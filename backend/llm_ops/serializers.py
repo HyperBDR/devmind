@@ -11,7 +11,10 @@ from .global_config import (
     normalize_source_ids,
     validate_price_collection_source_ids,
 )
-from .llm_config import get_llm_config_reference
+from .llm_config import (
+    get_llm_config_reference,
+    get_price_sync_llm_status,
+)
 from .models import (
     AuditLog,
     ChannelModelPrice,
@@ -254,6 +257,7 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
     """Serializer for singleton LLM operations runtime configuration."""
 
     selected_price_collection_sources = serializers.SerializerMethodField()
+    price_sync_agent_status = serializers.SerializerMethodField()
     price_sync_llm_config = serializers.SerializerMethodField()
 
     class Meta:
@@ -336,6 +340,14 @@ class LLMOpsGlobalConfigSerializer(serializers.ModelSerializer):
         return get_llm_config_reference(
             str(instance.price_sync_llm_config_uuid or "")
         )
+
+    def get_price_sync_agent_status(self, instance):
+        return {
+            "price_collection_enabled": instance.price_collection_enabled,
+            "llm": get_price_sync_llm_status(
+                str(instance.price_sync_llm_config_uuid or "")
+            ),
+        }
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

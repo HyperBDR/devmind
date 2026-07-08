@@ -29,6 +29,29 @@ from llm_ops.serializers import (
 
 
 class LLMOpsGlobalConfigSerializerTests(TestCase):
+    @patch("llm_ops.serializers.get_price_sync_llm_status")
+    def test_representation_exposes_price_sync_agent_status(self, mock_status):
+        mock_status.return_value = {
+            "ok": False,
+            "code": "missing_llm_model",
+            "message": "LLM Ops price sync Agent model is not configured.",
+            "source": "settings",
+            "config_uuid": "",
+            "label": "",
+        }
+        config = LLMOpsGlobalConfig.get_solo()
+
+        data = LLMOpsGlobalConfigSerializer(config).data
+
+        self.assertEqual(
+            data["price_sync_agent_status"]["llm"]["code"],
+            "missing_llm_model",
+        )
+        self.assertFalse(data["price_sync_agent_status"]["llm"]["ok"])
+        self.assertTrue(
+            data["price_sync_agent_status"]["price_collection_enabled"]
+        )
+
     @patch("llm_ops.models.encryption_service.decrypt")
     def test_plaintext_secret_falls_back_without_decrypt(self, mock_decrypt):
         mock_decrypt.side_effect = AssertionError(
