@@ -15,6 +15,7 @@ from .llm_config import (
     get_llm_config_reference,
     get_price_sync_llm_status,
 )
+from .meta_model_lookup import find_meta_model_by_alias_or_name
 from .models import (
     AuditLog,
     ChannelModelPrice,
@@ -563,13 +564,6 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
     # records this code (or a legacy spelling of it). This
     # keeps the canonical row count to one per release even
     # when multiple price sources disagree on the spelling.
-    #
-    # The lookup is implemented in Python rather than via
-    # ``aliases__contains`` because SQLite (the default dev
-    # backend) does not support the JSON ``contains`` lookup.
-    # The meta-model table is small enough (low hundreds of
-    # rows) that an in-process scan stays well below 5 ms even
-    # on a developer laptop.
     tokens = [
         t
         for t in (
@@ -584,30 +578,10 @@ def ensure_meta_model_for_price_data(data: dict) -> MetaModel:
     ]
     existing = None
     if tokens:
-        all_meta = list(MetaModel.objects.all())
-        alias_index = {
-            alias: meta
-            for meta in all_meta
-            for alias in (meta.aliases or [])
-        }
-        for token in tokens:
-            hit = alias_index.get(token)
-            if hit is not None:
-                existing = hit
-                break
-        # When the reported code/name does not appear in any
-        # alias, fall back to a normalised name match. This
-        # covers the common case where two price sources
-        # disagree on the code spelling (for example
-        # ``deepseek-r1-0528`` vs ``deepseek-r1-250528``)
-        # but agree on the human readable name.
-        if existing is None and name:
-            normalised = name.strip().lower().replace(" ", "")
-            for meta in all_meta:
-                meta_name = (meta.name or "").strip().lower()
-                if meta_name.replace(" ", "") == normalised:
-                    existing = meta
-                    break
+        existing = find_meta_model_by_alias_or_name(
+            tokens=tokens,
+            name=name,
+        )
     if existing is not None:
         merged = list(existing.aliases or [])
         for token in tokens:

@@ -1,7 +1,9 @@
 from decimal import Decimal
 from unittest import mock
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from llm_ops.models import (
     ChannelModelPrice,
@@ -22,6 +24,7 @@ from llm_ops.models import (
 from llm_ops.services import (
     calculate_channel_model_cost,
     import_manual_model_prices,
+    match_meta_model_by_alias_or_name,
     price_role_for_source,
     record_channel_model_price_history,
     record_resale_listing_price_history,
@@ -80,6 +83,102 @@ class LLMOpsPricingServiceTests(TestCase):
         )
 
         self.assertEqual(cost, Decimal("28.000000"))
+
+    def test_repeated_meta_model_alias_matches_share_full_table_load(self):
+        from llm_ops import services
+
+        getattr(services, "invalidate_meta_model_lookup_cache", lambda: None)()
+        meta_model = MetaModel.objects.create(
+            name="Alias Family",
+            code="alias-family",
+            aliases=["vendor/alias-family-2024-08-06"],
+        )
+
+        with CaptureQueriesContext(connection) as context:
+            first = match_meta_model_by_alias_or_name(
+                raw_code="vendor/alias-family-2024-08-06",
+                reported_code="alias-family-2024-08-06",
+                reported_name="Alias Family",
+                canonical_code="alias-family",
+                canonical_name="Alias Family",
+                seed_aliases=[],
+            )
+            second = match_meta_model_by_alias_or_name(
+                raw_code="vendor/alias-family-2024-08-06",
+                reported_code="alias-family-2024-08-06",
+                reported_name="Alias Family",
+                canonical_code="alias-family",
+                canonical_name="Alias Family",
+                seed_aliases=[],
+            )
+
+        self.assertEqual(first, meta_model)
+        self.assertEqual(second, meta_model)
+        full_table_queries = [
+            query
+            for query in context.captured_queries
+            if 'FROM "llm_ops_metamodel"' in query["sql"]
+            and " WHERE " not in query["sql"]
+        ]
+        self.assertEqual(len(full_table_queries), 1)
+
+    def test_expired_meta_model_lookup_cache_reloads_table(self):
+        from llm_ops import services
+        from llm_ops.meta_model_lookup import (
+            META_MODEL_LOOKUP_CACHE_TTL_SECONDS,
+        )
+
+        getattr(services, "invalidate_meta_model_lookup_cache", lambda: None)()
+        MetaModel.objects.create(
+            name="Existing Family",
+            code="existing-family",
+            aliases=["existing-family"],
+        )
+
+        with mock.patch(
+            "llm_ops.meta_model_lookup.monotonic",
+            side_effect=[
+                100.0,
+                100.0 + META_MODEL_LOOKUP_CACHE_TTL_SECONDS + 0.01,
+                100.0 + META_MODEL_LOOKUP_CACHE_TTL_SECONDS + 0.02,
+            ],
+        ):
+            with CaptureQueriesContext(connection) as context:
+                missing = match_meta_model_by_alias_or_name(
+                    raw_code="new-family",
+                    reported_code="new-family",
+                    reported_name="New Family",
+                    canonical_code="new-family",
+                    canonical_name="New Family",
+                    seed_aliases=[],
+                )
+                MetaModel.objects.bulk_create(
+                    [
+                        MetaModel(
+                            name="New Family",
+                            code="new-family",
+                            aliases=["new-family"],
+                        )
+                    ]
+                )
+                found = match_meta_model_by_alias_or_name(
+                    raw_code="new-family",
+                    reported_code="new-family",
+                    reported_name="New Family",
+                    canonical_code="new-family",
+                    canonical_name="New Family",
+                    seed_aliases=[],
+                )
+
+        self.assertIsNone(missing)
+        self.assertEqual(found.code, "new-family")
+        full_table_queries = [
+            query
+            for query in context.captured_queries
+            if 'FROM "llm_ops_metamodel"' in query["sql"]
+            and " WHERE " not in query["sql"]
+        ]
+        self.assertEqual(len(full_table_queries), 2)
 
     def test_official_source_is_cloud_hosted_for_third_party_meta_model(
         self,
