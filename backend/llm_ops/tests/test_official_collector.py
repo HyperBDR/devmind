@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -859,27 +860,29 @@ class OfficialCollectionSyncTests(TestCase):
             name="Linked Online Model",
             code="linked-online-model",
         )
-        mock_get.return_value = MockPricingResponse(
-            """
-            {
-              "openai": {
-                "models": {
-                  "openai/gpt-clean-test": {
-                    "id": "openai/gpt-clean-test",
-                    "name": "GPT Clean Test"
-                  }
-                }
-              },
-              "openrouter": {
-                "models": {
-                  "openai/gpt-router-noise": {
-                    "id": "openai/gpt-router-noise",
-                    "name": "GPT Router Noise"
-                  }
-                }
-              }
+        active_models = {
+            f"openai/gpt-clean-test-{number}": {
+                "id": f"openai/gpt-clean-test-{number}",
+                "name": f"GPT Clean Test {number}",
             }
-            """,
+            for number in range(10)
+        }
+        mock_get.return_value = MockPricingResponse(
+            json.dumps(
+                {
+                    "openai": {
+                        "models": active_models,
+                    },
+                    "openrouter": {
+                        "models": {
+                            "openai/gpt-router-noise": {
+                                "id": "openai/gpt-router-noise",
+                                "name": "GPT Router Noise",
+                            },
+                        },
+                    },
+                },
+            ),
             content_type="application/json",
         )
 
@@ -892,8 +895,85 @@ class OfficialCollectionSyncTests(TestCase):
             MetaModel.objects.filter(code="gpt-router-noise").exists(),
         )
         self.assertTrue(
-            MetaModel.objects.filter(code="gpt-clean-test").exists(),
+            MetaModel.objects.filter(code="gpt-clean-test-0").exists(),
         )
+
+    @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_meta_models_from_models_dev_skips_empty_cleanup(
+        self,
+        mock_get,
+    ):
+        stale = MetaModel.objects.create(
+            code="empty-response-stale",
+            name="Empty Response Stale",
+            metadata={
+                "models_dev": {
+                    "id": "openai/empty-response-stale",
+                },
+            },
+        )
+        mock_get.return_value = MockPricingResponse(
+            "{}",
+            content_type="application/json",
+        )
+
+        with self.assertLogs(
+            "llm_ops.collection_services",
+            level="WARNING",
+        ) as logs:
+            stats = sync_meta_models_from_models_dev()
+
+        self.assertEqual(stats["deleted"], 0)
+        self.assertTrue(MetaModel.objects.filter(id=stale.id).exists())
+        self.assertIn("skipped models.dev stale cleanup", logs.output[0])
+
+    @patch("llm_ops.collectors.official.requests.get")
+    def test_sync_meta_models_from_models_dev_skips_large_drop_cleanup(
+        self,
+        mock_get,
+    ):
+        for number in range(12):
+            MetaModel.objects.create(
+                code=f"previous-model-{number}",
+                name=f"Previous Model {number}",
+                metadata={
+                    "models_dev": {
+                        "id": f"openai/previous-model-{number}",
+                    },
+                },
+            )
+        mock_get.return_value = MockPricingResponse(
+            """
+            {
+              "openai": {
+                "models": {
+                  "openai/gpt-partial-test": {
+                    "id": "openai/gpt-partial-test",
+                    "name": "GPT Partial Test"
+                  }
+                }
+              }
+            }
+            """,
+            content_type="application/json",
+        )
+
+        with self.assertLogs(
+            "llm_ops.collection_services",
+            level="WARNING",
+        ) as logs:
+            stats = sync_meta_models_from_models_dev()
+
+        self.assertEqual(stats["deleted"], 0)
+        self.assertEqual(
+            MetaModel.objects.filter(code__startswith="previous-model-")
+            .count(),
+            12,
+        )
+        self.assertTrue(
+            MetaModel.objects.filter(code="gpt-partial-test").exists(),
+        )
+        self.assertIn("skipped models.dev stale cleanup", logs.output[0])
 
     def test_sync_aliyun_official_prices_keeps_cny_currency(self):
         provider = LLMProvider.objects.get(code="aliyun")
