@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from decimal import Decimal, InvalidOperation
 
@@ -56,6 +57,8 @@ from .skill_runner import (
     standard_catalog_to_collected_catalog,
     vendor_pricing_skill_exists,
 )
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES = tuple(
     code
@@ -205,6 +208,8 @@ MODELS_DEV_META_SOURCE_PROVIDERS = {
     "zai",
     "zhipuai",
 }
+MODELS_DEV_CLEANUP_MIN_RETAIN_COUNT = 10
+MODELS_DEV_CLEANUP_MAX_DROP_PERCENT = 30
 
 MODELS_DEV_LAB_OWNER_DEFAULTS = {
     "alibaba": ("alibaba", "阿里巴巴", "https://www.alibaba.com/"),
@@ -1632,6 +1637,18 @@ def models_dev_provider_priority(provider_id: str) -> tuple[int, str]:
 
 def cleanup_stale_models_dev_meta_models(active_codes: set[str]) -> int:
     """Delete old online-only meta models outside the accepted source set."""
+    active_count = len(active_codes)
+    tracked_count = count_models_dev_meta_models()
+    if should_skip_models_dev_stale_cleanup(active_count, tracked_count):
+        logger.warning(
+            "llm_ops: skipped models.dev stale cleanup because "
+            "active model count %d is unsafe for %d tracked models.dev "
+            "meta model(s)",
+            active_count,
+            tracked_count,
+        )
+        return 0
+
     deleted = 0
     for meta in MetaModel.objects.all():
         if not (meta.metadata or {}).get("models_dev"):
@@ -1643,6 +1660,33 @@ def cleanup_stale_models_dev_meta_models(active_codes: set[str]) -> int:
         meta.delete()
         deleted += 1
     return deleted
+
+
+def count_models_dev_meta_models() -> int:
+    """Return the number of meta models currently sourced from models.dev."""
+    return sum(
+        1
+        for metadata in MetaModel.objects.values_list("metadata", flat=True)
+        if (metadata or {}).get("models_dev")
+    )
+
+
+def should_skip_models_dev_stale_cleanup(
+    active_count: int,
+    tracked_count: int,
+) -> bool:
+    """Return whether source shrinkage makes stale cleanup unsafe."""
+    if tracked_count <= 0:
+        return False
+    if active_count <= 0:
+        return True
+    if tracked_count < MODELS_DEV_CLEANUP_MIN_RETAIN_COUNT:
+        return False
+    if active_count < MODELS_DEV_CLEANUP_MIN_RETAIN_COUNT:
+        return True
+
+    retained_percent = 100 - MODELS_DEV_CLEANUP_MAX_DROP_PERCENT
+    return active_count * 100 < tracked_count * retained_percent
 
 
 def meta_model_has_business_links(meta_model: MetaModel) -> bool:
