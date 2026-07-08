@@ -798,6 +798,8 @@ class LLMOpsPeriodicTasksTests(TestCase):
 
         result = sync_meta_models_from_models_dev_task.run(
             source_url="https://example.com/api.json",
+            timeout=75,
+            fallback_urls=["https://mirror.example.com/models.json"],
         )
 
         self.assertEqual(
@@ -810,6 +812,8 @@ class LLMOpsPeriodicTasksTests(TestCase):
         )
         mock_sync.assert_called_once_with(
             source_url="https://example.com/api.json",
+            timeout=75,
+            fallback_urls=["https://mirror.example.com/models.json"],
         )
         mock_normalize.assert_called_once_with()
         mock_resolve.assert_called_once_with()

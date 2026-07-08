@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
+from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -84,6 +87,8 @@ FULL_CATALOG_PROVIDER_CODES = (
     "baidu",
     "volcengine",
 )
+DEFAULT_MODELS_DEV_SYNC_TIMEOUT = 60
+MODELS_DEV_RESPONSE_CACHE_KEY = "llm_ops:models_dev:last_success_payload"
 CLOUD_PROVIDER_OFFICIAL_CODES = {
     "aliyun",
     "aliyun-wanx",
@@ -1522,18 +1527,24 @@ def collected_model_code_from_value(value: str) -> str:
 
 def sync_meta_models_from_models_dev(
     *,
-    source_url: str = MODELS_DEV_MODELS_URL,
-    timeout: int = 20,
-) -> dict[str, int]:
+    source_url: str | None = None,
+    timeout: int | None = None,
+    fallback_urls: list[str] | tuple[str, ...] | str | None = None,
+) -> dict[str, object]:
     """Fetch models.dev and upsert canonical meta-model identities."""
     from .constants import (
         canonical_meta_model_identity,
     )
 
-    payload = fetch_source_payload(source_url, timeout)
-    source_json = payload.get("json")
-    if not isinstance(source_json, dict):
-        raise ValueError("models.dev source did not return JSON.")
+    resolved_source_url = source_url or MODELS_DEV_MODELS_URL
+    resolved_timeout = models_dev_sync_timeout(timeout)
+    source_json, effective_source_url, used_cache, cached_at = (
+        fetch_models_dev_source_json(
+            source_url=resolved_source_url,
+            timeout=resolved_timeout,
+            fallback_urls=fallback_urls,
+        )
+    )
 
     stats = {
         "models": 0,
@@ -1541,7 +1552,10 @@ def sync_meta_models_from_models_dev(
         "updated": 0,
         "skipped": 0,
         "deleted": 0,
+        "used_cache": int(used_cache),
     }
+    if cached_at:
+        stats["cached_at"] = cached_at
     seen_codes = set()
     with transaction.atomic():
         for model_payload in iter_models_dev_meta_model_payloads(
@@ -1569,12 +1583,156 @@ def sync_meta_models_from_models_dev(
                 code=code,
                 identity=identity,
                 owner=owner,
-                source_url=source_url,
+                source_url=effective_source_url,
             )
             stats["models"] += 1
             stats["created" if created else "updated"] += int(changed)
         stats["deleted"] = cleanup_stale_models_dev_meta_models(seen_codes)
     return stats
+
+
+def models_dev_sync_timeout(timeout: int | None) -> int:
+    """Return the configured timeout for models.dev metadata sync."""
+    if timeout is not None:
+        return max(1, int(timeout))
+    configured = getattr(settings, "LLM_OPS_MODELS_DEV_TIMEOUT", None)
+    if configured in (None, ""):
+        configured = os.getenv("LLM_OPS_MODELS_DEV_TIMEOUT", "")
+    try:
+        return max(1, int(configured))
+    except (TypeError, ValueError):
+        return DEFAULT_MODELS_DEV_SYNC_TIMEOUT
+
+
+def fetch_models_dev_source_json(
+    *,
+    source_url: str,
+    timeout: int,
+    fallback_urls: list[str] | tuple[str, ...] | str | None = None,
+) -> tuple[dict, str, bool, str]:
+    """Fetch models.dev JSON, falling back to mirrors then cache."""
+    errors = []
+    for candidate_url in models_dev_candidate_urls(
+        source_url,
+        fallback_urls,
+    ):
+        try:
+            payload = fetch_source_payload(candidate_url, timeout)
+            source_json = payload.get("json")
+            if not isinstance(source_json, dict):
+                raise ValueError("models.dev source did not return JSON.")
+            cache_models_dev_source_json(source_json, candidate_url)
+            return source_json, candidate_url, False, ""
+        except Exception as exc:
+            errors.append(f"{candidate_url}: {exc}")
+            logger.warning(
+                "llm_ops.models_dev_sync_source_failed",
+                extra={"source_url": candidate_url},
+                exc_info=True,
+            )
+
+    cached = cached_models_dev_source_json()
+    if cached is not None:
+        logger.warning(
+            "llm_ops.models_dev_sync_using_cached_payload",
+            extra={"source_url": cached["source_url"]},
+        )
+        return (
+            cached["json"],
+            cached["source_url"],
+            True,
+            cached["cached_at"],
+        )
+    raise ValueError(
+        "models.dev source did not return JSON and no cache is available: "
+        + "; ".join(errors),
+    )
+
+
+def models_dev_candidate_urls(
+    source_url: str,
+    fallback_urls: list[str] | tuple[str, ...] | str | None,
+) -> list[str]:
+    """Return primary and fallback models.dev URLs without duplicates."""
+    values = [source_url]
+    values.extend(configured_models_dev_fallback_urls(fallback_urls))
+    candidates = []
+    seen = set()
+    for value in values:
+        candidate = str(value or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        candidates.append(candidate)
+    return candidates
+
+
+def configured_models_dev_fallback_urls(
+    fallback_urls: list[str] | tuple[str, ...] | str | None,
+) -> list[str]:
+    """Return explicit or environment-configured models.dev fallback URLs."""
+    if fallback_urls is None:
+        fallback_urls = getattr(
+            settings,
+            "LLM_OPS_MODELS_DEV_FALLBACK_URLS",
+            None,
+        )
+        if fallback_urls in (None, ""):
+            fallback_urls = os.getenv("LLM_OPS_MODELS_DEV_FALLBACK_URLS", "")
+    if isinstance(fallback_urls, str):
+        return [
+            item.strip()
+            for item in fallback_urls.split(",")
+            if item.strip()
+        ]
+    return [
+        str(item).strip()
+        for item in fallback_urls
+        if str(item or "").strip()
+    ]
+
+
+def cache_models_dev_source_json(source_json: dict, source_url: str) -> None:
+    """Store the last successful models.dev response for outage fallback."""
+    try:
+        cache.set(
+            MODELS_DEV_RESPONSE_CACHE_KEY,
+            {
+                "json": source_json,
+                "source_url": source_url,
+                "cached_at": timezone.now().isoformat(),
+            },
+            timeout=None,
+        )
+    except Exception:
+        logger.warning(
+            "llm_ops.models_dev_sync_cache_write_failed",
+            exc_info=True,
+        )
+
+
+def cached_models_dev_source_json() -> dict | None:
+    """Return the cached models.dev payload when it has the expected shape."""
+    try:
+        cached = cache.get(MODELS_DEV_RESPONSE_CACHE_KEY)
+    except Exception:
+        logger.warning(
+            "llm_ops.models_dev_sync_cache_read_failed",
+            exc_info=True,
+        )
+        return None
+    if not isinstance(cached, dict):
+        return None
+    source_json = cached.get("json")
+    source_url = str(cached.get("source_url") or "").strip()
+    cached_at = str(cached.get("cached_at") or "").strip()
+    if not isinstance(source_json, dict) or not source_url:
+        return None
+    return {
+        "json": source_json,
+        "source_url": source_url,
+        "cached_at": cached_at,
+    }
 
 
 def iter_models_dev_meta_model_payloads(source_json: dict):

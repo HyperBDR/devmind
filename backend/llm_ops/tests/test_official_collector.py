@@ -1,11 +1,13 @@
 import json
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import call, patch
 
-from django.test import TestCase
+from django.core.cache import cache
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from llm_ops.collection_services import (
+    MODELS_DEV_RESPONSE_CACHE_KEY,
     ensure_official_model_source,
     ensure_official_source,
     official_model_source_slug as build_official_model_source_slug,
@@ -53,6 +55,7 @@ class MockPricingResponse:
 
 class OfficialCollectionSyncTests(TestCase):
     def setUp(self):
+        cache.delete(MODELS_DEV_RESPONSE_CACHE_KEY)
         self.create_official_sync_fixture()
 
     def create_official_sync_fixture(self):
@@ -779,6 +782,141 @@ class OfficialCollectionSyncTests(TestCase):
         )
         self.assertFalse(
             MetaModel.objects.filter(code="gpt-router-noise").exists(),
+        )
+
+    @patch("llm_ops.collection_services.fetch_source_payload")
+    def test_sync_meta_models_from_models_dev_uses_configured_timeout(
+        self,
+        mock_fetch,
+    ):
+        mock_fetch.return_value = {
+            "json": {
+                "openai/gpt-timeout-test": {
+                    "id": "openai/gpt-timeout-test",
+                    "name": "GPT Timeout Test",
+                },
+            },
+        }
+
+        stats = sync_meta_models_from_models_dev(timeout=45)
+
+        self.assertEqual(stats["models"], 1)
+        mock_fetch.assert_called_once_with(
+            "https://models.dev/models.json",
+            45,
+        )
+        self.assertTrue(
+            MetaModel.objects.filter(code="gpt-timeout-test").exists(),
+        )
+
+    @override_settings(LLM_OPS_MODELS_DEV_TIMEOUT=70)
+    @patch("llm_ops.collection_services.fetch_source_payload")
+    def test_sync_meta_models_from_models_dev_reads_timeout_setting(
+        self,
+        mock_fetch,
+    ):
+        mock_fetch.return_value = {
+            "json": {
+                "openai/gpt-setting-timeout-test": {
+                    "id": "openai/gpt-setting-timeout-test",
+                    "name": "GPT Setting Timeout Test",
+                },
+            },
+        }
+
+        stats = sync_meta_models_from_models_dev()
+
+        self.assertEqual(stats["models"], 1)
+        mock_fetch.assert_called_once_with(
+            "https://models.dev/models.json",
+            70,
+        )
+
+    @patch("llm_ops.collection_services.fetch_source_payload")
+    def test_sync_meta_models_from_models_dev_uses_fallback_url(
+        self,
+        mock_fetch,
+    ):
+        mock_fetch.side_effect = [
+            RuntimeError("primary unavailable"),
+            {
+                "json": {
+                    "openai/gpt-fallback-test": {
+                        "id": "openai/gpt-fallback-test",
+                        "name": "GPT Fallback Test",
+                    },
+                },
+            },
+        ]
+
+        stats = sync_meta_models_from_models_dev(
+            source_url="https://models.dev/models.json",
+            fallback_urls=["https://mirror.example.com/models.json"],
+            timeout=55,
+        )
+
+        self.assertEqual(stats["models"], 1)
+        self.assertEqual(
+            mock_fetch.call_args_list,
+            [
+                call("https://models.dev/models.json", 55),
+                call("https://mirror.example.com/models.json", 55),
+            ],
+        )
+        meta = MetaModel.objects.get(code="gpt-fallback-test")
+        self.assertEqual(
+            meta.metadata["models_dev"]["source_url"],
+            "https://mirror.example.com/models.json",
+        )
+
+    @patch("llm_ops.collection_services.fetch_source_payload")
+    def test_sync_meta_models_from_models_dev_uses_cached_payload(
+        self,
+        mock_fetch,
+    ):
+        mock_fetch.return_value = {
+            "json": {
+                "openai/gpt-cache-test": {
+                    "id": "openai/gpt-cache-test",
+                    "name": "GPT Cache Test",
+                },
+            },
+        }
+        first_stats = sync_meta_models_from_models_dev(timeout=30)
+        mock_fetch.side_effect = RuntimeError("models.dev unavailable")
+
+        second_stats = sync_meta_models_from_models_dev(timeout=30)
+
+        self.assertEqual(first_stats["models"], 1)
+        self.assertEqual(second_stats["models"], 1)
+        self.assertEqual(second_stats["used_cache"], 1)
+        self.assertEqual(
+            MetaModel.objects.filter(code="gpt-cache-test").count(),
+            1,
+        )
+
+    @patch("llm_ops.collection_services.cache.set")
+    @patch("llm_ops.collection_services.fetch_source_payload")
+    def test_sync_meta_models_from_models_dev_ignores_cache_write_failure(
+        self,
+        mock_fetch,
+        mock_cache_set,
+    ):
+        mock_fetch.return_value = {
+            "json": {
+                "openai/gpt-cache-write-test": {
+                    "id": "openai/gpt-cache-write-test",
+                    "name": "GPT Cache Write Test",
+                },
+            },
+        }
+        mock_cache_set.side_effect = RuntimeError("cache unavailable")
+
+        stats = sync_meta_models_from_models_dev(timeout=30)
+
+        self.assertEqual(stats["models"], 1)
+        self.assertTrue(
+            MetaModel.objects.filter(code="gpt-cache-write-test").exists(),
         )
 
     @patch("llm_ops.collectors.official.requests.get")
