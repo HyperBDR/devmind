@@ -373,6 +373,17 @@ class MetaModel(models.Model):
                 dict.fromkeys([*update_fields, *changed_fields])
             )
         super().save(*args, **kwargs)
+        from .meta_model_lookup import register_meta_model_in_lookup_cache
+
+        register_meta_model_in_lookup_cache(self)
+
+    def delete(self, *args, **kwargs):
+        """Clear lookup caches when a canonical model is removed."""
+        result = super().delete(*args, **kwargs)
+        from .meta_model_lookup import invalidate_meta_model_lookup_cache
+
+        invalidate_meta_model_lookup_cache()
+        return result
 
     def __str__(self) -> str:
         return self.name

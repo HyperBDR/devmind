@@ -1,7 +1,9 @@
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from llm_ops.models import (
     LLMModel,
@@ -1000,6 +1002,76 @@ class EnsureMetaModelForPriceDataTests(TestCase):
         )
         self.assertEqual(reused.id, canonical.id)
         self.assertIn("deepseek-r1-250528", reused.aliases)
+
+    def test_repeated_price_data_alias_matches_share_full_table_load(self):
+        from llm_ops import services
+        from llm_ops.serializers import ensure_meta_model_for_price_data
+
+        getattr(services, "invalidate_meta_model_lookup_cache", lambda: None)()
+        canonical = MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            owner_code=self.deepseek.code,
+            owner_name=self.deepseek.name,
+            owner_website=self.deepseek.website,
+            aliases=[
+                "deepseek-r1-250528",
+                "DeepSeek R1 0528",
+                "deepseek-r1",
+                "DeepSeek R1",
+            ],
+        )
+        data = {
+            "code": "deepseek-r1-250528",
+            "name": "DeepSeek R1 0528",
+            "provider": self.deepseek,
+        }
+
+        with CaptureQueriesContext(connection) as context:
+            first = ensure_meta_model_for_price_data(data)
+            second = ensure_meta_model_for_price_data(data)
+
+        self.assertEqual(first.id, canonical.id)
+        self.assertEqual(second.id, canonical.id)
+        full_table_queries = [
+            query
+            for query in context.captured_queries
+            if 'FROM "llm_ops_metamodel"' in query["sql"]
+            and " WHERE " not in query["sql"]
+        ]
+        self.assertEqual(len(full_table_queries), 1)
+
+    def test_created_meta_model_updates_lookup_cache_without_reload(self):
+        from llm_ops import services
+        from llm_ops.serializers import ensure_meta_model_for_price_data
+
+        getattr(services, "invalidate_meta_model_lookup_cache", lambda: None)()
+
+        with CaptureQueriesContext(connection) as context:
+            canonical = ensure_meta_model_for_price_data(
+                {
+                    "code": "deepseek-r1-0528",
+                    "name": "DeepSeek R1 0528",
+                    "provider": self.deepseek,
+                }
+            )
+            reused = ensure_meta_model_for_price_data(
+                {
+                    "code": "",
+                    "name": "DeepSeek R1 0528",
+                    "raw_code": "deepseek-r1-250528",
+                    "provider": self.deepseek,
+                }
+            )
+
+        self.assertEqual(reused.id, canonical.id)
+        full_table_queries = [
+            query
+            for query in context.captured_queries
+            if 'FROM "llm_ops_metamodel"' in query["sql"]
+            and " WHERE " not in query["sql"]
+        ]
+        self.assertEqual(len(full_table_queries), 1)
 
     def test_mainstream_online_model_families_have_canonical_owners(self):
         from llm_ops.constants import canonical_owner_for_model_code

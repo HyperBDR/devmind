@@ -10,6 +10,11 @@ from cloud_billing.dashboard import _build_exchange_rate_info
 from django.db import transaction
 from django.utils import timezone
 
+from .meta_model_lookup import (
+    find_meta_model_by_alias_or_name,
+    invalidate_meta_model_lookup_cache as _invalidate_lookup_cache,
+    normalize_meta_model_lookup_name as _normalize_lookup_name,
+)
 from .models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
@@ -67,6 +72,16 @@ MANUAL_COLLECTION_METHODS = {
     PriceCollectionSource.COLLECTION_METHOD_MANUAL_ENTRY,
     PriceCollectionSource.COLLECTION_METHOD_MANUAL_IMPORT,
 }
+
+
+def invalidate_meta_model_lookup_cache() -> None:
+    """Clear cached meta model lookup indexes for compatibility callers."""
+    _invalidate_lookup_cache()
+
+
+def normalize_meta_model_lookup_name(value: str | None) -> str:
+    """Normalize a model display name for loose matching."""
+    return _normalize_lookup_name(value)
 
 
 @dataclass(frozen=True)
@@ -222,25 +237,10 @@ def match_meta_model_by_alias_or_name(
     if not tokens:
         return None
 
-    all_meta = list(MetaModel.objects.all())
-    alias_index = {
-        alias: meta
-        for meta in all_meta
-        for alias in (meta.aliases or [])
-        if alias
-    }
-    for token in tokens:
-        hit = alias_index.get(token)
-        if hit is not None:
-            return hit
-
-    normalized_name = normalize_meta_model_lookup_name(canonical_name)
-    if not normalized_name:
-        return None
-    for meta in all_meta:
-        if normalize_meta_model_lookup_name(meta.name) == normalized_name:
-            return meta
-    return None
+    return find_meta_model_by_alias_or_name(
+        tokens=tokens,
+        name=canonical_name,
+    )
 
 
 def meta_model_alias_tokens(
@@ -266,11 +266,6 @@ def meta_model_alias_tokens(
         if value and value not in tokens:
             tokens.append(value)
     return tokens
-
-
-def normalize_meta_model_lookup_name(value: str | None) -> str:
-    """Normalize a model display name for loose matching."""
-    return re.sub(r"[\s_\-]+", "", str(value or "").strip().lower())
 
 
 def price_role_for_source(
