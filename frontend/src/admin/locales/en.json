@@ -53,6 +53,8 @@
     "operationsConsole": "Operations Console",
     "adminConsole": "Admin Console",
     "llmConsole": "LLM Console",
+    "llmOps": "LLM Operations",
+    "dataOps": "Data Operations",
     "taskManagementConsole": "Task Console",
     "notificationConsole": "Notification Console",
     "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard"

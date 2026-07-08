@@ -731,6 +731,7 @@
     "workspace": "用户工作台",
     "operationsConsole": "运营控制台",
     "llmOps": "大模型运营管理",
+    "dataOps": "数据运营控制台",
     "hyperbdrDashboard": "HyperMotion / HyperBDR数据仪表盘",
     "adminConsole": "管理员控制台",
     "llmConsole": "LLM 控制台",
