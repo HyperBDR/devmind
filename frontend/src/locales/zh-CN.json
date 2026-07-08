@@ -1007,6 +1007,9 @@
         "lowerThanAverage": "↓ 低 {pct}%",
         "higherThanAverage": "↑ 高 {pct}%",
         "sameAsAverage": "- 持平",
+        "priceColorNoBenchmark": "暂无有效市场均价，使用灰色显示。",
+        "priceColorAboveAverage": "售价 > 市场均价，使用黄色提示偏高。",
+        "priceColorAtOrBelowAverage": "售价 <= 市场均价，使用绿色显示；等于市场均价也视为合理。",
         "marketAverage": "市场均价",
         "marketMarginReference": "坐标参照：Input 市场均价 {price}，对应收益率 {margin}"
       },
