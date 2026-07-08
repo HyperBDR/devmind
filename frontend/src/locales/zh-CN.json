@@ -1007,7 +1007,8 @@
         "lowerThanAverage": "↓ 低 {pct}%",
         "higherThanAverage": "↑ 高 {pct}%",
         "sameAsAverage": "- 持平",
-        "marketAverage": "市场均价"
+        "marketAverage": "市场均价",
+        "marketMarginReference": "坐标参照：Input 市场均价 {price}，对应收益率 {margin}"
       },
       "performance": {
         "title": "链路性能全景对标",
@@ -2087,7 +2088,7 @@
         "default": "没有符合筛选条件的模型。"
       },
       "marginTone": {
-        "high": "太高：当前 {value}，高于自动审批上限 {limit}",
+        "high": "售价高于市场均价：{market}；当前收益率 {value}",
         "low": "太低：当前 {value}，低于平台成本下限 {floor}",
         "muted": "暂无收益率",
         "ok": "合适：当前 {value}，平台下限 {floor}，自动审批上限 {limit}"

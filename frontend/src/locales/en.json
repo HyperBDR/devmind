@@ -997,7 +997,8 @@
         "lowerThanAverage": "↓ {pct}% lower",
         "higherThanAverage": "↑ {pct}% higher",
         "sameAsAverage": "- Flat",
-        "marketAverage": "Market average"
+        "marketAverage": "Market average",
+        "marketMarginReference": "Axis reference: Input market average {price}, margin {margin}"
       },
       "performance": {
         "title": "Link Performance Benchmark",
@@ -2077,7 +2078,7 @@
         "default": "No models match the current filters."
       },
       "marginTone": {
-        "high": "Too high: current {value}, above auto-approval limit {limit}",
+        "high": "Price is above market average: {market}; current margin {value}",
         "low": "Too low: current {value}, below platform cost floor {floor}",
         "muted": "No margin available",
         "ok": "Suitable: current {value}, platform floor {floor}, auto-approval limit {limit}"

@@ -520,6 +520,9 @@
                 :digits="1"
                 @change="onMarginAxisChange(row, $event)"
               />
+              <p class="pricing-axis-reference">
+                {{ marketMarginReferenceText(row) }}
+              </p>
             </div>
           </div>
         </article>
@@ -693,6 +696,7 @@ const {
   marginPolicyTooltip,
   marketAverageText,
   marketMarginRefsFor,
+  marketMarginReferenceText,
   normalizeDiscountRatio,
   normalizeMargin,
   priceDiffAmountText,

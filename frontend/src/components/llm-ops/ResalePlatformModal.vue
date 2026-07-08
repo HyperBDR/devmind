@@ -21,7 +21,7 @@
               {{ form.id ? '编辑挂售平台' : '新建挂售平台' }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
-              配置平台类型、区域、接口、抽佣、免审收益率和积分规则。
+              配置 Agione 平台实例、区域、接口、抽佣、免审收益率和积分规则。
             </p>
           </div>
           <button
@@ -41,7 +41,7 @@
         <section class="form-section">
           <div class="section-heading">
             <h4>平台信息</h4>
-            <p>用于区分 Agione 或其他上架平台实例和后续接口适配。</p>
+            <p>用于区分 Agione 上架平台实例和后续接口适配。</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
@@ -312,14 +312,7 @@ const currencyOptions = [
   { label: 'CNY', value: 'CNY' },
   { label: 'USD', value: 'USD' }
 ]
-const platformTypeOptions = [
-  { label: 'Agione', value: 'agione' },
-  { label: '云市场', value: 'cloud_marketplace' },
-  { label: 'API 网关', value: 'api_gateway' },
-  { label: '代理商平台', value: 'reseller' },
-  { label: '内部平台', value: 'internal' },
-  { label: '其他平台', value: 'other' }
-]
+const platformTypeOptions = [{ label: 'Agione', value: 'agione' }]
 const environmentOptions = [
   { label: '生产', value: 'production' },
   { label: '预发', value: 'staging' },
@@ -393,7 +386,7 @@ function defaults() {
 function platformToForm(platform) {
   return {
     ...platform,
-    platform_type: platform.platform_type || 'agione',
+    platform_type: 'agione',
     region_code: platform.region_code || '',
     region_name: platform.region_name || '',
     environment: platform.environment || 'production',
@@ -429,6 +422,7 @@ function ratioFromPercent(value) {
 
 function normalizePayload(payload) {
   const clean = { ...payload }
+  clean.platform_type = 'agione'
   clean.code = String(clean.code || '')
     .trim()
     .toLowerCase()
