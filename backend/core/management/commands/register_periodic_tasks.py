@@ -19,7 +19,7 @@ from core.periodic_registry import (
 logger = logging.getLogger(__name__)
 
 
-def discover_and_register():
+def discover_and_register(force=False):
     """
     Clear registry, discover each app's periodic_tasks, call
     register_periodic_tasks, then apply registry to django_celery_beat.
@@ -40,21 +40,34 @@ def discover_and_register():
                     f"register_periodic_tasks failed for app {app}: {e}"
                 )
 
-    apply_registry()
+    apply_registry(force=force)
 
 
 class Command(BaseCommand):
     help = (
         "Discover all apps' periodic_tasks.register_periodic_tasks() and "
         "register entries to django_celery_beat without updating existing "
-        "rows."
+        "rows unless --force is provided."
     )
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help=(
+                "Overwrite existing django_celery_beat PeriodicTask rows "
+                "with the code-defined registry values."
+            ),
+        )
+
     def handle(self, *args, **options):
-        discover_and_register()
+        force = options.get("force", False)
+        discover_and_register(force=force)
         count = len(TASK_REGISTRY)
+        mode = "updated" if force else "registered"
         self.stdout.write(
             self.style.SUCCESS(
-                f"Registered {count} periodic task(s) to django_celery_beat; "
+                f"Discovered {count} periodic task(s); {mode} "
+                "django_celery_beat rows."
             )
         )

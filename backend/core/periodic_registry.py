@@ -99,7 +99,7 @@ class TaskRegistry:
             "enabled": enabled,
         }
 
-    def _apply_one(self, name, entry):
+    def _apply_one(self, name, entry, force=False):
         from django_celery_beat.models import PeriodicTask, PeriodicTasks
 
         task_name = entry["task"]
@@ -125,7 +125,7 @@ class TaskRegistry:
                 crontab_schedule = _get_or_create_crontab(schedule)
                 interval_schedule = None
 
-        create_defaults = {
+        desired_values = {
             "task": task_name,
             "args": json.dumps(list(args)),
             "kwargs": json.dumps(kwargs),
@@ -133,24 +133,39 @@ class TaskRegistry:
             "enabled": enabled,
         }
         if crontab_schedule is not None:
-            create_defaults["crontab"] = crontab_schedule
-            create_defaults["interval"] = None
+            desired_values["crontab"] = crontab_schedule
+            desired_values["interval"] = None
         else:
-            create_defaults["interval"] = interval_schedule
-            create_defaults["crontab"] = None
+            desired_values["interval"] = interval_schedule
+            desired_values["crontab"] = None
 
         obj, created = PeriodicTask.objects.get_or_create(
-            name=name, defaults=create_defaults
+            name=name, defaults=desired_values
         )
         if not created:
+            if force:
+                update_fields = []
+                for field_name, value in desired_values.items():
+                    setattr(obj, field_name, value)
+                    update_fields.append(field_name)
+
+                for field_name in ("solar", "clocked"):
+                    if hasattr(obj, field_name):
+                        setattr(obj, field_name, None)
+                        update_fields.append(field_name)
+
+                obj.save(update_fields=update_fields)
+                PeriodicTasks.update_changed()
+                return "updated"
+
             logger.debug(
                 "Periodic task already exists, skipping update: %s",
                 name,
             )
-            return False
+            return "skipped"
 
         PeriodicTasks.update_changed()
-        return True
+        return "created"
 
     @staticmethod
     def _ensure_task_module_loaded(task_name):
@@ -171,7 +186,9 @@ class TaskRegistry:
             return True
         if task_name in current_app.tasks:
             return True
-        module_name = task_name.rsplit(".", 1)[0] if "." in task_name else ""
+        module_name = (
+            task_name.rsplit(".", 1)[0] if "." in task_name else ""
+        )
         if not module_name:
             return task_name in current_app.tasks
         try:
@@ -198,7 +215,9 @@ class TaskRegistry:
             # command path runs in a process where those modules may not
             # have been imported yet. Attempt a best-effort import and
             # re-check before declaring the task missing.
-            module_name = task_name.rsplit(".", 1)[0] if "." in task_name else ""
+            module_name = (
+                task_name.rsplit(".", 1)[0] if "." in task_name else ""
+            )
             if module_name:
                 try:
                     __import__(module_name)
@@ -210,11 +229,14 @@ class TaskRegistry:
             # case is the same KeyError that motivated this check.
             return True
 
-    def apply(self):
+    def apply(self, force=False):
         """
         Write all registered entries to django_celery_beat.
 
         Existing rows are skipped so database-side edits are preserved.
+        When ``force`` is true, existing rows are overwritten with the
+        registry definition so operators can restore code-defined
+        schedules after accidental admin-side edits.
         Entries that reference a task name not yet known to the Celery
         app are logged at ERROR level so that missing-task regressions
         show up loudly during ``manage.py register_periodic_tasks``
@@ -234,9 +256,11 @@ class TaskRegistry:
                 )
                 continue
             try:
-                created = self._apply_one(name, entry)
-                if created:
+                result = self._apply_one(name, entry, force=force)
+                if result == "created":
                     logger.debug(f"Registered periodic task: {name}")
+                elif result == "updated":
+                    logger.debug(f"Updated periodic task: {name}")
                 else:
                     logger.debug(f"Skipped existing periodic task: {name}")
             except Exception as e:
@@ -248,7 +272,6 @@ class TaskRegistry:
 TASK_REGISTRY = TaskRegistry()
 
 
-def apply_registry():
+def apply_registry(force=False):
     """Apply the global TASK_REGISTRY to django_celery_beat."""
-    TASK_REGISTRY.apply()
-
+    TASK_REGISTRY.apply(force=force)
