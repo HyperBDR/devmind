@@ -219,6 +219,21 @@ def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
         logger.warning("llm_ops: skipped beat sync due to invalid cron")
         return
 
+    price_task_source_ids = price_sync_task_source_ids(config)
+    price_task_enabled = config.price_collection_enabled
+    if isinstance(price_task_source_ids, list) and not price_task_source_ids:
+        if price_task_enabled:
+            logger.warning(
+                "llm_ops: disabled price sync beat task because selected "
+                "source ids no longer contain supported sources",
+                extra={
+                    "price_collection_source_ids": (
+                        config.price_collection_source_ids
+                    ),
+                },
+            )
+        price_task_enabled = False
+
     PeriodicTask.objects.update_or_create(
         name=META_MODEL_SYNC_TASK_NAME,
         defaults={
@@ -240,13 +255,13 @@ def sync_global_config_to_beat(config: LLMOpsGlobalConfig) -> None:
             "args": json.dumps([]),
             "kwargs": json.dumps(
                 {
-                    "source_ids": price_sync_task_source_ids(config),
+                    "source_ids": price_task_source_ids,
                     "verify_source": True,
                 }
             ),
             "crontab": price_crontab,
             "interval": None,
-            "enabled": config.price_collection_enabled,
+            "enabled": price_task_enabled,
         },
     )
 
