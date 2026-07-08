@@ -24,6 +24,12 @@ export const FEATURE_DEFINITIONS = [
     matchers: ['/llm-ops']
   },
   {
+    key: 'data_ops',
+    labelKey: 'platforms.dataOps',
+    defaultPath: '/data-ops',
+    matchers: ['/data-ops']
+  },
+  {
     key: 'sales_work_orders',
     labelKey: 'platforms.salesWorkOrders',
     defaultPath: '/sals/dashboard',
@@ -46,6 +52,7 @@ const FEATURE_MAP = new Map(FEATURE_DEFINITIONS.map((item) => [item.key, item]))
 const FEATURE_ALIASES = {
   cloud_billing: 'operations_console',
   data_collector: 'operations_console',
+  data_operations: 'data_ops',
   sals: 'sales_work_orders',
   llm_operations: 'llm_ops',
   llm_ops_management: 'llm_ops',
