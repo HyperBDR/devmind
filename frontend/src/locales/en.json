@@ -997,6 +997,9 @@
         "lowerThanAverage": "↓ {pct}% lower",
         "higherThanAverage": "↑ {pct}% higher",
         "sameAsAverage": "- Flat",
+        "priceColorNoBenchmark": "No valid market average is available, so this is shown in gray.",
+        "priceColorAboveAverage": "Price > market average, so this is shown in amber as high.",
+        "priceColorAtOrBelowAverage": "Price <= market average, so this is shown in green; matching the market average is acceptable.",
         "marketAverage": "Market average",
         "marketMarginReference": "Axis reference: Input market average {price}, margin {margin}"
       },

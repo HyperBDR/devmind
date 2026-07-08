@@ -6,6 +6,8 @@ import {
   RESALE_PRICE_DIMENSION_SPECS
 } from '@/utils/resalePricing'
 
+const PRICE_COMPARE_EPSILON = 0.00001
+
 export function useResalePricing({
   currencyLabel,
   currencySymbol,
@@ -354,12 +356,12 @@ export function useResalePricing({
     }
     const diff = p - a
     const pct = Math.abs((diff / a) * 100).toFixed(1)
-    if (diff < -0.00001) {
+    if (diff < -PRICE_COMPARE_EPSILON) {
       return t('llmOps.publishingWorkspace.pricing.lowerThanAverage', {
         pct
       })
     }
-    if (diff > 0.00001) {
+    if (diff > PRICE_COMPARE_EPSILON) {
       return t('llmOps.publishingWorkspace.pricing.higherThanAverage', {
         pct
       })
@@ -379,12 +381,23 @@ export function useResalePricing({
   function priceDiffClass(price, avg) {
     const p = Number(price)
     const a = Number(avg)
-    if (!Number.isFinite(p) || !Number.isFinite(a) || a === 0) {
+    if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0) {
       return 'text-slate-400'
     }
-    if (p < a) return 'text-emerald-600'
-    if (p > a) return 'text-amber-600'
-    return 'text-slate-500'
+    if (p > a + PRICE_COMPARE_EPSILON) return 'text-amber-600'
+    return 'text-emerald-600'
+  }
+
+  function priceDiffTitle(price, avg) {
+    const p = Number(price)
+    const a = Number(avg)
+    if (!Number.isFinite(p) || !Number.isFinite(a) || a <= 0) {
+      return t('llmOps.publishingWorkspace.pricing.priceColorNoBenchmark')
+    }
+    if (p > a + PRICE_COMPARE_EPSILON) {
+      return t('llmOps.publishingWorkspace.pricing.priceColorAboveAverage')
+    }
+    return t('llmOps.publishingWorkspace.pricing.priceColorAtOrBelowAverage')
   }
 
   function priceSpecForItemDimension(dimension) {
@@ -574,6 +587,7 @@ export function useResalePricing({
     normalizeMargin,
     priceDiffAmountText,
     priceDiffClass,
+    priceDiffTitle,
     priceDiffText,
     priceDimensions,
     priceFromMargin,

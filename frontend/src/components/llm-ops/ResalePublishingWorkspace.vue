@@ -462,6 +462,12 @@
                           dimension.marketAverage
                         )
                       "
+                      :title="
+                        priceDiffTitle(
+                          dimension.priceRaw,
+                          dimension.marketAverage
+                        )
+                      "
                     >
                       {{
                         priceDiffText(
@@ -701,6 +707,7 @@ const {
   normalizeMargin,
   priceDiffAmountText,
   priceDiffClass,
+  priceDiffTitle,
   priceDiffText,
   priceDimensions,
   priceFromMargin,
