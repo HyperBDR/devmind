@@ -244,6 +244,18 @@
             {{ t('llmOps.globalConfigPanel.llmConfig.description') }}
           </small>
         </label>
+        <div
+          v-if="priceSyncLLMUnavailable"
+          class="config-warning"
+          role="status"
+        >
+          <strong>
+            {{ t('llmOps.globalConfigPanel.llmConfig.warningTitle') }}
+          </strong>
+          <span>
+            {{ t('llmOps.globalConfigPanel.llmConfig.warningBody') }}
+          </span>
+        </div>
 
         <div class="source-mode-group" role="radiogroup">
           <label
@@ -452,6 +464,13 @@ const llmConfigOptions = computed(() => {
     options.set(selected.uuid, selected)
   }
   return Array.from(options.values())
+})
+
+const priceSyncLLMUnavailable = computed(() => {
+  const status = config.value?.price_sync_agent_status
+  return Boolean(
+    status?.price_collection_enabled && status?.llm?.ok === false
+  )
 })
 
 onMounted(() => {
@@ -947,6 +966,24 @@ function errorMessage(error, fallback) {
   color: #64748b;
   font-size: 0.75rem;
   line-height: 1.5;
+}
+
+.config-warning {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 0.5rem;
+  color: #92400e;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8125rem;
+  gap: 0.25rem;
+  line-height: 1.5;
+  padding: 0.75rem 0.875rem;
+}
+
+.config-warning strong {
+  color: #78350f;
+  font-size: 0.875rem;
 }
 
 .schedule-editor {

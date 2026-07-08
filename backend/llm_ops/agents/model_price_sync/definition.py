@@ -17,7 +17,11 @@ from llm_ops.global_config import (
     price_sync_source_queryset,
     selected_price_collection_sources,
 )
-from llm_ops.llm_config import resolve_price_sync_llm_settings
+from llm_ops.llm_config import (
+    PRICE_SYNC_LLM_NOT_CONFIGURED_MESSAGE,
+    PriceSyncLLMConfigurationError,
+    resolve_price_sync_llm_settings,
+)
 from llm_ops.models import LLMOpsGlobalConfig, PriceCollectionSource
 from llm_ops.source_collectors import (
     collect_price_source,
@@ -285,7 +289,9 @@ def build_llm_ops_agent_model(
         provider = "gemini"
     model_name = str(llm_settings.get("model") or "").strip()
     if not model_name:
-        raise ValueError("LLM Ops price sync Agent model is not configured.")
+        raise PriceSyncLLMConfigurationError(
+            PRICE_SYNC_LLM_NOT_CONFIGURED_MESSAGE
+        )
 
     api_key = llm_settings.get("api_key") or ""
     api_base = llm_settings.get("api_base") or ""

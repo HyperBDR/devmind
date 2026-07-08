@@ -1115,7 +1115,9 @@
       },
       "llmConfig": {
         "default": "使用默认启用的管理员 LLM 配置",
-        "description": "模型价格同步 Agent 需要 LLM 辅助抽取时使用该配置。"
+        "description": "模型价格同步 Agent 需要 LLM 辅助抽取时使用该配置。",
+        "warningBody": "启用需要 LLM 辅助抽取的数据源前，请先配置可用的 LLM。缺少配置时任务会直接失败，不再自动重试。",
+        "warningTitle": "价格同步 Agent 尚未配置 LLM"
       },
       "metaSync": {
         "description": "同步模型厂商、模型族和能力标签。",

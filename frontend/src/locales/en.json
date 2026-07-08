@@ -1105,7 +1105,9 @@
       },
       "llmConfig": {
         "default": "Use default active admin LLM config",
-        "description": "Used by the model price sync Agent when it needs LLM-assisted extraction."
+        "description": "Used by the model price sync Agent when it needs LLM-assisted extraction.",
+        "warningBody": "Configure an active LLM before enabling sources that need LLM-assisted extraction. Missing configuration now fails immediately without retry.",
+        "warningTitle": "Price sync Agent LLM is not configured"
       },
       "metaSync": {
         "description": "Sync model providers, model families, and capability tags.",

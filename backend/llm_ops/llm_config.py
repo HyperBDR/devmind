@@ -13,6 +13,25 @@ except (ImportError, RuntimeError):
     LLMConfig = None
 
 
+PRICE_SYNC_LLM_NOT_CONFIGURED_MESSAGE = (
+    "LLM Ops price sync Agent model is not configured."
+)
+
+
+class PriceSyncLLMConfigurationError(ValueError):
+    """Raised when the price sync Agent cannot resolve an LLM model."""
+
+
+def is_price_sync_llm_configuration_error(exc: Exception) -> bool:
+    """Return whether an exception is a deterministic LLM config failure."""
+    if isinstance(exc, PriceSyncLLMConfigurationError):
+        return True
+    return (
+        isinstance(exc, ValueError)
+        and PRICE_SYNC_LLM_NOT_CONFIGURED_MESSAGE in str(exc)
+    )
+
+
 def _row_to_reference(row: Any) -> dict[str, str]:
     """Return a stable display reference for an agentcore LLM config."""
     config = getattr(row, "config", {}) or {}
@@ -126,4 +145,29 @@ def resolve_price_sync_llm_settings(
             ),
         },
         "label": model or "Global default",
+    }
+
+
+def get_price_sync_llm_status(
+    preferred_config_uuid: str | None = None,
+) -> dict[str, Any]:
+    """Return operator-facing health for the price sync Agent LLM."""
+    llm_settings = resolve_price_sync_llm_settings(preferred_config_uuid)
+    model = str(llm_settings.get("model") or "").strip()
+    if model:
+        return {
+            "ok": True,
+            "code": "configured",
+            "message": "LLM Ops price sync Agent model is configured.",
+            "source": llm_settings.get("source") or "",
+            "config_uuid": llm_settings.get("config_uuid") or "",
+            "label": llm_settings.get("label") or model,
+        }
+    return {
+        "ok": False,
+        "code": "missing_llm_model",
+        "message": PRICE_SYNC_LLM_NOT_CONFIGURED_MESSAGE,
+        "source": llm_settings.get("source") or "",
+        "config_uuid": llm_settings.get("config_uuid") or "",
+        "label": llm_settings.get("label") or "",
     }
