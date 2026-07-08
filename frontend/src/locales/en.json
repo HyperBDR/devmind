@@ -724,6 +724,7 @@
     "workspace": "Workspace",
     "operationsConsole": "Operations Console",
     "llmOps": "LLM Operations",
+    "dataOps": "Data Operations",
     "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard",
     "adminConsole": "Admin Console",
     "llmConsole": "LLM Console",

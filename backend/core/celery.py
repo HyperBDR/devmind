@@ -42,6 +42,7 @@ app.conf.update(
         # "unregistered task" before a child ever sees them.
         "cloud_billing.tasks",
         "data_collector.tasks",
+        "data_ops.tasks",
         "hyperbdr_dashboard.tasks",
         "llm_ops.tasks",
         "sals.tasks",

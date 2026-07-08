@@ -168,6 +168,7 @@ INSTALLED_APPS += [
     'accounts',
     'cloud_billing',
     'data_collector',
+    'data_ops',
     'hyperbdr_dashboard',
     'llm_ops',
     'sals',

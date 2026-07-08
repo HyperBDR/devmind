@@ -28,6 +28,11 @@ FEATURE_DEFINITIONS = (
         'default_path': '/llm-ops',
     },
     {
+        'key': 'data_ops',
+        'label': 'Data Operations Console',
+        'default_path': '/data-ops',
+    },
+    {
         'key': 'admin_console',
         'label': 'Admin Console',
         'default_path': '/management/users',
@@ -56,6 +61,7 @@ PLATFORM_DEFAULT_PATHS = FEATURE_DEFAULT_PATHS
 FEATURE_ALIASES = {
     'cloud_billing': 'operations_console',
     'data_collector': 'operations_console',
+    'data_operations': 'data_ops',
     'sals': 'sales_work_orders',
     'llm_operations': 'llm_ops',
     'llm_ops_management': 'llm_ops',
