@@ -86,10 +86,7 @@
           <strong v-else class="range-ref-tooltip-value">
             {{ refDisplayValue(ref) }}
           </strong>
-          <span
-            v-if="ref.titleValue && !ref.rows?.length"
-            class="range-ref-tooltip-source"
-          >
+          <span v-if="ref.titleValue" class="range-ref-tooltip-source">
             {{ ref.titleValue }}
           </span>
         </span>
@@ -105,7 +102,7 @@
       :aria-valuemax="axisMax"
       :aria-valuenow="Number(value) || 0"
       :style="{
-        left: getMarkerPos(Number(value) || 0) + '%',
+        left: getVisualMarkerPos(Number(value) || 0) + '%',
         backgroundColor: getMarkerColor(Number(value) || 0)
       }"
       @keydown="onMarkerKeydown"
@@ -178,11 +175,17 @@ const { t } = useI18n()
 
 const rangeRef = ref(null)
 const isDragging = ref(false)
+const dragAxisRange = ref(null)
+const dragMarkerPercent = ref(null)
 const fallbackCenter = ref(0)
 
 const AXIS_START_PERCENT = 10
 const AXIS_END_PERCENT = 90
 const AXIS_WIDTH_PERCENT = AXIS_END_PERCENT - AXIS_START_PERCENT
+const AXIS_DRAG_OVERFLOW_RATIO = 0.05
+const AXIS_VALUE_EXTENSION_TRIGGER_PERCENT = 90
+const LABEL_EDGE_START_PERCENT = 4
+const LABEL_EDGE_END_PERCENT = 96
 
 const boundaryMin = computed(() => Number(props.min))
 const boundaryMax = computed(() => Number(props.max))
@@ -194,33 +197,22 @@ const axisRange = computed(() => {
   const value = Number(props.value)
   const refValues = props.refs.map((ref) => Number(ref.price))
   if (hasBoundaryRange.value) {
-    const candidates = [
+    const baseCandidates = [
       boundaryMin.value,
       boundaryMax.value,
-      value,
       ...refValues
     ].filter((item) => Number.isFinite(item))
-    const rawMin = Math.min(...candidates)
-    const rawMax = Math.max(...candidates)
-    if (rawMax === rawMin) {
-      const padding = Math.max(Math.abs(rawMax) * 0.2, 1)
-      return {
-        min: Math.max(0, rawMin - padding),
-        max: rawMax + padding
-      }
-    }
-    const span = rawMax - rawMin
-    const leftPadding = Math.max(span * 0.04, 1)
-    const rightPadding = Math.max(span * 0.14, 10)
-    return {
-      min: Math.max(0, Math.floor((rawMin - leftPadding) / 5) * 5),
-      max: Math.ceil((rawMax + rightPadding) / 5) * 5
-    }
+    return axisRangeWithValueExtension(baseCandidates, value, {
+      leftRatio: 0.04,
+      rightMin: 10,
+      rightRatio: 0.14
+    })
   }
 
-  const candidates = [value, ...refValues].filter((item) =>
-    Number.isFinite(item)
-  )
+  const baseCandidates = refValues.filter((item) => Number.isFinite(item))
+  const candidates = baseCandidates.length
+    ? baseCandidates
+    : [value].filter((item) => Number.isFinite(item))
 
   if (!candidates.length) {
     if (!fallbackCenter.value && Number.isFinite(value) && value > 0) {
@@ -234,6 +226,29 @@ const axisRange = computed(() => {
     }
   }
 
+  return axisRangeWithValueExtension(candidates, value, {
+    leftRatio: 0.08,
+    rightRatio: 0.08
+  })
+})
+
+function axisRangeWithValueExtension(baseCandidates, value, options = {}) {
+  const baseRange = paddedAxisRange(baseCandidates, options)
+  if (!Number.isFinite(value)) return baseRange
+  const markerPercent = markerPercentForRange(value, baseRange)
+  if (markerPercent > AXIS_VALUE_EXTENSION_TRIGGER_PERCENT) {
+    return paddedAxisRange([...baseCandidates, value], options)
+  }
+  return baseRange
+}
+
+function markerPercentForRange(value, range) {
+  const span = range.max - range.min
+  if (span <= 0) return 50
+  return ((value - range.min) / span) * AXIS_WIDTH_PERCENT + AXIS_START_PERCENT
+}
+
+function paddedAxisRange(candidates, options = {}) {
   const rawMin = Math.min(...candidates)
   const rawMax = Math.max(...candidates)
   if (rawMax === rawMin) {
@@ -245,12 +260,16 @@ const axisRange = computed(() => {
   }
 
   const span = rawMax - rawMin
-  const padding = Math.max(span * 0.08, 1)
+  const leftPadding = Math.max(span * (options.leftRatio ?? 0.08), 1)
+  const rightPadding = Math.max(
+    span * (options.rightRatio ?? 0.08),
+    options.rightMin ?? 1
+  )
   return {
-    min: Math.max(0, Math.floor((rawMin - padding) / 5) * 5),
-    max: Math.ceil((rawMax + padding) / 5) * 5
+    min: Math.max(0, Math.floor((rawMin - leftPadding) / 5) * 5),
+    max: Math.ceil((rawMax + rightPadding) / 5) * 5
   }
-})
+}
 
 const axisMin = computed(() => axisRange.value.min)
 const axisMax = computed(() => axisRange.value.max)
@@ -322,6 +341,10 @@ function getMarkerPos(price) {
   return Math.max(0, Math.min(pos, 100))
 }
 
+function getVisualMarkerPos(price) {
+  return dragMarkerPercent.value ?? getMarkerPos(price)
+}
+
 function getMarkerColor(price) {
   const p = Number(price)
   const min = axisMin.value
@@ -368,16 +391,16 @@ function refTitle(ref) {
 }
 
 function getValueLabelStyle(price) {
-  const pos = getMarkerPos(price)
+  const pos = getVisualMarkerPos(price)
   const color = getMarkerColor(price)
-  if (pos < 12) {
+  if (pos < LABEL_EDGE_START_PERCENT) {
     return {
       left: '0%',
       color,
       transform: 'translateX(0)'
     }
   }
-  if (pos > 88) {
+  if (pos > LABEL_EDGE_END_PERCENT) {
     return {
       left: '100%',
       color,
@@ -396,12 +419,23 @@ function getPriceFromPointer(event) {
   if (!el) return null
   const rect = el.getBoundingClientRect()
   const percent = ((event.clientX - rect.left) / rect.width) * 100
-  const clamped = Math.max(
+  const visualPercent = Math.max(0, Math.min(percent, 100))
+  const valuePercent = Math.max(
     AXIS_START_PERCENT,
-    Math.min(percent, AXIS_END_PERCENT)
+    Math.min(visualPercent, 100)
   )
-  const ratio = (clamped - AXIS_START_PERCENT) / AXIS_WIDTH_PERCENT
-  const price = axisMin.value + ratio * (axisMax.value - axisMin.value)
+  dragMarkerPercent.value = visualPercent
+  const ratio =
+    valuePercent <= AXIS_END_PERCENT
+      ? (valuePercent - AXIS_START_PERCENT) / AXIS_WIDTH_PERCENT
+      : 1 +
+        ((valuePercent - AXIS_END_PERCENT) / (100 - AXIS_END_PERCENT)) *
+          AXIS_DRAG_OVERFLOW_RATIO
+  const range = dragAxisRange.value || {
+    max: axisMax.value,
+    min: axisMin.value
+  }
+  const price = range.min + ratio * (range.max - range.min)
   return Number(price.toFixed(4))
 }
 
@@ -419,6 +453,8 @@ function handleValueDrag(event) {
 function stopValueDrag() {
   if (!isDragging.value) return
   isDragging.value = false
+  dragAxisRange.value = null
+  dragMarkerPercent.value = null
   document.removeEventListener('pointermove', handleValueDrag)
   document.removeEventListener('pointerup', stopValueDrag)
 }
@@ -427,6 +463,10 @@ function startValueDrag(event) {
   if (event?.button > 0) return
   event.preventDefault()
   isDragging.value = true
+  dragAxisRange.value = {
+    max: axisMax.value,
+    min: axisMin.value
+  }
   handleValueDrag(event)
   document.addEventListener('pointermove', handleValueDrag)
   document.addEventListener('pointerup', stopValueDrag)

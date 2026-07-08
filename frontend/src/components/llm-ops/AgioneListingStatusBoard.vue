@@ -237,9 +237,6 @@
               </td>
               <td class="table-cell">
                 <p class="font-medium text-slate-900">
-                  {{ row.provider_name || '—' }}
-                </p>
-                <p class="mt-0.5 text-[11px] text-slate-500">
                   {{ activeListingChannelLabel(row) }}
                 </p>
               </td>

@@ -346,11 +346,6 @@ export function useResalePricing({
     return rows.map((row) => `${row.label} ${row.value}`).join(' / ')
   }
 
-  function priceAmountDetails(rows) {
-    if (!rows.length) return '-'
-    return rows.map((row) => `${row.label} ${row.value}`).join(' / ')
-  }
-
   function priceDiffText(price, avg) {
     const p = Number(price)
     const a = Number(avg)
@@ -432,39 +427,56 @@ export function useResalePricing({
     })
   }
 
+  function inputMarketMarginReference(row) {
+    const inputDimension = priceDimensions(row).find(
+      (dimension) => dimension.key === 'input'
+    )
+    const marketPrice = Number(inputDimension?.marketAverage)
+    const cost = Number(inputDimension?.costRaw)
+    if (
+      !Number.isFinite(marketPrice) ||
+      !Number.isFinite(cost) ||
+      marketPrice <= 0 ||
+      cost <= 0
+    ) {
+      return null
+    }
+    const marketMargin = averageMarginRate([{ cost, price: marketPrice }])
+    if (marketMargin === null) return null
+    return {
+      label: inputDimension.shortLabel || inputDimension.label,
+      marketMargin,
+      marketPrice
+    }
+  }
+
   function marketMarginRefsFor(row) {
-    const dimensions = priceDimensions(row)
-    const marketRows = priceAmountRows(dimensions, 'marketAverage')
-    const margins = dimensions
-      .map((dimension) => {
-        const marketPrice = Number(dimension.marketAverage)
-        const cost = Number(dimension.costRaw)
-        if (
-          !Number.isFinite(marketPrice) ||
-          !Number.isFinite(cost) ||
-          marketPrice <= 0 ||
-          cost <= 0
-        ) {
-          return null
-        }
-        return ((marketPrice - cost) / cost) * 100
-      })
-      .filter((value) => value !== null)
-    if (!margins.length) return []
-    const average =
-      margins.reduce((total, value) => total + value, 0) / margins.length
+    const reference = inputMarketMarginReference(row)
+    if (!reference) return []
+    const marketRows = priceAmountRows(priceDimensions(row), 'marketAverage')
     return [
       {
         source: t('llmOps.publishingWorkspace.pricing.marketAverage'),
-        price: Number(average.toFixed(2)),
+        price: normalizeMargin(reference.marketMargin),
         displayValue: labeledPriceAmountSummary(marketRows),
         rows: marketRows.map((row) => ({
           label: row.label,
           value: row.value
         })),
-        titleValue: priceAmountDetails(marketRows)
+        titleValue: marketMarginReferenceText(row)
       }
     ]
+  }
+
+  function marketMarginReferenceText(row) {
+    const reference = inputMarketMarginReference(row)
+    if (!reference) {
+      return t('llmOps.publishingWorkspace.pricing.noBenchmark')
+    }
+    return t('llmOps.publishingWorkspace.pricing.marketMarginReference', {
+      margin: formatPercent(reference.marketMargin),
+      price: priceAmountText(reference.marketPrice)
+    })
   }
 
   function marginAxisRangeFor(row) {
@@ -557,6 +569,7 @@ export function useResalePricing({
     marginPolicyTooltip,
     marketAverageText,
     marketMarginRefsFor,
+    marketMarginReferenceText,
     normalizeDiscountRatio,
     normalizeMargin,
     priceDiffAmountText,

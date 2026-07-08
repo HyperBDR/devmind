@@ -173,12 +173,13 @@ export function useAgioneListingDisplay({
   }
 
   function activeListingChannelLabel(row) {
-    const activeListings = row.active_listings || []
-    if (activeListings.length > 1) {
-      return t('llmOps.listingBoard.supply.activeLinks', {
-        count: activeListings.length
-      })
-    }
+    const listings = row.active_listings?.length
+      ? row.active_listings
+      : row.listings || []
+    const channelNames = Array.from(
+      new Set(listings.map((listing) => listing.channel_name).filter(Boolean))
+    )
+    if (channelNames.length) return channelNames.join(' / ')
     return (
       row.lowest_option?.channel_name || t('llmOps.listingBoard.supply.none')
     )
@@ -295,13 +296,97 @@ export function useAgioneListingDisplay({
     return Number.isFinite(limit) ? limit : null
   }
 
+  function priceSpecForItemDimension(dimension) {
+    return RESALE_PRICE_DIMENSION_SPECS.find(
+      (spec) => spec.itemDimension === dimension
+    )
+  }
+
+  function itemBelongsToRowModel(item, row) {
+    const rowModel = row?.model || {}
+    const rowMetaModelId = rowModel.meta_model || rowModel.meta_model_id
+    if (rowMetaModelId && String(item.meta_model) === String(rowMetaModelId)) {
+      return true
+    }
+    if (String(item.model || '') === String(rowModel.id || '')) return true
+    const itemModel = (props.models || []).find(
+      (model) => String(model.id) === String(item.model || '')
+    )
+    return (
+      rowMetaModelId &&
+      String(itemModel?.meta_model || itemModel?.meta_model_id || '') ===
+        String(rowMetaModelId)
+    )
+  }
+
+  function marketAverageRows(row) {
+    const samples = Object.fromEntries(
+      RESALE_PRICE_DIMENSION_SPECS.map((spec) => [spec.key, []])
+    )
+    ;(props.priceItems || []).forEach((item) => {
+      if (item.source_is_enabled === false || item.is_current === false) return
+      if (!itemBelongsToRowModel(item, row)) return
+      const spec = priceSpecForItemDimension(item.dimension)
+      if (!spec) return
+      const amount = listingDisplayAmount(item.unit_price, item.currency)
+      if (amount !== null && amount > 0) samples[spec.key].push(amount)
+    })
+    RESALE_PRICE_DIMENSION_SPECS.forEach((spec) => {
+      if (samples[spec.key].length) return
+      ;(row.options || []).forEach((option) => {
+        const amount = Number(option[spec.costField])
+        if (Number.isFinite(amount) && amount > 0) {
+          samples[spec.key].push(amount)
+        }
+      })
+    })
+    return RESALE_PRICE_DIMENSION_SPECS.map((spec) => {
+      const values = samples[spec.key]
+      const average = values.length
+        ? values.reduce((sum, value) => sum + value, 0) / values.length
+        : null
+      const price = listingDisplayAmount(
+        row.status_listing?.[spec.retailField],
+        row.status_listing?.currency
+      )
+      return {
+        average,
+        label: spec.label,
+        price
+      }
+    }).filter(
+      (item) =>
+        item.price !== null && Number.isFinite(item.average) && item.average > 0
+    )
+  }
+
+  function priceAboveMarket(row) {
+    return marketAverageRows(row).some(
+      (item) => Number(item.price) > Number(item.average) + 0.000001
+    )
+  }
+
+  function marketAverageTitle(row) {
+    const rows = marketAverageRows(row).filter(
+      (item) => Number(item.price) > Number(item.average) + 0.000001
+    )
+    if (!rows.length) return ''
+    return rows
+      .map(
+        (item) =>
+          `${item.label} ${listingAmountText(item.price)} > ${listingAmountText(
+            item.average
+          )}`
+      )
+      .join(' / ')
+  }
+
   function marginToneKey(row) {
     const margin = listingUnifiedMarginRate(row)
     if (margin === null) return 'muted'
+    if (priceAboveMarket(row)) return 'high'
     const floor = platformMarginFloor()
     if (margin < floor) return 'low'
-    const limit = platformMarginLimit()
-    if (limit !== null && margin > limit) return 'high'
     return 'ok'
   }
 
@@ -312,6 +397,12 @@ export function useAgioneListingDisplay({
   function marginPillTitle(row) {
     const margin = listingUnifiedMarginRate(row)
     const tone = marginToneKey(row)
+    if (tone === 'high') {
+      return t('llmOps.listingBoard.marginTone.high', {
+        market: marketAverageTitle(row),
+        value: formatMarginText(margin)
+      })
+    }
     return t(`llmOps.listingBoard.marginTone.${tone}`, {
       value: formatMarginText(margin),
       floor: formatMarginText(platformMarginFloor()),
