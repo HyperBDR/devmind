@@ -185,6 +185,8 @@ def normalize_meta_model_catalog() -> dict[str, int]:
         "linked_records": 0,
     }
     for meta in list(MetaModel.objects.all()):
+        if not is_models_dev_meta_model(meta):
+            continue
         identity = canonical_meta_model_identity(meta.code, meta.name)
         canonical_code = identity["code"]
         canonical_name = identity["name"]
@@ -204,6 +206,8 @@ def normalize_meta_model_catalog() -> dict[str, int]:
                 stats["normalized"] += 1
             continue
         canonical = MetaModel.objects.filter(code=canonical_code).first()
+        if canonical is not None and not is_models_dev_meta_model(canonical):
+            continue
         if canonical is None:
             meta.code = canonical_code
             meta.name = canonical_name
@@ -226,6 +230,11 @@ def normalize_meta_model_catalog() -> dict[str, int]:
         stats["merged"] += 1
     stats["linked_records"] = normalize_model_linked_meta_models()
     return stats
+
+
+def is_models_dev_meta_model(meta_model: MetaModel) -> bool:
+    """Return whether a meta model is managed by models.dev sync."""
+    return bool((meta_model.metadata or {}).get("models_dev"))
 
 
 def normalize_model_linked_meta_models() -> int:
@@ -290,6 +299,14 @@ def merge_meta_model_rows(
     if duplicate.max_output_tokens > canonical.max_output_tokens:
         canonical.max_output_tokens = duplicate.max_output_tokens
         changed_fields.append("max_output_tokens")
+    capabilities = merged_meta_capabilities(canonical, duplicate)
+    if capabilities != dict(canonical.capabilities or {}):
+        canonical.capabilities = capabilities
+        changed_fields.append("capabilities")
+    metadata = merged_meta_metadata(canonical, duplicate)
+    if metadata != dict(canonical.metadata or {}):
+        canonical.metadata = metadata
+        changed_fields.append("metadata")
     if not canonical.owner_code and duplicate.owner_code:
         canonical.owner_code = duplicate.owner_code
         canonical.owner_name = duplicate.owner_name
@@ -304,6 +321,48 @@ def merge_meta_model_rows(
             **{field.name: duplicate}
         ).update(**{field.name: canonical})
     duplicate.delete()
+
+
+def merged_meta_capabilities(
+    canonical: MetaModel,
+    duplicate: MetaModel,
+) -> dict:
+    """Return canonical capabilities enriched from a duplicate row."""
+    capabilities = dict(canonical.capabilities or {})
+    duplicate_capabilities = dict(duplicate.capabilities or {})
+    for key, value in duplicate_capabilities.items():
+        if key == "features":
+            existing_features = capabilities.get("features") or []
+            duplicate_features = value or []
+            capabilities["features"] = list(
+                dict.fromkeys([*existing_features, *duplicate_features])
+            )
+            continue
+        if key not in capabilities:
+            capabilities[key] = value
+    return capabilities
+
+
+def merged_meta_metadata(
+    canonical: MetaModel,
+    duplicate: MetaModel,
+) -> dict:
+    """Return canonical metadata enriched without replacing models.dev."""
+    metadata = dict(canonical.metadata or {})
+    duplicate_metadata = dict(duplicate.metadata or {})
+    duplicate_models_dev = duplicate_metadata.get("models_dev")
+    canonical_models_dev = metadata.get("models_dev")
+    if duplicate_models_dev and duplicate_models_dev != canonical_models_dev:
+        merged_rows = list(metadata.get("merged_models_dev") or [])
+        if duplicate_models_dev not in merged_rows:
+            merged_rows.append(duplicate_models_dev)
+            metadata["merged_models_dev"] = merged_rows
+    for key, value in duplicate_metadata.items():
+        if key == "models_dev":
+            continue
+        if key not in metadata:
+            metadata[key] = value
+    return metadata
 
 
 def cleanup_orphan_meta_models() -> dict[str, int]:

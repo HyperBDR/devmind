@@ -17,7 +17,10 @@ from llm_ops.catalog_maintenance import (
     resolve_orphan_meta_models,
 )
 from llm_ops.collection_services import (
+    AUTO_SYNC_SOURCE_DEFAULTS,
+    OFFICIAL_PROVIDER_CONFIGS,
     SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
+    SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES,
     reset_official_price_catalog,
     supported_auto_sync_source_options,
     supported_official_provider_options,
@@ -40,6 +43,7 @@ from llm_ops.models import (
     ResalePlatform,
 )
 from llm_ops.periodic_tasks import register_periodic_tasks
+from llm_ops.price_collectors import registered_vendor_price_collector_codes
 
 
 class LLMOpsCatalogStateHelperTests(TestCase):
@@ -97,6 +101,7 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
         meta = MetaModel.objects.create(
             name="DeepSeek R1",
             code="deepseek-r1",
+            metadata={"models_dev": {"id": "deepseek/deepseek-r1"}},
         )
         MetaModel.objects.filter(id=meta.id).update(
             owner_code="aliyun",
@@ -122,6 +127,9 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
             owner_code=provider.code,
             owner_name=provider.name,
             owner_website=provider.website,
+            aliases=["canonical-alias"],
+            capabilities={"features": ["chat"]},
+            metadata={"models_dev": {"id": "deepseek/deepseek-r1"}},
         )
         release = MetaModel.objects.create(
             name="DeepSeek R1 0528",
@@ -129,6 +137,14 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
             owner_code=provider.code,
             owner_name=provider.name,
             owner_website=provider.website,
+            aliases=["release-alias"],
+            capabilities={"features": ["reasoning"]},
+            context_window=128000,
+            max_output_tokens=32000,
+            metadata={
+                "models_dev": {"id": "deepseek/deepseek-r1-0528"},
+                "release": {"date": "2025-05-28"},
+            },
         )
         model = LLMModel.objects.create(
             provider=provider,
@@ -143,9 +159,64 @@ class LLMOpsCatalogMaintenanceTests(TestCase):
         canonical.refresh_from_db()
         self.assertEqual(stats["merged"], 1)
         self.assertEqual(model.meta_model, canonical)
+        self.assertIn("release-alias", canonical.aliases)
+        self.assertEqual(canonical.context_window, 128000)
+        self.assertEqual(canonical.max_output_tokens, 32000)
+        self.assertIn("reasoning", canonical.capabilities["features"])
+        self.assertEqual(
+            canonical.metadata["models_dev"]["id"],
+            "deepseek/deepseek-r1",
+        )
+        self.assertEqual(
+            canonical.metadata["merged_models_dev"][0]["id"],
+            "deepseek/deepseek-r1-0528",
+        )
+        self.assertEqual(canonical.metadata["release"]["date"], "2025-05-28")
         self.assertFalse(
             MetaModel.objects.filter(code="deepseek-r1-0528").exists(),
         )
+
+    def test_normalize_meta_model_catalog_preserves_manual_rows(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        online = MetaModel.objects.create(
+            name="DeepSeek R1",
+            code="deepseek-r1",
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
+            metadata={"models_dev": {"id": "deepseek/deepseek-r1"}},
+        )
+        manual = MetaModel.objects.create(
+            name="Manual DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+            owner_code=provider.code,
+            owner_name=provider.name,
+            owner_website=provider.website,
+            aliases=["manual-alias"],
+            context_window=256000,
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=manual,
+            name="Manual DeepSeek R1 0528",
+            code="deepseek-r1-0528",
+        )
+
+        stats = normalize_meta_model_catalog()
+
+        model.refresh_from_db()
+        online.refresh_from_db()
+        manual.refresh_from_db()
+        self.assertEqual(stats["merged"], 0)
+        self.assertEqual(model.meta_model, manual)
+        self.assertEqual(manual.code, "deepseek-r1-0528")
+        self.assertEqual(manual.name, "Manual DeepSeek R1 0528")
+        self.assertEqual(manual.aliases, ["manual-alias"])
+        self.assertEqual(manual.context_window, 256000)
+        self.assertEqual(online.aliases, [])
 
     def test_reset_meta_models_canonical_does_not_repopulate(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -277,7 +348,7 @@ class LLMOpsOfficialProviderOptionTests(TestCase):
 
         provider_codes = {option["provider_code"] for option in options}
         self.assertEqual(
-            {"aliyun", "azure-openai", "deepseek"},
+            set(SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES),
             provider_codes,
         )
         self.assertFalse(LLMProvider.objects.exists())
@@ -286,9 +357,17 @@ class LLMOpsOfficialProviderOptionTests(TestCase):
     def test_auto_sync_source_options_do_not_create_rows(self):
         options = supported_auto_sync_source_options()
 
+        supplier_codes = {
+            code
+            for code in registered_vendor_price_collector_codes()
+            if (
+                code not in OFFICIAL_PROVIDER_CONFIGS
+                and code in AUTO_SYNC_SOURCE_DEFAULTS
+            )
+        }
         provider_codes = {option["provider_code"] for option in options}
         self.assertEqual(
-            {"aliyun", "azure-openai", "deepseek", "siliconflow"},
+            set(SUPPORTED_OFFICIAL_SOURCE_PROVIDER_CODES) | supplier_codes,
             provider_codes,
         )
         self.assertFalse(LLMProvider.objects.exists())
