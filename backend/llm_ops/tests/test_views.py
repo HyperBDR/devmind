@@ -403,7 +403,7 @@ class LLMOpsViewTests(TestCase):
         )
         self.assertIsNone(json.loads(price_task.kwargs)["source_ids"])
 
-    def test_global_config_stale_sources_write_empty_task_source_ids(self):
+    def test_global_config_stale_sources_disable_price_sync_task(self):
         from django_celery_beat.models import PeriodicTask
 
         provider = LLMProvider.objects.create(
@@ -435,6 +435,7 @@ class LLMOpsViewTests(TestCase):
             name="llm_ops_model_price_sync_agent"
         )
         self.assertEqual(json.loads(price_task.kwargs)["source_ids"], [])
+        self.assertFalse(price_task.enabled)
 
     def test_global_config_blank_secret_clears_existing_secret(self):
         config = LLMOpsGlobalConfig.get_solo()
@@ -523,6 +524,7 @@ class LLMOpsViewTests(TestCase):
             name="llm_ops_model_price_sync_agent"
         )
         self.assertEqual(json.loads(price_task.kwargs)["source_ids"], [])
+        self.assertFalse(price_task.enabled)
 
     def test_global_config_sync_disables_legacy_periodic_task(self):
         from django_celery_beat.models import CrontabSchedule, PeriodicTask
