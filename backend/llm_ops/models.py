@@ -165,6 +165,11 @@ class PriceCollectionSource(models.Model):
     def _default_collection_method(self):
         if self.source_type == self.SOURCE_TYPE_YUNCE:
             return self.COLLECTION_METHOD_API_SYNC
+        if (
+            self.source_category == self.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            and self.updates_model_prices
+        ):
+            return self.COLLECTION_METHOD_AUTO_COLLECT
         if self.source_category == self.SOURCE_CATEGORY_SUPPLIER:
             return self.COLLECTION_METHOD_UNKNOWN
         if self.source_category == self.SOURCE_CATEGORY_MANUAL:
