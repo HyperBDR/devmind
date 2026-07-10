@@ -93,6 +93,25 @@ def test_run_sql_rejects_mutation_and_sensitive_fields():
         run_data_ops_sql({"sql": "SELECT * FROM data_ops_contract"})
 
 
+@pytest.mark.django_db
+def test_run_sql_reports_missing_column_with_allowed_fields():
+    with pytest.raises(ValueError) as exc_info:
+        run_data_ops_sql(
+            {
+                "sql": (
+                    "SELECT currency, SUM(total_amount_usd) "
+                    "AS total_sales_usd FROM data_ops_salesrecord "
+                    "GROUP BY currency"
+                ),
+            },
+        )
+    message = str(exc_info.value)
+
+    assert "column does not exist" in message
+    assert "data_ops_salesrecord" in message
+    assert "total_amount_usd" in message
+
+
 def test_schema_exposes_only_safe_fields():
     schema = get_data_ops_schema("contracts")["tables"][0]
     field_names = {field["name"] for field in schema["fields"]}

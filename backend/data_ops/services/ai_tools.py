@@ -5,7 +5,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from django.db import connection, models
+from django.db import DatabaseError, connection, models
 from django.db.models import Avg, Count, Max, Min, Sum
 
 from data_ops.models import (
@@ -42,6 +42,16 @@ SQL_SENSITIVE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SQL_COUNT_STAR_PATTERN = re.compile(r"count\s*\(\s*\*\s*\)", re.IGNORECASE)
+SQL_MISSING_COLUMN_PATTERNS = (
+    re.compile(
+        r'column "(?P<column>[^"]+)" does not exist',
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"no such column: (?P<column>[a-zA-Z_][a-zA-Z0-9_]*)",
+        re.IGNORECASE,
+    ),
+)
 
 
 DATA_OPS_QUERY_TABLES: dict[str, type[models.Model]] = {
@@ -294,15 +304,20 @@ def run_data_ops_sql(arguments: dict[str, Any]) -> dict[str, Any]:
     sql = str(arguments.get("sql") or "").strip()
     limit = _normalize_limit(arguments.get("limit"))
     safe_sql = _validate_data_ops_sql(sql, limit)
-    with connection.cursor() as cursor:
-        cursor.execute(safe_sql)
-        columns = [item[0] for item in cursor.description or []]
-        if any(_is_sensitive_column(item) for item in columns):
-            raise ValueError("SQL result contains forbidden sensitive columns")
-        rows = [
-            dict(zip(columns, row))
-            for row in cursor.fetchmany(limit)
-        ]
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(safe_sql)
+            columns = [item[0] for item in cursor.description or []]
+            if any(_is_sensitive_column(item) for item in columns):
+                raise ValueError(
+                    "SQL result contains forbidden sensitive columns"
+                )
+            rows = [
+                dict(zip(columns, row))
+                for row in cursor.fetchmany(limit)
+            ]
+    except DatabaseError as exc:
+        raise ValueError(_format_sql_execution_error(safe_sql, exc)) from exc
     return {
         "sql": safe_sql,
         "columns": columns,
@@ -449,6 +464,51 @@ def _validate_sql_tables(sql: str) -> None:
     ]
     if disallowed:
         raise ValueError(f"SQL references forbidden table: {disallowed[0]}")
+
+
+def _format_sql_execution_error(sql: str, error: Exception) -> str:
+    missing_column = _extract_missing_column(str(error))
+    if not missing_column:
+        return f"SQL execution failed: {error}"
+    table_schemas = _referenced_table_schemas(sql)
+    if not table_schemas:
+        return f"SQL column does not exist: {missing_column}"
+    return (
+        f"SQL column does not exist: {missing_column}. "
+        f"Allowed fields by table: {'; '.join(table_schemas)}"
+    )
+
+
+def _extract_missing_column(message: str) -> str:
+    for pattern in SQL_MISSING_COLUMN_PATTERNS:
+        match = pattern.search(message)
+        if match:
+            return str(match.group("column"))
+    return ""
+
+
+def _referenced_table_schemas(sql: str) -> list[str]:
+    schema_lines = []
+    seen_tables = set()
+    db_tables = SQL_TABLE_PATTERN.findall(sql)
+    model_map = {
+        model._meta.db_table: model
+        for model in DATA_OPS_QUERY_TABLES.values()
+    }
+    for db_table in db_tables:
+        if db_table in seen_tables:
+            continue
+        seen_tables.add(db_table)
+        model = model_map.get(db_table)
+        if model is None:
+            continue
+        allowed_fields = ", ".join(
+            field.name
+            for field in model._meta.fields
+            if _field_allowed(field.name)
+        )
+        schema_lines.append(f"{db_table}({allowed_fields})")
+    return schema_lines
 
 
 def _is_sensitive_column(column: str) -> bool:
