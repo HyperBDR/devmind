@@ -60,7 +60,9 @@ def test_ai_context_exposes_data_ops_assistant_question_groups():
     assert assistant["capabilities"]
     assert assistant["analysis_guide"]
     assert assistant["query_tools"]["tools"]
-    assert "data_ops_run_sql" in assistant["query_tools"]["tools"]
+    assert "data_ops_run_sql" not in assistant["query_tools"]["tools"]
+    assert "query_rules" in assistant["query_tools"]
+    assert "sql_rules" not in assistant["query_tools"]
     expected_question_group_keys = {
         "daily_review",
         "cash_risk",
@@ -108,11 +110,12 @@ def test_ai_prompt_includes_data_ops_capabilities_and_guidance():
     assert "数据质量守卫" in prompt_text
     assert "飞书同步" in prompt_text
     assert "先判断数据是否可信" in prompt_text
-    assert "data_ops_run_sql" in prompt_text
+    assert "data_ops_run_sql" not in prompt_text
+    assert "SQL" not in prompt_text
 
 
 @pytest.mark.django_db
-def test_ai_tool_loop_executes_sql_tool_and_returns_tool_messages(
+def test_ai_tool_loop_rejects_raw_sql_tool_call(
     monkeypatch,
 ):
     Contract.all_objects.create(
@@ -165,5 +168,5 @@ def test_ai_tool_loop_executes_sql_tool_and_returns_tool_messages(
     assert content == ""
     assert usage["total_tokens"] == 5
     assert len(calls) == 2
-    assert "Acme" in tool_message["content"]
-    assert "data_ops_contract" in tool_message["content"]
+    assert '"ok": false' in tool_message["content"]
+    assert "unknown tool" in tool_message["content"]
