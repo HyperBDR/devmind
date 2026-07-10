@@ -5,7 +5,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from django.db import connection, models
+from django.db import models
 from django.db.models import Avg, Count, Max, Min, Sum
 
 from data_ops.models import (
@@ -25,23 +25,6 @@ from data_ops.services.metrics.overview import _number
 
 MAX_TOOL_ROWS = 100
 DEFAULT_TOOL_ROWS = 30
-SQL_FORBIDDEN_PATTERN = re.compile(
-    r"\b(insert|update|delete|drop|alter|truncate|create|replace|attach|"
-    r"detach|pragma|vacuum|grant|revoke|copy|execute|call)\b",
-    re.IGNORECASE,
-)
-SQL_COMMENT_PATTERN = re.compile(r"(--|/\*|\*/)")
-SQL_TABLE_PATTERN = re.compile(
-    r"\b(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_]*)",
-    re.IGNORECASE,
-)
-SQL_LIMIT_PATTERN = re.compile(r"\blimit\s+\d+\b", re.IGNORECASE)
-SQL_SENSITIVE_PATTERN = re.compile(
-    r"\b(raw_data|feishu_app_secret|source_app_token|source_table_id|"
-    r"app_token|table_id|celery_task_id|locked_by)\b",
-    re.IGNORECASE,
-)
-SQL_COUNT_STAR_PATTERN = re.compile(r"count\s*\(\s*\*\s*\)", re.IGNORECASE)
 
 
 DATA_OPS_QUERY_TABLES: dict[str, type[models.Model]] = {
@@ -167,24 +150,14 @@ DATA_OPS_TOOL_SCHEMAS = [
                         "type": "array",
                         "items": {"type": "object"},
                     },
-                    "limit": {"type": "integer"},
-                },
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "data_ops_run_sql",
-            "description": (
-                "当内置工具无法表达时执行只读 SQL。只允许 SELECT，"
-                "必须使用白名单表和显式字段，禁止 SELECT *。"
-            ),
-            "parameters": {
-                "type": "object",
-                "required": ["sql"],
-                "properties": {
-                    "sql": {"type": "string"},
+                    "order_by": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "可按分组字段或指标 alias 排序，"
+                            "降序加 -。"
+                        ),
+                    },
                     "limit": {"type": "integer"},
                 },
             },
@@ -199,12 +172,18 @@ def get_data_ops_tool_profile() -> dict[str, Any]:
             item["function"]["name"] for item in DATA_OPS_TOOL_SCHEMAS
         ],
         "tables": get_data_ops_schema()["tables"],
-        "sql_rules": [
-            "只允许单条 SELECT 查询。",
-            "只能查询 Data Ops 白名单表。",
-            "禁止 SELECT *，必须显式选择字段或 count(*) 聚合。",
-            "禁止读取 raw_data、token、secret、celery_task_id 等字段。",
-            f"默认最多返回 {DEFAULT_TOOL_ROWS} 行，最多 {MAX_TOOL_ROWS} 行。",
+        "query_rules": [
+            "只能使用 Data Ops 工具 schema 中公开的表和字段。",
+            "明细查询使用 data_ops_query_records。",
+            "分组、排行、统计和 Top 项使用 data_ops_aggregate。",
+            (
+                "禁止读取 raw_data、token、secret、"
+                "celery_task_id 等字段。"
+            ),
+            (
+                f"默认最多返回 {DEFAULT_TOOL_ROWS} 行，"
+                f"最多 {MAX_TOOL_ROWS} 行。"
+            ),
         ],
     }
 
@@ -230,7 +209,6 @@ def execute_data_ops_tool(
         ),
         "data_ops_query_records": query_data_ops_records,
         "data_ops_aggregate": aggregate_data_ops_records,
-        "data_ops_run_sql": run_data_ops_sql,
     }
     if name not in handlers:
         return {"ok": False, "error": f"unknown tool: {name}"}
@@ -272,10 +250,15 @@ def aggregate_data_ops_records(arguments: dict[str, Any]) -> dict[str, Any]:
     if not metrics:
         raise ValueError("metrics is required")
     if group_by:
+        order_by = _normalize_aggregate_order_by(
+            arguments.get("order_by"),
+            group_by,
+            list(metrics.keys()),
+        )
         rows = (
             queryset.values(*group_by)
             .annotate(**metrics)
-            .order_by(*group_by)
+            .order_by(*(order_by or group_by))
         )
         result_rows = list(rows[: _normalize_limit(arguments.get("limit"))])
         return {
@@ -287,27 +270,6 @@ def aggregate_data_ops_records(arguments: dict[str, Any]) -> dict[str, Any]:
     return {
         "table": table,
         "metrics": _json_safe_row(queryset.aggregate(**metrics)),
-    }
-
-
-def run_data_ops_sql(arguments: dict[str, Any]) -> dict[str, Any]:
-    sql = str(arguments.get("sql") or "").strip()
-    limit = _normalize_limit(arguments.get("limit"))
-    safe_sql = _validate_data_ops_sql(sql, limit)
-    with connection.cursor() as cursor:
-        cursor.execute(safe_sql)
-        columns = [item[0] for item in cursor.description or []]
-        if any(_is_sensitive_column(item) for item in columns):
-            raise ValueError("SQL result contains forbidden sensitive columns")
-        rows = [
-            dict(zip(columns, row))
-            for row in cursor.fetchmany(limit)
-        ]
-    return {
-        "sql": safe_sql,
-        "columns": columns,
-        "rows": [_json_safe_row(row) for row in rows],
-        "row_count": len(rows),
     }
 
 
@@ -408,60 +370,32 @@ def _build_metrics(
     return output
 
 
+def _normalize_aggregate_order_by(
+    value: Any,
+    group_by: list[str],
+    metric_aliases: list[str],
+) -> list[str]:
+    if not value:
+        return []
+    items = value if isinstance(value, list) else [value]
+    allowed = set(group_by) | set(metric_aliases)
+    order_by = []
+    for item in items:
+        raw = str(item or "").strip()
+        descending = raw.startswith("-")
+        field_name = raw[1:] if descending else raw
+        if field_name not in allowed:
+            raise ValueError(f"order_by is not allowed: {raw}")
+        order_by.append(f"-{field_name}" if descending else field_name)
+    return order_by
+
+
 def _normalize_limit(value: Any) -> int:
     try:
         limit = int(value or DEFAULT_TOOL_ROWS)
     except (TypeError, ValueError):
         limit = DEFAULT_TOOL_ROWS
     return max(1, min(limit, MAX_TOOL_ROWS))
-
-
-def _validate_data_ops_sql(sql: str, limit: int) -> str:
-    if not sql:
-        raise ValueError("sql is required")
-    if ";" in sql or SQL_COMMENT_PATTERN.search(sql):
-        raise ValueError("SQL must be a single statement without comments")
-    if not re.match(r"^\s*select\b", sql, re.IGNORECASE):
-        raise ValueError("only SELECT SQL is allowed")
-    if SQL_FORBIDDEN_PATTERN.search(sql):
-        raise ValueError("SQL contains forbidden operation")
-    if SQL_SENSITIVE_PATTERN.search(sql):
-        raise ValueError("SQL references forbidden sensitive fields")
-    selected = re.split(r"\bfrom\b", sql, maxsplit=1, flags=re.IGNORECASE)[0]
-    selected_without_count = SQL_COUNT_STAR_PATTERN.sub("", selected)
-    if "*" in selected_without_count:
-        raise ValueError("SELECT * is not allowed")
-    _validate_sql_tables(sql)
-    if SQL_LIMIT_PATTERN.search(sql):
-        return sql
-    return f"{sql} LIMIT {limit}"
-
-
-def _validate_sql_tables(sql: str) -> None:
-    allowed_db_tables = {
-        model._meta.db_table for model in DATA_OPS_QUERY_TABLES.values()
-    }
-    table_names = SQL_TABLE_PATTERN.findall(sql)
-    if not table_names:
-        raise ValueError("SQL must reference at least one allowed table")
-    disallowed = [
-        table for table in table_names if table not in allowed_db_tables
-    ]
-    if disallowed:
-        raise ValueError(f"SQL references forbidden table: {disallowed[0]}")
-
-
-def _is_sensitive_column(column: str) -> bool:
-    return column.lower() in {
-        "raw_data",
-        "feishu_app_secret",
-        "source_app_token",
-        "source_table_id",
-        "app_token",
-        "table_id",
-        "celery_task_id",
-        "locked_by",
-    }
 
 
 def _json_safe_row(row: dict[str, Any]) -> dict[str, Any]:
