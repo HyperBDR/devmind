@@ -81,7 +81,11 @@ export function useLLMOpsResalePublishing({
     }
     loadResaleWorkflowConfig(platformId)
     if (!loading.value) {
-      refreshLight()
+      if (activeSection.value === 'monitor') {
+        refreshSummary()
+      } else {
+        refreshLight()
+      }
     }
   })
 
@@ -243,18 +247,18 @@ export function useLLMOpsResalePublishing({
   async function handleResaleWorkspacePublished(payload) {
     if (!payload || !payload.listings || !payload.listings.length) {
       showInfo(t('llmOps.messages.noListingsToPublish'))
-      return
+      return false
     }
     if (!payload.hasChanges) {
       showInfo(t('llmOps.messages.noChangesToSave'))
-      return
+      return false
     }
     const changedListings = payload.listings.filter(
       (item) => item.hasChanges !== false
     )
     if (!changedListings.length) {
       showInfo(t('llmOps.messages.noChangesToSave'))
-      return
+      return false
     }
     const publishListings = changedListings.filter(
       (item) =>
@@ -265,7 +269,7 @@ export function useLLMOpsResalePublishing({
     const items = publishListings.map(mapWorkspaceListingToPayload)
     if (!items.length) {
       showError(t('llmOps.messages.invalidListingPrices'))
-      return
+      return false
     }
     try {
       const response = await llmOpsApi.bulkUpsertResaleListings(items)
@@ -285,6 +289,7 @@ export function useLLMOpsResalePublishing({
       )
       resalePublishingDrawerOpen.value = false
       refreshLight()
+      return true
     } catch (error) {
       const message =
         error?.response?.data?.detail ||
@@ -292,6 +297,7 @@ export function useLLMOpsResalePublishing({
         error?.message ||
         ''
       showError(message || t('llmOps.messages.submitFailed'))
+      return false
     }
   }
 
@@ -348,24 +354,25 @@ export function useLLMOpsResalePublishing({
   async function handleResaleWorkspaceDraft(payload) {
     if (!payload || !payload.listings || !payload.listings.length) {
       showInfo(t('llmOps.messages.noDraftsToSave'))
-      return
+      return false
     }
     if (!payload.hasChanges) {
       showInfo(t('llmOps.messages.noChangesToSave'))
-      return
+      return false
     }
     const items = payload.listings
       .filter((item) => item.hasChanges !== false)
       .map(mapWorkspaceListingToPayload)
     if (!items.length) {
       showInfo(t('llmOps.messages.noChangesToSave'))
-      return
+      return false
     }
     try {
       await llmOpsApi.bulkDraftResaleListings(items)
       showSuccess(t('llmOps.messages.draftsSaved', { count: items.length }))
       resalePublishingDrawerOpen.value = false
       refreshLight()
+      return true
     } catch (error) {
       const message =
         error?.response?.data?.detail ||
@@ -373,6 +380,7 @@ export function useLLMOpsResalePublishing({
         error?.message ||
         ''
       showError(message || t('llmOps.messages.saveFailed'))
+      return false
     }
   }
 

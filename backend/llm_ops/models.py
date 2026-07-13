@@ -1677,6 +1677,34 @@ class ResalePlatform(models.Model):
         decimal_places=2,
         default=100,
     )
+    tax_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    settlement_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    yield_warning = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    yield_target = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
     is_active = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
     notes = models.TextField(blank=True, default="")

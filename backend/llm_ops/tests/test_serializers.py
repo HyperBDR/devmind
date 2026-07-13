@@ -266,6 +266,41 @@ class ResalePlatformSerializerTests(TestCase):
         self.assertFalse(serializer.is_valid())
         self.assertIn("service_fee_rate", serializer.errors)
 
+    def test_validates_nullable_yield_configuration(self):
+        serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Test",
+                "code": "agione-test",
+                "currency": "CNY",
+                "points_per_currency_unit": "100",
+                "tax_rate": None,
+                "settlement_rate": None,
+                "yield_warning": None,
+                "yield_target": None,
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+
+        invalid_serializer = ResalePlatformSerializer(
+            data={
+                "name": "Agione Invalid",
+                "code": "agione-invalid",
+                "currency": "CNY",
+                "points_per_currency_unit": "100",
+                "tax_rate": "1.2",
+                "settlement_rate": "0",
+                "yield_warning": "-0.01",
+                "yield_target": "-0.01",
+            }
+        )
+
+        self.assertFalse(invalid_serializer.is_valid())
+        self.assertIn("tax_rate", invalid_serializer.errors)
+        self.assertIn("settlement_rate", invalid_serializer.errors)
+        self.assertIn("yield_warning", invalid_serializer.errors)
+        self.assertIn("yield_target", invalid_serializer.errors)
+
     def test_rejects_negative_auto_approve_margin(self):
         serializer = ResalePlatformSerializer(
             data={

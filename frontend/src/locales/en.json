@@ -2440,6 +2440,95 @@
           "updateDraft": "Update draft"
         }
       }
+    },
+    "overview": {
+      "kpi": {
+        "pendingListing": {
+          "label": "Pending listing",
+          "hint": "Models with supply but not yet listed on the current platform"
+        },
+        "missingChannel": {
+          "label": "Missing channel price",
+          "hint": "Models without usable procurement pricing"
+        },
+        "lowYield": {
+          "label": "Low yield",
+          "hint": "Listed models below the platform yield_warning threshold"
+        },
+        "dataAnomaly": {
+          "label": "Data anomaly",
+          "hint": "Collection failures, source disabled, reconciliation anomalies"
+        }
+      },
+      "decisionTable": {
+        "title": "Model Resale Decision Table",
+        "subtitle": "Sorted by decision priority: missing channel -> currency -> platform fee -> low yield -> not lowest -> unlisted."
+      },
+      "columns": {
+        "model": "Model",
+        "provider": "Provider",
+        "coverage": "Coverage",
+        "recommended": "Recommended channel",
+        "currentListing": "Current listing",
+        "purchasePrice": "Purchase price",
+        "listingPrice": "Listing price",
+        "inputYield": "Input yield",
+        "outputYield": "Output yield",
+        "action": "Recommended action",
+        "lastUpdate": "Last update"
+      },
+      "emptyDecisionRows": "No models match the current filters.",
+      "kpiGroup": {
+        "supply": "Supply",
+        "yield": "Yield",
+        "data": "Data"
+      },
+      "event": {
+        "updated": "Updated",
+        "collectionFailed": "Collection failed",
+        "sourceDisabled": "Source disabled",
+        "reconciliationAnomaly": "Reconciliation anomaly",
+        "stale": "Stale price"
+      },
+      "hover": {
+        "action": "Action",
+        "recommended": "Recommended",
+        "current": "Current",
+        "purchasePrice": "Purchase price",
+        "listingPrice": "Listing price",
+        "yield": "Yield"
+      },
+      "time": {
+        "justNow": "just now",
+        "secondsAgo": "{count}s ago",
+        "minutesAgo": "{count}m ago",
+        "hoursAgo": "{count}h ago",
+        "daysAgo": "{count}d ago"
+      },
+      "emptyDecisionAllReady": "No models need handling. All ready.",
+      "emptyDecisionFiltered": "No models match the current filters."
+    },
+    "decision": {
+      "status": {
+        "no_supply": "No channel price",
+        "currency_unresolved": "Currency unresolved",
+        "platform_fee_unresolved": "Platform fee unconfigured",
+        "low_yield": "Low yield",
+        "not_lowest_channel": "Not on lowest channel",
+        "unlisted": "Unlisted",
+        "single_channel": "Single channel",
+        "ready": "Ready"
+      },
+      "action": {
+        "configureChannel": "Configure channel",
+        "configureExchange": "Configure exchange rate",
+        "configurePlatformFee": "Configure platform fee rules",
+        "reviewMargin": "Review pricing or switch channel",
+        "switchLowestChannel": "Evaluate switching to lowest channel",
+        "publishToPlatform": "Open publishing workspace",
+        "addChannelCoverage": "Add backup channel",
+        "keep": "Keep"
+      }
     }
   },
   "sals": {

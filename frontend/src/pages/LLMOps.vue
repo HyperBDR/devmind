@@ -45,39 +45,106 @@
           >
             <LLMOpsMonitorDashboard
               v-if="activeSection === 'monitor'"
-              v-model:simulation-channel="simulationChannel"
               v-model:simulation-status="simulationStatus"
-              :action-items="actionItems"
-              :channel-coverage-rows="channelCoverageRows"
-              :current-platform-listing-label="currentPlatformListingLabel"
               :kpi-cards="kpiCards"
               :monitor-model-subtitle="monitorModelSubtitle"
               :monitor-table-rows="monitorTableRows"
-              :money="money"
               :operational-channel-count="operationalChannelCount"
-              :provider-coverage-rows="providerCoverageRows"
-              :simulation-channel-options="simulationChannelOptions"
               :simulation-status-options="simulationStatusOptions"
-              @navigate="setActiveSection"
+              @navigate-to-workspace="onNavigateToWorkspace"
             />
 
-            <AgioneListingStatusBoard
-              v-else-if="activeSection === 'reseller'"
-              :agione-platform="agionePlatform"
-              :providers="providers"
-              :models="models"
-              :price-items="modelPriceItems"
-              :listings="listings"
-              :summary="summary"
-              :platform-count="activeResalePlatforms.length"
-              :point-conversion="pointConversion"
-              :display-currency="summaryDisplayCurrency"
-              :exchange-rate="exchangeRate"
-              @refresh="refreshLight"
-              @listings-updated="mergeResaleListings"
-              @action="openListingActionDrawer"
-              @open-workspace="openResalePublishingWorkspace"
-            />
+            <template v-else-if="activeSection === 'reseller'">
+              <section
+                v-if="resaleWorkspaceFocusModelId"
+                class="panel overflow-hidden p-0"
+              >
+                <header
+                  class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4"
+                >
+                  <div class="min-w-0">
+                    <p
+                      class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-600"
+                    >
+                      Model Publishing Workspace
+                    </p>
+                    <h2 class="mt-0.5 text-base font-bold text-slate-900">
+                      {{ t('llmOps.publishingDrawer.title') }}
+                    </h2>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      class="btn-secondary"
+                      @click="closeInlineWorkspace"
+                    >
+                      {{ t('llmOps.publishingDrawer.back') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary btn-action-save"
+                      :disabled="!inlineCanDraft || inlineSaving"
+                      @click="handleInlineSaveDraft"
+                    >
+                      {{ t('llmOps.publishingDrawer.saveDraft') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-primary btn-action-submit"
+                      :disabled="!inlineCanPublish || inlineSaving"
+                      @click="handleInlinePublish"
+                    >
+                      {{
+                        inlineSaving
+                          ? t('llmOps.publishingDrawer.submitting')
+                          : t('llmOps.publishingDrawer.submit')
+                      }}
+                    </button>
+                  </div>
+                </header>
+                <div class="px-5 py-5">
+                  <ResalePublishingWorkspace
+                    :key="inlineWorkspaceKey"
+                    ref="inlineWorkspaceRef"
+                    :initial-model-id="resaleWorkspaceFocusModelId"
+                    :initial-auto-listing="resaleWorkspaceFocusAutoListing"
+                    :agione-platform="agionePlatform"
+                    :platforms="activeResalePlatforms"
+                    :providers="providers"
+                    :meta-models="metaModels"
+                    :models="models"
+                    :channels="channels"
+                    :procurement-rows="procurementRows"
+                    :price-items="modelPriceItems"
+                    :channel-price-items="channelPriceItems"
+                    :listings="listings"
+                    :point-conversion="pointConversion"
+                    :display-currency="summaryDisplayCurrency"
+                    :exchange-rate="exchangeRate"
+                    :workflow-config="workflowConfigForWorkspace"
+                    @change="onInlineWorkspaceChange"
+                  />
+                </div>
+              </section>
+
+              <AgioneListingStatusBoard
+                :agione-platform="agionePlatform"
+                :providers="providers"
+                :models="models"
+                :price-items="modelPriceItems"
+                :listings="listings"
+                :summary="summary"
+                :platform-count="activeResalePlatforms.length"
+                :point-conversion="pointConversion"
+                :display-currency="summaryDisplayCurrency"
+                :exchange-rate="exchangeRate"
+                :focus-model-id="resaleWorkspaceFocusModelId"
+                @refresh="refreshLight"
+                @listings-updated="mergeResaleListings"
+                @action="openListingActionDrawer"
+                @open-workspace="openResalePublishingWorkspace"
+              />
+            </template>
 
             <CollectionHealthPanel
               v-else-if="activeSection === 'collectionHealth'"
@@ -223,7 +290,8 @@ import '@/components/llm-ops/llmOpsSelects.css'
 import '@/components/llm-ops/llmOpsTables.css'
 import '@/components/llm-ops/llmOpsShell.css'
 
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
@@ -245,6 +313,7 @@ import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
 import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
 import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
 import ResalePublishingDrawer from '@/components/llm-ops/ResalePublishingDrawer.vue'
+import ResalePublishingWorkspace from '@/components/llm-ops/ResalePublishingWorkspace.vue'
 import ResaleWorkflowConfigPanel from '@/components/llm-ops/ResaleWorkflowConfigPanel.vue'
 import { useToast } from '@/composables/useToast'
 import { useLLMOpsData } from '@/composables/useLLMOpsData'
@@ -259,6 +328,7 @@ import { useLLMOpsResalePublishing } from '@/composables/useLLMOpsResalePublishi
 import { errorMessage } from '@/utils/llmOpsPagination'
 
 const { showError } = useToast()
+const { t } = useI18n()
 
 const {
   activeNav,
@@ -266,7 +336,6 @@ const {
   expandedNavGroupKeys,
   navGroups,
   selectNavItem,
-  setActiveSection,
   sidebarCollapsed,
   sidebarToggleLabel,
   toggleNavGroup,
@@ -357,29 +426,93 @@ const {
 })
 
 const {
-  actionItems,
-  channelCoverageRows,
-  currentPlatformListingLabel,
   kpiCards,
   monitorModelSubtitle,
   monitorTableRows,
-  money,
   operationalChannelCount,
-  providerCoverageRows,
-  simulationChannel,
-  simulationChannelOptions,
   simulationStatus,
   simulationStatusOptions
 } = useLLMOpsMonitor({
-  agionePlatform,
   channels,
-  collectionRuns,
-  listings,
-  models,
   procurementRows,
-  providerCollectionSources,
   summary
 })
+
+const resaleWorkspaceFocusModelId = ref(null)
+const resaleWorkspaceFocusAutoListing = ref(false)
+const inlineWorkspacePayload = ref(null)
+const inlineWorkspaceRef = ref(null)
+const inlineSaving = ref(false)
+const inlineWorkspaceKey = computed(
+  () => `inline-${resaleWorkspaceFocusModelId.value || 'new'}`
+)
+
+const inlineCanPublish = computed(() => {
+  if (!inlineWorkspacePayload.value) return false
+  const { hasChanges, listings, platformId, modelId } =
+    inlineWorkspacePayload.value
+  if (!platformId || !modelId || !hasChanges || !listings.length) return false
+  const changedListings = listings.filter((item) => item.hasChanges !== false)
+  if (!changedListings.length) return false
+  return changedListings.every(
+    (listing) =>
+      !listing.priceBelowReference &&
+      Number.isFinite(Number(listing.priceIn)) &&
+      Number.isFinite(Number(listing.priceOut)) &&
+      Number(listing.priceIn) > 0 &&
+      Number(listing.priceOut) > 0
+  )
+})
+
+const inlineCanDraft = computed(() => {
+  return Boolean(
+    inlineWorkspacePayload.value?.platformId &&
+      inlineWorkspacePayload.value?.listings?.length &&
+      inlineWorkspacePayload.value?.hasChanges
+  )
+})
+
+function onNavigateToWorkspace(payload) {
+  const modelId =
+    payload && typeof payload === 'object' ? payload.modelId : payload
+  resaleWorkspaceFocusModelId.value = modelId || null
+  resaleWorkspaceFocusAutoListing.value = Boolean(payload?.autoListing)
+  activeSection.value = 'reseller'
+}
+
+function onInlineWorkspaceChange(payload) {
+  inlineWorkspacePayload.value = payload
+}
+
+function closeInlineWorkspace() {
+  resaleWorkspaceFocusModelId.value = null
+  resaleWorkspaceFocusAutoListing.value = false
+  inlineWorkspacePayload.value = null
+}
+
+async function handleInlineSaveDraft() {
+  if (!inlineCanDraft.value || inlineSaving.value) return
+  inlineSaving.value = true
+  try {
+    const saved = await handleResaleWorkspaceDraft(inlineWorkspacePayload.value)
+    if (saved) closeInlineWorkspace()
+  } finally {
+    inlineSaving.value = false
+  }
+}
+
+async function handleInlinePublish() {
+  if (!inlineCanPublish.value || inlineSaving.value) return
+  inlineSaving.value = true
+  try {
+    const saved = await handleResaleWorkspacePublished(
+      inlineWorkspacePayload.value
+    )
+    if (saved) closeInlineWorkspace()
+  } finally {
+    inlineSaving.value = false
+  }
+}
 
 function handleRefreshAll() {
   refreshAll(activeSection.value)
@@ -393,7 +526,11 @@ watch(displayCurrency, (currency) => {
   }
   localStorage.setItem('llm_ops_display_currency', normalized)
   if (!loading.value) {
-    refreshLight()
+    if (activeSection.value === 'monitor') {
+      refreshSummary()
+    } else {
+      refreshLight()
+    }
   }
 })
 

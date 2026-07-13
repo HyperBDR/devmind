@@ -1393,7 +1393,7 @@
         "channelRequired": "请选择账单归属的转发渠道。",
         "modelRequired": "请选择本次用量对应的调用模型。"
       }
-      },
+    },
     "providerManagement": {
       "title": "服务商价格源",
       "modelsCount": "{count} 个元模型",
@@ -2449,6 +2449,137 @@
           "pendingUpdate": "待更新",
           "updateDraft": "更新草稿"
         }
+      }
+    },
+    "overview": {
+      "kpi": {
+        "pendingListing": {
+          "label": "待上架",
+          "hint": "有供应但尚未挂售到当前平台的模型数"
+        },
+        "missingChannel": {
+          "label": "缺渠道价",
+          "hint": "无法计算采购成本，必须先补渠道价"
+        },
+        "lowYield": {
+          "label": "低收益率",
+          "hint": "已挂售但低于平台 yield_warning 阈值的模型"
+        },
+        "dataAnomaly": {
+          "label": "数据异常",
+          "hint": "采集失败 / 源失效 / 对账异常 的模型"
+        }
+      },
+      "decisionTable": {
+        "title": "模型挂售决策表",
+        "subtitle": "按决策优先级排序：先处理缺渠道价、汇率、平台费用，再处理低收益率、非最低渠道、未挂售。"
+      },
+      "columns": {
+        "model": "模型",
+        "provider": "服务商",
+        "coverage": "渠道覆盖",
+        "recommended": "推荐采购渠道",
+        "currentListing": "当前挂售",
+        "purchasePrice": "采购价",
+        "listingPrice": "挂售价",
+        "inputYield": "Input 收益率",
+        "outputYield": "Output 收益率",
+        "action": "推荐动作",
+        "lastUpdate": "数据时间"
+      },
+      "emptyDecisionRows": "当前筛选条件下没有需要处理的模型。",
+      "statusOptions": [
+        {
+          "value": "priority",
+          "label": "优先处理"
+        },
+        {
+          "value": "all",
+          "label": "全部"
+        },
+        {
+          "value": "no_supply",
+          "label": "缺渠道价"
+        },
+        {
+          "value": "currency_unresolved",
+          "label": "需要汇率"
+        },
+        {
+          "value": "platform_fee_unresolved",
+          "label": "平台费用未配置"
+        },
+        {
+          "value": "low_yield",
+          "label": "低收益率"
+        },
+        {
+          "value": "not_lowest_channel",
+          "label": "非最低渠道"
+        },
+        {
+          "value": "unlisted",
+          "label": "未挂售"
+        },
+        {
+          "value": "single_channel",
+          "label": "单渠道覆盖"
+        },
+        {
+          "value": "ready",
+          "label": "已就绪"
+        }
+      ],
+      "kpiGroup": {
+        "supply": "供给",
+        "yield": "收益",
+        "data": "数据"
+      },
+      "event": {
+        "updated": "已更新",
+        "collectionFailed": "采集失败",
+        "sourceDisabled": "源已停用",
+        "reconciliationAnomaly": "对账异常",
+        "stale": "价格过期"
+      },
+      "hover": {
+        "action": "动作",
+        "recommended": "推荐",
+        "current": "当前",
+        "purchasePrice": "采购价",
+        "listingPrice": "挂售价",
+        "yield": "收益"
+      },
+      "time": {
+        "justNow": "刚刚",
+        "secondsAgo": "{count} 秒前",
+        "minutesAgo": "{count} 分钟前",
+        "hoursAgo": "{count} 小时前",
+        "daysAgo": "{count} 天前"
+      },
+      "emptyDecisionAllReady": "当前没有需要处理的模型，全部就绪。",
+      "emptyDecisionFiltered": "当前筛选条件下没有匹配的模型。"
+    },
+    "decision": {
+      "status": {
+        "no_supply": "缺渠道价",
+        "currency_unresolved": "需要汇率",
+        "platform_fee_unresolved": "平台费用未配置",
+        "low_yield": "低收益率",
+        "not_lowest_channel": "非最低渠道",
+        "unlisted": "未挂售",
+        "single_channel": "单渠道覆盖",
+        "ready": "已就绪"
+      },
+      "action": {
+        "configureChannel": "去渠道配置",
+        "configureExchange": "补汇率",
+        "configurePlatformFee": "配置平台费用规则",
+        "reviewMargin": "复核售价或切换渠道",
+        "switchLowestChannel": "评估切换到最低渠道",
+        "publishToPlatform": "去挂售",
+        "addChannelCoverage": "增加备选渠道",
+        "keep": "保持"
       }
     }
   },

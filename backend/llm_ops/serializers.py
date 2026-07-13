@@ -1489,6 +1489,34 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
             )
         return value
 
+    def validate_tax_rate(self, value):
+        if value is None:
+            return value
+        if value < Decimal("0") or value >= Decimal("1"):
+            raise serializers.ValidationError("tax_rate must be >= 0 and < 1.")
+        return value
+
+    def validate_settlement_rate(self, value):
+        if value is None:
+            return value
+        if value <= Decimal("0"):
+            raise serializers.ValidationError("settlement_rate must be > 0.")
+        return value
+
+    def validate_yield_warning(self, value):
+        if value is None:
+            return value
+        if value < Decimal("0"):
+            raise serializers.ValidationError("yield_warning must be >= 0.")
+        return value
+
+    def validate_yield_target(self, value):
+        if value is None:
+            return value
+        if value < Decimal("0"):
+            raise serializers.ValidationError("yield_target must be >= 0.")
+        return value
+
     def validate_auto_approve_max_margin_rate(self, value):
         if value < Decimal("0"):
             raise serializers.ValidationError(

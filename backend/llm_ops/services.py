@@ -1032,6 +1032,7 @@ def resolve_channel_model_price(
     model: LLMModel,
     *,
     override: ChannelModelPrice | None = None,
+    source_items: list[ModelPriceItem] | None = None,
     video_resolution: str = "",
 ) -> UnitPrices:
     """Resolve final procurement unit prices after channel overrides."""
@@ -1070,6 +1071,7 @@ def resolve_channel_model_price(
         channel,
         model,
         override=override,
+        source_items=source_items,
     )
     if source_unit_prices:
         input_price = source_unit_prices.input_per_million * ratio
@@ -1159,6 +1161,7 @@ def source_unit_prices_for_channel_model(
     model: LLMModel,
     *,
     override: ChannelModelPrice | None,
+    source_items: list[ModelPriceItem] | None = None,
 ) -> UnitPrices | None:
     """Resolve unit prices from the selected procurement source."""
     if not override:
@@ -1171,7 +1174,9 @@ def source_unit_prices_for_channel_model(
     )
     values = {}
     grouped_items = {}
-    for item in current_model_price_items_for_channel_price(override):
+    if source_items is None:
+        source_items = current_model_price_items_for_channel_price(override)
+    for item in source_items:
         grouped_items.setdefault(item.dimension, []).append(item)
 
     for dimension, items in grouped_items.items():
@@ -2054,3 +2059,240 @@ def decimal_to_string(value) -> str:
     if value is None:
         return ""
     return str(Decimal(str(value)))
+
+
+# ---------------------------------------------------------------------------
+# Model Resale Decision helper
+# ---------------------------------------------------------------------------
+#
+# Compute the canonical decision row used by the LLM Ops Monitor
+# overview page. Inputs are plain dicts (matching SummaryAPIView
+# procurement_rows and ResaleListing payloads). Outputs follow the
+# shape described in docs/llm-ops/overview-refactor.codex.md.
+#
+# No global fallback constants: if any platform fee/yield field is
+# missing, ``platform_fee_unresolved`` is returned and the yield
+# values stay ``None``.
+
+
+DECISION_STATUS_NO_SUPPLY = "no_supply"
+DECISION_STATUS_CURRENCY_UNRESOLVED = "currency_unresolved"
+DECISION_STATUS_PLATFORM_FEE_UNRESOLVED = "platform_fee_unresolved"
+DECISION_STATUS_LOW_YIELD = "low_yield"
+DECISION_STATUS_NOT_LOWEST_CHANNEL = "not_lowest_channel"
+DECISION_STATUS_UNLISTED = "unlisted"
+DECISION_STATUS_SINGLE_CHANNEL = "single_channel"
+DECISION_STATUS_READY = "ready"
+
+
+_DECISION_PRIORITY = {
+    DECISION_STATUS_NO_SUPPLY: 1,
+    DECISION_STATUS_CURRENCY_UNRESOLVED: 2,
+    DECISION_STATUS_PLATFORM_FEE_UNRESOLVED: 3,
+    DECISION_STATUS_LOW_YIELD: 4,
+    DECISION_STATUS_NOT_LOWEST_CHANNEL: 5,
+    DECISION_STATUS_UNLISTED: 6,
+    DECISION_STATUS_SINGLE_CHANNEL: 7,
+    DECISION_STATUS_READY: 8,
+}
+
+
+_DECISION_ACTION_ZH = {
+    DECISION_STATUS_NO_SUPPLY: "去渠道配置",
+    DECISION_STATUS_CURRENCY_UNRESOLVED: "补汇率",
+    DECISION_STATUS_PLATFORM_FEE_UNRESOLVED: "配置平台费用规则",
+    DECISION_STATUS_LOW_YIELD: "复核售价或切换渠道",
+    DECISION_STATUS_NOT_LOWEST_CHANNEL: "评估切换到最低渠道",
+    DECISION_STATUS_UNLISTED: "去挂售",
+    DECISION_STATUS_SINGLE_CHANNEL: "增加备选渠道",
+    DECISION_STATUS_READY: "保持",
+}
+
+
+DECISION_ANOMALY_EVENT_TYPES = {
+    "collection_failed",
+    "source_disabled",
+    "reconciliation_anomaly",
+}
+
+
+def _decimal(value, default=None):
+    """Return Decimal for numeric input, preserving None as None."""
+    if value is None:
+        return default
+    try:
+        return Decimal(str(value))
+    except Exception:  # noqa: BLE001
+        return default
+
+
+def _fee_config_resolved(platform) -> bool:
+    """Return True when every required fee field is non-null."""
+    required = (
+        "fee_rate",
+        "service_fee_rate",
+        "tax_rate",
+        "settlement_rate",
+        "yield_warning",
+    )
+    for attr in required:
+        if getattr(platform, attr, None) is None:
+            return False
+    return True
+
+
+def _compute_yield(retail, cost, platform):
+    """Return (input_yield, output_yield) or (None, None)."""
+    if not _fee_config_resolved(platform):
+        return None, None
+    net_factor = (
+        Decimal("1")
+        - Decimal(str(platform.fee_rate))
+        - Decimal(str(platform.service_fee_rate))
+        - Decimal(str(platform.tax_rate))
+    )
+    settlement = Decimal(str(platform.settlement_rate))
+    if retail is None or cost is None:
+        return None, None
+    if retail == ZERO:
+        if cost > ZERO:
+            return Decimal("-1"), Decimal("-1")
+        return ZERO, ZERO
+    net = retail * net_factor - cost * settlement
+    yield_rate = net / retail if retail else None
+    return yield_rate, yield_rate
+
+
+def compute_model_decision(
+    *,
+    procurement_row,
+    current_listing,
+    platform,
+    data_event_type="updated",
+    last_data_event_at=None,
+):
+    """Build the canonical decision payload for one model row.
+
+    Parameters
+    ----------
+    procurement_row : dict
+        SummaryAPIView procurement row. Must include ``best_channel``,
+        ``options`` (list) and ``requires_currency_conversion``.
+    current_listing : dict or None
+        Currently active listing payload for the selected platform.
+    platform : ResalePlatform or None
+        Selected resale platform used for fee/yield lookup.
+    data_event_type : str
+        ``updated`` | ``collection_failed`` | ``source_disabled`` |
+        ``reconciliation_anomaly`` | ``stale``.
+    last_data_event_at : datetime or None
+        Timestamp of the most recent data event for the row.
+    """
+    best_channel = (procurement_row or {}).get("best_channel") or None
+    options = list((procurement_row or {}).get("options") or [])
+    requires_currency_conversion = bool(
+        (best_channel or {}).get("requires_currency_conversion")
+        or (procurement_row or {}).get(
+            "requires_currency_conversion",
+        )
+    )
+    is_listed = bool(
+        (current_listing or {}).get("is_listed", bool(current_listing))
+    )
+    listing_requires_currency_conversion = bool(
+        (current_listing or {}).get("requires_currency_conversion")
+    )
+
+    if best_channel is None:
+        status = DECISION_STATUS_NO_SUPPLY
+    elif requires_currency_conversion or listing_requires_currency_conversion:
+        status = DECISION_STATUS_CURRENCY_UNRESOLVED
+    elif platform is None or not _fee_config_resolved(platform):
+        status = DECISION_STATUS_PLATFORM_FEE_UNRESOLVED
+    elif is_listed:
+        if "cost_input_price_per_million" in (current_listing or {}):
+            cost_input = _decimal(
+                (current_listing or {}).get(
+                    "cost_input_price_per_million"
+                ),
+            )
+        else:
+            cost_input = _decimal(best_channel.get("input_price_per_million"))
+        if "cost_output_price_per_million" in (current_listing or {}):
+            cost_output = _decimal(
+                (current_listing or {}).get(
+                    "cost_output_price_per_million"
+                ),
+            )
+        else:
+            cost_output = _decimal(
+                best_channel.get("output_price_per_million")
+            )
+        retail_input = _decimal(
+            (current_listing or {}).get(
+                "retail_input_price_per_million"
+            )
+        )
+        retail_output = _decimal(
+            (current_listing or {}).get(
+                "retail_output_price_per_million"
+            )
+        )
+        input_yield, _ = _compute_yield(retail_input, cost_input, platform)
+        _, output_yield = _compute_yield(
+            retail_output, cost_output, platform
+        )
+        yield_warning = Decimal(str(platform.yield_warning))
+        below_warning = (
+            (input_yield is not None and input_yield < yield_warning)
+            or (
+                output_yield is not None
+                and output_yield < yield_warning
+            )
+        )
+        listing_channel_id = (current_listing or {}).get("channel_id")
+        on_lowest = (
+            listing_channel_id is None
+            or listing_channel_id == best_channel.get("channel_id")
+        )
+        if below_warning:
+            status = DECISION_STATUS_LOW_YIELD
+        elif not on_lowest:
+            status = DECISION_STATUS_NOT_LOWEST_CHANNEL
+        elif len(options) <= 1:
+            status = DECISION_STATUS_SINGLE_CHANNEL
+        else:
+            status = DECISION_STATUS_READY
+        return {
+            "decision_status": status,
+            "decision_action": _DECISION_ACTION_ZH[status],
+            "decision_priority": _DECISION_PRIORITY[status],
+            "input_yield": input_yield,
+            "output_yield": output_yield,
+            "data_event_type": data_event_type,
+            "last_data_event_at": (
+                last_data_event_at.isoformat()
+                if last_data_event_at is not None
+                else None
+            ),
+            "is_data_anomaly": data_event_type
+            in DECISION_ANOMALY_EVENT_TYPES,
+        }
+    else:
+        status = DECISION_STATUS_UNLISTED
+
+    return {
+        "decision_status": status,
+        "decision_action": _DECISION_ACTION_ZH[status],
+        "decision_priority": _DECISION_PRIORITY[status],
+        "input_yield": None,
+        "output_yield": None,
+        "data_event_type": data_event_type,
+        "last_data_event_at": (
+            last_data_event_at.isoformat()
+            if last_data_event_at is not None
+            else None
+        ),
+        "is_data_anomaly": data_event_type
+        in DECISION_ANOMALY_EVENT_TYPES,
+    }

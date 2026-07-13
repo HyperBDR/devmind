@@ -78,10 +78,25 @@ export function useLLMOpsData() {
       loading.value = false
     }
 
-    refreshSecondaryData({ force: true, silent: true })
+    if (DATA_HEAVY_SECTIONS.has(section)) {
+      refreshSecondaryData({ force: true, silent: true })
+    }
   }
 
   async function refreshCoreData(section) {
+    if (section === 'monitor') {
+      const [channelRes, platformRes, summaryRes] = await Promise.all([
+        fetchList(llmOpsApi.listChannels),
+        fetchList(llmOpsApi.listResalePlatforms),
+        llmOpsApi.getSummary(summaryParams())
+      ])
+      channels.value = asArray(extract(channelRes))
+      resalePlatforms.value = asArray(extract(platformRes))
+      summary.value = normalizeSummary(extract(summaryRes))
+      await loadResaleWorkflowConfig()
+      return
+    }
+
     const shouldLoadModels = !LIGHT_CORE_SECTIONS.has(section)
     const [
       sourceRes,

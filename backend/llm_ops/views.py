@@ -1,7 +1,8 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, IntegerField, Max, Q, Value
+from django.db.models import Count, IntegerField, Max, Q
+from django.db.models import Value
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
@@ -80,13 +81,16 @@ from .serializers import (
 from .services import (
     build_currency_conversion_context,
     calculate_usage_cost,
+    compute_model_decision,
     convert_currency_amount,
+    current_model_price_items_for_channel_price,
     import_manual_model_prices,
     record_channel_model_price_history,
     record_resale_listing_price_history,
     resolve_channel_model_currency,
     resolve_channel_model_price,
     resolve_resale_listing_currency,
+    selected_price_item_group,
     sync_channel_price_items,
 )
 from .source_collectors import source_supports_code_collection
@@ -2191,6 +2195,12 @@ def _as_float(value) -> float:
     return float(value or Decimal("0"))
 
 
+def _as_optional_float(value) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
 def _decimal_or_none(value) -> Decimal | None:
     if value is None or value == "":
         return None
@@ -2541,12 +2551,115 @@ def _select_best_option(options: list[dict]):
         for item in options
         if not item.get("requires_currency_conversion")
     ]
-    if len(comparable_options) != len(options):
-        return None
+    if not comparable_options:
+        return sorted(
+            options,
+            key=lambda item: item["estimated_cost"],
+        )[0]
     return sorted(
         comparable_options,
         key=lambda item: item["estimated_cost"],
     )[0]
+
+
+def _price_source_id_for_override(override, price_items=None):
+    if not override:
+        return None
+    if override.price_source_id:
+        return override.price_source_id
+    if price_items is None:
+        price_items = current_model_price_items_for_channel_price(override)
+    source_ids = [item.source_id for item in price_items if item.source_id]
+    return source_ids[0] if source_ids else None
+
+
+def _price_items_updated_at(price_items):
+    values = [item.updated_at for item in price_items if item.updated_at]
+    return max(values) if values else None
+
+
+def _price_item_indexes(overrides):
+    model_ids = {override.model_id for override in overrides}
+    meta_model_ids = {
+        override.model.meta_model_id
+        for override in overrides
+        if override.model.meta_model_id
+    }
+    model_rows = list(
+        ModelPriceItem.objects.filter(
+            model_id__in=model_ids,
+            is_current=True,
+        )
+        .select_related("model", "offering", "sku", "source")
+        .order_by("model_id", "source_id", "dimension", "tier_start", "id")
+    )
+    meta_rows = list(
+        ModelPriceItem.objects.filter(
+            meta_model_id__in=meta_model_ids,
+            is_current=True,
+            unit_price__gt=Decimal("0"),
+        )
+        .select_related("model", "offering", "sku", "source")
+        .order_by(
+            "meta_model_id",
+            "source_id",
+            "dimension",
+            "tier_start",
+            "id",
+        )
+    )
+
+    model_any = {}
+    model_by_source = {}
+    for item in model_rows:
+        model_any.setdefault(item.model_id, []).append(item)
+        model_by_source.setdefault(
+            (item.model_id, item.source_id),
+            [],
+        ).append(item)
+
+    meta_any = {}
+    meta_by_source = {}
+    for item in meta_rows:
+        meta_any.setdefault(item.meta_model_id, []).append(item)
+        meta_by_source.setdefault(
+            (item.meta_model_id, item.source_id),
+            [],
+        ).append(item)
+
+    return {
+        "model_any": model_any,
+        "model_by_source": model_by_source,
+        "meta_any": meta_any,
+        "meta_by_source": meta_by_source,
+    }
+
+
+def _indexed_price_items_for_override(override, indexes):
+    if not override:
+        return []
+    if override.price_source_id:
+        rows = indexes["model_by_source"].get(
+            (override.model_id, override.price_source_id),
+            [],
+        )
+        if rows:
+            return selected_price_item_group(rows, model=override.model)
+        rows = indexes["meta_by_source"].get(
+            (override.model.meta_model_id, override.price_source_id),
+            [],
+        )
+        if rows:
+            return selected_price_item_group(rows, model=override.model)
+        return []
+
+    rows = indexes["model_any"].get(override.model_id, [])
+    if rows:
+        return selected_price_item_group(rows, model=override.model)
+    rows = indexes["meta_any"].get(override.model.meta_model_id, [])
+    if rows:
+        return selected_price_item_group(rows, model=override.model)
+    return []
 
 
 def _has_procurement_text_price(unit_prices) -> bool:
@@ -2625,6 +2738,173 @@ def _diagnostic_status(
     }
 
 
+_DATA_EVENT_PRIORITY = {
+    "reconciliation_anomaly": 1,
+    "collection_failed": 2,
+    "source_disabled": 3,
+}
+
+_REQUIRED_YIELD_CONFIG_FIELDS = (
+    "fee_rate",
+    "service_fee_rate",
+    "tax_rate",
+    "settlement_rate",
+    "yield_warning",
+)
+
+
+def _prefer_data_event(current, candidate) -> bool:
+    if current is None:
+        return True
+    current_at = current.get("at")
+    candidate_at = candidate.get("at")
+    if current_at and candidate_at and current_at != candidate_at:
+        return candidate_at > current_at
+    if candidate_at and not current_at:
+        return True
+    if current_at and not candidate_at:
+        return False
+    return _DATA_EVENT_PRIORITY.get(
+        candidate["type"],
+        0,
+    ) > _DATA_EVENT_PRIORITY.get(current["type"], 0)
+
+
+def _set_model_data_event(events_by_model, model_id, event_type, event_at):
+    candidate = {"type": event_type, "at": event_at}
+    current = events_by_model.get(model_id)
+    if _prefer_data_event(current, candidate):
+        events_by_model[model_id] = candidate
+
+
+def _latest_datetime(*values):
+    valid_values = [value for value in values if value is not None]
+    if not valid_values:
+        return None
+    return max(valid_values)
+
+
+def _platform_yield_config_resolved(platform) -> bool:
+    if platform is None:
+        return False
+    return all(
+        getattr(platform, field_name, None) is not None
+        for field_name in _REQUIRED_YIELD_CONFIG_FIELDS
+    )
+
+
+def _best_channel_price_updated_at(
+    overrides,
+    best_channel,
+    model_id,
+    source_run_at_by_source=None,
+):
+    if not best_channel:
+        return None
+    channel_id = best_channel.get("channel_id")
+    override = overrides.get((channel_id, model_id))
+    source_id = best_channel.get("price_source_id")
+    source_run_at = None
+    if source_id and source_run_at_by_source:
+        source_run_at = source_run_at_by_source.get(source_id)
+    return _latest_datetime(
+        override.updated_at if override else None,
+        best_channel.get("price_updated_at"),
+        source_run_at,
+    )
+
+
+def _decision_listing_payload(listing_payloads, best_channel):
+    if not listing_payloads:
+        return None
+    if best_channel:
+        best_channel_id = best_channel.get("channel_id")
+        for payload in listing_payloads:
+            channel_id = payload.get("channel_id")
+            if channel_id is None or channel_id == best_channel_id:
+                return payload
+    return listing_payloads[0]
+
+
+def _decision_listing_payload_from_listing(
+    listing,
+    *,
+    row,
+    currency_context,
+):
+    retail_currency = resolve_resale_listing_currency(listing)
+    retail_input = listing.retail_input_price_per_million
+    retail_output = listing.retail_output_price_per_million
+    retail_cache_input = listing.retail_cache_input_price_per_million
+    retail_input_display = _converted_amount(
+        retail_input,
+        retail_currency,
+        currency_context,
+    )
+    retail_output_display = _converted_amount(
+        retail_output,
+        retail_currency,
+        currency_context,
+    )
+    retail_cache_input_display = _converted_amount(
+        retail_cache_input,
+        retail_currency,
+        currency_context,
+    )
+    option = _listing_option(
+        listing,
+        row["options"] if row else [],
+        row["best_channel"] if row else None,
+    )
+    requires_currency_conversion = any(
+        value is None
+        for value in (
+            retail_input_display,
+            retail_output_display,
+            retail_cache_input_display,
+        )
+    )
+    if option:
+        requires_currency_conversion = (
+            requires_currency_conversion
+            or option.get("requires_currency_conversion", False)
+        )
+    channel = listing.channel
+    return {
+        "channel_id": listing.channel_id,
+        "channel_name": channel.name if channel else "自动最优",
+        "currency": (
+            currency_context.display_currency
+            if not requires_currency_conversion
+            else retail_currency
+        ),
+        "retail_input_price_per_million": _as_float(
+            retail_input_display
+            if retail_input_display is not None
+            else retail_input
+        ),
+        "retail_output_price_per_million": _as_float(
+            retail_output_display
+            if retail_output_display is not None
+            else retail_output
+        ),
+        "retail_cache_input_price_per_million": _as_float(
+            retail_cache_input_display
+            if retail_cache_input_display is not None
+            else retail_cache_input
+        ),
+        "cost_input_price_per_million": (
+            option.get("input_price_per_million") if option else None
+        ),
+        "cost_output_price_per_million": (
+            option.get("output_price_per_million") if option else None
+        ),
+        "requires_currency_conversion": requires_currency_conversion,
+        "updated_at": listing.updated_at,
+        "is_listed": True,
+    }
+
+
 class SummaryAPIView(LLMOpsPermissionMixin, APIView):
     """Return dashboard metrics and calculation summaries."""
 
@@ -2655,6 +2935,9 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             .select_related("meta_model", "provider")
             .order_by("provider__name", "name", "id")
         )
+        model_updated_at_by_id = {
+            model.id: model.updated_at for model in models
+        }
         channels = list(
             ProcurementChannel.objects.filter(is_active=True).order_by(
                 "name",
@@ -2666,8 +2949,14 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             for item in ChannelModelPrice.objects.select_related(
                 "channel",
                 "model",
+                "model__meta_model",
+                "price_source",
             )
         }
+        listed_overrides = [
+            override for override in overrides.values() if override.is_listed
+        ]
+        price_item_indexes = _price_item_indexes(listed_overrides)
 
         procurement_rows = []
         for model in models:
@@ -2676,10 +2965,15 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 override = overrides.get((channel.id, model.id))
                 if not override or not override.is_listed:
                     continue
+                price_items = _indexed_price_items_for_override(
+                    override,
+                    price_item_indexes,
+                )
                 unit_prices = resolve_channel_model_price(
                     channel,
                     model,
                     override=override,
+                    source_items=price_items,
                     video_resolution=video_resolution,
                 )
                 if not _has_procurement_text_price(unit_prices):
@@ -2697,6 +2991,11 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 option = {
                     "channel_id": channel.id,
                     "channel_name": channel.name,
+                    "price_source_id": _price_source_id_for_override(
+                        override,
+                        price_items,
+                    ),
+                    "price_updated_at": _price_items_updated_at(price_items),
                     "currency": currency,
                     "input_price_per_million": _as_float(
                         unit_prices.input_per_million
@@ -2742,10 +3041,13 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     item["estimated_cost"],
                 )
             )
-            requires_currency_conversion = any(
-                item.get("requires_currency_conversion") for item in options
-            )
             best = _select_best_option(options) if options else None
+            requires_currency_conversion = bool(
+                any(
+                    item.get("requires_currency_conversion")
+                    for item in options
+                )
+            )
             procurement_rows.append(
                 {
                     "model_id": model.id,
@@ -2764,6 +3066,101 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 }
             )
 
+        data_events_by_model = {}
+        source_model_ids = {}
+        best_channel_ids_by_model = {}
+        for row in procurement_rows:
+            best_channel = row["best_channel"]
+            if not best_channel:
+                continue
+            model_id = row["model_id"]
+            channel_id = best_channel["channel_id"]
+            best_channel_ids_by_model[model_id] = channel_id
+            source_id = best_channel.get("price_source_id")
+            if not source_id:
+                continue
+            source_model_ids.setdefault(
+                source_id,
+                set(),
+            ).add(model_id)
+        price_sources_by_id = {}
+        if source_model_ids:
+            price_sources_by_id = {
+                source.id: source
+                for source in PriceCollectionSource.objects.filter(
+                    id__in=source_model_ids,
+                )
+            }
+        for source_id, model_ids in source_model_ids.items():
+            source = price_sources_by_id.get(source_id)
+            if not source or source.is_enabled:
+                continue
+            for model_id in model_ids:
+                _set_model_data_event(
+                    data_events_by_model,
+                    model_id,
+                    "source_disabled",
+                    source.updated_at,
+                )
+        latest_source_run_at_by_source = {}
+        if source_model_ids:
+            latest_started_rows = (
+                PriceCollectionRun.objects.filter(
+                    source_id__in=source_model_ids,
+                )
+                .values("source_id")
+                .annotate(latest_started_at=Max("started_at"))
+            )
+            latest_started_at_values = [
+                row["latest_started_at"]
+                for row in latest_started_rows
+                if row["latest_started_at"]
+            ]
+            latest_runs_by_source = {}
+            latest_run_candidates = PriceCollectionRun.objects.filter(
+                source_id__in=source_model_ids,
+                started_at__in=latest_started_at_values,
+            ).order_by("source_id", "-started_at", "-id")
+            for run in latest_run_candidates:
+                latest_runs_by_source.setdefault(run.source_id, run)
+            for run in latest_runs_by_source.values():
+                latest_source_run_at_by_source[run.source_id] = (
+                    run.finished_at or run.started_at
+                )
+                if run.status != PriceCollectionRun.STATUS_FAILED:
+                    continue
+                for model_id in source_model_ids.get(run.source_id, set()):
+                    _set_model_data_event(
+                        data_events_by_model,
+                        model_id,
+                        "collection_failed",
+                        run.finished_at or run.started_at,
+                    )
+        if best_channel_ids_by_model:
+            reconciliation_rows = (
+                UsageReconciliationRecord.objects.exclude(
+                    status=UsageReconciliationRecord.STATUS_PERFECT,
+                )
+                .filter(
+                    model_id__in=best_channel_ids_by_model,
+                    channel_id__in=set(best_channel_ids_by_model.values()),
+                )
+                .values("model_id", "channel_id")
+                .annotate(latest=Max("updated_at"))
+            )
+            for reconciliation_row in reconciliation_rows:
+                model_id = reconciliation_row["model_id"]
+                if (
+                    best_channel_ids_by_model.get(model_id)
+                    != reconciliation_row["channel_id"]
+                ):
+                    continue
+                _set_model_data_event(
+                    data_events_by_model,
+                    model_id,
+                    "reconciliation_anomaly",
+                    reconciliation_row["latest"],
+                )
         listing_rows = []
         active_listings = list(
             ResaleListing.objects.filter(is_active=True).select_related(
@@ -2773,17 +3170,10 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "channel",
             )
         )
-        valid_active_listings = []
+        rows_by_model = {row["model_id"]: row for row in procurement_rows}
         for listing in active_listings:
             channel = listing.channel
-            row = next(
-                (
-                    procurement_row
-                    for procurement_row in procurement_rows
-                    if procurement_row["model_id"] == listing.model_id
-                ),
-                None,
-            )
+            row = rows_by_model.get(listing.model_id)
             options = row["options"] if row else []
             if channel is None:
                 best_row = row["best_channel"] if row else None
@@ -2819,6 +3209,10 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     channel,
                     listing.model,
                     override=override,
+                    source_items=_indexed_price_items_for_override(
+                        override,
+                        price_item_indexes,
+                    ),
                     video_resolution=video_resolution,
                 )
                 cost_input = unit_prices.input_per_million
@@ -2829,8 +3223,6 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     listing.model,
                     override=override,
                 )
-            valid_active_listings.append(listing)
-
             retail_input = listing.retail_input_price_per_million
             retail_output = listing.retail_output_price_per_million
             retail_cache_input = listing.retail_cache_input_price_per_million
@@ -2922,6 +3314,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "requires_currency_conversion": (
                         requires_currency_conversion
                     ),
+                    "updated_at": listing.updated_at,
                     "retail_input_price_per_million": _as_float(
                         retail_input_display
                         if retail_input_display is not None
@@ -2982,7 +3375,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
 
         selected_platform_listing_rows = [
             listing
-            for listing in valid_active_listings
+            for listing in active_listings
             if (
                 selected_platform
                 and listing.platform_id == selected_platform.id
@@ -2994,6 +3387,20 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 listing.model_id,
                 [],
             ).append(listing)
+        selected_platform_listing_payloads_by_model = {}
+        for listing in selected_platform_listing_rows:
+            if not selected_platform:
+                continue
+            row = rows_by_model.get(listing.model_id)
+            payload = _decision_listing_payload_from_listing(
+                listing,
+                row=row,
+                currency_context=currency_context,
+            )
+            selected_platform_listing_payloads_by_model.setdefault(
+                listing.model_id,
+                [],
+            ).append(payload)
 
         diagnostics = []
         for row in procurement_rows:
@@ -3030,6 +3437,99 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "requires_currency_conversion"
                 ],
             )
+            listing_payloads = selected_platform_listing_payloads_by_model.get(
+                row["model_id"],
+                [],
+            )
+            listing_payload = _decision_listing_payload(
+                listing_payloads,
+                best_channel,
+            )
+            data_event = data_events_by_model.get(row["model_id"], {})
+            last_data_event_at = data_event.get("at")
+            if last_data_event_at is None:
+                last_data_event_at = _latest_datetime(
+                    _best_channel_price_updated_at(
+                        overrides,
+                        best_channel,
+                        row["model_id"],
+                        latest_source_run_at_by_source,
+                    ),
+                    (
+                        listing_payload.get("updated_at")
+                        if listing_payload
+                        else None
+                    ),
+                    model_updated_at_by_id.get(row["model_id"]),
+                )
+            decision_payload = compute_model_decision(
+                procurement_row=row,
+                current_listing=listing_payload,
+                platform=selected_platform,
+                data_event_type=data_event.get("type", "updated"),
+                last_data_event_at=last_data_event_at,
+            )
+            recommended_channel = best_channel or None
+            current_listing_payload = None
+            if listing_payload:
+                current_listing_payload = {
+                    "channel_id": listing_payload.get("channel_id"),
+                    "channel_name": listing_payload.get("channel_name"),
+                    "currency": listing_payload.get("currency"),
+                    "retail_input_price_per_million": listing_payload.get(
+                        "retail_input_price_per_million"
+                    ),
+                    "retail_output_price_per_million": listing_payload.get(
+                        "retail_output_price_per_million"
+                    ),
+                    "retail_cache_input_price_per_million": (
+                        listing_payload.get(
+                            "retail_cache_input_price_per_million",
+                        )
+                    ),
+                    "is_listed": True,
+                }
+            yield_metrics_payload = {
+                "fee_rate": _as_optional_float(
+                    selected_platform.fee_rate
+                    if selected_platform
+                    else None
+                ),
+                "service_fee_rate": _as_optional_float(
+                    selected_platform.service_fee_rate
+                    if selected_platform
+                    else None
+                ),
+                "tax_rate": _as_optional_float(
+                    selected_platform.tax_rate
+                    if selected_platform
+                    else None
+                ),
+                "settlement_rate": _as_optional_float(
+                    selected_platform.settlement_rate
+                    if selected_platform
+                    else None
+                ),
+                "yield_warning": _as_optional_float(
+                    selected_platform.yield_warning
+                    if selected_platform
+                    else None
+                ),
+                "yield_target": _as_optional_float(
+                    selected_platform.yield_target
+                    if selected_platform
+                    else None
+                ),
+                "input_yield": _as_optional_float(
+                    decision_payload.get("input_yield")
+                ),
+                "output_yield": _as_optional_float(
+                    decision_payload.get("output_yield")
+                ),
+                "is_resolved": _platform_yield_config_resolved(
+                    selected_platform
+                ),
+            }
             diagnostics.append(
                 {
                     **row,
@@ -3042,6 +3542,10 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         best_channel,
                     ),
                     **status_payload,
+                    "recommended_channel": recommended_channel,
+                    "current_listing": current_listing_payload,
+                    "yield_metrics": yield_metrics_payload,
+                    **decision_payload,
                 }
             )
 

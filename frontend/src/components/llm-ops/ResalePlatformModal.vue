@@ -180,6 +180,51 @@
               />
             </label>
             <label class="field-group">
+              <span class="field-label">税费率（%）</span>
+              <input
+                v-model="form.tax_rate"
+                class="field"
+                min="0"
+                max="99.99"
+                step="0.01"
+                type="number"
+                placeholder="留空表示未配置"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">结算比例（%）</span>
+              <input
+                v-model="form.settlement_rate"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                placeholder="例如：95"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">收益率预警线（%）</span>
+              <input
+                v-model="form.yield_warning"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                placeholder="例如：15"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">目标收益率（%）</span>
+              <input
+                v-model="form.yield_target"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                placeholder="例如：25"
+              />
+            </label>
+            <label class="field-group">
               <span class="field-label">免审最高收益率（%）</span>
               <input
                 v-model="form.auto_approve_max_margin_rate"
@@ -371,6 +416,10 @@ function defaults() {
     currency: 'CNY',
     fee_rate: '3',
     service_fee_rate: '0',
+    tax_rate: '',
+    settlement_rate: '',
+    yield_warning: '',
+    yield_target: '',
     auto_approve_max_margin_rate: '100',
     point_name: '积分',
     points_per_currency_unit: '100.00',
@@ -392,6 +441,10 @@ function platformToForm(platform) {
     environment: platform.environment || 'production',
     fee_rate: percentFromRatio(platform.fee_rate),
     service_fee_rate: percentFromRatio(platform.service_fee_rate),
+    tax_rate: optionalPercentFromRatio(platform.tax_rate),
+    settlement_rate: optionalPercentFromRatio(platform.settlement_rate),
+    yield_warning: optionalPercentFromRatio(platform.yield_warning),
+    yield_target: optionalPercentFromRatio(platform.yield_target),
     points_per_currency_unit: formatDecimal(
       platform.points_per_currency_unit,
       2
@@ -420,6 +473,18 @@ function ratioFromPercent(value) {
   return Number((numberValue / 100).toFixed(6))
 }
 
+function optionalPercentFromRatio(value) {
+  if (value === null || value === undefined || value === '') return ''
+  return percentFromRatio(value)
+}
+
+function optionalRatioFromPercent(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return null
+  return Number((numberValue / 100).toFixed(6))
+}
+
 function normalizePayload(payload) {
   const clean = { ...payload }
   clean.platform_type = 'agione'
@@ -436,6 +501,10 @@ function normalizePayload(payload) {
   )
   clean.fee_rate = ratioFromPercent(clean.fee_rate)
   clean.service_fee_rate = ratioFromPercent(clean.service_fee_rate)
+  clean.tax_rate = optionalRatioFromPercent(clean.tax_rate)
+  clean.settlement_rate = optionalRatioFromPercent(clean.settlement_rate)
+  clean.yield_warning = optionalRatioFromPercent(clean.yield_warning)
+  clean.yield_target = optionalRatioFromPercent(clean.yield_target)
   clean.point_decimal_places = normalizePointDecimalPlaces(
     clean.point_decimal_places
   )
