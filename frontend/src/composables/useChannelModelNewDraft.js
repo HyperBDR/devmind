@@ -17,26 +17,44 @@ export function useChannelModelNewDraft({
   ratioPercent,
   ratioToPercentInput,
   recentlyAddedModelId,
-  selectedResolvedModels
+  selectedResolvedModels,
+  t
 }) {
+  const translate = typeof t === 'function' ? t : (key) => key
   const newDraft = ref(emptyNewDraft())
 
   const currencyOptions = computed(() => [
     {
-      label: '使用渠道默认币种',
+      label: translate('llmOps.channelModelDrawer.currency.useChannelDefault'),
       value: '',
-      description: `保存为 ${channelCurrency.value}`
+      description: translate('llmOps.channelModelDrawer.currency.savedAs', {
+        currency: channelCurrency.value
+      })
     },
-    { label: 'CNY', value: 'CNY', description: '固定保存为人民币' },
-    { label: 'USD', value: 'USD', description: '固定保存为美元' }
+    {
+      label: 'CNY',
+      value: 'CNY',
+      description: translate('llmOps.channelModelDrawer.currency.fixedCny')
+    },
+    {
+      label: 'USD',
+      value: 'USD',
+      description: translate('llmOps.channelModelDrawer.currency.fixedUsd')
+    }
   ])
 
   const newDraftRuleSummary = computed(() => {
     if (newDraft.value.price_mode === 'discount') {
-      return `折扣 ${ratioPercent(newDraft.value.settlement_ratio)}`
+      return translate('llmOps.channelModelDrawer.priceRule.discount', {
+        value: ratioPercent(newDraft.value.settlement_ratio)
+      })
     }
-    if (newDraft.value.price_mode === 'fixed') return '固定成本价'
-    return `默认折扣 ${ratioPercent(props.channel?.settlement_ratio, 1)}`
+    if (newDraft.value.price_mode === 'fixed') {
+      return translate('llmOps.channelModelDrawer.priceRule.fixed')
+    }
+    return translate('llmOps.channelModelDrawer.priceRule.defaultDiscount', {
+      value: ratioPercent(props.channel?.settlement_ratio, 1)
+    })
   })
 
   const newDraftPerformanceSummary = computed(() => {

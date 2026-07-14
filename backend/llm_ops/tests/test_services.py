@@ -32,6 +32,7 @@ from llm_ops.services import (
     resolve_channel_model_price,
     resolve_resale_listing_currency,
     sync_channel_price_items,
+    sync_dependent_channel_price_items_for_price_items,
 )
 
 
@@ -417,6 +418,55 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(items[0].base_price_item, supplier_item)
         self.assertEqual(items[0].unit_price, Decimal("1.500000"))
         self.assertEqual(cost, Decimal("1.500000"))
+
+    def test_sync_dependent_channel_items_after_source_price_change(self):
+        supplier_source = PriceCollectionSource.objects.create(
+            name="Supplier A",
+            slug="supplier-a",
+            provider=self.provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        base_item = ModelPriceItem.objects.create(
+            provider=self.provider,
+            model=self.model,
+            source=supplier_source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("2.5"),
+            price_fingerprint="supplier-input-v1",
+            is_current=True,
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=supplier_source,
+            settlement_ratio=Decimal("0.8"),
+        )
+        sync_channel_price_items(price)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("2.000000"),
+        )
+
+        base_item.unit_price = Decimal("3.5")
+        base_item.price_fingerprint = "supplier-input-v2"
+        base_item.save(update_fields=["unit_price", "price_fingerprint"])
+        result = sync_dependent_channel_price_items_for_price_items(
+            [base_item],
+        )
+
+        self.assertEqual(result["channel_model_prices"], 1)
+        self.assertEqual(result["channel_price_items"], 1)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("2.800000"),
+        )
+        self.assertEqual(
+            ChannelPriceItem.objects.filter(is_current=False).count(),
+            1,
+        )
 
     def test_sync_does_not_fallback_when_selected_source_has_no_items(self):
         official_source = PriceCollectionSource.objects.create(
@@ -876,6 +926,65 @@ class LLMOpsPricingServiceTests(TestCase):
             .values_list("dimension", flat=True)
             .get(),
             ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+        )
+
+    def test_manual_import_resyncs_dependent_channel_prices(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Sheet",
+            slug="supplier-sheet-resync",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+        import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("1.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+            settlement_ratio=Decimal("0.8"),
+        )
+        sync_channel_price_items(price)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("1.200000"),
+        )
+
+        result = import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "input_price_per_million": Decimal("2.5"),
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+
+        self.assertEqual(
+            result["channel_price_sync"]["channel_model_prices"],
+            1,
+        )
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("2.000000"),
         )
 
     def test_manual_import_keeps_current_rows_when_write_fails(self):

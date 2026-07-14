@@ -17,10 +17,14 @@
               Channel
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑转发渠道' : '新建转发渠道' }}
+              {{
+                form.id
+                  ? t('llmOps.channelModal.editTitle')
+                  : t('llmOps.channelModal.createTitle')
+              }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
-              渠道用于配置可采购/转发模型的供应入口和默认结算规则。
+              {{ t('llmOps.channelModal.description') }}
             </p>
           </div>
           <button
@@ -29,7 +33,7 @@
             :disabled="saving"
             @click="close"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
         </div>
       </div>
@@ -38,43 +42,49 @@
       >
         <section class="form-section">
           <div class="section-heading">
-            <h4>基础信息</h4>
-            <p>用于识别渠道，以及记录后续对接接口的入口。</p>
+            <h4>{{ t('llmOps.channelModal.basicTitle') }}</h4>
+            <p>{{ t('llmOps.channelModal.basicHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">渠道显示名称</span>
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.name') }}
+              </span>
               <input
                 v-model="form.name"
                 class="field"
-                placeholder="例如：生产转发渠道"
+                :placeholder="t('llmOps.channelModal.placeholders.name')"
                 required
               />
               <span class="field-help">
-                展示在渠道列表、模型转发关系和价格对比中的名称。
+                {{ t('llmOps.channelModal.help.name') }}
               </span>
             </label>
             <label class="field-group">
-              <span class="field-label">渠道标识</span>
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.code') }}
+              </span>
               <input
                 v-model="form.code"
                 class="field"
-                placeholder="例如：prod-forwarding-channel"
+                :placeholder="t('llmOps.channelModal.placeholders.code')"
                 required
               />
               <span class="field-help">
-                系统唯一标识，建议使用小写英文、数字和短横线。
+                {{ t('llmOps.channelModal.help.code') }}
               </span>
             </label>
             <label class="field-group md:col-span-2">
-              <span class="field-label">转发 API Base URL</span>
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.apiEndpoint') }}
+              </span>
               <input
                 v-model="form.api_endpoint"
                 class="field"
-                placeholder="例如：https://llm.example.com/v1"
+                :placeholder="t('llmOps.channelModal.placeholders.apiEndpoint')"
               />
               <span class="field-help">
-                渠道提供的模型转发接口地址；暂无接口时可先留空。
+                {{ t('llmOps.channelModal.help.apiEndpoint') }}
               </span>
             </label>
           </div>
@@ -82,22 +92,26 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>结算规则</h4>
-            <p>作为该渠道模型的默认采购价规则，单个模型仍可覆盖。</p>
+            <h4>{{ t('llmOps.channelModal.settlementTitle') }}</h4>
+            <p>{{ t('llmOps.channelModal.settlementHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">默认结算币种</span>
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.currency') }}
+              </span>
               <CompactSelect
                 v-model="form.currency"
                 :options="currencyOptions"
               />
               <span class="field-help">
-                渠道默认采购币种；单个模型可在模型管理中覆盖。
+                {{ t('llmOps.channelModal.help.currency') }}
               </span>
             </label>
             <label class="field-group">
-              <span class="field-label">默认采购折扣比例</span>
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.settlementRatio') }}
+              </span>
               <div class="relative">
                 <input
                   v-model="settlementRatioPercent"
@@ -105,12 +119,14 @@
                   min="0.01"
                   step="0.01"
                   type="number"
-                  placeholder="例如：85"
+                  :placeholder="
+                    t('llmOps.channelModal.placeholders.settlementRatio')
+                  "
                 />
                 <span class="field-suffix">%</span>
               </div>
               <span class="field-help">
-                采购价 = 价格源价格 × 折扣比例；85% 表示按 0.85 倍采购。
+                {{ t('llmOps.channelModal.help.settlementRatio') }}
               </span>
             </label>
           </div>
@@ -118,18 +134,20 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>补充信息</h4>
-            <p>记录合同、账期或模型覆盖限制。</p>
+            <h4>{{ t('llmOps.channelModal.notesTitle') }}</h4>
+            <p>{{ t('llmOps.channelModal.notesHint') }}</p>
           </div>
           <label class="field-group">
-            <span class="field-label">运营备注</span>
+            <span class="field-label">
+              {{ t('llmOps.channelModal.fields.notes') }}
+            </span>
             <textarea
               v-model="form.notes"
               class="field min-h-20 resize-none"
-              placeholder="例如：合同折扣、结算周期、特殊限制"
+              :placeholder="t('llmOps.channelModal.placeholders.notes')"
             />
             <span class="field-help">
-              可记录账期、限流、合同折扣、模型覆盖范围等信息。
+              {{ t('llmOps.channelModal.help.notes') }}
             </span>
           </label>
         </section>
@@ -144,7 +162,11 @@
             <span class="status-switch-dot" />
           </span>
           <span class="text-sm text-slate-700">
-            {{ form.is_active ? '渠道已启用' : '渠道已停用' }}
+            {{
+              form.is_active
+                ? t('llmOps.channelModal.enabled')
+                : t('llmOps.channelModal.disabled')
+            }}
           </span>
         </label>
         <div class="modal-footer-actions">
@@ -154,7 +176,7 @@
             :disabled="saving"
             @click="close"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-save"
@@ -162,7 +184,13 @@
             :disabled="saving"
           >
             <span class="icon-mark" />
-            {{ saving ? '保存中' : form.id ? '保存修改' : '创建渠道' }}
+            {{
+              saving
+                ? t('common.saving')
+                : form.id
+                  ? t('llmOps.channelModal.saveChanges')
+                  : t('llmOps.channelModal.createChannel')
+            }}
           </button>
         </div>
       </div>
@@ -172,6 +200,8 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
@@ -187,6 +217,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'saved'])
+const { t } = useI18n()
 
 const form = ref(defaults())
 const saving = ref(false)

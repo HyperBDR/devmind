@@ -8,6 +8,7 @@ import re
 
 from cloud_billing.dashboard import _build_exchange_rate_info
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .meta_model_lookup import (
@@ -739,6 +740,12 @@ def import_manual_model_prices(
     changed_price_item_ids = (
         affected_price_item_ids | deactivated_price_item_ids
     )
+    changed_price_items = list(
+        ModelPriceItem.objects.filter(id__in=changed_price_item_ids)
+    )
+    channel_sync = sync_dependent_channel_price_items_for_price_items(
+        changed_price_items,
+    )
     current_price_item_ids = set(
         ModelPriceItem.objects.filter(
             id__in=changed_price_item_ids,
@@ -762,6 +769,7 @@ def import_manual_model_prices(
         "deactivated_price_item_ids": sorted(
             deactivated_price_item_ids - current_price_item_ids,
         ),
+        "channel_price_sync": channel_sync,
     }
 
 
@@ -1460,6 +1468,77 @@ def sync_channel_price_items(
     return items
 
 
+def sync_dependent_channel_price_items_for_price_items(
+    price_items,
+) -> dict[str, int]:
+    """Resync channel prices that derive from changed upstream prices."""
+    references = [
+        price_item_dependency_reference(item) for item in price_items if item
+    ]
+    model_ids = {
+        reference["model_id"]
+        for reference in references
+        if reference["model_id"]
+    }
+    meta_model_ids = {
+        reference["meta_model_id"]
+        for reference in references
+        if reference["meta_model_id"]
+    }
+    source_ids = {
+        reference["source_id"]
+        for reference in references
+        if reference["source_id"]
+    }
+    if not model_ids and not meta_model_ids:
+        return {"channel_model_prices": 0, "channel_price_items": 0}
+
+    model_query = Q()
+    if model_ids:
+        model_query |= Q(model_id__in=model_ids)
+    if meta_model_ids:
+        model_query |= Q(meta_model_id__in=meta_model_ids)
+
+    source_query = Q(price_source__isnull=True)
+    if source_ids:
+        source_query |= Q(price_source_id__in=source_ids)
+
+    prices = list(
+        ChannelModelPrice.objects.filter(model_query)
+        .filter(source_query)
+        .select_related(
+            "channel",
+            "model",
+            "model__meta_model",
+            "price_source",
+        )
+        .order_by("id")
+    )
+    item_count = 0
+    for price in prices:
+        record_channel_model_price_history(price)
+        item_count += len(sync_channel_price_items(price))
+    return {
+        "channel_model_prices": len(prices),
+        "channel_price_items": item_count,
+    }
+
+
+def price_item_dependency_reference(item) -> dict[str, int | None]:
+    """Return stable channel dependency fields for a price item."""
+    if isinstance(item, dict):
+        return {
+            "model_id": item.get("model_id"),
+            "meta_model_id": item.get("meta_model_id"),
+            "source_id": item.get("source_id"),
+        }
+    return {
+        "model_id": getattr(item, "model_id", None),
+        "meta_model_id": getattr(item, "meta_model_id", None),
+        "source_id": getattr(item, "source_id", None),
+    }
+
+
 def channel_price_item_payloads(
     price: ChannelModelPrice,
     *,
@@ -2097,15 +2176,15 @@ _DECISION_PRIORITY = {
 }
 
 
-_DECISION_ACTION_ZH = {
-    DECISION_STATUS_NO_SUPPLY: "去渠道配置",
-    DECISION_STATUS_CURRENCY_UNRESOLVED: "补汇率",
-    DECISION_STATUS_PLATFORM_FEE_UNRESOLVED: "配置平台费用规则",
-    DECISION_STATUS_LOW_YIELD: "复核售价或切换渠道",
-    DECISION_STATUS_NOT_LOWEST_CHANNEL: "评估切换到最低渠道",
-    DECISION_STATUS_UNLISTED: "去挂售",
-    DECISION_STATUS_SINGLE_CHANNEL: "增加备选渠道",
-    DECISION_STATUS_READY: "保持",
+_DECISION_ACTION = {
+    DECISION_STATUS_NO_SUPPLY: "configure_channel",
+    DECISION_STATUS_CURRENCY_UNRESOLVED: "configure_exchange_rate",
+    DECISION_STATUS_PLATFORM_FEE_UNRESOLVED: "configure_platform_fee",
+    DECISION_STATUS_LOW_YIELD: "review_pricing_or_channel",
+    DECISION_STATUS_NOT_LOWEST_CHANNEL: "switch_lowest_channel",
+    DECISION_STATUS_UNLISTED: "publish_listing",
+    DECISION_STATUS_SINGLE_CHANNEL: "add_channel_coverage",
+    DECISION_STATUS_READY: "keep",
 }
 
 
@@ -2265,7 +2344,7 @@ def compute_model_decision(
             status = DECISION_STATUS_READY
         return {
             "decision_status": status,
-            "decision_action": _DECISION_ACTION_ZH[status],
+            "decision_action": _DECISION_ACTION[status],
             "decision_priority": _DECISION_PRIORITY[status],
             "input_yield": input_yield,
             "output_yield": output_yield,
@@ -2283,7 +2362,7 @@ def compute_model_decision(
 
     return {
         "decision_status": status,
-        "decision_action": _DECISION_ACTION_ZH[status],
+        "decision_action": _DECISION_ACTION[status],
         "decision_priority": _DECISION_PRIORITY[status],
         "input_yield": None,
         "output_yield": None,

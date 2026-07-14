@@ -3,9 +3,11 @@
     <div class="panel">
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div>
-          <h3 class="panel-title">模型详情工作台</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.modelWorkbenchPanel.title') }}
+          </h3>
           <p class="mt-1 text-xs text-slate-500">
-            集中查看单个模型的官方价格、渠道采购、挂售状态和对账记录。
+            {{ t('llmOps.modelWorkbenchPanel.subtitle') }}
           </p>
         </div>
         <CompactSelect
@@ -20,7 +22,9 @@
 
     <div v-if="selectedModel" class="grid gap-4 xl:grid-cols-4">
       <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">元模型</p>
+        <p class="text-xs font-medium text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.metaModel') }}
+        </p>
         <p class="mt-2 text-lg font-semibold text-slate-900">
           {{ selectedModel.meta_model_name || '-' }}
         </p>
@@ -29,48 +33,64 @@
         </p>
       </div>
       <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">渠道覆盖</p>
+        <p class="text-xs font-medium text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.channelCoverage') }}
+        </p>
         <p class="kpi-value mt-2 text-2xl font-semibold">
           {{ selectedDiagnostic?.coverage_count || 0 }}
         </p>
-        <p class="mt-2 text-xs text-slate-500">可用采购渠道数量</p>
+        <p class="mt-2 text-xs text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.channelCoverageHint') }}
+        </p>
       </div>
       <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">挂售链路</p>
+        <p class="text-xs font-medium text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.listingLinks') }}
+        </p>
         <p class="kpi-value mt-2 text-2xl font-semibold">
           {{ modelListings.length }}
         </p>
-        <p class="mt-2 text-xs text-slate-500">当前平台及其他平台记录</p>
+        <p class="mt-2 text-xs text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.listingLinksHint') }}
+        </p>
       </div>
       <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">对账异常</p>
+        <p class="text-xs font-medium text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.reconciliationAnomalies') }}
+        </p>
         <p class="kpi-value mt-2 text-2xl font-semibold">
           {{ anomalyRecords.length }}
         </p>
-        <p class="mt-2 text-xs text-slate-500">非 perfect 的对账记录</p>
+        <p class="mt-2 text-xs text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.kpi.reconciliationAnomaliesHint') }}
+        </p>
       </div>
     </div>
 
     <div class="grid gap-4 xl:grid-cols-2">
       <div class="panel overflow-hidden p-0">
         <div class="table-toolbar">
-          <h3 class="panel-title">标准价格项</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.modelWorkbenchPanel.standardPrices') }}
+          </h3>
         </div>
         <MiniTable
-          :columns="['维度', '价格', '来源']"
+          :columns="officialColumns"
           :rows="officialRows"
-          empty-text="暂无标准价格项。"
+          :empty-text="t('llmOps.modelWorkbenchPanel.emptyStandardPrices')"
         />
       </div>
 
       <div class="panel overflow-hidden p-0">
         <div class="table-toolbar">
-          <h3 class="panel-title">渠道采购价</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.modelWorkbenchPanel.channelPrices') }}
+          </h3>
         </div>
         <MiniTable
-          :columns="['渠道', '维度', '价格']"
+          :columns="channelColumns"
           :rows="channelRows"
-          empty-text="暂无渠道价格项。"
+          :empty-text="t('llmOps.modelWorkbenchPanel.emptyChannelPrices')"
         />
       </div>
     </div>
@@ -78,23 +98,29 @@
     <div class="grid gap-4 xl:grid-cols-2">
       <div class="panel overflow-hidden p-0">
         <div class="table-toolbar">
-          <h3 class="panel-title">挂售记录</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.modelWorkbenchPanel.listingRecords') }}
+          </h3>
         </div>
         <MiniTable
-          :columns="['平台', '渠道', '状态']"
+          :columns="listingColumns"
           :rows="listingRows"
-          empty-text="暂无挂售记录。"
+          :empty-text="t('llmOps.modelWorkbenchPanel.emptyListingRecords')"
         />
       </div>
 
       <div class="panel overflow-hidden p-0">
         <div class="table-toolbar">
-          <h3 class="panel-title">对账记录</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.modelWorkbenchPanel.reconciliationRecords') }}
+          </h3>
         </div>
         <MiniTable
-          :columns="['日期', '渠道', '差异']"
+          :columns="reconciliationColumns"
           :rows="reconciliationRows"
-          empty-text="暂无对账记录。"
+          :empty-text="
+            t('llmOps.modelWorkbenchPanel.emptyReconciliationRecords')
+          "
         />
       </div>
     </div>
@@ -103,6 +129,7 @@
 
 <script setup>
 import { computed, defineComponent, h, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CompactSelect from './CompactSelect.vue'
 
@@ -110,7 +137,7 @@ const MiniTable = defineComponent({
   props: {
     columns: { type: Array, default: () => [] },
     rows: { type: Array, default: () => [] },
-    emptyText: { type: String, default: '暂无数据。' }
+    emptyText: { type: String, default: '' }
   },
   setup(props) {
     return () =>
@@ -171,7 +198,32 @@ const props = defineProps({
   records: { type: Array, default: () => [] }
 })
 
+const { t } = useI18n()
 const selectedModelId = ref('')
+
+const officialColumns = computed(() => [
+  t('llmOps.modelWorkbenchPanel.columns.dimension'),
+  t('llmOps.modelWorkbenchPanel.columns.price'),
+  t('llmOps.modelWorkbenchPanel.columns.source')
+])
+
+const channelColumns = computed(() => [
+  t('llmOps.modelWorkbenchPanel.columns.channel'),
+  t('llmOps.modelWorkbenchPanel.columns.dimension'),
+  t('llmOps.modelWorkbenchPanel.columns.price')
+])
+
+const listingColumns = computed(() => [
+  t('llmOps.modelWorkbenchPanel.columns.platform'),
+  t('llmOps.modelWorkbenchPanel.columns.channel'),
+  t('llmOps.modelWorkbenchPanel.columns.status')
+])
+
+const reconciliationColumns = computed(() => [
+  t('llmOps.modelWorkbenchPanel.columns.date'),
+  t('llmOps.modelWorkbenchPanel.columns.channel'),
+  t('llmOps.modelWorkbenchPanel.columns.variance')
+])
 
 const diagnostics = computed(() => props.summary.agione?.diagnostics || [])
 const modelOptions = computed(() =>
@@ -259,8 +311,11 @@ const channelRows = computed(() =>
 
 const listingRows = computed(() =>
   modelListings.value.map((listing) => [
-    listing.platform_name || `平台 ${listing.platform}`,
-    listing.channel_name || '自动最优',
+    listing.platform_name ||
+      t('llmOps.modelWorkbenchPanel.platformFallback', {
+        id: listing.platform
+      }),
+    channelDisplayName(listing),
     `${workflowLabel(listing.workflow_status)} / ${publishLabel(
       listing.publish_status
     )}`
@@ -284,17 +339,24 @@ function channelName(channelId) {
   )
 }
 
+function channelDisplayName(value) {
+  if (value.channel_type === 'auto_best' || value.channel === null) {
+    return t('llmOps.channel.autoBest')
+  }
+  return value.channel_name || channelName(value.channel)
+}
+
 function dimensionLabel(value) {
   return (
     {
-      text_input: '文本输入',
-      text_output: '文本输出',
-      cache_input: '缓存输入',
-      image_output: '图片输出',
-      audio_input: '音频输入',
-      audio_output: '音频输出',
-      video_input: '视频输入',
-      video_output: '视频输出'
+      text_input: t('llmOps.modelWorkbenchPanel.dimension.textInput'),
+      text_output: t('llmOps.modelWorkbenchPanel.dimension.textOutput'),
+      cache_input: t('llmOps.modelWorkbenchPanel.dimension.cacheInput'),
+      image_output: t('llmOps.modelWorkbenchPanel.dimension.imageOutput'),
+      audio_input: t('llmOps.modelWorkbenchPanel.dimension.audioInput'),
+      audio_output: t('llmOps.modelWorkbenchPanel.dimension.audioOutput'),
+      video_input: t('llmOps.modelWorkbenchPanel.dimension.videoInput'),
+      video_output: t('llmOps.modelWorkbenchPanel.dimension.videoOutput')
     }[value] || value
   )
 }
@@ -302,15 +364,23 @@ function dimensionLabel(value) {
 function workflowLabel(value) {
   return (
     {
-      draft: '草稿',
-      pending_publish: '待发布',
-      online: '在线',
-      update_draft: '更新草稿',
-      pending_update: '待更新',
-      pending_offline: '待下架',
-      offline_exception: '下架异常',
-      offline: '已下架',
-      deleted: '已删除'
+      draft: t('llmOps.modelWorkbenchPanel.workflowStatus.draft'),
+      pending_publish: t(
+        'llmOps.modelWorkbenchPanel.workflowStatus.pendingPublish'
+      ),
+      online: t('llmOps.modelWorkbenchPanel.workflowStatus.online'),
+      update_draft: t('llmOps.modelWorkbenchPanel.workflowStatus.updateDraft'),
+      pending_update: t(
+        'llmOps.modelWorkbenchPanel.workflowStatus.pendingUpdate'
+      ),
+      pending_offline: t(
+        'llmOps.modelWorkbenchPanel.workflowStatus.pendingOffline'
+      ),
+      offline_exception: t(
+        'llmOps.modelWorkbenchPanel.workflowStatus.offlineException'
+      ),
+      offline: t('llmOps.modelWorkbenchPanel.workflowStatus.offline'),
+      deleted: t('llmOps.modelWorkbenchPanel.workflowStatus.deleted')
     }[value] || value
   )
 }
@@ -318,10 +388,10 @@ function workflowLabel(value) {
 function publishLabel(value) {
   return (
     {
-      none: '未发布',
-      online: '已发布',
-      offline: '已下架',
-      deleted: '已删除'
+      none: t('llmOps.modelWorkbenchPanel.publishStatus.none'),
+      online: t('llmOps.modelWorkbenchPanel.publishStatus.online'),
+      offline: t('llmOps.modelWorkbenchPanel.publishStatus.offline'),
+      deleted: t('llmOps.modelWorkbenchPanel.publishStatus.deleted')
     }[value] || value
   )
 }

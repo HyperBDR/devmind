@@ -52,6 +52,7 @@ from .services import (
     normalize_currency,
     price_role_for_source,
     source_owner_type_for_source,
+    sync_dependent_channel_price_items_for_price_items,
     update_aggregated_model_identity,
 )
 from .skill_runner import (
@@ -658,6 +659,7 @@ def sync_official_provider_model_prices(
     )
     run = PriceCollectionRun.objects.create(source=source)
     active_offering_ids: set[int] = set()
+    changed_price_item_ids: set[int] = set()
     stats: dict[str, int | list[str]] = {
         "models": 0,
         "created": 0,
@@ -708,11 +710,14 @@ def sync_official_provider_model_prices(
                     run=run,
                     offering=offering,
                 )
-                sync_model_price_items(
+                price_items = sync_model_price_items(
                     item,
                     source=source,
                     offering=offering,
                     source_url=catalog.source_url,
+                )
+                changed_price_item_ids.update(
+                    price_item.id for price_item in price_items
                 )
                 active_offering_ids.add(offering.id)
                 stats["models"] = int(stats["models"]) + 1
@@ -725,6 +730,10 @@ def sync_official_provider_model_prices(
             stale_stats = close_stale_current_collected_prices(
                 source=source,
                 active_offering_ids=active_offering_ids,
+            )
+            changed_price_item_ids.update(stale_stats["price_item_ids"])
+            channel_sync = sync_dependent_channel_price_items_for_price_items(
+                ModelPriceItem.objects.filter(id__in=changed_price_item_ids),
             )
             source.last_collected_at = timezone.now()
             source_update_fields = ["last_collected_at", "updated_at"]
@@ -748,6 +757,12 @@ def sync_official_provider_model_prices(
                 "skipped_model_codes": skipped_codes,
                 "closed_stale_price_items": stale_stats["price_items"],
                 "closed_stale_history": stale_stats["history"],
+                "channel_model_prices_synced": (
+                    channel_sync["channel_model_prices"]
+                ),
+                "channel_price_items_synced": (
+                    channel_sync["channel_price_items"]
+                ),
             }
             run_metadata.update(catalog_source_fetch_metadata(catalog))
             if standard_catalog is not None:
@@ -3133,6 +3148,7 @@ def close_stale_current_collected_prices(
     if active_offering_ids:
         price_items = price_items.exclude(offering_id__in=active_offering_ids)
         history = history.exclude(offering_id__in=active_offering_ids)
+    closed_price_item_ids = list(price_items.values_list("id", flat=True))
     closed_price_items = price_items.update(
         is_current=False,
         effective_to=now,
@@ -3143,6 +3159,7 @@ def close_stale_current_collected_prices(
     )
     return {
         "price_items": closed_price_items,
+        "price_item_ids": closed_price_item_ids,
         "history": closed_history,
     }
 

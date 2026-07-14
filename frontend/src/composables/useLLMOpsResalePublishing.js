@@ -34,6 +34,7 @@ export function useLLMOpsResalePublishing({
   models,
   normalizeDisplayCurrency,
   preloadResalePublishingData,
+  refreshChannelPricingData,
   refreshLight,
   refreshPlatformData,
   refreshProviderManagementData,
@@ -82,7 +83,7 @@ export function useLLMOpsResalePublishing({
     loadResaleWorkflowConfig(platformId)
     if (!loading.value) {
       if (activeSection.value === 'monitor') {
-        refreshSummary()
+        refreshSummary('monitor')
       } else {
         refreshLight()
       }
@@ -177,9 +178,9 @@ export function useLLMOpsResalePublishing({
     )
 
     try {
-      await refreshSummary()
+      await Promise.all([refreshChannelPricingData(), refreshSummary()])
     } catch (error) {
-      showError(errorMessage(error, '刷新汇总数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.refreshSummary')))
     }
   }
 

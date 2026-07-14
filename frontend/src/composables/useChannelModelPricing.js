@@ -1,8 +1,11 @@
 export function useChannelModelPricing({
   customPriceFields,
   normalizeSearch,
-  props
+  props,
+  t
 }) {
+  const translate = typeof t === 'function' ? t : (key) => key
+
   function convertCurrencyAmount(value, sourceCurrency = 'USD') {
     if (value === null || value === undefined || value === '') return null
     const source = String(sourceCurrency || '').toUpperCase()
@@ -46,7 +49,9 @@ export function useChannelModelPricing({
 
   function moneyOrStatus(value, currency = 'USD') {
     if (value === null || value === undefined || value === '') return '-'
-    if (Number(value) === 0) return '缺价格'
+    if (Number(value) === 0) {
+      return translate('llmOps.channelModelDrawer.missingPrice')
+    }
     return money(value, currency)
   }
 
@@ -61,7 +66,9 @@ export function useChannelModelPricing({
       )
     }
     const previewItems = draftPricePreview(row?.draft, row?.model)
-    if (!previewItems.length) return '成本待生成'
+    if (!previewItems.length) {
+      return translate('llmOps.channelModelDrawer.pendingCostGeneration')
+    }
     return priceSummaryText(
       previewItems.map((item) => ({
         label: previewPriceLabel(item.label),
@@ -137,7 +144,7 @@ export function useChannelModelPricing({
         value: draft.rpm_limit || '-'
       },
       {
-        label: '延迟',
+        label: translate('llmOps.channelModelDrawer.performance.latencyShort'),
         value: draft.latency_ms ? `${draft.latency_ms}ms` : '-'
       }
     ]
@@ -153,9 +160,9 @@ export function useChannelModelPricing({
       return money(item.value, item.currency)
     }
     if (isNotApplicablePrice(item, model)) {
-      return '不适用'
+      return translate('llmOps.channelModelDrawer.notApplicable')
     }
-    return '缺价格'
+    return translate('llmOps.channelModelDrawer.missingPrice')
   }
 
   function summaryPriceText(item, model) {
@@ -168,9 +175,9 @@ export function useChannelModelPricing({
       return priceNumberText(item, model, 2)
     }
     if (isNotApplicablePrice(item, model)) {
-      return '不适用'
+      return translate('llmOps.channelModelDrawer.notApplicable')
     }
-    return '缺价格'
+    return translate('llmOps.channelModelDrawer.missingPrice')
   }
 
   function fixedNumber(value, digits = 4) {
@@ -193,20 +200,23 @@ export function useChannelModelPricing({
       return fixedNumber(displayValue, digits)
     }
     if (isNotApplicablePrice(item, model)) {
-      return '不适用'
+      return translate('llmOps.channelModelDrawer.notApplicable')
     }
     return fixedNumber(0, digits)
   }
 
   function isNotApplicablePrice(item, model) {
     const code = String(model?.code || '').toLowerCase()
-    const label = String(item?.label || '')
-    if (code.includes('embedding') && label.includes('出')) {
+    const label = String(item?.label || '').toLowerCase()
+    if (
+      code.includes('embedding') &&
+      (label.includes('out') || label.includes('output'))
+    ) {
       return true
     }
     if (
       Number(model?.image_output_price_per_image || 0) > 0 &&
-      (label.includes('文本入') || label.includes('文本出'))
+      (label.includes('input') || label.includes('output'))
     ) {
       return true
     }
@@ -362,24 +372,20 @@ export function useChannelModelPricing({
   }
 
   function previewPriceLabel(label) {
-    const normalized = String(label || '').replace('预估', '')
+    const normalized = String(label || '').trim()
     const labels = {
-      文入: 'Input',
-      文出: 'Output',
-      缓存: 'Cache',
-      音入: 'Audio In',
-      音出: 'Audio Out',
-      视入: 'Video In',
-      视出: 'Video Out',
-      图入: 'Image In',
-      图出: 'Image Out',
-      文本入: 'Input',
-      文本出: 'Output',
-      图片出: 'Image Out',
-      音频入: 'Audio In',
-      音频出: 'Audio Out',
-      视频入: 'Video In',
-      视频出: 'Video Out'
+      [translate('llmOps.channelModelDrawer.priceField.textInputShort')]:
+        'Input',
+      [translate('llmOps.channelModelDrawer.priceField.textOutputShort')]:
+        'Output',
+      [translate('llmOps.channelModelDrawer.priceField.audioInputShort')]:
+        'Audio In',
+      [translate('llmOps.channelModelDrawer.priceField.audioOutputShort')]:
+        'Audio Out',
+      [translate('llmOps.channelModelDrawer.priceField.videoInputShort')]:
+        'Video In',
+      [translate('llmOps.channelModelDrawer.priceField.videoOutputShort')]:
+        'Video Out'
     }
     return labels[normalized] || normalized || '-'
   }
@@ -402,7 +408,9 @@ export function useChannelModelPricing({
     if (!model) return ''
     if (providerPriceItemsForModel(model).length) return ''
     if (model.last_price_updated_at) return ''
-    if (model.source_name || model.source_endpoint_url) return '源未入库'
+    if (model.source_name || model.source_endpoint_url) {
+      return translate('llmOps.channelModelDrawer.sourceNotIngested')
+    }
     return ''
   }
 
@@ -430,7 +438,7 @@ export function useChannelModelPricing({
   function fixedPricePreview(draft, model, currency) {
     return customPriceFields(model)
       .map((field) => ({
-        label: `${field.shortLabel}预估`,
+        label: field.shortLabel,
         value: draft[field.key],
         currency
       }))
@@ -448,7 +456,7 @@ export function useChannelModelPricing({
           currency
         )
         return {
-          label: `${item.label}预估`,
+          label: item.label,
           value: baseAmount === null ? null : baseAmount * ratio,
           currency,
           missingReason: item.missingReason || ''
@@ -481,12 +489,18 @@ export function useChannelModelPricing({
   }
 
   function upstreamSourceLabel(model) {
-    if (!model) return '未绑定上游'
-    return model.source_name || model.provider_name || '未绑定上游'
+    if (!model) return translate('llmOps.channelModelDrawer.unboundUpstream')
+    return (
+      model.source_name ||
+      model.provider_name ||
+      translate('llmOps.channelModelDrawer.unboundUpstream')
+    )
   }
 
   function purchaseSourceLabel(model) {
-    if (!model) return '未选择渠道上游'
+    if (!model) {
+      return translate('llmOps.channelModelDrawer.noUpstreamSelected')
+    }
     return upstreamSourceLabel(model)
   }
 
@@ -506,12 +520,17 @@ export function useChannelModelPricing({
 
   function sourceCategoryLabel(category) {
     const labels = {
-      official_provider: '原厂',
-      supplier: '供货商',
-      manual: '人工',
-      unknown: '未标记类型'
+      official_provider: translate(
+        'llmOps.channelModelDrawer.sourceCategory.officialProvider'
+      ),
+      supplier: translate('llmOps.channelModelDrawer.sourceCategory.supplier'),
+      manual: translate('llmOps.channelModelDrawer.sourceCategory.manual'),
+      unknown: translate('llmOps.channelModelDrawer.sourceCategory.unknown')
     }
-    return labels[category] || '未标记类型'
+    return (
+      labels[category] ||
+      translate('llmOps.channelModelDrawer.sourceCategory.unknown')
+    )
   }
 
   function sourceCategoryBadge(category) {
@@ -544,22 +563,23 @@ export function useChannelModelPricing({
 
   function comparisonTitle(item) {
     if (item.comparison_status === 'unknown') {
-      return (
-        '已按全局显示货币换算展示；缺少同维度上游基准价时，' +
-        '暂无法判断高低。'
-      )
+      return translate('llmOps.channelModelDrawer.comparisonUnknown')
     }
     const delta = item.delta_amount || 0
     const percent = item.delta_percent || 0
-    return `较上游价格 ${item.currency} ${Number(delta).toFixed(4)} / ${Number(percent).toFixed(2)}%`
+    return translate('llmOps.channelModelDrawer.comparisonDelta', {
+      currency: item.currency,
+      delta: Number(delta).toFixed(4),
+      percent: Number(percent).toFixed(2)
+    })
   }
 
   function modalityLabel(modality) {
     const labels = {
-      text: '文本',
-      audio: '音频',
-      video: '视频',
-      multimodal: '多模态'
+      text: translate('llmOps.channelModelDrawer.modality.text'),
+      audio: translate('llmOps.channelModelDrawer.modality.audio'),
+      video: translate('llmOps.channelModelDrawer.modality.video'),
+      multimodal: translate('llmOps.channelModelDrawer.modality.multimodal')
     }
     return labels[modality] || modality || '-'
   }

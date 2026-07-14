@@ -17,10 +17,14 @@
               Meta Model
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑元模型' : '新建元模型' }}
+              {{
+                form.id
+                  ? t('llmOps.metaModelModal.editTitle')
+                  : t('llmOps.metaModelModal.createTitle')
+              }}
             </h3>
             <p class="mt-1 text-sm leading-6 text-slate-500">
-              元模型用于把不同价格源中的同一模型身份归一到厂商、能力和版本。
+              {{ t('llmOps.metaModelModal.description') }}
             </p>
           </div>
           <button
@@ -29,7 +33,7 @@
             :disabled="saving"
             @click="close"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
         </div>
       </div>
@@ -39,31 +43,37 @@
       >
         <section class="form-section">
           <div class="section-heading">
-            <h4>模型身份</h4>
-            <p>用于跨官方、供应商和人工价格源归并模型。</p>
+            <h4>{{ t('llmOps.metaModelModal.identityTitle') }}</h4>
+            <p>{{ t('llmOps.metaModelModal.identityHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">显示名称</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.name') }}
+              </span>
               <input
                 v-model="form.name"
                 class="field"
-                placeholder="例如：GPT-4o mini"
+                :placeholder="t('llmOps.metaModelModal.placeholders.name')"
                 required
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模型标识 Code</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.code') }}
+              </span>
               <input
                 v-model="form.code"
                 class="field font-mono disabled:bg-slate-50 disabled:text-slate-400"
                 :disabled="Boolean(form.id)"
-                placeholder="例如：gpt-4o-mini"
+                :placeholder="t('llmOps.metaModelModal.placeholders.code')"
                 required
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模型归属方</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.owner') }}
+              </span>
               <CompactSelect
                 v-model="form.owner_code"
                 :options="ownerOptions"
@@ -71,7 +81,9 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">状态</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.status') }}
+              </span>
               <CompactSelect
                 v-model="form.status"
                 :options="statusOptions"
@@ -83,20 +95,24 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>分类与能力</h4>
-            <p>用于运营筛选、渠道规划和模型可用性展示。</p>
+            <h4>{{ t('llmOps.metaModelModal.capabilityTitle') }}</h4>
+            <p>{{ t('llmOps.metaModelModal.capabilityHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">模型家族</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.family') }}
+              </span>
               <input
                 v-model="form.family"
                 class="field"
-                placeholder="例如：GPT-4o"
+                :placeholder="t('llmOps.metaModelModal.placeholders.family')"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">模态</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.modality') }}
+              </span>
               <CompactSelect
                 v-model="form.modality"
                 :options="modalityOptions"
@@ -104,16 +120,22 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">能力标签</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.features') }}
+              </span>
               <input
                 v-model="form.feature_text"
                 class="field"
                 placeholder="chat, vision, tool_calling"
               />
-              <span class="field-help">英文逗号分隔。</span>
+              <span class="field-help">
+                {{ t('llmOps.metaModelModal.featureHelp') }}
+              </span>
             </label>
             <label class="field-group">
-              <span class="field-label">上下文窗口</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.contextWindow') }}
+              </span>
               <input
                 v-model.number="form.context_window"
                 class="field"
@@ -122,7 +144,9 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">最大输出 Token</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.maxOutputTokens') }}
+              </span>
               <input
                 v-model.number="form.max_output_tokens"
                 class="field"
@@ -135,16 +159,18 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>别名</h4>
-            <p>别名用于从采集结果中匹配同一元模型身份。</p>
+            <h4>{{ t('llmOps.metaModelModal.aliasTitle') }}</h4>
+            <p>{{ t('llmOps.metaModelModal.aliasHint') }}</p>
           </div>
           <div class="grid gap-4">
             <label class="field-group">
-              <span class="field-label">别名</span>
+              <span class="field-label">
+                {{ t('llmOps.metaModelModal.fields.aliases') }}
+              </span>
               <textarea
                 v-model="form.alias_text"
                 class="field min-h-24 resize-none font-mono"
-                placeholder="每行一个别名，例如 GPT-4o mini"
+                :placeholder="t('llmOps.metaModelModal.placeholders.aliases')"
               />
             </label>
           </div>
@@ -152,8 +178,8 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>元数据</h4>
-            <p>可记录采集来源、官方页面标识或运营备注，必须是 JSON 对象。</p>
+            <h4>{{ t('llmOps.metaModelModal.metadataTitle') }}</h4>
+            <p>{{ t('llmOps.metaModelModal.metadataHint') }}</p>
           </div>
           <textarea
             v-model="form.metadata_text"
@@ -173,8 +199,8 @@
         <span v-else class="modal-footer-status modal-footer-note">
           {{
             form.id
-              ? '保存后会影响关联模型的展示身份。'
-              : '创建后可绑定到模型 SKU。'
+              ? t('llmOps.metaModelModal.editNote')
+              : t('llmOps.metaModelModal.createNote')
           }}
         </span>
         <div class="modal-footer-actions">
@@ -184,7 +210,7 @@
             :disabled="saving"
             @click="close"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-save"
@@ -192,7 +218,11 @@
             :disabled="saving"
           >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
-            {{ form.id ? '保存修改' : '创建元模型' }}
+            {{
+              form.id
+                ? t('llmOps.metaModelModal.saveChanges')
+                : t('llmOps.metaModelModal.createMetaModel')
+            }}
           </button>
         </div>
       </div>
@@ -202,6 +232,8 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
@@ -225,6 +257,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'saved'])
+const { t } = useI18n()
 
 const form = ref(defaults())
 const saving = ref(false)
@@ -244,7 +277,9 @@ const modalityOptions = [
 ]
 
 const ownerOptions = computed(() => {
-  const options = [{ value: '', label: '未绑定' }]
+  const options = [
+    { value: '', label: t('llmOps.metaModelModal.ownerUnbound') }
+  ]
   const seen = new Set([''])
   props.metaModels.forEach((model) => {
     pushOwnerOption(options, seen, model.owner_code, model.owner_name)
@@ -337,7 +372,10 @@ async function save() {
     form.value = defaults()
     emit('saved')
   } catch (error) {
-    saveError.value = errorMessage(error, '元模型保存失败，请稍后重试。')
+    saveError.value = errorMessage(
+      error,
+      t('llmOps.metaModelModal.errors.saveFailed')
+    )
   } finally {
     saving.value = false
   }
@@ -348,10 +386,10 @@ function normalizePayload(payload) {
   try {
     metadata = payload.metadata_text ? JSON.parse(payload.metadata_text) : {}
   } catch (_error) {
-    throw new Error('元数据必须是合法 JSON 对象。')
+    throw new Error(t('llmOps.metaModelModal.errors.invalidMetadataJson'))
   }
   if (!metadata || Array.isArray(metadata) || typeof metadata !== 'object') {
-    throw new Error('元数据必须是 JSON 对象。')
+    throw new Error(t('llmOps.metaModelModal.errors.metadataObject'))
   }
 
   const aliases = String(payload.alias_text || '')

@@ -439,7 +439,8 @@ const rows = useAgioneListingRows({
   selectedTrendModelIdRef: unusedModelId,
   selectedTrendChannelIdRef: unusedChannelId,
   trendProfitRateRef: unusedProfitRate,
-  pointConversionRef: toRef(props, 'pointConversion')
+  pointConversionRef: toRef(props, 'pointConversion'),
+  t
 })
 
 const {

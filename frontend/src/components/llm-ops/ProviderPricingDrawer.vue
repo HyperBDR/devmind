@@ -27,7 +27,7 @@
             class="btn-secondary btn-action-cancel"
             @click="$emit('close')"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
         </div>
       </div>
@@ -35,39 +35,59 @@
       <div class="space-y-5 px-5 py-5">
         <div class="grid gap-3 md:grid-cols-5">
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">模型数量</p>
+            <p class="text-xs text-slate-500">
+              {{ t('llmOps.providerPricingDrawer.modelCount') }}
+            </p>
             <p class="mt-1 font-mono text-sm text-slate-800">
               {{ models.length }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">已定价模型</p>
+            <p class="text-xs text-slate-500">
+              {{ t('llmOps.providerPricingDrawer.pricedModelCount') }}
+            </p>
             <p class="mt-1 font-mono text-sm text-slate-800">
               {{ pricedModelCount }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">模型价格源</p>
+            <p class="text-xs text-slate-500">
+              {{ t('llmOps.providerPricingDrawer.modelPriceSources') }}
+            </p>
             <p class="mt-1 font-mono text-sm text-slate-800">
               {{ sourceRows.length }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">价格结构</p>
+            <p class="text-xs text-slate-500">
+              {{ t('llmOps.providerPricingDrawer.priceStructure') }}
+            </p>
             <p class="mt-1 text-sm text-slate-800">
-              原厂 {{ officialModelCount }} · 云托管
-              {{ cloudHostedModelCount }} · 外部 {{ externalModelCount }}
+              {{
+                t('llmOps.providerPricingDrawer.priceStructureSummary', {
+                  official: officialModelCount,
+                  cloud: cloudHostedModelCount,
+                  external: externalModelCount
+                })
+              }}
             </p>
           </div>
           <div class="rounded-lg bg-slate-50 px-3 py-2">
-            <p class="text-xs text-slate-500">价格来源</p>
+            <p class="text-xs text-slate-500">
+              {{ t('llmOps.providerPricingDrawer.priceSource') }}
+            </p>
             <div v-if="primarySource" class="mt-1 min-w-0">
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-slate-900">
                   {{ primarySource.name }}
                 </p>
                 <p class="mt-1 truncate font-mono text-xs text-slate-400">
-                  {{ primarySource.slug }} · {{ sourceRows.length }} 个来源
+                  {{
+                    t('llmOps.providerPricingDrawer.sourceSummary', {
+                      slug: primarySource.slug,
+                      count: sourceRows.length
+                    })
+                  }}
                 </p>
                 <a
                   v-if="primarySource.endpoint_url"
@@ -88,9 +108,11 @@
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
             <div>
-              <h3 class="panel-title">服务商模型价格</h3>
+              <h3 class="panel-title">
+                {{ t('llmOps.providerPricingDrawer.title') }}
+              </h3>
               <p class="mt-1 text-xs text-slate-500">
-                按模型汇总输入、输出、缓存等核心价格，减少逐维度展开带来的噪音。
+                {{ t('llmOps.providerPricingDrawer.subtitle') }}
               </p>
             </div>
             <div
@@ -99,9 +121,15 @@
               <input
                 v-model="search"
                 class="field-input"
-                placeholder="搜索模型、来源或 code"
+                :placeholder="
+                  t('llmOps.providerPricingDrawer.searchPlaceholder')
+                "
               />
-              <div class="filter-tabs" role="tablist" aria-label="来源类型">
+              <div
+                class="filter-tabs"
+                role="tablist"
+                :aria-label="t('llmOps.providerPricingDrawer.sourceType')"
+              >
                 <button
                   v-for="option in categoryFilterOptions"
                   :key="option.value"
@@ -130,10 +158,16 @@
               </colgroup>
               <thead>
                 <tr>
-                  <th class="table-head">模型</th>
-                  <th class="table-head">来源类型</th>
-                  <th class="table-head">价格摘要</th>
-                  <th class="table-head">更新时间</th>
+                  <th class="table-head">{{ t('llmOps.fields.model') }}</th>
+                  <th class="table-head">
+                    {{ t('llmOps.providerPricingDrawer.sourceType') }}
+                  </th>
+                  <th class="table-head">
+                    {{ t('llmOps.providerPricingDrawer.priceSummary') }}
+                  </th>
+                  <th class="table-head">
+                    {{ t('llmOps.providerPricingDrawer.updatedAt') }}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -166,7 +200,9 @@
                         {{ item.value }}
                       </span>
                     </div>
-                    <span v-else class="text-xs text-slate-400">暂无价格</span>
+                    <span v-else class="text-xs text-slate-400">
+                      {{ t('llmOps.providerPricingDrawer.noPrice') }}
+                    </span>
                   </td>
                   <td class="table-cell">
                     {{ formatDateTime(row.updated_at) }}
@@ -174,7 +210,7 @@
                 </tr>
                 <tr v-if="!filteredModelRows.length">
                   <td class="table-cell text-slate-500" colspan="4">
-                    当前服务商还没有模型定价记录。
+                    {{ t('llmOps.providerPricingDrawer.empty') }}
                   </td>
                 </tr>
               </tbody>
@@ -189,6 +225,8 @@
 <script setup>
 import '@/components/llm-ops/providerPricingDrawer.css'
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import {
   canCollectPriceSource,
   canManualEntryPriceSource,
@@ -197,7 +235,6 @@ import {
   normalizePriceSourceCategory as businessSourceCategory,
   officialProviderCodeFromSlug as baseOfficialProviderCodeFromSlug,
   preferredPriceSource,
-  priceSourceCategoryLabel as sourceCategoryLabel,
   priceSourceCategoryRank as categoryRank,
   priceSourceGroupKey as basePriceSourceGroupKey,
   priceSourceTone as sourceTone
@@ -240,6 +277,7 @@ const props = defineProps({
   }
 })
 
+const { t } = useI18n()
 const search = ref('')
 const categoryFilter = ref('all')
 
@@ -250,19 +288,31 @@ const modelRows = computed(() =>
 const categoryFilterOptions = computed(() => {
   const counts = sourceCategoryCounts(modelRows.value)
   return [
-    { value: 'all', label: '全部来源', count: modelRows.value.length },
+    {
+      value: 'all',
+      label: t('llmOps.providerPricingDrawer.allSources'),
+      count: modelRows.value.length
+    },
     {
       value: 'official_provider',
-      label: '原厂',
+      label: sourceCategoryLabel('official_provider'),
       count: counts.official_provider || 0
     },
     {
       value: 'cloud_hosted',
-      label: '云托管',
+      label: sourceCategoryLabel('cloud_hosted'),
       count: counts.cloud_hosted || 0
     },
-    { value: 'supplier', label: '供货商', count: counts.supplier || 0 },
-    { value: 'manual', label: '人工', count: counts.manual || 0 }
+    {
+      value: 'supplier',
+      label: sourceCategoryLabel('supplier'),
+      count: counts.supplier || 0
+    },
+    {
+      value: 'manual',
+      label: sourceCategoryLabel('manual'),
+      count: counts.manual || 0
+    }
   ]
 })
 
@@ -403,7 +453,7 @@ function buildModelRow(model, items, source = null, sourceKey = 'source') {
       items[0]?.source_name ||
       model.source_name ||
       resolvedSource.name ||
-      '未绑定价格源',
+      t('llmOps.providerPricingDrawer.unboundPriceSource'),
     source_url:
       items[0]?.source_endpoint_url ||
       model.source_endpoint_url ||
@@ -552,9 +602,21 @@ function isProviderOfficialSource(source) {
 function aggregateSourceName(source) {
   const providerName = source.provider_name || props.provider?.name || ''
   if (!isLegacyOfficialModelSource(source)) {
-    return source?.name || (providerName ? `${providerName} 官方价格` : '-')
+    return (
+      source?.name ||
+      (providerName
+        ? t('llmOps.providerPricingDrawer.officialPriceName', {
+            provider: providerName
+          })
+        : '-')
+    )
   }
-  return `${providerName || source.provider_code || '服务商'} 官方价格`
+  return t('llmOps.providerPricingDrawer.officialPriceName', {
+    provider:
+      providerName ||
+      source.provider_code ||
+      t('llmOps.providerPricingDrawer.providerFallback')
+  })
 }
 
 function aggregateSourceSlug(source) {
@@ -574,25 +636,33 @@ function officialProviderCodeFromSlug(source) {
 
 function dimensionLabel(dimension) {
   const labels = {
-    text_input: '文本输入',
-    text_output: '文本输出',
-    cache_input: '缓存输入',
-    image_input: '图片输入',
-    image_output: '图片输出',
-    audio_input: '音频输入',
-    audio_output: '音频输出',
-    video_input: '视频输入',
-    video_output: '视频输出'
+    text_input: t('llmOps.providerPricingDrawer.dimension.textInput'),
+    text_output: t('llmOps.providerPricingDrawer.dimension.textOutput'),
+    cache_input: t('llmOps.providerPricingDrawer.dimension.cacheInput'),
+    image_input: t('llmOps.providerPricingDrawer.dimension.imageInput'),
+    image_output: t('llmOps.providerPricingDrawer.dimension.imageOutput'),
+    audio_input: t('llmOps.providerPricingDrawer.dimension.audioInput'),
+    audio_output: t('llmOps.providerPricingDrawer.dimension.audioOutput'),
+    video_input: t('llmOps.providerPricingDrawer.dimension.videoInput'),
+    video_output: t('llmOps.providerPricingDrawer.dimension.videoOutput')
   }
   return labels[dimension] || dimension || '-'
 }
 
 function tokenPricingItems(model) {
   return [
-    priceItem('输入 / 1M', model.input_price_per_million, model.currency),
-    priceItem('输出 / 1M', model.output_price_per_million, model.currency),
     priceItem(
-      '缓存输入 / 1M',
+      t('llmOps.providerPricingDrawer.legacyPrice.input1m'),
+      model.input_price_per_million,
+      model.currency
+    ),
+    priceItem(
+      t('llmOps.providerPricingDrawer.legacyPrice.output1m'),
+      model.output_price_per_million,
+      model.currency
+    ),
+    priceItem(
+      t('llmOps.providerPricingDrawer.legacyPrice.cacheInput1m'),
       model.cache_input_price_per_million,
       model.currency
     )
@@ -602,12 +672,12 @@ function tokenPricingItems(model) {
 function audioPricingItems(model) {
   return [
     priceItem(
-      '音频输入 / 秒',
+      t('llmOps.providerPricingDrawer.legacyPrice.audioInputSecond'),
       model.audio_input_price_per_second,
       model.currency
     ),
     priceItem(
-      '音频输出 / 秒',
+      t('llmOps.providerPricingDrawer.legacyPrice.audioOutputSecond'),
       model.audio_output_price_per_second,
       model.currency
     )
@@ -617,7 +687,7 @@ function audioPricingItems(model) {
 function imagePricingItems(model) {
   return [
     priceItem(
-      '图片输出 / 张',
+      t('llmOps.providerPricingDrawer.legacyPrice.imageOutputImage'),
       model.image_output_price_per_image,
       model.currency
     )
@@ -627,12 +697,12 @@ function imagePricingItems(model) {
 function videoPricingItems(model) {
   const items = [
     priceItem(
-      '视频输入 / 秒',
+      t('llmOps.providerPricingDrawer.legacyPrice.videoInputSecond'),
       model.video_input_price_per_second,
       model.currency
     ),
     priceItem(
-      '视频输出 / 秒',
+      t('llmOps.providerPricingDrawer.legacyPrice.videoOutputSecond'),
       model.video_output_price_per_second,
       model.currency
     )
@@ -640,8 +710,20 @@ function videoPricingItems(model) {
   const resolutionItems = Object.entries(model.video_resolution_prices || {})
     .slice(0, 2)
     .flatMap(([resolution, price]) => [
-      priceItem(`${resolution} 输入`, price?.input, model.currency),
-      priceItem(`${resolution} 输出`, price?.output, model.currency)
+      priceItem(
+        t('llmOps.providerPricingDrawer.legacyPrice.resolutionInput', {
+          resolution
+        }),
+        price?.input,
+        model.currency
+      ),
+      priceItem(
+        t('llmOps.providerPricingDrawer.legacyPrice.resolutionOutput', {
+          resolution
+        }),
+        price?.output,
+        model.currency
+      )
     ])
     .filter(Boolean)
   return [...items, ...resolutionItems]
@@ -664,20 +746,32 @@ function currentPriceItemSummary(item) {
 
 function compactDimensionLabel(dimension, billingUnit) {
   const labels = {
-    text_input: '输入',
-    text_output: '输出',
-    cache_input: '缓存',
-    image_input: '图入',
-    image_output: '图出',
-    audio_input: '音入',
-    audio_output: '音出',
-    video_input: '视入',
-    video_output: '视出'
+    text_input: t('llmOps.providerPricingDrawer.compactDimension.input'),
+    text_output: t('llmOps.providerPricingDrawer.compactDimension.output'),
+    cache_input: t('llmOps.providerPricingDrawer.compactDimension.cache'),
+    image_input: t('llmOps.providerPricingDrawer.compactDimension.imageInput'),
+    image_output: t(
+      'llmOps.providerPricingDrawer.compactDimension.imageOutput'
+    ),
+    audio_input: t('llmOps.providerPricingDrawer.compactDimension.audioInput'),
+    audio_output: t(
+      'llmOps.providerPricingDrawer.compactDimension.audioOutput'
+    ),
+    video_input: t('llmOps.providerPricingDrawer.compactDimension.videoInput'),
+    video_output: t('llmOps.providerPricingDrawer.compactDimension.videoOutput')
   }
   const base = labels[dimension] || dimensionLabel(dimension)
-  if (billingUnit === 'per_image') return `${base}/张`
-  if (billingUnit === 'per_second') return `${base}/秒`
-  if (billingUnit === 'per_generation') return `${base}/次`
+  if (billingUnit === 'per_image') {
+    return t('llmOps.providerPricingDrawer.billingUnit.perImage', { base })
+  }
+  if (billingUnit === 'per_second') {
+    return t('llmOps.providerPricingDrawer.billingUnit.perSecond', { base })
+  }
+  if (billingUnit === 'per_generation') {
+    return t('llmOps.providerPricingDrawer.billingUnit.perGeneration', {
+      base
+    })
+  }
   return base
 }
 
@@ -772,12 +866,25 @@ function hasImagePrice(model) {
 
 function modalityLabel(modality) {
   const labels = {
-    text: '文本',
-    audio: '音频',
-    video: '视频',
-    multimodal: '多模态'
+    text: t('llmOps.providerPricingDrawer.modality.text'),
+    audio: t('llmOps.providerPricingDrawer.modality.audio'),
+    video: t('llmOps.providerPricingDrawer.modality.video'),
+    multimodal: t('llmOps.providerPricingDrawer.modality.multimodal')
   }
   return labels[modality] || modality || '-'
+}
+
+function sourceCategoryLabel(category) {
+  const labels = {
+    official_provider: t(
+      'llmOps.providerPricingDrawer.sourceCategory.officialProvider'
+    ),
+    cloud_hosted: t('llmOps.providerPricingDrawer.sourceCategory.cloudHosted'),
+    supplier: t('llmOps.providerPricingDrawer.sourceCategory.supplier'),
+    manual: t('llmOps.providerPricingDrawer.sourceCategory.manual'),
+    unknown: t('llmOps.providerPricingDrawer.sourceCategory.unknown')
+  }
+  return labels[category] || labels.unknown
 }
 
 function formatDateTime(value) {

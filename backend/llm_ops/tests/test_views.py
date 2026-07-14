@@ -27,6 +27,7 @@ from llm_ops.models import (
     ResaleListingPriceHistory,
     ResalePlatform,
     ResaleWorkflowConfig,
+    UsageReconciliationRecord,
 )
 from llm_ops.services import sync_channel_price_items
 
@@ -186,6 +187,144 @@ class LLMOpsViewTests(TestCase):
             },
             {"gpt-4o"},
         )
+
+    def test_resale_listing_list_filters_by_platform_and_status(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta_model = MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            name="GPT-4o",
+            code="gpt-4o",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Primary",
+            code="primary",
+        )
+        agione = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione-filter",
+        )
+        marketplace = ResalePlatform.objects.create(
+            name="Marketplace",
+            code="marketplace-filter",
+        )
+        online_listing = self._create_online_listing(
+            platform=agione,
+            model=model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+        ResaleListing.objects.create(
+            platform=agione,
+            model=model,
+            meta_model=meta_model,
+            channel=None,
+            publish_status=ResaleListing.PUBLISH_NONE,
+            workflow_status=ResaleListing.WORKFLOW_DRAFT,
+        )
+        self._create_online_listing(
+            platform=marketplace,
+            model=model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+
+        response = self.client.get(
+            reverse("resale-listing-list"),
+            {
+                "platform": agione.id,
+                "publish_status": ResaleListing.PUBLISH_ONLINE,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], online_listing.id)
+
+    def test_reconciliation_list_filters_by_platform_and_status(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta_model = MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+        listed_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            name="GPT-4o",
+            code="gpt-4o",
+        )
+        other_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            name="GPT-4o Mini",
+            code="gpt-4o-mini",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Primary",
+            code="primary",
+        )
+        agione = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione-reconciliation",
+        )
+        marketplace = ResalePlatform.objects.create(
+            name="Marketplace",
+            code="marketplace-reconciliation",
+        )
+        self._create_online_listing(
+            platform=agione,
+            model=listed_model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+        self._create_online_listing(
+            platform=marketplace,
+            model=other_model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+        target_record = UsageReconciliationRecord.objects.create(
+            date=timezone.localdate(),
+            channel=channel,
+            model=listed_model,
+            meta_model=meta_model,
+            charged_amount=Decimal("12.000000"),
+            expected_amount=Decimal("10.000000"),
+            discrepancy=Decimal("2.000000"),
+            discrepancy_percent=Decimal("20.0000"),
+            status=UsageReconciliationRecord.STATUS_OVERCHARGED,
+        )
+        UsageReconciliationRecord.objects.create(
+            date=timezone.localdate(),
+            channel=channel,
+            model=other_model,
+            meta_model=meta_model,
+            charged_amount=Decimal("8.000000"),
+            expected_amount=Decimal("10.000000"),
+            discrepancy=Decimal("-2.000000"),
+            discrepancy_percent=Decimal("-20.0000"),
+            status=UsageReconciliationRecord.STATUS_UNDERCHARGED,
+        )
+
+        response = self.client.get(
+            reverse("reconciliation-record-list"),
+            {
+                "platform": agione.id,
+                "status": UsageReconciliationRecord.STATUS_OVERCHARGED,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], target_record.id)
 
     def test_meta_model_owner_summary_reads_current_catalog(self):
         MetaModel.objects.create(
@@ -1024,6 +1163,60 @@ class LLMOpsViewTests(TestCase):
             "0.150000",
         )
         self.assertEqual(audit.changes["unit_price"]["after"], "0.120000")
+
+    def test_model_price_item_update_resyncs_channel_prices(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="Supplier Source",
+            slug="supplier-source-resync",
+            provider=provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            source=source,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Supplier Channel",
+            code="supplier-channel-resync",
+            currency="USD",
+            settlement_ratio=Decimal("0.8"),
+        )
+        item = ModelPriceItem.objects.create(
+            provider=provider,
+            model=model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("1.000000"),
+            price_fingerprint="supplier-input-before",
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=source,
+        )
+        sync_channel_price_items(price)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("0.800000"),
+        )
+
+        response = self.client.patch(
+            reverse("model-price-item-detail", args=[item.id]),
+            {"unit_price": "2.000000"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("1.600000"),
+        )
 
     def test_model_price_item_can_be_deleted(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -3493,6 +3686,55 @@ class LLMOpsViewTests(TestCase):
             100.0,
         )
 
+    def test_summary_monitor_scope_omits_heavy_payloads(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5-monitor",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Best Channel",
+            code="best-channel-monitor",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"scope": "monitor"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["procurement"], [])
+        self.assertEqual(response.data["listings"], [])
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertNotIn("options", diagnostic)
+        self.assertEqual(diagnostic["model_id"], model.id)
+        self.assertEqual(
+            diagnostic["recommended_channel"]["channel_name"],
+            "Best Channel",
+        )
+        self.assertTrue(diagnostic["current_listing"]["is_listed"])
+        self.assertIn("decision_status", diagnostic)
+        self.assertIn("yield_metrics", diagnostic)
+
     def test_summary_decision_fields_for_listed_model(self):
         from llm_ops.services import compute_model_decision
         provider = LLMProvider.objects.create(name="Anthropic", code="anthropic")
@@ -3549,6 +3791,11 @@ class LLMOpsViewTests(TestCase):
         ):
             self.assertIn(key, diagnostic)
         self.assertEqual(diagnostic["decision_status"], "single_channel")
+        self.assertEqual(diagnostic["status_label"], "low_coverage")
+        self.assertEqual(
+            diagnostic["decision_action"],
+            "add_channel_coverage",
+        )
         self.assertEqual(diagnostic["yield_metrics"]["is_resolved"], True)
         self.assertEqual(diagnostic["current_listing"]["is_listed"], True)
         self.assertEqual(diagnostic["data_event_type"], "updated")
@@ -3618,6 +3865,11 @@ class LLMOpsViewTests(TestCase):
         self.assertTrue(diagnostic["has_lowest_listing"])
         self.assertEqual(diagnostic["decision_status"], "ready")
         self.assertIsNone(diagnostic["current_listing"]["channel_id"])
+        self.assertIsNone(diagnostic["current_listing"]["channel_name"])
+        self.assertEqual(
+            diagnostic["current_listing"]["channel_type"],
+            "auto_best",
+        )
 
     def test_summary_marks_latest_failed_collection_as_data_anomaly(self):
         provider = LLMProvider.objects.create(

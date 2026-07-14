@@ -5,16 +5,18 @@
         class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between"
       >
         <div>
-          <h3 class="panel-title">渠道横向比价矩阵</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.channelPriceMatrixPanel.title') }}
+          </h3>
           <p class="mt-1 text-xs text-slate-500">
-            按模型比较各渠道采购价格、最低价命中和覆盖缺口。
+            {{ t('llmOps.channelPriceMatrixPanel.subtitle') }}
           </p>
         </div>
         <div class="flex flex-col gap-2 sm:flex-row">
           <input
             v-model="keyword"
             class="llm-ops-input h-9 w-full sm:w-64"
-            placeholder="搜索模型或厂商"
+            :placeholder="t('llmOps.channelPriceMatrixPanel.searchPlaceholder')"
             type="search"
           />
           <CompactSelect
@@ -40,7 +42,9 @@
         <table class="data-table min-w-[980px]">
           <thead>
             <tr>
-              <th class="table-head sticky left-0 z-10 bg-white">模型</th>
+              <th class="table-head sticky left-0 z-10 bg-white">
+                {{ t('llmOps.fields.model') }}
+              </th>
               <th
                 v-for="channel in visibleChannels"
                 :key="channel.id"
@@ -48,8 +52,12 @@
               >
                 {{ channel.name }}
               </th>
-              <th class="table-head text-right">覆盖</th>
-              <th class="table-head">最低价渠道</th>
+              <th class="table-head text-right">
+                {{ t('llmOps.channelPriceMatrixPanel.columns.coverage') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.channelPriceMatrixPanel.columns.lowestChannel') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -83,7 +91,9 @@
                 <span v-if="row.best_channel" class="status-pill success">
                   {{ row.best_channel.channel_name }}
                 </span>
-                <span v-else class="status-pill danger">缺渠道价</span>
+                <span v-else class="status-pill danger">
+                  {{ t('llmOps.channelPriceMatrixPanel.status.missing') }}
+                </span>
               </td>
             </tr>
             <tr v-if="!filteredRows.length">
@@ -91,7 +101,7 @@
                 class="table-cell text-slate-500"
                 :colspan="visibleChannels.length + 3"
               >
-                当前筛选条件下没有模型。
+                {{ t('llmOps.channelPriceMatrixPanel.empty') }}
               </td>
             </tr>
           </tbody>
@@ -103,6 +113,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { asArray } from '@/utils/llmOpsPagination'
 
@@ -113,14 +124,24 @@ const props = defineProps({
   channels: { type: Array, default: () => [] }
 })
 
+const { t } = useI18n()
 const keyword = ref('')
 const statusFilter = ref('all')
-const statusFilterOptions = [
-  { label: '全部状态', value: 'all' },
-  { label: '缺渠道价', value: 'missing' },
-  { label: '单渠道覆盖', value: 'single' },
-  { label: '多渠道覆盖', value: 'ready' }
-]
+const statusFilterOptions = computed(() => [
+  { label: t('llmOps.channelPriceMatrixPanel.filters.all'), value: 'all' },
+  {
+    label: t('llmOps.channelPriceMatrixPanel.filters.missing'),
+    value: 'missing'
+  },
+  {
+    label: t('llmOps.channelPriceMatrixPanel.filters.single'),
+    value: 'single'
+  },
+  {
+    label: t('llmOps.channelPriceMatrixPanel.filters.ready'),
+    value: 'ready'
+  }
+])
 
 const rows = computed(() => asArray(props.summary.agione?.diagnostics))
 const visibleChannels = computed(() =>
@@ -156,24 +177,26 @@ const metrics = computed(() => {
   const missing = rows.value.filter((row) => !row.best_channel).length
   return [
     {
-      label: '模型总数',
+      label: t('llmOps.channelPriceMatrixPanel.metrics.total.label'),
       value: total,
-      hint: '参与渠道比价的活跃模型'
+      hint: t('llmOps.channelPriceMatrixPanel.metrics.total.hint')
     },
     {
-      label: '有渠道价',
+      label: t('llmOps.channelPriceMatrixPanel.metrics.covered.label'),
       value: covered,
-      hint: `覆盖率 ${percentage(covered, total)}%`
+      hint: t('llmOps.channelPriceMatrixPanel.metrics.covered.hint', {
+        percent: percentage(covered, total)
+      })
     },
     {
-      label: '单渠道风险',
+      label: t('llmOps.channelPriceMatrixPanel.metrics.single.label'),
       value: single,
-      hint: '只有一个采购渠道，缺少备选'
+      hint: t('llmOps.channelPriceMatrixPanel.metrics.single.hint')
     },
     {
-      label: '缺渠道价',
+      label: t('llmOps.channelPriceMatrixPanel.metrics.missing.label'),
       value: missing,
-      hint: '无法计算采购成本'
+      hint: t('llmOps.channelPriceMatrixPanel.metrics.missing.hint')
     }
   ]
 })

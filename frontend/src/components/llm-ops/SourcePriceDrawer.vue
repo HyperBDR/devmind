@@ -133,7 +133,7 @@
               <tbody>
                 <tr v-if="loading">
                   <td class="table-cell text-slate-500" colspan="3">
-                    加载中...
+                    {{ t('common.loading') }}
                   </td>
                 </tr>
                 <template v-for="row in filteredModelRows" :key="row.key">
@@ -218,7 +218,7 @@
                 :disabled="page <= 1 || loading"
                 @click="$emit('page-change', page - 1)"
               >
-                上一页
+                {{ t('common.previous') }}
               </button>
               <button
                 class="btn-secondary pagination-btn"
@@ -226,7 +226,7 @@
                 :disabled="page >= totalPages || loading"
                 @click="$emit('page-change', page + 1)"
               >
-                下一页
+                {{ t('common.next') }}
               </button>
             </div>
           </div>

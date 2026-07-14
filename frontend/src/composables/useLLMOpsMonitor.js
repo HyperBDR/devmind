@@ -68,7 +68,7 @@ export function useLLMOpsMonitor({ channels, procurementRows, summary }) {
         output_yield: row.yield_metrics?.output_yield ?? null,
         data_event_type: row.data_event_type || 'updated',
         last_data_event_at: row.last_data_event_at || null,
-        status_label: row.decision_action || '',
+        status_label: '',
         status_tone: decisionTone(decisionStatus),
         status_priority: row.decision_priority || 8
       }

@@ -366,6 +366,7 @@ const {
   providers,
   records,
   refreshAll,
+  refreshChannelPricingData,
   refreshChannelManagementData,
   refreshCollectionRuns,
   refreshCoreData,
@@ -415,6 +416,7 @@ const {
   models,
   normalizeDisplayCurrency,
   preloadResalePublishingData,
+  refreshChannelPricingData,
   refreshLight,
   refreshPlatformData,
   refreshProviderManagementData,
@@ -527,7 +529,7 @@ watch(displayCurrency, (currency) => {
   localStorage.setItem('llm_ops_display_currency', normalized)
   if (!loading.value) {
     if (activeSection.value === 'monitor') {
-      refreshSummary()
+      refreshSummary('monitor')
     } else {
       refreshLight()
     }
@@ -542,7 +544,7 @@ watch(activeSection, (section) => {
     !loading.value
   ) {
     refreshSectionData(section).catch((error) => {
-      showError(errorMessage(error, '加载当前页面数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.loadSection')))
     })
   }
   if (
@@ -551,7 +553,7 @@ watch(activeSection, (section) => {
     !loading.value
   ) {
     refreshCoreData(section).catch((error) => {
-      showError(errorMessage(error, '加载基础模型数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.loadCoreModels')))
     })
   }
 })

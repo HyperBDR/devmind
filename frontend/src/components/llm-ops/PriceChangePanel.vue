@@ -11,9 +11,11 @@
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
         <div>
-          <h3 class="panel-title">价格变化看板</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.priceChangePanel.title') }}
+          </h3>
           <p class="mt-1 text-xs text-slate-500">
-            汇总渠道采购价、挂售价和标准价格项的最近变化。
+            {{ t('llmOps.priceChangePanel.subtitle') }}
           </p>
         </div>
         <CompactSelect
@@ -27,12 +29,20 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th class="table-head">对象</th>
-              <th class="table-head">类型</th>
+              <th class="table-head">
+                {{ t('llmOps.priceChangePanel.columns.object') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.priceChangePanel.columns.type') }}
+              </th>
               <th class="table-head text-right">Input</th>
               <th class="table-head text-right">Output</th>
-              <th class="table-head">币种</th>
-              <th class="table-head">时间</th>
+              <th class="table-head">
+                {{ t('llmOps.priceChangePanel.columns.currency') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.priceChangePanel.columns.time') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -57,7 +67,7 @@
             </tr>
             <tr v-if="!filteredRows.length">
               <td class="table-cell text-slate-500" colspan="6">
-                暂无价格变化记录。
+                {{ t('llmOps.priceChangePanel.empty') }}
               </td>
             </tr>
           </tbody>
@@ -69,6 +79,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import CompactSelect from './CompactSelect.vue'
 
@@ -78,22 +89,27 @@ const props = defineProps({
   priceItems: { type: Array, default: () => [] }
 })
 
+const { t } = useI18n()
 const typeFilter = ref('all')
-const typeFilterOptions = [
-  { label: '全部价格', value: 'all' },
-  { label: '渠道采购价', value: 'channel' },
-  { label: '平台挂售价', value: 'listing' },
-  { label: '标准价格项', value: 'official' }
-]
+const typeFilterOptions = computed(() => [
+  { label: t('llmOps.priceChangePanel.filters.all'), value: 'all' },
+  { label: t('llmOps.priceChangePanel.types.channel'), value: 'channel' },
+  { label: t('llmOps.priceChangePanel.types.listing'), value: 'listing' },
+  { label: t('llmOps.priceChangePanel.types.official'), value: 'official' }
+])
 
 const changeRows = computed(() => {
   const channelRows = props.channelHistory.map((item) => ({
     key: `channel-${item.id}`,
     type: 'channel',
-    type_label: '渠道采购价',
+    type_label: t('llmOps.priceChangePanel.types.channel'),
     tone: 'info',
-    name: item.model_name || `模型 ${item.model}`,
-    context: item.channel_name || `渠道 ${item.channel}`,
+    name:
+      item.model_name ||
+      t('llmOps.priceChangePanel.fallback.model', { id: item.model }),
+    context:
+      item.channel_name ||
+      t('llmOps.priceChangePanel.fallback.channel', { id: item.channel }),
     input: item.input_price_per_million,
     output: item.output_price_per_million,
     currency: item.currency,
@@ -102,10 +118,16 @@ const changeRows = computed(() => {
   const listingRows = props.listingHistory.map((item) => ({
     key: `listing-${item.id}`,
     type: 'listing',
-    type_label: '平台挂售价',
+    type_label: t('llmOps.priceChangePanel.types.listing'),
     tone: 'warn',
-    name: item.model_name || `模型 ${item.model}`,
-    context: item.platform_name || `平台 ${item.platform}`,
+    name:
+      item.model_name ||
+      t('llmOps.priceChangePanel.fallback.model', { id: item.model }),
+    context:
+      item.platform_name ||
+      t('llmOps.priceChangePanel.fallback.platform', {
+        id: item.platform
+      }),
     input: item.retail_input_price_per_million,
     output: item.retail_output_price_per_million,
     currency: item.currency,
@@ -125,19 +147,19 @@ const filteredRows = computed(() => {
 
 const metrics = computed(() => [
   {
-    label: '渠道价历史',
+    label: t('llmOps.priceChangePanel.metrics.channelHistory.label'),
     value: props.channelHistory.length,
-    hint: '采购渠道价格版本记录'
+    hint: t('llmOps.priceChangePanel.metrics.channelHistory.hint')
   },
   {
-    label: '挂售价历史',
+    label: t('llmOps.priceChangePanel.metrics.listingHistory.label'),
     value: props.listingHistory.length,
-    hint: '平台挂售价格版本记录'
+    hint: t('llmOps.priceChangePanel.metrics.listingHistory.hint')
   },
   {
-    label: '标准价格项',
+    label: t('llmOps.priceChangePanel.metrics.officialItems.label'),
     value: props.priceItems.length,
-    hint: '当前标准价格维度数量'
+    hint: t('llmOps.priceChangePanel.metrics.officialItems.hint')
   }
 ])
 
@@ -145,9 +167,11 @@ function recentOfficialRows() {
   return props.priceItems.slice(0, 80).map((item) => ({
     key: `official-${item.id}`,
     type: 'official',
-    type_label: '标准价格项',
+    type_label: t('llmOps.priceChangePanel.types.official'),
     tone: 'success',
-    name: item.model_name || `模型 ${item.model}`,
+    name:
+      item.model_name ||
+      t('llmOps.priceChangePanel.fallback.model', { id: item.model }),
     context: dimensionLabel(item.dimension),
     input: item.dimension === 'text_input' ? item.unit_price : null,
     output: item.dimension === 'text_output' ? item.unit_price : null,
@@ -159,14 +183,14 @@ function recentOfficialRows() {
 function dimensionLabel(value) {
   return (
     {
-      text_input: '文本输入',
-      text_output: '文本输出',
-      cache_input: '缓存输入',
-      image_output: '图片输出',
-      audio_input: '音频输入',
-      audio_output: '音频输出',
-      video_input: '视频输入',
-      video_output: '视频输出'
+      text_input: t('llmOps.priceChangePanel.dimension.textInput'),
+      text_output: t('llmOps.priceChangePanel.dimension.textOutput'),
+      cache_input: t('llmOps.priceChangePanel.dimension.cacheInput'),
+      image_output: t('llmOps.priceChangePanel.dimension.imageOutput'),
+      audio_input: t('llmOps.priceChangePanel.dimension.audioInput'),
+      audio_output: t('llmOps.priceChangePanel.dimension.audioOutput'),
+      video_input: t('llmOps.priceChangePanel.dimension.videoInput'),
+      video_output: t('llmOps.priceChangePanel.dimension.videoOutput')
     }[value] || value
   )
 }

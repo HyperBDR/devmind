@@ -1,9 +1,9 @@
 const DEFAULT_CATEGORY_LABELS = {
-  official_provider: '原厂',
-  cloud_hosted: '云托管',
-  supplier: '供货商',
-  manual: '内部维护',
-  unknown: '其他'
+  official_provider: 'Official',
+  cloud_hosted: 'Cloud hosted',
+  supplier: 'Supplier',
+  manual: 'Internal',
+  unknown: 'Other'
 }
 
 const CATEGORY_TONES = {
@@ -23,19 +23,19 @@ const CATEGORY_RANKS = {
 }
 
 const OWNER_TYPE_LABELS = {
-  model_provider_official: '模型厂商官方',
-  cloud_provider_official: '云厂商官方',
-  supplier: '供应商',
-  internal: '内部维护',
-  unknown: '未知'
+  model_provider_official: 'Model provider official',
+  cloud_provider_official: 'Cloud provider official',
+  supplier: 'Supplier',
+  internal: 'Internal',
+  unknown: 'Unknown'
 }
 
 const COLLECTION_METHOD_LABELS = {
-  auto_collect: '自动采集',
-  api_sync: '接口同步',
-  manual_entry: '手动录入',
-  manual_import: '手动导入',
-  unknown: '待配置'
+  auto_collect: 'Auto collect',
+  api_sync: 'API sync',
+  manual_entry: 'Manual entry',
+  manual_import: 'Manual import',
+  unknown: 'Pending config'
 }
 
 const COLLECTION_GROUP_RANKS = {

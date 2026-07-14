@@ -11,8 +11,11 @@ export function useChannelModelDisplay({
   metaModelById,
   modalityLabel,
   modelSourceCategory,
-  sourceCategoryLabel
+  sourceCategoryLabel,
+  t
 }) {
+  const translate = typeof t === 'function' ? t : (key) => key
+
   function metaModelForSourceModel(model) {
     const metaId = String(model?.meta_model || '').trim()
     if (metaId && metaModelById.value.has(metaId)) {
@@ -36,7 +39,11 @@ export function useChannelModelDisplay({
   }
 
   function metaModelVendorName(group) {
-    return group.ownerName || group.ownerCode || '未归属厂商'
+    return (
+      group.ownerName ||
+      group.ownerCode ||
+      translate('llmOps.channelModelDrawer.unassignedVendor')
+    )
   }
 
   function stripModelNamespace(value) {
@@ -92,7 +99,7 @@ export function useChannelModelDisplay({
       hasKnownSourceCategory(modelSourceCategory(model))
         ? sourceCategoryLabel(modelSourceCategory(model))
         : null,
-      model.currency || '默认币种'
+      model.currency || translate('llmOps.channelModelDrawer.defaultCurrency')
     ]
       .filter(Boolean)
       .join(' · ')
@@ -103,7 +110,11 @@ export function useChannelModelDisplay({
     if (normalizeSearch(option.code) !== normalizeSearch(option.name)) {
       parts.push(option.code)
     }
-    parts.push(`${option.providerCount} 个上游价格源`)
+    parts.push(
+      translate('llmOps.channelModelDrawer.upstreamSourceCount', {
+        count: option.providerCount
+      })
+    )
     return parts.filter(Boolean).join(' · ')
   }
 

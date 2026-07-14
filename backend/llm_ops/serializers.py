@@ -134,6 +134,9 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         return instance.model_price_items.filter(is_current=True).count()
 
     def get_latest_run_status(self, instance):
+        value = getattr(instance, "latest_run_status", None)
+        if value is not None:
+            return value
         return (
             instance.collection_runs.order_by("-started_at", "-id")
             .values_list("status", flat=True)
@@ -141,9 +144,15 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         )
 
     def get_model_count(self, instance):
+        value = getattr(instance, "model_count", None)
+        if value is not None:
+            return value
         return instance.models.count()
 
     def get_price_item_count(self, instance):
+        value = getattr(instance, "price_item_count", None)
+        if value is not None:
+            return value
         return instance.model_price_items.count()
 
     def validate(self, attrs):

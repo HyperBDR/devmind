@@ -26,14 +26,14 @@
           </div>
           <div class="flex flex-wrap items-center justify-end gap-2">
             <span v-if="hasUnsavedChanges" class="dirty-badge">
-              未保存变更
+              {{ t('llmOps.channelModelDrawer.unsaved') }}
             </span>
             <button
               type="button"
               class="btn-secondary btn-action-cancel"
               @click="close"
             >
-              关闭
+              {{ t('common.close') }}
             </button>
             <button
               type="button"
@@ -42,7 +42,9 @@
               @click="save"
             >
               <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
-              {{ saving ? '保存中' : saveButtonLabel }}
+              {{
+                saving ? t('llmOps.channelModelDrawer.saving') : saveButtonLabel
+              }}
             </button>
           </div>
         </div>
@@ -52,19 +54,34 @@
         <div class="panel space-y-4">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
             <div class="min-w-0 flex-1">
-              <h4 class="text-sm font-semibold text-slate-900">添加渠道模型</h4>
+              <h4 class="text-sm font-semibold text-slate-900">
+                {{ t('llmOps.channelModelDrawer.addTitle') }}
+              </h4>
               <p class="mt-1 text-xs leading-5 text-slate-500">
-                先选择元模型，再指定该渠道实际使用的上游供货源。
-                添加后默认启用，可在下方设置成本规则和固定成本价。
+                {{ t('llmOps.channelModelDrawer.addDescription') }}
               </p>
             </div>
             <div class="flex flex-wrap gap-2 text-xs text-slate-500">
               <span class="summary-pill">
-                已配置 {{ managedRows.length }}
+                {{
+                  t('llmOps.channelModelDrawer.configuredCount', {
+                    count: managedRows.length
+                  })
+                }}
               </span>
-              <span class="summary-pill"> 已启用 {{ listedCount }} </span>
               <span class="summary-pill">
-                可添加 {{ availableModelCount }}
+                {{
+                  t('llmOps.channelModelDrawer.enabledCount', {
+                    count: listedCount
+                  })
+                }}
+              </span>
+              <span class="summary-pill">
+                {{
+                  t('llmOps.channelModelDrawer.availableCount', {
+                    count: availableModelCount
+                  })
+                }}
               </span>
             </div>
           </div>
@@ -73,19 +90,27 @@
             <div class="add-model-main">
               <div class="add-grid">
                 <div class="form-field">
-                  <label class="field-label">元模型厂商</label>
+                  <label class="field-label">
+                    {{ t('llmOps.channelModelDrawer.metaVendor') }}
+                  </label>
                   <CompactSelect
                     v-model="selectedVendorKey"
                     :options="vendorOptions"
-                    placeholder="先选择元模型厂商"
+                    :placeholder="
+                      t('llmOps.channelModelDrawer.selectMetaVendor')
+                    "
                     searchable
-                    search-placeholder="搜索厂商"
+                    :search-placeholder="
+                      t('llmOps.channelModelDrawer.searchVendor')
+                    "
                     @change="handleVendorChange"
                   />
                 </div>
 
                 <div class="form-field model-select-field">
-                  <label class="field-label">选择元模型</label>
+                  <label class="field-label">
+                    {{ t('llmOps.channelModelDrawer.selectMetaModel') }}
+                  </label>
                   <div ref="modelDropdownRef" class="searchable-select">
                     <button
                       class="searchable-trigger"
@@ -98,16 +123,22 @@
                           v-if="selectedModelCount"
                           class="block truncate font-medium text-slate-800"
                         >
-                          已选 {{ selectedModelCount }} 个元模型
+                          {{
+                            t('llmOps.channelModelDrawer.selectedMetaModels', {
+                              count: selectedModelCount
+                            })
+                          }}
                         </span>
                         <span
                           v-else-if="!selectedVendorKey"
                           class="block truncate text-slate-400"
                         >
-                          先选择元模型厂商
+                          {{ t('llmOps.channelModelDrawer.selectMetaVendor') }}
                         </span>
                         <span v-else class="block truncate text-slate-400">
-                          搜索并选择元模型
+                          {{
+                            t('llmOps.channelModelDrawer.searchAndSelectModel')
+                          }}
                         </span>
                       </span>
                       <span class="dropdown-caret">⌄</span>
@@ -118,14 +149,25 @@
                         ref="modelSearchInput"
                         v-model="modelSearch"
                         class="searchable-input"
-                        placeholder="名称 / code / 模态"
+                        :placeholder="
+                          t('llmOps.channelModelDrawer.modelSearchPlaceholder')
+                        "
                         @keydown.escape="closeModelDropdown"
                       />
                       <div class="searchable-meta">
                         <span>
-                          {{ availableModelGroups.length }} 个可添加元模型
+                          {{
+                            t('llmOps.channelModelDrawer.addableMetaModels', {
+                              count: availableModelGroups.length
+                            })
+                          }}
                           <template v-if="selectedModelCount">
-                            · 已选 {{ selectedModelCount }}
+                            ·
+                            {{
+                              t('llmOps.channelModelDrawer.selectedShort', {
+                                count: selectedModelCount
+                              })
+                            }}
                           </template>
                         </span>
                         <span class="searchable-meta-actions">
@@ -133,13 +175,15 @@
                             type="button"
                             @click.stop="selectVisibleModels"
                           >
-                            全选当前结果
+                            {{
+                              t('llmOps.channelModelDrawer.selectAllVisible')
+                            }}
                           </button>
                           <button
                             type="button"
                             @click.stop="clearSelectedModels"
                           >
-                            清空
+                            {{ t('common.clear') }}
                           </button>
                         </span>
                       </div>
@@ -189,7 +233,7 @@
                           v-if="!availableModelOptions.length"
                           class="searchable-empty"
                         >
-                          没有匹配的可添加模型
+                          {{ t('llmOps.channelModelDrawer.noMatchedModels') }}
                         </div>
                       </div>
                     </div>
@@ -198,7 +242,9 @@
 
                 <div class="inline-cost-grid">
                   <div class="form-field">
-                    <label class="field-label">成本规则</label>
+                    <label class="field-label">
+                      {{ t('llmOps.channelModelDrawer.costRule') }}
+                    </label>
                     <CompactSelect
                       v-model="newDraft.price_mode"
                       :options="priceModeOptions"
@@ -207,12 +253,18 @@
                   </div>
 
                   <div class="form-field">
-                    <label class="field-label">配置值</label>
+                    <label class="field-label">
+                      {{ t('llmOps.channelModelDrawer.configValue') }}
+                    </label>
                     <div
                       v-if="newDraft.price_mode === 'channel_default'"
                       class="readonly-field cost-value-readonly"
                     >
-                      <span class="truncate">渠道默认折扣</span>
+                      <span class="truncate">
+                        {{
+                          t('llmOps.channelModelDrawer.channelDefaultDiscount')
+                        }}
+                      </span>
                       <strong>
                         {{ ratioPercent(props.channel?.settlement_ratio, 1) }}
                       </strong>
@@ -246,7 +298,7 @@
                           class="field compact-field text-right"
                           step="0.000001"
                           type="number"
-                          placeholder="可选"
+                          :placeholder="t('common.optional')"
                         />
                       </label>
                       <div
@@ -256,18 +308,23 @@
                         "
                         class="fixed-price-note"
                       >
-                        当前模型的图片等特殊计价维度暂不支持在渠道配置中手动覆盖，
-                        会使用上游价格或折扣后的渠道成本价。
+                        {{
+                          t(
+                            'llmOps.channelModelDrawer.unsupportedFixedPriceNote'
+                          )
+                        }}
                       </div>
                       <div
                         v-else-if="!selectedCostModel"
                         class="fixed-price-note"
                       >
-                        先选择元模型，再配置固定成本价。
+                        {{ t('llmOps.channelModelDrawer.selectModelForFixed') }}
                       </div>
                     </div>
                     <div v-else class="readonly-field">
-                      <span class="truncate">跟随成本规则</span>
+                      <span class="truncate">
+                        {{ t('llmOps.channelModelDrawer.followCostRule') }}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -279,11 +336,13 @@
               >
                 <div class="batch-selection-head">
                   <div>
-                    <p>已选模型</p>
-                    <span>为每个元模型指定实际使用的渠道上游。</span>
+                    <p>{{ t('llmOps.channelModelDrawer.selectedModels') }}</p>
+                    <span>
+                      {{ t('llmOps.channelModelDrawer.selectedModelsHint') }}
+                    </span>
                   </div>
                   <button type="button" @click="clearSelectedModels">
-                    清空选择
+                    {{ t('llmOps.channelModelDrawer.clearSelection') }}
                   </button>
                 </div>
                 <div class="batch-selection-list">
@@ -302,31 +361,49 @@
                         selectedProviderByModelKey[item.group.key] || ''
                       "
                       :options="item.options"
-                      placeholder="选择渠道上游"
+                      :placeholder="
+                        t('llmOps.channelModelDrawer.selectChannelUpstream')
+                      "
                       searchable
-                      search-placeholder="搜索上游 / 币种 / 类型"
+                      :search-placeholder="
+                        t('llmOps.channelModelDrawer.searchUpstream')
+                      "
                       @change="
                         (value) =>
                           selectBatchPriceSourceModel(item.group.key, value)
                       "
                     />
                     <div v-else class="readonly-field">
-                      <span class="truncate">无可用上游</span>
+                      <span class="truncate">
+                        {{ t('llmOps.channelModelDrawer.noAvailableUpstream') }}
+                      </span>
                     </div>
                     <div v-if="item.model" class="batch-price-preview">
                       <span>
-                        上游 {{ batchUpstreamPriceSummary(item.model) }}
+                        {{
+                          t('llmOps.channelModelDrawer.upstreamSummary', {
+                            value: batchUpstreamPriceSummary(item.model)
+                          })
+                        }}
                       </span>
                       <strong>
-                        成本
                         {{
-                          batchPendingDraftPriceSummary(newDraft, item.model)
+                          t('llmOps.channelModelDrawer.costSummary', {
+                            value: batchPendingDraftPriceSummary(
+                              newDraft,
+                              item.model
+                            )
+                          })
                         }}
                       </strong>
                     </div>
                     <div v-else class="batch-price-preview muted">
-                      <span>待选择渠道上游</span>
-                      <strong>选择后显示价格</strong>
+                      <span>
+                        {{ t('llmOps.channelModelDrawer.pendingUpstream') }}
+                      </span>
+                      <strong>
+                        {{ t('llmOps.channelModelDrawer.priceAfterSelection') }}
+                      </strong>
                     </div>
                   </div>
                 </div>
@@ -334,7 +411,9 @@
             </div>
 
             <div class="channel-performance-panel">
-              <p class="channel-performance-title">模型转发能力</p>
+              <p class="channel-performance-title">
+                {{ t('llmOps.channelModelDrawer.forwardingCapability') }}
+              </p>
               <div class="channel-performance-grid">
                 <label
                   v-for="field in performanceFields"
@@ -358,18 +437,28 @@
           <div v-if="selectedModelOptions.length" class="pending-association">
             <div class="pending-main">
               <p class="truncate text-sm font-semibold text-slate-900">
-                已选 {{ selectedModelCount }} 个元模型
+                {{
+                  t('llmOps.channelModelDrawer.selectedMetaModels', {
+                    count: selectedModelCount
+                  })
+                }}
               </p>
               <p class="mt-1 truncate text-xs text-slate-500">
-                {{ selectedResolvedCount }} 个已指定上游
+                {{
+                  t('llmOps.channelModelDrawer.resolvedUpstreamCount', {
+                    count: selectedResolvedCount
+                  })
+                }}
               </p>
             </div>
             <div class="pending-price-compact">
-              <span>成本规则</span>
+              <span>{{ t('llmOps.channelModelDrawer.costRule') }}</span>
               <strong>{{ newDraftRuleSummary }}</strong>
             </div>
             <div class="pending-price-compact">
-              <span>转发能力</span>
+              <span>{{
+                t('llmOps.channelModelDrawer.forwardingCapability')
+              }}</span>
               <strong>{{ newDraftPerformanceSummary }}</strong>
             </div>
             <button
@@ -378,7 +467,11 @@
               :disabled="!canAddSelectedModels"
               @click="addSelectedModels"
             >
-              批量添加 {{ selectedModelCount }} 个模型
+              {{
+                t('llmOps.channelModelDrawer.batchAddModels', {
+                  count: selectedModelCount
+                })
+              }}
             </button>
           </div>
         </div>
@@ -387,7 +480,9 @@
           <input
             v-model="search"
             class="field compact-field"
-            placeholder="搜索已配置元模型、code 或上游来源"
+            :placeholder="
+              t('llmOps.channelModelDrawer.configuredSearchPlaceholder')
+            "
           />
         </div>
 
@@ -395,7 +490,11 @@
           <div class="table-toolbar">
             <div class="min-w-0">
               <h3 class="panel-title">
-                已配置元模型（{{ filteredRows.length }}）
+                {{
+                  t('llmOps.channelModelDrawer.configuredMetaModelsTitle', {
+                    count: filteredRows.length
+                  })
+                }}
               </h3>
               <div
                 v-if="changeSummaryLabels.length"
@@ -419,8 +518,10 @@
               >
                 {{
                   configuredRowsExpanded
-                    ? '收起'
-                    : `显示全部 ${filteredRows.length}`
+                    ? t('common.collapse')
+                    : t('llmOps.channelModelDrawer.showAll', {
+                        count: filteredRows.length
+                      })
                 }}
               </button>
             </div>
@@ -447,7 +548,7 @@
                 </div>
                 <OperationIconButton
                   icon="remove"
-                  label="移除"
+                  :label="t('common.remove')"
                   tone="danger"
                   @click="removeRow(row)"
                 />
@@ -473,22 +574,22 @@
 
               <div class="channel-model-summary-list">
                 <div class="channel-model-price-summary">
-                  <span>价格</span>
+                  <span>{{ t('llmOps.channelModelDrawer.price') }}</span>
                   <strong>
-                    <em>规则</em>
+                    <em>{{ t('llmOps.channelModelDrawer.rule') }}</em>
                     {{ priceRuleSummary(row) }}
                   </strong>
                   <strong>
-                    <em>成本</em>
+                    <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
                     {{ compactCostSummary(row) }}
                   </strong>
                   <strong>
-                    <em>上游</em>
+                    <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
                     {{ upstreamPriceSummary(row.model) }}
                   </strong>
                 </div>
                 <div class="channel-model-ability-summary">
-                  <span>能力</span>
+                  <span>{{ t('llmOps.channelModelDrawer.capability') }}</span>
                   <strong
                     v-for="item in performanceSummaryItems(row)"
                     :key="item.label"
@@ -500,11 +601,15 @@
               </div>
 
               <details class="channel-model-detail">
-                <summary>配置详情</summary>
+                <summary>
+                  {{ t('llmOps.channelModelDrawer.configDetails') }}
+                </summary>
 
                 <div class="mt-3 grid gap-2 sm:grid-cols-2">
                   <div class="card-field">
-                    <span>上游价格</span>
+                    <span>{{
+                      t('llmOps.channelModelDrawer.upstreamPrice')
+                    }}</span>
                     <div class="mt-1 space-y-1 font-mono">
                       <p
                         v-for="item in providerPriceSummary(row.model)"
@@ -516,7 +621,9 @@
                     </div>
                   </div>
                   <div class="card-field">
-                    <span>渠道成本价</span>
+                    <span>{{
+                      t('llmOps.channelModelDrawer.channelCost')
+                    }}</span>
                     <div
                       v-if="row.priceItems?.length"
                       class="mt-1 flex flex-wrap gap-1"
@@ -533,7 +640,7 @@
                       </span>
                     </div>
                     <span v-else class="mt-1 block text-xs text-slate-400">
-                      保存后自动生成
+                      {{ t('llmOps.channelModelDrawer.generatedAfterSave') }}
                     </span>
                   </div>
                 </div>
@@ -585,14 +692,16 @@
                       class="field compact-field text-right"
                       step="0.000001"
                       type="number"
-                      placeholder="可选"
+                      :placeholder="t('common.optional')"
                     />
                   </label>
                   <span
                     v-if="!customPriceFields(row.model).length"
                     class="text-xs text-slate-400"
                   >
-                    当前模型暂不支持手动覆盖固定成本价。
+                    {{
+                      t('llmOps.channelModelDrawer.fixedOverrideUnsupported')
+                    }}
                   </span>
                 </div>
 
@@ -616,7 +725,7 @@
               </details>
             </article>
             <div v-if="!filteredRows.length" class="empty-card">
-              还没有配置模型，请先从上方添加。
+              {{ t('llmOps.channelModelDrawer.emptyConfigured') }}
             </div>
             <button
               v-if="hiddenConfiguredRowCount"
@@ -624,7 +733,11 @@
               class="show-more-card"
               @click="configuredRowsExpanded = true"
             >
-              还有 {{ hiddenConfiguredRowCount }} 个模型，点击显示全部
+              {{
+                t('llmOps.channelModelDrawer.hiddenModels', {
+                  count: hiddenConfiguredRowCount
+                })
+              }}
             </button>
           </div>
 
@@ -639,11 +752,21 @@
               </colgroup>
               <thead>
                 <tr>
-                  <th class="table-head">模型</th>
-                  <th class="table-head">上游</th>
-                  <th class="table-head">价格</th>
-                  <th class="table-head">能力</th>
-                  <th class="table-head action-col text-center">操作</th>
+                  <th class="table-head">
+                    {{ t('llmOps.fields.model') }}
+                  </th>
+                  <th class="table-head">
+                    {{ t('llmOps.channelModelDrawer.upstream') }}
+                  </th>
+                  <th class="table-head">
+                    {{ t('llmOps.channelModelDrawer.price') }}
+                  </th>
+                  <th class="table-head">
+                    {{ t('llmOps.channelModelDrawer.capability') }}
+                  </th>
+                  <th class="table-head action-col text-center">
+                    {{ t('common.actions') }}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -692,15 +815,15 @@
                   <td class="table-cell">
                     <div class="price-cell">
                       <p>
-                        <em>规则</em>
+                        <em>{{ t('llmOps.channelModelDrawer.rule') }}</em>
                         <strong>{{ priceRuleSummary(row) }}</strong>
                       </p>
                       <span>
-                        <em>成本</em>
+                        <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
                         <strong>{{ compactCostSummary(row) }}</strong>
                       </span>
                       <span>
-                        <em>上游</em>
+                        <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
                         <strong>{{ upstreamPriceSummary(row.model) }}</strong>
                       </span>
                     </div>
@@ -728,7 +851,7 @@
                     <div class="flex items-center justify-center">
                       <OperationIconButton
                         icon="remove"
-                        label="移除"
+                        :label="t('common.remove')"
                         tone="danger"
                         @click="removeRow(row)"
                       />
@@ -742,13 +865,17 @@
                       class="link-btn"
                       @click="configuredRowsExpanded = true"
                     >
-                      还有 {{ hiddenConfiguredRowCount }} 个模型，点击显示全部
+                      {{
+                        t('llmOps.channelModelDrawer.hiddenModels', {
+                          count: hiddenConfiguredRowCount
+                        })
+                      }}
                     </button>
                   </td>
                 </tr>
                 <tr v-if="!filteredRows.length">
                   <td class="table-cell text-slate-500" colspan="5">
-                    还没有配置模型，请先从上方添加。
+                    {{ t('llmOps.channelModelDrawer.emptyConfigured') }}
                   </td>
                 </tr>
               </tbody>
@@ -764,6 +891,7 @@
 import '@/components/llm-ops/channelModelDrawer.css'
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import {
@@ -820,6 +948,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'refresh', 'saved'])
+const { t } = useI18n()
 
 const search = ref('')
 const selectedVendorKey = ref('')
@@ -836,11 +965,20 @@ const saving = ref(false)
 const pendingRefresh = ref(false)
 const recentlyAddedModelId = ref(null)
 
-const priceModeOptions = [
-  { label: '默认折扣', value: 'channel_default' },
-  { label: '折扣比例', value: 'discount' },
-  { label: '固定成本价', value: 'fixed' }
-]
+const priceModeOptions = computed(() => [
+  {
+    label: t('llmOps.channelModelDrawer.priceMode.channelDefault'),
+    value: 'channel_default'
+  },
+  {
+    label: t('llmOps.channelModelDrawer.priceMode.discount'),
+    value: 'discount'
+  },
+  {
+    label: t('llmOps.channelModelDrawer.priceMode.fixed'),
+    value: 'fixed'
+  }
+])
 
 const channelCurrency = computed(() =>
   String(props.channel?.currency || 'USD').toUpperCase()
@@ -867,7 +1005,8 @@ const {
   channelCurrency,
   drafts,
   getChannel: () => props.channel,
-  getModelSourceCategory: (model) => modelSourceCategory(model)
+  getModelSourceCategory: (model) => modelSourceCategory(model),
+  t
 })
 
 const {
@@ -894,7 +1033,8 @@ const {
 } = useChannelModelPricing({
   customPriceFields,
   normalizeSearch,
-  props
+  props,
+  t
 })
 
 const changeSummary = computed(() => summarizeDraftChanges())
@@ -906,16 +1046,38 @@ const hasUnsavedChanges = computed(() =>
 const changeSummaryLabels = computed(() => {
   const summary = changeSummary.value
   return [
-    summary.added ? `新增 ${summary.added}` : '',
-    summary.modified ? `改成本 ${summary.modified}` : '',
-    summary.enabled ? `启用 ${summary.enabled}` : '',
-    summary.disabled ? `停用 ${summary.disabled}` : '',
-    summary.removed ? `移除 ${summary.removed}` : ''
+    summary.added
+      ? t('llmOps.channelModelDrawer.changeAdded', {
+          count: summary.added
+        })
+      : '',
+    summary.modified
+      ? t('llmOps.channelModelDrawer.changeModified', {
+          count: summary.modified
+        })
+      : '',
+    summary.enabled
+      ? t('llmOps.channelModelDrawer.changeEnabled', {
+          count: summary.enabled
+        })
+      : '',
+    summary.disabled
+      ? t('llmOps.channelModelDrawer.changeDisabled', {
+          count: summary.disabled
+        })
+      : '',
+    summary.removed
+      ? t('llmOps.channelModelDrawer.changeRemoved', {
+          count: summary.removed
+        })
+      : ''
   ].filter(Boolean)
 })
 
 const saveButtonLabel = computed(() =>
-  hasUnsavedChanges.value ? '保存变更' : '暂无变更'
+  hasUnsavedChanges.value
+    ? t('llmOps.channelModelDrawer.saveChanges')
+    : t('llmOps.channelModelDrawer.noChanges')
 )
 
 const baseAvailableModels = computed(() =>
@@ -975,7 +1137,8 @@ const {
   metaModelById,
   modalityLabel,
   modelSourceCategory,
-  sourceCategoryLabel
+  sourceCategoryLabel,
+  t
 })
 
 const {
@@ -1012,7 +1175,8 @@ const {
   selectedModelKeys,
   selectedProviderByModelKey,
   selectedVendorKey,
-  sourceCategoryBadge
+  sourceCategoryBadge,
+  t
 })
 
 const {
@@ -1040,7 +1204,8 @@ const {
   ratioPercent,
   ratioToPercentInput,
   recentlyAddedModelId,
-  selectedResolvedModels
+  selectedResolvedModels,
+  t
 })
 
 const {
@@ -1107,7 +1272,7 @@ function reset() {
 function close() {
   if (
     hasUnsavedChanges.value &&
-    !window.confirm('当前有未保存的模型配置变更，确定关闭抽屉吗？')
+    !window.confirm(t('llmOps.channelModelDrawer.closeConfirm'))
   ) {
     return
   }

@@ -177,7 +177,7 @@
                 <div class="provider-actions">
                   <OperationIconButton
                     icon="edit"
-                    label="编辑价格源"
+                    :label="t('llmOps.providerManagement.actions.editSource')"
                     :disabled="!provider.primary_source"
                     @click.stop="
                       editSourceFromProvider(provider.primary_source)
@@ -186,7 +186,9 @@
                   <OperationIconButton
                     v-if="provider.primary_source?.can_manual_entry"
                     icon="manual"
-                    label="配置模型价格"
+                    :label="
+                      t('llmOps.providerManagement.actions.configureModelPrice')
+                    "
                     tone="primary"
                     @click.stop="
                       openManualEntryFromProvider(provider.primary_source)
@@ -206,7 +208,7 @@
                     icon="collect"
                     :label="
                       provider.primary_source?.collect_action_label ||
-                      '同步价格'
+                      t('llmOps.providerManagement.actions.syncPrice')
                     "
                     :disabled="
                       !provider.primary_source.is_enabled ||
@@ -218,7 +220,9 @@
                   <OperationIconButton
                     v-if="canOfficialResetSource(provider.primary_source)"
                     icon="reset"
-                    label="重置官方价格"
+                    :label="
+                      t('llmOps.providerManagement.actions.resetOfficialPrice')
+                    "
                     tone="danger"
                     @click.stop="
                       openOfficialResetModal(provider.primary_source)
@@ -226,7 +230,7 @@
                   />
                   <OperationIconButton
                     icon="delete"
-                    label="删除价格源"
+                    :label="t('llmOps.providerManagement.actions.deleteSource')"
                     tone="danger"
                     :disabled="
                       !provider.primary_source ||
@@ -271,9 +275,11 @@
         <div class="modal-header">
           <div>
             <p class="modal-eyebrow">Official Price Reset</p>
-            <h3 class="modal-title">重置官方价格数据</h3>
+            <h3 class="modal-title">
+              {{ t('llmOps.providerManagement.officialReset.title') }}
+            </h3>
             <p class="modal-desc">
-              清理历史 seed / 同步写入的官方价格脏数据，并重新同步官方价格。
+              {{ t('llmOps.providerManagement.officialReset.description') }}
             </p>
           </div>
           <button
@@ -282,20 +288,24 @@
             :disabled="officialResetBusy"
             @click="closeOfficialResetModal"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
         </div>
 
         <div class="reset-modal-body">
           <label class="field-group">
-            <span class="field-label">清理范围</span>
+            <span class="field-label">
+              {{ t('llmOps.providerManagement.officialReset.scope') }}
+            </span>
             <select
               v-model="officialResetScope"
               class="field-input"
               :disabled="officialResetBusy || officialResetScopeLocked"
               @change="officialResetPreview = null"
             >
-              <option value="all">全部官方来源</option>
+              <option value="all">
+                {{ t('llmOps.providerManagement.officialReset.allSources') }}
+              </option>
               <option
                 v-for="option in officialResetProviderOptions"
                 :key="option.code"
@@ -317,14 +327,16 @@
             </div>
           </div>
           <p v-else class="reset-empty">
-            先预览清理范围，再执行重置。平台会保留手工价格、供货商价格和渠道配置。
+            {{ t('llmOps.providerManagement.officialReset.emptyPreview') }}
           </p>
 
           <div
             v-if="officialResetLegacySources.length"
             class="reset-legacy-list"
           >
-            <p>将删除的历史模型级来源</p>
+            <p>
+              {{ t('llmOps.providerManagement.officialReset.legacySources') }}
+            </p>
             <div>
               <span v-for="slug in officialResetLegacySources" :key="slug">
                 {{ slug }}
@@ -340,7 +352,11 @@
             :disabled="officialResetBusy"
             @click="previewOfficialReset"
           >
-            {{ officialResetPreviewing ? '预览中...' : '预览影响' }}
+            {{
+              officialResetPreviewing
+                ? t('llmOps.providerManagement.officialReset.previewing')
+                : t('llmOps.providerManagement.officialReset.preview')
+            }}
           </button>
           <button
             type="button"
@@ -348,7 +364,11 @@
             :disabled="!officialResetPreview || officialResetBusy"
             @click="executeOfficialReset"
           >
-            {{ officialResetExecuting ? '重置中...' : '确认重置并同步' }}
+            {{
+              officialResetExecuting
+                ? t('llmOps.providerManagement.officialReset.executing')
+                : t('llmOps.providerManagement.officialReset.execute')
+            }}
           </button>
         </div>
       </section>
@@ -501,14 +521,38 @@ const officialResetBusy = computed(
 const officialResetPreviewItems = computed(() => {
   const stats = officialResetPreview.value?.stats || {}
   return [
-    { label: '匹配来源', value: stats.sources_matched || 0 },
-    { label: '保留真实来源', value: stats.provider_sources_kept || 0 },
-    { label: '删除历史来源', value: stats.legacy_sources_deleted || 0 },
-    { label: '重置模型', value: stats.models_reset || 0 },
-    { label: '删除价格项', value: stats.price_items_deleted || 0 },
-    { label: '删除快照', value: stats.snapshots_deleted || 0 },
-    { label: '删除历史', value: stats.history_deleted || 0 },
-    { label: '删除运行记录', value: stats.runs_deleted || 0 }
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.sourcesMatched'),
+      value: stats.sources_matched || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.sourcesKept'),
+      value: stats.provider_sources_kept || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.legacySources'),
+      value: stats.legacy_sources_deleted || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.modelsReset'),
+      value: stats.models_reset || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.priceItems'),
+      value: stats.price_items_deleted || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.snapshots'),
+      value: stats.snapshots_deleted || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.history'),
+      value: stats.history_deleted || 0
+    },
+    {
+      label: t('llmOps.providerManagement.officialReset.stats.runs'),
+      value: stats.runs_deleted || 0
+    }
   ]
 })
 
@@ -573,7 +617,12 @@ async function loadSelectedProviderPriceItems(
   } catch (error) {
     selectedProviderPriceItems.value = []
     selectedProviderTotal.value = 0
-    showError(errorMessage(error, '加载价格源明细失败。'))
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.providerManagement.errors.loadSourceDetail')
+      )
+    )
   } finally {
     selectedProviderLoading.value = false
   }
@@ -617,7 +666,12 @@ async function previewOfficialReset() {
     )
     officialResetPreview.value = apiPayload(response)
   } catch (error) {
-    showError(errorMessage(error, '预览官方价格重置范围失败。'))
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.providerManagement.errors.previewOfficialReset')
+      )
+    )
   } finally {
     officialResetPreviewing.value = false
   }
@@ -626,7 +680,7 @@ async function previewOfficialReset() {
 async function executeOfficialReset() {
   if (!officialResetPreview.value) return
   const confirmed = window.confirm(
-    '确认清理所选官方价格数据并重新同步？该操作会删除官方价格项、采集快照和历史模型级来源。'
+    t('llmOps.providerManagement.officialReset.confirm')
   )
   if (!confirmed) return
 
@@ -641,14 +695,19 @@ async function executeOfficialReset() {
     const payload = apiPayload(response)
     const stats = payload.stats || {}
     showSuccess(
-      `官方价格已重置并同步：删除价格项 ${stats.price_items_deleted || 0}，重置模型 ${stats.models_reset || 0}`
+      t('llmOps.providerManagement.messages.officialResetSuccess', {
+        priceItems: stats.price_items_deleted || 0,
+        models: stats.models_reset || 0
+      })
     )
     showOfficialResetModal.value = false
     officialResetPreview.value = null
     officialResetScopeLocked.value = false
     emit('refresh')
   } catch (error) {
-    showError(errorMessage(error, '重置官方价格失败。'))
+    showError(
+      errorMessage(error, t('llmOps.providerManagement.errors.officialReset'))
+    )
   } finally {
     officialResetExecuting.value = false
   }
@@ -687,7 +746,12 @@ async function ensurePriceEntryCatalogLoaded() {
   try {
     await Promise.all(requests)
   } catch (error) {
-    showError(errorMessage(error, '加载手工录价模型目录失败。'))
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.providerManagement.errors.loadManualEntryCatalog')
+      )
+    )
   }
 }
 

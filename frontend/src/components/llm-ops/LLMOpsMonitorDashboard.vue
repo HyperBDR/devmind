@@ -140,16 +140,13 @@
               </td>
               <td class="table-cell">
                 <span v-if="row.recommended_channel?.channel_name">
-                  {{ row.recommended_channel.channel_name }}
+                  {{ channelText(row.recommended_channel) }}
                 </span>
                 <span v-else class="text-slate-400">-</span>
               </td>
               <td class="table-cell">
                 <span v-if="row.current_listing?.is_listed" class="badge-ok">
-                  {{
-                    row.current_listing.channel_name ||
-                    t('llmOps.status.listed')
-                  }}
+                  {{ currentListingText(row) }}
                 </span>
                 <span v-else class="badge-muted">
                   {{ t('llmOps.status.unlisted') }}
@@ -343,12 +340,18 @@ function rowClass(row) {
 
 function channelText(channel) {
   if (!channel) return '-'
+  if (channel.channel_type === 'auto_best' || channel.channel_id === null) {
+    return t('llmOps.channel.autoBest')
+  }
   return channel.channel_name || '-'
 }
 
 function currentListingText(row) {
   if (!row.current_listing?.is_listed) return t('llmOps.status.unlisted')
   const listing = row.current_listing
+  if (listing.channel_type === 'auto_best' || listing.channel_id === null) {
+    return t('llmOps.channel.autoBest')
+  }
   return listing.channel_name || t('llmOps.status.listed')
 }
 

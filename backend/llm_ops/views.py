@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, IntegerField, Max, Q
+from django.db.models import Count, IntegerField, Max, OuterRef, Q, Subquery
 from django.db.models import Value
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
@@ -92,6 +92,7 @@ from .services import (
     resolve_resale_listing_currency,
     selected_price_item_group,
     sync_channel_price_items,
+    sync_dependent_channel_price_items_for_price_items,
 )
 from .source_collectors import source_supports_code_collection
 from .tasks import collect_price_source_prices, run_model_price_sync_agent
@@ -230,15 +231,22 @@ class PriceCollectionSourceViewSet(
                 current_price_item_count=Count(
                     "model_price_items",
                     filter=Q(model_price_items__is_current=True),
+                    distinct=True,
                 ),
                 current_meta_model_count=Count(
                     "model_price_items__meta_model",
                     filter=Q(model_price_items__is_current=True),
                     distinct=True,
                 ),
-            )
-            .prefetch_related(
-                "models__meta_model",
+                latest_run_status=Subquery(
+                    PriceCollectionRun.objects.filter(
+                        source=OuterRef("pk"),
+                    )
+                    .order_by("-started_at", "-id")
+                    .values("status")[:1],
+                ),
+                model_count=Count("models", distinct=True),
+                price_item_count=Count("model_price_items", distinct=True),
             )
         )
         search = self.request.query_params.get("search")
@@ -1017,6 +1025,8 @@ class ModelPriceItemViewSet(
             "sku",
             "offering",
             "source",
+            "source__channel",
+            "source__provider",
         )
         provider = self.request.query_params.get("provider")
         meta_model = self.request.query_params.get("meta_model")
@@ -1081,6 +1091,41 @@ class ModelPriceItemViewSet(
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+    def perform_update(self, serializer):
+        before = snapshot_instance(serializer.instance)
+        dependency_before = _price_item_dependency_snapshot(
+            serializer.instance,
+        )
+        price_item = serializer.save()
+        sync_dependent_channel_price_items_for_price_items(
+            [dependency_before, price_item],
+        )
+        record_audit_log(
+            request=self.request,
+            action=AuditLog.ACTION_UPDATE,
+            category=self.audit_category,
+            target=price_item,
+            summary=f"Updated model price item {price_item}",
+            before=before,
+            after=snapshot_instance(price_item),
+        )
+
+    def perform_destroy(self, instance):
+        before = snapshot_instance(instance)
+        dependency = _price_item_dependency_snapshot(instance)
+        target_repr = str(instance)
+        with transaction.atomic():
+            instance.delete()
+            sync_dependent_channel_price_items_for_price_items([dependency])
+            record_audit_log(
+                request=self.request,
+                action=AuditLog.ACTION_DELETE,
+                category=self.audit_category,
+                target="llm_ops.ModelPriceItem",
+                summary=f"Deleted model price item {target_repr}",
+                before=before,
+            )
 
 
 class ProcurementChannelViewSet(
@@ -1346,6 +1391,7 @@ class ChannelModelPriceHistoryViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "price_source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
@@ -1562,12 +1608,21 @@ class ResaleListingViewSet(
         platform = self.request.query_params.get("platform")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        publish_status = self.request.query_params.get("publish_status")
+        workflow_status = self.request.query_params.get("workflow_status")
+        is_active = self.request.query_params.get("is_active")
         if platform:
             queryset = queryset.filter(platform_id=platform)
         if meta_model:
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if publish_status:
+            queryset = queryset.filter(publish_status=publish_status)
+        if workflow_status:
+            queryset = queryset.filter(workflow_status=workflow_status)
+        if is_active in {"true", "false"}:
+            queryset = queryset.filter(is_active=is_active == "true")
         return queryset.order_by("platform__name", "model__name", "id")
 
     def perform_create(self, serializer):
@@ -2184,10 +2239,24 @@ class UsageReconciliationRecordViewSet(
         )
         channel = self.request.query_params.get("channel")
         model = self.request.query_params.get("model")
+        status_value = self.request.query_params.get("status")
+        date_from = self.request.query_params.get("date_from")
+        date_to = self.request.query_params.get("date_to")
+        platform = self.request.query_params.get("platform")
         if channel:
             queryset = queryset.filter(channel_id=channel)
         if model:
             queryset = queryset.filter(model_id=model)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        if date_from:
+            queryset = queryset.filter(date__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(date__lte=date_to)
+        if platform:
+            queryset = queryset.filter(
+                model__resale_listings__platform_id=platform,
+            ).distinct()
         return queryset.order_by("-date", "-id")
 
 
@@ -2205,6 +2274,14 @@ def _decimal_or_none(value) -> Decimal | None:
     if value is None or value == "":
         return None
     return Decimal(str(value))
+
+
+def _price_item_dependency_snapshot(price_item):
+    return {
+        "model_id": price_item.model_id,
+        "meta_model_id": price_item.meta_model_id,
+        "source_id": price_item.source_id,
+    }
 
 
 def _listing_submit_status(existing: ResaleListing | None) -> dict:
@@ -2704,36 +2781,36 @@ def _diagnostic_status(
     if requires_currency_conversion:
         return {
             "status": "currency_mismatch",
-            "status_label": "需要汇率",
+            "status_label": "currency_mismatch",
             "status_priority": 1,
         }
     if not best_channel:
         return {
             "status": "missing_channel",
-            "status_label": "缺少渠道价",
+            "status_label": "missing_channel",
             "status_priority": 1,
         }
     if not is_agione_listed:
         return {
             "status": "unlisted",
-            "status_label": "未上架",
+            "status_label": "unlisted",
             "status_priority": 2,
         }
     if not has_lowest_listing:
         return {
             "status": "not_lowest",
-            "status_label": "非最低价",
+            "status_label": "not_lowest",
             "status_priority": 3,
         }
     if coverage_count <= 1:
         return {
             "status": "low_coverage",
-            "status_label": "覆盖偏少",
+            "status_label": "low_coverage",
             "status_priority": 4,
         }
     return {
         "status": "ready",
-        "status_label": "就绪",
+        "status_label": "ready",
         "status_priority": 5,
     }
 
@@ -2872,7 +2949,8 @@ def _decision_listing_payload_from_listing(
     channel = listing.channel
     return {
         "channel_id": listing.channel_id,
-        "channel_name": channel.name if channel else "自动最优",
+        "channel_name": channel.name if channel else None,
+        "channel_type": "fixed_channel" if channel else "auto_best",
         "currency": (
             currency_context.display_currency
             if not requires_currency_conversion
@@ -2905,6 +2983,216 @@ def _decision_listing_payload_from_listing(
     }
 
 
+def _summary_listing_rows(
+    *,
+    active_listings,
+    currency_context,
+    overrides,
+    price_item_indexes,
+    rows_by_model,
+    video_resolution,
+):
+    """Build full listing rows for dashboard sections that need them."""
+    listing_rows = []
+    for listing in active_listings:
+        channel = listing.channel
+        row = rows_by_model.get(listing.model_id)
+        options = row["options"] if row else []
+        if channel is None:
+            best_row = row["best_channel"] if row else None
+            if not best_row:
+                continue
+            cost_input = Decimal(
+                str(best_row["original_input_price_per_million"])
+            )
+            cost_output = Decimal(
+                str(best_row["original_output_price_per_million"])
+            )
+            cost_cache_input = Decimal(
+                str(
+                    best_row.get(
+                        "original_cache_input_price_per_million",
+                        "0",
+                    )
+                    or "0"
+                )
+            )
+            cost_currency = (
+                best_row.get("original_currency") or listing.model.currency
+            )
+        else:
+            override = overrides.get((channel.id, listing.model_id))
+            if (
+                not channel.is_active
+                or override is None
+                or not override.is_listed
+            ):
+                continue
+            unit_prices = resolve_channel_model_price(
+                channel,
+                listing.model,
+                override=override,
+                source_items=_indexed_price_items_for_override(
+                    override,
+                    price_item_indexes,
+                ),
+                video_resolution=video_resolution,
+            )
+            cost_input = unit_prices.input_per_million
+            cost_output = unit_prices.output_per_million
+            cost_cache_input = unit_prices.cache_input_per_million
+            cost_currency = resolve_channel_model_currency(
+                channel,
+                listing.model,
+                override=override,
+            )
+        retail_input = listing.retail_input_price_per_million
+        retail_output = listing.retail_output_price_per_million
+        retail_cache_input = listing.retail_cache_input_price_per_million
+        retail_currency = resolve_resale_listing_currency(listing)
+        fee_rate = listing.platform.fee_rate or Decimal("0")
+        cost_input_display = _converted_amount(
+            cost_input,
+            cost_currency,
+            currency_context,
+        )
+        cost_output_display = _converted_amount(
+            cost_output,
+            cost_currency,
+            currency_context,
+        )
+        cost_cache_input_display = _converted_amount(
+            cost_cache_input,
+            cost_currency,
+            currency_context,
+        )
+        retail_input_display = _converted_amount(
+            retail_input,
+            retail_currency,
+            currency_context,
+        )
+        retail_output_display = _converted_amount(
+            retail_output,
+            retail_currency,
+            currency_context,
+        )
+        retail_cache_input_display = _converted_amount(
+            retail_cache_input,
+            retail_currency,
+            currency_context,
+        )
+        requires_currency_conversion = any(
+            value is None
+            for value in (
+                cost_input_display,
+                cost_output_display,
+                cost_cache_input_display,
+                retail_input_display,
+                retail_output_display,
+                retail_cache_input_display,
+            )
+        )
+        if requires_currency_conversion:
+            input_margin = _empty_margin(
+                requires_currency_conversion=True,
+            )
+            output_margin = _empty_margin(
+                requires_currency_conversion=True,
+            )
+        else:
+            input_margin = _gross_margin(
+                retail_input_display,
+                cost_input_display,
+                fee_rate,
+            )
+            output_margin = _gross_margin(
+                retail_output_display,
+                cost_output_display,
+                fee_rate,
+            )
+        listing_rows.append(
+            {
+                "listing_id": listing.id,
+                "platform_id": listing.platform_id,
+                "platform_name": listing.platform.name,
+                "model_id": listing.model_id,
+                "model_name": listing.model.name,
+                "model_code": listing.model.code,
+                "channel_id": listing.channel_id,
+                "channel_name": channel.name if channel else None,
+                "channel_type": "fixed_channel" if channel else "auto_best",
+                "currency": (
+                    currency_context.display_currency
+                    if not requires_currency_conversion
+                    else retail_currency
+                ),
+                "display_currency": currency_context.display_currency,
+                "exchange_rate": _as_float(currency_context.usd_to_cny_rate),
+                "original_currency": retail_currency,
+                "retail_currency": retail_currency,
+                "cost_currency": cost_currency,
+                "requires_currency_conversion": requires_currency_conversion,
+                "updated_at": listing.updated_at,
+                "retail_input_price_per_million": _as_float(
+                    retail_input_display
+                    if retail_input_display is not None
+                    else retail_input
+                ),
+                "retail_output_price_per_million": _as_float(
+                    retail_output_display
+                    if retail_output_display is not None
+                    else retail_output
+                ),
+                "retail_cache_input_price_per_million": _as_float(
+                    retail_cache_input_display
+                    if retail_cache_input_display is not None
+                    else retail_cache_input
+                ),
+                "original_retail_input_price_per_million": (
+                    _as_float(retail_input)
+                ),
+                "original_retail_output_price_per_million": (
+                    _as_float(retail_output)
+                ),
+                "original_retail_cache_input_price_per_million": (
+                    _as_float(retail_cache_input)
+                ),
+                "cost_input_price_per_million": _as_float(
+                    cost_input_display
+                    if cost_input_display is not None
+                    else cost_input
+                ),
+                "cost_output_price_per_million": _as_float(
+                    cost_output_display
+                    if cost_output_display is not None
+                    else cost_output
+                ),
+                "cost_cache_input_price_per_million": _as_float(
+                    cost_cache_input_display
+                    if cost_cache_input_display is not None
+                    else cost_cache_input
+                ),
+                "original_cost_input_price_per_million": _as_float(
+                    cost_input
+                ),
+                "original_cost_output_price_per_million": _as_float(
+                    cost_output
+                ),
+                "original_cost_cache_input_price_per_million": _as_float(
+                    cost_cache_input
+                ),
+                "input_margin": input_margin,
+                "output_margin": output_margin,
+                "option": _listing_option(
+                    listing,
+                    options,
+                    row["best_channel"] if row else None,
+                ),
+            }
+        )
+    return listing_rows
+
+
 class SummaryAPIView(LLMOpsPermissionMixin, APIView):
     """Return dashboard metrics and calculation summaries."""
 
@@ -2927,6 +3215,8 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         selected_platform_param = (
             request.query_params.get("resale_platform") or ""
         )
+        summary_scope = request.query_params.get("scope") or "full"
+        is_monitor_scope = summary_scope == "monitor"
         currency_context = build_currency_conversion_context(display_currency)
         selected_platform = _selected_resale_platform(selected_platform_param)
 
@@ -3161,7 +3451,6 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "reconciliation_anomaly",
                     reconciliation_row["latest"],
                 )
-        listing_rows = []
         active_listings = list(
             ResaleListing.objects.filter(is_active=True).select_related(
                 "platform",
@@ -3171,207 +3460,18 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             )
         )
         rows_by_model = {row["model_id"]: row for row in procurement_rows}
-        for listing in active_listings:
-            channel = listing.channel
-            row = rows_by_model.get(listing.model_id)
-            options = row["options"] if row else []
-            if channel is None:
-                best_row = row["best_channel"] if row else None
-                if not best_row:
-                    continue
-                cost_input = Decimal(
-                    str(best_row["original_input_price_per_million"])
-                )
-                cost_output = Decimal(
-                    str(best_row["original_output_price_per_million"])
-                )
-                cost_cache_input = Decimal(
-                    str(
-                        best_row.get(
-                            "original_cache_input_price_per_million",
-                            "0",
-                        )
-                        or "0"
-                    )
-                )
-                cost_currency = (
-                    best_row.get("original_currency") or listing.model.currency
-                )
-            else:
-                override = overrides.get((channel.id, listing.model_id))
-                if (
-                    not channel.is_active
-                    or override is None
-                    or not override.is_listed
-                ):
-                    continue
-                unit_prices = resolve_channel_model_price(
-                    channel,
-                    listing.model,
-                    override=override,
-                    source_items=_indexed_price_items_for_override(
-                        override,
-                        price_item_indexes,
-                    ),
-                    video_resolution=video_resolution,
-                )
-                cost_input = unit_prices.input_per_million
-                cost_output = unit_prices.output_per_million
-                cost_cache_input = unit_prices.cache_input_per_million
-                cost_currency = resolve_channel_model_currency(
-                    channel,
-                    listing.model,
-                    override=override,
-                )
-            retail_input = listing.retail_input_price_per_million
-            retail_output = listing.retail_output_price_per_million
-            retail_cache_input = listing.retail_cache_input_price_per_million
-            retail_currency = resolve_resale_listing_currency(listing)
-            fee_rate = listing.platform.fee_rate or Decimal("0")
-            cost_input_display = _converted_amount(
-                cost_input,
-                cost_currency,
-                currency_context,
+        listing_rows = (
+            []
+            if is_monitor_scope
+            else _summary_listing_rows(
+                active_listings=active_listings,
+                currency_context=currency_context,
+                overrides=overrides,
+                price_item_indexes=price_item_indexes,
+                rows_by_model=rows_by_model,
+                video_resolution=video_resolution,
             )
-            cost_output_display = _converted_amount(
-                cost_output,
-                cost_currency,
-                currency_context,
-            )
-            cost_cache_input_display = _converted_amount(
-                cost_cache_input,
-                cost_currency,
-                currency_context,
-            )
-            retail_input_display = _converted_amount(
-                retail_input,
-                retail_currency,
-                currency_context,
-            )
-            retail_output_display = _converted_amount(
-                retail_output,
-                retail_currency,
-                currency_context,
-            )
-            retail_cache_input_display = _converted_amount(
-                retail_cache_input,
-                retail_currency,
-                currency_context,
-            )
-            requires_currency_conversion = any(
-                value is None
-                for value in (
-                    cost_input_display,
-                    cost_output_display,
-                    cost_cache_input_display,
-                    retail_input_display,
-                    retail_output_display,
-                    retail_cache_input_display,
-                )
-            )
-            if requires_currency_conversion:
-                input_margin = _empty_margin(
-                    requires_currency_conversion=True,
-                )
-                output_margin = _empty_margin(
-                    requires_currency_conversion=True,
-                )
-            else:
-                input_margin = _gross_margin(
-                    retail_input_display,
-                    cost_input_display,
-                    fee_rate,
-                )
-                output_margin = _gross_margin(
-                    retail_output_display,
-                    cost_output_display,
-                    fee_rate,
-                )
-            listing_rows.append(
-                {
-                    "listing_id": listing.id,
-                    "platform_id": listing.platform_id,
-                    "platform_name": listing.platform.name,
-                    "model_id": listing.model_id,
-                    "model_name": listing.model.name,
-                    "model_code": listing.model.code,
-                    "channel_id": listing.channel_id,
-                    "channel_name": (
-                        channel.name if channel else "自动最优"
-                    ),
-                    "currency": (
-                        currency_context.display_currency
-                        if not requires_currency_conversion
-                        else retail_currency
-                    ),
-                    "display_currency": currency_context.display_currency,
-                    "exchange_rate": _as_float(
-                        currency_context.usd_to_cny_rate
-                    ),
-                    "original_currency": retail_currency,
-                    "retail_currency": retail_currency,
-                    "cost_currency": cost_currency,
-                    "requires_currency_conversion": (
-                        requires_currency_conversion
-                    ),
-                    "updated_at": listing.updated_at,
-                    "retail_input_price_per_million": _as_float(
-                        retail_input_display
-                        if retail_input_display is not None
-                        else retail_input
-                    ),
-                    "retail_output_price_per_million": _as_float(
-                        retail_output_display
-                        if retail_output_display is not None
-                        else retail_output
-                    ),
-                    "retail_cache_input_price_per_million": _as_float(
-                        retail_cache_input_display
-                        if retail_cache_input_display is not None
-                        else retail_cache_input
-                    ),
-                    "original_retail_input_price_per_million": (
-                        _as_float(retail_input)
-                    ),
-                    "original_retail_output_price_per_million": (
-                        _as_float(retail_output)
-                    ),
-                    "original_retail_cache_input_price_per_million": (
-                        _as_float(retail_cache_input)
-                    ),
-                    "cost_input_price_per_million": _as_float(
-                        cost_input_display
-                        if cost_input_display is not None
-                        else cost_input
-                    ),
-                    "cost_output_price_per_million": _as_float(
-                        cost_output_display
-                        if cost_output_display is not None
-                        else cost_output
-                    ),
-                    "cost_cache_input_price_per_million": _as_float(
-                        cost_cache_input_display
-                        if cost_cache_input_display is not None
-                        else cost_cache_input
-                    ),
-                    "original_cost_input_price_per_million": (
-                        _as_float(cost_input)
-                    ),
-                    "original_cost_output_price_per_million": (
-                        _as_float(cost_output)
-                    ),
-                    "original_cost_cache_input_price_per_million": (
-                        _as_float(cost_cache_input)
-                    ),
-                    "input_margin": input_margin,
-                    "output_margin": output_margin,
-                    "option": _listing_option(
-                        listing,
-                        options,
-                        row["best_channel"] if row else None,
-                    ),
-                }
-            )
+        )
 
         selected_platform_listing_rows = [
             listing
@@ -3475,6 +3575,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 current_listing_payload = {
                     "channel_id": listing_payload.get("channel_id"),
                     "channel_name": listing_payload.get("channel_name"),
+                    "channel_type": listing_payload.get("channel_type"),
                     "currency": listing_payload.get("currency"),
                     "retail_input_price_per_million": listing_payload.get(
                         "retail_input_price_per_million"
@@ -3530,24 +3631,36 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     selected_platform
                 ),
             }
-            diagnostics.append(
-                {
-                    **row,
-                    "coverage_count": len(options),
-                    "is_agione_listed": bool(active_model_listings),
-                    "has_lowest_listing": has_lowest_listing,
-                    "active_listing_count": len(active_model_listings),
-                    "price_gap": _listing_price_gap(
-                        cheapest_active,
-                        best_channel,
-                    ),
-                    **status_payload,
-                    "recommended_channel": recommended_channel,
-                    "current_listing": current_listing_payload,
-                    "yield_metrics": yield_metrics_payload,
-                    **decision_payload,
-                }
-            )
+            diagnostic = {
+                "model_id": row["model_id"],
+                "model_name": row["model_name"],
+                "model_code": row["model_code"],
+                "meta_model_id": row["meta_model_id"],
+                "meta_model_name": row["meta_model_name"],
+                "meta_model_code": row["meta_model_code"],
+                "provider_name": row["provider_name"],
+                "currency": row["currency"],
+                "requires_currency_conversion": row[
+                    "requires_currency_conversion"
+                ],
+                "coverage_count": len(options),
+                "is_agione_listed": bool(active_model_listings),
+                "has_lowest_listing": has_lowest_listing,
+                "active_listing_count": len(active_model_listings),
+                "price_gap": _listing_price_gap(
+                    cheapest_active,
+                    best_channel,
+                ),
+                **status_payload,
+                "best_channel": recommended_channel,
+                "recommended_channel": recommended_channel,
+                "current_listing": current_listing_payload,
+                "yield_metrics": yield_metrics_payload,
+                **decision_payload,
+            }
+            if not is_monitor_scope:
+                diagnostic = {**row, **diagnostic}
+            diagnostics.append(diagnostic)
 
         diagnostic_counts = {
             "currency_mismatch": 0,
@@ -3621,7 +3734,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "point_conversion": _point_conversion_payload(
                     selected_platform,
                 ),
-                "procurement": procurement_rows,
+                "procurement": [] if is_monitor_scope else procurement_rows,
                 "listings": listing_rows,
                 "agione": {
                     "platform_id": (

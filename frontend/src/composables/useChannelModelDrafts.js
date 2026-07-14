@@ -7,42 +7,55 @@ const customPriceKeys = [
   'custom_video_output_price_per_second'
 ]
 
-const performanceFields = [
+const performanceFieldDefinitions = [
   {
     key: 'tpm_limit',
-    label: 'TPM',
-    shortLabel: 'TPM',
-    placeholder: '每分钟 Token',
+    labelKey: 'llmOps.channelModelDrawer.performance.tpm',
+    shortLabelKey: 'llmOps.channelModelDrawer.performance.tpmShort',
+    placeholderKey: 'llmOps.channelModelDrawer.performance.tpmPlaceholder',
     shortPlaceholder: 'Token/min',
-    title: '每分钟 Token 上限'
+    titleKey: 'llmOps.channelModelDrawer.performance.tpmTitle'
   },
   {
     key: 'rpm_limit',
-    label: 'RPM',
-    shortLabel: 'RPM',
-    placeholder: '每分钟请求',
+    labelKey: 'llmOps.channelModelDrawer.performance.rpm',
+    shortLabelKey: 'llmOps.channelModelDrawer.performance.rpmShort',
+    placeholderKey: 'llmOps.channelModelDrawer.performance.rpmPlaceholder',
     shortPlaceholder: 'Req/min',
-    title: '每分钟请求上限'
+    titleKey: 'llmOps.channelModelDrawer.performance.rpmTitle'
   },
   {
     key: 'latency_ms',
-    label: '延迟(ms)',
-    shortLabel: '延迟',
-    placeholder: '毫秒',
+    labelKey: 'llmOps.channelModelDrawer.performance.latency',
+    shortLabelKey: 'llmOps.channelModelDrawer.performance.latencyShort',
+    placeholderKey: 'llmOps.channelModelDrawer.performance.latencyPlaceholder',
     shortPlaceholder: 'ms',
-    title: '渠道平均延迟，单位毫秒'
+    titleKey: 'llmOps.channelModelDrawer.performance.latencyTitle'
   }
 ]
 
-const performanceFieldKeys = performanceFields.map((field) => field.key)
+const performanceFieldKeys = performanceFieldDefinitions.map(
+  (field) => field.key
+)
 
 export function useChannelModelDrafts({
   baselineDrafts,
   channelCurrency,
   drafts,
   getChannel,
-  getModelSourceCategory
+  getModelSourceCategory,
+  t
 }) {
+  const translate = typeof t === 'function' ? t : (key) => key
+  const performanceFields = performanceFieldDefinitions.map((field) => ({
+    key: field.key,
+    label: translate(field.labelKey),
+    shortLabel: translate(field.shortLabelKey),
+    placeholder: translate(field.placeholderKey),
+    shortPlaceholder: field.shortPlaceholder,
+    title: translate(field.titleKey)
+  }))
+
   function emptyNewDraft() {
     return {
       model: '',
@@ -219,11 +232,17 @@ export function useChannelModelDrafts({
   function priceRuleSummary(row) {
     const channel = getChannel()
     const draft = row?.draft || {}
-    if (draft.price_mode === 'fixed') return '固定成本价'
-    if (draft.price_mode === 'discount') {
-      return `折扣 ${ratioPercent(draft.settlement_ratio)}`
+    if (draft.price_mode === 'fixed') {
+      return translate('llmOps.channelModelDrawer.priceRule.fixed')
     }
-    return `默认折扣 ${ratioPercent(channel?.settlement_ratio, 1)}`
+    if (draft.price_mode === 'discount') {
+      return translate('llmOps.channelModelDrawer.priceRule.discount', {
+        value: ratioPercent(draft.settlement_ratio)
+      })
+    }
+    return translate('llmOps.channelModelDrawer.priceRule.defaultDiscount', {
+      value: ratioPercent(channel?.settlement_ratio, 1)
+    })
   }
 
   function costCurrencyTitle(currency) {
@@ -231,9 +250,13 @@ export function useChannelModelDrafts({
       .trim()
       .toUpperCase()
     if (value) {
-      return `成本价保存为 ${value}；页面价格按全局显示货币换算。`
+      return translate('llmOps.channelModelDrawer.costCurrencyFixed', {
+        currency: value
+      })
     }
-    return `成本价跟随渠道结算币种 ${channelCurrency.value} 保存；页面价格按全局显示货币换算。`
+    return translate('llmOps.channelModelDrawer.costCurrencyChannelDefault', {
+      currency: channelCurrency.value
+    })
   }
 
   function normalizePayload(payload, nullableFields = []) {
@@ -299,13 +322,17 @@ export function useChannelModelDrafts({
       return [
         {
           key: 'custom_audio_input_price_per_second',
-          label: '音频输入 / 秒',
-          shortLabel: '音入'
+          label: translate('llmOps.channelModelDrawer.priceField.audioInput'),
+          shortLabel: translate(
+            'llmOps.channelModelDrawer.priceField.audioInputShort'
+          )
         },
         {
           key: 'custom_audio_output_price_per_second',
-          label: '音频输出 / 秒',
-          shortLabel: '音出'
+          label: translate('llmOps.channelModelDrawer.priceField.audioOutput'),
+          shortLabel: translate(
+            'llmOps.channelModelDrawer.priceField.audioOutputShort'
+          )
         }
       ]
     }
@@ -313,13 +340,17 @@ export function useChannelModelDrafts({
       return [
         {
           key: 'custom_video_input_price_per_second',
-          label: '视频输入 / 秒',
-          shortLabel: '视入'
+          label: translate('llmOps.channelModelDrawer.priceField.videoInput'),
+          shortLabel: translate(
+            'llmOps.channelModelDrawer.priceField.videoInputShort'
+          )
         },
         {
           key: 'custom_video_output_price_per_second',
-          label: '视频输出 / 秒',
-          shortLabel: '视出'
+          label: translate('llmOps.channelModelDrawer.priceField.videoOutput'),
+          shortLabel: translate(
+            'llmOps.channelModelDrawer.priceField.videoOutputShort'
+          )
         }
       ]
     }
@@ -329,13 +360,17 @@ export function useChannelModelDrafts({
     return [
       {
         key: 'custom_input_price_per_million',
-        label: '文本输入 / 百万 tokens',
-        shortLabel: '文入'
+        label: translate('llmOps.channelModelDrawer.priceField.textInput'),
+        shortLabel: translate(
+          'llmOps.channelModelDrawer.priceField.textInputShort'
+        )
       },
       {
         key: 'custom_output_price_per_million',
-        label: '文本输出 / 百万 tokens',
-        shortLabel: '文出'
+        label: translate('llmOps.channelModelDrawer.priceField.textOutput'),
+        shortLabel: translate(
+          'llmOps.channelModelDrawer.priceField.textOutputShort'
+        )
       }
     ]
   }
