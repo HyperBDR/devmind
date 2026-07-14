@@ -28,7 +28,8 @@ export function useAgioneListingRows({
   selectedTrendModelIdRef,
   selectedTrendChannelIdRef,
   trendProfitRateRef,
-  pointConversionRef
+  pointConversionRef,
+  t
 }) {
   const listingRows = computed(() => {
     const procurementByModel = new Map(
@@ -197,14 +198,26 @@ export function useAgioneListingRows({
     }
     if (model.modality === 'audio') {
       return [
-        { key: 'audio_input', label: '音频输入' },
-        { key: 'audio_output', label: '音频输出' }
+        {
+          key: 'audio_input',
+          label: t('llmOps.publishingWorkspace.metrics.audioInput')
+        },
+        {
+          key: 'audio_output',
+          label: t('llmOps.publishingWorkspace.metrics.audioOutput')
+        }
       ]
     }
     if (model.modality === 'video') {
       return [
-        { key: 'video_input', label: '视频输入' },
-        { key: 'video_output', label: '视频输出' }
+        {
+          key: 'video_input',
+          label: t('llmOps.publishingWorkspace.metrics.videoInput')
+        },
+        {
+          key: 'video_output',
+          label: t('llmOps.publishingWorkspace.metrics.videoOutput')
+        }
       ]
     }
     if (
@@ -213,9 +226,15 @@ export function useAgioneListingRows({
       model.image_output_price_per_image !== ''
     ) {
       return [
-        { key: 'input', label: '输入价' },
-        { key: 'output', label: '输出价' },
-        { key: 'image_output', label: '图片输出' }
+        { key: 'input', label: t('llmOps.publishingWorkspace.metrics.input') },
+        {
+          key: 'output',
+          label: t('llmOps.publishingWorkspace.metrics.output')
+        },
+        {
+          key: 'image_output',
+          label: t('llmOps.publishingWorkspace.metrics.imageOutput')
+        }
       ]
     }
     return tokenMetricOptions()
@@ -240,7 +259,7 @@ export function useAgioneListingRows({
         const fallbackValue = metricValues[0]?.value ?? null
         return {
           ...option,
-          label: option.channel_name || '渠道',
+          label: option.channel_name || t('llmOps.channel.fallback'),
           metric_values: metricValues,
           metric_price: primaryValue ?? fallbackValue,
           value: primaryValue ?? fallbackValue,
@@ -260,13 +279,13 @@ export function useAgioneListingRows({
 
   const trendChannelSelectOptions = computed(() =>
     trendChannelOptions.value.map((option) => ({
-      label: option.channel_name || '未命名渠道',
+      label: option.channel_name || t('llmOps.channel.unnamed'),
       value: option.channel_id,
       description: metricPriceSummary(option.metric_values),
       badge:
         String(option.channel_id) ===
         String(lowestChannelPrice.value?.channel_id)
-          ? '最低'
+          ? t('llmOps.publishingWorkspace.supply.lowest')
           : '',
       searchText: [
         option.channel_name,
@@ -280,12 +299,17 @@ export function useAgioneListingRows({
 
   const trendModelOptions = computed(() => [
     {
-      label: '选择模型',
+      label: t('llmOps.publishingWorkspace.modelSelect.label'),
       value: '',
-      description: `${actionableTrendRows.value.length} 个可决策模型 · ${unavailableTrendRows.value.length} 个待配置渠道`
+      description: t('llmOps.publishingWorkspace.modelSelect.description', {
+        actionable: actionableTrendRows.value.length,
+        unavailable: unavailableTrendRows.value.length
+      })
     },
     {
-      label: `可选模型（已配置渠道 ${actionableTrendRows.value.length}）`,
+      label: t('llmOps.publishingWorkspace.modelSelect.actionableGroup', {
+        count: actionableTrendRows.value.length
+      }),
       value: '__group_actionable_models',
       type: 'group'
     },
@@ -293,7 +317,10 @@ export function useAgioneListingRows({
     ...(unavailableTrendRows.value.length
       ? [
           {
-            label: `不可选模型（暂无渠道 ${unavailableTrendRows.value.length}）`,
+            label: t(
+              'llmOps.publishingWorkspace.modelSelect.unavailableGroup',
+              { count: unavailableTrendRows.value.length }
+            ),
             value: '__group_unavailable_models',
             type: 'group'
           }
@@ -302,7 +329,7 @@ export function useAgioneListingRows({
     ...unavailableTrendRows.value.map((row) => ({
       ...trendModelOption(row),
       disabled: true,
-      badge: '需配置渠道'
+      badge: t('llmOps.publishingWorkspace.modelSelect.needsChannel')
     }))
   ])
 
@@ -357,8 +384,8 @@ export function useAgioneListingRows({
       return {
         ...option,
         key: `channel-${option.channel_id}`,
-        label: option.channel_name || '未命名渠道',
-        channel_name: option.channel_name || '未命名渠道',
+        label: option.channel_name || t('llmOps.channel.unnamed'),
+        channel_name: option.channel_name || t('llmOps.channel.unnamed'),
         cost_value: costValue,
         cost_summary: metricPriceSummary(option.metric_values),
         cost_breakdown_summary: metricCostBreakdownSummary(
@@ -375,10 +402,10 @@ export function useAgioneListingRows({
           String(unref(selectedTrendChannelIdRef)),
         gap_label:
           gapValue > 0
-            ? `高 ${money(
-                gapValue,
-                selectedTrendCurrency.value
-              )} · ${gapPercent.toFixed(1)}%`
+            ? t('llmOps.publishingWorkspace.supply.higherCost', {
+                amount: money(gapValue, selectedTrendCurrency.value),
+                percent: gapPercent.toFixed(1)
+              })
             : ''
       }
     })
@@ -416,46 +443,65 @@ export function useAgioneListingRows({
   )
 
   const trendPrimaryActionLabel = computed(() => {
-    if (selectedOptionIsListed.value) return '更新价格'
-    return '追加上架'
+    if (selectedOptionIsListed.value) {
+      return t('llmOps.publishingWorkspace.actions.updatePrice')
+    }
+    return t('llmOps.publishingWorkspace.actions.appendListing')
   })
 
   const trendActionHint = computed(() => {
-    if (!selectedTrendOption.value) return '先选择采购渠道后再生成上架价格。'
+    if (!selectedTrendOption.value) {
+      return t('llmOps.publishingWorkspace.actions.selectChannelFirst')
+    }
     if (selectedOptionIsListed.value && selectedOptionIsLowest.value) {
-      return '当前渠道已经上架且是最低采购渠道，可直接更新收益率后的售价。'
+      return t('llmOps.publishingWorkspace.actions.updateLowestListedHint')
     }
     if (selectedOptionIsListed.value) {
-      return '当前渠道已经上架，本次操作会更新该渠道的挂售价格。'
+      return t('llmOps.publishingWorkspace.actions.updateListedHint')
     }
     if (canSwitchTrendListing.value) {
-      return '追加会保留现有渠道；切换会下架同平台其他渠道，仅保留当前渠道。'
+      return t('llmOps.publishingWorkspace.actions.switchAvailableHint')
     }
-    return '追加会新增当前渠道的挂售价格，不会影响已有上架渠道。'
+    return t('llmOps.publishingWorkspace.actions.appendListingHint')
   })
 
   const selectedDecisionStatusLabel = computed(() => {
-    if (!selectedTrendOption.value) return '未选择渠道'
-    if (selectedOptionIsListed.value && selectedOptionIsLowest.value) {
-      return '已上架最低价'
+    if (!selectedTrendOption.value) {
+      return t('llmOps.publishingWorkspace.decision.noChannelSelected')
     }
-    if (selectedOptionIsListed.value) return '当前已上架'
-    if (selectedOptionIsLowest.value) return '最低采购价'
-    return '非最低采购价'
+    if (selectedOptionIsListed.value && selectedOptionIsLowest.value) {
+      return t('llmOps.publishingWorkspace.decision.listedLowest')
+    }
+    if (selectedOptionIsListed.value) {
+      return t('llmOps.publishingWorkspace.decision.currentlyListed')
+    }
+    if (selectedOptionIsLowest.value) {
+      return t('llmOps.publishingWorkspace.decision.lowestProcurement')
+    }
+    return t('llmOps.publishingWorkspace.decision.notLowestProcurement')
   })
 
   const selectedPlanLabel = computed(() => {
-    if (!selectedTrendOption.value) return '未选择'
-    if (selectedOptionIsListed.value && selectedOptionIsLowest.value) {
-      return '已上架最低源'
+    if (!selectedTrendOption.value) {
+      return t('llmOps.publishingWorkspace.plan.notSelected')
     }
-    if (selectedOptionIsListed.value) return '已上架'
-    if (selectedOptionIsLowest.value) return '最低采购渠道'
-    return '非最低源'
+    if (selectedOptionIsListed.value && selectedOptionIsLowest.value) {
+      return t('llmOps.publishingWorkspace.plan.listedLowestSource')
+    }
+    if (selectedOptionIsListed.value) {
+      return t('llmOps.publishingWorkspace.plan.listed')
+    }
+    if (selectedOptionIsLowest.value) {
+      return t('llmOps.publishingWorkspace.plan.lowestProcurementChannel')
+    }
+    return t('llmOps.publishingWorkspace.plan.notLowestSource')
   })
 
   const pointFormulaLabel = computed(() => {
-    return unref(pointConversionRef)?.formula_label || '未配置'
+    return (
+      unref(pointConversionRef)?.formula_label ||
+      t('llmOps.publishingWorkspace.fallback.notConfigured')
+    )
   })
 
   function listingOption(listing, lowestOption, options) {
@@ -526,9 +572,12 @@ export function useAgioneListingRows({
 
   function tokenMetricOptions() {
     return [
-      { key: 'input', label: '输入价' },
-      { key: 'cache_input', label: '缓存输入价' },
-      { key: 'output', label: '输出价' }
+      { key: 'input', label: t('llmOps.publishingWorkspace.metrics.input') },
+      {
+        key: 'cache_input',
+        label: t('llmOps.publishingWorkspace.metrics.cacheInput')
+      },
+      { key: 'output', label: t('llmOps.publishingWorkspace.metrics.output') }
     ]
   }
 
@@ -666,7 +715,10 @@ export function useAgioneListingRows({
     const listings = asArray(row?.active_listings)
     if (!listings.length) return '-'
     return listings
-      .map((listing) => listing.channel_name || '未指定渠道')
+      .map(
+        (listing) =>
+          listing.channel_name || t?.('llmOps.channel.unspecified') || '-'
+      )
       .filter(Boolean)
       .join(' / ')
   }
@@ -703,7 +755,8 @@ export function useAgioneListingRows({
           unref(pointConversionRef)
         )
         return `${item.label} ${points} ${
-          unref(pointConversionRef)?.point_name || '积分'
+          unref(pointConversionRef)?.point_name ||
+          t('llmOps.publishingWorkspace.fallback.points')
         }`
       })
       .filter(Boolean)
@@ -730,7 +783,9 @@ export function useAgioneListingRows({
     return [
       modelNameIncludesVendor(name, vendorName) ? '' : vendorName,
       code,
-      row.source_count ? `${row.source_count} 个价格源` : ''
+      row.source_count
+        ? t('llmOps.monitor.sourceCount', { count: row.source_count })
+        : ''
     ]
       .filter(Boolean)
       .join(' / ')
@@ -761,16 +816,24 @@ export function useAgioneListingRows({
       value: row.key,
       description: [
         modelCodeDescription(row.model),
-        row.source_count > 1 ? `${row.source_count} 个价格源` : '',
-        row.options.length ? `${row.options.length} 个采购渠道` : '暂无采购渠道'
+        row.source_count > 1
+          ? t?.('llmOps.monitor.sourceCount', {
+              count: row.source_count
+            }) || ''
+          : '',
+        row.options.length
+          ? t?.('llmOps.monitor.procurementChannelCount', {
+              count: row.options.length
+            }) || ''
+          : t?.('llmOps.monitor.noProcurementChannels') || ''
       ]
         .filter(Boolean)
         .join(' · '),
       badge: row.is_listed
         ? row.has_lowest_listing
-          ? '已上架'
-          : '待处理'
-        : '未上架',
+          ? t?.('llmOps.status.listed') || ''
+          : t?.('llmOps.status.needsHandling') || ''
+        : t?.('llmOps.status.unlisted') || '',
       searchText: [
         modelDisplayName(row.model),
         row.model.code,

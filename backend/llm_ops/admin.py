@@ -299,6 +299,10 @@ class ResalePlatformAdmin(admin.ModelAdmin):
         "point_decimal_places",
         "fee_rate",
         "service_fee_rate",
+        "tax_rate",
+        "settlement_rate",
+        "yield_warning",
+        "yield_target",
         "auto_approve_max_margin_rate",
         "is_active",
     )

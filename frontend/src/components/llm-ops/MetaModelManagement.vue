@@ -257,7 +257,7 @@
                 <tbody>
                   <tr v-if="drawerLoading">
                     <td class="table-cell text-slate-500" colspan="5">
-                      加载中...
+                      {{ t('common.loading') }}
                     </td>
                   </tr>
                   <tr v-for="item in paginatedVendorMetaRows" :key="item.id">
@@ -622,7 +622,12 @@ async function fetchOwnerSummary() {
     const response = await llmOpsApi.listMetaModelOwnerSummary()
     ownerRows.value = paginationResults(paginationPayload(response))
   } catch (error) {
-    showError(errorMessage(error, '加载元模型厂商汇总失败。'))
+    showError(
+      errorMessage(
+        error,
+        t('llmOps.metaModelManagement.errors.loadOwnerSummary')
+      )
+    )
   } finally {
     ownerSummaryLoading.value = false
   }
@@ -654,7 +659,9 @@ async function fetchVendorMetaModels() {
   } catch (error) {
     drawerRows.value = []
     drawerTotal.value = 0
-    showError(errorMessage(error, '加载元模型明细失败。'))
+    showError(
+      errorMessage(error, t('llmOps.metaModelManagement.errors.loadDetails'))
+    )
   } finally {
     drawerLoading.value = false
   }

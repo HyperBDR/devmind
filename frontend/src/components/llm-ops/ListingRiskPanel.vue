@@ -11,9 +11,9 @@
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
         <div>
-          <h3 class="panel-title">挂售利润风险榜</h3>
+          <h3 class="panel-title">{{ t('llmOps.listingRisk.title') }}</h3>
           <p class="mt-1 text-xs text-slate-500">
-            聚合低毛利、非最低采购、未挂售和币种换算风险。
+            {{ t('llmOps.listingRisk.subtitle') }}
           </p>
         </div>
         <CompactSelect
@@ -27,12 +27,24 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th class="table-head">模型</th>
-              <th class="table-head">风险类型</th>
-              <th class="table-head text-right">Input 毛利</th>
-              <th class="table-head text-right">Output 毛利</th>
-              <th class="table-head">当前渠道</th>
-              <th class="table-head">建议动作</th>
+              <th class="table-head">
+                {{ t('llmOps.listingRisk.columns.model') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingRisk.columns.risk') }}
+              </th>
+              <th class="table-head text-right">
+                {{ t('llmOps.listingRisk.columns.inputMargin') }}
+              </th>
+              <th class="table-head text-right">
+                {{ t('llmOps.listingRisk.columns.outputMargin') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingRisk.columns.channel') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.listingRisk.columns.action') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -63,7 +75,7 @@
             </tr>
             <tr v-if="!filteredRows.length">
               <td class="table-cell text-slate-500" colspan="6">
-                当前筛选条件下没有风险项。
+                {{ t('llmOps.listingRisk.empty') }}
               </td>
             </tr>
           </tbody>
@@ -75,6 +87,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { asArray } from '@/utils/llmOpsPagination'
 
@@ -84,14 +97,18 @@ const props = defineProps({
   summary: { type: Object, default: () => ({}) }
 })
 
+const { t, te } = useI18n()
 const riskFilter = ref('all')
-const riskFilterOptions = [
-  { label: '全部风险', value: 'all' },
-  { label: '低毛利', value: 'margin' },
-  { label: '非最低价', value: 'not_lowest' },
-  { label: '未挂售', value: 'unlisted' },
-  { label: '需要汇率', value: 'currency_mismatch' }
-]
+const riskFilterOptions = computed(() => [
+  { label: t('llmOps.listingRisk.filters.all'), value: 'all' },
+  { label: t('llmOps.listingRisk.risk.margin'), value: 'margin' },
+  { label: t('llmOps.listingRisk.risk.not_lowest'), value: 'not_lowest' },
+  { label: t('llmOps.listingRisk.risk.unlisted'), value: 'unlisted' },
+  {
+    label: t('llmOps.listingRisk.risk.currency_mismatch'),
+    value: 'currency_mismatch'
+  }
+])
 
 const diagnosticRows = computed(() =>
   asArray(props.summary.agione?.diagnostics)
@@ -120,7 +137,7 @@ const riskRows = computed(() => {
       tone: statusTone(row.status),
       input_margin: null,
       output_margin: null,
-      channel_name: row.best_channel?.channel_name || '',
+      channel_name: channelDisplayName(row.best_channel),
       action: actionText(row.status)
     })
   })
@@ -134,12 +151,12 @@ const riskRows = computed(() => {
       model_name: listing.model_name,
       provider_name: listing.platform_name,
       risk: 'margin',
-      risk_label: '低毛利',
+      risk_label: t('llmOps.listingRisk.risk.margin'),
       tone: 'danger',
       input_margin: inputMargin,
       output_margin: outputMargin,
-      channel_name: listing.channel_name,
-      action: '复核售价、服务费率或采购渠道'
+      channel_name: channelDisplayName(listing),
+      action: t('llmOps.listingRisk.actions.margin')
     })
   })
   return rows.sort((left, right) => riskRank(left.risk) - riskRank(right.risk))
@@ -152,24 +169,24 @@ const filteredRows = computed(() => {
 
 const metrics = computed(() => [
   {
-    label: '风险总数',
+    label: t('llmOps.listingRisk.metrics.total.label'),
     value: riskRows.value.length,
-    hint: '当前平台可见的挂售和采购风险'
+    hint: t('llmOps.listingRisk.metrics.total.hint')
   },
   {
-    label: '低毛利',
+    label: t('llmOps.listingRisk.metrics.margin.label'),
     value: riskRows.value.filter((row) => row.risk === 'margin').length,
-    hint: 'Input 或 Output 毛利低于 10%'
+    hint: t('llmOps.listingRisk.metrics.margin.hint')
   },
   {
-    label: '非最低价',
+    label: t('llmOps.listingRisk.metrics.notLowest.label'),
     value: riskRows.value.filter((row) => row.risk === 'not_lowest').length,
-    hint: '已挂售但未使用最低采购渠道'
+    hint: t('llmOps.listingRisk.metrics.notLowest.hint')
   },
   {
-    label: '未挂售',
+    label: t('llmOps.listingRisk.metrics.unlisted.label'),
     value: riskRows.value.filter((row) => row.risk === 'unlisted').length,
-    hint: '已有供应但未进入当前平台'
+    hint: t('llmOps.listingRisk.metrics.unlisted.hint')
   }
 ])
 
@@ -179,14 +196,8 @@ function isLowMargin(value) {
 }
 
 function statusLabel(status) {
-  return (
-    {
-      currency_mismatch: '需要汇率',
-      missing_channel: '缺渠道价',
-      unlisted: '未挂售',
-      not_lowest: '非最低价'
-    }[status] || status
-  )
+  const key = `llmOps.listingRisk.risk.${status}`
+  return te(key) ? t(key) : status
 }
 
 function statusTone(status) {
@@ -201,14 +212,8 @@ function statusTone(status) {
 }
 
 function actionText(status) {
-  return (
-    {
-      currency_mismatch: '补充汇率后重新比较采购价',
-      missing_channel: '先为模型配置至少一个渠道采购价',
-      unlisted: '进入挂售工作台创建平台上架记录',
-      not_lowest: '评估切换到最低采购渠道'
-    }[status] || '复核状态'
-  )
+  const key = `llmOps.listingRisk.actions.${status}`
+  return te(key) ? t(key) : t('llmOps.listingRisk.actions.fallback')
 }
 
 function riskRank(status) {
@@ -226,5 +231,13 @@ function riskRank(status) {
 function percent(value) {
   if (value === null || value === undefined || value === '') return '-'
   return `${(Number(value) * 100).toFixed(2)}%`
+}
+
+function channelDisplayName(value) {
+  if (!value) return ''
+  if (value.channel_type === 'auto_best' || value.channel_id === null) {
+    return t('llmOps.channel.autoBest')
+  }
+  return value.channel_name || ''
 }
 </script>

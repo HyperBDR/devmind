@@ -290,7 +290,8 @@ const sourceOptions = computed(() => [
         source.provider_name ||
         '',
       badge: priceSourceCollectionMethodLabel(
-        priceSourceCollectionMethod(source)
+        priceSourceCollectionMethod(source),
+        collectionMethodLabels()
       )
     }))
 ])
@@ -308,7 +309,8 @@ const selectedSourceProvider = computed(() => {
 })
 const sourceCategoryLabel = computed(() =>
   priceSourceCollectionMethodLabel(
-    priceSourceCollectionMethod(selectedSource.value)
+    priceSourceCollectionMethod(selectedSource.value),
+    collectionMethodLabels()
   )
 )
 const sourceStatusText = computed(() => {
@@ -583,6 +585,22 @@ function modalityLabel(value) {
     video: t('llmOps.manualPriceImport.modalities.video')
   }
   return labels[value] || value || labels.text
+}
+
+function collectionMethodLabels() {
+  return {
+    auto_collect: t(
+      'llmOps.collectionHealthPanel.collectionMethod.autoCollect'
+    ),
+    api_sync: t('llmOps.collectionHealthPanel.collectionMethod.apiSync'),
+    manual_entry: t(
+      'llmOps.collectionHealthPanel.collectionMethod.manualEntry'
+    ),
+    manual_import: t(
+      'llmOps.collectionHealthPanel.collectionMethod.manualImport'
+    ),
+    unknown: t('llmOps.collectionHealthPanel.collectionMethod.unknown')
+  }
 }
 </script>
 

@@ -18,10 +18,14 @@
               Resale Platform
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑挂售平台' : '新建挂售平台' }}
+              {{
+                form.id
+                  ? t('llmOps.resalePlatformModal.editTitle')
+                  : t('llmOps.resalePlatformModal.createTitle')
+              }}
             </h3>
             <p class="mt-1 text-sm text-slate-500">
-              配置 Agione 平台实例、区域、接口、抽佣、免审收益率和积分规则。
+              {{ t('llmOps.resalePlatformModal.description') }}
             </p>
           </div>
           <button
@@ -30,7 +34,7 @@
             :disabled="saving"
             @click="close"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
         </div>
       </div>
@@ -40,44 +44,54 @@
       >
         <section class="form-section">
           <div class="section-heading">
-            <h4>平台信息</h4>
-            <p>用于区分 Agione 上架平台实例和后续接口适配。</p>
+            <h4>{{ t('llmOps.resalePlatformModal.platformInfo') }}</h4>
+            <p>{{ t('llmOps.resalePlatformModal.platformInfoHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">平台名称</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.name') }}
+              </span>
               <input
                 v-model="form.name"
                 class="field"
-                placeholder="例如：Agione 主平台"
+                :placeholder="t('llmOps.resalePlatformModal.placeholders.name')"
                 required
               />
             </label>
             <label class="field-group">
-              <span class="field-label">平台标识</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.code') }}
+              </span>
               <input
                 v-model="form.code"
                 class="field"
-                placeholder="例如：agione-main"
+                :placeholder="t('llmOps.resalePlatformModal.placeholders.code')"
                 required
               />
             </label>
             <label class="field-group">
-              <span class="field-label">平台类型</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.platformType') }}
+              </span>
               <CompactSelect
                 v-model="form.platform_type"
                 :options="platformTypeOptions"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">环境</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.environment') }}
+              </span>
               <CompactSelect
                 v-model="form.environment"
                 :options="environmentOptions"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">区域</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.region') }}
+              </span>
               <CompactSelect
                 v-model="form.region_code"
                 :options="regionOptions"
@@ -85,15 +99,21 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">区域名称</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.regionName') }}
+              </span>
               <input
                 v-model="form.region_name"
                 class="field"
-                placeholder="例如：新加坡"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.regionName')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">官网地址</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.website') }}
+              </span>
               <input
                 v-model="form.website"
                 class="field"
@@ -102,7 +122,9 @@
               />
             </label>
             <label class="field-group">
-              <span class="field-label">API 接入地址</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.apiEndpoint') }}
+              </span>
               <input
                 v-model="form.api_endpoint"
                 autocomplete="off"
@@ -120,7 +142,9 @@
               />
             </label>
             <label class="field-group md:col-span-2">
-              <span class="field-label">平台 API Key</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.apiKey') }}
+              </span>
               <input
                 v-model="form.api_key"
                 autocomplete="off"
@@ -131,12 +155,14 @@
                 data-bwignore="true"
                 data-form-type="other"
                 data-lpignore="true"
-                placeholder="用于挂售接口鉴权"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.apiKey')
+                "
                 spellcheck="false"
                 type="text"
               />
               <span class="field-help">
-                用于调用挂售平台接口执行上架、改价和下架操作。
+                {{ t('llmOps.resalePlatformModal.apiKeyHint') }}
               </span>
             </label>
           </div>
@@ -144,19 +170,23 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>结算与积分</h4>
-            <p>用于挂售页将平台上架价换算为积分。</p>
+            <h4>{{ t('llmOps.resalePlatformModal.settlementTitle') }}</h4>
+            <p>{{ t('llmOps.resalePlatformModal.settlementHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">平台货币</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.currency') }}
+              </span>
               <CompactSelect
                 v-model="form.currency"
                 :options="currencyOptions"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">平台抽佣比例（%）</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.feeRate') }}
+              </span>
               <input
                 v-model="form.fee_rate"
                 class="field"
@@ -164,11 +194,15 @@
                 max="99.99"
                 step="0.01"
                 type="number"
-                placeholder="例如：3"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.feeRate')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">服务费率（%）</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.serviceFeeRate') }}
+              </span>
               <input
                 v-model="form.service_fee_rate"
                 class="field"
@@ -176,48 +210,135 @@
                 max="99.99"
                 step="0.01"
                 type="number"
-                placeholder="例如：10"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.serviceFeeRate')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">免审最高收益率（%）</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.taxRate') }}
+              </span>
+              <input
+                v-model="form.tax_rate"
+                class="field"
+                min="0"
+                max="99.99"
+                step="0.01"
+                type="number"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.optionalRate')
+                "
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.settlementRate') }}
+              </span>
+              <input
+                v-model="form.settlement_rate"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.settlementRate')
+                "
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.yieldWarning') }}
+              </span>
+              <input
+                v-model="form.yield_warning"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.yieldWarning')
+                "
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.yieldTarget') }}
+              </span>
+              <input
+                v-model="form.yield_target"
+                class="field"
+                min="0"
+                step="0.01"
+                type="number"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.yieldTarget')
+                "
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{
+                  t('llmOps.resalePlatformModal.fields.autoApproveMaxMargin')
+                }}
+              </span>
               <input
                 v-model="form.auto_approve_max_margin_rate"
                 class="field"
                 min="0"
                 step="0.01"
                 type="number"
-                placeholder="例如：20"
+                :placeholder="
+                  t(
+                    'llmOps.resalePlatformModal.placeholders.autoApproveMaxMargin'
+                  )
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">积分名称</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.pointName') }}
+              </span>
               <input
                 v-model="form.point_name"
                 class="field"
-                placeholder="积分"
+                :placeholder="
+                  t('llmOps.resalePlatformModal.placeholders.pointName')
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">积分兑换比例（每 1 平台货币）</span>
+              <span class="field-label">
+                {{
+                  t('llmOps.resalePlatformModal.fields.pointsPerCurrencyUnit')
+                }}
+              </span>
               <input
                 v-model="form.points_per_currency_unit"
                 class="field"
                 min="0.01"
                 step="0.01"
                 type="number"
-                placeholder="例如：100.00"
+                :placeholder="
+                  t(
+                    'llmOps.resalePlatformModal.placeholders.pointsPerCurrencyUnit'
+                  )
+                "
               />
             </label>
             <label class="field-group">
-              <span class="field-label">积分舍入方式</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.roundingMode') }}
+              </span>
               <CompactSelect
                 v-model="form.point_rounding_mode"
                 :options="roundingModeOptions"
               />
             </label>
             <label class="field-group">
-              <span class="field-label">保留小数位</span>
+              <span class="field-label">
+                {{ t('llmOps.resalePlatformModal.fields.decimalPlaces') }}
+              </span>
               <CompactSelect
                 v-model="form.point_decimal_places"
                 :options="decimalPlaceOptions"
@@ -228,13 +349,13 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>扩展元数据</h4>
-            <p>记录租户、渠道、账号、结算口径等平台特有信息。</p>
+            <h4>{{ t('llmOps.resalePlatformModal.metadataTitle') }}</h4>
+            <p>{{ t('llmOps.resalePlatformModal.metadataHint') }}</p>
           </div>
           <textarea
             v-model="form.metadata_text"
             class="field min-h-28 resize-none font-mono text-xs leading-5"
-            placeholder='例如：{"tenant_id":"tenant-001","channel":"direct"}'
+            :placeholder="t('llmOps.resalePlatformModal.placeholders.metadata')"
             :aria-invalid="Boolean(metadataError)"
           />
           <p v-if="metadataError" class="field-error">
@@ -244,13 +365,13 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>备注</h4>
-            <p>记录平台差异、合同口径或接口限制。</p>
+            <h4>{{ t('llmOps.resalePlatformModal.notesTitle') }}</h4>
+            <p>{{ t('llmOps.resalePlatformModal.notesHint') }}</p>
           </div>
           <textarea
             v-model="form.notes"
             class="field min-h-20 resize-none"
-            placeholder="例如：积分倍率来源、结算周期、接口适配状态"
+            :placeholder="t('llmOps.resalePlatformModal.placeholders.notes')"
           />
         </section>
       </div>
@@ -262,7 +383,11 @@
             <span class="status-switch-dot" />
           </span>
           <span class="text-sm text-slate-700">
-            {{ form.is_active ? '平台已启用' : '平台已停用' }}
+            {{
+              form.is_active
+                ? t('llmOps.resalePlatformModal.enabled')
+                : t('llmOps.resalePlatformModal.disabled')
+            }}
           </span>
         </label>
         <div class="modal-footer-actions">
@@ -272,7 +397,7 @@
             :disabled="saving"
             @click="close"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-save"
@@ -280,7 +405,13 @@
             :disabled="saving"
           >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
-            {{ saving ? '保存中' : form.id ? '保存修改' : '创建平台' }}
+            {{
+              saving
+                ? t('common.saving')
+                : form.id
+                  ? t('llmOps.resalePlatformModal.saveChanges')
+                  : t('llmOps.resalePlatformModal.createPlatform')
+            }}
           </button>
         </div>
       </div>
@@ -289,7 +420,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
@@ -305,6 +438,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'saved'])
+const { t } = useI18n()
 
 const form = ref(defaults())
 const saving = ref(false)
@@ -313,38 +447,62 @@ const currencyOptions = [
   { label: 'USD', value: 'USD' }
 ]
 const platformTypeOptions = [{ label: 'Agione', value: 'agione' }]
-const environmentOptions = [
-  { label: '生产', value: 'production' },
-  { label: '预发', value: 'staging' },
-  { label: '沙箱', value: 'sandbox' },
-  { label: '测试', value: 'test' }
-]
-const regionOptions = [
-  { label: '全球 / 默认', value: '' },
-  { label: '中国大陆', value: 'cn' },
-  { label: '华北', value: 'cn-north' },
-  { label: '华东', value: 'cn-east' },
-  { label: '华南', value: 'cn-south' },
-  { label: '香港', value: 'cn-hongkong' },
-  { label: '新加坡', value: 'ap-southeast-1' },
-  { label: '日本', value: 'ap-northeast-1' },
-  { label: '美国东部', value: 'us-east-1' },
-  { label: '欧洲西部', value: 'eu-west-1' }
-]
-const roundingModeOptions = [
-  { label: '四舍五入', value: 'half_up' },
-  { label: '向上舍入', value: 'up' },
-  { label: '向下舍入', value: 'down' }
-]
-const decimalPlaceOptions = [
-  { label: '0 位', value: 0 },
-  { label: '1 位', value: 1 },
-  { label: '2 位', value: 2 },
-  { label: '3 位', value: 3 },
-  { label: '4 位', value: 4 },
-  { label: '5 位', value: 5 },
-  { label: '6 位', value: 6 }
-]
+const environmentOptions = computed(() => [
+  {
+    label: t('llmOps.resalePlatform.environments.production'),
+    value: 'production'
+  },
+  { label: t('llmOps.resalePlatform.environments.staging'), value: 'staging' },
+  { label: t('llmOps.resalePlatform.environments.sandbox'), value: 'sandbox' },
+  { label: t('llmOps.resalePlatform.environments.test'), value: 'test' }
+])
+const regionOptions = computed(() => [
+  { label: t('llmOps.resalePlatformModal.regions.global'), value: '' },
+  { label: t('llmOps.resalePlatformModal.regions.cn'), value: 'cn' },
+  {
+    label: t('llmOps.resalePlatformModal.regions.cnNorth'),
+    value: 'cn-north'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.cnEast'),
+    value: 'cn-east'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.cnSouth'),
+    value: 'cn-south'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.cnHongkong'),
+    value: 'cn-hongkong'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.apSoutheast1'),
+    value: 'ap-southeast-1'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.apNortheast1'),
+    value: 'ap-northeast-1'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.usEast1'),
+    value: 'us-east-1'
+  },
+  {
+    label: t('llmOps.resalePlatformModal.regions.euWest1'),
+    value: 'eu-west-1'
+  }
+])
+const roundingModeOptions = computed(() => [
+  { label: t('llmOps.resalePlatformModal.rounding.halfUp'), value: 'half_up' },
+  { label: t('llmOps.resalePlatformModal.rounding.up'), value: 'up' },
+  { label: t('llmOps.resalePlatformModal.rounding.down'), value: 'down' }
+])
+const decimalPlaceOptions = computed(() =>
+  Array.from({ length: 7 }, (_, value) => ({
+    label: t('llmOps.resalePlatformModal.decimalPlaces', { count: value }),
+    value
+  }))
+)
 const metadataError = ref('')
 
 watch(
@@ -371,8 +529,12 @@ function defaults() {
     currency: 'CNY',
     fee_rate: '3',
     service_fee_rate: '0',
+    tax_rate: '',
+    settlement_rate: '',
+    yield_warning: '',
+    yield_target: '',
     auto_approve_max_margin_rate: '100',
-    point_name: '积分',
+    point_name: t('llmOps.resalePlatformModal.defaultPointName'),
     points_per_currency_unit: '100.00',
     point_rounding_mode: 'half_up',
     point_decimal_places: 0,
@@ -392,6 +554,10 @@ function platformToForm(platform) {
     environment: platform.environment || 'production',
     fee_rate: percentFromRatio(platform.fee_rate),
     service_fee_rate: percentFromRatio(platform.service_fee_rate),
+    tax_rate: optionalPercentFromRatio(platform.tax_rate),
+    settlement_rate: optionalPercentFromRatio(platform.settlement_rate),
+    yield_warning: optionalPercentFromRatio(platform.yield_warning),
+    yield_target: optionalPercentFromRatio(platform.yield_target),
     points_per_currency_unit: formatDecimal(
       platform.points_per_currency_unit,
       2
@@ -420,6 +586,18 @@ function ratioFromPercent(value) {
   return Number((numberValue / 100).toFixed(6))
 }
 
+function optionalPercentFromRatio(value) {
+  if (value === null || value === undefined || value === '') return ''
+  return percentFromRatio(value)
+}
+
+function optionalRatioFromPercent(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numberValue = Number(value)
+  if (!Number.isFinite(numberValue)) return null
+  return Number((numberValue / 100).toFixed(6))
+}
+
 function normalizePayload(payload) {
   const clean = { ...payload }
   clean.platform_type = 'agione'
@@ -436,6 +614,10 @@ function normalizePayload(payload) {
   )
   clean.fee_rate = ratioFromPercent(clean.fee_rate)
   clean.service_fee_rate = ratioFromPercent(clean.service_fee_rate)
+  clean.tax_rate = optionalRatioFromPercent(clean.tax_rate)
+  clean.settlement_rate = optionalRatioFromPercent(clean.settlement_rate)
+  clean.yield_warning = optionalRatioFromPercent(clean.yield_warning)
+  clean.yield_target = optionalRatioFromPercent(clean.yield_target)
   clean.point_decimal_places = normalizePointDecimalPlaces(
     clean.point_decimal_places
   )
@@ -471,10 +653,10 @@ function parseMetadata(value) {
   try {
     parsed = JSON.parse(text)
   } catch {
-    throw new Error('扩展元数据不是有效的 JSON。')
+    throw new Error(t('llmOps.resalePlatformModal.errors.invalidMetadataJson'))
   }
   if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error('扩展元数据必须是 JSON 对象。')
+    throw new Error(t('llmOps.resalePlatformModal.errors.metadataObject'))
   }
   return parsed
 }
@@ -500,14 +682,21 @@ async function save() {
     emit('saved')
   } catch (error) {
     if (error instanceof SyntaxError) {
-      metadataError.value = '扩展元数据不是有效的 JSON。'
+      metadataError.value = t(
+        'llmOps.resalePlatformModal.errors.invalidMetadataJson'
+      )
       return
     }
-    if (error?.message === '扩展元数据不是有效的 JSON。') {
+    if (
+      error?.message ===
+      t('llmOps.resalePlatformModal.errors.invalidMetadataJson')
+    ) {
       metadataError.value = error.message
       return
     }
-    if (error?.message === '扩展元数据必须是 JSON 对象。') {
+    if (
+      error?.message === t('llmOps.resalePlatformModal.errors.metadataObject')
+    ) {
       metadataError.value = error.message
       return
     }

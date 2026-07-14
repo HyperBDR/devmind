@@ -19,8 +19,11 @@ export function useChannelModelSelection({
   selectedModelKeys,
   selectedProviderByModelKey,
   selectedVendorKey,
-  sourceCategoryBadge
+  sourceCategoryBadge,
+  t
 }) {
+  const translate = typeof t === 'function' ? t : (key) => key
+
   const candidateMetaModelGroups = computed(() => {
     const groups = new Map()
     baseAvailableModels.value.forEach((model) => {
@@ -73,7 +76,9 @@ export function useChannelModelSelection({
       .map((vendor) => ({
         label: vendor.label,
         value: vendor.value,
-        description: `${vendor.count} 个可添加元模型`
+        description: translate('llmOps.channelModelDrawer.vendorAddableCount', {
+          count: vendor.count
+        })
       }))
       .sort((left, right) => left.label.localeCompare(right.label))
   })

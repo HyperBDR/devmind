@@ -292,11 +292,17 @@ const statusOptions = computed(() => [
 const categoryOptions = computed(() => [
   { label: t('llmOps.taskLogs.categories.all'), value: '' },
   {
-    label: priceSourceCollectionMethodLabel('auto_collect'),
+    label: priceSourceCollectionMethodLabel(
+      'auto_collect',
+      collectionMethodLabels()
+    ),
     value: 'auto'
   },
   {
-    label: priceSourceCollectionMethodLabel('manual_entry'),
+    label: priceSourceCollectionMethodLabel(
+      'manual_entry',
+      collectionMethodLabels()
+    ),
     value: 'manual'
   },
   { label: t('llmOps.taskLogs.categories.unknown'), value: 'unknown' }
@@ -457,11 +463,33 @@ function statusTone(status) {
 
 function categoryLabel(category) {
   const labels = {
-    auto: priceSourceCollectionMethodLabel('auto_collect'),
-    manual: priceSourceCollectionMethodLabel('manual_entry'),
+    auto: priceSourceCollectionMethodLabel(
+      'auto_collect',
+      collectionMethodLabels()
+    ),
+    manual: priceSourceCollectionMethodLabel(
+      'manual_entry',
+      collectionMethodLabels()
+    ),
     unknown: t('llmOps.taskLogs.categories.unknown')
   }
   return labels[category] || labels.unknown
+}
+
+function collectionMethodLabels() {
+  return {
+    auto_collect: t(
+      'llmOps.collectionHealthPanel.collectionMethod.autoCollect'
+    ),
+    api_sync: t('llmOps.collectionHealthPanel.collectionMethod.apiSync'),
+    manual_entry: t(
+      'llmOps.collectionHealthPanel.collectionMethod.manualEntry'
+    ),
+    manual_import: t(
+      'llmOps.collectionHealthPanel.collectionMethod.manualImport'
+    ),
+    unknown: t('llmOps.collectionHealthPanel.collectionMethod.unknown')
+  }
 }
 
 function categoryTone(category) {

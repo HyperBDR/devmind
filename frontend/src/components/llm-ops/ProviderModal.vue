@@ -17,10 +17,14 @@
               Provider
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
-              {{ form.id ? '编辑模型厂商' : '新建模型厂商' }}
+              {{
+                form.id
+                  ? t('llmOps.providerModal.editTitle')
+                  : t('llmOps.providerModal.createTitle')
+              }}
             </h3>
             <p class="mt-1 text-sm leading-6 text-slate-500">
-              模型厂商由系统适配，页面只维护展示名称、价格采集地址和运营备注。
+              {{ t('llmOps.providerModal.description') }}
             </p>
           </div>
           <button
@@ -29,7 +33,7 @@
             :disabled="saving"
             @click="close"
           >
-            关闭
+            {{ t('common.close') }}
           </button>
         </div>
       </div>
@@ -39,33 +43,37 @@
       >
         <section class="form-section">
           <div class="section-heading">
-            <h4>基础信息</h4>
-            <p>用于在模型定价、渠道发布和 Agione 挂售中识别厂商。</p>
+            <h4>{{ t('llmOps.providerModal.basicTitle') }}</h4>
+            <p>{{ t('llmOps.providerModal.basicHint') }}</p>
           </div>
           <div class="grid gap-4 md:grid-cols-2">
             <label class="field-group">
-              <span class="field-label">厂商显示名称</span>
+              <span class="field-label">
+                {{ t('llmOps.providerModal.fields.name') }}
+              </span>
               <input
                 v-model="form.name"
                 class="field"
-                placeholder="例如：OpenAI"
+                :placeholder="t('llmOps.providerModal.placeholders.name')"
                 required
               />
               <span class="field-help">
-                展示在厂商列表、模型详情和运营总览中的名称。
+                {{ t('llmOps.providerModal.help.name') }}
               </span>
             </label>
             <label class="field-group">
-              <span class="field-label">厂商标识 Code</span>
+              <span class="field-label">
+                {{ t('llmOps.providerModal.fields.code') }}
+              </span>
               <input
                 v-model="form.code"
                 class="field font-mono disabled:bg-slate-50 disabled:text-slate-400"
                 :disabled="Boolean(form.id)"
-                placeholder="例如：openai"
+                :placeholder="t('llmOps.providerModal.placeholders.code')"
                 required
               />
               <span class="field-help">
-                系统适配标识，已创建厂商不建议修改。
+                {{ t('llmOps.providerModal.help.code') }}
               </span>
             </label>
           </div>
@@ -73,21 +81,24 @@
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>价格采集地址</h4>
-            <p>只影响该厂商绑定的模型价格源，不修改厂商官网或 API 接入地址。</p>
+            <h4>{{ t('llmOps.providerModal.priceSourceTitle') }}</h4>
+            <p>{{ t('llmOps.providerModal.priceSourceHint') }}</p>
           </div>
           <label class="field-group">
-            <span class="field-label">价格源地址</span>
+            <span class="field-label">
+              {{ t('llmOps.providerModal.fields.priceSourceEndpoint') }}
+            </span>
             <input
               v-model="form.price_source_endpoint_url"
               class="field"
-              placeholder="例如：https://models.dev/api.json"
+              :placeholder="
+                t('llmOps.providerModal.placeholders.priceSourceEndpoint')
+              "
               type="url"
               :disabled="!form.primary_source_id"
             />
             <span class="field-help">
-              可填写厂商官方价格页，或使用 https://models.dev/api.json
-              作为聚合价格数据源；停用状态请在模型价格源列表中维护。
+              {{ t('llmOps.providerModal.help.priceSourceEndpoint') }}
             </span>
           </label>
           <a
@@ -106,21 +117,27 @@
             class="mt-2 truncate text-xs text-slate-400"
             :title="form.website"
           >
-            厂商官网 / 接入地址：{{ form.website }}
+            {{
+              t('llmOps.providerModal.websitePrefix', {
+                website: form.website
+              })
+            }}
           </p>
         </section>
 
         <section class="form-section">
           <div class="section-heading">
-            <h4>运营备注</h4>
-            <p>记录价格口径、采集限制或厂商适配说明。</p>
+            <h4>{{ t('llmOps.providerModal.notesTitle') }}</h4>
+            <p>{{ t('llmOps.providerModal.notesHint') }}</p>
           </div>
           <label class="field-group">
-            <span class="field-label">备注</span>
+            <span class="field-label">
+              {{ t('llmOps.providerModal.fields.notes') }}
+            </span>
             <textarea
               v-model="form.notes"
               class="field min-h-24 resize-none"
-              placeholder="例如：价格页更新频率、特殊模型口径、待补充采集适配"
+              :placeholder="t('llmOps.providerModal.placeholders.notes')"
             />
           </label>
         </section>
@@ -134,7 +151,11 @@
               <span class="status-switch-dot" />
             </span>
             <span class="text-sm text-slate-700">
-              {{ form.is_active ? '厂商已启用' : '厂商已停用' }}
+              {{
+                form.is_active
+                  ? t('llmOps.providerModal.enabled')
+                  : t('llmOps.providerModal.disabled')
+              }}
             </span>
           </label>
           <p
@@ -151,7 +172,7 @@
             :disabled="saving"
             @click="close"
           >
-            取消
+            {{ t('common.cancel') }}
           </button>
           <button
             class="btn-primary btn-action-save"
@@ -159,7 +180,11 @@
             :disabled="saving"
           >
             <span class="icon-mark" :class="saving ? 'animate-spin' : ''" />
-            {{ form.id ? '保存修改' : '创建厂商' }}
+            {{
+              form.id
+                ? t('llmOps.providerModal.saveChanges')
+                : t('llmOps.providerModal.createProvider')
+            }}
           </button>
         </div>
       </div>
@@ -169,6 +194,8 @@
 
 <script setup>
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { llmOpsApi } from '@/api/llmOps'
 
 const props = defineProps({
@@ -183,6 +210,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'saved'])
+const { t } = useI18n()
 
 const form = ref(defaults())
 const saving = ref(false)
@@ -262,8 +290,8 @@ async function save() {
     emit('saved')
   } catch (error) {
     saveError.value = providerSaved
-      ? errorMessage(error, '厂商已保存，但价格源地址保存失败，请重试。')
-      : errorMessage(error, '模型厂商保存失败，请稍后重试。')
+      ? errorMessage(error, t('llmOps.providerModal.errors.sourceSaveFailed'))
+      : errorMessage(error, t('llmOps.providerModal.errors.saveFailed'))
   } finally {
     saving.value = false
   }

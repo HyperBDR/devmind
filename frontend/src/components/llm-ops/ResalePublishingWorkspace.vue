@@ -566,6 +566,10 @@ const props = defineProps({
     type: [String, Number],
     default: null
   },
+  initialAutoListing: {
+    type: Boolean,
+    default: false
+  },
   agionePlatform: {
     type: Object,
     default: null
@@ -780,6 +784,7 @@ const workspaceHasChanges = computed(() =>
 watch(
   [
     () => props.initialModelId,
+    () => props.initialAutoListing,
     () => metaModelRows.value.length,
     () => props.models.length,
     () => props.listings.length
@@ -879,16 +884,17 @@ function hydrateInitialModel() {
 
 function hydrateInitialListings(initialModelId) {
   const platformId = String(selectedPlatform.value?.id || '')
+  const autoListing = props.initialAutoListing
+    ? findAutoListing(initialModelId, platformId)
+    : null
   const nextState = { ...chainState.value }
   chainRows.value
     .filter((row) => String(row.modelId) === String(initialModelId))
     .forEach((row) => {
-      const listing = (props.listings || []).find(
-        (item) =>
-          String(item.model) === String(initialModelId) &&
-          String(item.channel) === String(row.channelId) &&
-          (!platformId || String(item.platform) === platformId)
-      )
+      const listing =
+        autoListing && row.isLowest
+          ? autoListing
+          : listingForChannel(initialModelId, row.channelId, platformId)
       if (!listing) return
       const priceIn = convertToDisplay(
         listing.retail_input_price_per_million,
@@ -904,6 +910,7 @@ function hydrateInitialListings(initialModelId) {
       )
       nextState[row.uniqueId] = {
         ...nextState[row.uniqueId],
+        listingChannelId: autoListing && row.isLowest ? null : row.channelId,
         selected: true,
         currency: currencyLabel.value.toUpperCase(),
         priceInRaw:
@@ -923,6 +930,24 @@ function hydrateInitialListings(initialModelId) {
     })
   chainState.value = nextState
   syncSelectedChain()
+}
+
+function findAutoListing(modelId, platformId) {
+  return (props.listings || []).find(
+    (item) =>
+      String(item.model) === String(modelId) &&
+      (item.channel === null || item.channel === undefined) &&
+      (!platformId || String(item.platform) === platformId)
+  )
+}
+
+function listingForChannel(modelId, channelId, platformId) {
+  return (props.listings || []).find(
+    (item) =>
+      String(item.model) === String(modelId) &&
+      String(item.channel) === String(channelId) &&
+      (!platformId || String(item.platform) === platformId)
+  )
 }
 
 function onMarginInput(row, event) {
@@ -1044,12 +1069,17 @@ function comparablePrice(value, options = {}) {
 
 function listingForRow(row) {
   const platformId = String(selectedPlatform.value?.id || '')
-  return (props.listings || []).find(
-    (item) =>
-      String(item.model) === String(row.modelId) &&
-      String(item.channel) === String(row.channelId) &&
-      (!platformId || String(item.platform) === platformId)
+  const state = getChainState(row.uniqueId)
+  const channelId = Object.prototype.hasOwnProperty.call(
+    state,
+    'listingChannelId'
   )
+    ? state.listingChannelId
+    : row.channelId
+  if (channelId === null) {
+    return findAutoListing(row.modelId, platformId)
+  }
+  return listingForChannel(row.modelId, channelId, platformId)
 }
 
 function baselineForRow(row) {
@@ -1095,7 +1125,7 @@ function workspacePayload() {
     supplierId: form.value.supplierId,
     hasChanges: workspaceHasChanges.value,
     listings: selectedChainRows.value.map((row) => ({
-      channelId: row.channelId,
+      channelId: payloadChannelId(row),
       metaModelId: row.metaModelId,
       modelId: row.modelId,
       currency: currencyLabel.value.toUpperCase(),
@@ -1107,6 +1137,14 @@ function workspacePayload() {
       hasChanges: listingRowHasChanges(row)
     }))
   }
+}
+
+function payloadChannelId(row) {
+  const state = getChainState(row.uniqueId)
+  if (Object.prototype.hasOwnProperty.call(state, 'listingChannelId')) {
+    return state.listingChannelId
+  }
+  return row.channelId
 }
 
 function emitChange() {

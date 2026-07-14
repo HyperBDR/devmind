@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from llm_ops.models import (
@@ -26,6 +27,7 @@ from llm_ops.models import (
     ResaleListingPriceHistory,
     ResalePlatform,
     ResaleWorkflowConfig,
+    UsageReconciliationRecord,
 )
 from llm_ops.services import sync_channel_price_items
 
@@ -185,6 +187,144 @@ class LLMOpsViewTests(TestCase):
             },
             {"gpt-4o"},
         )
+
+    def test_resale_listing_list_filters_by_platform_and_status(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta_model = MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            name="GPT-4o",
+            code="gpt-4o",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Primary",
+            code="primary",
+        )
+        agione = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione-filter",
+        )
+        marketplace = ResalePlatform.objects.create(
+            name="Marketplace",
+            code="marketplace-filter",
+        )
+        online_listing = self._create_online_listing(
+            platform=agione,
+            model=model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+        ResaleListing.objects.create(
+            platform=agione,
+            model=model,
+            meta_model=meta_model,
+            channel=None,
+            publish_status=ResaleListing.PUBLISH_NONE,
+            workflow_status=ResaleListing.WORKFLOW_DRAFT,
+        )
+        self._create_online_listing(
+            platform=marketplace,
+            model=model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+
+        response = self.client.get(
+            reverse("resale-listing-list"),
+            {
+                "platform": agione.id,
+                "publish_status": ResaleListing.PUBLISH_ONLINE,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], online_listing.id)
+
+    def test_reconciliation_list_filters_by_platform_and_status(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        meta_model = MetaModel.objects.create(
+            code="gpt-4o",
+            name="GPT-4o",
+            owner_code="openai",
+            owner_name="OpenAI",
+        )
+        listed_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            name="GPT-4o",
+            code="gpt-4o",
+        )
+        other_model = LLMModel.objects.create(
+            provider=provider,
+            meta_model=meta_model,
+            name="GPT-4o Mini",
+            code="gpt-4o-mini",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Primary",
+            code="primary",
+        )
+        agione = ResalePlatform.objects.create(
+            name="Agione",
+            code="agione-reconciliation",
+        )
+        marketplace = ResalePlatform.objects.create(
+            name="Marketplace",
+            code="marketplace-reconciliation",
+        )
+        self._create_online_listing(
+            platform=agione,
+            model=listed_model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+        self._create_online_listing(
+            platform=marketplace,
+            model=other_model,
+            meta_model=meta_model,
+            channel=channel,
+        )
+        target_record = UsageReconciliationRecord.objects.create(
+            date=timezone.localdate(),
+            channel=channel,
+            model=listed_model,
+            meta_model=meta_model,
+            charged_amount=Decimal("12.000000"),
+            expected_amount=Decimal("10.000000"),
+            discrepancy=Decimal("2.000000"),
+            discrepancy_percent=Decimal("20.0000"),
+            status=UsageReconciliationRecord.STATUS_OVERCHARGED,
+        )
+        UsageReconciliationRecord.objects.create(
+            date=timezone.localdate(),
+            channel=channel,
+            model=other_model,
+            meta_model=meta_model,
+            charged_amount=Decimal("8.000000"),
+            expected_amount=Decimal("10.000000"),
+            discrepancy=Decimal("-2.000000"),
+            discrepancy_percent=Decimal("-20.0000"),
+            status=UsageReconciliationRecord.STATUS_UNDERCHARGED,
+        )
+
+        response = self.client.get(
+            reverse("reconciliation-record-list"),
+            {
+                "platform": agione.id,
+                "status": UsageReconciliationRecord.STATUS_OVERCHARGED,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["id"], target_record.id)
 
     def test_meta_model_owner_summary_reads_current_catalog(self):
         MetaModel.objects.create(
@@ -1023,6 +1163,60 @@ class LLMOpsViewTests(TestCase):
             "0.150000",
         )
         self.assertEqual(audit.changes["unit_price"]["after"], "0.120000")
+
+    def test_model_price_item_update_resyncs_channel_prices(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="Supplier Source",
+            slug="supplier-source-resync",
+            provider=provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            source=source,
+            name="GPT-4o mini",
+            code="gpt-4o-mini",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Supplier Channel",
+            code="supplier-channel-resync",
+            currency="USD",
+            settlement_ratio=Decimal("0.8"),
+        )
+        item = ModelPriceItem.objects.create(
+            provider=provider,
+            model=model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("1.000000"),
+            price_fingerprint="supplier-input-before",
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=source,
+        )
+        sync_channel_price_items(price)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("0.800000"),
+        )
+
+        response = self.client.patch(
+            reverse("model-price-item-detail", args=[item.id]),
+            {"unit_price": "2.000000"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            ChannelPriceItem.objects.get(is_current=True).unit_price,
+            Decimal("1.600000"),
+        )
 
     def test_model_price_item_can_be_deleted(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
@@ -3492,6 +3686,722 @@ class LLMOpsViewTests(TestCase):
             100.0,
         )
 
+    def test_summary_monitor_scope_omits_heavy_payloads(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5-monitor",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Best Channel",
+            code="best-channel-monitor",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"scope": "monitor"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["procurement"], [])
+        self.assertEqual(response.data["listings"], [])
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertNotIn("options", diagnostic)
+        self.assertEqual(diagnostic["model_id"], model.id)
+        self.assertEqual(
+            diagnostic["recommended_channel"]["channel_name"],
+            "Best Channel",
+        )
+        self.assertTrue(diagnostic["current_listing"]["is_listed"])
+        self.assertIn("decision_status", diagnostic)
+        self.assertIn("yield_metrics", diagnostic)
+
+    def test_summary_decision_fields_for_listed_model(self):
+        from llm_ops.services import compute_model_decision
+        provider = LLMProvider.objects.create(name="Anthropic", code="anthropic")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Claude-Test",
+            code="claude-test",
+            input_price_per_million="10",
+            output_price_per_million="30",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Channel-A",
+            code="channel-a",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione-fee",
+            defaults={
+                "name": "Agione Fee",
+                "fee_rate": "0.05",
+                "service_fee_rate": "0.02",
+                "tax_rate": "0.06",
+                "settlement_rate": "0.95",
+                "yield_warning": "0.15",
+            },
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="30",
+            retail_output_price_per_million="90",
+        )
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        for key in (
+            "decision_status",
+            "decision_action",
+            "decision_priority",
+            "yield_metrics",
+            "recommended_channel",
+            "current_listing",
+            "data_event_type",
+            "last_data_event_at",
+            "is_data_anomaly",
+        ):
+            self.assertIn(key, diagnostic)
+        self.assertEqual(diagnostic["decision_status"], "single_channel")
+        self.assertEqual(diagnostic["status_label"], "low_coverage")
+        self.assertEqual(
+            diagnostic["decision_action"],
+            "add_channel_coverage",
+        )
+        self.assertEqual(diagnostic["yield_metrics"]["is_resolved"], True)
+        self.assertEqual(diagnostic["current_listing"]["is_listed"], True)
+        self.assertEqual(diagnostic["data_event_type"], "updated")
+        self.assertEqual(diagnostic["is_data_anomaly"], False)
+        self.assertEqual(
+            compute_model_decision.__name__,
+            "compute_model_decision",
+        )
+
+    def test_summary_decision_treats_auto_listing_as_lowest_channel(self):
+        provider = LLMProvider.objects.create(
+            name="Auto Provider",
+            code="auto-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Auto-Test",
+            code="auto-test",
+            input_price_per_million="10",
+            output_price_per_million="20",
+        )
+        cheap_channel = ProcurementChannel.objects.create(
+            name="Cheap Channel",
+            code="cheap-channel",
+        )
+        backup_channel = ProcurementChannel.objects.create(
+            name="Backup Channel",
+            code="backup-channel",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-auto",
+            name="Agione Auto",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=cheap_channel,
+            model=model,
+            is_listed=True,
+            custom_input_price_per_million="1",
+            custom_output_price_per_million="2",
+        )
+        ChannelModelPrice.objects.create(
+            channel=backup_channel,
+            model=model,
+            is_listed=True,
+            custom_input_price_per_million="3",
+            custom_output_price_per_million="4",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            retail_input_price_per_million="10",
+            retail_output_price_per_million="20",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertTrue(diagnostic["has_lowest_listing"])
+        self.assertEqual(diagnostic["decision_status"], "ready")
+        self.assertIsNone(diagnostic["current_listing"]["channel_id"])
+        self.assertIsNone(diagnostic["current_listing"]["channel_name"])
+        self.assertEqual(
+            diagnostic["current_listing"]["channel_type"],
+            "auto_best",
+        )
+
+    def test_summary_marks_latest_failed_collection_as_data_anomaly(self):
+        provider = LLMProvider.objects.create(
+            name="Failed Provider",
+            code="failed-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Failed-Test",
+            code="failed-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Failed Channel",
+            code="failed-channel",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Failed Source",
+            slug="failed-source",
+            is_enabled=True,
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-failed-source",
+            name="Agione Failed Source",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=source,
+            is_listed=True,
+            custom_input_price_per_million="1",
+            custom_output_price_per_million="2",
+        )
+        PriceCollectionRun.objects.create(
+            source=source,
+            status=PriceCollectionRun.STATUS_FAILED,
+            error_message="upstream timeout",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="10",
+            retail_output_price_per_million="20",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["data_event_type"], "collection_failed")
+        self.assertTrue(diagnostic["is_data_anomaly"])
+
+    def test_summary_decision_prefers_lowest_listing_payload(self):
+        provider = LLMProvider.objects.create(
+            name="Multi Listing Provider",
+            code="multi-listing-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Multi-Listing-Test",
+            code="multi-listing-test",
+            input_price_per_million="10",
+            output_price_per_million="20",
+        )
+        backup_channel = ProcurementChannel.objects.create(
+            name="A Backup Channel",
+            code="a-backup-channel",
+        )
+        cheap_channel = ProcurementChannel.objects.create(
+            name="Z Cheap Channel",
+            code="z-cheap-channel",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-multi-listing",
+            name="Agione Multi Listing",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=backup_channel,
+            model=model,
+            is_listed=True,
+            custom_input_price_per_million="5",
+            custom_output_price_per_million="10",
+        )
+        ChannelModelPrice.objects.create(
+            channel=cheap_channel,
+            model=model,
+            is_listed=True,
+            custom_input_price_per_million="1",
+            custom_output_price_per_million="2",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=backup_channel,
+            retail_input_price_per_million="5.5",
+            retail_output_price_per_million="11",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=cheap_channel,
+            retail_input_price_per_million="10",
+            retail_output_price_per_million="20",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertTrue(diagnostic["has_lowest_listing"])
+        self.assertEqual(diagnostic["decision_status"], "ready")
+        self.assertEqual(
+            diagnostic["current_listing"]["channel_id"],
+            cheap_channel.id,
+        )
+
+    def test_summary_ignores_backup_channel_source_anomaly(self):
+        provider = LLMProvider.objects.create(
+            name="Backup Source Provider",
+            code="backup-source-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Backup-Source-Test",
+            code="backup-source-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        best_channel = ProcurementChannel.objects.create(
+            name="Best Source Channel",
+            code="best-source-channel",
+        )
+        backup_channel = ProcurementChannel.objects.create(
+            name="Backup Source Channel",
+            code="backup-source-channel",
+        )
+        healthy_source = PriceCollectionSource.objects.create(
+            name="Healthy Source",
+            slug="healthy-source",
+            is_enabled=True,
+        )
+        failed_source = PriceCollectionSource.objects.create(
+            name="Failed Backup Source",
+            slug="failed-backup-source",
+            is_enabled=True,
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-backup-source",
+            name="Agione Backup Source",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=best_channel,
+            model=model,
+            price_source=healthy_source,
+            is_listed=True,
+            custom_input_price_per_million="1",
+            custom_output_price_per_million="2",
+        )
+        ChannelModelPrice.objects.create(
+            channel=backup_channel,
+            model=model,
+            price_source=failed_source,
+            is_listed=True,
+            custom_input_price_per_million="5",
+            custom_output_price_per_million="10",
+        )
+        PriceCollectionRun.objects.create(
+            source=failed_source,
+            status=PriceCollectionRun.STATUS_FAILED,
+            error_message="backup timeout",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=best_channel,
+            retail_input_price_per_million="10",
+            retail_output_price_per_million="20",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["data_event_type"], "updated")
+        self.assertFalse(diagnostic["is_data_anomaly"])
+
+    def test_summary_decision_platform_fee_unresolved_when_unset(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-Fee",
+            code="gpt-fee",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Channel-X",
+            code="channel-x",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione-empty",
+            defaults={"name": "Agione Empty"},
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="1.2",
+            retail_output_price_per_million="2.4",
+        )
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(
+            diagnostic["decision_status"],
+            "platform_fee_unresolved",
+        )
+        self.assertIsNone(diagnostic["yield_metrics"]["tax_rate"])
+        self.assertFalse(diagnostic["yield_metrics"]["is_resolved"])
+
+    def test_summary_decision_marks_unconvertible_channel_currency(self):
+        provider = LLMProvider.objects.create(
+            name="Currency Provider",
+            code="currency-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Currency-Test",
+            code="currency-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="EUR Channel",
+            code="eur-channel",
+            currency="EUR",
+        )
+        cny_channel = ProcurementChannel.objects.create(
+            name="CNY Channel",
+            code="currency-cny-channel",
+            currency="CNY",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-currency",
+            name="Agione Currency",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        ChannelModelPrice.objects.create(
+            channel=cny_channel,
+            model=model,
+            is_listed=True,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {
+                "display_currency": "CNY",
+                "resale_platform": platform.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["decision_status"], "currency_unresolved")
+        self.assertEqual(
+            diagnostic["recommended_channel"]["channel_id"],
+            cny_channel.id,
+        )
+        self.assertTrue(diagnostic["requires_currency_conversion"])
+
+    def test_summary_decision_uses_implicit_price_source_for_anomaly(self):
+        provider = LLMProvider.objects.create(
+            name="Implicit Source Provider",
+            code="implicit-source-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Implicit-Source-Test",
+            code="implicit-source-test",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Implicit Source Channel",
+            code="implicit-source-channel",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Implicit Disabled Source",
+            slug="implicit-disabled-source",
+            provider=provider,
+            is_enabled=False,
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-implicit-source",
+            name="Agione Implicit Source",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        for dimension, unit_price, fingerprint in (
+            (
+                ModelPriceItem.DIMENSION_TEXT_INPUT,
+                "1",
+                "implicit-input",
+            ),
+            (
+                ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                "2",
+                "implicit-output",
+            ),
+        ):
+            ModelPriceItem.objects.create(
+                source=source,
+                provider=provider,
+                model=model,
+                meta_model=model.meta_model,
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="USD",
+                unit_price=unit_price,
+                price_fingerprint=fingerprint,
+            )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["data_event_type"], "source_disabled")
+        self.assertTrue(diagnostic["is_data_anomaly"])
+
+    def test_summary_decision_updated_time_uses_channel_price_time(self):
+        provider = LLMProvider.objects.create(
+            name="Updated Provider",
+            code="updated-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Updated-Test",
+            code="updated-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Updated Channel",
+            code="updated-channel",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-updated",
+            name="Agione Updated",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        channel_price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        old_time = timezone.now().replace(microsecond=0)
+        old_time = old_time - timezone.timedelta(days=2)
+        price_time = old_time + timezone.timedelta(days=1)
+        LLMModel.objects.filter(id=model.id).update(updated_at=old_time)
+        ChannelModelPrice.objects.filter(id=channel_price.id).update(
+            updated_at=price_time,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["data_event_type"], "updated")
+        self.assertEqual(
+            diagnostic["last_data_event_at"],
+            price_time.isoformat(),
+        )
+
+    def test_summary_decision_current_listing_uses_display_currency(self):
+        provider = LLMProvider.objects.create(
+            name="Display Provider",
+            code="display-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Display-Test",
+            code="display-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Display Channel",
+            code="display-channel",
+            currency="CNY",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-display",
+            name="Agione Display",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            currency="USD",
+            retail_input_price_per_million="10",
+            retail_output_price_per_million="20",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {
+                "display_currency": "CNY",
+                "resale_platform": platform.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["current_listing"]["currency"], "CNY")
+
+    def test_summary_decision_yield_config_resolved_with_zero_listing(self):
+        provider = LLMProvider.objects.create(
+            name="Zero Provider",
+            code="zero-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Zero-Test",
+            code="zero-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Zero Channel",
+            code="zero-channel",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-zero",
+            name="Agione Zero",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            is_listed=True,
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="0",
+            retail_output_price_per_million="0",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["decision_status"], "low_yield")
+        self.assertEqual(diagnostic["yield_metrics"]["input_yield"], -1.0)
+        self.assertTrue(diagnostic["yield_metrics"]["is_resolved"])
+
     def test_summary_uses_selected_resale_platform(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(
@@ -3654,5 +4564,10 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         diagnostic = response.data["agione"]["diagnostics"][0]
         self.assertEqual(diagnostic["status"], "missing_channel")
-        self.assertFalse(diagnostic["is_agione_listed"])
+        self.assertTrue(diagnostic["is_agione_listed"])
+        self.assertEqual(diagnostic["decision_status"], "no_supply")
+        self.assertEqual(
+            diagnostic["current_listing"]["channel_id"],
+            channel.id,
+        )
         self.assertEqual(response.data["listings"], [])

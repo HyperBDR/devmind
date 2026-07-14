@@ -950,6 +950,16 @@ class PriceCollectionRun(models.Model):
 
     class Meta:
         ordering = ["-started_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["source", "-started_at", "-id"],
+                name="llmops_run_src_start_idx",
+            ),
+            models.Index(
+                fields=["status", "-started_at", "-id"],
+                name="llmops_run_status_start_idx",
+            ),
+        ]
 
     def __str__(self) -> str:
         source_name = self.source.name if self.source_id else "Deleted source"
@@ -1677,6 +1687,34 @@ class ResalePlatform(models.Model):
         decimal_places=2,
         default=100,
     )
+    tax_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    settlement_rate = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    yield_warning = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
+    yield_target = models.DecimalField(
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        default=None,
+    )
     is_active = models.BooleanField(default=True)
     metadata = models.JSONField(blank=True, default=dict)
     notes = models.TextField(blank=True, default="")
@@ -1820,6 +1858,20 @@ class ResaleListing(models.Model):
             "model__name",
             "channel__name",
             "id",
+        ]
+        indexes = [
+            models.Index(
+                fields=["platform", "is_active"],
+                name="llmops_listing_plat_active_idx",
+            ),
+            models.Index(
+                fields=["platform", "publish_status"],
+                name="llmops_listing_plat_pub_idx",
+            ),
+            models.Index(
+                fields=["platform", "workflow_status"],
+                name="llmops_listing_plat_flow_idx",
+            ),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -2081,6 +2133,20 @@ class UsageReconciliationRecord(models.Model):
 
     class Meta:
         ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(
+                fields=["status", "-date", "-id"],
+                name="llmops_recon_status_date_idx",
+            ),
+            models.Index(
+                fields=["model", "-date", "-id"],
+                name="llmops_recon_model_date_idx",
+            ),
+            models.Index(
+                fields=["channel", "model", "-date"],
+                name="llmops_recon_ch_model_dt_idx",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.date} / {self.channel.name} / {self.model.name}"

@@ -8,6 +8,8 @@
     "delete": "Delete",
     "edit": "Edit",
     "close": "Close",
+    "clear": "Clear",
+    "remove": "Remove",
     "confirm": "Confirm",
     "back": "Back",
     "required": "Required",
@@ -36,6 +38,7 @@
     "collapseSidebar": "Collapse sidebar",
     "share": "Share",
     "settings": "Settings",
+    "optional": "Optional",
     "about": "About",
     "logout": "Logout",
     "profile": "Profile",
@@ -861,6 +864,9 @@
       "actionQueueTitle": "Today's Priority Queue",
       "channelCoverageTitle": "Channel Coverage and Lowest-Price Hits",
       "channelCount": "{count} channels",
+      "sourceCount": "{count} price sources",
+      "procurementChannelCount": "{count} procurement channels",
+      "noProcurementChannels": "No procurement channels",
       "channelCoverageMeta": "{covered} models covered · {best} lowest-price hits",
       "emptyChannelCoverage": "No channel coverage data yet.",
       "providerMatrixTitle": "Provider Model Operations Coverage",
@@ -942,6 +948,18 @@
       "draftsSaved": "Saved {count} drafts",
       "saveFailed": "Save failed"
     },
+    "dataErrors": {
+      "loadCoreModels": "Failed to load base model data.",
+      "loadPublishing": "Failed to load publishing workspace data.",
+      "loadSecondary": "Failed to load extended LLM Ops data.",
+      "loadSection": "Failed to load the current page data.",
+      "refreshChannels": "Failed to refresh channel data.",
+      "refreshListings": "Failed to refresh resale listings.",
+      "refreshMetaModels": "Failed to refresh meta-model data.",
+      "refreshPlatforms": "Failed to refresh resale platform data.",
+      "refreshProviders": "Failed to refresh price source data.",
+      "refreshSummary": "Failed to refresh summary data."
+    },
     "publishingDrawer": {
       "back": "Back",
       "title": "Immersive Model Publishing Workspace",
@@ -952,6 +970,22 @@
       "submitFailed": "Submit failed"
     },
     "publishingWorkspace": {
+      "actions": {
+        "appendListing": "Append listing",
+        "appendListingHint": "Appending adds listing prices for the current channel without affecting existing listed channels.",
+        "selectChannelFirst": "Select a procurement channel before generating listing prices.",
+        "switchAvailableHint": "Appending keeps existing channels; switching delists other channels on the same platform and keeps only the current channel.",
+        "updateListedHint": "This channel is already listed. This action updates its listing price.",
+        "updateLowestListedHint": "This channel is already listed and is the lowest procurement channel. You can update the price derived from the margin.",
+        "updatePrice": "Update price"
+      },
+      "decision": {
+        "currentlyListed": "Currently listed",
+        "listedLowest": "Listed at lowest price",
+        "lowestProcurement": "Lowest procurement price",
+        "noChannelSelected": "No channel selected",
+        "notLowestProcurement": "Not lowest procurement price"
+      },
       "filters": {
         "platform": "Publishing platform",
         "vendor": "Meta vendor",
@@ -967,6 +1001,30 @@
         "exchangeRate": "Exchange rate",
         "pointConversion": "{point} conversion"
       },
+      "metrics": {
+        "audioInput": "Audio input",
+        "audioOutput": "Audio output",
+        "cacheInput": "Cache input price",
+        "imageOutput": "Image output",
+        "input": "Input price",
+        "output": "Output price",
+        "videoInput": "Video input",
+        "videoOutput": "Video output"
+      },
+      "modelSelect": {
+        "actionableGroup": "Available models ({count} with configured channels)",
+        "description": "{actionable} decision-ready models · {unavailable} channels pending configuration",
+        "label": "Select model",
+        "needsChannel": "Needs channel",
+        "unavailableGroup": "Unavailable models ({count} without channels)"
+      },
+      "plan": {
+        "listed": "Listed",
+        "listedLowestSource": "Listed lowest source",
+        "lowestProcurementChannel": "Lowest procurement channel",
+        "notLowestSource": "Not lowest source",
+        "notSelected": "Not selected"
+      },
       "supply": {
         "title": "Supply Chain Selection",
         "selectedCount": "{count} selected links",
@@ -979,6 +1037,7 @@
         "sourcePrefix": "Supply source: {name}",
         "lowest": "Lowest",
         "lowestProcurement": "Lowest procurement link",
+        "higherCost": "{amount} higher · {percent}%",
         "selectRequired": "Select at least one supply link in the selection panel to continue pricing.",
         "chainFallback": "Supply link"
       },
@@ -1060,6 +1119,609 @@
         "staging": "Staging",
         "test": "Test"
       }
+    },
+    "resalePlatformModal": {
+      "apiKeyHint": "Used to call the resale platform API for listing, price updates, and delisting.",
+      "createPlatform": "Create platform",
+      "createTitle": "New resale platform",
+      "decimalPlaces": "{count} decimals",
+      "defaultPointName": "Points",
+      "description": "Configure the Agione platform instance, region, API access, commission, auto-approval margin, and point conversion rules.",
+      "disabled": "Platform disabled",
+      "editTitle": "Edit resale platform",
+      "enabled": "Platform enabled",
+      "errors": {
+        "invalidMetadataJson": "Extended metadata is not valid JSON.",
+        "metadataObject": "Extended metadata must be a JSON object."
+      },
+      "fields": {
+        "apiEndpoint": "API endpoint",
+        "apiKey": "Platform API key",
+        "autoApproveMaxMargin": "Auto-approval max margin (%)",
+        "code": "Platform code",
+        "currency": "Platform currency",
+        "decimalPlaces": "Decimal places",
+        "environment": "Environment",
+        "feeRate": "Platform commission rate (%)",
+        "name": "Platform name",
+        "platformType": "Platform type",
+        "pointName": "Point name",
+        "pointsPerCurrencyUnit": "Points per 1 platform currency unit",
+        "region": "Region",
+        "regionName": "Region name",
+        "roundingMode": "Point rounding mode",
+        "serviceFeeRate": "Service fee rate (%)",
+        "settlementRate": "Settlement rate (%)",
+        "taxRate": "Tax rate (%)",
+        "website": "Website",
+        "yieldTarget": "Target yield (%)",
+        "yieldWarning": "Yield warning line (%)"
+      },
+      "metadataHint": "Record tenant, channel, account, settlement basis, and other platform-specific information.",
+      "metadataTitle": "Extended metadata",
+      "notesHint": "Record platform differences, contract terms, or API limitations.",
+      "notesTitle": "Notes",
+      "placeholders": {
+        "apiKey": "Used for listing API authentication",
+        "autoApproveMaxMargin": "Example: 20",
+        "code": "Example: agione-main",
+        "feeRate": "Example: 3",
+        "metadata": "Example: {\"tenant_id\":\"tenant-001\",\"channel\":\"direct\"}",
+        "name": "Example: Agione main platform",
+        "notes": "Example: point multiplier source, settlement cycle, API integration status",
+        "optionalRate": "Leave blank if not configured",
+        "pointName": "Points",
+        "pointsPerCurrencyUnit": "Example: 100.00",
+        "regionName": "Example: Singapore",
+        "serviceFeeRate": "Example: 10",
+        "settlementRate": "Example: 95",
+        "yieldTarget": "Example: 25",
+        "yieldWarning": "Example: 15"
+      },
+      "platformInfo": "Platform information",
+      "platformInfoHint": "Identifies the Agione listing platform instance and downstream API integration.",
+      "regions": {
+        "apNortheast1": "Japan",
+        "apSoutheast1": "Singapore",
+        "cn": "Mainland China",
+        "cnEast": "China East",
+        "cnHongkong": "Hong Kong",
+        "cnNorth": "China North",
+        "cnSouth": "China South",
+        "euWest1": "EU West",
+        "global": "Global / default",
+        "usEast1": "US East"
+      },
+      "rounding": {
+        "down": "Round down",
+        "halfUp": "Round half up",
+        "up": "Round up"
+      },
+      "saveChanges": "Save changes",
+      "settlementHint": "Used on the listing page to convert platform listing prices into points.",
+      "settlementTitle": "Settlement and points"
+    },
+    "channelModelDrawer": {
+      "addDescription": "Select meta models first, then choose the upstream supplier source used by this channel. Added models are enabled by default and can be assigned cost rules or fixed costs below.",
+      "addTitle": "Add channel models",
+      "addableMetaModels": "{count} addable meta models",
+      "availableCount": "{count} available",
+      "batchAddModels": "Add {count} models",
+      "capability": "Capability",
+      "changeAdded": "{count} added",
+      "changeDisabled": "{count} disabled",
+      "changeEnabled": "{count} enabled",
+      "changeModified": "{count} cost changes",
+      "changeRemoved": "{count} removed",
+      "channelCost": "Channel cost",
+      "channelDefaultDiscount": "Channel default discount",
+      "clearSelection": "Clear selection",
+      "closeConfirm": "There are unsaved channel model changes. Close the drawer?",
+      "comparisonDelta": "Compared with upstream price: {currency} {delta} / {percent}%",
+      "comparisonUnknown": "Displayed after conversion to the global display currency. Without an upstream baseline for the same dimension, the direction cannot be determined.",
+      "configDetails": "Configuration details",
+      "configValue": "Config value",
+      "configuredCount": "{count} configured",
+      "configuredMetaModelsTitle": "Configured meta models ({count})",
+      "configuredSearchPlaceholder": "Search configured meta models, code, or upstream source",
+      "cost": "Cost",
+      "costCurrencyChannelDefault": "Cost prices follow the channel settlement currency {currency}; page prices are converted to the global display currency.",
+      "costCurrencyFixed": "Cost prices are saved as {currency}; page prices are converted to the global display currency.",
+      "costRule": "Cost rule",
+      "costSummary": "Cost {value}",
+      "currency": {
+        "fixedCny": "Always save as CNY",
+        "fixedUsd": "Always save as USD",
+        "savedAs": "Saved as {currency}",
+        "useChannelDefault": "Use channel default currency"
+      },
+      "defaultCurrency": "Default currency",
+      "emptyConfigured": "No models are configured yet. Add one from above.",
+      "enabledCount": "{count} enabled",
+      "fixedOverrideUnsupported": "This model does not support manual fixed-cost overrides.",
+      "followCostRule": "Follow cost rule",
+      "forwardingCapability": "Model forwarding capability",
+      "generatedAfterSave": "Generated after save",
+      "hiddenModels": "{count} more models. Click to show all.",
+      "metaVendor": "Meta-model vendor",
+      "missingPrice": "Missing price",
+      "modality": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "modelSearchPlaceholder": "Name / code / modality",
+      "noAvailableUpstream": "No available upstream",
+      "noChanges": "No changes",
+      "noMatchedModels": "No addable models match",
+      "noUpstreamSelected": "No channel upstream selected",
+      "notApplicable": "N/A",
+      "pendingCostGeneration": "Cost pending generation",
+      "pendingUpstream": "Select a channel upstream",
+      "performance": {
+        "latency": "Latency (ms)",
+        "latencyPlaceholder": "Milliseconds",
+        "latencyShort": "Latency",
+        "latencyTitle": "Average channel latency in milliseconds",
+        "rpm": "RPM",
+        "rpmPlaceholder": "Requests per minute",
+        "rpmShort": "RPM",
+        "rpmTitle": "Requests per minute limit",
+        "tpm": "TPM",
+        "tpmPlaceholder": "Tokens per minute",
+        "tpmShort": "TPM",
+        "tpmTitle": "Tokens per minute limit"
+      },
+      "price": "Price",
+      "priceAfterSelection": "Prices appear after selection",
+      "priceField": {
+        "audioInput": "Audio input / second",
+        "audioInputShort": "Audio in",
+        "audioOutput": "Audio output / second",
+        "audioOutputShort": "Audio out",
+        "textInput": "Text input / million tokens",
+        "textInputShort": "Text in",
+        "textOutput": "Text output / million tokens",
+        "textOutputShort": "Text out",
+        "videoInput": "Video input / second",
+        "videoInputShort": "Video in",
+        "videoOutput": "Video output / second",
+        "videoOutputShort": "Video out"
+      },
+      "priceMode": {
+        "channelDefault": "Default discount",
+        "discount": "Discount ratio",
+        "fixed": "Fixed cost"
+      },
+      "priceRule": {
+        "defaultDiscount": "Default discount {value}",
+        "discount": "Discount {value}",
+        "fixed": "Fixed cost"
+      },
+      "resolvedUpstreamCount": "{count} upstreams selected",
+      "rule": "Rule",
+      "saveChanges": "Save changes",
+      "saving": "Saving",
+      "searchAndSelectModel": "Search and select meta models",
+      "searchUpstream": "Search upstream / currency / type",
+      "searchVendor": "Search vendors",
+      "selectAllVisible": "Select visible results",
+      "selectChannelUpstream": "Select channel upstream",
+      "selectMetaModel": "Select meta model",
+      "selectMetaVendor": "Select a meta-model vendor first",
+      "selectModelForFixed": "Select a meta model before configuring fixed costs.",
+      "selectedMetaModels": "{count} meta models selected",
+      "selectedModels": "Selected models",
+      "selectedModelsHint": "Choose the actual channel upstream used by each meta model.",
+      "selectedShort": "{count} selected",
+      "showAll": "Show all {count}",
+      "sourceCategory": {
+        "manual": "Manual",
+        "officialProvider": "Official",
+        "supplier": "Supplier",
+        "unknown": "Unlabeled type"
+      },
+      "sourceNotIngested": "Source not ingested",
+      "unassignedVendor": "Unassigned vendor",
+      "unboundUpstream": "Unbound upstream",
+      "unsaved": "Unsaved changes",
+      "unsupportedFixedPriceNote": "This model's image or other special pricing dimensions cannot be manually overridden in channel configuration yet. It will use the upstream price or discounted channel cost.",
+      "upstream": "Upstream",
+      "upstreamPrice": "Upstream price",
+      "upstreamSourceCount": "{count} upstream price sources",
+      "upstreamSummary": "Upstream {value}",
+      "vendorAddableCount": "{count} addable meta models"
+    },
+    "providerPricingDrawer": {
+      "allSources": "All sources",
+      "billingUnit": {
+        "perGeneration": "{base}/generation",
+        "perImage": "{base}/image",
+        "perSecond": "{base}/second"
+      },
+      "compactDimension": {
+        "audioInput": "Audio in",
+        "audioOutput": "Audio out",
+        "cache": "Cache",
+        "imageInput": "Image in",
+        "imageOutput": "Image out",
+        "input": "Input",
+        "output": "Output",
+        "videoInput": "Video in",
+        "videoOutput": "Video out"
+      },
+      "dimension": {
+        "audioInput": "Audio input",
+        "audioOutput": "Audio output",
+        "cacheInput": "Cache input",
+        "imageInput": "Image input",
+        "imageOutput": "Image output",
+        "textInput": "Text input",
+        "textOutput": "Text output",
+        "videoInput": "Video input",
+        "videoOutput": "Video output"
+      },
+      "empty": "This provider has no model pricing records yet.",
+      "legacyPrice": {
+        "audioInputSecond": "Audio input / second",
+        "audioOutputSecond": "Audio output / second",
+        "cacheInput1m": "Cache input / 1M",
+        "imageOutputImage": "Image output / image",
+        "input1m": "Input / 1M",
+        "output1m": "Output / 1M",
+        "resolutionInput": "{resolution} input",
+        "resolutionOutput": "{resolution} output",
+        "videoInputSecond": "Video input / second",
+        "videoOutputSecond": "Video output / second"
+      },
+      "modality": {
+        "audio": "Audio",
+        "multimodal": "Multimodal",
+        "text": "Text",
+        "video": "Video"
+      },
+      "modelCount": "Models",
+      "modelPriceSources": "Model price sources",
+      "noPrice": "No price",
+      "officialPriceName": "{provider} official pricing",
+      "priceSource": "Price source",
+      "priceStructure": "Price structure",
+      "priceStructureSummary": "Official {official} · Cloud hosted {cloud} · External {external}",
+      "priceSummary": "Price summary",
+      "pricedModelCount": "Priced models",
+      "providerFallback": "Provider",
+      "searchPlaceholder": "Search model, source, or code",
+      "sourceCategory": {
+        "cloudHosted": "Cloud hosted",
+        "manual": "Manual",
+        "officialProvider": "Official",
+        "supplier": "Supplier",
+        "unknown": "Other"
+      },
+      "sourceSummary": "{slug} · {count} sources",
+      "sourceType": "Source type",
+      "subtitle": "Summarizes core input, output, and cache prices by model to reduce per-dimension noise.",
+      "title": "Provider model prices",
+      "unboundPriceSource": "Unbound price source",
+      "updatedAt": "Updated at"
+    },
+    "modelWorkbenchPanel": {
+      "channelPrices": "Channel procurement prices",
+      "columns": {
+        "channel": "Channel",
+        "date": "Date",
+        "dimension": "Dimension",
+        "platform": "Platform",
+        "price": "Price",
+        "source": "Source",
+        "status": "Status",
+        "variance": "Variance"
+      },
+      "dimension": {
+        "audioInput": "Audio input",
+        "audioOutput": "Audio output",
+        "cacheInput": "Cache input",
+        "imageOutput": "Image output",
+        "textInput": "Text input",
+        "textOutput": "Text output",
+        "videoInput": "Video input",
+        "videoOutput": "Video output"
+      },
+      "emptyChannelPrices": "No channel price items yet.",
+      "emptyListingRecords": "No listing records yet.",
+      "emptyReconciliationRecords": "No reconciliation records yet.",
+      "emptyStandardPrices": "No standard price items yet.",
+      "kpi": {
+        "channelCoverage": "Channel coverage",
+        "channelCoverageHint": "Available procurement channel count",
+        "listingLinks": "Listing links",
+        "listingLinksHint": "Records on the current and other platforms",
+        "metaModel": "Meta model",
+        "reconciliationAnomalies": "Reconciliation anomalies",
+        "reconciliationAnomaliesHint": "Reconciliation records that are not perfect"
+      },
+      "listingRecords": "Listing records",
+      "platformFallback": "Platform {id}",
+      "publishStatus": {
+        "deleted": "Deleted",
+        "none": "Unpublished",
+        "offline": "Delisted",
+        "online": "Published"
+      },
+      "reconciliationRecords": "Reconciliation records",
+      "standardPrices": "Standard price items",
+      "subtitle": "Inspect official prices, channel procurement, listing status, and reconciliation for a single model.",
+      "title": "Model Detail Workbench",
+      "workflowStatus": {
+        "deleted": "Deleted",
+        "draft": "Draft",
+        "offline": "Delisted",
+        "offlineException": "Delist exception",
+        "online": "Online",
+        "pendingOffline": "Pending delist",
+        "pendingPublish": "Pending publish",
+        "pendingUpdate": "Pending update",
+        "updateDraft": "Update draft"
+      }
+    },
+    "metaModelModal": {
+      "aliasHint": "Aliases are used to match the same meta-model identity from collected results.",
+      "aliasTitle": "Aliases",
+      "capabilityHint": "Used for operations filtering, channel planning, and model availability display.",
+      "capabilityTitle": "Category and capabilities",
+      "createMetaModel": "Create meta model",
+      "createNote": "After creation, it can be linked to model SKUs.",
+      "createTitle": "New meta model",
+      "description": "Meta models normalize the same model identity across price sources into vendor, capability, and version.",
+      "editNote": "Saving changes affects the display identity of linked models.",
+      "editTitle": "Edit meta model",
+      "errors": {
+        "invalidMetadataJson": "Metadata must be a valid JSON object.",
+        "metadataObject": "Metadata must be a JSON object.",
+        "saveFailed": "Failed to save the meta model. Please try again later."
+      },
+      "featureHelp": "Separate with English commas.",
+      "fields": {
+        "aliases": "Aliases",
+        "code": "Model code",
+        "contextWindow": "Context window",
+        "family": "Model family",
+        "features": "Capability tags",
+        "maxOutputTokens": "Max output tokens",
+        "modality": "Modality",
+        "name": "Display name",
+        "owner": "Model owner",
+        "status": "Status"
+      },
+      "identityHint": "Used to merge models across official, supplier, and manual price sources.",
+      "identityTitle": "Model identity",
+      "metadataHint": "Record collection sources, official page identifiers, or operations notes. Must be a JSON object.",
+      "metadataTitle": "Metadata",
+      "ownerUnbound": "Unbound",
+      "placeholders": {
+        "aliases": "One alias per line, e.g. GPT-4o mini",
+        "code": "Example: gpt-4o-mini",
+        "family": "Example: GPT-4o",
+        "name": "Example: GPT-4o mini"
+      },
+      "saveChanges": "Save changes"
+    },
+    "priceChangePanel": {
+      "columns": {
+        "currency": "Currency",
+        "object": "Object",
+        "time": "Time",
+        "type": "Type"
+      },
+      "dimension": {
+        "audioInput": "Audio input",
+        "audioOutput": "Audio output",
+        "cacheInput": "Cache input",
+        "imageOutput": "Image output",
+        "textInput": "Text input",
+        "textOutput": "Text output",
+        "videoInput": "Video input",
+        "videoOutput": "Video output"
+      },
+      "empty": "No price change records yet.",
+      "fallback": {
+        "channel": "Channel {id}",
+        "model": "Model {id}",
+        "platform": "Platform {id}"
+      },
+      "filters": {
+        "all": "All prices"
+      },
+      "metrics": {
+        "channelHistory": {
+          "hint": "Procurement channel price version records",
+          "label": "Channel price history"
+        },
+        "listingHistory": {
+          "hint": "Platform listing price version records",
+          "label": "Listing price history"
+        },
+        "officialItems": {
+          "hint": "Current standard price dimension count",
+          "label": "Standard price items"
+        }
+      },
+      "subtitle": "Summarizes recent changes in channel procurement prices, listing prices, and standard price items.",
+      "title": "Price Change Dashboard",
+      "types": {
+        "channel": "Channel procurement price",
+        "listing": "Platform listing price",
+        "official": "Standard price item"
+      }
+    },
+    "collectionHealthPanel": {
+      "badges": {
+        "needsHandling": "Needs handling",
+        "normal": "Normal",
+        "sevenDayThreshold": "7-day threshold"
+      },
+      "collectionMethod": {
+        "apiSync": "API sync",
+        "autoCollect": "Auto collect",
+        "manualEntry": "Manual entry",
+        "manualImport": "Manual import",
+        "unknown": "Pending config"
+      },
+      "columns": {
+        "consecutiveFailures": "Consecutive failures",
+        "health": "Health",
+        "lastCollected": "Last collected",
+        "latestStatus": "Latest status",
+        "source": "Price source",
+        "successRate": "Success rate",
+        "type": "Type"
+      },
+      "empty": "No price sources yet.",
+      "health": {
+        "disabled": "Disabled",
+        "failed": "Collection failed",
+        "healthy": "Healthy",
+        "stale": "Stale data"
+      },
+      "metrics": {
+        "failed": {
+          "hint": "Latest task failed or consecutive failures exist",
+          "label": "Collection failed"
+        },
+        "healthy": {
+          "hint": "Latest collection succeeded and is within the freshness window",
+          "label": "Healthy sources"
+        },
+        "stale": {
+          "hint": "Latest collection is older than 7 days",
+          "label": "Stale data"
+        },
+        "total": {
+          "hint": "Enabled official, supplier, and manual price sources",
+          "label": "Total price sources"
+        }
+      },
+      "runStatus": {
+        "failed": "Failed",
+        "none": "None",
+        "running": "Running",
+        "succeeded": "Succeeded"
+      },
+      "subtitle": "Review latest collection status, consecutive failures, and freshness by price source.",
+      "title": "Collection Health Dashboard"
+    },
+    "channelModal": {
+      "basicHint": "Used to identify the channel and record the entry point for future API integration.",
+      "basicTitle": "Basic information",
+      "createChannel": "Create channel",
+      "createTitle": "New forwarding channel",
+      "description": "Channels configure the supply entry point and default settlement rules for purchasable and forwardable models.",
+      "disabled": "Channel disabled",
+      "editTitle": "Edit forwarding channel",
+      "enabled": "Channel enabled",
+      "fields": {
+        "apiEndpoint": "Forwarding API Base URL",
+        "code": "Channel code",
+        "currency": "Default settlement currency",
+        "name": "Channel display name",
+        "notes": "Operations notes",
+        "settlementRatio": "Default procurement discount ratio"
+      },
+      "help": {
+        "apiEndpoint": "Forwarding API endpoint provided by the channel. Leave blank if no API is available yet.",
+        "code": "System-unique identifier. Use lowercase letters, numbers, and hyphens.",
+        "currency": "Default procurement currency for the channel. Individual models can override it in model management.",
+        "name": "Name shown in channel lists, model forwarding relations, and price comparisons.",
+        "notes": "Record billing period, rate limits, contract discounts, model coverage, and related notes.",
+        "settlementRatio": "Procurement price = price source price × discount ratio. 85% means procurement at 0.85x."
+      },
+      "notesHint": "Record contracts, billing periods, or model coverage limits.",
+      "notesTitle": "Additional information",
+      "placeholders": {
+        "apiEndpoint": "Example: https://llm.example.com/v1",
+        "code": "Example: prod-forwarding-channel",
+        "name": "Example: production forwarding channel",
+        "notes": "Example: contract discount, settlement cycle, special limits",
+        "settlementRatio": "Example: 85"
+      },
+      "saveChanges": "Save changes",
+      "settlementHint": "Default procurement pricing rule for models in this channel. Individual models can still override it.",
+      "settlementTitle": "Settlement rules"
+    },
+    "providerModal": {
+      "basicHint": "Used to identify providers in model pricing, channel publishing, and Agione listing.",
+      "basicTitle": "Basic information",
+      "createProvider": "Create provider",
+      "createTitle": "New model provider",
+      "description": "Model providers are system-adapted. This page only maintains display name, price collection URL, and operations notes.",
+      "disabled": "Provider disabled",
+      "editTitle": "Edit model provider",
+      "enabled": "Provider enabled",
+      "errors": {
+        "saveFailed": "Failed to save the model provider. Please try again later.",
+        "sourceSaveFailed": "The provider was saved, but the price source URL failed to save. Please retry."
+      },
+      "fields": {
+        "code": "Provider code",
+        "name": "Provider display name",
+        "notes": "Notes",
+        "priceSourceEndpoint": "Price source URL"
+      },
+      "help": {
+        "code": "System adapter identifier. Existing provider codes should not be changed.",
+        "name": "Name shown in provider lists, model details, and operations overview.",
+        "priceSourceEndpoint": "Enter the provider's official pricing page or use https://models.dev/api.json as an aggregated pricing source. Enabled state is maintained in the model price source list."
+      },
+      "notesHint": "Record pricing basis, collection limits, or provider adapter notes.",
+      "notesTitle": "Operations notes",
+      "placeholders": {
+        "code": "Example: openai",
+        "name": "Example: OpenAI",
+        "notes": "Example: price page update frequency, special model basis, pending collection adapter",
+        "priceSourceEndpoint": "Example: https://models.dev/api.json"
+      },
+      "priceSourceHint": "Only affects the model price source bound to this provider. It does not change the provider website or API endpoint.",
+      "priceSourceTitle": "Price collection URL",
+      "saveChanges": "Save changes",
+      "websitePrefix": "Provider website / endpoint: {website}"
+    },
+    "channelPriceMatrixPanel": {
+      "columns": {
+        "coverage": "Coverage",
+        "lowestChannel": "Lowest channel"
+      },
+      "empty": "No models match the current filters.",
+      "filters": {
+        "all": "All statuses",
+        "missing": "Missing channel price",
+        "ready": "Multi-channel coverage",
+        "single": "Single-channel coverage"
+      },
+      "metrics": {
+        "covered": {
+          "hint": "Coverage {percent}%",
+          "label": "Has channel price"
+        },
+        "missing": {
+          "hint": "Procurement cost cannot be calculated",
+          "label": "Missing channel price"
+        },
+        "single": {
+          "hint": "Only one procurement channel is available",
+          "label": "Single-channel risk"
+        },
+        "total": {
+          "hint": "Active models participating in channel comparison",
+          "label": "Total models"
+        }
+      },
+      "searchPlaceholder": "Search model or provider",
+      "status": {
+        "missing": "Missing channel price"
+      },
+      "subtitle": "Compare procurement prices, lowest-price hits, and coverage gaps across channels by model.",
+      "title": "Channel Price Matrix"
     },
     "globalConfigPanel": {
       "actions": {
@@ -1252,6 +1914,8 @@
         "vendorsTitle": "No meta model providers yet"
       },
       "errors": {
+        "loadDetails": "Failed to load meta-model details.",
+        "loadOwnerSummary": "Failed to load meta-model provider summary.",
         "sync": "Failed to sync meta models"
       },
       "features": {
@@ -1394,12 +2058,16 @@
         "added": "Added",
         "bulkImport": "Bulk import",
         "cancel": "Cancel",
+        "configureModelPrice": "Configure model prices",
         "createSource": "New price source",
         "delete": "Delete",
+        "deleteSource": "Delete price source",
         "deleting": "Deleting",
         "edit": "Edit",
+        "editSource": "Edit price source",
         "manualPricing": "Manual pricing",
         "notSupported": "Not supported",
+        "resetOfficialPrice": "Reset official prices",
         "submitting": "Submitting",
         "syncAllPrices": "Sync price collection",
         "syncPrice": "Sync prices",
@@ -1530,9 +2198,33 @@
       "confirm": {
         "deleteSource": "Delete model price source \"{name}\"?\n\nThis removes the price source and its collection records. Linked models or channels will lose this price source."
       },
+      "officialReset": {
+        "allSources": "All official sources",
+        "confirm": "Clean the selected official price data and resync? This deletes official price items, collection snapshots, and legacy model-level sources.",
+        "description": "Clean legacy official price data written by seed or sync jobs, then resync official prices.",
+        "emptyPreview": "Preview the cleanup scope before executing. Manual prices, supplier prices, and channel configuration are retained.",
+        "execute": "Confirm reset and sync",
+        "executing": "Resetting...",
+        "legacySources": "Legacy model-level sources to delete",
+        "preview": "Preview impact",
+        "previewing": "Previewing...",
+        "scope": "Cleanup scope",
+        "stats": {
+          "history": "History deleted",
+          "legacySources": "Legacy sources deleted",
+          "modelsReset": "Models reset",
+          "priceItems": "Price items deleted",
+          "runs": "Run records deleted",
+          "snapshots": "Snapshots deleted",
+          "sourcesKept": "Real sources kept",
+          "sourcesMatched": "Sources matched"
+        },
+        "title": "Reset Official Price Data"
+      },
       "messages": {
         "deleted": "Model price source deleted",
         "officialSourceAdded": "Official price source \"{name}\" added",
+        "officialResetSuccess": "Official prices reset and synced: {priceItems} price items deleted, {models} models reset",
         "syncAllSubmitted": "Price collection task submitted{taskId}",
         "syncSubmitted": "{name} sync task submitted{taskId}",
         "taskId": " ({taskId})"
@@ -1540,7 +2232,11 @@
       "errors": {
         "addOfficialSourceFailed": "Failed to add official price source",
         "deleteFailed": "Failed to delete model price source",
+        "loadManualEntryCatalog": "Failed to load the manual price entry model catalog.",
+        "loadSourceDetail": "Failed to load price source details.",
         "loadOfficialSourcesFailed": "Failed to load official price sources",
+        "officialReset": "Failed to reset official prices.",
+        "previewOfficialReset": "Failed to preview official price reset scope.",
         "saveFailed": "Failed to save model price source",
         "syncAllFailed": "Failed to submit model price source sync task",
         "syncFailed": "Failed to submit price sync task"
@@ -2440,6 +3136,160 @@
           "updateDraft": "Update draft"
         }
       }
+    },
+    "overview": {
+      "kpi": {
+        "pendingListing": {
+          "label": "Pending listing",
+          "hint": "Models with supply but not yet listed on the current platform"
+        },
+        "missingChannel": {
+          "label": "Missing channel price",
+          "hint": "Models without usable procurement pricing"
+        },
+        "lowYield": {
+          "label": "Low yield",
+          "hint": "Listed models below the platform yield_warning threshold"
+        },
+        "dataAnomaly": {
+          "label": "Data anomaly",
+          "hint": "Collection failures, source disabled, reconciliation anomalies"
+        }
+      },
+      "decisionTable": {
+        "title": "Model Resale Decision Table",
+        "subtitle": "Sorted by decision priority: missing channel -> currency -> platform fee -> low yield -> not lowest -> unlisted."
+      },
+      "columns": {
+        "model": "Model",
+        "provider": "Provider",
+        "coverage": "Coverage",
+        "recommended": "Recommended channel",
+        "currentListing": "Current listing",
+        "purchasePrice": "Purchase price",
+        "listingPrice": "Listing price",
+        "inputYield": "Input yield",
+        "outputYield": "Output yield",
+        "action": "Recommended action",
+        "lastUpdate": "Last update"
+      },
+      "emptyDecisionRows": "No models match the current filters.",
+      "kpiGroup": {
+        "supply": "Supply",
+        "yield": "Yield",
+        "data": "Data"
+      },
+      "event": {
+        "updated": "Updated",
+        "collectionFailed": "Collection failed",
+        "sourceDisabled": "Source disabled",
+        "reconciliationAnomaly": "Reconciliation anomaly",
+        "stale": "Stale price"
+      },
+      "hover": {
+        "action": "Action",
+        "recommended": "Recommended",
+        "current": "Current",
+        "purchasePrice": "Purchase price",
+        "listingPrice": "Listing price",
+        "yield": "Yield"
+      },
+      "time": {
+        "justNow": "just now",
+        "secondsAgo": "{count}s ago",
+        "minutesAgo": "{count}m ago",
+        "hoursAgo": "{count}h ago",
+        "daysAgo": "{count}d ago"
+      },
+      "emptyDecisionAllReady": "No models need handling. All ready.",
+      "emptyDecisionFiltered": "No models match the current filters."
+    },
+    "decision": {
+      "status": {
+        "no_supply": "No channel price",
+        "currency_unresolved": "Currency unresolved",
+        "platform_fee_unresolved": "Platform fee unconfigured",
+        "low_yield": "Low yield",
+        "not_lowest_channel": "Not on lowest channel",
+        "unlisted": "Unlisted",
+        "single_channel": "Single channel",
+        "ready": "Ready"
+      },
+      "action": {
+        "configureChannel": "Configure channel",
+        "configureExchange": "Configure exchange rate",
+        "configurePlatformFee": "Configure platform fee rules",
+        "reviewMargin": "Review pricing or switch channel",
+        "switchLowestChannel": "Evaluate switching to lowest channel",
+        "publishToPlatform": "Open publishing workspace",
+        "addChannelCoverage": "Add backup channel",
+        "keep": "Keep"
+      }
+    },
+    "channel": {
+      "autoBest": "Auto best",
+      "fallback": "Channel",
+      "unnamed": "Unnamed channel",
+      "unspecified": "Unspecified channel"
+    },
+    "diagnostic": {
+      "status": {
+        "currency_mismatch": "Currency required",
+        "missing_channel": "Missing channel price",
+        "unlisted": "Unlisted",
+        "not_lowest": "Not lowest",
+        "low_coverage": "Low coverage",
+        "ready": "Ready"
+      }
+    },
+    "listingRisk": {
+      "title": "Listing Profit Risk",
+      "subtitle": "Aggregates low margin, non-lowest procurement, unlisted, and currency conversion risks.",
+      "columns": {
+        "model": "Model",
+        "risk": "Risk type",
+        "inputMargin": "Input margin",
+        "outputMargin": "Output margin",
+        "channel": "Current channel",
+        "action": "Recommended action"
+      },
+      "filters": {
+        "all": "All risks"
+      },
+      "risk": {
+        "currency_mismatch": "Currency required",
+        "missing_channel": "Missing channel price",
+        "unlisted": "Unlisted",
+        "not_lowest": "Not lowest",
+        "margin": "Low margin"
+      },
+      "actions": {
+        "currency_mismatch": "Add exchange rate and compare procurement pricing again",
+        "missing_channel": "Configure at least one procurement channel price first",
+        "unlisted": "Open the publishing workspace to create a listing",
+        "not_lowest": "Evaluate switching to the lowest procurement channel",
+        "margin": "Review listing price, service fee, or procurement channel",
+        "fallback": "Review status"
+      },
+      "metrics": {
+        "total": {
+          "label": "Total risks",
+          "hint": "Visible listing and procurement risks on the current platform"
+        },
+        "margin": {
+          "label": "Low margin",
+          "hint": "Input or output margin below 10%"
+        },
+        "notLowest": {
+          "label": "Not lowest",
+          "hint": "Listed but not using the lowest procurement channel"
+        },
+        "unlisted": {
+          "label": "Unlisted",
+          "hint": "Supply exists but has not entered the current platform"
+        }
+      },
+      "empty": "No risk items match the current filters."
     }
   },
   "sals": {

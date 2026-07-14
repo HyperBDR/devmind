@@ -208,6 +208,7 @@
             <tr
               v-for="row in paginatedListingRows"
               :key="row.status_listing?.id || 'model-' + row.model.id"
+              :class="{ 'listing-row-focused': isFocusedRow(row) }"
               class="cursor-default"
             >
               <td class="table-cell">
@@ -353,7 +354,7 @@
 <script setup>
 import '@/components/llm-ops/agioneListingStatusBoard.css'
 
-import { ref, toRef } from 'vue'
+import { ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
@@ -404,6 +405,10 @@ const props = defineProps({
   exchangeRate: {
     type: Number,
     default: 7.15
+  },
+  focusModelId: {
+    type: [String, Number],
+    default: null
   }
 })
 
@@ -434,7 +439,8 @@ const rows = useAgioneListingRows({
   selectedTrendModelIdRef: unusedModelId,
   selectedTrendChannelIdRef: unusedChannelId,
   trendProfitRateRef: unusedProfitRate,
-  pointConversionRef: toRef(props, 'pointConversion')
+  pointConversionRef: toRef(props, 'pointConversion'),
+  t
 })
 
 const {
@@ -492,6 +498,14 @@ const {
   visibleListingRows
 })
 
+watch(
+  () => [props.focusModelId, visibleListingRows.value.length],
+  () => {
+    focusListingModel()
+  },
+  { immediate: true }
+)
+
 const { exportFormat, exportListings } = useAgioneListingExport({
   activeListingChannelLabel,
   exportableRows,
@@ -535,6 +549,26 @@ function isWorkflowTransition(kind) {
 
 function openWorkspace(modelId, kind) {
   emit('open-workspace', { modelId, kind })
+}
+
+function focusListingModel() {
+  const modelId = props.focusModelId
+  if (!modelId) return
+  const row = visibleListingRows.value.find(
+    (item) => String(item.model?.id) === String(modelId)
+  )
+  const model =
+    row?.model ||
+    props.models.find((item) => String(item.id) === String(modelId))
+  if (!model) return
+  listingStatusFilter.value = 'all'
+  searchQuery.value = rows.modelDisplayName(model) || model.code || ''
+}
+
+function isFocusedRow(row) {
+  return (
+    props.focusModelId && String(row.model?.id) === String(props.focusModelId)
+  )
 }
 
 function actionPayloadForRows(targetRows, action = null) {

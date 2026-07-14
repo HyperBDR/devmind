@@ -8,6 +8,8 @@
     "delete": "删除",
     "edit": "编辑",
     "close": "关闭",
+    "clear": "清空",
+    "remove": "移除",
     "confirm": "确认",
     "back": "返回",
     "required": "必填",
@@ -36,6 +38,7 @@
     "collapseSidebar": "收起侧边栏",
     "share": "分享",
     "settings": "设置",
+    "optional": "可选",
     "about": "关于",
     "logout": "退出登录",
     "profile": "个人资料",
@@ -871,6 +874,9 @@
       "actionQueueTitle": "今日优先处理",
       "channelCoverageTitle": "渠道覆盖与最低价命中",
       "channelCount": "{count} 个渠道",
+      "sourceCount": "{count} 个价格源",
+      "procurementChannelCount": "{count} 个采购渠道",
+      "noProcurementChannels": "暂无采购渠道",
       "channelCoverageMeta": "覆盖 {covered} 个模型 · 最低价命中 {best} 个",
       "emptyChannelCoverage": "暂无渠道覆盖数据。",
       "providerMatrixTitle": "厂商模型运营覆盖",
@@ -952,6 +958,18 @@
       "draftsSaved": "已保存 {count} 条草稿",
       "saveFailed": "保存失败"
     },
+    "dataErrors": {
+      "loadCoreModels": "加载基础模型数据失败。",
+      "loadPublishing": "加载发布工作台数据失败。",
+      "loadSecondary": "加载 LLM Ops 扩展数据失败。",
+      "loadSection": "加载当前页面数据失败。",
+      "refreshChannels": "刷新渠道数据失败。",
+      "refreshListings": "刷新转售列表失败。",
+      "refreshMetaModels": "刷新元模型数据失败。",
+      "refreshPlatforms": "刷新转售平台数据失败。",
+      "refreshProviders": "刷新价格源数据失败。",
+      "refreshSummary": "刷新汇总数据失败。"
+    },
     "publishingDrawer": {
       "back": "返回",
       "title": "模型沉浸式上架工作台",
@@ -962,6 +980,22 @@
       "submitFailed": "提交失败"
     },
     "publishingWorkspace": {
+      "actions": {
+        "appendListing": "追加上架",
+        "appendListingHint": "追加会新增当前渠道的挂售价格，不会影响已有上架渠道。",
+        "selectChannelFirst": "先选择采购渠道后再生成上架价格。",
+        "switchAvailableHint": "追加会保留现有渠道；切换会下架同平台其他渠道，仅保留当前渠道。",
+        "updateListedHint": "当前渠道已经上架，本次操作会更新该渠道的挂售价格。",
+        "updateLowestListedHint": "当前渠道已经上架且是最低采购渠道，可直接更新收益率后的售价。",
+        "updatePrice": "更新价格"
+      },
+      "decision": {
+        "currentlyListed": "当前已上架",
+        "listedLowest": "已上架最低价",
+        "lowestProcurement": "最低采购价",
+        "noChannelSelected": "未选择渠道",
+        "notLowestProcurement": "非最低采购价"
+      },
       "filters": {
         "platform": "发布平台",
         "vendor": "元厂商",
@@ -977,6 +1011,30 @@
         "exchangeRate": "汇率",
         "pointConversion": "{point}换算"
       },
+      "metrics": {
+        "audioInput": "音频输入",
+        "audioOutput": "音频输出",
+        "cacheInput": "缓存输入价",
+        "imageOutput": "图片输出",
+        "input": "输入价",
+        "output": "输出价",
+        "videoInput": "视频输入",
+        "videoOutput": "视频输出"
+      },
+      "modelSelect": {
+        "actionableGroup": "可选模型（已配置渠道 {count}）",
+        "description": "{actionable} 个可决策模型 · {unavailable} 个待配置渠道",
+        "label": "选择模型",
+        "needsChannel": "需配置渠道",
+        "unavailableGroup": "不可选模型（暂无渠道 {count}）"
+      },
+      "plan": {
+        "listed": "已上架",
+        "listedLowestSource": "已上架最低源",
+        "lowestProcurementChannel": "最低采购渠道",
+        "notLowestSource": "非最低源",
+        "notSelected": "未选择"
+      },
       "supply": {
         "title": "供应链路甄选",
         "selectedCount": "已选 {count} 条链路",
@@ -989,6 +1047,7 @@
         "sourcePrefix": "供应源：{name}",
         "lowest": "最低",
         "lowestProcurement": "最低采购链路",
+        "higherCost": "高 {amount} · {percent}%",
         "selectRequired": "请在链路甄选面板中勾选至少一条供应链路，继续定价。",
         "chainFallback": "供货链路"
       },
@@ -1070,6 +1129,609 @@
         "staging": "预发",
         "test": "测试"
       }
+    },
+    "resalePlatformModal": {
+      "apiKeyHint": "用于调用挂售平台接口执行上架、改价和下架操作。",
+      "createPlatform": "创建平台",
+      "createTitle": "新建挂售平台",
+      "decimalPlaces": "{count} 位",
+      "defaultPointName": "积分",
+      "description": "配置 Agione 平台实例、区域、接口、抽佣、免审收益率和积分规则。",
+      "disabled": "平台已停用",
+      "editTitle": "编辑挂售平台",
+      "enabled": "平台已启用",
+      "errors": {
+        "invalidMetadataJson": "扩展元数据不是有效的 JSON。",
+        "metadataObject": "扩展元数据必须是 JSON 对象。"
+      },
+      "fields": {
+        "apiEndpoint": "API 接入地址",
+        "apiKey": "平台 API Key",
+        "autoApproveMaxMargin": "免审最高收益率（%）",
+        "code": "平台标识",
+        "currency": "平台货币",
+        "decimalPlaces": "保留小数位",
+        "environment": "环境",
+        "feeRate": "平台抽佣比例（%）",
+        "name": "平台名称",
+        "platformType": "平台类型",
+        "pointName": "积分名称",
+        "pointsPerCurrencyUnit": "积分兑换比例（每 1 平台货币）",
+        "region": "区域",
+        "regionName": "区域名称",
+        "roundingMode": "积分舍入方式",
+        "serviceFeeRate": "服务费率（%）",
+        "settlementRate": "结算比例（%）",
+        "taxRate": "税费率（%）",
+        "website": "官网地址",
+        "yieldTarget": "目标收益率（%）",
+        "yieldWarning": "收益率预警线（%）"
+      },
+      "metadataHint": "记录租户、渠道、账号、结算口径等平台特有信息。",
+      "metadataTitle": "扩展元数据",
+      "notesHint": "记录平台差异、合同口径或接口限制。",
+      "notesTitle": "备注",
+      "placeholders": {
+        "apiKey": "用于挂售接口鉴权",
+        "autoApproveMaxMargin": "例如：20",
+        "code": "例如：agione-main",
+        "feeRate": "例如：3",
+        "metadata": "例如：{\"tenant_id\":\"tenant-001\",\"channel\":\"direct\"}",
+        "name": "例如：Agione 主平台",
+        "notes": "例如：积分倍率来源、结算周期、接口适配状态",
+        "optionalRate": "留空表示未配置",
+        "pointName": "积分",
+        "pointsPerCurrencyUnit": "例如：100.00",
+        "regionName": "例如：新加坡",
+        "serviceFeeRate": "例如：10",
+        "settlementRate": "例如：95",
+        "yieldTarget": "例如：25",
+        "yieldWarning": "例如：15"
+      },
+      "platformInfo": "平台信息",
+      "platformInfoHint": "用于区分 Agione 上架平台实例和后续接口适配。",
+      "regions": {
+        "apNortheast1": "日本",
+        "apSoutheast1": "新加坡",
+        "cn": "中国大陆",
+        "cnEast": "华东",
+        "cnHongkong": "香港",
+        "cnNorth": "华北",
+        "cnSouth": "华南",
+        "euWest1": "欧洲西部",
+        "global": "全球 / 默认",
+        "usEast1": "美国东部"
+      },
+      "rounding": {
+        "down": "向下舍入",
+        "halfUp": "四舍五入",
+        "up": "向上舍入"
+      },
+      "saveChanges": "保存修改",
+      "settlementHint": "用于挂售页将平台上架价换算为积分。",
+      "settlementTitle": "结算与积分"
+    },
+    "channelModelDrawer": {
+      "addDescription": "先选择元模型，再指定该渠道实际使用的上游供货源。添加后默认启用，可在下方设置成本规则和固定成本价。",
+      "addTitle": "添加渠道模型",
+      "addableMetaModels": "{count} 个可添加元模型",
+      "availableCount": "可添加 {count}",
+      "batchAddModels": "批量添加 {count} 个模型",
+      "capability": "能力",
+      "changeAdded": "新增 {count}",
+      "changeDisabled": "停用 {count}",
+      "changeEnabled": "启用 {count}",
+      "changeModified": "改成本 {count}",
+      "changeRemoved": "移除 {count}",
+      "channelCost": "渠道成本价",
+      "channelDefaultDiscount": "渠道默认折扣",
+      "clearSelection": "清空选择",
+      "closeConfirm": "当前有未保存的模型配置变更，确定关闭抽屉吗？",
+      "comparisonDelta": "较上游价格 {currency} {delta} / {percent}%",
+      "comparisonUnknown": "已按全局显示货币换算展示；缺少同维度上游基准价时，暂无法判断高低。",
+      "configDetails": "配置详情",
+      "configValue": "配置值",
+      "configuredCount": "已配置 {count}",
+      "configuredMetaModelsTitle": "已配置元模型（{count}）",
+      "configuredSearchPlaceholder": "搜索已配置元模型、code 或上游来源",
+      "cost": "成本",
+      "costCurrencyChannelDefault": "成本价跟随渠道结算币种 {currency} 保存；页面价格按全局显示货币换算。",
+      "costCurrencyFixed": "成本价保存为 {currency}；页面价格按全局显示货币换算。",
+      "costRule": "成本规则",
+      "costSummary": "成本 {value}",
+      "currency": {
+        "fixedCny": "固定保存为人民币",
+        "fixedUsd": "固定保存为美元",
+        "savedAs": "保存为 {currency}",
+        "useChannelDefault": "使用渠道默认币种"
+      },
+      "defaultCurrency": "默认币种",
+      "emptyConfigured": "还没有配置模型，请先从上方添加。",
+      "enabledCount": "已启用 {count}",
+      "fixedOverrideUnsupported": "当前模型暂不支持手动覆盖固定成本价。",
+      "followCostRule": "跟随成本规则",
+      "forwardingCapability": "模型转发能力",
+      "generatedAfterSave": "保存后自动生成",
+      "hiddenModels": "还有 {count} 个模型，点击显示全部",
+      "metaVendor": "元模型厂商",
+      "missingPrice": "缺价格",
+      "modality": {
+        "audio": "音频",
+        "multimodal": "多模态",
+        "text": "文本",
+        "video": "视频"
+      },
+      "modelSearchPlaceholder": "名称 / code / 模态",
+      "noAvailableUpstream": "无可用上游",
+      "noChanges": "暂无变更",
+      "noMatchedModels": "没有匹配的可添加模型",
+      "noUpstreamSelected": "未选择渠道上游",
+      "notApplicable": "不适用",
+      "pendingCostGeneration": "成本待生成",
+      "pendingUpstream": "待选择渠道上游",
+      "performance": {
+        "latency": "延迟(ms)",
+        "latencyPlaceholder": "毫秒",
+        "latencyShort": "延迟",
+        "latencyTitle": "渠道平均延迟，单位毫秒",
+        "rpm": "RPM",
+        "rpmPlaceholder": "每分钟请求",
+        "rpmShort": "RPM",
+        "rpmTitle": "每分钟请求上限",
+        "tpm": "TPM",
+        "tpmPlaceholder": "每分钟 Token",
+        "tpmShort": "TPM",
+        "tpmTitle": "每分钟 Token 上限"
+      },
+      "price": "价格",
+      "priceAfterSelection": "选择后显示价格",
+      "priceField": {
+        "audioInput": "音频输入 / 秒",
+        "audioInputShort": "音入",
+        "audioOutput": "音频输出 / 秒",
+        "audioOutputShort": "音出",
+        "textInput": "文本输入 / 百万 tokens",
+        "textInputShort": "文入",
+        "textOutput": "文本输出 / 百万 tokens",
+        "textOutputShort": "文出",
+        "videoInput": "视频输入 / 秒",
+        "videoInputShort": "视入",
+        "videoOutput": "视频输出 / 秒",
+        "videoOutputShort": "视出"
+      },
+      "priceMode": {
+        "channelDefault": "默认折扣",
+        "discount": "折扣比例",
+        "fixed": "固定成本价"
+      },
+      "priceRule": {
+        "defaultDiscount": "默认折扣 {value}",
+        "discount": "折扣 {value}",
+        "fixed": "固定成本价"
+      },
+      "resolvedUpstreamCount": "{count} 个已指定上游",
+      "rule": "规则",
+      "saveChanges": "保存变更",
+      "saving": "保存中",
+      "searchAndSelectModel": "搜索并选择元模型",
+      "searchUpstream": "搜索上游 / 币种 / 类型",
+      "searchVendor": "搜索厂商",
+      "selectAllVisible": "全选当前结果",
+      "selectChannelUpstream": "选择渠道上游",
+      "selectMetaModel": "选择元模型",
+      "selectMetaVendor": "先选择元模型厂商",
+      "selectModelForFixed": "先选择元模型，再配置固定成本价。",
+      "selectedMetaModels": "已选 {count} 个元模型",
+      "selectedModels": "已选模型",
+      "selectedModelsHint": "为每个元模型指定实际使用的渠道上游。",
+      "selectedShort": "已选 {count}",
+      "showAll": "显示全部 {count}",
+      "sourceCategory": {
+        "manual": "人工",
+        "officialProvider": "原厂",
+        "supplier": "供货商",
+        "unknown": "未标记类型"
+      },
+      "sourceNotIngested": "源未入库",
+      "unassignedVendor": "未归属厂商",
+      "unboundUpstream": "未绑定上游",
+      "unsaved": "未保存变更",
+      "unsupportedFixedPriceNote": "当前模型的图片等特殊计价维度暂不支持在渠道配置中手动覆盖，会使用上游价格或折扣后的渠道成本价。",
+      "upstream": "上游",
+      "upstreamPrice": "上游价格",
+      "upstreamSourceCount": "{count} 个上游价格源",
+      "upstreamSummary": "上游 {value}",
+      "vendorAddableCount": "{count} 个可添加元模型"
+    },
+    "providerPricingDrawer": {
+      "allSources": "全部来源",
+      "billingUnit": {
+        "perGeneration": "{base}/次",
+        "perImage": "{base}/张",
+        "perSecond": "{base}/秒"
+      },
+      "compactDimension": {
+        "audioInput": "音入",
+        "audioOutput": "音出",
+        "cache": "缓存",
+        "imageInput": "图入",
+        "imageOutput": "图出",
+        "input": "输入",
+        "output": "输出",
+        "videoInput": "视入",
+        "videoOutput": "视出"
+      },
+      "dimension": {
+        "audioInput": "音频输入",
+        "audioOutput": "音频输出",
+        "cacheInput": "缓存输入",
+        "imageInput": "图片输入",
+        "imageOutput": "图片输出",
+        "textInput": "文本输入",
+        "textOutput": "文本输出",
+        "videoInput": "视频输入",
+        "videoOutput": "视频输出"
+      },
+      "empty": "当前服务商还没有模型定价记录。",
+      "legacyPrice": {
+        "audioInputSecond": "音频输入 / 秒",
+        "audioOutputSecond": "音频输出 / 秒",
+        "cacheInput1m": "缓存输入 / 1M",
+        "imageOutputImage": "图片输出 / 张",
+        "input1m": "输入 / 1M",
+        "output1m": "输出 / 1M",
+        "resolutionInput": "{resolution} 输入",
+        "resolutionOutput": "{resolution} 输出",
+        "videoInputSecond": "视频输入 / 秒",
+        "videoOutputSecond": "视频输出 / 秒"
+      },
+      "modality": {
+        "audio": "音频",
+        "multimodal": "多模态",
+        "text": "文本",
+        "video": "视频"
+      },
+      "modelCount": "模型数量",
+      "modelPriceSources": "模型价格源",
+      "noPrice": "暂无价格",
+      "officialPriceName": "{provider} 官方价格",
+      "priceSource": "价格来源",
+      "priceStructure": "价格结构",
+      "priceStructureSummary": "原厂 {official} · 云托管 {cloud} · 外部 {external}",
+      "priceSummary": "价格摘要",
+      "pricedModelCount": "已定价模型",
+      "providerFallback": "服务商",
+      "searchPlaceholder": "搜索模型、来源或 code",
+      "sourceCategory": {
+        "cloudHosted": "云托管",
+        "manual": "人工",
+        "officialProvider": "原厂",
+        "supplier": "供货商",
+        "unknown": "其他"
+      },
+      "sourceSummary": "{slug} · {count} 个来源",
+      "sourceType": "来源类型",
+      "subtitle": "按模型汇总输入、输出、缓存等核心价格，减少逐维度展开带来的噪音。",
+      "title": "服务商模型价格",
+      "unboundPriceSource": "未绑定价格源",
+      "updatedAt": "更新时间"
+    },
+    "modelWorkbenchPanel": {
+      "channelPrices": "渠道采购价",
+      "columns": {
+        "channel": "渠道",
+        "date": "日期",
+        "dimension": "维度",
+        "platform": "平台",
+        "price": "价格",
+        "source": "来源",
+        "status": "状态",
+        "variance": "差异"
+      },
+      "dimension": {
+        "audioInput": "音频输入",
+        "audioOutput": "音频输出",
+        "cacheInput": "缓存输入",
+        "imageOutput": "图片输出",
+        "textInput": "文本输入",
+        "textOutput": "文本输出",
+        "videoInput": "视频输入",
+        "videoOutput": "视频输出"
+      },
+      "emptyChannelPrices": "暂无渠道价格项。",
+      "emptyListingRecords": "暂无挂售记录。",
+      "emptyReconciliationRecords": "暂无对账记录。",
+      "emptyStandardPrices": "暂无标准价格项。",
+      "kpi": {
+        "channelCoverage": "渠道覆盖",
+        "channelCoverageHint": "可用采购渠道数量",
+        "listingLinks": "挂售链路",
+        "listingLinksHint": "当前平台及其他平台记录",
+        "metaModel": "元模型",
+        "reconciliationAnomalies": "对账异常",
+        "reconciliationAnomaliesHint": "非 perfect 的对账记录"
+      },
+      "listingRecords": "挂售记录",
+      "platformFallback": "平台 {id}",
+      "publishStatus": {
+        "deleted": "已删除",
+        "none": "未发布",
+        "offline": "已下架",
+        "online": "已发布"
+      },
+      "reconciliationRecords": "对账记录",
+      "standardPrices": "标准价格项",
+      "subtitle": "集中查看单个模型的官方价格、渠道采购、挂售状态和对账记录。",
+      "title": "模型详情工作台",
+      "workflowStatus": {
+        "deleted": "已删除",
+        "draft": "草稿",
+        "offline": "已下架",
+        "offlineException": "下架异常",
+        "online": "在线",
+        "pendingOffline": "待下架",
+        "pendingPublish": "待发布",
+        "pendingUpdate": "待更新",
+        "updateDraft": "更新草稿"
+      }
+    },
+    "metaModelModal": {
+      "aliasHint": "别名用于从采集结果中匹配同一元模型身份。",
+      "aliasTitle": "别名",
+      "capabilityHint": "用于运营筛选、渠道规划和模型可用性展示。",
+      "capabilityTitle": "分类与能力",
+      "createMetaModel": "创建元模型",
+      "createNote": "创建后可绑定到模型 SKU。",
+      "createTitle": "新建元模型",
+      "description": "元模型用于把不同价格源中的同一模型身份归一到厂商、能力和版本。",
+      "editNote": "保存后会影响关联模型的展示身份。",
+      "editTitle": "编辑元模型",
+      "errors": {
+        "invalidMetadataJson": "元数据必须是合法 JSON 对象。",
+        "metadataObject": "元数据必须是 JSON 对象。",
+        "saveFailed": "元模型保存失败，请稍后重试。"
+      },
+      "featureHelp": "英文逗号分隔。",
+      "fields": {
+        "aliases": "别名",
+        "code": "模型标识 Code",
+        "contextWindow": "上下文窗口",
+        "family": "模型家族",
+        "features": "能力标签",
+        "maxOutputTokens": "最大输出 Token",
+        "modality": "模态",
+        "name": "显示名称",
+        "owner": "模型归属方",
+        "status": "状态"
+      },
+      "identityHint": "用于跨官方、供应商和人工价格源归并模型。",
+      "identityTitle": "模型身份",
+      "metadataHint": "可记录采集来源、官方页面标识或运营备注，必须是 JSON 对象。",
+      "metadataTitle": "元数据",
+      "ownerUnbound": "未绑定",
+      "placeholders": {
+        "aliases": "每行一个别名，例如 GPT-4o mini",
+        "code": "例如：gpt-4o-mini",
+        "family": "例如：GPT-4o",
+        "name": "例如：GPT-4o mini"
+      },
+      "saveChanges": "保存修改"
+    },
+    "priceChangePanel": {
+      "columns": {
+        "currency": "币种",
+        "object": "对象",
+        "time": "时间",
+        "type": "类型"
+      },
+      "dimension": {
+        "audioInput": "音频输入",
+        "audioOutput": "音频输出",
+        "cacheInput": "缓存输入",
+        "imageOutput": "图片输出",
+        "textInput": "文本输入",
+        "textOutput": "文本输出",
+        "videoInput": "视频输入",
+        "videoOutput": "视频输出"
+      },
+      "empty": "暂无价格变化记录。",
+      "fallback": {
+        "channel": "渠道 {id}",
+        "model": "模型 {id}",
+        "platform": "平台 {id}"
+      },
+      "filters": {
+        "all": "全部价格"
+      },
+      "metrics": {
+        "channelHistory": {
+          "hint": "采购渠道价格版本记录",
+          "label": "渠道价历史"
+        },
+        "listingHistory": {
+          "hint": "平台挂售价格版本记录",
+          "label": "挂售价历史"
+        },
+        "officialItems": {
+          "hint": "当前标准价格维度数量",
+          "label": "标准价格项"
+        }
+      },
+      "subtitle": "汇总渠道采购价、挂售价和标准价格项的最近变化。",
+      "title": "价格变化看板",
+      "types": {
+        "channel": "渠道采购价",
+        "listing": "平台挂售价",
+        "official": "标准价格项"
+      }
+    },
+    "collectionHealthPanel": {
+      "badges": {
+        "needsHandling": "需处理",
+        "normal": "正常",
+        "sevenDayThreshold": "7天阈值"
+      },
+      "collectionMethod": {
+        "apiSync": "接口同步",
+        "autoCollect": "自动采集",
+        "manualEntry": "手动录入",
+        "manualImport": "手动导入",
+        "unknown": "待配置"
+      },
+      "columns": {
+        "consecutiveFailures": "连续失败",
+        "health": "健康状态",
+        "lastCollected": "最近采集",
+        "latestStatus": "最近状态",
+        "source": "价格源",
+        "successRate": "成功率",
+        "type": "类型"
+      },
+      "empty": "暂无价格源。",
+      "health": {
+        "disabled": "已停用",
+        "failed": "采集失败",
+        "healthy": "健康",
+        "stale": "数据过期"
+      },
+      "metrics": {
+        "failed": {
+          "hint": "最近任务失败或存在连续失败",
+          "label": "采集失败"
+        },
+        "healthy": {
+          "hint": "最近一次采集成功且未超过新鲜度窗口",
+          "label": "健康价格源"
+        },
+        "stale": {
+          "hint": "最近采集时间超过 7 天",
+          "label": "数据过期"
+        },
+        "total": {
+          "hint": "启用的官方、供应商和手工价格源",
+          "label": "价格源总数"
+        }
+      },
+      "runStatus": {
+        "failed": "失败",
+        "none": "暂无",
+        "running": "运行中",
+        "succeeded": "成功"
+      },
+      "subtitle": "按价格源查看最近采集、连续失败和数据新鲜度。",
+      "title": "采集健康度看板"
+    },
+    "channelModal": {
+      "basicHint": "用于识别渠道，以及记录后续对接接口的入口。",
+      "basicTitle": "基础信息",
+      "createChannel": "创建渠道",
+      "createTitle": "新建转发渠道",
+      "description": "渠道用于配置可采购/转发模型的供应入口和默认结算规则。",
+      "disabled": "渠道已停用",
+      "editTitle": "编辑转发渠道",
+      "enabled": "渠道已启用",
+      "fields": {
+        "apiEndpoint": "转发 API Base URL",
+        "code": "渠道标识",
+        "currency": "默认结算币种",
+        "name": "渠道显示名称",
+        "notes": "运营备注",
+        "settlementRatio": "默认采购折扣比例"
+      },
+      "help": {
+        "apiEndpoint": "渠道提供的模型转发接口地址；暂无接口时可先留空。",
+        "code": "系统唯一标识，建议使用小写英文、数字和短横线。",
+        "currency": "渠道默认采购币种；单个模型可在模型管理中覆盖。",
+        "name": "展示在渠道列表、模型转发关系和价格对比中的名称。",
+        "notes": "可记录账期、限流、合同折扣、模型覆盖范围等信息。",
+        "settlementRatio": "采购价 = 价格源价格 × 折扣比例；85% 表示按 0.85 倍采购。"
+      },
+      "notesHint": "记录合同、账期或模型覆盖限制。",
+      "notesTitle": "补充信息",
+      "placeholders": {
+        "apiEndpoint": "例如：https://llm.example.com/v1",
+        "code": "例如：prod-forwarding-channel",
+        "name": "例如：生产转发渠道",
+        "notes": "例如：合同折扣、结算周期、特殊限制",
+        "settlementRatio": "例如：85"
+      },
+      "saveChanges": "保存修改",
+      "settlementHint": "作为该渠道模型的默认采购价规则，单个模型仍可覆盖。",
+      "settlementTitle": "结算规则"
+    },
+    "providerModal": {
+      "basicHint": "用于在模型定价、渠道发布和 Agione 挂售中识别厂商。",
+      "basicTitle": "基础信息",
+      "createProvider": "创建厂商",
+      "createTitle": "新建模型厂商",
+      "description": "模型厂商由系统适配，页面只维护展示名称、价格采集地址和运营备注。",
+      "disabled": "厂商已停用",
+      "editTitle": "编辑模型厂商",
+      "enabled": "厂商已启用",
+      "errors": {
+        "saveFailed": "模型厂商保存失败，请稍后重试。",
+        "sourceSaveFailed": "厂商已保存，但价格源地址保存失败，请重试。"
+      },
+      "fields": {
+        "code": "厂商标识 Code",
+        "name": "厂商显示名称",
+        "notes": "备注",
+        "priceSourceEndpoint": "价格源地址"
+      },
+      "help": {
+        "code": "系统适配标识，已创建厂商不建议修改。",
+        "name": "展示在厂商列表、模型详情和运营总览中的名称。",
+        "priceSourceEndpoint": "可填写厂商官方价格页，或使用 https://models.dev/api.json 作为聚合价格数据源；停用状态请在模型价格源列表中维护。"
+      },
+      "notesHint": "记录价格口径、采集限制或厂商适配说明。",
+      "notesTitle": "运营备注",
+      "placeholders": {
+        "code": "例如：openai",
+        "name": "例如：OpenAI",
+        "notes": "例如：价格页更新频率、特殊模型口径、待补充采集适配",
+        "priceSourceEndpoint": "例如：https://models.dev/api.json"
+      },
+      "priceSourceHint": "只影响该厂商绑定的模型价格源，不修改厂商官网或 API 接入地址。",
+      "priceSourceTitle": "价格采集地址",
+      "saveChanges": "保存修改",
+      "websitePrefix": "厂商官网 / 接入地址：{website}"
+    },
+    "channelPriceMatrixPanel": {
+      "columns": {
+        "coverage": "覆盖",
+        "lowestChannel": "最低价渠道"
+      },
+      "empty": "当前筛选条件下没有模型。",
+      "filters": {
+        "all": "全部状态",
+        "missing": "缺渠道价",
+        "ready": "多渠道覆盖",
+        "single": "单渠道覆盖"
+      },
+      "metrics": {
+        "covered": {
+          "hint": "覆盖率 {percent}%",
+          "label": "有渠道价"
+        },
+        "missing": {
+          "hint": "无法计算采购成本",
+          "label": "缺渠道价"
+        },
+        "single": {
+          "hint": "只有一个采购渠道，缺少备选",
+          "label": "单渠道风险"
+        },
+        "total": {
+          "hint": "参与渠道比价的活跃模型",
+          "label": "模型总数"
+        }
+      },
+      "searchPlaceholder": "搜索模型或厂商",
+      "status": {
+        "missing": "缺渠道价"
+      },
+      "subtitle": "按模型比较各渠道采购价格、最低价命中和覆盖缺口。",
+      "title": "渠道横向比价矩阵"
     },
     "globalConfigPanel": {
       "actions": {
@@ -1262,6 +1924,8 @@
         "vendorsTitle": "暂无元模型厂商"
       },
       "errors": {
+        "loadDetails": "加载元模型明细失败。",
+        "loadOwnerSummary": "加载元模型厂商汇总失败。",
         "sync": "同步元模型失败"
       },
       "features": {
@@ -1393,7 +2057,7 @@
         "channelRequired": "请选择账单归属的转发渠道。",
         "modelRequired": "请选择本次用量对应的调用模型。"
       }
-      },
+    },
     "providerManagement": {
       "title": "服务商价格源",
       "modelsCount": "{count} 个元模型",
@@ -1404,12 +2068,16 @@
         "added": "已添加",
         "bulkImport": "批量导入",
         "cancel": "取消",
+        "configureModelPrice": "配置模型价格",
         "createSource": "新建价格源",
         "delete": "删除",
+        "deleteSource": "删除价格源",
         "deleting": "删除中",
         "edit": "编辑",
+        "editSource": "编辑价格源",
         "manualPricing": "手工录价",
         "notSupported": "暂不支持",
+        "resetOfficialPrice": "重置官方价格",
         "submitting": "提交中",
         "syncAllPrices": "同步全部价格采集",
         "syncPrice": "同步价格",
@@ -1540,9 +2208,33 @@
       "confirm": {
         "deleteSource": "确认删除模型价格源「{name}」吗？\n\n删除后会移除该价格源及其采集记录，关联模型或渠道会失去这个价格来源。"
       },
+      "officialReset": {
+        "allSources": "全部官方来源",
+        "confirm": "确认清理所选官方价格数据并重新同步？该操作会删除官方价格项、采集快照和历史模型级来源。",
+        "description": "清理历史 seed / 同步写入的官方价格脏数据，并重新同步官方价格。",
+        "emptyPreview": "先预览清理范围，再执行重置。平台会保留手工价格、供货商价格和渠道配置。",
+        "execute": "确认重置并同步",
+        "executing": "重置中...",
+        "legacySources": "将删除的历史模型级来源",
+        "preview": "预览影响",
+        "previewing": "预览中...",
+        "scope": "清理范围",
+        "stats": {
+          "history": "删除历史",
+          "legacySources": "删除历史来源",
+          "modelsReset": "重置模型",
+          "priceItems": "删除价格项",
+          "runs": "删除运行记录",
+          "snapshots": "删除快照",
+          "sourcesKept": "保留真实来源",
+          "sourcesMatched": "匹配来源"
+        },
+        "title": "重置官方价格数据"
+      },
       "messages": {
         "deleted": "模型价格源已删除",
         "officialSourceAdded": "原厂价格源「{name}」已添加",
+        "officialResetSuccess": "官方价格已重置并同步：删除价格项 {priceItems}，重置模型 {models}",
         "syncAllSubmitted": "价格采集任务已提交{taskId}",
         "syncSubmitted": "{name} 同步任务已提交{taskId}",
         "taskId": "（{taskId}）"
@@ -1550,7 +2242,11 @@
       "errors": {
         "addOfficialSourceFailed": "添加原厂价格源失败",
         "deleteFailed": "删除模型价格源失败",
+        "loadManualEntryCatalog": "加载手工录价模型目录失败。",
+        "loadSourceDetail": "加载价格源明细失败。",
         "loadOfficialSourcesFailed": "加载原厂价格源失败",
+        "officialReset": "重置官方价格失败。",
+        "previewOfficialReset": "预览官方价格重置范围失败。",
         "saveFailed": "保存模型价格源失败",
         "syncAllFailed": "提交全部价格源同步任务失败",
         "syncFailed": "提交价格同步任务失败"
@@ -2450,6 +3146,202 @@
           "updateDraft": "更新草稿"
         }
       }
+    },
+    "overview": {
+      "kpi": {
+        "pendingListing": {
+          "label": "待上架",
+          "hint": "有供应但尚未挂售到当前平台的模型数"
+        },
+        "missingChannel": {
+          "label": "缺渠道价",
+          "hint": "无法计算采购成本，必须先补渠道价"
+        },
+        "lowYield": {
+          "label": "低收益率",
+          "hint": "已挂售但低于平台 yield_warning 阈值的模型"
+        },
+        "dataAnomaly": {
+          "label": "数据异常",
+          "hint": "采集失败 / 源失效 / 对账异常 的模型"
+        }
+      },
+      "decisionTable": {
+        "title": "模型挂售决策表",
+        "subtitle": "按决策优先级排序：先处理缺渠道价、汇率、平台费用，再处理低收益率、非最低渠道、未挂售。"
+      },
+      "columns": {
+        "model": "模型",
+        "provider": "服务商",
+        "coverage": "渠道覆盖",
+        "recommended": "推荐采购渠道",
+        "currentListing": "当前挂售",
+        "purchasePrice": "采购价",
+        "listingPrice": "挂售价",
+        "inputYield": "Input 收益率",
+        "outputYield": "Output 收益率",
+        "action": "推荐动作",
+        "lastUpdate": "数据时间"
+      },
+      "emptyDecisionRows": "当前筛选条件下没有需要处理的模型。",
+      "statusOptions": [
+        {
+          "value": "priority",
+          "label": "优先处理"
+        },
+        {
+          "value": "all",
+          "label": "全部"
+        },
+        {
+          "value": "no_supply",
+          "label": "缺渠道价"
+        },
+        {
+          "value": "currency_unresolved",
+          "label": "需要汇率"
+        },
+        {
+          "value": "platform_fee_unresolved",
+          "label": "平台费用未配置"
+        },
+        {
+          "value": "low_yield",
+          "label": "低收益率"
+        },
+        {
+          "value": "not_lowest_channel",
+          "label": "非最低渠道"
+        },
+        {
+          "value": "unlisted",
+          "label": "未挂售"
+        },
+        {
+          "value": "single_channel",
+          "label": "单渠道覆盖"
+        },
+        {
+          "value": "ready",
+          "label": "已就绪"
+        }
+      ],
+      "kpiGroup": {
+        "supply": "供给",
+        "yield": "收益",
+        "data": "数据"
+      },
+      "event": {
+        "updated": "已更新",
+        "collectionFailed": "采集失败",
+        "sourceDisabled": "源已停用",
+        "reconciliationAnomaly": "对账异常",
+        "stale": "价格过期"
+      },
+      "hover": {
+        "action": "动作",
+        "recommended": "推荐",
+        "current": "当前",
+        "purchasePrice": "采购价",
+        "listingPrice": "挂售价",
+        "yield": "收益"
+      },
+      "time": {
+        "justNow": "刚刚",
+        "secondsAgo": "{count} 秒前",
+        "minutesAgo": "{count} 分钟前",
+        "hoursAgo": "{count} 小时前",
+        "daysAgo": "{count} 天前"
+      },
+      "emptyDecisionAllReady": "当前没有需要处理的模型，全部就绪。",
+      "emptyDecisionFiltered": "当前筛选条件下没有匹配的模型。"
+    },
+    "decision": {
+      "status": {
+        "no_supply": "缺渠道价",
+        "currency_unresolved": "需要汇率",
+        "platform_fee_unresolved": "平台费用未配置",
+        "low_yield": "低收益率",
+        "not_lowest_channel": "非最低渠道",
+        "unlisted": "未挂售",
+        "single_channel": "单渠道覆盖",
+        "ready": "已就绪"
+      },
+      "action": {
+        "configureChannel": "去渠道配置",
+        "configureExchange": "补汇率",
+        "configurePlatformFee": "配置平台费用规则",
+        "reviewMargin": "复核售价或切换渠道",
+        "switchLowestChannel": "评估切换到最低渠道",
+        "publishToPlatform": "去挂售",
+        "addChannelCoverage": "增加备选渠道",
+        "keep": "保持"
+      }
+    },
+    "channel": {
+      "autoBest": "自动最优",
+      "fallback": "渠道",
+      "unnamed": "未命名渠道",
+      "unspecified": "未指定渠道"
+    },
+    "diagnostic": {
+      "status": {
+        "currency_mismatch": "需要汇率",
+        "missing_channel": "缺渠道价",
+        "unlisted": "未挂售",
+        "not_lowest": "非最低价",
+        "low_coverage": "覆盖偏少",
+        "ready": "就绪"
+      }
+    },
+    "listingRisk": {
+      "title": "挂售利润风险榜",
+      "subtitle": "聚合低毛利、非最低采购、未挂售和币种换算风险。",
+      "columns": {
+        "model": "模型",
+        "risk": "风险类型",
+        "inputMargin": "Input 毛利",
+        "outputMargin": "Output 毛利",
+        "channel": "当前渠道",
+        "action": "建议动作"
+      },
+      "filters": {
+        "all": "全部风险"
+      },
+      "risk": {
+        "currency_mismatch": "需要汇率",
+        "missing_channel": "缺渠道价",
+        "unlisted": "未挂售",
+        "not_lowest": "非最低价",
+        "margin": "低毛利"
+      },
+      "actions": {
+        "currency_mismatch": "补充汇率后重新比较采购价",
+        "missing_channel": "先为模型配置至少一个渠道采购价",
+        "unlisted": "进入挂售工作台创建平台上架记录",
+        "not_lowest": "评估切换到最低采购渠道",
+        "margin": "复核售价、服务费率或采购渠道",
+        "fallback": "复核状态"
+      },
+      "metrics": {
+        "total": {
+          "label": "风险总数",
+          "hint": "当前平台可见的挂售和采购风险"
+        },
+        "margin": {
+          "label": "低毛利",
+          "hint": "Input 或 Output 毛利低于 10%"
+        },
+        "notLowest": {
+          "label": "非最低价",
+          "hint": "已挂售但未使用最低采购渠道"
+        },
+        "unlisted": {
+          "label": "未挂售",
+          "hint": "已有供应但未进入当前平台"
+        }
+      },
+      "empty": "当前筛选条件下没有风险项。"
     }
   },
   "sals": {

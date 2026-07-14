@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
@@ -16,9 +17,12 @@ import {
 } from '@/utils/llmOpsPagination'
 
 const PRICE_HISTORY_PAGE_SIZE = 120
+const RUN_LOG_PAGE_SIZE = 120
+const RECONCILIATION_PAGE_SIZE = 120
 const supportedDisplayCurrencies = new Set(['CNY', 'USD'])
 
 export function useLLMOpsData() {
+  const { t } = useI18n()
   const { showError } = useToast()
   const loading = ref(false)
   const backgroundLoading = ref(false)
@@ -78,10 +82,25 @@ export function useLLMOpsData() {
       loading.value = false
     }
 
-    refreshSecondaryData({ force: true, silent: true })
+    if (DATA_HEAVY_SECTIONS.has(section)) {
+      refreshSecondaryData({ force: true, silent: true })
+    }
   }
 
   async function refreshCoreData(section) {
+    if (section === 'monitor') {
+      const [channelRes, platformRes, summaryRes] = await Promise.all([
+        fetchList(llmOpsApi.listChannels),
+        fetchList(llmOpsApi.listResalePlatforms),
+        llmOpsApi.getSummary(summaryParams('monitor'))
+      ])
+      channels.value = asArray(extract(channelRes))
+      resalePlatforms.value = asArray(extract(platformRes))
+      summary.value = normalizeSummary(extract(summaryRes))
+      await loadResaleWorkflowConfig()
+      return
+    }
+
     const shouldLoadModels = !LIGHT_CORE_SECTIONS.has(section)
     const [
       sourceRes,
@@ -94,7 +113,7 @@ export function useLLMOpsData() {
       summaryRes
     ] = await Promise.all([
       fetchList(llmOpsApi.listCollectionSources),
-      fetchList(llmOpsApi.listCollectionRuns),
+      fetchRecentCollectionRuns(),
       fetchList(llmOpsApi.listProviders),
       fetchList(llmOpsApi.listMetaModels),
       shouldLoadModels ? fetchList(llmOpsApi.listModels) : Promise.resolve([]),
@@ -136,7 +155,7 @@ export function useLLMOpsData() {
       secondaryDataLoaded.value = true
     } catch (error) {
       if (!silent) {
-        showError(errorMessage(error, '加载 LLM Ops 扩展数据失败。'))
+        showError(errorMessage(error, t('llmOps.dataErrors.loadSecondary')))
       }
     } finally {
       backgroundLoading.value = false
@@ -158,18 +177,23 @@ export function useLLMOpsData() {
       return
     }
     if (section === 'channels') {
-      await Promise.all([refreshChannelPricingData(), refreshModelPriceItems()])
+      await Promise.all([
+        refreshChannelPricingData(),
+        refreshModelPriceItems(),
+        refreshSummary()
+      ])
       return
     }
     if (section === 'channelMatrix') {
-      await refreshChannelPricingData()
+      await Promise.all([refreshChannelPricingData(), refreshSummary()])
       return
     }
     if (section === 'reseller' || section === 'listingRisk') {
       await Promise.all([
         refreshChannelPricingData(),
         refreshModelPriceItems(),
-        refreshResaleListings()
+        refreshResaleListings(),
+        refreshSummary()
       ])
       return
     }
@@ -178,7 +202,8 @@ export function useLLMOpsData() {
         refreshModelPriceItems(),
         refreshChannelPricingData(),
         refreshResaleListings(),
-        refreshReconciliationRecords()
+        refreshReconciliationRecords(),
+        refreshSummary()
       ])
       return
     }
@@ -209,8 +234,13 @@ export function useLLMOpsData() {
     modelPriceItems.value = asArray(items)
   }
 
-  async function refreshResaleListings() {
-    listings.value = asArray(await fetchList(llmOpsApi.listResaleListings))
+  async function refreshResaleListings(
+    platformId = selectedResalePlatformId.value
+  ) {
+    const params = platformId ? { platform: platformId } : {}
+    listings.value = asArray(
+      await fetchList(llmOpsApi.listResaleListings, params)
+    )
   }
 
   function preloadResalePublishingData() {
@@ -230,13 +260,15 @@ export function useLLMOpsData() {
     }
 
     Promise.all(tasks).catch((error) => {
-      showError(errorMessage(error, '加载发布工作台数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.loadPublishing')))
     })
   }
 
   async function refreshReconciliationRecords() {
     records.value = asArray(
-      await fetchList(llmOpsApi.listReconciliationRecords)
+      await fetchFirstPage(llmOpsApi.listReconciliationRecords, {
+        page_size: RECONCILIATION_PAGE_SIZE
+      })
     )
   }
 
@@ -260,8 +292,15 @@ export function useLLMOpsData() {
         fetchList(llmOpsApi.listChannelPriceItems, {
           is_current: 'true'
         }),
-        fetchList(llmOpsApi.listResaleListings),
-        fetchList(llmOpsApi.listReconciliationRecords),
+        fetchList(
+          llmOpsApi.listResaleListings,
+          selectedResalePlatformId.value
+            ? { platform: selectedResalePlatformId.value }
+            : {}
+        ),
+        fetchFirstPage(llmOpsApi.listReconciliationRecords, {
+          page_size: RECONCILIATION_PAGE_SIZE
+        }),
         llmOpsApi.getSummary(summaryParams())
       ])
     channelPrices.value = asArray(prices)
@@ -274,7 +313,7 @@ export function useLLMOpsData() {
   async function refreshCollectionRuns() {
     const [sourceData, runData] = await Promise.all([
       fetchList(llmOpsApi.listCollectionSources),
-      fetchList(llmOpsApi.listCollectionRuns)
+      fetchRecentCollectionRuns()
     ])
     sources.value = sourceData
     collectionRuns.value = runData
@@ -285,7 +324,7 @@ export function useLLMOpsData() {
       const [sourceData, runData, providerData, summaryRes] = await Promise.all(
         [
           fetchList(llmOpsApi.listCollectionSources),
-          fetchList(llmOpsApi.listCollectionRuns),
+          fetchRecentCollectionRuns(),
           fetchList(llmOpsApi.listProviders),
           llmOpsApi.getSummary(summaryParams())
         ]
@@ -295,7 +334,7 @@ export function useLLMOpsData() {
       providers.value = asArray(providerData)
       summary.value = normalizeSummary(extract(summaryRes))
     } catch (error) {
-      showError(errorMessage(error, '刷新价格源数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.refreshProviders')))
     }
   }
 
@@ -310,7 +349,7 @@ export function useLLMOpsData() {
       metaModels.value = asArray(metaModelData)
       summary.value = normalizeSummary(extract(summaryRes))
     } catch (error) {
-      showError(errorMessage(error, '刷新元模型数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.refreshMetaModels')))
     }
   }
 
@@ -324,10 +363,10 @@ export function useLLMOpsData() {
       channels.value = asArray(channelData)
       summary.value = normalizeSummary(extract(summaryRes))
       refreshResaleListings().catch((error) => {
-        showError(errorMessage(error, '刷新转售列表失败。'))
+        showError(errorMessage(error, t('llmOps.dataErrors.refreshListings')))
       })
     } catch (error) {
-      showError(errorMessage(error, '刷新渠道数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.refreshChannels')))
     }
   }
 
@@ -335,7 +374,12 @@ export function useLLMOpsData() {
     try {
       const [platformData, listingData, summaryRes] = await Promise.all([
         fetchList(llmOpsApi.listResalePlatforms),
-        fetchList(llmOpsApi.listResaleListings),
+        fetchList(
+          llmOpsApi.listResaleListings,
+          selectedResalePlatformId.value
+            ? { platform: selectedResalePlatformId.value }
+            : {}
+        ),
         llmOpsApi.getSummary(summaryParams())
       ])
       resalePlatforms.value = asArray(platformData)
@@ -343,7 +387,7 @@ export function useLLMOpsData() {
       summary.value = normalizeSummary(extract(summaryRes))
       await loadResaleWorkflowConfig()
     } catch (error) {
-      showError(errorMessage(error, '刷新转售平台数据失败。'))
+      showError(errorMessage(error, t('llmOps.dataErrors.refreshPlatforms')))
     }
   }
 
@@ -364,15 +408,22 @@ export function useLLMOpsData() {
     }
   }
 
-  async function refreshSummary() {
-    const summaryRes = await llmOpsApi.getSummary(summaryParams())
+  async function refreshSummary(scope = 'full') {
+    const summaryRes = await llmOpsApi.getSummary(summaryParams(scope))
     summary.value = normalizeSummary(extract(summaryRes))
   }
 
-  function summaryParams() {
+  async function fetchRecentCollectionRuns() {
+    return fetchFirstPage(llmOpsApi.listCollectionRuns, {
+      page_size: RUN_LOG_PAGE_SIZE
+    })
+  }
+
+  function summaryParams(scope = 'full') {
     return {
       display_currency: displayCurrency.value,
-      resale_platform: selectedResalePlatformId.value || ''
+      resale_platform: selectedResalePlatformId.value || '',
+      scope
     }
   }
 
@@ -401,6 +452,7 @@ export function useLLMOpsData() {
     providers,
     records,
     refreshAll,
+    refreshChannelPricingData,
     refreshChannelManagementData,
     refreshCollectionRuns,
     refreshCoreData,

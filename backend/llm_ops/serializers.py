@@ -134,6 +134,9 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         return instance.model_price_items.filter(is_current=True).count()
 
     def get_latest_run_status(self, instance):
+        value = getattr(instance, "latest_run_status", None)
+        if value is not None:
+            return value
         return (
             instance.collection_runs.order_by("-started_at", "-id")
             .values_list("status", flat=True)
@@ -141,9 +144,15 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         )
 
     def get_model_count(self, instance):
+        value = getattr(instance, "model_count", None)
+        if value is not None:
+            return value
         return instance.models.count()
 
     def get_price_item_count(self, instance):
+        value = getattr(instance, "price_item_count", None)
+        if value is not None:
+            return value
         return instance.model_price_items.count()
 
     def validate(self, attrs):
@@ -1487,6 +1496,34 @@ class ResalePlatformSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "service_fee_rate must be >= 0 and < 1."
             )
+        return value
+
+    def validate_tax_rate(self, value):
+        if value is None:
+            return value
+        if value < Decimal("0") or value >= Decimal("1"):
+            raise serializers.ValidationError("tax_rate must be >= 0 and < 1.")
+        return value
+
+    def validate_settlement_rate(self, value):
+        if value is None:
+            return value
+        if value <= Decimal("0"):
+            raise serializers.ValidationError("settlement_rate must be > 0.")
+        return value
+
+    def validate_yield_warning(self, value):
+        if value is None:
+            return value
+        if value < Decimal("0"):
+            raise serializers.ValidationError("yield_warning must be >= 0.")
+        return value
+
+    def validate_yield_target(self, value):
+        if value is None:
+            return value
+        if value < Decimal("0"):
+            raise serializers.ValidationError("yield_target must be >= 0.")
         return value
 
     def validate_auto_approve_max_margin_rate(self, value):

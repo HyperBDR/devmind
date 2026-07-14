@@ -14,9 +14,11 @@
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar">
         <div>
-          <h3 class="panel-title">采集健康度看板</h3>
+          <h3 class="panel-title">
+            {{ t('llmOps.collectionHealthPanel.title') }}
+          </h3>
           <p class="mt-1 text-xs text-slate-500">
-            按价格源查看最近采集、连续失败和数据新鲜度。
+            {{ t('llmOps.collectionHealthPanel.subtitle') }}
           </p>
         </div>
       </div>
@@ -24,13 +26,29 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th class="table-head">价格源</th>
-              <th class="table-head">类型</th>
-              <th class="table-head">最近状态</th>
-              <th class="table-head text-right">成功率</th>
-              <th class="table-head text-right">连续失败</th>
-              <th class="table-head">最近采集</th>
-              <th class="table-head">健康状态</th>
+              <th class="table-head">
+                {{ t('llmOps.collectionHealthPanel.columns.source') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.collectionHealthPanel.columns.type') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.collectionHealthPanel.columns.latestStatus') }}
+              </th>
+              <th class="table-head text-right">
+                {{ t('llmOps.collectionHealthPanel.columns.successRate') }}
+              </th>
+              <th class="table-head text-right">
+                {{
+                  t('llmOps.collectionHealthPanel.columns.consecutiveFailures')
+                }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.collectionHealthPanel.columns.lastCollected') }}
+              </th>
+              <th class="table-head">
+                {{ t('llmOps.collectionHealthPanel.columns.health') }}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -64,7 +82,7 @@
             </tr>
             <tr v-if="!sourceRows.length">
               <td class="table-cell text-slate-500" colspan="7">
-                暂无价格源。
+                {{ t('llmOps.collectionHealthPanel.empty') }}
               </td>
             </tr>
           </tbody>
@@ -76,6 +94,8 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import {
   priceSourceCollectionMethod,
   priceSourceCollectionMethodLabel
@@ -85,6 +105,8 @@ const props = defineProps({
   sources: { type: Array, default: () => [] },
   runs: { type: Array, default: () => [] }
 })
+
+const { t } = useI18n()
 
 const sourceRows = computed(() =>
   props.sources
@@ -139,31 +161,33 @@ const metrics = computed(() => {
   ).length
   return [
     {
-      label: '价格源总数',
+      label: t('llmOps.collectionHealthPanel.metrics.total.label'),
       value: total,
       badge: `${percentage(healthy, total)}%`,
-      hint: '启用的官方、供应商和手工价格源',
+      hint: t('llmOps.collectionHealthPanel.metrics.total.hint'),
       tone: healthy === total && total ? 'good' : 'warn'
     },
     {
-      label: '健康价格源',
+      label: t('llmOps.collectionHealthPanel.metrics.healthy.label'),
       value: healthy,
-      badge: '正常',
-      hint: '最近一次采集成功且未超过新鲜度窗口',
+      badge: t('llmOps.collectionHealthPanel.badges.normal'),
+      hint: t('llmOps.collectionHealthPanel.metrics.healthy.hint'),
       tone: healthy ? 'good' : 'warn'
     },
     {
-      label: '采集失败',
+      label: t('llmOps.collectionHealthPanel.metrics.failed.label'),
       value: failed,
-      badge: failed ? '需处理' : '正常',
-      hint: '最近任务失败或存在连续失败',
+      badge: failed
+        ? t('llmOps.collectionHealthPanel.badges.needsHandling')
+        : t('llmOps.collectionHealthPanel.badges.normal'),
+      hint: t('llmOps.collectionHealthPanel.metrics.failed.hint'),
       tone: failed ? 'danger' : 'good'
     },
     {
-      label: '数据过期',
+      label: t('llmOps.collectionHealthPanel.metrics.stale.label'),
       value: stale,
-      badge: '7天阈值',
-      hint: '最近采集时间超过 7 天',
+      badge: t('llmOps.collectionHealthPanel.badges.sevenDayThreshold'),
+      hint: t('llmOps.collectionHealthPanel.metrics.stale.hint'),
       tone: stale ? 'warn' : 'good'
     }
   ]
@@ -191,12 +215,28 @@ function isStale(value) {
 }
 
 function healthState({ enabled, stale, failures, latestStatus }) {
-  if (!enabled) return { label: '已停用', tone: 'info' }
-  if (failures > 0 || latestStatus === 'failed') {
-    return { label: '采集失败', tone: 'danger' }
+  if (!enabled) {
+    return {
+      label: t('llmOps.collectionHealthPanel.health.disabled'),
+      tone: 'info'
+    }
   }
-  if (stale) return { label: '数据过期', tone: 'warn' }
-  return { label: '健康', tone: 'success' }
+  if (failures > 0 || latestStatus === 'failed') {
+    return {
+      label: t('llmOps.collectionHealthPanel.health.failed'),
+      tone: 'danger'
+    }
+  }
+  if (stale) {
+    return {
+      label: t('llmOps.collectionHealthPanel.health.stale'),
+      tone: 'warn'
+    }
+  }
+  return {
+    label: t('llmOps.collectionHealthPanel.health.healthy'),
+    tone: 'success'
+  }
 }
 
 function healthRank(tone) {
@@ -205,17 +245,33 @@ function healthRank(tone) {
 
 function sourceCategoryLabel(source) {
   const method = priceSourceCollectionMethod(source)
-  return priceSourceCollectionMethodLabel(method)
+  return priceSourceCollectionMethodLabel(method, collectionMethodLabels())
 }
 
 function statusLabel(status) {
   return (
     {
-      succeeded: '成功',
-      failed: '失败',
-      running: '运行中'
-    }[status] || '暂无'
+      succeeded: t('llmOps.collectionHealthPanel.runStatus.succeeded'),
+      failed: t('llmOps.collectionHealthPanel.runStatus.failed'),
+      running: t('llmOps.collectionHealthPanel.runStatus.running')
+    }[status] || t('llmOps.collectionHealthPanel.runStatus.none')
   )
+}
+
+function collectionMethodLabels() {
+  return {
+    auto_collect: t(
+      'llmOps.collectionHealthPanel.collectionMethod.autoCollect'
+    ),
+    api_sync: t('llmOps.collectionHealthPanel.collectionMethod.apiSync'),
+    manual_entry: t(
+      'llmOps.collectionHealthPanel.collectionMethod.manualEntry'
+    ),
+    manual_import: t(
+      'llmOps.collectionHealthPanel.collectionMethod.manualImport'
+    ),
+    unknown: t('llmOps.collectionHealthPanel.collectionMethod.unknown')
+  }
 }
 
 function statusTone(status) {
