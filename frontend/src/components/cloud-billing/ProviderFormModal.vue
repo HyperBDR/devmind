@@ -1276,6 +1276,66 @@
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
             <div class="md:col-span-1">
               <label
+                for="providerEnableRechargeRecoveryDetection"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{
+                  t(
+                    'cloudBilling.settings.alertRule.enableRechargeRecoveryDetection'
+                  )
+                }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{
+                  t(
+                    'cloudBilling.settings.alertRule.enableRechargeRecoveryDetectionDesc'
+                  )
+                }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <label
+                class="relative inline-flex items-center"
+                :class="
+                  canAutoSubmitRechargeApproval
+                    ? 'cursor-pointer'
+                    : 'cursor-not-allowed opacity-60'
+                "
+              >
+                <input
+                  id="providerEnableRechargeRecoveryDetection"
+                  v-model="alertRuleData.enable_recharge_recovery_detection"
+                  type="checkbox"
+                  class="sr-only peer"
+                  :disabled="!canAutoSubmitRechargeApproval"
+                />
+                <div
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
+                ></div>
+                <span class="ml-3 text-sm text-gray-700">
+                  {{
+                    alertRuleData.enable_recharge_recovery_detection
+                      ? t('common.enabled')
+                      : t('common.disabled')
+                  }}
+                </span>
+              </label>
+              <p
+                v-if="!canAutoSubmitRechargeApproval"
+                class="text-xs text-gray-500 mt-1"
+              >
+                {{
+                  t(
+                    'cloudBilling.settings.alertRule.enableRechargeRecoveryDetectionHint'
+                  )
+                }}
+              </p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
                 for="providerAutoSubmitRechargeApproval"
                 class="block text-sm font-medium text-gray-700 mb-1"
               >
@@ -1567,6 +1627,7 @@ const alertRuleData = reactive({
   growth_amount_threshold: '',
   balance_threshold: '',
   days_remaining_threshold: '',
+  enable_recharge_recovery_detection: false,
   auto_submit_recharge_approval: false
 })
 
@@ -1584,6 +1645,7 @@ const canAutoSubmitRechargeApproval = computed(
 
 watch(canAutoSubmitRechargeApproval, (canSubmit) => {
   if (!canSubmit) {
+    alertRuleData.enable_recharge_recovery_detection = false
     alertRuleData.auto_submit_recharge_approval = false
   }
 })
@@ -1996,6 +2058,8 @@ watch(
             alertRuleData.days_remaining_threshold = getThresholdFormValue(
               rule.days_remaining_threshold
             )
+            alertRuleData.enable_recharge_recovery_detection =
+              rule.enable_recharge_recovery_detection ?? false
             alertRuleData.auto_submit_recharge_approval =
               rule.auto_submit_recharge_approval ?? false
           } else {
@@ -2006,6 +2070,7 @@ watch(
             alertRuleData.growth_amount_threshold = ''
             alertRuleData.balance_threshold = ''
             alertRuleData.days_remaining_threshold = ''
+            alertRuleData.enable_recharge_recovery_detection = false
             alertRuleData.auto_submit_recharge_approval = false
           }
         } catch (error) {
@@ -2017,6 +2082,7 @@ watch(
           alertRuleData.growth_amount_threshold = ''
           alertRuleData.balance_threshold = ''
           alertRuleData.days_remaining_threshold = ''
+          alertRuleData.enable_recharge_recovery_detection = false
           alertRuleData.auto_submit_recharge_approval = false
         }
       }
@@ -2078,6 +2144,7 @@ watch(
       alertRuleData.growth_amount_threshold = ''
       alertRuleData.balance_threshold = ''
       alertRuleData.days_remaining_threshold = ''
+      alertRuleData.enable_recharge_recovery_detection = false
       alertRuleData.auto_submit_recharge_approval = false
       selectedChannelValue.value = ''
       pendingChannelUuid.value = ''
@@ -2586,6 +2653,9 @@ const handleSubmit = async () => {
           )
             ? parseInt(alertRuleData.days_remaining_threshold, 10)
             : null,
+          enable_recharge_recovery_detection:
+            canAutoSubmitRechargeApproval.value &&
+            alertRuleData.enable_recharge_recovery_detection,
           auto_submit_recharge_approval:
             canAutoSubmitRechargeApproval.value &&
             alertRuleData.auto_submit_recharge_approval
@@ -2609,6 +2679,7 @@ const handleSubmit = async () => {
           growth_amount_threshold: null,
           balance_threshold: null,
           days_remaining_threshold: null,
+          enable_recharge_recovery_detection: false,
           auto_submit_recharge_approval: false
         })
       }

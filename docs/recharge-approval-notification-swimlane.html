@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>云账单充值审批消息通知泳道图</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 40px 28px;
+      color: #26221f;
+      background: #faf9f6;
+      font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    main { max-width: 1500px; margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: #9b928a;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 2px;
+    }
+    h1 { margin: 0; font-size: 30px; }
+    .lead { color: #766f68; line-height: 1.7; }
+    .diagram {
+      margin-top: 24px;
+      overflow-x: auto;
+      border: 1px solid #d9d2ca;
+      border-radius: 10px;
+      background: #f4f1eb;
+      padding: 16px;
+    }
+    .diagram img { display: block; width: 100%; min-width: 1100px; }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+    .card {
+      border: 1px solid #d9d2ca;
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 20px;
+    }
+    .card h2 { margin: 0 0 10px; font-size: 16px; }
+    .card p { margin: 0; color: #766f68; font-size: 14px; line-height: 1.7; }
+    footer {
+      margin-top: 24px;
+      padding-top: 14px;
+      border-top: 1px solid #d9d2ca;
+      color: #9b928a;
+      font-size: 12px;
+      text-align: center;
+    }
+    @media (max-width: 900px) {
+      .cards { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">SWIMLANE DIAGRAM · RELEASE SUMMARY</p>
+    <h1>云账单充值审批消息通知</h1>
+    <p class="lead">
+      本图按 Tower 平台、告警群/邮件、审批发起人、当前审批节点人四条泳道，
+      展示告警触发到审批终态之间的消息接收人、内容差异、余额分级催办
+      和可靠性策略。
+    </p>
+    <div class="diagram">
+      <img src="./recharge-approval-notification-swimlane.svg"
+           alt="云账单充值审批消息通知泳道图">
+    </div>
+    <section class="cards">
+      <article class="card">
+        <h2>群消息：统一跟进</h2>
+        <p>
+          告警群保留完整充值业务信息。提交成功时增加当前审批人及节点，
+          第二轮告警会直接展示已有审批流程的当前卡点人员，并可通过
+          折叠面板查看已完成、当前和后续审批节点，
+          余额恢复时通知推定充值金额和审批是否仍在进行；终态或失败时
+          同步审批结果，方便运营统一追踪。
+        </p>
+      </article>
+      <article class="card">
+        <h2>发起人：掌握进度</h2>
+        <p>
+          通过配置的 user_id 单聊发起人，说明由 Tower 自动发起，提供充值摘要、
+          账单概述和审批分享链接；隐藏 user_id、实例号和采集时间等内部信息。
+        </p>
+      </article>
+      <article class="card">
+        <h2>审批人：立即处理</h2>
+        <p>
+          根据飞书实例当前 task_list 识别卡点人员，发送待审批卡片。
+          余额降至阈值的 50% 和 30% 时分别发送告急、紧急催办；每位审批人
+          每个级别只收到一次，并支持发现重试、发送重试和租约回收。
+        </p>
+      </article>
+    </section>
+    <footer>DevMind · Cloud Billing · Recharge Approval Notification Flow</footer>
+  </main>
+</body>
+</html>

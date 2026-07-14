@@ -93,6 +93,7 @@ class TestAlertRuleSerializer:
         assert "growth_threshold" in data
         assert "balance_threshold" in data
         assert "days_remaining_threshold" in data
+        assert "enable_recharge_recovery_detection" in data
         assert "auto_submit_recharge_approval" in data
         assert "auto_recharge_amount" in data
 
@@ -103,6 +104,7 @@ class TestAlertRuleSerializer:
             "growth_threshold": "10.00",
             "balance_threshold": "100.00",
             "days_remaining_threshold": 7,
+            "enable_recharge_recovery_detection": True,
             "auto_submit_recharge_approval": True,
             "auto_recharge_amount": "500.00",
             "is_active": True,
@@ -114,8 +116,59 @@ class TestAlertRuleSerializer:
         assert rule.cost_threshold == Decimal("20.00")
         assert rule.balance_threshold == Decimal("100.00")
         assert rule.days_remaining_threshold == 7
+        assert rule.enable_recharge_recovery_detection is True
         assert rule.auto_submit_recharge_approval is True
         assert rule.auto_recharge_amount == Decimal("500.00")
+
+    def test_recharge_recovery_detection_defaults_to_disabled(
+        self,
+        cloud_provider,
+    ):
+        serializer = AlertRuleSerializer(
+            data={
+                "provider": cloud_provider.id,
+                "balance_threshold": "100.00",
+                "is_active": True,
+            }
+        )
+
+        assert serializer.is_valid()
+        rule = serializer.save()
+        assert rule.enable_recharge_recovery_detection is False
+
+    def test_recharge_recovery_detection_requires_health_threshold(
+        self,
+        cloud_provider,
+    ):
+        serializer = AlertRuleSerializer(
+            data={
+                "provider": cloud_provider.id,
+                "cost_threshold": "100.00",
+                "enable_recharge_recovery_detection": True,
+                "is_active": True,
+            }
+        )
+
+        assert not serializer.is_valid()
+        assert "enable_recharge_recovery_detection" in serializer.errors
+
+    def test_recovery_detection_rejects_explicitly_cleared_threshold(
+        self,
+        cloud_provider,
+    ):
+        rule = AlertRule.objects.create(
+            provider=cloud_provider,
+            balance_threshold=Decimal("100.00"),
+            enable_recharge_recovery_detection=True,
+        )
+        serializer = AlertRuleSerializer(
+            rule,
+            data={"balance_threshold": None},
+            partial=True,
+        )
+
+        assert not serializer.is_valid()
+        assert "non_field_errors" in serializer.errors
 
     def test_auto_submit_requires_manual_recharge_amount(self, cloud_provider):
         data = {

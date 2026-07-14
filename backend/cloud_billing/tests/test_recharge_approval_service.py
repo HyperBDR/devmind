@@ -8,16 +8,24 @@ import uuid
 import importlib.util
 import hashlib
 from contextlib import nullcontext
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from django.utils import timezone
+
 from agentcore_metering.adapters.django.models import LLMUsage
 from cloud_billing.agents.recharge_approval import (
     RechargeApprovalAgentRunner as LayeredRechargeApprovalAgentRunner,
 )
-from cloud_billing.models import RechargeApprovalEvent, RechargeApprovalLLMRun, RechargeApprovalRecord
+from cloud_billing.models import (
+    AlertRecord,
+    RechargeApprovalEvent,
+    RechargeApprovalLLMRun,
+    RechargeApprovalRecord,
+)
 import cloud_billing.services.recharge_approval as recharge_service
 from cloud_billing.services.recharge_approval import (
     RechargeApprovalAgentCallbackHandler,
@@ -298,9 +306,9 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
                 "充值客户名称",
                 "示例云科技有限公司",
                 "充值云账号",
-                "13301962892",
+                "billing-account-test",
                 "付款说明",
-                "AGIOne模型调用(厂商)",
+                "测试模型调用",
                 "支付方式",
                 "公司支付",
                 "付款公司",
@@ -317,11 +325,11 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
                 "户名",
                 "示例收款有限公司",
                 "账号",
-                "1109 3851 0410 7021 0011 884",
+                "0000 0000 0000 0000 0000",
                 "银行",
                 "示例银行",
                 "银行所在地区",
-                "北京市/北京市",
+                "示例省/示例市",
                 "银行支行",
                 "示例银行示例支行",
             ]
@@ -329,13 +337,13 @@ def test_parse_recharge_info_accepts_alternating_label_value_lines():
     )
 
     assert payload["cloud_type"] == "智谱"
-    assert payload["recharge_account"] == "13301962892"
-    assert payload["payment_note"] == "AGIOne模型调用(厂商)"
+    assert payload["recharge_account"] == "billing-account-test"
+    assert payload["payment_note"] == "测试模型调用"
     assert payload["amount"] == 200.0
     assert payload["currency"] == "CNY"
     assert payload["payee"]["type"] == "对公账户"
     assert payload["payee"]["account_number"] == "00000000000000000000"
-    assert payload["payee"]["bank_region"] == "北京市/北京市"
+    assert payload["payee"]["bank_region"] == "示例省/示例市"
     assert payload["payee"]["bank_branch"] == "示例银行示例支行"
 
 
@@ -393,7 +401,7 @@ def test_parse_recharge_info_with_tracking_falls_back_to_llm(
     )
 
     monkeypatch.setattr(
-        "cloud_billing.services.recharge_approval.invoke_tracked_structured_llm",
+        "cloud_billing.tracked_llm.invoke_tracked_structured_llm",
         lambda **kwargs: (
             kwargs["schema"](
                 cloud_type="智谱",
@@ -858,7 +866,10 @@ def test_execute_recharge_approval_plan_records_workflow_failed_event_on_script_
         stdout = ""
         stderr = "Feishu API error 60002: approval code not found"
 
-    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: FakeResult())
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda *args, **kwargs: FakeResult(),
+    )
 
     with pytest.raises(RuntimeError) as exc:
         plan = plan_tool.invoke(
@@ -916,6 +927,9 @@ def test_execute_recharge_approval_plan_retains_generated_request_json(
     record = RechargeApprovalRecord.objects.create(
         provider=cloud_provider,
         raw_recharge_info=json.dumps(payload, ensure_ascii=False),
+        context_payload={
+            "excluded_duplicate_instance_codes": ["ins_recovered"],
+        },
     )
     runner = LayeredRechargeApprovalAgentRunner(
         record=record,
@@ -937,7 +951,13 @@ def test_execute_recharge_approval_plan_retains_generated_request_json(
         )
         stderr = ""
 
-    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: FakeResult())
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return FakeResult()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
 
     plan = tools["plan_recharge_approval_workflow"].invoke(
         {
@@ -967,6 +987,8 @@ def test_execute_recharge_approval_plan_retains_generated_request_json(
     assert generated["currency"] == "CNY"
     assert "payee" not in generated
     assert "账号：00000000000000000000" in generated["remark"]
+    exclude_option = captured["cmd"].index("--exclude-instance-code")
+    assert captured["cmd"][exclude_option + 1] == "ins_recovered"
 
 
 # Removed: test_run_skill_script_materializes_missing_recharge_request_file
@@ -1648,6 +1670,125 @@ def test_recharge_approval_script_accepts_submit_options_after_subcommand(tmp_pa
     assert args.lookback_days == 7
 
 
+def test_recharge_approval_script_excludes_only_recovered_instance():
+    module = _load_skill_module(
+        "submit_recharge_approval_excludes_recovered_instance",
+        "scripts/submit_recharge_approval.py",
+    )
+    request_data = {
+        "cloud_type": "智谱",
+        "recharge_customer_name": "示例云科技有限公司",
+        "recharge_account": "acct-188",
+        "payment_company": "示例云科技有限公司",
+        "amount": 188,
+        "expected_date": "2026-07-16",
+        "remark": "测试充值",
+    }
+    expected = module.expected_name_map(request_data)
+    form = [
+        {
+            "name": name,
+            "type": (
+                "amount"
+                if name == module.FIELD_AMOUNT
+                else "text"
+            ),
+            "value": value,
+        }
+        for name, value in expected.items()
+    ]
+    module.list_instances = lambda *args, **kwargs: {
+        "data": {
+            "instance_code_list": [
+                "ins_recovered",
+                "ins_blocking",
+            ],
+        },
+    }
+    inspected = []
+
+    def fake_get_instance(*args, **kwargs):
+        instance_code = args[3]
+        inspected.append(instance_code)
+        return {
+            "data": {
+                "status": "PENDING",
+                "serial_number": "SN-blocking",
+                "form": json.dumps(form, ensure_ascii=False),
+            },
+        }
+
+    module.get_instance = fake_get_instance
+
+    result = module.detect_duplicate_or_conflict(
+        "https://www.feishu.cn",
+        "token",
+        "approval-188",
+        request_data,
+        30,
+        excluded_instance_codes={"ins_recovered"},
+    )
+
+    assert inspected == ["ins_blocking"]
+    assert result["instance_code"] == "ins_blocking"
+
+
+def test_local_recharge_executor_excludes_only_recovered_instance(
+    monkeypatch,
+):
+    from cloud_billing.agents.recharge_approval import definition
+
+    monkeypatch.setattr(
+        definition,
+        "_local_list_instances",
+        lambda *args, **kwargs: ["ins_recovered", "ins_blocking"],
+    )
+    inspected = []
+
+    def fake_get_instance(*args, **kwargs):
+        instance_code = args[2]
+        inspected.append(instance_code)
+        return {
+            "data": {
+                "status": "PENDING",
+                "serial_number": "SN-blocking",
+                "form": json.dumps(
+                    [
+                        {
+                            "name": definition._F_CLOUD_TYPE,
+                            "value": "智谱",
+                        },
+                        {
+                            "name": definition._F_RECHARGE_ACCOUNT,
+                            "value": "acct-188",
+                        },
+                    ],
+                    ensure_ascii=False,
+                ),
+            },
+        }
+
+    monkeypatch.setattr(
+        definition,
+        "_local_get_instance",
+        fake_get_instance,
+    )
+
+    result = definition._detect_duplicate(
+        "token",
+        "approval-188",
+        {
+            "cloud_type": "智谱",
+            "recharge_account": "acct-188",
+        },
+        "https://www.feishu.cn",
+        {"ins_recovered"},
+    )
+
+    assert inspected == ["ins_blocking"]
+    assert result["instance_code"] == "ins_blocking"
+
+
 def test_recharge_approval_script_defaults_history_lookback_to_ninety_days(tmp_path):
     module = _load_skill_module(
         "submit_recharge_approval_default_lookback",
@@ -1985,6 +2126,146 @@ def test_check_ongoing_recharge_approval_submission_uses_local_record_when_insta
     assert result["message"].startswith("充值账号 acct-188 已有一笔正在审批中的充值申请")
     assert "本地记录：%s" % existing.id in result["message"]
     assert "本地状态说明：Waiting for approval" in result["message"]
+
+
+@pytest.mark.django_db
+def test_check_ongoing_submission_ignores_recovered_approval(
+    cloud_provider,
+    monkeypatch,
+):
+    recovered = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        raw_recharge_info='{"recharge_account": "acct-188"}',
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        fulfillment_status=(
+            RechargeApprovalRecord.FULFILLMENT_RECOVERED
+        ),
+        feishu_instance_code="ins_recovered",
+        feishu_approval_code="approval_188",
+    )
+    older_recovered = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        raw_recharge_info='{"recharge_account": "acct-188"}',
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        fulfillment_status=(
+            RechargeApprovalRecord.FULFILLMENT_RECOVERED
+        ),
+        feishu_instance_code="ins_recovered_older",
+        feishu_approval_code="approval_188",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "inspect_recharge_account_submission_state",
+        lambda *args, **kwargs: {
+            "state": "ongoing",
+            "approval_code": "approval_188",
+            "recharge_account": "acct-188",
+            "instance_code": recovered.feishu_instance_code,
+            "status": "PENDING",
+        },
+    )
+
+    result = check_ongoing_recharge_approval_submission(
+        cloud_provider,
+        '{"recharge_account": "acct-188"}',
+        approval_code="approval_188",
+    )
+
+    assert result["blocked"] is False
+    assert result["reason"] == ""
+    assert set(result["excluded_duplicate_instance_codes"]) == {
+        recovered.feishu_instance_code,
+        older_recovered.feishu_instance_code,
+    }
+
+
+@pytest.mark.django_db
+def test_check_ongoing_submission_excludes_recovered_outside_preflight(
+    cloud_provider,
+    monkeypatch,
+):
+    recovered = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        raw_recharge_info='{"recharge_account": "acct-188"}',
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        fulfillment_status=(
+            RechargeApprovalRecord.FULFILLMENT_RECOVERED
+        ),
+        feishu_instance_code="ins_recovered_old",
+        feishu_approval_code="approval_188",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "inspect_recharge_account_submission_state",
+        lambda *args, **kwargs: {
+            "state": "none",
+            "approval_code": "approval_188",
+            "recharge_account": "acct-188",
+            "matches": [],
+        },
+    )
+
+    result = check_ongoing_recharge_approval_submission(
+        cloud_provider,
+        '{"recharge_account": "acct-188"}',
+        approval_code="approval_188",
+    )
+
+    assert result["blocked"] is False
+    assert result["excluded_duplicate_instance_codes"] == [
+        recovered.feishu_instance_code,
+    ]
+
+
+@pytest.mark.django_db
+def test_check_ongoing_submission_blocks_other_unrecovered_approval(
+    cloud_provider,
+    monkeypatch,
+):
+    recovered = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        raw_recharge_info='{"recharge_account": "acct-188"}',
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        fulfillment_status=(
+            RechargeApprovalRecord.FULFILLMENT_RECOVERED
+        ),
+        feishu_instance_code="ins_recovered",
+        feishu_approval_code="approval_188",
+    )
+    blocking = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        raw_recharge_info='{"recharge_account": "acct-188"}',
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        feishu_instance_code="ins_blocking",
+        feishu_approval_code="approval_188",
+        submitted_at=timezone.now(),
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "inspect_recharge_account_submission_state",
+        lambda *args, **kwargs: {
+            "state": "ongoing",
+            "approval_code": "approval_188",
+            "recharge_account": "acct-188",
+            "instance_code": recovered.feishu_instance_code,
+            "status": "PENDING",
+        },
+    )
+
+    result = check_ongoing_recharge_approval_submission(
+        cloud_provider,
+        '{"recharge_account": "acct-188"}',
+        approval_code="approval_188",
+    )
+
+    assert result["blocked"] is True
+    assert result["record_id"] == blocking.id
+    assert result["instance_code"] == blocking.feishu_instance_code
 
 
 def test_recharge_approval_puts_payee_in_remark_for_company_pay():
@@ -2333,6 +2614,445 @@ def test_recharge_approval_resolves_user_id_with_query_param_and_include_resigne
     assert captured["body"]["emails"] == ["reviewer@example.test"]
     assert captured["body"]["mobiles"] == []
     assert "Authorization" in captured["headers"]
+
+
+def test_list_feishu_users_auto_mode_walks_visible_departments(
+    monkeypatch,
+):
+    root_users = [
+        {
+            "user_id": "root-1",
+            "name": "Root One",
+            "email": "root-1@example.test",
+            "mobile": "",
+        },
+        {
+            "user_id": "root-2",
+            "name": "Root Two",
+            "email": "root-2@example.test",
+            "mobile": "",
+        },
+    ]
+    department_users = [
+        {
+            "user_id": "child-1",
+            "name": "Child One",
+            "email": "child-1@example.test",
+            "mobile": "",
+        }
+    ]
+    monkeypatch.setattr(
+        recharge_service,
+        "FEISHU_USERS_WALK_DEPARTMENTS",
+        "auto",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_get_feishu_access_token",
+        lambda: "tenant-token",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_fetch_feishu_user_page",
+        lambda token, url: root_users,
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_list_feishu_users_by_departments",
+        lambda token: department_users,
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_apply_feishu_user_display_names",
+        lambda users: None,
+    )
+    monkeypatch.setattr(
+        recharge_service.cache,
+        "set",
+        lambda *args, **kwargs: None,
+    )
+
+    users = recharge_service._list_feishu_users_uncached("test-cache-key")
+
+    assert [user["user_id"] for user in users] == [
+        "root-1",
+        "root-2",
+        "child-1",
+    ]
+
+
+def test_extract_pending_approvers_deduplicates_users_across_nodes():
+    detail = {
+        "data": {
+            "task_list": [
+                {
+                    "id": "task-1",
+                    "node_id": "node-finance",
+                    "node_name": "财务审批",
+                    "user_id": "user-finance",
+                    "status": "PENDING",
+                },
+                {
+                    "id": "task-2",
+                    "node_id": "node-review",
+                    "node_name": "复核",
+                    "user_id": "user-finance",
+                    "status": "PENDING",
+                },
+                {
+                    "id": "task-3",
+                    "node_id": "node-manager",
+                    "node_name": "负责人审批",
+                    "user_id": "user-manager",
+                    "status": "APPROVING",
+                },
+                {
+                    "id": "task-4",
+                    "node_id": "node-done",
+                    "node_name": "已处理节点",
+                    "user_id": "user-done",
+                    "status": "APPROVED",
+                },
+            ]
+        }
+    }
+
+    targets = recharge_service.extract_pending_approval_targets(detail)
+
+    assert targets == [
+        {
+            "user_id": "user-finance",
+            "node_id": "node-finance",
+            "node_name": "财务审批 / 复核",
+            "task_id": "task-1",
+        },
+        {
+            "user_id": "user-manager",
+            "node_id": "node-manager",
+            "node_name": "负责人审批",
+            "task_id": "task-3",
+        },
+    ]
+
+
+def test_recharge_approval_progress_merges_tasks_and_future_nodes(
+    monkeypatch,
+):
+    """Progress should include handled, current, and previewed nodes."""
+    record = SimpleNamespace(
+        feishu_instance_code="instance-code",
+        submitter_user_label="Test Initiator",
+        callback_payload={},
+        response_payload={},
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "refresh_recharge_approval_record_status",
+        lambda approval: {
+            "is_ongoing": True,
+            "detail": {
+                "data": {
+                    "start_time": "1000",
+                    "end_time": "0",
+                    "status": "PENDING",
+                    "task_list": [
+                        {
+                            "id": "task-manager",
+                            "node_id": "node-manager",
+                            "node_name": "负责人审批",
+                            "user_id": "user-b",
+                            "status": "PENDING",
+                            "start_time": "4000",
+                            "end_time": "0",
+                        },
+                        {
+                            "id": "task-finance-1",
+                            "node_id": "node-finance",
+                            "node_name": "财务审批",
+                            "user_id": "user-a",
+                            "status": "APPROVED",
+                            "start_time": "2000",
+                            "end_time": "3000",
+                        },
+                    ]
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_get_feishu_access_token",
+        lambda: "tenant-token",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_feishu_preview_instance",
+        lambda token, instance_code, task_id, user_id: {
+            "data": {
+                "preview_nodes": [
+                    {
+                        "node_id": "node-cashier",
+                        "node_name": "出纳付款",
+                        "node_type": "AND",
+                        "user_id_list": ["user-c"],
+                    },
+                    {
+                        "node_id": "node-end",
+                        "node_name": "结束",
+                        "node_type": "",
+                        "user_id_list": [],
+                    },
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "list_feishu_users",
+        lambda: [
+            {
+                "user_id": "user-a",
+                "display_name": "Approver A",
+            },
+            {
+                "user_id": "user-b",
+                "display_name": "Approver B",
+            },
+            {
+                "user_id": "user-c",
+                "display_name": "Approver C",
+            },
+        ],
+    )
+
+    progress = recharge_service.get_recharge_approval_progress(record)
+
+    assert [node["node_name"] for node in progress] == [
+        "发起",
+        "财务审批",
+        "负责人审批",
+        "出纳付款",
+        "结束",
+    ]
+    assert [node["status"] for node in progress] == [
+        "APPROVED",
+        "APPROVED",
+        "PENDING",
+        "NOT_STARTED",
+        "NOT_STARTED",
+    ]
+    assert [node["approver_names"] for node in progress] == [
+        ["Test Initiator"],
+        ["Approver A"],
+        ["Approver B"],
+        ["Approver C"],
+        [],
+    ]
+
+
+def test_feishu_preview_instance_uses_v4_preview_endpoint(monkeypatch):
+    """Future nodes should be loaded through Feishu's documented API."""
+    captured = {}
+
+    def request(url, payload, token):
+        captured.update(
+            {"url": url, "payload": payload, "token": token}
+        )
+        return {"code": 0, "data": {"preview_nodes": []}}
+
+    monkeypatch.setattr(
+        recharge_service,
+        "_feishu_api_request",
+        request,
+    )
+
+    result = recharge_service._feishu_preview_instance(
+        "tenant-token",
+        "instance-code",
+        "task-id",
+        "user-id",
+    )
+
+    assert result == {"code": 0, "data": {"preview_nodes": []}}
+    assert captured == {
+        "url": (
+            "https://open.feishu.cn/open-apis/approval/v4/"
+            "instances/preview?user_id_type=user_id"
+        ),
+        "payload": {
+            "instance_code": "instance-code",
+            "task_id": "task-id",
+            "user_id": "user-id",
+        },
+        "token": "tenant-token",
+    }
+
+
+def test_progress_includes_boundaries_when_preview_only_returns_end(
+    monkeypatch,
+):
+    """A final active task should still render the complete instance path."""
+    record = SimpleNamespace(
+        feishu_instance_code="instance-live",
+        submitter_user_label="Test Initiator",
+        callback_payload={},
+        response_payload={},
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "refresh_recharge_approval_record_status",
+        lambda approval: {
+            "is_ongoing": True,
+            "detail": {
+                "data": {
+                    "start_time": "1000",
+                    "end_time": "0",
+                    "status": "PENDING",
+                    "task_list": [
+                        {
+                            "id": "task-approval",
+                            "node_id": "node-approval",
+                            "node_name": "审批",
+                            "user_id": "user-a",
+                            "status": "PENDING",
+                            "start_time": "3000",
+                        },
+                        {
+                            "id": "task-handle",
+                            "node_id": "node-handle",
+                            "node_name": "办理",
+                            "user_id": "user-a",
+                            "status": "APPROVED",
+                            "start_time": "2000",
+                            "end_time": "2500",
+                        },
+                    ],
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_get_feishu_access_token",
+        lambda: "tenant-token",
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "_feishu_preview_instance",
+        lambda *args: {
+            "data": {
+                "preview_nodes": [
+                    {
+                        "node_id": "node-end",
+                        "node_name": "结束",
+                        "node_type": "",
+                        "user_id_list": [],
+                    }
+                ]
+            }
+        },
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "list_feishu_users",
+        lambda: [
+            {
+                "user_id": "user-a",
+                "display_name": "Approver A",
+            }
+        ],
+    )
+
+    progress = recharge_service.get_recharge_approval_progress(record)
+
+    assert [
+        (node["node_name"], node["status"])
+        for node in progress
+    ] == [
+        ("发起", "APPROVED"),
+        ("办理", "APPROVED"),
+        ("审批", "PENDING"),
+        ("结束", "NOT_STARTED"),
+    ]
+
+
+def test_live_empty_task_list_does_not_fallback_to_stale_approver(
+    monkeypatch,
+):
+    record = SimpleNamespace(
+        callback_payload={
+            "data": {
+                "task_list": [
+                    {
+                        "id": "task-stale",
+                        "node_name": "财务审批",
+                        "user_id": "user-stale",
+                        "status": "PENDING",
+                    },
+                ],
+            },
+        },
+        response_payload={},
+    )
+    monkeypatch.setattr(
+        recharge_service,
+        "refresh_recharge_approval_record_status",
+        lambda approval: {
+            "is_ongoing": True,
+            "detail": {"data": {"task_list": []}},
+        },
+    )
+
+    targets = recharge_service.get_pending_recharge_approval_targets(
+        record
+    )
+
+    assert targets == []
+
+
+def test_list_feishu_departments_stops_at_configured_limit(
+    monkeypatch,
+):
+    calls = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "code": 0,
+                    "data": {
+                        "items": [
+                            {"open_department_id": f"dep-{index}"}
+                            for index in range(10)
+                        ],
+                        "has_more": False,
+                    },
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout=10):
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        recharge_service,
+        "FEISHU_USERS_MAX_DEPARTMENTS",
+        3,
+    )
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    departments = recharge_service._list_feishu_departments("token")
+
+    assert departments == ["0", "dep-0", "dep-1"]
+    assert len(calls) == 1
 
 
 def test_resolve_submitter_identity_prefers_feishu_user_name(
@@ -2759,3 +3479,500 @@ def test_submit_recharge_skill_ignores_same_account_with_different_cloud_type():
     assert out["state"] == "none"
     assert out["cloud_type"] == "智谱"
     assert out["recharge_account"] == "acct-188"
+
+
+@pytest.mark.django_db
+def test_recharge_approval_fulfillment_defaults_to_pending(
+    cloud_provider,
+):
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+    )
+
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_PENDING
+    )
+    assert record.fulfilled_at is None
+    assert record.fulfillment_evidence == {}
+
+
+@pytest.mark.django_db
+def test_reconcile_recharge_fulfillment_releases_recovered_balance_approval(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.current_days_remaining = None
+    alert_record.days_remaining_threshold = None
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        raw_recharge_info='{"recharge_account": "configured-acct"}',
+        context_payload={"billing_account_id": "billing-acct-188"},
+        resolved_submitter_user_id="ou_submitter",
+        feishu_instance_code="ins_188",
+        feishu_approval_code="approval_188",
+        submitted_at=timezone.now(),
+    )
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="billing-acct-188",
+        current_balance=Decimal("520.00"),
+        current_days_remaining=None,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert results[0]["recovered"] is True
+    assert results[0]["submission_block_released"] is True
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_RECOVERED
+    )
+    assert record.fulfilled_at is not None
+    assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
+    assert record.fulfillment_evidence["signal"] == (
+        "balance_threshold_recovered"
+    )
+    assert record.fulfillment_evidence["observed_balance"] == "520.00"
+    assert record.fulfillment_evidence[
+        "estimated_recharge_amount"
+    ] == "420.00"
+    assert results[0]["balance_recovery_detected"] is True
+    assert RechargeApprovalEvent.objects.filter(
+        record=record,
+        event_type="recharge_fulfillment_recovered",
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_reconcile_detects_positive_balance_change_below_threshold(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.current_days_remaining = None
+    alert_record.days_remaining_threshold = None
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        context_payload={"billing_account_id": "billing-acct-188"},
+    )
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="billing-acct-188",
+        current_balance=Decimal("200.00"),
+        current_days_remaining=None,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert results[0]["balance_recovery_detected"] is True
+    assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_RECOVERED
+    )
+    assert record.fulfillment_evidence["signal"] == (
+        "positive_balance_change_detected"
+    )
+    assert record.fulfillment_evidence[
+        "estimated_recharge_amount"
+    ] == "100.00"
+
+
+@pytest.mark.django_db
+def test_reconcile_ignores_unchanged_balance(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        context_payload={"billing_account_id": "billing-acct-188"},
+    )
+
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="billing-acct-188",
+        current_balance=Decimal("100.00"),
+        current_days_remaining=None,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert results == []
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_PENDING
+    )
+
+
+@pytest.mark.django_db
+def test_reconcile_detects_increase_from_last_observed_balance(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        context_payload={"billing_account_id": "billing-acct-188"},
+    )
+
+    first_observed_at = timezone.now()
+    first_results = (
+        recharge_service.reconcile_recharge_approvals_for_account(
+            provider=cloud_provider,
+            recharge_account="billing-acct-188",
+            current_balance=Decimal("50.00"),
+            current_days_remaining=None,
+            observed_at=first_observed_at,
+        )
+    )
+    record.refresh_from_db()
+
+    assert first_results == []
+    assert record.context_payload["last_observed_balance"] == "50.00"
+    assert record.context_payload["last_balance_observed_at"] == (
+        first_observed_at.isoformat()
+    )
+
+    second_results = (
+        recharge_service.reconcile_recharge_approvals_for_account(
+            provider=cloud_provider,
+            recharge_account="billing-acct-188",
+            current_balance=Decimal("90.00"),
+            current_days_remaining=None,
+            observed_at=timezone.now(),
+        )
+    )
+
+    record.refresh_from_db()
+    assert second_results[0]["balance_recovery_detected"] is True
+    assert record.fulfillment_evidence[
+        "estimated_recharge_amount"
+    ] == "40.00"
+
+
+@pytest.mark.django_db
+def test_positive_balance_change_does_not_wait_for_days_recovery(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.current_days_remaining = 2
+    alert_record.days_remaining_threshold = 7
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        context_payload={"billing_account_id": "billing-acct-188"},
+    )
+
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="billing-acct-188",
+        current_balance=Decimal("200.00"),
+        current_days_remaining=3,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert results[0]["balance_recovery_detected"] is True
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_RECOVERED
+    )
+    assert record.fulfillment_evidence["signal"] == (
+        "positive_balance_change_detected"
+    )
+
+
+@pytest.mark.django_db
+def test_days_remaining_approval_detects_positive_balance_change(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_DAYS_REMAINING
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = None
+    alert_record.current_days_remaining = 2
+    alert_record.days_remaining_threshold = 7
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        context_payload={"billing_account_id": "billing-account-test"},
+    )
+
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="billing-account-test",
+        current_balance=Decimal("150.00"),
+        current_days_remaining=3,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert results[0]["balance_recovery_detected"] is True
+    assert record.fulfillment_evidence["signal"] == (
+        "positive_balance_change_detected"
+    )
+    assert record.fulfillment_evidence[
+        "estimated_recharge_amount"
+    ] == "50.00"
+
+
+@pytest.mark.django_db
+def test_reconcile_recovers_from_a_zero_balance_threshold(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("-10.00")
+    alert_record.balance_threshold = Decimal("0.00")
+    alert_record.current_days_remaining = None
+    alert_record.days_remaining_threshold = None
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        context_payload={"billing_account_id": "billing-acct-zero"},
+    )
+
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="billing-acct-zero",
+        current_balance=Decimal("0.00"),
+        current_days_remaining=None,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert results[0]["recovered"] is True
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_RECOVERED
+    )
+    assert record.fulfillment_evidence["threshold"] == "0.00"
+
+
+@pytest.mark.django_db
+def test_reconcile_legacy_single_account_uses_provider_fallback(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.current_days_remaining = None
+    alert_record.days_remaining_threshold = None
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        raw_recharge_info="",
+        resolved_submitter_user_id="ou_submitter",
+        feishu_instance_code="ins_legacy",
+        feishu_approval_code="approval_legacy",
+    )
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="",
+        current_balance=Decimal("520.00"),
+        current_days_remaining=None,
+        observed_at=timezone.now(),
+        allow_provider_fallback=True,
+    )
+
+    record.refresh_from_db()
+    assert results[0]["submission_block_released"] is True
+    assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_RECOVERED
+    )
+
+
+@pytest.mark.django_db
+def test_reconcile_provider_fallback_keeps_explicit_other_account(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_BALANCE
+    alert_record.current_balance = Decimal("100.00")
+    alert_record.balance_threshold = Decimal("500.00")
+    alert_record.current_days_remaining = None
+    alert_record.days_remaining_threshold = None
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_balance",
+            "balance_threshold",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        raw_recharge_info='{"recharge_account": "acct-other"}',
+    )
+
+    results = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="acct-current",
+        current_balance=Decimal("520.00"),
+        current_days_remaining=None,
+        observed_at=timezone.now(),
+        allow_provider_fallback=True,
+    )
+
+    record.refresh_from_db()
+    assert results == []
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_PENDING
+    )
+
+
+@pytest.mark.django_db
+def test_reconcile_recovery_is_idempotent_while_approval_continues(
+    cloud_provider,
+    alert_record,
+):
+    alert_record.alert_type = AlertRecord.ALERT_TYPE_DAYS_REMAINING
+    alert_record.current_days_remaining = 2
+    alert_record.days_remaining_threshold = 7
+    alert_record.save(
+        update_fields=[
+            "alert_type",
+            "current_days_remaining",
+            "days_remaining_threshold",
+        ]
+    )
+    record = RechargeApprovalRecord.objects.create(
+        provider=cloud_provider,
+        alert_record=alert_record,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status=RechargeApprovalRecord.STATUS_SUBMITTED,
+        raw_recharge_info='{"recharge_account": "acct-188"}',
+        resolved_submitter_user_id="ou_submitter",
+        feishu_instance_code="ins_retry",
+        feishu_approval_code="approval_retry",
+        submitted_at=timezone.now(),
+    )
+    first = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="acct-188",
+        current_balance=Decimal("520.00"),
+        current_days_remaining=8,
+        observed_at=timezone.now(),
+    )
+    second = recharge_service.reconcile_recharge_approvals_for_account(
+        provider=cloud_provider,
+        recharge_account="acct-188",
+        current_balance=Decimal("100.00"),
+        current_days_remaining=1,
+        observed_at=timezone.now(),
+    )
+
+    record.refresh_from_db()
+    assert first[0]["recovered"] is True
+    assert first[0]["submission_block_released"] is True
+    assert second == []
+    assert record.fulfillment_status == (
+        RechargeApprovalRecord.FULFILLMENT_RECOVERED
+    )
+    assert record.status == RechargeApprovalRecord.STATUS_SUBMITTED
+    assert RechargeApprovalEvent.objects.filter(
+        record=record,
+        event_type="recharge_fulfillment_recovered",
+    ).count() == 1

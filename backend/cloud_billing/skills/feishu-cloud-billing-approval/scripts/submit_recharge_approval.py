@@ -305,9 +305,13 @@ def parse_args() -> argparse.Namespace:
         help="Path to a request JSON file.",
     )
     submit_parser.add_argument(
-        "--skip-duplicate-check",
-        action="store_true",
-        help="Skip checking pending instances before submit.",
+        "--exclude-instance-code",
+        action="append",
+        default=[],
+        help=(
+            "Ignore one fulfilled instance during duplicate checking. "
+            "May be repeated."
+        ),
     )
 
     args = parser.parse_args()
@@ -1224,6 +1228,7 @@ def detect_duplicate_or_conflict(
     approval_code: str,
     request_data: dict[str, Any],
     lookback_days: int,
+    excluded_instance_codes: set[str] | None = None,
 ) -> dict[str, Any] | None:
     expected = expected_name_map(request_data)
     now = dt.datetime.now(dt.timezone.utc)
@@ -1233,7 +1238,17 @@ def detect_duplicate_or_conflict(
     listed = list_instances(base_url, token, approval_code,
                             start_time_ms, end_time_ms, limit=100)
 
-    for instance_code in listed.get("data", {}).get("instance_code_list", []):
+    excluded_instance_codes = excluded_instance_codes or set()
+    for instance_code in listed.get("data", {}).get(
+        "instance_code_list",
+        [],
+    ):
+        if instance_code in excluded_instance_codes:
+            debug(
+                "Ignoring fulfilled approval instance during duplicate "
+                f"check (instance_code={instance_code})"
+            )
+            continue
         detail = get_instance(base_url, token, approval_code, instance_code)
         data = detail.get("data", {})
         if data.get("status") != "PENDING":
@@ -1632,11 +1647,18 @@ def main() -> int:
     # validate_unsupported_account_widgets(request_data, schema_by_name)
     form_payload = build_form_payload(request_data, schema_by_name)
 
-    existing = None
-    if not args.skip_duplicate_check:
-        existing = detect_duplicate_or_conflict(
-            args.base_url, token, approval_code, request_data, args.lookback_days
-        )
+    existing = detect_duplicate_or_conflict(
+        args.base_url,
+        token,
+        approval_code,
+        request_data,
+        args.lookback_days,
+        excluded_instance_codes={
+            str(code).strip()
+            for code in args.exclude_instance_code
+            if str(code).strip()
+        },
+    )
     if existing:
         payload = {
             "approval_code": approval_code,

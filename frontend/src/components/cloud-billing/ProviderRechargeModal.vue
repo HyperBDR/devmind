@@ -165,27 +165,27 @@
               </div>
               <div>
                 <span class="font-medium text-gray-700">
-                  {{ t('cloudBilling.providers.latestNode') }}:
+                  {{ t('cloudBilling.providers.submittedAt') }}:
                 </span>
-                {{ item.latest_node_name || '-' }}
+                {{ formatDate(item.submitted_at) || '-' }}
               </div>
               <div>
                 <span class="font-medium text-gray-700">
-                  {{ t('cloudBilling.providers.lastCallbackAt') }}:
+                  {{ t('cloudBilling.providers.submittedBalance') }}:
                 </span>
-                {{ formatDate(item.last_callback_at) || '-' }}
+                {{ approvalSnapshot(item).submittedBalance }}
               </div>
               <div>
                 <span class="font-medium text-gray-700">
-                  {{ t('cloudBilling.providers.llmTrace') }}:
+                  {{ t('cloudBilling.providers.alertThreshold') }}:
                 </span>
-                {{ formatLlmSummary(item) }}
+                {{ approvalSnapshot(item).threshold }}
               </div>
               <div>
                 <span class="font-medium text-gray-700">
-                  {{ t('cloudBilling.providers.latestLatency') }}:
+                  {{ t('cloudBilling.providers.rechargeApprovalAmount') }}:
                 </span>
-                {{ formatLatency(item.last_latency_ms) }}
+                {{ approvalSnapshot(item).rechargeAmount }}
               </div>
             </div>
           </div>
@@ -281,6 +281,7 @@ import {
   getRechargeApprovalSubmitErrorContext,
   getRechargeInfoSaveErrorContext
 } from './rechargeApprovalErrors'
+import { getRechargeApprovalSnapshot } from './rechargeApprovalDisplay'
 import { cloudBillingApi } from '@/api/cloudBilling'
 import BaseModal from '@/components/ui/BaseModal.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
@@ -469,11 +470,6 @@ const formatDate = (value) => {
   return format(new Date(value), 'yyyy-MM-dd HH:mm')
 }
 
-const formatLatency = (value) => {
-  if (value === null || value === undefined || value === '') return '-'
-  return `${value} ms`
-}
-
 const formatStatus = (value) => {
   const key = `cloudBilling.providers.approvalStatuses.${value || 'pending'}`
   return t(key)
@@ -484,16 +480,10 @@ const formatTriggerSource = (value) => {
   return t(key)
 }
 
-const formatLlmSummary = (item) => {
-  const summary = item.llm_trace_summary || {}
-  if (!summary.stage && !summary.model && !summary.runner_type) {
-    return '-'
-  }
-  const parts = [summary.runner_type, summary.model, summary.stage].filter(
-    Boolean
-  )
-  return parts.join(' / ')
-}
+const approvalSnapshot = (item) =>
+  getRechargeApprovalSnapshot(item, {
+    daysUnit: t('cloudBilling.providers.daysUnit')
+  })
 
 const statusClass = (status) => {
   const classes = {

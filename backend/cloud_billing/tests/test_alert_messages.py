@@ -7,6 +7,7 @@ from cloud_billing.alert_messages import (
     _format_resource_cost_lines,
     build_alert_message,
     build_alert_message_from_record,
+    build_recharge_approval_notice,
     build_alert_sections,
     build_alert_sections_from_record,
 )
@@ -282,7 +283,52 @@ class TestAlertMessageLocalization:
         )
 
         assert "充值审批" in message
-        assert "已自动触发充值审批，请关注审批进度" in message
+        assert "已自动触发充值审批" in message
+        assert "当前进度：正在创建审批单" in message
+        assert "提交成功后将同步当前审批人及节点" in message
+
+    def test_balance_alert_english_includes_auto_recharge_progress(
+        self,
+        alert_rule,
+    ):
+        message = build_alert_message(
+            provider_name="AWS",
+            provider_notes="",
+            provider_tags=[],
+            account_id="123456789",
+            current_cost=80.00,
+            previous_cost=70.00,
+            increase_cost=10.00,
+            increase_percent=14.29,
+            current_balance=30.00,
+            current_days_remaining=None,
+            currency="CNY",
+            alert_rule=alert_rule,
+            cost_threshold_triggered=False,
+            balance_threshold_triggered=True,
+            days_remaining_threshold_triggered=False,
+            language="en",
+            auto_recharge_approval_triggered=True,
+        )
+
+        assert "Current progress: creating the approval request" in message
+        assert (
+            "The current approver and node will be sent after submission"
+            in message
+        )
+
+    def test_existing_approval_notice_includes_current_approver(
+        self,
+    ):
+        notice = build_recharge_approval_notice(
+            "zh-Hans",
+            existing_approval=True,
+            current_approvers=["Approver A（审批节点 A）"],
+        )
+
+        assert "已有充值审批流程正在进行" in notice
+        assert "当前进度：等待审批" in notice
+        assert "当前审批人：Approver A（审批节点 A）" in notice
 
     def test_days_remaining_alert_chinese(self, alert_rule):
         """Days remaining alert should be in Chinese."""

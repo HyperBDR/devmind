@@ -1,0 +1,459 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="2060"
+     viewBox="0 0 1500 2060" role="img"
+     aria-labelledby="title description">
+  <title id="title">云账单充值审批消息通知泳道图</title>
+  <desc id="description">
+    展示告警触发、审批提交、节点流转、重复提交阻挡和终态回调阶段，
+    Tower 平台分别向告警群、审批发起人和当前审批人发送的消息，
+    包括余额低于阈值百分之五十和百分之三十时的分级催办。
+  </desc>
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="7" refX="8"
+            refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#766f68"/>
+    </marker>
+    <marker id="accentArrow" markerWidth="9" markerHeight="7" refX="8"
+            refY="3.5" orient="auto">
+      <path d="M0,0 L9,3.5 L0,7 Z" fill="#c15f3c"/>
+    </marker>
+    <pattern id="dots" width="24" height="24"
+             patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="0.8" fill="#d9d2ca"/>
+    </pattern>
+    <style>
+      .title { font: 600 28px Inter, "PingFang SC", sans-serif; fill: #26221f; }
+      .subtitle { font: 14px Inter, "PingFang SC", sans-serif; fill: #766f68; }
+      .eyebrow { font: 600 11px Inter, sans-serif; letter-spacing: 2px; fill: #9b928a; }
+      .laneEn { font: 600 10px Inter, sans-serif; letter-spacing: 1.4px; fill: #9b928a; }
+      .laneZh { font: 600 14px Inter, "PingFang SC", sans-serif; fill: #332e2a; }
+      .stage { font: 600 11px Inter, "PingFang SC", sans-serif; fill: #c15f3c; }
+      .nodeTitle { font: 600 14px Inter, "PingFang SC", sans-serif; fill: #26221f; }
+      .nodeText { font: 12px Inter, "PingFang SC", sans-serif; fill: #5f5852; }
+      .small { font: 11px Inter, "PingFang SC", sans-serif; fill: #766f68; }
+      .pill { font: 600 10px Inter, "PingFang SC", sans-serif; fill: #ffffff; }
+      .sectionTitle { font: 600 22px Inter, "PingFang SC", sans-serif; fill: #26221f; }
+      .sampleTitle { font: 600 15px Inter, "PingFang SC", sans-serif; fill: #26221f; }
+      .sampleLabel { font: 600 11px Inter, "PingFang SC", sans-serif; fill: #766f68; }
+      .sampleText { font: 11px Inter, "PingFang SC", sans-serif; fill: #4f4944; }
+      .sampleHint { font: 10px Inter, "PingFang SC", sans-serif; fill: #8a8179; }
+    </style>
+  </defs>
+
+  <rect width="1500" height="2060" fill="#faf9f6"/>
+  <rect width="1500" height="2060" fill="url(#dots)" opacity="0.45"/>
+
+  <text x="56" y="48" class="eyebrow">SWIMLANE · MESSAGE DELIVERY</text>
+  <text x="56" y="84" class="title">云账单充值审批：各阶段消息通知</text>
+  <text x="56" y="110" class="subtitle">
+    展示“什么时候、发给谁、发送什么”，以及分级去重、节点发现和失败重试。
+  </text>
+
+  <!-- Lane backgrounds -->
+  <rect x="170" y="148" width="1274" height="154" rx="8"
+        fill="#fffdf9" stroke="#d9d2ca"/>
+  <rect x="170" y="316" width="1274" height="176" rx="8"
+        fill="#f4f1eb" stroke="#d9d2ca"/>
+  <rect x="170" y="506" width="1274" height="196" rx="8"
+        fill="#fffdf9" stroke="#d9d2ca"/>
+  <rect x="170" y="716" width="1274" height="220" rx="8"
+        fill="#f4f1eb" stroke="#d9d2ca"/>
+
+  <!-- Lane labels -->
+  <text x="84" y="218" text-anchor="middle" class="laneEn">PLATFORM</text>
+  <text x="84" y="242" text-anchor="middle" class="laneZh">Tower 平台</text>
+  <text x="84" y="394" text-anchor="middle" class="laneEn">CHANNEL</text>
+  <text x="84" y="418" text-anchor="middle" class="laneZh">告警群 / 邮件</text>
+  <text x="84" y="588" text-anchor="middle" class="laneEn">SUBMITTER</text>
+  <text x="84" y="612" text-anchor="middle" class="laneZh">审批发起人</text>
+  <text x="84" y="810" text-anchor="middle" class="laneEn">APPROVER</text>
+  <text x="84" y="834" text-anchor="middle" class="laneZh">当前审批节点人</text>
+
+  <!-- Arrows are drawn before nodes -->
+  <path d="M352 224 H405" fill="none" stroke="#766f68"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+  <path d="M604 224 H657" fill="none" stroke="#766f68"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+  <path d="M856 224 H909" fill="none" stroke="#766f68"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+  <path d="M1108 224 H1161" fill="none" stroke="#766f68"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <path d="M252 265 V344" fill="none" stroke="#c15f3c"
+        stroke-width="1.5" marker-end="url(#accentArrow)"/>
+  <path d="M504 275 V344" fill="none" stroke="#c15f3c"
+        stroke-width="1.5" marker-end="url(#accentArrow)"/>
+  <path d="M504 275 V534" fill="none" stroke="#7b5d78"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+  <path d="M554 275 V744" fill="none" stroke="#6b8f71"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+  <path d="M756 275 V744" fill="none" stroke="#6b8f71"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+  <path d="M806 275 V344" fill="none" stroke="#c15f3c"
+        stroke-width="1.5" marker-end="url(#accentArrow)"/>
+  <path d="M1008 275 V744" fill="none" stroke="#b86a76"
+        stroke-width="1.4" stroke-dasharray="5 4"
+        marker-end="url(#arrow)"/>
+  <path d="M856 252 H1422 V826 H1411" fill="none"
+        stroke="#d18b35" stroke-width="1.4" stroke-dasharray="5 4"
+        marker-end="url(#arrow)"/>
+  <path d="M1260 275 V344" fill="none" stroke="#c15f3c"
+        stroke-width="1.5" marker-end="url(#accentArrow)"/>
+  <path d="M1310 275 V534" fill="none" stroke="#7b5d78"
+        stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <!-- Platform nodes -->
+  <g>
+    <text x="252" y="168" text-anchor="middle" class="stage">01 · 告警触发</text>
+    <rect x="186" y="182" width="166" height="92" rx="8"
+          fill="#ffffff" stroke="#c15f3c" stroke-width="1.3"/>
+    <text x="200" y="207" class="nodeTitle">余额 / 剩余天数告警</text>
+    <text x="200" y="229" class="nodeText">生成充值参数并预检</text>
+    <text x="200" y="248" class="nodeText">可由开关控制自动提交</text>
+    <rect x="200" y="256" width="76" height="16" rx="8" fill="#c15f3c"/>
+    <text x="238" y="268" text-anchor="middle" class="pill">自动触发</text>
+  </g>
+
+  <g>
+    <text x="504" y="168" text-anchor="middle" class="stage">02 · 提交成功</text>
+    <rect x="405" y="182" width="199" height="92" rx="8"
+          fill="#ffffff" stroke="#c15f3c" stroke-width="1.3"/>
+    <text x="420" y="207" class="nodeTitle">创建飞书审批实例</text>
+    <text x="420" y="229" class="nodeText">保存余额、阈值、充值金额快照</text>
+    <text x="420" y="248" class="nodeText">合并 task_list 与后续流程预览节点</text>
+    <text x="420" y="266" class="small">节点未就绪：10 / 20 / 40 秒重试</text>
+  </g>
+
+  <g>
+    <text x="756" y="168" text-anchor="middle" class="stage">03 · 节点流转</text>
+    <rect x="657" y="182" width="199" height="92" rx="8"
+          fill="#ffffff" stroke="#6b8f71" stroke-width="1.3"/>
+    <text x="672" y="207" class="nodeTitle">收到飞书进行中回调</text>
+    <text x="672" y="229" class="nodeText">重新识别当前卡点节点及人员</text>
+    <text x="672" y="248" class="nodeText">仅通知新出现的审批人</text>
+    <text x="672" y="266" class="small">不撤回流程，不重复私聊</text>
+  </g>
+
+  <g>
+    <text x="1008" y="168" text-anchor="middle" class="stage">04 · 新提交被阻挡</text>
+    <rect x="909" y="182" width="199" height="92" rx="8"
+          fill="#fff8f6" stroke="#b86a76" stroke-width="1.3"/>
+    <text x="924" y="207" class="nodeTitle">同账号已有在途审批</text>
+    <text x="924" y="229" class="nodeText">阻止创建新的审批实例</text>
+    <text x="924" y="248" class="nodeText">再次检查当前卡点审批人</text>
+    <text x="924" y="266" class="small">已提醒过的人不会重复收到</text>
+  </g>
+
+  <g>
+    <text x="1260" y="168" text-anchor="middle" class="stage">05 · 终态 / 失败</text>
+    <rect x="1161" y="182" width="199" height="92" rx="8"
+          fill="#ffffff" stroke="#7b5d78" stroke-width="1.3"/>
+    <text x="1176" y="207" class="nodeTitle">通过 / 拒绝 / 撤回</text>
+    <text x="1176" y="229" class="nodeText">或审批实例提交失败</text>
+    <text x="1176" y="248" class="nodeText">同步最终状态与失败原因</text>
+    <text x="1176" y="266" class="small">回调确认不受通知失败影响</text>
+  </g>
+
+  <!-- Channel messages -->
+  <g>
+    <rect x="186" y="344" width="166" height="136" rx="8"
+          fill="#ffffff" stroke="#c15f3c"/>
+    <text x="200" y="369" class="nodeTitle">原告警消息</text>
+    <text x="200" y="393" class="nodeText">告警指标与云账号信息</text>
+    <text x="200" y="414" class="nodeText">首轮：正在创建审批单</text>
+    <text x="200" y="432" class="nodeText">第二轮：等待已有审批</text>
+    <text x="200" y="450" class="nodeText">当前审批人：姓名（节点）</text>
+    <text x="200" y="470" class="small">折叠面板：查看全部审批进度</text>
+  </g>
+
+  <g>
+    <rect x="405" y="344" width="250" height="128" rx="8"
+          fill="#ffffff" stroke="#c15f3c"/>
+    <text x="420" y="369" class="nodeTitle">【充值审批】提交成功</text>
+    <text x="420" y="392" class="nodeText">触发方式、充值账号、客户、金额</text>
+    <text x="420" y="412" class="nodeText">付款信息、审批状态</text>
+    <text x="420" y="432" class="nodeText">当前审批人（姓名 + 节点）</text>
+    <text x="420" y="452" class="small">群内容偏完整，便于统一跟进</text>
+  </g>
+
+  <g>
+    <rect x="700" y="344" width="240" height="128" rx="8"
+          fill="#f6fbf6" stroke="#6b8f71"/>
+    <text x="715" y="369" class="nodeTitle">【充值审批】检测到充值到账</text>
+    <text x="715" y="392" class="nodeText">充值前余额 → 当前余额</text>
+    <text x="715" y="412" class="nodeText">推定充值金额（余额净增加额）</text>
+    <text x="715" y="432" class="nodeText">审批流程：仍在审批 / 已结束</text>
+    <text x="715" y="452" class="small">仍在审批时同时展示当前审批人</text>
+  </g>
+
+  <g>
+    <rect x="1161" y="344" width="250" height="128" rx="8"
+          fill="#ffffff" stroke="#7b5d78"/>
+    <text x="1176" y="369" class="nodeTitle">审批状态通知</text>
+    <text x="1176" y="392" class="nodeText">审批通过 / 被拒绝 / 已撤回</text>
+    <text x="1176" y="412" class="nodeText">提交失败时附失败原因</text>
+    <text x="1176" y="432" class="nodeText">保留充值业务摘要</text>
+    <text x="1176" y="452" class="small">接收人：原配置群或邮件渠道</text>
+  </g>
+
+  <!-- Submitter messages -->
+  <g>
+    <rect x="405" y="534" width="290" height="146" rx="8"
+          fill="#ffffff" stroke="#7b5d78"/>
+    <text x="420" y="560" class="nodeTitle">发起人单聊卡片</text>
+    <text x="420" y="584" class="nodeText">“Tower 平台自动发起了一个审批流程”</text>
+    <text x="420" y="605" class="nodeText">充值信息 + 云账号账单概述</text>
+    <text x="420" y="626" class="nodeText">余额告警：余额 / 阈值</text>
+    <text x="420" y="647" class="nodeText">天数告警：剩余天数 / 阈值</text>
+    <text x="420" y="668" class="small">含“查看审批单”分享链接；不展示 user_id</text>
+  </g>
+
+  <g>
+    <rect x="1161" y="534" width="250" height="146" rx="8"
+          fill="#ffffff" stroke="#7b5d78"/>
+    <text x="1176" y="560" class="nodeTitle">发起人状态副本</text>
+    <text x="1176" y="584" class="nodeText">审批状态与状态说明</text>
+    <text x="1176" y="605" class="nodeText">充值信息 + 账单概述</text>
+    <text x="1176" y="626" class="nodeText">继续提供审批实例分享链接</text>
+    <text x="1176" y="647" class="small">私聊失败：最多 3 次指数退避重试</text>
+    <text x="1176" y="668" class="small">不重复发送群消息</text>
+  </g>
+
+  <!-- Approver messages -->
+  <g>
+    <rect x="405" y="744" width="290" height="164" rx="8"
+          fill="#ffffff" stroke="#6b8f71" stroke-width="1.4"/>
+    <text x="420" y="770" class="nodeTitle">【待审批】云账单充值申请</text>
+    <text x="420" y="794" class="nodeText">“你有一笔云账单充值审批需要处理”</text>
+    <text x="420" y="815" class="nodeText">充值信息 + 账单概述</text>
+    <text x="420" y="836" class="nodeText">当前审批节点</text>
+    <text x="420" y="857" class="nodeText">“查看审批单”分享链接</text>
+    <text x="420" y="881" class="small">同一审批实例、同一用户只通知一次</text>
+    <text x="420" y="899" class="small">失败最多 3 次；发送租约超时可回收</text>
+  </g>
+
+  <g>
+    <rect x="720" y="744" width="210" height="122" rx="8"
+          fill="#f6fbf6" stroke="#6b8f71"/>
+    <text x="735" y="770" class="nodeTitle">新节点审批人</text>
+    <text x="735" y="794" class="nodeText">收到同款待审批卡片</text>
+    <text x="735" y="815" class="nodeText">节点已通知用户自动跳过</text>
+    <text x="735" y="839" class="small">审批流程继续正常向下流转</text>
+  </g>
+
+  <g>
+    <rect x="972" y="744" width="210" height="122" rx="8"
+          fill="#fff8f6" stroke="#b86a76"/>
+    <text x="987" y="770" class="nodeTitle">卡点审批人提醒</text>
+    <text x="987" y="794" class="nodeText">仅补发尚未成功送达的人</text>
+    <text x="987" y="815" class="nodeText">不撤回旧流程</text>
+    <text x="987" y="839" class="small">同时继续阻挡该账号新审批</text>
+  </g>
+
+  <g>
+    <rect x="1198" y="744" width="213" height="164" rx="8"
+          fill="#fffaf0" stroke="#d18b35" stroke-width="1.4"/>
+    <text x="1213" y="770" class="nodeTitle">余额分级催办</text>
+    <text x="1213" y="794" class="nodeText">≤ 50%：余额告急（黄色）</text>
+    <text x="1213" y="815" class="nodeText">≤ 30%：紧急催办（红色）</text>
+    <text x="1213" y="836" class="nodeText">余额 / 阈值 / 占比 + 充值摘要</text>
+    <text x="1213" y="857" class="nodeText">当前节点 + 审批分享链接</text>
+    <text x="1213" y="881" class="small">每位审批人、每个级别仅一次</text>
+    <text x="1213" y="899" class="small">首次已 ≤ 30% 时只发送 30%</text>
+  </g>
+
+  <!-- Legend and notes -->
+  <line x1="56" y1="970" x2="1444" y2="970" stroke="#d9d2ca"/>
+  <rect x="56" y="992" width="14" height="14" rx="3"
+        fill="#ffffff" stroke="#c15f3c"/>
+  <text x="80" y="1004" class="small">群 / 邮件通知</text>
+  <rect x="208" y="992" width="14" height="14" rx="3"
+        fill="#ffffff" stroke="#7b5d78"/>
+  <text x="232" y="1004" class="small">发起人私聊</text>
+  <rect x="354" y="992" width="14" height="14" rx="3"
+        fill="#ffffff" stroke="#6b8f71"/>
+  <text x="378" y="1004" class="small">审批人私聊</text>
+  <line x1="510" y1="999" x2="548" y2="999" stroke="#b86a76"
+        stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="560" y="1004" class="small">条件分支 / 已有审批阻挡</text>
+  <text x="56" y="1040" class="small">
+    健康指标恢复后释放新提交阻挡，但不撤回原流程；在途余额进入 50% / 30% 区间时分级催办当前审批人。
+  </text>
+  <text x="1444" y="1040" text-anchor="end" class="small">
+    DevMind · Cloud Billing · 2026-07-14
+  </text>
+
+  <!-- Detailed message examples -->
+  <line x1="56" y1="1080" x2="1444" y2="1080" stroke="#d9d2ca"/>
+  <text x="56" y="1120" class="eyebrow">MESSAGE CATALOG · REVIEW COPY</text>
+  <text x="56" y="1154" class="sectionTitle">详细消息通知内容</text>
+  <text x="1444" y="1152" text-anchor="end" class="subtitle">
+    以下为中文消息示例；金额、账号、节点和状态均取实际审批数据。
+  </text>
+
+  <!-- Submitted group message -->
+  <g>
+    <rect x="56" y="1180" width="430" height="326" rx="10"
+          fill="#ffffff" stroke="#c15f3c" stroke-width="1.3"/>
+    <rect x="72" y="1196" width="100" height="20" rx="10"
+          fill="#c15f3c"/>
+    <text x="122" y="1210" text-anchor="middle" class="pill">告警群 / 邮件</text>
+    <text x="72" y="1242" class="sampleTitle">【充值审批】提交成功</text>
+    <text x="72" y="1266" class="sampleText">触发方式：告警触发</text>
+    <text x="72" y="1285" class="sampleText">触发人：系统自动触发</text>
+    <text x="72" y="1304" class="sampleText">审批发起人：配置的飞书发起人</text>
+    <text x="72" y="1323" class="sampleText">触发原因：余额不足（当前余额 40.00，阈值 100.00）</text>
+    <text x="72" y="1342" class="sampleText">公有云类型：阿里云</text>
+    <text x="72" y="1361" class="sampleText">充值账号：onepro_wh_prod</text>
+    <text x="72" y="1380" class="sampleText">充值客户：万博智云软件科技（武汉）有限公司</text>
+    <text x="72" y="1399" class="sampleText">付款金额：12,345.00 CNY · 支付方式：公司支付 / 转账</text>
+    <text x="72" y="1418" class="sampleText">收款信息：户名、账号、银行、地区及支行</text>
+    <text x="72" y="1437" class="sampleText">当前审批人：当前节点人员（财务审批）</text>
+    <text x="72" y="1456" class="sampleText">▾ 审批进度（3/5，默认折叠）</text>
+    <text x="72" y="1480" class="sampleHint">展开：✅ 发起 · ✅ 财务审批 · 🟠 负责人审批</text>
+    <text x="72" y="1496" class="sampleHint">　　　⚪ 出纳付款 · ⚪ 结束</text>
+  </g>
+
+  <!-- Submitter direct message -->
+  <g>
+    <rect x="507" y="1180" width="430" height="326" rx="10"
+          fill="#ffffff" stroke="#7b5d78" stroke-width="1.3"/>
+    <rect x="523" y="1196" width="74" height="20" rx="10"
+          fill="#7b5d78"/>
+    <text x="560" y="1210" text-anchor="middle" class="pill">发起人私聊</text>
+    <text x="523" y="1242" class="sampleTitle">【充值审批】提交成功</text>
+    <text x="523" y="1266" class="sampleText">Tower 平台自动发起了一个审批流程。</text>
+    <text x="523" y="1290" class="sampleLabel">💰 充值信息</text>
+    <text x="523" y="1310" class="sampleText">公有云类型、充值客户、充值账号、付款金额</text>
+    <text x="523" y="1329" class="sampleText">支付方式、期望到账时间、审批发起人</text>
+    <text x="523" y="1353" class="sampleLabel">📊 账单概述</text>
+    <text x="523" y="1373" class="sampleText">当前余额 / 余额阈值</text>
+    <text x="523" y="1392" class="sampleText">近 24 小时消费 / 本月累计消费 / 主要服务消费</text>
+    <text x="523" y="1416" class="sampleLabel">🔗 审批实例</text>
+    <text x="523" y="1436" class="sampleText">审批状态及状态说明（如有）</text>
+    <text x="523" y="1455" class="sampleText">按钮：查看审批单（移动端 / PC 分享链接）</text>
+    <text x="523" y="1485" class="sampleHint">不展示：发起人 user_id、审批实例号、最新采集时间。</text>
+  </g>
+
+  <!-- Normal approver direct message -->
+  <g>
+    <rect x="958" y="1180" width="486" height="326" rx="10"
+          fill="#f6fbf6" stroke="#6b8f71" stroke-width="1.3"/>
+    <rect x="974" y="1196" width="84" height="20" rx="10"
+          fill="#6b8f71"/>
+    <text x="1016" y="1210" text-anchor="middle" class="pill">审批人私聊</text>
+    <text x="974" y="1242" class="sampleTitle">【待审批】云账单充值申请</text>
+    <text x="974" y="1266" class="sampleText">你有一笔云账单充值审批需要处理。</text>
+    <text x="974" y="1290" class="sampleLabel">💰 充值信息</text>
+    <text x="974" y="1310" class="sampleText">公有云类型、充值客户、充值账号、付款金额</text>
+    <text x="974" y="1329" class="sampleText">支付方式、期望到账时间、审批发起人</text>
+    <text x="974" y="1353" class="sampleLabel">📊 账单概述</text>
+    <text x="974" y="1373" class="sampleText">当前余额 / 阈值、近 24 小时 / 本月消费、主要服务</text>
+    <text x="974" y="1397" class="sampleLabel">🔗 审批实例</text>
+    <text x="974" y="1417" class="sampleText">当前审批节点：财务审批</text>
+    <text x="974" y="1436" class="sampleText">按钮：查看审批单（移动端 / PC 分享链接）</text>
+    <text x="974" y="1465" class="sampleHint">接收人：飞书实例当前 task_list 中的审批节点人员。</text>
+    <text x="974" y="1485" class="sampleHint">普通待审批消息：同一审批实例、同一用户仅发送一次。</text>
+  </g>
+
+  <!-- 50 percent warning -->
+  <g>
+    <rect x="56" y="1534" width="326" height="414" rx="10"
+          fill="#fffaf0" stroke="#d18b35" stroke-width="1.3"/>
+    <rect x="72" y="1550" width="80" height="20" rx="10"
+          fill="#d18b35"/>
+    <text x="112" y="1564" text-anchor="middle" class="pill">≤ 50% 告急</text>
+    <text x="72" y="1596" class="sampleTitle">【余额告急】云账单充值审批</text>
+    <text x="72" y="1622" class="sampleText">余额已低于阈值的 50%，请尽快审批。</text>
+    <text x="72" y="1646" class="sampleLabel">余额告急</text>
+    <text x="72" y="1666" class="sampleText">当前余额：40.00 CNY</text>
+    <text x="72" y="1685" class="sampleText">余额阈值：100.00 CNY</text>
+    <text x="72" y="1704" class="sampleText">余额占比：40.00%</text>
+    <text x="72" y="1728" class="sampleLabel">审批内容</text>
+    <text x="72" y="1748" class="sampleText">充值账号：onepro_wh_prod</text>
+    <text x="72" y="1767" class="sampleText">充值金额：12,345.00 CNY</text>
+    <text x="72" y="1786" class="sampleText">账单概述：近 24 小时 / 本月累计 / 主要服务</text>
+    <text x="72" y="1805" class="sampleText">当前审批节点：财务审批</text>
+    <text x="72" y="1824" class="sampleText">按钮：查看审批单</text>
+    <text x="72" y="1848" class="sampleHint">卡片颜色：黄色</text>
+    <text x="72" y="1867" class="sampleHint">每位当前审批人只收到一次 50% 提醒。</text>
+    <text x="72" y="1886" class="sampleHint">节点变化后，新卡点人员可收到本级提醒。</text>
+    <text x="72" y="1916" class="sampleHint">判断使用未舍入占比；展示保留两位小数。</text>
+  </g>
+
+  <!-- 30 percent emergency -->
+  <g>
+    <rect x="398" y="1534" width="326" height="414" rx="10"
+          fill="#fff5f3" stroke="#b84f45" stroke-width="1.3"/>
+    <rect x="414" y="1550" width="80" height="20" rx="10"
+          fill="#b84f45"/>
+    <text x="454" y="1564" text-anchor="middle" class="pill">≤ 30% 紧急</text>
+    <text x="414" y="1596" class="sampleTitle">【紧急催办】云账单充值审批</text>
+    <text x="414" y="1622" class="sampleText">余额已低于阈值的 30%，请尽快审批。</text>
+    <text x="414" y="1646" class="sampleLabel">余额告急</text>
+    <text x="414" y="1666" class="sampleText">当前余额：25.00 CNY</text>
+    <text x="414" y="1685" class="sampleText">余额阈值：100.00 CNY</text>
+    <text x="414" y="1704" class="sampleText">余额占比：25.00%</text>
+    <text x="414" y="1728" class="sampleLabel">审批内容</text>
+    <text x="414" y="1748" class="sampleText">充值账号：onepro_wh_prod</text>
+    <text x="414" y="1767" class="sampleText">充值金额：12,345.00 CNY</text>
+    <text x="414" y="1786" class="sampleText">账单概述：近 24 小时 / 本月累计 / 主要服务</text>
+    <text x="414" y="1805" class="sampleText">当前审批节点：财务审批</text>
+    <text x="414" y="1824" class="sampleText">按钮：查看审批单</text>
+    <text x="414" y="1848" class="sampleHint">卡片颜色：红色</text>
+    <text x="414" y="1867" class="sampleHint">每位当前审批人只收到一次 30% 提醒。</text>
+    <text x="414" y="1886" class="sampleHint">首次检测已 ≤ 30% 时，不同时补发 50%。</text>
+    <text x="414" y="1916" class="sampleHint">发送失败最多 3 次；重试保留原余额快照。</text>
+  </g>
+
+  <!-- Recharge recovery group message -->
+  <g>
+    <rect x="740" y="1534" width="326" height="414" rx="10"
+          fill="#f6fbf6" stroke="#6b8f71" stroke-width="1.3"/>
+    <rect x="756" y="1550" width="100" height="20" rx="10"
+          fill="#6b8f71"/>
+    <text x="806" y="1564" text-anchor="middle" class="pill">告警群 / 邮件</text>
+    <text x="756" y="1596" class="sampleTitle">【充值审批】检测到充值到账</text>
+    <text x="756" y="1622" class="sampleText">触发方式、触发人、发起人</text>
+    <text x="756" y="1641" class="sampleText">公有云类型、充值账号、客户、付款金额</text>
+    <text x="756" y="1665" class="sampleLabel">到账感知</text>
+    <text x="756" y="1685" class="sampleText">充值前余额：25.00 CNY</text>
+    <text x="756" y="1704" class="sampleText">当前余额：12,370.00 CNY</text>
+    <text x="756" y="1723" class="sampleText">推定充值金额：12,345.00 CNY</text>
+    <text x="756" y="1742" class="sampleText">审批流程：仍在审批 / 已结束</text>
+    <text x="756" y="1761" class="sampleText">当前审批人：仍在审批时展示</text>
+    <text x="756" y="1795" class="sampleHint">充值金额按余额净增加额推定。</text>
+    <text x="756" y="1814" class="sampleHint">到账只释放后续提交阻挡，不撤回原审批。</text>
+    <text x="756" y="1833" class="sampleHint">同一恢复事件只向原通知渠道发送一次。</text>
+  </g>
+
+  <!-- Final status group and submitter message -->
+  <g>
+    <rect x="1082" y="1534" width="362" height="414" rx="10"
+          fill="#ffffff" stroke="#7b5d78" stroke-width="1.3"/>
+    <rect x="1098" y="1550" width="110" height="20" rx="10"
+          fill="#7b5d78"/>
+    <text x="1153" y="1564" text-anchor="middle" class="pill">群渠道 + 发起人</text>
+    <text x="1098" y="1596" class="sampleTitle">审批终态 / 提交失败</text>
+    <text x="1098" y="1622" class="sampleText">标题按结果展示：</text>
+    <text x="1098" y="1641" class="sampleText">【充值审批】审批通过 / 被拒绝 / 已撤回</text>
+    <text x="1098" y="1660" class="sampleText">【充值审批】提交失败</text>
+    <text x="1098" y="1684" class="sampleLabel">群消息</text>
+    <text x="1098" y="1704" class="sampleText">保留触发、充值、付款及收款信息</text>
+    <text x="1098" y="1723" class="sampleText">审批状态；拒绝 / 失败时附状态说明</text>
+    <text x="1098" y="1747" class="sampleLabel">发起人私聊副本</text>
+    <text x="1098" y="1767" class="sampleText">充值信息 + 账单概述</text>
+    <text x="1098" y="1786" class="sampleText">审批状态 + 状态说明</text>
+    <text x="1098" y="1805" class="sampleText">按钮：查看审批单</text>
+    <text x="1098" y="1839" class="sampleHint">终态后不会补发延迟的“已提交”消息。</text>
+    <text x="1098" y="1858" class="sampleHint">私聊失败最多 3 次指数退避重试。</text>
+    <text x="1098" y="1908" class="sampleHint">回调确认不受消息发送失败影响。</text>
+  </g>
+
+  <line x1="56" y1="1984" x2="1444" y2="1984" stroke="#d9d2ca"/>
+  <text x="56" y="2020" class="small">
+    去重维度：审批记录 + 接收人 user_id + 提醒类型（pending / balance_50 / balance_30）。
+  </text>
+  <text x="1444" y="2020" text-anchor="end" class="small">
+    本图不触发真实飞书消息 · 用于产品与运营 Review
+  </text>
+</svg>

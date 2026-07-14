@@ -148,15 +148,53 @@ def format_provider_tags(tags: list[str], language: str) -> str:
     return separator.join(normalized_tags)
 
 
-def build_recharge_approval_notice(language: str) -> str:
+def build_recharge_approval_notice(
+    language: str,
+    *,
+    existing_approval: bool = False,
+    current_approvers: Optional[list[str]] = None,
+) -> str:
     """Return the localized auto recharge approval notice."""
+    if existing_approval:
+        approvers = [
+            str(value or "").strip()
+            for value in current_approvers or []
+            if str(value or "").strip()
+        ]
+        approver_text = (
+            ("、" if is_chinese_language(language) else ", ").join(
+                approvers
+            )
+            or localized_text(
+                language,
+                "Pending node information",
+                "节点信息同步中",
+            )
+        )
+        return localized_text(
+            language,
+            (
+                "A recharge approval workflow is already in progress. "
+                "Current progress: awaiting approval. Current approver: "
+                f"{approver_text}."
+            ),
+            (
+                "已有充值审批流程正在进行；当前进度：等待审批；"
+                f"当前审批人：{approver_text}。"
+            ),
+        )
     return localized_text(
         language,
         (
             "The recharge approval workflow has been triggered "
-            "automatically. Please track the approval progress."
+            "automatically. Current progress: creating the approval "
+            "request. The current approver and node will be sent after "
+            "submission."
         ),
-        "已自动触发充值审批，请关注审批进度",
+        (
+            "已自动触发充值审批；当前进度：正在创建审批单。"
+            "提交成功后将同步当前审批人及节点。"
+        ),
     )
 
 
@@ -168,7 +206,10 @@ def extract_recharge_approval_notice(message: str) -> str:
             continue
         has_notice = (
             "自动触发充值审批" in line
+            or "已有充值审批流程正在进行" in line
             or "recharge approval workflow has been triggered" in line.lower()
+            or "recharge approval workflow is already in progress"
+            in line.lower()
         )
         if not has_notice:
             continue
@@ -638,6 +679,13 @@ def _build_alert_sections_inner(
 
     effective_alert_type = str(alert_type or "").strip().lower()
 
+    def label(english: str, chinese: str) -> str:
+        return localized_text(
+            normalized_language,
+            english,
+            chinese,
+        )
+
     # ── Determine alert type label and trigger ──
     # NOTE: _() must be called on the raw template string BEFORE .format()
     # substitution, otherwise Python evaluates the format first and _()
@@ -646,86 +694,121 @@ def _build_alert_sections_inner(
         type_label = _("Balance Alert")
         trigger_icon = "💰"
         if current_balance is not None and alert_rule.balance_threshold:
-            trigger_text = _(
-                "Balance %(bal).2f %(cur)s"
-                " below threshold %(thr).2f %(cur)s"
-            ) % {
-                "bal": current_balance,
-                "thr": alert_rule.balance_threshold,
-                "cur": currency,
-            }
+            trigger_text = label(
+                (
+                    f"Balance {current_balance:.2f} {currency} below "
+                    f"threshold {alert_rule.balance_threshold:.2f} "
+                    f"{currency}"
+                ),
+                (
+                    f"余额 {current_balance:.2f} {currency} 低于阈值 "
+                    f"{alert_rule.balance_threshold:.2f} {currency}"
+                ),
+            )
         else:
-            trigger_text = type_label
+            trigger_text = label(type_label, "余额阈值告警")
     elif (
         effective_alert_type == "days_remaining"
         or days_remaining_threshold_triggered
     ):
         type_label = _("Days Remaining Alert")
         trigger_icon = "⏳"
-        trigger_text = _(
-            "%(days)s days remaining"
-            " below threshold %(thr)s"
-        ) % {
-            "days": current_days_remaining,
-            "thr": alert_rule.days_remaining_threshold,
-        }
+        trigger_text = label(
+            (
+                f"{current_days_remaining} days remaining below "
+                f"threshold {alert_rule.days_remaining_threshold}"
+            ),
+            (
+                f"预计剩余 {current_days_remaining} 天，低于阈值 "
+                f"{alert_rule.days_remaining_threshold} 天"
+            ),
+        )
     elif effective_alert_type == "cost" or cost_threshold_triggered:
         type_label = _("Cost Threshold Alert")
         trigger_icon = "📊"
-        trigger_text = _(
-            "Total cost %(cost).2f %(cur)s"
-            " exceeds threshold %(thr).2f %(cur)s"
-        ) % {
-            "cost": current_cost,
-            "thr": alert_rule.cost_threshold,
-            "cur": currency,
-        }
+        trigger_text = label(
+            (
+                f"Total cost {current_cost:.2f} {currency} exceeds "
+                f"threshold {alert_rule.cost_threshold:.2f} {currency}"
+            ),
+            (
+                f"总费用 {current_cost:.2f} {currency} 超过阈值 "
+                f"{alert_rule.cost_threshold:.2f} {currency}"
+            ),
+        )
     else:
         type_label = _("Cost Growth Alert")
         trigger_icon = "📈"
         parts = []
         if increase_percent > 0:
             parts.append(
-                _("Growth %(pct).1f%%") % {"pct": increase_percent}
+                label(
+                    f"Growth {increase_percent:.1f}%",
+                    f"增长率 {increase_percent:.1f}%",
+                )
             )
         if alert_rule.growth_threshold is not None:
             parts.append(
-                _("threshold %(thr).1f%%")
-                % {"thr": alert_rule.growth_threshold}
+                label(
+                    f"threshold {alert_rule.growth_threshold:.1f}%",
+                    f"阈值 {alert_rule.growth_threshold:.1f}%",
+                )
             )
-        joined = _(", ").join(parts)
-        trigger_text = joined if joined else type_label
+        joined = ("、" if is_chinese_language(
+            normalized_language
+        ) else ", ").join(parts)
+        trigger_text = joined if joined else label(
+            type_label,
+            "费用增长告警",
+        )
 
     # ── Structural labels (single source of truth) ──
     # Determine period-specific labels
     if cost_period == "today":
-        cost_breakdown_label = _("Today's Cost Breakdown")
-        col_cost_label = _("Today's Cost")
+        cost_breakdown_label = label(
+            "Today's Cost Breakdown",
+            "当天 费用明细",
+        )
+        col_cost_label = label("Today's Cost", "当天费用")
     else:
-        cost_breakdown_label = _("Month's Cost Breakdown")
-        col_cost_label = _("Month's Cost")
+        cost_breakdown_label = label(
+            "Month's Cost Breakdown",
+            "当月 费用明细",
+        )
+        col_cost_label = label("Month's Cost", "当月费用")
 
     labels = {
-        "provider":                 _("Provider"),
-        "account":                 _("Account"),
-        "notes":                   _("Notes"),
-        "tags":                    _("Tags"),
-        "balance_threshold":       _("Balance Threshold"),
-        "current_balance":         _("Current Balance"),
-        "cost_breakdown":          cost_breakdown_label,
-        "col_resource":            _("Resource"),
-        "col_cost":                col_cost_label,
-        "col_owner":               _("Owner"),
-        "footer":                  _("DevMind Cloud Billing · @all"),
-        "sep":                     ": ",
-        "current_hour_cost":       _("Current Hour Cost"),
-        "previous_hour_cost":      _("Previous Hour Cost"),
-        "growth_rate":             _("Growth Rate"),
-        "increase_amount":         _("Increase Amount"),
-        "growth_percentage_threshold":  _("Growth Percentage Threshold"),
-        "amount_threshold":        _("Amount Threshold"),
-        "cost_threshold":          _("Cost Threshold"),
-        "recharge_approval":       localized_text(
+        "provider": label("Provider", "公有云类型"),
+        "account": label("Account", "账号"),
+        "notes": label("Notes", "备注"),
+        "tags": label("Tags", "标签"),
+        "balance_threshold": label(
+            "Balance Threshold",
+            "余额阈值",
+        ),
+        "current_balance": label("Current Balance", "当前余额"),
+        "cost_breakdown": cost_breakdown_label,
+        "col_resource": label("Resource", "资源"),
+        "col_cost": col_cost_label,
+        "col_owner": label("Owner", "负责人"),
+        "footer": label(
+            "DevMind Cloud Billing · @all",
+            "DevMind 云账单 · @所有人",
+        ),
+        "sep": "：" if is_chinese_language(
+            normalized_language
+        ) else ": ",
+        "current_hour_cost": label("Current Hour Cost", "当前小时费用"),
+        "previous_hour_cost": label("Previous Hour Cost", "上一小时费用"),
+        "growth_rate": label("Growth Rate", "增长率"),
+        "increase_amount": label("Increase Amount", "增长金额"),
+        "growth_percentage_threshold": label(
+            "Growth Percentage Threshold",
+            "百分比阈值",
+        ),
+        "amount_threshold": label("Amount Threshold", "金额阈值"),
+        "cost_threshold": label("Cost Threshold", "成本阈值"),
+        "recharge_approval": localized_text(
             normalized_language,
             "Recharge Approval",
             "充值审批",
@@ -765,22 +848,22 @@ def _build_alert_sections_inner(
     ):
         sections["metrics"] = [
             {
-                "label": _("Current Hour Cost"),
+                "label": labels["current_hour_cost"],
                 "value": f"{current_cost:.2f}",
                 "highlight": False,
             },
             {
-                "label": _("Previous Hour Cost"),
+                "label": labels["previous_hour_cost"],
                 "value": f"{previous_cost:.2f}",
                 "highlight": False,
             },
             {
-                "label": _("Increase Amount"),
+                "label": labels["increase_amount"],
                 "value": f"{increase_cost:.2f}",
                 "highlight": True,
             },
             {
-                "label": _("Growth Rate"),
+                "label": labels["growth_rate"],
                 "value": f"{increase_percent:.1f}%",
                 "highlight": True,
             },
@@ -790,22 +873,22 @@ def _build_alert_sections_inner(
     ):
         sections["metrics"] = [
             {
-                "label": _("Current Hour Cost"),
+                "label": labels["current_hour_cost"],
                 "value": f"{current_cost:.2f}",
                 "highlight": True,
             },
             {
-                "label": _("Previous Hour Cost"),
+                "label": labels["previous_hour_cost"],
                 "value": f"{previous_cost:.2f}",
                 "highlight": False,
             },
             {
-                "label": _("Growth Rate"),
+                "label": labels["growth_rate"],
                 "value": f"{increase_percent:.1f}%",
                 "highlight": False,
             },
             {
-                "label": _("Increase Amount"),
+                "label": labels["increase_amount"],
                 "value": f"{increase_cost:.2f}",
                 "highlight": False,
             },
@@ -814,12 +897,12 @@ def _build_alert_sections_inner(
     # ── Thresholds ──
     if alert_rule.growth_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Growth Percentage Threshold"),
+            "label": labels["growth_percentage_threshold"],
             "value": f"{alert_rule.growth_threshold:.1f}%",
         })
     if alert_rule.growth_amount_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Amount Threshold"),
+            "label": labels["amount_threshold"],
             "value": (
                 f"{alert_rule.growth_amount_threshold:.2f}"
                 f" {currency}"
@@ -827,12 +910,12 @@ def _build_alert_sections_inner(
         })
     if alert_rule.cost_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Cost Threshold"),
+            "label": labels["cost_threshold"],
             "value": f"{alert_rule.cost_threshold:.2f} {currency}",
         })
     if alert_rule.balance_threshold is not None:
         sections["thresholds"].append({
-            "label": _("Balance Threshold"),
+            "label": labels["balance_threshold"],
             "value": (
                 f"{alert_rule.balance_threshold:.2f} {currency}"
             ),

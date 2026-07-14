@@ -1092,6 +1092,18 @@ def build_recharge_plan_execute_tools(runner_ref: Any) -> List[BaseTool]:
             ]
             if resolved_user_id:
                 cmd.extend(["--user-id", resolved_user_id])
+            excluded_instance_codes = (
+                (ctx.record.context_payload or {}).get(
+                    "excluded_duplicate_instance_codes"
+                )
+                or []
+            )
+            for instance_code in excluded_instance_codes:
+                instance_code = str(instance_code).strip()
+                if instance_code:
+                    cmd.extend(
+                        ["--exclude-instance-code", instance_code]
+                    )
 
             ctx.create_event(
                 event_type="workflow_step_script_started",
