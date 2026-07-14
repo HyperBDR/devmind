@@ -1,0 +1,556 @@
+{
+  "brand": {
+    "subtitle": "财务数据平台"
+  },
+  "nav": {
+    "mobileLabel": "移动端导航",
+    "fallback": "导航",
+    "groups": {
+      "business": "业务视图",
+      "global": "全局配置"
+    },
+    "items": {
+      "executive": {
+        "label": "经营驾驶舱",
+        "description": "合同、回款、风险和机会的经营概览"
+      },
+      "pipeline": {
+        "label": "Pipeline 看板",
+        "description": "国内立项、海外落地和续约风险"
+      },
+      "contracts": {
+        "label": "合同台账",
+        "description": "合同记录、筛选、分页和导出"
+      },
+      "sales": {
+        "label": "海外销售记录",
+        "description": "KooGallery 订单和海外销售明细"
+      },
+      "sync": {
+        "label": "同步状态",
+        "description": "飞书采集任务、权限检查和同步问题"
+      },
+      "config": {
+        "label": "采集配置",
+        "description": "查看飞书多维表格、频率和手动触发"
+      }
+    }
+  },
+  "header": {
+    "dataMonth": "数据月份 {month}",
+    "currencyNote": "当前按原始币种聚合，未做统一汇率换算",
+    "refresh": "刷新数据",
+    "refreshing": "刷新中",
+    "checkPermissions": "检查飞书权限",
+    "checking": "检查中",
+    "fullSync": "全量同步",
+    "syncing": "同步中"
+  },
+  "common": {
+    "query": "查询",
+    "export": "导出",
+    "status": "状态",
+    "unknown": "未知",
+    "notSet": "未设置",
+    "enabled": "已启用",
+    "disabled": "未启用",
+    "manual": "手动",
+    "hourly": "每小时",
+    "daily": "每天",
+    "weekly": "每周",
+    "noData": "暂无数据",
+    "totalPages": "共 {total} 条，{pages} 页",
+    "firstPage": "首页",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "lastPage": "末页"
+  },
+  "ai": {
+    "openLabel": "打开 AI 数据助手",
+    "drawerLabel": "AI 数据助手",
+    "title": "AI 数据助手",
+    "subtitle": "基于当前 Data Ops 上下文进行经营洞察分析",
+    "history": "历史",
+    "collapseHistory": "收起历史",
+    "newChat": "新对话",
+    "close": "关闭",
+    "historyLabel": "对话历史",
+    "messagesCount": "{count} 条消息",
+    "delete": "删除",
+    "noHistory": "暂无历史。完成一次问答后会自动记录。",
+    "startTitle": "从一个经营问题开始",
+    "startDescription": "选择建议问题，或在下方直接描述你想分析的内容",
+    "recommendedQuestions": "推荐问题",
+    "inputLabel": "输入业务问题",
+    "placeholder": "输入业务问题，例如：用表格列出待回款风险",
+    "stop": "停止生成",
+    "send": "发送消息",
+    "justNow": "刚刚",
+    "followUpsLabel": "建议追问",
+    "followUpsTitle": "接下来可以继续",
+    "followUpsDescription": "点击问题直接开始下一轮分析",
+    "user": "我",
+    "stepsCount": "{count} 个步骤",
+    "tableRef": "表 {table}",
+    "resultRows": "结果 {count} 行",
+    "status": {
+      "done": "已完成",
+      "error": "输出失败",
+      "stopped": "已停止",
+      "streaming": "正在输出",
+      "thinking": "正在思考"
+    },
+    "empty": {
+      "thinking": "正在读取上下文并组织回答",
+      "streaming": "正在生成回答",
+      "default": "暂无输出内容"
+    },
+    "questionGroups": {
+      "daily_review": {
+        "title": "每日经营复盘",
+        "questions": [
+          "今天我应该优先关注哪些经营风险？",
+          "当前合同、回款和待回款的整体健康度怎么样？",
+          "哪些客户或负责人需要优先跟进？"
+        ]
+      },
+      "cash_risk": {
+        "title": "回款与风险",
+        "questions": [
+          "待回款风险主要集中在哪些客户、项目或负责人？",
+          "哪些合同临近到期但回款或续约状态需要关注？",
+          "请按影响金额给我排一个回款跟进优先级。"
+        ]
+      },
+      "pipeline": {
+        "title": "Pipeline 洞察",
+        "questions": [
+          "国内和海外 Pipeline 的转化风险在哪里？",
+          "哪些立项项目最值得销售重点推进？",
+          "Pipeline 里有哪些高潜金额但状态停滞的项目？"
+        ]
+      },
+      "oversea": {
+        "title": "海外业务",
+        "questions": [
+          "海外销售记录里哪些国家或产品类型表现最好？",
+          "有哪些 License 即将到期，需要提前续约或交付跟进？",
+          "海外项目的收入、成本和利润结构有什么异常？"
+        ]
+      },
+      "data_quality": {
+        "title": "数据质量",
+        "questions": [
+          "当前飞书同步结果是否足以支撑经营分析？",
+          "哪些数据表存在权限、字段缺失或抓取不完整风险？",
+          "如果我要做本周经营会，哪些数据需要先修复？"
+        ]
+      }
+    }
+  },
+  "sync": {
+    "banner": {
+      "domestic": "国内增量",
+      "oversea": "海外增量",
+      "settlement": "结算增量"
+    },
+    "records": {
+      "title": "同步记录",
+      "subtitle": "点击记录查看每张表的数据变化",
+      "recent": "最近 {count} 次",
+      "empty": "暂无同步记录",
+      "created": "新增",
+      "updated": "修改",
+      "deleted": "移除",
+      "read": "读取",
+      "restored": "恢复",
+      "unchanged": "未变化",
+      "changeEvents": "业务变更事件",
+      "viewDetails": "查看详情",
+      "skipped": "无变化，已跳过",
+      "noResult": "任务尚未产生表级同步结果。",
+      "durationSeconds": "耗时 {seconds} 秒",
+      "durationMinutes": "耗时 {minutes} 分 {seconds} 秒"
+    },
+    "scope": {
+      "all": "全量数据",
+      "domestic": "国内数据",
+      "oversea": "海外数据",
+      "settlement": "结算数据"
+    },
+    "status": {
+      "ok": "成功",
+      "warning": "警告",
+      "failed": "失败",
+      "running": "同步中",
+      "pending": "等待中",
+      "unknown": "未知"
+    }
+  },
+  "quality": {
+    "label": "数据质量 · {status}",
+    "title": "经营分析可信度检查",
+    "description": "结合同步任务、字段完整性、币种口径和日期异常，判断当前数据是否适合用于经营分析。",
+    "highRisk": "高风险",
+    "attention": "需关注",
+    "normal": "正常",
+    "runningJobs": "运行中任务",
+    "failedJobs": "失败任务",
+    "warningJobs": "警告任务",
+    "contractCurrencies": "合同金额币种",
+    "ledgerCurrencies": "收支台账币种",
+    "noCurrency": "暂无币种数据",
+    "issues": "质量问题清单",
+    "issueTypes": "{count} 类问题",
+    "items": "{count} 项",
+    "currencyNote": "当前按原始币种聚合。",
+    "mixedCurrency": "混合币种聚合",
+    "mixedCurrencyDetail": "当前按原始币种聚合，未做统一汇率换算。",
+    "mixedCurrencyRecommendation": "经营视图中的金额应补统一汇率口径，原始币种聚合只适合明细核对。"
+  },
+  "config": {
+    "collectionTitle": "飞书多维表格采集配置",
+    "enabled": "启用",
+    "source": "数据源",
+    "table": "飞书表",
+    "frequency": "频率",
+    "status": "状态",
+    "actions": "操作",
+    "check": "检查",
+    "sync": "同步",
+    "openTable": "打开飞书表 ↗",
+    "openTableLabel": "打开飞书表：{name}",
+    "empty": "暂无采集配置",
+    "globalTitle": "全局飞书配置",
+    "configured": "已配置",
+    "secretPlaceholder": "留空保持不变",
+    "timezone": "日期时区",
+    "timeout": "任务超时(小时)",
+    "save": "保存全局配置"
+  },
+  "filters": {
+    "customer": "客户名称",
+    "allEntities": "全部签约主体",
+    "allOwners": "全部负责人",
+    "allStatuses": "全部状态",
+    "region": "地区",
+    "productType": "产品类型"
+  },
+  "empty": {
+    "contracts": "暂无合同记录",
+    "sales": "暂无海外销售记录",
+    "sync": "暂无同步状态"
+  },
+  "columns": {
+    "contractNumber": "合同编号",
+    "customerName": "客户名称",
+    "signingEntity": "签约主体",
+    "owner": "负责人",
+    "region": "地区",
+    "amount": "金额",
+    "currency": "币种",
+    "signingDate": "签订日期",
+    "serviceEnd": "服务到期",
+    "status": "状态",
+    "projectName": "项目名称",
+    "productType": "产品类型",
+    "allocationDate": "分配时间",
+    "expiryDate": "到期时间",
+    "orderType": "订单类型",
+    "source": "数据源",
+    "tableKey": "表 Key",
+    "tableName": "表名",
+    "issue": "问题",
+    "records": "记录数",
+    "message": "提示",
+    "lastChecked": "最近检查"
+  },
+  "kpi": {
+    "contractCount": "合同数量",
+    "contractAmount": "合同金额",
+    "monthlySigned": "本月签约",
+    "received": "累计回款",
+    "outstanding": "待回款"
+  },
+  "banner": {
+    "unchecked": "尚未执行飞书权限检查",
+    "failed": "飞书同步存在失败项",
+    "warning": "飞书同步需要确认",
+    "healthy": "飞书同步状态正常",
+    "uncheckedText": "尚未执行飞书权限检查。",
+    "issues": "发现 {count} 张表存在权限、字段或数据完整性问题。",
+    "allReadable": "所有已检查数据表均可读取。"
+  },
+  "feedback": {
+    "refreshRunning": "飞书更新检查仍在后台运行，请稍后再次刷新。",
+    "recordsUpdated": "飞书数据已更新，共同步 {count} 条记录。",
+    "tablesUnchanged": "已检查飞书数据，{count} 张表无变化。",
+    "noChanges": "飞书更新检查完成，当前没有需要同步的数据。",
+    "fullSyncRunning": "全量同步仍在后台运行，请稍后刷新查看状态。",
+    "analysisEmpty": "本次分析已完成，但模型没有返回可展示的文字结果。请重新提问或缩小分析范围。",
+    "streamFailed": "AI 助手流式输出失败",
+    "stopped": "已停止输出。",
+    "requestFailed": "数据运营控制台请求失败",
+    "preflightEmpty": "飞书权限检查完成：暂无可检查的数据表。",
+    "preflightFailed": "飞书权限检查完成：{failed} 张表失败，{warning} 张表警告，共检查 {total} 张表。{discovery}",
+    "preflightWarning": "飞书权限检查完成：{warning} 张表需要确认，共检查 {total} 张表。{discovery}",
+    "preflightOk": "飞书权限检查完成：{total} 张表均可读取。{discovery}",
+    "discovery": "已发现 {seen} 张飞书数据表，自动匹配 {matched} 张。",
+    "progressStep": "处理步骤",
+    "progress": {
+      "questionTitle": "拆解业务问题",
+      "questionDetail": "识别本次分析的关注点和业务优先级。",
+      "contextTitle": "读取 Data Ops 上下文",
+      "contextDetail": "读取最新合同、回款、Pipeline 和同步上下文。",
+      "planTitle": "规划数据查询",
+      "planDetail": "确定回答所需的数据表、筛选条件、指标和输出形式。",
+      "toolTitle": "查询 {table}",
+      "toolDetail": "读取并聚合本次分析需要的业务数据。",
+      "answerTitle": "生成分析回答",
+      "answerDetail": "整理分析结论、优先级和建议动作。"
+    },
+    "untitledConversation": "未命名对话"
+  },
+  "context": {
+    "title": "当前上下文",
+    "contracts": "合同",
+    "contractAmount": "合同金额",
+    "outstanding": "待回款",
+    "overseasProjects": "海外项目",
+    "skills": "助手 Skills"
+  },
+  "chart": {
+    "dataChart": "数据图表",
+    "trend": "趋势",
+    "chart": "图表",
+    "metric": "指标"
+  },
+  "project": {
+    "unnamed": "未命名项目"
+  },
+  "executive": {
+    "conclusion": "{month} 经营结论",
+    "todayPriority": "今日优先处理",
+    "items": "{count} 项",
+    "noPriority": "暂无需要优先处理的事项",
+    "dashboardGroups": "经营驾驶舱分组",
+    "resourceGroups": "资源分组",
+    "actionList": "行动清单",
+    "actionListDescription": "从现金、续约、增长机会中抽取需要先处理的事项。",
+    "owner": "负责人",
+    "timeBasis": "时间依据",
+    "noActions": "暂无需要优先处理的行动项",
+    "trendTitle": "经营趋势",
+    "trendDescription": "支持按月、季度、年度查看趋势，并叠加相邻周期环比。",
+    "keyCustomers": "重点客户",
+    "keyCustomersDescription": "按收入台账聚合客户回款与待回款",
+    "salesRanking": "销售排行",
+    "salesRankingDescription": "按高潜项目和待回款聚合责任人",
+    "riskTitle": "经营风险",
+    "riskDescription": "优先查看续约预警和大额待回款事项。",
+    "renewalAlerts": "续约预警 {count}",
+    "largeOutstanding": "大额待回款 {count}",
+    "renewalTop": "续约预警 Top",
+    "outstandingTop": "大额待回款 Top",
+    "opportunityPool": "高潜机会池",
+    "opportunitySummary": "高潜项目 {count} 个 · 总金额 {amount}",
+    "unnamedProject": "未命名项目",
+    "unassignedOwner": "未分配负责人",
+    "closeDetails": "关闭详情",
+    "recommendedAction": "建议动作",
+    "period": {
+      "month": "月",
+      "quarter": "季度",
+      "year": "年",
+      "last3": "近3期",
+      "last6": "近6期",
+      "last12": "近12期",
+      "ytd": "今年以来"
+    },
+    "tabs": {
+      "overview": "总览",
+      "trend": "趋势",
+      "customer": "客户与销售",
+      "risk": "风险",
+      "opportunity": "机会池"
+    },
+    "metrics": {
+      "monthlySigned": "本月签约金额",
+      "monthlyReceived": "本月回款金额",
+      "outstandingBalance": "当前待回款余额",
+      "noComparison": "环比暂无可比数据",
+      "fullBalance": "全量余额，不是本月新增"
+    },
+    "severity": {
+      "high": "高风险",
+      "attention": "需关注",
+      "normal": "正常"
+    },
+    "headline": {
+      "stalled": "回款停滞，待回款需要优先推进",
+      "outstanding": "大额待回款需要负责人跟进",
+      "renewal": "续约窗口临近，需要提前确认方案",
+      "normal": "经营数据暂无明显高风险信号"
+    },
+    "unknownCustomer": "未知客户",
+    "customerMeta": "合同数 {contracts} · 待回款 {outstanding}",
+    "riskLevel": "风险：{level}",
+    "salesMeta": "客户数 {customers} · 高潜项目 {opportunities}",
+    "salesOutstanding": "待回款：{amount}",
+    "days": "{count} 天",
+    "priority": {
+      "high": "高优先级",
+      "medium": "中优先级"
+    },
+    "type": {
+      "cash": "现金回收",
+      "renewal": "续约",
+      "growth": "增长机会"
+    },
+    "fields": {
+      "customer": "客户",
+      "project": "项目",
+      "outstanding": "待回款",
+      "expectedPayment": "预计到账日",
+      "contractNumber": "合同编号",
+      "remainingDays": "剩余天数",
+      "serviceEnd": "服务到期日",
+      "estimatedAmount": "预估金额",
+      "initiationDate": "立项日期"
+    },
+    "pendingConfirmation": "待确认",
+    "confirmPaymentDate": "需确认预计到账日",
+    "confirmExpiryDate": "需确认到期日",
+    "confirmActivity": "需确认最近活动时间",
+    "actions": {
+      "cashTitle": "推进 {name} 待回款",
+      "cashDetail": "待回款 {amount}",
+      "cashNext": "确认预计到账日期和付款阻塞点，更新本周回款推进结果。",
+      "renewalTitle": "确认 {name} 续约方案",
+      "renewalDetail": "合同 {contract} 剩余 {days} 天",
+      "renewalNext": "确认客户续约意向、报价方案和内部审批时间，形成明确续约计划。",
+      "growthTitle": "补齐 {name} 推进状态",
+      "growthDetail": "预估金额 {amount}",
+      "growthNext": "补充当前推进阶段、下一关键节点和预计签约时间。"
+    },
+    "summary": {
+      "signed": "本月签约 {value}",
+      "received": "本月回款 {value}",
+      "outstanding": "当前待回款 {value}",
+      "largeOutstanding": "大额待回款 {count} 项",
+      "renewal": "未来 {days} 天续约预警 {count} 项",
+      "opportunities": "高潜机会 {count} 项",
+      "none": "暂无优先处理事项"
+    },
+    "trend": {
+      "latestSigned": "最近完整签约变化",
+      "latestReceived": "最近完整回款变化",
+      "latestNet": "最近完整净经营变化",
+      "signedTitle": "签约金额与月环比",
+      "signedDescription": "柱状图看金额，折线看相邻周期增速。",
+      "signedAmount": "签约金额",
+      "cashTitle": "回款与支出对照",
+      "cashDescription": "双柱对比现金流入与支出，折线辅助看净差额。",
+      "receivedAmount": "回款金额",
+      "netTitle": "净经营差额与月环比",
+      "netDescription": "观察经营净流入是否持续改善，以及变化斜率。",
+      "netAmount": "净经营差额",
+      "momGrowth": "环比增长率",
+      "mom": "环比",
+      "yoy": "同比",
+      "down": "↓ 环比 {value}",
+      "up": "↑ 环比 {value}"
+    },
+    "unit": {
+      "hundredMillion": "{value}亿",
+      "tenThousand": "{value}万"
+    }
+  },
+  "pipeline": {
+    "title": "项目 Pipeline 分析看板",
+    "subtitle": "共 {count} 个项目 · 数据来自飞书多维表格同步",
+    "includeLanded": "包含已落地",
+    "distribution": "项目分布",
+    "contractStatus": "合同状态分布",
+    "funnel": "项目转化漏斗",
+    "conversionRate": "整体转化率",
+    "contribution": "个人项目贡献 (Pipeline)",
+    "projectsCount": "{count} 个",
+    "settlementTrend": "海外结算月度趋势",
+    "received": "实收",
+    "signingTrend": "月度签约趋势",
+    "renewalAlert": "近期合同续约预警",
+    "renewalSummary": "未来90天内有 {future} 个合同到期 · 历史到期 {expired} 个",
+    "urgent": "{count} 紧急",
+    "details": "项目明细总览",
+    "records": "{count} 条",
+    "allOwners": "全部负责人",
+    "allRegions": "全部地区",
+    "pagination": "共 {count} 条 / {pages} 页",
+    "empty": "暂无项目数据",
+    "tabs": {
+      "all": "全部",
+      "domestic": "国内",
+      "overseas": "海外"
+    },
+    "captionSplit": "国内 {domestic} / 海外 {overseas}",
+    "captionAmount": "国内 {domestic} · 海外 {overseas}",
+    "totalProjects": "Pipeline 项目总数",
+    "estimatedTotal": "预估签约总额",
+    "potentialCaption": "按项目标记统计，金额仍按原币种展示",
+    "highPotential": "高潜力项目",
+    "riskCaption": "30天内到期或逾期回款",
+    "riskAlerts": "风险预警",
+    "funnelStages": {
+      "potential": "潜在机会",
+      "followUp": "立项跟进",
+      "negotiation": "商务谈判",
+      "signed": "签约执行"
+    },
+    "unnamed": "未命名项目",
+    "unknown": "未知",
+    "uncategorized": "未分类",
+    "unassigned": "未分配",
+    "notUpdated": "未更新",
+    "noData": "暂无数据",
+    "currencyCount": "{count} 个币种"
+  },
+  "failure": {
+    "title": "飞书数据同步失败",
+    "summary": "{count} 张飞书表同步失败。",
+    "details": "查看 {count} 张表的详细错误与解决建议",
+    "readFailed": "飞书数据表读取失败。",
+    "stage": "失败阶段",
+    "httpStatus": "HTTP 状态",
+    "errorCode": "飞书错误码",
+    "response": "飞书返回",
+    "logId": "飞书 Log ID",
+    "suggestions": "解决建议",
+    "openTable": "打开对应飞书表 ↗",
+    "retry": "保存配置后先执行检查，再进行单表同步；确认通过后再运行全量同步。",
+    "recommendations": {
+      "app_access_denied": "确认飞书应用已添加为目标多维表格协作者，并具备数据表记录读取权限。",
+      "config_missing": "使用包含 table 参数的飞书多维表格链接补全 App Token 和 Table ID。",
+      "field_access_denied": "确认应用具备字段读取权限，并重新发布应用权限配置。",
+      "field_missing": "核对源表字段是否被重命名或删除，并同步更新字段映射。",
+      "network_error": "检查服务到 open.feishu.cn 的网络、DNS 和代理配置。",
+      "pagination_incomplete": "使用请求追踪 ID 检查飞书接口日志和分页 Token。",
+      "table_access_denied": "确认 App Token 与 Table ID 属于同一多维表格，并授予记录读取权限。",
+      "token_error": "核对飞书 App ID 和 App Secret，并确认应用处于启用状态。",
+      "unknown": "根据请求 ID 和飞书返回信息排查接口日志。",
+      "zero_records_unexpected": "检查源表数据量、视图过滤和应用可见范围是否发生变化。"
+    },
+    "issues": {
+      "app_access_denied": "应用访问受限",
+      "config_missing": "配置缺失",
+      "field_access_denied": "字段权限不足",
+      "field_missing": "字段缺失",
+      "network_error": "网络异常",
+      "pagination_incomplete": "分页不完整",
+      "table_access_denied": "表记录权限不足",
+      "token_error": "凭据异常",
+      "unknown": "未知错误",
+      "zero_records_unexpected": "记录数异常"
+    }
+  }
+}

@@ -209,6 +209,9 @@ def get_effective_feature_keys(
         feature_keys.extend(normalize_feature_keys(role.visible_features))
 
     normalized_features = normalize_feature_keys(feature_keys)
+    if 'admin_console' in normalized_features:
+        return list(FEATURE_KEYS)
+
     if not normalized_features:
         normalized_features = list(LEGACY_DEFAULT_FEATURES)
 

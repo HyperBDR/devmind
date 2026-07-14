@@ -1,8 +1,10 @@
 import csv
 import io
 import json
+from datetime import timedelta
 
 from django.http import HttpResponse, StreamingHttpResponse
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -21,15 +23,22 @@ from .serializers import (
     FeishuBitableCollectionConfigSerializer,
     SyncCursorSerializer,
     SyncJobSerializer,
+    SyncTriggerSerializer,
     SyncTableStatusSerializer,
 )
-from .services.feishu.client import run_bitable_access_check
+from .services.feishu.client import (
+    FeishuBitableClient,
+    run_bitable_access_check,
+)
 from .services.feishu.config import (
+    discover_bitable_table_ids,
     get_bitable_collection_config,
     list_bitable_collection_configs,
     mark_config_manual_trigger,
     mark_config_preflight,
 )
+from .services.feishu.global_config import get_active_sync_job_timeout_hours
+from .services.feishu.mappings import ACTIVE_SOURCE_KEYS
 from .services.ai import (
     chat_with_data_ops_assistant,
     get_ai_context_metrics,
@@ -146,7 +155,9 @@ class SyncStatusAPIView(DataOpsPermissionMixin, APIView):
 
 class FeishuPreflightAPIView(DataOpsAdminPermissionMixin, APIView):
     def post(self, request):
-        statuses = run_bitable_access_check()
+        client = FeishuBitableClient()
+        discovery = discover_bitable_table_ids(client=client)
+        statuses = run_bitable_access_check(client=client)
         has_failed = any(item.status == "failed" for item in statuses)
         has_warning = any(item.status == "warning" for item in statuses)
         overall_status = "ok"
@@ -158,6 +169,7 @@ class FeishuPreflightAPIView(DataOpsAdminPermissionMixin, APIView):
         return Response(
             {
                 "overall_status": overall_status,
+                "discovery": discovery,
                 "tables": SyncTableStatusSerializer(statuses, many=True).data,
             }
         )
@@ -196,13 +208,21 @@ class FeishuCollectionConfigPreflightAPIView(
 ):
     def post(self, request, config_id):
         config = get_bitable_collection_config(config_id)
+        client = FeishuBitableClient()
+        discovery = discover_bitable_table_ids(
+            client=client,
+            source_key=config.source_key,
+            table_key=config.table_key,
+        )
         statuses = run_bitable_access_check(
             source_key=config.source_key,
             table_key=config.table_key,
+            client=client,
         )
         mark_config_preflight(config)
         return Response(
             {
+                "discovery": discovery,
                 "tables": SyncTableStatusSerializer(statuses, many=True).data,
                 "config": FeishuBitableCollectionConfigSerializer(
                     get_bitable_collection_config(config_id),
@@ -248,15 +268,36 @@ class FeishuCollectionConfigTriggerAPIView(
 
 class TriggerFullSyncAPIView(DataOpsAdminPermissionMixin, APIView):
     def post(self, request):
+        serializer = SyncTriggerSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        force = serializer.validated_data["force"]
+        active_since = timezone.now() - timedelta(
+            hours=get_active_sync_job_timeout_hours(),
+        )
+        active_job = (
+            SyncJob.objects.filter(
+                source_key="",
+                table_key="",
+                status__in=[SyncStatus.PENDING, SyncStatus.RUNNING],
+                started_at__gte=active_since,
+            )
+            .order_by("-started_at")
+            .first()
+        )
+        if active_job:
+            data = dict(SyncJobSerializer(active_job).data)
+            data["deduplicated"] = True
+            return Response(data, status=202)
         job = SyncJob.objects.create(
             source_key="",
-            status="pending",
+            status=SyncStatus.PENDING,
         )
         try:
             dispatch_sync_task(
                 run_full_sync_task,
                 job,
                 job_id=str(job.id),
+                force=force,
             )
         except SyncTaskDispatchError:
             return _dispatch_failed_response(job)
@@ -266,13 +307,13 @@ class TriggerFullSyncAPIView(DataOpsAdminPermissionMixin, APIView):
 class TriggerIncrementalSyncAPIView(DataOpsAdminPermissionMixin, APIView):
     def post(self, request):
         source_key = str(request.data.get("source_key") or "").strip()
-        allowed = {"domestic", "oversea", "oversea_stats"}
+        allowed = set(ACTIVE_SOURCE_KEYS)
         if source_key not in allowed:
             return Response(
                 {
                     "detail": (
-                        "未知数据源，source_key 可选值："
-                        "domestic, oversea, oversea_stats。"
+                        "未知或未启用的数据源，source_key 可选值："
+                        f"{', '.join(sorted(allowed))}。"
                     )
                 },
                 status=400,
@@ -553,15 +594,30 @@ class LLMQueryAPIView(DataOpsPermissionMixin, APIView):
 def _csv_response(rows: list[dict], filename: str) -> HttpResponse:
     output = io.StringIO()
     if rows:
-        writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+        fieldnames = list(
+            dict.fromkeys(key for row in rows for key in row.keys())
+        )
+        safe_rows = [
+            {key: _escape_csv_cell(value) for key, value in row.items()}
+            for row in rows
+        ]
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(safe_rows)
     response = HttpResponse(
         "\ufeff" + output.getvalue(),
         content_type="text/csv; charset=utf-8",
     )
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
     return response
+
+
+def _escape_csv_cell(value):
+    """Prevent spreadsheet applications from evaluating untrusted formulas."""
+    formula_prefixes = ("=", "+", "-", "@")
+    if isinstance(value, str) and value.lstrip().startswith(formula_prefixes):
+        return f"'{value}"
+    return value
 
 
 def _dispatch_failed_response(job: SyncJob) -> Response:

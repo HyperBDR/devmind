@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from data_ops.models import Contract, DomesticLedger
+from data_ops.models import Contract, DomesticLedger, SourceRecordChange
 from data_ops.services.ai_tools import (
     DATA_OPS_TOOL_SCHEMAS,
     aggregate_data_ops_records,
@@ -58,6 +58,9 @@ def test_tool_profile_does_not_expose_raw_sql():
     assert "data_ops_run_sql" not in profile["tools"]
     assert "sql_rules" not in profile
     assert profile["query_rules"]
+    assert any(
+        "record_changes" in rule for rule in profile["query_rules"]
+    )
 
 
 def test_raw_sql_tool_call_returns_unknown_tool():
@@ -119,6 +122,37 @@ def test_schema_exposes_only_safe_fields():
     assert "raw_data" not in field_names
     assert "source_app_token" not in field_names
     assert schema["db_table"] == "data_ops_contract"
+
+
+@pytest.mark.django_db
+def test_record_changes_are_available_as_an_ai_data_source():
+    SourceRecordChange.objects.create(
+        source_key="domestic",
+        table_key="contracts",
+        model_name="contract",
+        source_record_id="rec-test",
+        change_type="updated",
+        changed_fields=["customer_name"],
+        before_values={"customer_name": "Example Customer Alpha"},
+        after_values={"customer_name": "Example Customer Beta"},
+    )
+
+    result = query_data_ops_records(
+        {
+            "table": "record_changes",
+            "columns": [
+                "table_key",
+                "change_type",
+                "changed_fields",
+                "before_values",
+                "after_values",
+            ],
+        }
+    )
+
+    assert result["row_count"] == 1
+    assert result["rows"][0]["change_type"] == "updated"
+    assert result["rows"][0]["changed_fields"] == ["customer_name"]
 
 
 def test_unknown_tool_returns_structured_error():

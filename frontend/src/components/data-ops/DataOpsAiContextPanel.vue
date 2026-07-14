@@ -1,13 +1,13 @@
 <template>
   <aside class="hidden min-h-0 overflow-y-auto bg-slate-50 p-4 lg:block">
-    <Panel title="当前上下文">
+    <Panel :title="t('dataOps.context.title')">
       <div class="space-y-3 text-sm text-slate-600">
         <DataRow
-          label="合同"
+          :label="t('dataOps.context.contracts')"
           :value="context?.contract?.contract_count || 0"
         />
         <DataRow
-          label="合同金额"
+          :label="t('dataOps.context.contractAmount')"
           :value="
             formatAmountByCurrency(
               context?.contract?.total_amount,
@@ -16,7 +16,7 @@
           "
         />
         <DataRow
-          label="待回款"
+          :label="t('dataOps.context.outstanding')"
           :value="
             formatAmountByCurrency(
               context?.ledger?.outstanding,
@@ -25,14 +25,14 @@
           "
         />
         <DataRow
-          label="海外项目"
+          :label="t('dataOps.context.overseasProjects')"
           :value="context?.oversea_project?.project_count || 0"
         />
       </div>
     </Panel>
 
     <div class="mt-4">
-      <Panel title="助手 Skills">
+      <Panel :title="t('dataOps.context.skills')">
         <div class="space-y-3">
           <article
             v-for="skill in skills"
@@ -54,10 +54,13 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { formatAmountByCurrency } from '@/composables/useDataOpsConsole'
 
 import { DataRow, Panel } from './DataOpsPrimitives'
+
+const { t } = useI18n()
 
 const props = defineProps({
   context: { type: Object, default: null },

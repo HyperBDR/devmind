@@ -40,7 +40,9 @@ async function postSse(path, payload, callbacks = {}, signal = null) {
     try {
       const data = await response.json()
       error.detail = data?.detail || data?.message
-    } catch (_) {}
+    } catch (_) {
+      // Ignore response bodies that are not valid JSON.
+    }
     callbacks.onError?.(error.detail || error.message)
     throw error
   }
@@ -53,7 +55,7 @@ async function readSseResponse(response, callbacks) {
   const decoder = new TextDecoder()
   let buffer = ''
 
-  while (true) {
+  for (;;) {
     const { done, value } = await reader.read()
     if (done) break
     buffer += decoder.decode(value, { stream: true })
@@ -76,12 +78,16 @@ function handleSsePart(part, callbacks) {
       payload.content != null
     ) {
       callbacks.onChunk?.(payload.content)
+    } else if (payload.type === 'progress') {
+      callbacks.onProgress?.(payload)
     } else if (payload.type === 'done') {
       callbacks.onDone?.(payload)
     } else if (payload.type === 'error') {
       callbacks.onError?.(payload.detail || 'Stream error')
     }
-  } catch (_) {}
+  } catch (_) {
+    // Ignore malformed SSE events and continue reading the stream.
+  }
 }
 
 export const dataOpsApi = {
@@ -135,33 +141,6 @@ export const dataOpsApi = {
 
   query(payload) {
     return apiClient.post(`${base}/llm/query/`, payload)
-  },
-
-  kanban() {
-    return apiClient.get(`${base}/kanban/`)
-  },
-
-  kanbanContracts(params) {
-    return apiClient.get(`${base}/kanban/contracts/`, paramsOrEmpty(params))
-  },
-
-  kanbanProjectInit() {
-    return apiClient.get(`${base}/kanban/project-init/`)
-  },
-
-  kanbanOverseaProjects() {
-    return apiClient.get(`${base}/kanban/oversea-projects/`)
-  },
-
-  kanbanDomesticLedger() {
-    return apiClient.get(`${base}/kanban/domestic-ledger/`)
-  },
-
-  kanbanOverseaSettlements(params) {
-    return apiClient.get(
-      `${base}/kanban/oversea-settlements/`,
-      paramsOrEmpty(params)
-    )
   },
 
   pipelineProjects(params) {
@@ -277,9 +256,14 @@ export const dataOpsApi = {
     return apiClient.post(`${base}/sync/`)
   },
 
+  triggerRefreshSync() {
+    return apiClient.post(`${base}/sync/`, { force: false })
+  },
+
   triggerIncrementalSync(sourceKey) {
     return apiClient.post(`${base}/sync/incremental/`, {
       source_key: sourceKey
     })
-  }
+  },
+
 }

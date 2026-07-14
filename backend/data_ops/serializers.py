@@ -11,6 +11,7 @@ from .models import (
     SyncJob,
     SyncTableStatus,
 )
+from .services.feishu.client import build_bitable_table_url
 
 
 class DataOpsGlobalConfigSerializer(serializers.ModelSerializer):
@@ -117,12 +118,15 @@ class SalesRecordSerializer(serializers.ModelSerializer):
 
 
 class SyncTableStatusSerializer(serializers.ModelSerializer):
+    table_url = serializers.SerializerMethodField()
+
     class Meta:
         model = SyncTableStatus
         fields = [
             "source_key",
             "table_key",
             "table_name",
+            "table_url",
             "status",
             "issue_code",
             "message",
@@ -135,6 +139,9 @@ class SyncTableStatusSerializer(serializers.ModelSerializer):
             "last_checked_at",
             "last_success_at",
         ]
+
+    def get_table_url(self, obj):
+        return build_bitable_table_url(obj.app_token, obj.table_id)
 
 
 class SyncCursorSerializer(serializers.ModelSerializer):
@@ -167,6 +174,10 @@ class SyncJobSerializer(serializers.ModelSerializer):
         ]
 
 
+class SyncTriggerSerializer(serializers.Serializer):
+    force = serializers.BooleanField(default=True)
+
+
 class FeishuBitableCollectionConfigSerializer(serializers.ModelSerializer):
     sync_status = serializers.SerializerMethodField()
     issue_code = serializers.SerializerMethodField()
@@ -175,6 +186,7 @@ class FeishuBitableCollectionConfigSerializer(serializers.ModelSerializer):
     record_count = serializers.SerializerMethodField()
     last_checked_at = serializers.SerializerMethodField()
     last_success_at = serializers.SerializerMethodField()
+    table_url = serializers.SerializerMethodField()
 
     class Meta:
         model = FeishuBitableCollectionConfig
@@ -184,6 +196,7 @@ class FeishuBitableCollectionConfigSerializer(serializers.ModelSerializer):
             "table_key",
             "source_name",
             "table_name",
+            "table_url",
             "app_token",
             "table_id",
             "is_enabled",
@@ -219,6 +232,7 @@ class FeishuBitableCollectionConfigSerializer(serializers.ModelSerializer):
             "record_count",
             "last_checked_at",
             "last_success_at",
+            "table_url",
         ]
 
     def _status(self, obj):
@@ -258,3 +272,6 @@ class FeishuBitableCollectionConfigSerializer(serializers.ModelSerializer):
     def get_last_success_at(self, obj):
         status = self._status(obj)
         return status.last_success_at if status else None
+
+    def get_table_url(self, obj):
+        return build_bitable_table_url(obj.app_token, obj.table_id)

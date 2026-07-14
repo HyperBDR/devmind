@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -12,6 +13,16 @@ from .mappings import iter_bitable_tables
 
 
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
+FEISHU_WEB_BASE_URL = "https://www.feishu.cn"
+
+
+def build_bitable_table_url(app_token: str, table_id: str) -> str:
+    if not app_token:
+        return ""
+    url = f"{FEISHU_WEB_BASE_URL}/base/{app_token}"
+    if table_id:
+        url = f"{url}?table={table_id}"
+    return url
 
 
 @dataclass
@@ -24,6 +35,7 @@ class FeishuCheckResult:
     expected_fields: list[str] | None = None
     missing_fields: list[str] | None = None
     expected_min_records: int | None = None
+    feishu_detail: dict | None = None
 
 
 def _settings_missing_result() -> FeishuCheckResult:
@@ -35,6 +47,35 @@ def _settings_missing_result() -> FeishuCheckResult:
             "请配置 DATA_OPS_FEISHU_APP_ID 和 "
             "DATA_OPS_FEISHU_APP_SECRET。"
         ),
+    )
+
+
+def _table_config_missing_result(
+    *,
+    app_token: str,
+    table_id: str,
+    table_name: str,
+    expected_fields: list[str],
+) -> FeishuCheckResult:
+    return FeishuCheckResult(
+        status=SyncStatus.FAILED,
+        issue_code=SyncIssueCode.CONFIG_MISSING,
+        message=(
+            f"飞书多维表格「{table_name}」配置缺失，"
+            "无法检查或同步。"
+        ),
+        resolution_hint=(
+            "当前只配置了 base 地址，缺少具体 table_id。"
+            "请提供带 table 参数的飞书表链接。"
+        ),
+        expected_fields=expected_fields,
+        missing_fields=[],
+        feishu_detail={
+            "stage": "本地配置检查",
+            "app_token": app_token,
+            "table_id": table_id,
+            "table_url": build_bitable_table_url(app_token, table_id),
+        },
     )
 
 
@@ -84,6 +125,12 @@ def _classify_feishu_error(
     code = payload.get("code")
     msg = payload.get("msg") or payload.get("message") or ""
     status_code = response.status_code if response is not None else 0
+    detail = _feishu_error_detail(
+        stage=stage,
+        status_code=status_code,
+        payload=payload,
+        response=response,
+    )
     text = f"{code} {msg}".lower()
     permission_markers = (
         "permission",
@@ -116,6 +163,7 @@ def _classify_feishu_error(
                 "请确认飞书应用已添加到该多维表格，并授予"
                 "多维表格、数据表记录和字段读取权限。"
             ),
+            feishu_detail=detail,
         )
 
     if stage == "tenant token 获取":
@@ -129,6 +177,7 @@ def _classify_feishu_error(
             resolution_hint=(
                 "请检查飞书应用 ID、Secret 和应用启用状态。"
             ),
+            feishu_detail=detail,
         )
 
     return FeishuCheckResult(
@@ -141,7 +190,61 @@ def _classify_feishu_error(
         resolution_hint=(
             "请检查飞书应用权限、表格 ID 和服务状态。"
         ),
+        feishu_detail=detail,
     )
+
+
+def _feishu_error_detail(
+    *,
+    stage: str,
+    status_code: int,
+    payload: dict,
+    response: httpx.Response | None,
+) -> dict:
+    data = payload.get("data")
+    headers = {}
+    api_url = ""
+    table_url = ""
+    if response is not None:
+        api_url = str(response.request.url)
+        app_token, table_id = _extract_bitable_tokens_from_url(api_url)
+        table_url = build_bitable_table_url(app_token, table_id)
+        for name in (
+            "x-request-id",
+            "x-tt-logid",
+            "x-lark-request-id",
+            "x-log-id",
+        ):
+            value = response.headers.get(name)
+            if value:
+                headers[name] = value
+
+    return {
+        "stage": stage,
+        "http_status": status_code,
+        "feishu_code": payload.get("code"),
+        "feishu_msg": payload.get("msg") or payload.get("message"),
+        "feishu_error": payload.get("error"),
+        "feishu_data": data if isinstance(data, dict) else None,
+        "api_url": api_url,
+        "table_url": table_url,
+        "request_headers": headers,
+    }
+
+
+def _extract_bitable_tokens_from_url(url: str) -> tuple[str, str]:
+    match = re.search(r"/bitable/v1/apps/([^/]+)/tables/([^/?]+)", url)
+    if not match:
+        return "", ""
+    return match.group(1), match.group(2)
+
+
+def _automatic_fields_forbidden(response: httpx.Response) -> bool:
+    try:
+        code = response.json().get("code")
+    except (AttributeError, ValueError):
+        code = None
+    return response.status_code == 403 or code == 91403
 
 
 class FeishuBitableClient:
@@ -179,6 +282,41 @@ class FeishuBitableClient:
     def headers(self) -> dict[str, str]:
         token = self._tenant_token or self.get_tenant_access_token()
         return {"Authorization": f"Bearer {token}"}
+
+    def list_tables(self, app_token: str) -> list[dict]:
+        tables = []
+        page_token = ""
+
+        while True:
+            params = {"page_size": 100}
+            if page_token:
+                params["page_token"] = page_token
+            response = httpx.get(
+                f"{FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables",
+                headers=self.headers,
+                params=params,
+                timeout=20,
+            )
+            payload = response.json()
+            if response.status_code >= 400 or payload.get("code") != 0:
+                raise httpx.HTTPStatusError(
+                    "Feishu table list request failed",
+                    request=response.request,
+                    response=response,
+                )
+
+            data = payload.get("data", {})
+            tables.extend(data.get("items", []))
+            if not data.get("has_more"):
+                break
+            next_page_token = data.get("page_token")
+            if not next_page_token:
+                raise httpx.HTTPError(
+                    "Feishu table list pagination incomplete"
+                )
+            page_token = next_page_token
+
+        return tables
 
     def list_fields(self, app_token: str, table_id: str) -> list[str]:
         fields = []
@@ -253,6 +391,31 @@ class FeishuBitableClient:
         *,
         page_size: int = 500,
     ) -> tuple[list[dict], bool, int | None]:
+        try:
+            return self._list_records(
+                app_token,
+                table_id,
+                page_size=page_size,
+                include_automatic_fields=True,
+            )
+        except httpx.HTTPStatusError as exc:
+            if not _automatic_fields_forbidden(exc.response):
+                raise
+            return self._list_records(
+                app_token,
+                table_id,
+                page_size=page_size,
+                include_automatic_fields=False,
+            )
+
+    def _list_records(
+        self,
+        app_token: str,
+        table_id: str,
+        *,
+        page_size: int,
+        include_automatic_fields: bool,
+    ) -> tuple[list[dict], bool, int | None]:
         records = []
         page_token = ""
         total = None
@@ -260,6 +423,8 @@ class FeishuBitableClient:
 
         while True:
             params = {"page_size": page_size}
+            if include_automatic_fields:
+                params["automatic_fields"] = True
             if page_token:
                 params["page_token"] = page_token
             response = httpx.get(
@@ -295,50 +460,6 @@ class FeishuBitableClient:
             incomplete = True
         return records, incomplete, total
 
-    def list_record_history(
-        self,
-        app_token: str,
-        table_id: str,
-        record_id: str,
-    ) -> list[dict]:
-        history = []
-        page_token = ""
-
-        while True:
-            params = {"page_size": 100}
-            if page_token:
-                params["page_token"] = page_token
-            response = httpx.get(
-                (
-                    f"{FEISHU_BASE_URL}/bitable/v1/apps/{app_token}"
-                    f"/tables/{table_id}/records/{record_id}/record_history"
-                ),
-                headers=self.headers,
-                params=params,
-                timeout=20,
-            )
-            payload = response.json()
-            if response.status_code >= 400 or payload.get("code") != 0:
-                raise httpx.HTTPStatusError(
-                    "Feishu record history request failed",
-                    request=response.request,
-                    response=response,
-                )
-
-            data = payload.get("data", {})
-            for item in data.get("items", []):
-                history.extend(item.get("fields_history", []) or [])
-            if not data.get("has_more"):
-                break
-            next_page_token = data.get("page_token")
-            if not next_page_token:
-                raise httpx.HTTPError(
-                    "Feishu record history pagination incomplete"
-                )
-            page_token = next_page_token
-
-        return history
-
     def check_table_access(
         self,
         *,
@@ -347,6 +468,14 @@ class FeishuBitableClient:
         table_name: str,
         expected_fields: list[str],
     ) -> FeishuCheckResult:
+        if not app_token or not table_id:
+            return _table_config_missing_result(
+                app_token=app_token,
+                table_id=table_id,
+                table_name=table_name,
+                expected_fields=expected_fields,
+            )
+
         try:
             fields = self.list_fields(app_token, table_id)
         except httpx.HTTPStatusError as exc:
@@ -408,8 +537,9 @@ def run_bitable_access_check(
     *,
     source_key: str | None = None,
     table_key: str | None = None,
+    client: FeishuBitableClient | None = None,
 ) -> list[SyncTableStatus]:
-    client = FeishuBitableClient()
+    client = client or FeishuBitableClient()
     now = timezone.now()
     statuses = []
     tables = list(

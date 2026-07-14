@@ -1,4 +1,5 @@
 import { h } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatAmount } from '@/composables/useDataOpsConsole'
 
 export const Panel = {
@@ -66,9 +67,10 @@ export const DataRow = {
 
 export const EmptyState = {
   props: {
-    text: { type: String, default: '暂无数据' },
+    text: { type: String, default: '' },
   },
   setup(props) {
+    const { t } = useI18n()
     return () =>
       h(
         'div',
@@ -76,7 +78,7 @@ export const EmptyState = {
           class:
             'rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400',
         },
-        props.text
+        props.text || t('dataOps.common.noData')
       )
   },
 }
@@ -89,6 +91,7 @@ export const MiniList = {
     valueKey: { type: String, required: true },
   },
   setup(props) {
+    const { locale, t } = useI18n()
     return () =>
       h('div', [
         h(
@@ -105,12 +108,14 @@ export const MiniList = {
                   h(
                     'span',
                     { class: 'truncate text-slate-600' },
-                    item[props.labelKey] || '未知'
+                    item[props.labelKey] || t('dataOps.common.unknown')
                   ),
                   h(
                     'strong',
                     { class: 'text-slate-900' },
-                    formatAmount(item[props.valueKey])
+                    formatAmount(item[props.valueKey], '', {
+                      locale: locale.value,
+                    })
                   ),
                 ])
               )
@@ -124,9 +129,10 @@ export const DataTable = {
   props: {
     columns: { type: Array, required: true },
     rows: { type: Array, default: () => [] },
-    emptyText: { type: String, default: '暂无数据' },
+    emptyText: { type: String, default: '' },
   },
   setup(props) {
+    const { t } = useI18n()
     return () =>
       h('div', { class: 'overflow-hidden rounded-xl border border-slate-200 bg-white' }, [
         h('div', { class: 'overflow-x-auto' }, [
@@ -167,7 +173,7 @@ export const DataTable = {
                         class: 'px-4 py-10 text-center text-slate-400',
                         colspan: props.columns.length,
                       },
-                      props.emptyText
+                      props.emptyText || t('dataOps.common.noData')
                     ),
                   ])
             ),
@@ -185,10 +191,17 @@ export const Pager = {
   },
   emits: ['change'],
   setup(props, { emit }) {
+    const { t } = useI18n()
     return () => {
       const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize))
       return h('div', { class: 'flex items-center justify-between text-xs text-slate-500' }, [
-        h('span', `共 ${props.total} 条，${totalPages} 页`),
+        h(
+          'span',
+          t('dataOps.common.totalPages', {
+            total: props.total,
+            pages: totalPages,
+          })
+        ),
         h('div', { class: 'flex items-center gap-2' }, [
           h(
             'button',
@@ -197,7 +210,7 @@ export const Pager = {
               disabled: props.page <= 1,
               onClick: () => emit('change', 1),
             },
-            '首页'
+            t('dataOps.common.firstPage')
           ),
           h(
             'button',
@@ -206,7 +219,7 @@ export const Pager = {
               disabled: props.page <= 1,
               onClick: () => emit('change', props.page - 1),
             },
-            '上一页'
+            t('dataOps.common.previousPage')
           ),
           h(
             'span',
@@ -220,7 +233,7 @@ export const Pager = {
               disabled: props.page >= totalPages,
               onClick: () => emit('change', props.page + 1),
             },
-            '下一页'
+            t('dataOps.common.nextPage')
           ),
           h(
             'button',
@@ -229,7 +242,7 @@ export const Pager = {
               disabled: props.page >= totalPages,
               onClick: () => emit('change', totalPages),
             },
-            '末页'
+            t('dataOps.common.lastPage')
           ),
         ]),
       ])

@@ -3,10 +3,37 @@ from django.contrib import admin
 from .models import (
     DataOpsGlobalConfig,
     FeishuBitableCollectionConfig,
+    SourceRecordChange,
     SyncCursor,
     SyncJob,
     SyncTableStatus,
 )
+
+
+@admin.register(SourceRecordChange)
+class SourceRecordChangeAdmin(admin.ModelAdmin):
+    list_display = (
+        "source_key",
+        "table_key",
+        "source_record_id",
+        "change_type",
+        "detected_at",
+    )
+    list_filter = ("change_type", "source_key", "table_key")
+    search_fields = ("source_record_id", "source_key", "table_key")
+    readonly_fields = (
+        "source_key",
+        "table_key",
+        "model_name",
+        "source_record_id",
+        "change_type",
+        "changed_fields",
+        "source_changed_fields",
+        "before_values",
+        "after_values",
+        "source_modified_time",
+        "detected_at",
+    )
 
 
 @admin.register(DataOpsGlobalConfig)
@@ -61,15 +88,22 @@ class SyncTableStatusAdmin(admin.ModelAdmin):
 @admin.register(SyncJob)
 class SyncJobAdmin(admin.ModelAdmin):
     list_display = (
-        "job_type",
+        "target",
         "source_key",
         "table_key",
         "status",
+        "records_synced",
         "started_at",
         "finished_at",
     )
-    list_filter = ("job_type", "status")
+    list_filter = ("status", "source_key")
     search_fields = ("source_key", "table_key", "error_message")
+
+    def target(self, obj):
+        target = obj.source_key or "full"
+        if obj.table_key:
+            target = f"{target}/{obj.table_key}"
+        return target
 
 
 @admin.register(SyncCursor)

@@ -4,16 +4,30 @@
       <input
         :value="filters.customer_name"
         class="field-sm"
-        placeholder="客户名称"
+        :placeholder="t('dataOps.filters.customer')"
         @input="$emit('update-filter', 'customer_name', $event.target.value)"
         @keyup.enter="$emit('load')"
       />
+      <select
+        :value="filters.signing_entity"
+        class="field-sm"
+        @change="$emit('update-filter', 'signing_entity', $event.target.value)"
+      >
+        <option value="">{{ t('dataOps.filters.allEntities') }}</option>
+        <option
+          v-for="entity in filterOptions.signing_entity || []"
+          :key="entity"
+          :value="entity"
+        >
+          {{ entity }}
+        </option>
+      </select>
       <select
         :value="filters.sales_person"
         class="field-sm"
         @change="$emit('update-filter', 'sales_person', $event.target.value)"
       >
-        <option value="">全部负责人</option>
+        <option value="">{{ t('dataOps.filters.allOwners') }}</option>
         <option
           v-for="name in filterOptions.sales_person || []"
           :key="name"
@@ -27,7 +41,7 @@
         class="field-sm"
         @change="$emit('update-filter', 'status', $event.target.value)"
       >
-        <option value="">全部状态</option>
+        <option value="">{{ t('dataOps.filters.allStatuses') }}</option>
         <option
           v-for="status in filterOptions.status || []"
           :key="status"
@@ -37,7 +51,7 @@
         </option>
       </select>
       <button class="btn-secondary" type="button" @click="$emit('load')">
-        查询
+        {{ t('dataOps.common.query') }}
       </button>
       <button
         v-if="canExport"
@@ -45,10 +59,14 @@
         type="button"
         @click="$emit('download')"
       >
-        导出
+        {{ t('dataOps.common.export') }}
       </button>
     </Toolbar>
-    <DataTable :columns="columns" :rows="contracts" empty-text="暂无合同记录" />
+    <DataTable
+      :columns="columns"
+      :rows="contracts"
+      :empty-text="t('dataOps.empty.contracts')"
+    />
     <Pager
       :page="page"
       :page-size="pageSize"
@@ -59,7 +77,11 @@
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
 import { DataTable, Pager, Toolbar } from './DataOpsPrimitives'
+
+const { t } = useI18n()
 
 defineProps({
   canExport: { type: Boolean, default: false },

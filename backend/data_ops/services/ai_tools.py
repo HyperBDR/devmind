@@ -17,6 +17,7 @@ from data_ops.models import (
     Project,
     ProjectInit,
     SalesRecord,
+    SourceRecordChange,
     SyncJob,
     SyncTableStatus,
 )
@@ -38,6 +39,7 @@ DATA_OPS_QUERY_TABLES: dict[str, type[models.Model]] = {
     "sync_table_status": SyncTableStatus,
     "sync_jobs": SyncJob,
     "feishu_collection_configs": FeishuBitableCollectionConfig,
+    "record_changes": SourceRecordChange,
 }
 
 SENSITIVE_FIELDS = {
@@ -82,7 +84,9 @@ DATA_OPS_TOOL_SCHEMAS = [
                 "properties": {
                     "table": {
                         "type": "string",
-                        "description": "可选表名，不传则返回所有表。",
+                        "description": (
+                            "可选表名，不传则返回所有表。"
+                        ),
                     },
                 },
             },
@@ -92,7 +96,9 @@ DATA_OPS_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "data_ops_query_records",
-            "description": "按字段筛选 Data Ops 记录，适合明细查询。",
+            "description": (
+                "按字段筛选 Data Ops 记录，适合明细查询。"
+            ),
             "parameters": {
                 "type": "object",
                 "required": ["table"],
@@ -176,6 +182,10 @@ def get_data_ops_tool_profile() -> dict[str, Any]:
             "只能使用 Data Ops 工具 schema 中公开的表和字段。",
             "明细查询使用 data_ops_query_records。",
             "分组、排行、统计和 Top 项使用 data_ops_aggregate。",
+            (
+                "分析同步后的新增、修改、删除或"
+                "恢复数据时，查询 record_changes。"
+            ),
             (
                 "禁止读取 raw_data、token、secret、"
                 "celery_task_id 等字段。"

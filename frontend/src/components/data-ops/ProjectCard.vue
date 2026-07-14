@@ -3,7 +3,7 @@
     <div class="flex items-start justify-between gap-3">
       <div>
         <p class="font-semibold text-slate-900">
-          {{ project.project_name || '未命名项目' }}
+          {{ project.project_name || t('dataOps.project.unnamed') }}
         </p>
         <p class="mt-1 text-xs text-slate-500">
           {{ project.project_code || project.po_number || '-' }}
@@ -22,7 +22,8 @@
         {{
           formatAmount(
             project.estimated_amount || project.stat_amount_usd,
-            project.currency
+            project.currency,
+            { locale }
           )
         }}
       </span>
@@ -34,7 +35,11 @@
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
 import { formatAmount } from '@/composables/useDataOpsConsole'
+
+const { locale, t } = useI18n()
 
 defineProps({
   project: { type: Object, required: true },

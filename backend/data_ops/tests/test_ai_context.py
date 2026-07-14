@@ -4,10 +4,17 @@ import pytest
 
 from data_ops.models import Contract, DomesticLedger, SalesRecord
 from data_ops.services.ai import (
+    SYSTEM_PROMPT,
     _build_messages,
     _prepare_messages_with_data_ops_tools,
     get_ai_context_metrics,
 )
+
+
+def test_ai_prompt_follows_the_users_language():
+    assert "英文问题用英文回答" in SYSTEM_PROMPT
+    assert "Suggested follow-up questions:" in SYSTEM_PROMPT
+    assert "回答使用中文，" not in SYSTEM_PROMPT
 
 
 @pytest.mark.django_db
@@ -112,6 +119,8 @@ def test_ai_prompt_includes_data_ops_capabilities_and_guidance():
     assert "先判断数据是否可信" in prompt_text
     assert "data_ops_run_sql" not in prompt_text
     assert "SQL" not in prompt_text
+    assert "建议追问：" in prompt_text
+    assert "2 至 3 个" in prompt_text
 
 
 @pytest.mark.django_db
@@ -162,10 +171,10 @@ def test_ai_tool_loop_rejects_raw_sql_tool_call(
         preferred_config_uuid="",
         user_id=None,
     )
-    messages, content, usage, _settings = result
+    messages, content, usage, _settings, _progress_events = result
 
     tool_message = next(item for item in messages if item["role"] == "tool")
-    assert content == ""
+    assert content == "已完成。"
     assert usage["total_tokens"] == 5
     assert len(calls) == 2
     assert '"ok": false' in tool_message["content"]
