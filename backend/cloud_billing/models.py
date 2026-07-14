@@ -303,6 +303,13 @@ class AlertRule(models.Model):
         db_index=True,
         help_text="Whether this alert rule is active",
     )
+    enable_recharge_recovery_detection = models.BooleanField(
+        default=False,
+        help_text=(
+            "Whether account health recovery should release recovered "
+            "automatic approvals from blocking new submissions."
+        ),
+    )
     auto_submit_recharge_approval = models.BooleanField(
         default=False,
         help_text=(
@@ -369,6 +376,19 @@ class AlertRule(models.Model):
                 {
                     "auto_recharge_amount": (
                         "Auto recharge amount must be greater than 0."
+                    )
+                }
+            )
+        if (
+            self.enable_recharge_recovery_detection
+            and self.balance_threshold is None
+            and self.days_remaining_threshold is None
+        ):
+            raise ValidationError(
+                {
+                    "enable_recharge_recovery_detection": (
+                        "A balance or days remaining threshold is required "
+                        "when recharge recovery detection is enabled."
                     )
                 }
             )
@@ -556,6 +576,13 @@ class RechargeApprovalRecord(models.Model):
         (STATUS_FAILED, "Failed"),
     ]
 
+    FULFILLMENT_PENDING = "pending"
+    FULFILLMENT_RECOVERED = "recovered"
+    FULFILLMENT_CHOICES = [
+        (FULFILLMENT_PENDING, "Pending"),
+        (FULFILLMENT_RECOVERED, "Recovered"),
+    ]
+
     provider = models.ForeignKey(
         CloudProvider,
         on_delete=models.CASCADE,
@@ -589,6 +616,22 @@ class RechargeApprovalRecord(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_PENDING,
         db_index=True,
+    )
+    fulfillment_status = models.CharField(
+        max_length=20,
+        choices=FULFILLMENT_CHOICES,
+        default=FULFILLMENT_PENDING,
+        db_index=True,
+        help_text=(
+            "Business fulfillment state independent from the Feishu "
+            "approval workflow status."
+        ),
+    )
+    fulfilled_at = models.DateTimeField(null=True, blank=True)
+    fulfillment_evidence = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Evidence used to mark the recharge objective as recovered.",
     )
     latest_stage = models.CharField(
         max_length=64,
@@ -747,6 +790,68 @@ class RechargeApprovalEvent(models.Model):
 
     def __str__(self):
         return f"{self.record_id} - {self.event_type} - {self.stage}"
+
+
+class RechargeApprovalApproverNotification(models.Model):
+    """Track one approver reminder per user and approval instance."""
+
+    STATUS_PENDING = "pending"
+    STATUS_SENDING = "sending"
+    STATUS_SENT = "sent"
+    STATUS_FAILED = "failed"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_SENDING, "Sending"),
+        (STATUS_SENT, "Sent"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    record = models.ForeignKey(
+        RechargeApprovalRecord,
+        on_delete=models.CASCADE,
+        related_name="approver_notifications",
+    )
+    recipient_user_id = models.CharField(max_length=128)
+    notification_key = models.CharField(
+        max_length=64,
+        default="pending",
+    )
+    node_id = models.CharField(max_length=128, blank=True, default="")
+    node_name = models.CharField(max_length=255, blank=True, default="")
+    task_id = models.CharField(max_length=128, blank=True, default="")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+        db_index=True,
+    )
+    attempt_count = models.PositiveIntegerField(default=0)
+    message_id = models.CharField(max_length=255, blank=True, default="")
+    error_message = models.TextField(blank=True, default="")
+    sent_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "cloud_billing_recharge_approver_notification"
+        verbose_name = "Recharge Approval Approver Notification"
+        verbose_name_plural = "Recharge Approval Approver Notifications"
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "record",
+                    "recipient_user_id",
+                    "notification_key",
+                ],
+                name="cloud_billing_unique_approver_notice",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["status", "updated_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.record_id} - {self.recipient_user_id} - {self.status}"
 
 
 class RechargeApprovalLLMRun(models.Model):

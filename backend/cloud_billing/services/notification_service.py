@@ -4,10 +4,18 @@ Notification service for cloud billing alerts.
 This service generates notification messages from cloud billing business data
 and sends them via agentcore_notifier unified task (send_notification).
 Channel selection (webhook/email by UUID or default) is handled by notifier.
+Recharge approval copies to their Feishu initiators use the Feishu IM API.
 """
+import json
 import logging
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from typing import Any, Dict, Optional
+
 from agentcore_notifier.adapters.django.services.email_service import (
     get_default_email_channel,
     get_email_channel_by_uuid,
@@ -22,12 +30,16 @@ from agentcore_notifier.adapters.django.tasks.send import (
     send_notification,
 )
 from agentcore_notifier.constants import FEISHU_PROVIDERS, Provider
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.utils import translation
 from django.utils.translation import gettext as _
 
 from cloud_billing.alert_messages import (
     build_alert_message_from_record,
     build_alert_sections_from_record,
+    extract_account_id_from_message,
+    extract_recharge_approval_notice,
 )
 from cloud_billing.constants import (
     DEFAULT_LANGUAGE,
@@ -36,10 +48,31 @@ from cloud_billing.constants import (
     SOURCE_TYPE_RECHARGE_APPROVAL,
     WECHAT_MSGTYPE_MARKDOWN,
 )
-from cloud_billing.models import AlertRecord, RechargeApprovalRecord
-from cloud_billing.services.recharge_approval import parse_recharge_info
+from cloud_billing.models import (
+    AlertRecord,
+    BillingData,
+    RechargeApprovalRecord,
+)
+from cloud_billing.services.recharge_approval import (
+    PENDING_FEISHU_TASK_STATUSES,
+    _get_feishu_access_token,
+    find_ongoing_recharge_approval_for_account,
+    get_recharge_approval_progress,
+    parse_recharge_info,
+)
 
 logger = logging.getLogger(__name__)
+
+FEISHU_USER_MESSAGE_URL = (
+    "https://open.feishu.cn/open-apis/im/v1/messages"
+    "?receive_id_type=user_id"
+)
+FEISHU_APPROVAL_APPLINK_URL = (
+    "https://applink.feishu.cn/client/mini_program/open"
+)
+FEISHU_APPROVAL_APP_ID = "cli_9cb844403dbb9108"
+FEISHU_DISPLAY_TIME_ZONE = dt_timezone(timedelta(hours=8))
+APPROVAL_PROGRESS_CACHE_TTL = timedelta(seconds=60)
 
 
 def _feishu_cost_table(
@@ -49,7 +82,7 @@ def _feishu_cost_table(
 ) -> list:
     """Build Feishu column_set elements for cost breakdown table.
 
-    Returns a title div + header row (blue bg) + data rows.
+    Returns a title markdown element + header row + data rows.
     Columns: Resource, Cost, Owner (always shown, "-" if empty).
     ``labels`` is the ``sections["labels"]`` dict from
     ``build_alert_sections`` — all strings are pre-localized.
@@ -57,13 +90,12 @@ def _feishu_cost_table(
     rows = []
 
     # Title
-    rows.append({
-        "tag": "div",
-        "text": {
-            "tag": "lark_md",
+    rows.append(
+        {
+            "tag": "markdown",
             "content": f"**📋 {labels['cost_breakdown']}**",
-        },
-    })
+        }
+    )
 
     # Header row
     cols = [
@@ -80,13 +112,12 @@ def _feishu_cost_table(
             "tag": "column",
             "width": widths[i],
             "weight": weights[i],
-            "elements": [{
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
+            "elements": [
+                {
+                    "tag": "markdown",
                     "content": f"**{col}**",
-                },
-            }],
+                }
+            ],
         })
     rows.append({
         "tag": "column_set",
@@ -113,13 +144,12 @@ def _feishu_cost_table(
                 "tag": "column",
                 "width": widths[i],
                 "weight": weights[i],
-                "elements": [{
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
+                "elements": [
+                    {
+                        "tag": "markdown",
                         "content": str(text),
-                    },
-                }],
+                    }
+                ],
             })
         rows.append({
             "tag": "column_set",
@@ -154,6 +184,313 @@ class CloudBillingNotificationService:
             label = label.strip().strip("*")
             return label, value.strip()
         return line.strip(), ""
+
+    def _format_recharge_approval_notice(
+        self,
+        notice: str,
+        label: str,
+        separator: str,
+    ) -> str:
+        """Format approval progress as readable markdown lines."""
+        notice = str(notice or "").strip()
+        if not notice:
+            return ""
+        if "；" in notice:
+            parts = [
+                part.strip()
+                for part in notice.split("；")
+                if part.strip()
+            ]
+        elif " Current progress:" in notice:
+            summary, progress = notice.split(
+                " Current progress:",
+                1,
+            )
+            parts = [summary.strip(), f"Current progress:{progress}"]
+        else:
+            parts = [notice]
+
+        lines = [f"**{label}**{separator}{parts[0]}"]
+        for part in parts[1:]:
+            key, value = self._split_label_value(part)
+            if value:
+                lines.append(f"**{key}**{separator}{value}")
+            else:
+                lines.append(part)
+        return "\n".join(lines)
+
+    def _get_recharge_approval_progress(
+        self,
+        alert_record: AlertRecord,
+    ) -> list[dict[str, Any]]:
+        """Return approval nodes associated with an alert, when available."""
+        notice = extract_recharge_approval_notice(
+            getattr(alert_record, "alert_message", "")
+        )
+        normalized_notice = notice.lower()
+        if (
+            "已有充值审批流程正在进行" not in notice
+            and "already in progress" not in normalized_notice
+        ):
+            return []
+        account_id = extract_account_id_from_message(
+            getattr(alert_record, "alert_message", "")
+        )
+        if not account_id:
+            return []
+        approval = find_ongoing_recharge_approval_for_account(
+            provider=alert_record.provider,
+            recharge_account=account_id,
+        )
+        if approval is None:
+            return []
+        cached_progress = (
+            approval.context_payload or {}
+        ).get("approval_progress")
+        if isinstance(cached_progress, list) and cached_progress:
+            cached_nodes = [
+                node
+                for node in cached_progress
+                if isinstance(node, dict)
+            ]
+            cached_node_kinds = {
+                str(node.get("node_kind") or "").strip()
+                for node in cached_nodes
+            }
+            has_active_node = any(
+                str(node.get("node_kind") or "").strip()
+                not in {"start", "end"}
+                and str(node.get("status") or "").strip().upper()
+                in PENDING_FEISHU_TASK_STATUSES
+                for node in cached_nodes
+            )
+            cached_at = parse_datetime(
+                str(
+                    (approval.context_payload or {}).get(
+                        "approval_progress_cached_at"
+                    )
+                    or ""
+                )
+            )
+            cache_is_fresh = False
+            if cached_at is not None:
+                if timezone.is_naive(cached_at):
+                    cached_at = timezone.make_aware(cached_at)
+                cache_age = timezone.now() - cached_at
+                cache_is_fresh = (
+                    timedelta(0)
+                    <= cache_age
+                    <= APPROVAL_PROGRESS_CACHE_TTL
+                )
+            if (
+                {"start", "end"} <= cached_node_kinds
+                and has_active_node
+                and cache_is_fresh
+            ):
+                return cached_nodes
+        try:
+            return get_recharge_approval_progress(approval)
+        except Exception:
+            logger.warning(
+                "Could not load recharge approval progress "
+                "(alert_record_id=%s, approval_record_id=%s)",
+                getattr(alert_record, "id", None),
+                approval.id,
+                exc_info=True,
+            )
+            return []
+
+    def _format_approval_progress_time(self, raw_time: Any) -> str:
+        """Format a Feishu millisecond timestamp in China Standard Time."""
+        text = str(raw_time or "").strip()
+        if not text or not text.isdigit() or int(text) <= 0:
+            return ""
+        value = datetime.fromtimestamp(
+            int(text) / 1000,
+            tz=dt_timezone.utc,
+        )
+        return value.astimezone(FEISHU_DISPLAY_TIME_ZONE).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+    def _build_feishu_approval_progress_panel(
+        self,
+        nodes: list[dict[str, Any]],
+        language: str,
+    ) -> Optional[dict[str, Any]]:
+        """Build a read-only, collapsed approval progress panel."""
+        normalized_nodes = [
+            node for node in nodes if isinstance(node, dict)
+        ]
+        if not normalized_nodes:
+            return None
+
+        chinese = self._is_chinese_language(language)
+        status_labels = {
+            "APPROVED": ("已通过", "Approved"),
+            "DONE": ("已完成", "Completed"),
+            "PENDING": ("等待审批", "Awaiting approval"),
+            "APPROVING": ("等待审批", "Awaiting approval"),
+            "IN_PROGRESS": ("处理中", "In progress"),
+            "REJECTED": ("已拒绝", "Rejected"),
+            "CANCELED": ("已撤回", "Cancelled"),
+            "TRANSFERRED": ("已转交", "Transferred"),
+            "NOT_STARTED": ("尚未开始", "Not started"),
+        }
+        status_icons = {
+            "APPROVED": "✅",
+            "DONE": "✅",
+            "PENDING": "🟠",
+            "APPROVING": "🟠",
+            "IN_PROGRESS": "🟠",
+            "REJECTED": "❌",
+            "CANCELED": "❌",
+            "TRANSFERRED": "↪️",
+            "NOT_STARTED": "⚪",
+        }
+        active_statuses = {"PENDING", "APPROVING", "IN_PROGRESS"}
+        current_position = sum(
+            1
+            for node in normalized_nodes
+            if str(node.get("status") or "").upper()
+            in {
+                "APPROVED",
+                "DONE",
+                "REJECTED",
+                "CANCELED",
+                "TRANSFERRED",
+                *active_statuses,
+            }
+        )
+        current_position = max(1, current_position)
+        title = (
+            f"审批进度（{current_position}/{len(normalized_nodes)}）"
+            if chinese
+            else (
+                "Approval progress "
+                f"({current_position}/{len(normalized_nodes)})"
+            )
+        )
+
+        progress_lines = []
+        for node in normalized_nodes:
+            node_kind = str(node.get("node_kind") or "").strip()
+            status = str(
+                node.get("status") or "NOT_STARTED"
+            ).strip().upper()
+            status_pair = status_labels.get(
+                status,
+                (status or "未知", status or "Unknown"),
+            )
+            status_text = status_pair[0] if chinese else status_pair[1]
+            icon = status_icons.get(status, "⚪")
+            node_name = str(
+                node.get("node_name") or "待审批"
+            ).strip()
+            if node_kind == "start":
+                node_name = "发起" if chinese else "Submitted"
+                if status in {"APPROVED", "DONE"}:
+                    status_text = "已发起" if chinese else "Submitted"
+            elif node_kind == "end":
+                node_name = "结束" if chinese else "End"
+                end_status_labels = {
+                    "NOT_STARTED": ("尚未结束", "Not finished"),
+                    "APPROVED": ("已结束", "Finished"),
+                    "DONE": ("已结束", "Finished"),
+                    "REJECTED": (
+                        "已结束（拒绝）",
+                        "Finished (rejected)",
+                    ),
+                    "CANCELED": (
+                        "已结束（撤回）",
+                        "Finished (cancelled)",
+                    ),
+                }
+                end_status_pair = end_status_labels.get(status)
+                if end_status_pair:
+                    status_text = (
+                        end_status_pair[0]
+                        if chinese
+                        else end_status_pair[1]
+                    )
+            approver_names = [
+                str(name or "").strip()
+                for name in node.get("approver_names") or []
+                if str(name or "").strip()
+            ]
+            approver_text = (
+                ("、" if chinese else ", ").join(approver_names)
+                or ("待确定" if chinese else "To be determined")
+            )
+            time_text = self._format_approval_progress_time(
+                node.get("end_time") or node.get("start_time")
+            )
+            if node_kind == "start":
+                time_label = "提交时间" if chinese else "Submitted at"
+            elif node_kind == "end":
+                time_label = "结束时间" if chinese else "Finished at"
+            elif status in active_statuses:
+                time_label = (
+                    "进入节点时间" if chinese else "Entered node at"
+                )
+            elif status != "NOT_STARTED":
+                time_label = "完成时间" if chinese else "Completed at"
+            else:
+                time_label = ""
+            if chinese:
+                details = []
+                if node_kind == "start" and approver_names:
+                    details.append(f"**发起人**：{approver_text}")
+                elif node_kind != "end":
+                    details.append(f"**审批人**：{approver_text}")
+                details.append(f"**状态**：{status_text}")
+                if time_text and time_label:
+                    details.append(f"**{time_label}**：{time_text}")
+            else:
+                details = []
+                if node_kind == "start" and approver_names:
+                    details.append(f"**Initiator**: {approver_text}")
+                elif node_kind != "end":
+                    details.append(f"**Approver**: {approver_text}")
+                details.append(f"**Status**: {status_text}")
+                if time_text and time_label:
+                    details.append(f"**{time_label}**: {time_text}")
+            progress_lines.append(
+                "\n".join([f"{icon} **{node_name}**", *details])
+            )
+
+        # Source: https://open.feishu.cn/document/feishu-cards/
+        # card-components/containers/collapsible-panel
+        return {
+            "tag": "collapsible_panel",
+            "expanded": False,
+            "header": {
+                "title": {
+                    "tag": "markdown",
+                    "content": f"**{title}**",
+                },
+                "vertical_align": "center",
+                "icon": {
+                    "tag": "standard_icon",
+                    "token": "down-small-ccm_outlined",
+                    "size": "16px 16px",
+                },
+                "icon_position": "right",
+                "icon_expanded_angle": -180,
+            },
+            "border": {
+                "color": "grey",
+                "corner_radius": "5px",
+            },
+            "vertical_spacing": "8px",
+            "padding": "8px 8px 8px 8px",
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": "\n\n".join(progress_lines),
+                }
+            ],
+        }
 
     def _is_chinese_language(self, language: str) -> bool:
         return str(language or DEFAULT_LANGUAGE).lower().startswith("zh")
@@ -190,8 +527,7 @@ class CloudBillingNotificationService:
     ) -> Dict[str, Any]:
         """Generate Feishu interactive card payload.
 
-        Uses color-coded header, font-colored metrics, column_set
-        table, and note component for a polished card layout.
+        Uses a JSON 2.0 card so the approval progress panel can collapse.
         """
         sections = build_alert_sections_from_record(
             alert_record, language
@@ -216,17 +552,16 @@ class CloudBillingNotificationService:
         # ── 1. Trigger reason (highlighted) ──
         trigger_icon = sections.get("trigger_icon", "")
         trigger_text = sections.get("trigger_text", "")
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
+        elements.append(
+            {
+                "tag": "markdown",
                 "content": (
                     f"{trigger_icon} "
                     f"<font color='orange'>"
                     f"**{trigger_text}**</font>"
                 ),
-            },
-        })
+            }
+        )
 
         # ── 2. Account info ──
         info_parts = []
@@ -245,13 +580,12 @@ class CloudBillingNotificationService:
                 f"**{L['tags']}**{sep}{tag_str}"
             )
         if info_parts:
-            elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
+            elements.append(
+                {
+                    "tag": "markdown",
                     "content": "\n".join(info_parts),
-                },
-            })
+                }
+            )
 
         elements.append({"tag": "hr"})
 
@@ -290,10 +624,12 @@ class CloudBillingNotificationService:
                     "width": "weighted",
                     "weight": 1,
                     "vertical_align": "center",
-                    "elements": [{
-                        "tag": "div",
-                        "text": {"tag": "lark_md", "content": f"{label}\n{val_md}"},
-                    }],
+                    "elements": [
+                        {
+                            "tag": "markdown",
+                            "content": f"{label}\n{val_md}",
+                        }
+                    ],
                 })
             if threshold:
                 val = threshold["value"]
@@ -305,10 +641,12 @@ class CloudBillingNotificationService:
                     "width": "weighted",
                     "weight": 1,
                     "vertical_align": "center",
-                    "elements": [{
-                        "tag": "div",
-                        "text": {"tag": "lark_md", "content": f"{label}\n{val_md}"},
-                    }],
+                    "elements": [
+                        {
+                            "tag": "markdown",
+                            "content": f"{label}\n{val_md}",
+                        }
+                    ],
                 })
             if pair_columns:
                 elements.append({
@@ -361,45 +699,52 @@ class CloudBillingNotificationService:
         if balance_info:
             bal = balance_info["value"]
             bal_cur = balance_info["currency"]
-            elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"**{L['current_balance']}**{sep}{bal:.2f} {bal_cur}",
-                },
-            })
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": (
+                        f"**{L['current_balance']}**{sep}"
+                        f"{bal:.2f} {bal_cur}"
+                    ),
+                }
+            )
 
         approval_notice = sections.get("recharge_approval_notice")
         if approval_notice:
-            elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": (
-                        f"**{L['recharge_approval']}**{sep}"
-                        f"{approval_notice}"
+            elements.append(
+                {
+                    "tag": "markdown",
+                    "content": self._format_recharge_approval_notice(
+                        approval_notice,
+                        L["recharge_approval"],
+                        sep,
                     ),
-                },
-            })
+                }
+            )
+            progress_panel = (
+                self._build_feishu_approval_progress_panel(
+                    self._get_recharge_approval_progress(alert_record),
+                    language,
+                )
+            )
+            if progress_panel:
+                elements.append(progress_panel)
 
-        # ── 7. Footer note + @all ──
-        elements.append({
-            "tag": "note",
-            "elements": [
-                {
-                    "tag": "plain_text",
-                    "content": L["footer"],
-                },
-                {
-                    "tag": "lark_md",
-                    "content": "<at id=all></at>",
-                },
-            ],
-        })
+        # ── 7. Footer + @all ──
+        elements.append(
+            {
+                "tag": "markdown",
+                "content": (
+                    f"<font color='grey'>{L['footer']}</font> "
+                    "<at id=all></at>"
+                ),
+            }
+        )
 
         payload = {
             "msg_type": "interactive",
             "card": {
+                "schema": "2.0",
                 "config": {"wide_screen_mode": True},
                 "header": {
                     "title": {
@@ -410,7 +755,9 @@ class CloudBillingNotificationService:
                     },
                     "template": header_template,
                 },
-                "elements": elements,
+                "body": {
+                    "elements": elements,
+                },
             },
         }
 
@@ -499,7 +846,11 @@ class CloudBillingNotificationService:
         if approval_notice:
             rows.append("")
             rows.append(
-                f"**{L['recharge_approval']}**{sep}{approval_notice}"
+                self._format_recharge_approval_notice(
+                    approval_notice,
+                    L["recharge_approval"],
+                    sep,
+                )
             )
 
         rows.append("")
@@ -603,7 +954,11 @@ class CloudBillingNotificationService:
         if approval_notice:
             rows.append("")
             rows.append(
-                f"**{L['recharge_approval']}**{sep}{approval_notice}"
+                self._format_recharge_approval_notice(
+                    approval_notice,
+                    L["recharge_approval"],
+                    sep,
+                )
             )
 
         body = (
@@ -768,7 +1123,7 @@ class RechargeApprovalNotificationService:
     Service for sending recharge approval notifications.
 
     Handles submitted/final-status notifications for recharge approval records
-    via the same agentcore_notifier channel infrastructure used by alerts.
+    via configured channels and direct copies to their Feishu initiators.
     """
 
     # Notification type → (Chinese title, English title)
@@ -778,6 +1133,10 @@ class RechargeApprovalNotificationService:
         "rejected": ("【充值审批】审批被拒绝", "[Recharge Approval] Approval Rejected"),
         "canceled": ("【充值审批】审批已撤回", "[Recharge Approval] Approval Cancelled"),
         "failed": ("【充值审批】提交失败", "[Recharge Approval] Submission Failed"),
+        "fulfillment_recovered": (
+            "【充值审批】检测到充值到账",
+            "[Recharge Approval] Recharge Detected",
+        ),
     }
 
     STATUS_LABELS = {
@@ -961,11 +1320,62 @@ class RechargeApprovalNotificationService:
             )
         return lines
 
+    def _build_recovery_detail_lines(
+        self,
+        record: RechargeApprovalRecord,
+        language: str,
+        currency: str,
+    ) -> list[str]:
+        evidence = dict(record.fulfillment_evidence or {})
+        signal_details = evidence.get("signal_details") or {}
+        balance_details = signal_details.get(
+            "balance_threshold_recovered",
+            {},
+        )
+        if not balance_details:
+            balance_details = evidence
+        baseline = balance_details.get("baseline_balance")
+        observed = balance_details.get("observed_balance")
+        estimated = (
+            evidence.get("estimated_recharge_amount")
+            or balance_details.get("estimated_recharge_amount")
+        )
+        is_ongoing = record.status in {
+            RechargeApprovalRecord.STATUS_PENDING,
+            RechargeApprovalRecord.STATUS_SUBMITTED,
+        }
+        flow_status = (
+            "仍在审批"
+            if is_ongoing and self._is_chinese_language(language)
+            else "Still in approval"
+            if is_ongoing
+            else "已结束"
+            if self._is_chinese_language(language)
+            else "Finished"
+        )
+        lines = []
+        for label_key, value in (
+            ("balance_before_recharge", baseline),
+            ("current_balance", observed),
+            ("estimated_recharge_amount", estimated),
+        ):
+            if value not in (None, ""):
+                lines.append(
+                    f"**{self._get_field_label(label_key, language)}**: "
+                    f"{self._format_recharge_amount(value, currency)}"
+                )
+        lines.append(
+            f"**{self._get_field_label('approval_flow', language)}**: "
+            f"{flow_status}"
+        )
+        return lines
+
     def _build_recharge_message(
         self,
         record: RechargeApprovalRecord,
         notification_type: str,
         language: str,
+        current_approvers: Optional[list[str]] = None,
     ) -> str:
         """
         Build a plain-text notification message from a RechargeApprovalRecord.
@@ -973,11 +1383,30 @@ class RechargeApprovalNotificationService:
         If the record's context_payload contains a pre-formatted notification_message
         (generated by the agent), return it directly. Otherwise, build from fields.
         """
+        approver_names = []
+        for value in current_approvers or []:
+            name = str(value or "").strip()
+            if name and name not in approver_names:
+                approver_names.append(name)
+        approver_separator = (
+            "、" if self._is_chinese_language(language) else ", "
+        )
+        current_approver_text = approver_separator.join(approver_names)
+
         # Agent-generated notification message takes precedence
         agent_msg = str(
             record.context_payload.get("notification_message", "")
         ).strip()
-        if agent_msg:
+        if agent_msg and notification_type != "fulfillment_recovered":
+            if current_approver_text:
+                current_approver_label = self._get_field_label(
+                    "current_approver",
+                    language,
+                )
+                return (
+                    f"{agent_msg}\n**{current_approver_label}**: "
+                    f"{current_approver_text}"
+                )
             return agent_msg
         separator = ": "
 
@@ -1211,6 +1640,33 @@ class RechargeApprovalNotificationService:
                 lines.append(
                     f"{fmt_label(self._get_field_label('remark', language))}{separator}{str(remark).strip()}"
                 )
+        instance_code = str(record.feishu_instance_code or "").strip()
+        if instance_code:
+            instance_label = self._get_field_label(
+                "instance_code",
+                language,
+            )
+            lines.append(
+                f"{fmt_label(instance_label)}"
+                f"{separator}{instance_code}"
+            )
+        if current_approver_text:
+            current_approver_label = self._get_field_label(
+                "current_approver",
+                language,
+            )
+            lines.append(
+                f"{fmt_label(current_approver_label)}"
+                f"{separator}{current_approver_text}"
+            )
+        if notification_type == "fulfillment_recovered":
+            lines.extend(
+                self._build_recovery_detail_lines(
+                    record,
+                    language,
+                    currency,
+                )
+            )
         lines.append(
             f"{fmt_label(self._get_field_label('approval_status', language))}{separator}{status_label}"
         )
@@ -1245,8 +1701,19 @@ class RechargeApprovalNotificationService:
             "expected_date": ("期望到账时间", "Expected Arrival Date"),
             "payee_account_name": ("收款户名", "Payee Account Name"),
             "payee_bank_name": ("收款银行", "Payee Bank"),
+            "instance_code": ("审批实例号", "Approval Instance ID"),
+            "current_approver": ("当前审批人", "Current Approver"),
             "approval_status": ("审批状态", "Approval Status"),
             "failure_reason": ("失败原因", "Failure Reason"),
+            "balance_before_recharge": (
+                "充值前余额",
+                "Balance Before Recharge",
+            ),
+            "estimated_recharge_amount": (
+                "推定充值金额",
+                "Estimated Recharge Amount",
+            ),
+            "approval_flow": ("审批流程", "Approval Flow"),
             "remark": ("备注", "Remark"),
         }
         pair = labels.get(field_key, (field_key, field_key))
@@ -1267,11 +1734,17 @@ class RechargeApprovalNotificationService:
         record: RechargeApprovalRecord,
         notification_type: str,
         language: str,
+        current_approvers: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         title = self._get_label(
             notification_type, language, self.NOTIFICATION_TYPE_LABELS
         )
-        message = self._build_recharge_message(record, notification_type, language)
+        message = self._build_recharge_message(
+            record,
+            notification_type,
+            language,
+            current_approvers=current_approvers,
+        )
         content = "\n".join(
             line.strip() for line in message.splitlines() if line.strip()
         )
@@ -1300,16 +1773,849 @@ class RechargeApprovalNotificationService:
             },
         }
 
+    def _get_direct_recharge_payload(
+        self,
+        record: RechargeApprovalRecord,
+    ) -> Dict[str, Any]:
+        payload = dict(record.request_payload or {})
+        if not payload and record.raw_recharge_info:
+            try:
+                payload = parse_recharge_info(record.raw_recharge_info)
+            except Exception:
+                payload = {}
+        return payload
+
+    def _build_direct_recharge_lines(
+        self,
+        record: RechargeApprovalRecord,
+        payload: Dict[str, Any],
+    ) -> list:
+        provider_name = str(
+            record.provider.display_name or record.provider.name or "—"
+        ).strip()
+        recharge_account = self._stringify_display_value(
+            payload.get("recharge_account")
+        )
+        amount = self._format_recharge_amount(
+            payload.get("amount"),
+            str(payload.get("currency") or "CNY"),
+        )
+        initiator = str(record.submitter_user_label or "").strip()
+        if not initiator:
+            initiator = str(record.submitter_identifier or "").strip()
+        if not initiator:
+            initiator = (
+                "系统自动提交"
+                if record.trigger_source
+                == RechargeApprovalRecord.TRIGGER_SOURCE_ALERT
+                else "—"
+            )
+        recharge_customer = str(
+            payload.get("recharge_customer_name") or ""
+        ).strip()
+        payment_company = str(
+            payload.get("payment_company") or ""
+        ).strip()
+        recharge_lines = [
+            "**💰 充值信息**",
+            f"**公有云类型**: {provider_name}",
+        ]
+        if recharge_customer:
+            recharge_lines.append(
+                f"**充值客户**: {recharge_customer}"
+            )
+        recharge_lines.extend(
+            [
+                f"**充值账号**: {recharge_account}",
+                f"**付款金额**: {amount}",
+            ]
+        )
+        if payment_company and payment_company != recharge_customer:
+            recharge_lines.append(f"**付款公司**: {payment_company}")
+        payment_methods = []
+        for value in (
+            payload.get("payment_way"),
+            payload.get("remit_method"),
+        ):
+            value_text = str(value or "").strip()
+            if value_text and value_text not in payment_methods:
+                payment_methods.append(value_text)
+        if payment_methods:
+            recharge_lines.append(
+                f"**支付方式**: {' / '.join(payment_methods)}"
+            )
+        expected_date = str(payload.get("expected_date") or "").strip()
+        if expected_date:
+            recharge_lines.append(
+                f"**期望到账时间**: {expected_date}"
+            )
+        recharge_lines.append(f"**审批发起人**: {initiator}")
+        return recharge_lines
+
+    def _build_direct_approval_elements(
+        self,
+        record: RechargeApprovalRecord,
+        *,
+        current_node: str = "",
+        status_label: str = "",
+        status_message: str = "",
+    ) -> list:
+        approval_lines = []
+        if current_node:
+            approval_lines.append(
+                f"**当前审批节点**: {current_node}"
+            )
+        if status_label:
+            approval_lines.append(f"**审批状态**: {status_label}")
+        if status_message:
+            approval_lines.append(f"**状态说明**: {status_message}")
+        approval_lines.append(
+            "点击下方“查看审批单”按钮"
+            "打开审批实例详情。"
+        )
+        elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**🔗 审批实例**",
+                },
+            },
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "\n".join(approval_lines),
+                },
+            },
+        ]
+        detail_action = self._build_approval_detail_action(
+            record.feishu_instance_code
+        )
+        if detail_action:
+            elements.append(detail_action)
+        return elements
+
+    def _generate_approver_reminder_payload(
+        self,
+        record: RechargeApprovalRecord,
+        *,
+        node_name: str,
+        escalation_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Build a direct message for one pending Feishu approver."""
+        payload = self._get_direct_recharge_payload(record)
+        current_node = self._stringify_display_value(node_name)
+        usage_report = self._build_account_usage_report(record, payload)
+        recharge_lines = [
+            "**你有一笔云账单充值审批需要处理**",
+            *self._build_direct_recharge_lines(record, payload),
+        ]
+        escalation = dict(escalation_context or {})
+        level = escalation.get("level")
+        elements = []
+        if level in {30, 50}:
+            currency = str(
+                escalation.get("currency") or "CNY"
+            ).strip()
+            current_balance = self._format_recharge_amount(
+                escalation.get("current_balance"),
+                currency,
+            )
+            balance_threshold = self._format_recharge_amount(
+                escalation.get("balance_threshold"),
+                currency,
+            )
+            balance_ratio = str(
+                escalation.get("balance_ratio") or ""
+            ).strip()
+            elements.extend(
+                [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": "\n".join(
+                                [
+                                    (
+                                        "**余额已低于阈值的 "
+                                        f"{level}%，请尽快审批。**"
+                                    ),
+                                    f"**当前余额**: {current_balance}",
+                                    f"**余额阈值**: {balance_threshold}",
+                                    f"**余额占比**: {balance_ratio}%",
+                                ]
+                            ),
+                        },
+                    },
+                    {"tag": "hr"},
+                ]
+            )
+        elements.extend([
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "\n".join(recharge_lines),
+                },
+            },
+            {"tag": "hr"},
+        ])
+        elements.extend(self._build_usage_report_elements(usage_report))
+        elements.append({"tag": "hr"})
+        elements.extend(
+            self._build_direct_approval_elements(
+                record,
+                current_node=current_node,
+            )
+        )
+        title = "【待审批】云账单充值申请"
+        template = "orange"
+        if level == 50:
+            title = "【余额告急】云账单充值审批"
+            template = "yellow"
+        elif level == 30:
+            title = "【紧急催办】云账单充值审批"
+            template = "red"
+        return {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": title,
+                    },
+                    "template": template,
+                },
+                "elements": elements,
+            },
+        }
+
+    def _generate_submitter_copy_payload(
+        self,
+        record: RechargeApprovalRecord,
+        notification_type: str,
+    ) -> Dict[str, Any]:
+        """Build a direct status card for the approval submitter."""
+        payload = self._get_direct_recharge_payload(record)
+        usage_report = self._build_account_usage_report(record, payload)
+        title = self._get_label(
+            notification_type,
+            DEFAULT_LANGUAGE,
+            self.NOTIFICATION_TYPE_LABELS,
+        )
+        status_label = self._get_label(
+            notification_type,
+            DEFAULT_LANGUAGE,
+            self.STATUS_LABELS,
+        )
+        status_message = ""
+        if notification_type in {"failed", "rejected", "canceled"}:
+            status_message = str(record.status_message or "").strip()
+        elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "\n".join(
+                        [
+                            (
+                                "**Tower 平台自动发起了一个"
+                                "审批流程。**"
+                            ),
+                            *self._build_direct_recharge_lines(
+                                record,
+                                payload,
+                            ),
+                        ]
+                    ),
+                },
+            },
+            {"tag": "hr"},
+        ]
+        elements.extend(self._build_usage_report_elements(usage_report))
+        elements.append({"tag": "hr"})
+        elements.extend(
+            self._build_direct_approval_elements(
+                record,
+                status_label=status_label,
+                status_message=status_message,
+            )
+        )
+        return {
+            "msg_type": "interactive",
+            "card": {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {
+                        "tag": "plain_text",
+                        "content": title,
+                    },
+                    "template": "blue",
+                },
+                "elements": elements,
+            },
+        }
+
+    def _build_account_usage_report(
+        self,
+        record: RechargeApprovalRecord,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Build a compact report from the account's latest billing rows."""
+        context = dict(record.context_payload or {})
+        account_id = str(
+            context.get("billing_account_id")
+            or payload.get("recharge_account")
+            or ""
+        ).strip()
+        currency = str(payload.get("currency") or "CNY").strip() or "CNY"
+        alert = record.alert_record
+        report = {
+            "account_id": account_id,
+            "has_data": False,
+            "currency": currency,
+            "alert_type": (
+                alert.alert_type
+                if alert is not None
+                else context.get("alert_type")
+            ),
+            "current_days_remaining": (
+                alert.current_days_remaining
+                if (
+                    alert is not None
+                    and alert.current_days_remaining is not None
+                )
+                else context.get("current_days_remaining")
+            ),
+            "days_remaining_threshold": (
+                alert.days_remaining_threshold
+                if (
+                    alert is not None
+                    and alert.days_remaining_threshold is not None
+                )
+                else context.get("days_remaining_threshold")
+            ),
+        }
+        if not account_id:
+            return report
+
+        rows = list(
+            BillingData.objects.filter(
+                provider=record.provider,
+                account_id=account_id,
+                collected_at__gte=timezone.now() - timedelta(hours=24),
+            ).order_by(
+                "-day",
+                "-hour",
+                "-collected_at",
+            )[:24]
+        )
+        if not rows:
+            return report
+
+        latest = rows[0]
+        report["has_data"] = True
+        report["currency"] = str(latest.currency or currency).strip()
+        report["monthly_cost"] = latest.total_cost
+        report["recent_cost"] = sum(
+            (
+                row.hourly_cost
+                for row in rows
+                if row.hourly_cost is not None
+            ),
+            Decimal("0"),
+        )
+        balance_row = next(
+            (row for row in rows if row.balance is not None),
+            None,
+        )
+        report["current_balance"] = (
+            balance_row.balance if balance_row is not None else None
+        )
+        report["balance_threshold"] = self._get_balance_threshold(record)
+        report["top_services"] = self._get_top_service_costs(
+            latest.service_costs
+        )
+        return report
+
+    def _get_balance_threshold(
+        self,
+        record: RechargeApprovalRecord,
+    ) -> Optional[Decimal]:
+        alert = record.alert_record
+        value = (
+            alert.balance_threshold
+            if alert is not None and alert.balance_threshold is not None
+            else (record.context_payload or {}).get("balance_threshold")
+        )
+        if value in (None, ""):
+            return None
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return None
+
+    def _get_top_service_costs(
+        self,
+        service_costs: Any,
+    ) -> list:
+        if not isinstance(service_costs, dict):
+            return []
+        normalized = []
+        for name, value in service_costs.items():
+            try:
+                cost = Decimal(str(value))
+            except Exception:
+                continue
+            normalized.append((str(name or "—").strip() or "—", cost))
+        normalized.sort(key=lambda item: item[1], reverse=True)
+        return normalized[:3]
+
+    def _format_usage_amount(
+        self,
+        value: Any,
+        currency: str,
+    ) -> str:
+        if value in (None, ""):
+            return "—"
+        try:
+            amount = Decimal(str(value))
+        except Exception:
+            return self._stringify_display_value(value)
+        return f"{amount:,.2f} {currency}"
+
+    def _build_usage_metric_column(
+        self,
+        label: str,
+        value: str,
+    ) -> Dict[str, Any]:
+        return {
+            "tag": "column",
+            "width": "weighted",
+            "weight": 1,
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**{label}**\n{value}",
+                    },
+                }
+            ],
+        }
+
+    def _build_usage_report_elements(
+        self,
+        report: Dict[str, Any],
+    ) -> list:
+        elements = [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": "**📊 账单概述**",
+                },
+            }
+        ]
+        uses_days_remaining = report.get("alert_type") == (
+            AlertRecord.ALERT_TYPE_DAYS_REMAINING
+        )
+        trigger_metrics = None
+        if uses_days_remaining:
+            current_days = report.get("current_days_remaining")
+            threshold_days = report.get("days_remaining_threshold")
+            trigger_metrics = (
+                (
+                    "当前剩余天数",
+                    (
+                        f"{current_days} 天"
+                        if current_days not in (None, "")
+                        else "—"
+                    ),
+                ),
+                (
+                    "剩余天数阈值",
+                    (
+                        f"{threshold_days} 天"
+                        if threshold_days not in (None, "")
+                        else "—"
+                    ),
+                ),
+            )
+        if not report.get("has_data"):
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": "暂无该云账号的使用记录。",
+                    },
+                }
+            )
+            if trigger_metrics:
+                elements.append(
+                    {
+                        "tag": "column_set",
+                        "flex_mode": "stretch",
+                        "background_style": "grey",
+                        "columns": [
+                            self._build_usage_metric_column(
+                                label,
+                                value,
+                            )
+                            for label, value in trigger_metrics
+                        ],
+                    }
+                )
+            return elements
+
+        currency = str(report.get("currency") or "CNY")
+        metric_rows = [
+            trigger_metrics or (
+                (
+                    "当前余额",
+                    self._format_usage_amount(
+                        report.get("current_balance"),
+                        currency,
+                    ),
+                ),
+                (
+                    "余额阈值",
+                    self._format_usage_amount(
+                        report.get("balance_threshold"),
+                        currency,
+                    ),
+                ),
+            ),
+            (
+                (
+                    "近24小时消费",
+                    self._format_usage_amount(
+                        report.get("recent_cost"),
+                        currency,
+                    ),
+                ),
+                (
+                    "本月累计消费",
+                    self._format_usage_amount(
+                        report.get("monthly_cost"),
+                        currency,
+                    ),
+                ),
+            ),
+        ]
+        for metrics in metric_rows:
+            elements.append(
+                {
+                    "tag": "column_set",
+                    "flex_mode": "stretch",
+                    "background_style": "grey",
+                    "columns": [
+                        self._build_usage_metric_column(label, value)
+                        for label, value in metrics
+                    ],
+                }
+            )
+
+        top_services = report.get("top_services") or []
+        if top_services:
+            service_text = "、".join(
+                f"{name} {self._format_usage_amount(cost, currency)}"
+                for name, cost in top_services
+            )
+            elements.append(
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            f"**主要服务消费**: {service_text}"
+                        ),
+                    },
+                }
+            )
+        return elements
+
+    def _build_approval_detail_action(
+        self,
+        instance_code: Any,
+    ) -> Optional[Dict[str, Any]]:
+        instance_code = str(instance_code or "").strip()
+        if not instance_code:
+            return None
+        mobile_url = (
+            f"{FEISHU_APPROVAL_APPLINK_URL}?"
+            + urllib.parse.urlencode(
+                {
+                    "appId": FEISHU_APPROVAL_APP_ID,
+                    "path": (
+                        "pages/detail/index?"
+                        f"instanceId={instance_code}"
+                    ),
+                }
+            )
+        )
+        pc_url = (
+            f"{FEISHU_APPROVAL_APPLINK_URL}?"
+            + urllib.parse.urlencode(
+                {
+                    "mode": "appCenter",
+                    "appId": FEISHU_APPROVAL_APP_ID,
+                    "path": (
+                        "pc/pages/in-process/index?"
+                        f"instanceId={instance_code}"
+                    ),
+                }
+            )
+        )
+        return {
+            "tag": "action",
+            "actions": [
+                {
+                    "tag": "button",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": "查看审批单",
+                    },
+                    "type": "primary",
+                    "multi_url": {
+                        "url": mobile_url,
+                        "android_url": mobile_url,
+                        "ios_url": mobile_url,
+                        "pc_url": pc_url,
+                    },
+                }
+            ],
+        }
+
+    def _send_feishu_user_card(
+        self,
+        record: RechargeApprovalRecord,
+        *,
+        recipient_user_id: str,
+        payload: Dict[str, Any],
+        log_label: str,
+        message_uuid: str = "",
+    ) -> Dict[str, Any]:
+        """Send one interactive card to a Feishu user_id."""
+        token = _get_feishu_access_token()
+        if not token:
+            return {
+                "success": False,
+                "skipped": False,
+                "recipient_user_id": recipient_user_id,
+                "message_id": "",
+                "error": "Feishu tenant access token is unavailable",
+            }
+        request_body = {
+            "receive_id": recipient_user_id,
+            "msg_type": payload["msg_type"],
+            "content": json.dumps(payload["card"], ensure_ascii=False),
+        }
+        if message_uuid:
+            request_body["uuid"] = message_uuid
+        request = urllib.request.Request(
+            url=FEISHU_USER_MESSAGE_URL,
+            data=json.dumps(
+                request_body,
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                response_data = json.loads(
+                    response.read().decode("utf-8")
+                )
+        except urllib.error.HTTPError as exc:
+            error = f"Feishu message API HTTP error: {exc.code}"
+            logger.warning(
+                "%s (record_id=%s, recipient_user_id=%s)",
+                error,
+                record.id,
+                recipient_user_id,
+            )
+            return {
+                "success": False,
+                "skipped": False,
+                "recipient_user_id": recipient_user_id,
+                "message_id": "",
+                "error": error,
+            }
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            error = f"Feishu message API request failed: {exc}"
+            logger.warning(
+                "%s (record_id=%s, recipient_user_id=%s)",
+                error,
+                record.id,
+                recipient_user_id,
+            )
+            return {
+                "success": False,
+                "skipped": False,
+                "recipient_user_id": recipient_user_id,
+                "message_id": "",
+                "error": error,
+            }
+        code = response_data.get("code")
+        if code != 0:
+            if code is None:
+                error = "Feishu message API response missing success code"
+            else:
+                error = (
+                    f"Feishu message API error {code}: "
+                    f"{response_data.get('msg', '')}"
+                )
+            logger.warning(
+                "%s (record_id=%s, recipient_user_id=%s)",
+                error,
+                record.id,
+                recipient_user_id,
+            )
+            return {
+                "success": False,
+                "skipped": False,
+                "recipient_user_id": recipient_user_id,
+                "message_id": "",
+                "error": error,
+            }
+        message_id = str(
+            (response_data.get("data") or {}).get("message_id") or ""
+        ).strip()
+        if not message_id:
+            return {
+                "success": False,
+                "skipped": False,
+                "recipient_user_id": recipient_user_id,
+                "message_id": "",
+                "error": "Feishu message API response missing message_id",
+            }
+        logger.info(
+            "%s (record_id=%s, recipient_user_id=%s, message_id=%s)",
+            log_label,
+            record.id,
+            recipient_user_id,
+            message_id,
+        )
+        return {
+            "success": True,
+            "skipped": False,
+            "recipient_user_id": recipient_user_id,
+            "message_id": message_id,
+            "error": None,
+        }
+
+    def send_approver_reminder(
+        self,
+        record: RechargeApprovalRecord,
+        *,
+        recipient_user_id: str,
+        node_name: str,
+        escalation_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Notify one current approver through Feishu direct message."""
+        recipient_user_id = str(recipient_user_id or "").strip()
+        if not recipient_user_id:
+            return {
+                "success": False,
+                "skipped": True,
+                "recipient_user_id": "",
+                "message_id": "",
+                "error": "Approver user_id is unavailable",
+            }
+        payload = self._generate_approver_reminder_payload(
+            record,
+            node_name=node_name,
+            escalation_context=escalation_context,
+        )
+        level = (escalation_context or {}).get("level")
+        notification_key = (
+            f"balance_{level}" if level in {30, 50} else "pending"
+        )
+        message_uuid = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                (
+                    "devmind:recharge-approver:"
+                    f"{record.id}:{recipient_user_id}:"
+                    f"{notification_key}"
+                ),
+            )
+        )
+        return self._send_feishu_user_card(
+            record,
+            recipient_user_id=recipient_user_id,
+            payload=payload,
+            log_label="Recharge approval reminder sent to Feishu approver",
+            message_uuid=message_uuid,
+        )
+
+    def send_submitter_copy(
+        self,
+        record: RechargeApprovalRecord,
+        notification_type: str,
+    ) -> Dict[str, Any]:
+        """Send an approval notification card to its Feishu initiator."""
+        recipient_user_id = str(
+            record.resolved_submitter_user_id or ""
+        ).strip()
+        if not recipient_user_id:
+            logger.info(
+                "Recharge approval submitter copy skipped: no resolved "
+                "Feishu user_id (record_id=%s)",
+                record.id,
+            )
+            return {
+                "success": True,
+                "skipped": True,
+                "recipient_user_id": "",
+                "message_id": "",
+                "error": None,
+            }
+
+        payload = self._generate_submitter_copy_payload(
+            record,
+            notification_type,
+        )
+        message_uuid = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                (
+                    "devmind:recharge-submitter:"
+                    f"{record.id}:{notification_type}"
+                ),
+            )
+        )
+        return self._send_feishu_user_card(
+            record,
+            recipient_user_id=recipient_user_id,
+            payload=payload,
+            log_label="Recharge approval copied to Feishu submitter",
+            message_uuid=message_uuid,
+        )
+
     def _generate_wechat_payload(
         self,
         record: RechargeApprovalRecord,
         notification_type: str,
         language: str,
+        current_approvers: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         title = self._get_label(
             notification_type, language, self.NOTIFICATION_TYPE_LABELS
         )
-        message = self._build_recharge_message(record, notification_type, language)
+        message = self._build_recharge_message(
+            record,
+            notification_type,
+            language,
+            current_approvers=current_approvers,
+        )
         rows = []
         for line in message.splitlines():
             if not line.strip():
@@ -1327,11 +2633,17 @@ class RechargeApprovalNotificationService:
         record: RechargeApprovalRecord,
         notification_type: str,
         language: str,
+        current_approvers: Optional[list[str]] = None,
     ) -> tuple[str, str]:
         title = self._get_label(
             notification_type, language, self.NOTIFICATION_TYPE_LABELS
         )
-        message = self._build_recharge_message(record, notification_type, language)
+        message = self._build_recharge_message(
+            record,
+            notification_type,
+            language,
+            current_approvers=current_approvers,
+        )
         body_lines = []
         for line in message.splitlines():
             if not line.strip():
@@ -1366,6 +2678,7 @@ class RechargeApprovalNotificationService:
         channel_uuid: Optional[str] = None,
         channel_type: Optional[str] = None,
         synchronous: bool = False,
+        current_approvers: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         """
         Send recharge approval notification via webhook or email.
@@ -1375,6 +2688,7 @@ class RechargeApprovalNotificationService:
             notification_type: one of submitted / approved / rejected / canceled / failed
             channel_uuid: explicit channel UUID (overrides provider config)
             channel_type: 'webhook' or 'email' (required when channel_uuid is set)
+            current_approvers: readable names for live pending approvers
         """
         # Resolve channel from provider config if not explicitly provided
         cfg_uuid, cfg_type = self._get_channel_config(record)
@@ -1387,12 +2701,14 @@ class RechargeApprovalNotificationService:
                 notification_type,
                 effective_uuid,
                 synchronous=synchronous,
+                current_approvers=current_approvers,
             )
         return self._send_recharge_webhook(
             record,
             notification_type,
             effective_uuid,
             synchronous=synchronous,
+            current_approvers=current_approvers,
         )
 
     def _send_recharge_webhook(
@@ -1401,6 +2717,7 @@ class RechargeApprovalNotificationService:
         notification_type: str,
         channel_uuid: Optional[str] = None,
         synchronous: bool = False,
+        current_approvers: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         # Only pass channel_uuid when it has a real value; otherwise
         # get_webhook_channel_by_uuid(None) raises ValueError(UUID("None")).
@@ -1428,11 +2745,17 @@ class RechargeApprovalNotificationService:
 
         if provider_type in FEISHU_PROVIDERS:
             payload = self._generate_feishu_payload(
-                record, notification_type, language
+                record,
+                notification_type,
+                language,
+                current_approvers=current_approvers,
             )
         elif provider_type == Provider.WECHAT:
             payload = self._generate_wechat_payload(
-                record, notification_type, language
+                record,
+                notification_type,
+                language,
+                current_approvers=current_approvers,
             )
         else:
             return {
@@ -1467,6 +2790,7 @@ class RechargeApprovalNotificationService:
         notification_type: str,
         channel_uuid: Optional[str],
         synchronous: bool = False,
+        current_approvers: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         if not channel_uuid:
             return {
@@ -1518,7 +2842,10 @@ class RechargeApprovalNotificationService:
 
         language = raw.get("language", DEFAULT_LANGUAGE)
         subject, body = self._generate_email_subject_and_body(
-            record, notification_type, language
+            record,
+            notification_type,
+            language,
+            current_approvers=current_approvers,
         )
         user = record.provider.created_by
         user_id = user.id if user else None

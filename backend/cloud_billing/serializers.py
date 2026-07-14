@@ -496,6 +496,7 @@ class AlertRuleSerializer(serializers.ModelSerializer):
             'cost_threshold', 'growth_threshold',
             'growth_amount_threshold', 'balance_threshold',
             'days_remaining_threshold', 'is_active',
+            'enable_recharge_recovery_detection',
             'auto_submit_recharge_approval', 'auto_recharge_amount',
             'created_at', 'updated_at',
             'created_by', 'created_by_username',
@@ -510,37 +511,29 @@ class AlertRuleSerializer(serializers.ModelSerializer):
         """
         Validate that at least one threshold is set.
         """
-        cost_threshold = attrs.get('cost_threshold')
-        if cost_threshold is None and self.instance:
-            cost_threshold = self.instance.cost_threshold
+        def effective_value(field_name):
+            if field_name in attrs:
+                return attrs[field_name]
+            if self.instance is not None:
+                return getattr(self.instance, field_name)
+            return None
 
-        growth_threshold = attrs.get('growth_threshold')
-        if growth_threshold is None and self.instance:
-            growth_threshold = self.instance.growth_threshold
-
-        growth_amount_threshold = attrs.get('growth_amount_threshold')
-        if growth_amount_threshold is None and self.instance:
-            growth_amount_threshold = self.instance.growth_amount_threshold
-
-        balance_threshold = attrs.get('balance_threshold')
-        if balance_threshold is None and self.instance:
-            balance_threshold = self.instance.balance_threshold
-
-        days_remaining_threshold = attrs.get('days_remaining_threshold')
-        if days_remaining_threshold is None and self.instance:
-            days_remaining_threshold = self.instance.days_remaining_threshold
-
-        auto_submit_recharge_approval = attrs.get(
+        cost_threshold = effective_value('cost_threshold')
+        growth_threshold = effective_value('growth_threshold')
+        growth_amount_threshold = effective_value(
+            'growth_amount_threshold'
+        )
+        balance_threshold = effective_value('balance_threshold')
+        days_remaining_threshold = effective_value(
+            'days_remaining_threshold'
+        )
+        enable_recharge_recovery_detection = effective_value(
+            'enable_recharge_recovery_detection'
+        )
+        auto_submit_recharge_approval = effective_value(
             'auto_submit_recharge_approval'
         )
-        if auto_submit_recharge_approval is None and self.instance:
-            auto_submit_recharge_approval = (
-                self.instance.auto_submit_recharge_approval
-            )
-
-        auto_recharge_amount = attrs.get('auto_recharge_amount')
-        if auto_recharge_amount is None and self.instance:
-            auto_recharge_amount = self.instance.auto_recharge_amount
+        auto_recharge_amount = effective_value('auto_recharge_amount')
 
         if (
             cost_threshold is None
@@ -559,6 +552,19 @@ class AlertRuleSerializer(serializers.ModelSerializer):
                 {
                     "auto_recharge_amount": (
                         "Auto recharge amount must be greater than 0."
+                    )
+                }
+            )
+        if (
+            enable_recharge_recovery_detection
+            and balance_threshold is None
+            and days_remaining_threshold is None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "enable_recharge_recovery_detection": (
+                        "A balance or days remaining threshold is required "
+                        "when recharge recovery detection is enabled."
                     )
                 }
             )
@@ -589,6 +595,7 @@ class AlertRuleListSerializer(serializers.ModelSerializer):
             'cost_threshold', 'growth_threshold',
             'growth_amount_threshold', 'balance_threshold',
             'days_remaining_threshold', 'is_active',
+            'enable_recharge_recovery_detection',
             'auto_submit_recharge_approval', 'auto_recharge_amount',
             'created_at', 'updated_at',
         ]
@@ -700,7 +707,9 @@ class RechargeApprovalRecordSerializer(serializers.ModelSerializer):
         model = RechargeApprovalRecord
         fields = [
             'id', 'provider', 'provider_name', 'trace_id', 'alert_record',
-            'trigger_source', 'trigger_reason', 'status', 'latest_stage',
+            'trigger_source', 'trigger_reason', 'status',
+            'fulfillment_status', 'fulfilled_at', 'fulfillment_evidence',
+            'latest_stage',
             'raw_recharge_info', 'request_payload', 'context_payload',
             'response_payload', 'callback_payload', 'approval_timeline',
             'feishu_instance_code', 'feishu_approval_code', 'status_message',

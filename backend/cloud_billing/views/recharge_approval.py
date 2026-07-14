@@ -194,6 +194,10 @@ class RechargeApprovalFeishuCallbackView(APIView):
         record.status = normalize_feishu_status(status_text)
         record.status_message = status_text or record.status_message
         record.callback_payload = payload
+        context_payload = dict(record.context_payload or {})
+        context_payload.pop("approval_progress", None)
+        context_payload.pop("approval_progress_cached_at", None)
+        record.context_payload = context_payload
         if isinstance(timeline, list):
             record.approval_timeline = timeline
             if timeline:
@@ -217,6 +221,7 @@ class RechargeApprovalFeishuCallbackView(APIView):
                 "status",
                 "status_message",
                 "callback_payload",
+                "context_payload",
                 "approval_timeline",
                 "latest_node_name",
                 "latest_node_status",
@@ -239,7 +244,7 @@ class RechargeApprovalFeishuCallbackView(APIView):
                 or ""
             ).strip(),
         )
-        # Send notification for final statuses (approved/rejected/canceled/failed)
+        # Dispatch final-state copies or reminders for the current approvers.
         if record.status in FINAL_RECHARGE_STATUSES:
             # Import here to avoid circular imports
             from ..tasks import send_recharge_approval_notification
@@ -249,7 +254,21 @@ class RechargeApprovalFeishuCallbackView(APIView):
                 # Callback acknowledgement should not fail just because the
                 # async notification broker is temporarily unavailable.
                 pass
-        return Response({"ok": True, "record_id": record.id, "status": record.status})
+        elif record.status in ONGOING_RECHARGE_STATUSES:
+            from ..tasks import (
+                send_pending_recharge_approver_notifications,
+            )
+            try:
+                send_pending_recharge_approver_notifications.delay(record.id)
+            except Exception:
+                pass
+        return Response(
+            {
+                "ok": True,
+                "record_id": record.id,
+                "status": record.status,
+            }
+        )
 
 
 class FeishuUserListView(APIView):

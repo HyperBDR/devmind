@@ -11,6 +11,7 @@ import os
 import re
 import threading
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Optional, Tuple
 
@@ -25,6 +26,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from cloud_billing.models import (
+    AlertRecord,
     CloudProvider,
     RechargeApprovalEvent,
     RechargeApprovalLLMRun,
@@ -369,6 +371,27 @@ def _feishu_get_instance(
     base = approval_base_url.rstrip("/")
     url = f"{base}/approval/openapi/v2/instance/get"
     payload = {"approval_code": approval_code, "instance_code": instance_code}
+    return _feishu_api_request(url, payload, token)
+
+
+def _feishu_preview_instance(
+    token: str,
+    instance_code: str,
+    task_id: str,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Preview the Feishu approval nodes after the current task."""
+    # Source: https://open.feishu.cn/document/server-docs/approval-v4/
+    # instance/approval-preview
+    url = (
+        "https://open.feishu.cn/open-apis/approval/v4/instances/preview"
+        "?user_id_type=user_id"
+    )
+    payload = {
+        "instance_code": instance_code,
+        "task_id": task_id,
+        "user_id": user_id,
+    }
     return _feishu_api_request(url, payload, token)
 
 
@@ -1172,7 +1195,7 @@ def _get_feishu_access_token() -> Optional[str]:
 FEISHU_CONTACT_BASE_URL = "https://open.feishu.cn/open-apis/contact/v3"
 FEISHU_ROOT_DEPARTMENT_ID = "0"
 FEISHU_CONTACT_PAGE_SIZE = 50
-FEISHU_USERS_CACHE_KEY_PREFIX = "cloud_billing:feishu_users:v2"
+FEISHU_USERS_CACHE_KEY_PREFIX = "cloud_billing:feishu_users:v3"
 FEISHU_USERS_CACHE_TTL_SECONDS = int(
     os.getenv("FEISHU_USERS_CACHE_TTL_SECONDS", "3600")
 )
@@ -1239,17 +1262,16 @@ def _list_feishu_users_uncached(cache_key: str) -> List[Dict[str, str]]:
     if result is not None:
         users = result
 
-    should_walk_departments = (
-        FEISHU_USERS_WALK_DEPARTMENTS in {"1", "true", "yes"}
-        or (
-            FEISHU_USERS_WALK_DEPARTMENTS == "auto"
-            and len(users) <= 1
-        )
-    )
+    should_walk_departments = FEISHU_USERS_WALK_DEPARTMENTS not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
 
-    # Department walking is slower on large tenants. Use the /users endpoint as
-    # the fast path, but fall back automatically when it only returns the root
-    # department's minimal result.
+    # The root users endpoint can return only direct contacts even when
+    # fetch_child=true. Walk every visible department unless explicitly
+    # disabled, then merge and cache the result.
     if users and should_walk_departments:
         users = _dedupe_feishu_users(
             users + _list_feishu_users_by_departments(token)
@@ -1462,8 +1484,9 @@ def _list_feishu_departments(token: str) -> List[str]:
     department_ids = [FEISHU_ROOT_DEPARTMENT_ID]
     queue = [FEISHU_ROOT_DEPARTMENT_ID]
     seen = {FEISHU_ROOT_DEPARTMENT_ID}
+    max_departments = max(1, FEISHU_USERS_MAX_DEPARTMENTS)
 
-    while queue:
+    while queue and len(department_ids) < max_departments:
         department_id = queue.pop(0)
         base_url = _build_feishu_contact_url(
             f"/departments/{department_id}/children",
@@ -1538,6 +1561,18 @@ def _list_feishu_departments(token: str) -> List[str]:
                         seen.add(child_id)
                         department_ids.append(child_id)
                         queue.append(child_id)
+                        if len(department_ids) >= max_departments:
+                            logger.warning(
+                                "Feishu department traversal reached "
+                                "the configured limit of %d departments",
+                                max_departments,
+                            )
+                            queue.clear()
+                            url = ""
+                            break
+
+                if len(department_ids) >= max_departments:
+                    break
 
                 page_token = str(page_data.get("page_token") or "").strip()
                 if page_data.get("has_more") and page_token:
@@ -1823,6 +1858,7 @@ def check_ongoing_recharge_approval_submission(
         "status": "",
         "recharge_account": "",
         "account_state": None,
+        "excluded_duplicate_instance_codes": [],
     }
     if not approval_code or not str(raw_recharge_info or "").strip():
         return result
@@ -1853,26 +1889,68 @@ def check_ongoing_recharge_approval_submission(
         return result
 
     result["account_state"] = account_state
-    if account_state.get("state") != "ongoing":
-        return result
-
-    recharge_account = str(account_state.get("recharge_account") or "").strip()
-    ongoing_instance_code = str(account_state.get("instance_code") or "").strip()
-    ongoing_record = None
-    if ongoing_instance_code:
-        ongoing_record = RechargeApprovalRecord.objects.filter(
-            provider=provider,
-            feishu_instance_code=ongoing_instance_code,
-        ).first()
-    elif recharge_account:
-        ongoing_record = find_ongoing_recharge_approval_for_account(
+    recharge_account = str(
+        account_state.get("recharge_account") or ""
+    ).strip()
+    recovered_instance_codes = [
+        str(record.feishu_instance_code or "").strip()
+        for record in find_recovered_recharge_approvals_for_account(
             provider=provider,
             recharge_account=recharge_account,
         )
+        if str(record.feishu_instance_code or "").strip()
+    ]
+    result["excluded_duplicate_instance_codes"] = (
+        recovered_instance_codes
+    )
+    if account_state.get("state") != "ongoing":
+        return result
+
+    ongoing_instance_code = str(
+        account_state.get("instance_code") or ""
+    ).strip()
+    blocking_record = find_ongoing_recharge_approval_for_account(
+        provider=provider,
+        recharge_account=recharge_account,
+    )
+    ongoing_record = None
+    if ongoing_instance_code:
+        remote_record = RechargeApprovalRecord.objects.filter(
+            provider=provider,
+            feishu_instance_code=ongoing_instance_code,
+        ).first()
+        if (
+            remote_record is not None
+            and remote_record.fulfillment_status
+            == RechargeApprovalRecord.FULFILLMENT_RECOVERED
+        ):
+            if blocking_record is None:
+                result["excluded_duplicate_instance_codes"] = list(
+                    dict.fromkeys(
+                        [
+                            *recovered_instance_codes,
+                            ongoing_instance_code,
+                        ]
+                    )
+                )
+                return result
+            ongoing_record = blocking_record
+            ongoing_instance_code = str(
+                blocking_record.feishu_instance_code or ""
+            ).strip()
+        else:
+            ongoing_record = remote_record or blocking_record
+    elif recharge_account:
+        ongoing_record = blocking_record
         if ongoing_record is not None:
             ongoing_instance_code = str(
                 ongoing_record.feishu_instance_code or ""
             ).strip()
+        elif recovered_instance_codes:
+            result["excluded_duplicate_instance_codes"] = (
+                recovered_instance_codes
+            )
+            return result
 
     status_text = str(account_state.get("status") or "").strip()
     if not status_text and ongoing_record is not None:
@@ -2858,25 +2936,451 @@ ONGOING_RECHARGE_APPROVAL_STATUSES = {
     RechargeApprovalRecord.STATUS_PENDING,
     RechargeApprovalRecord.STATUS_SUBMITTED,
 }
+PENDING_FEISHU_TASK_STATUSES = {
+    "PENDING",
+    "APPROVING",
+    "IN_PROGRESS",
+    "TODO",
+    "WAITING",
+}
+
+
+def extract_pending_approval_targets(
+    detail: Any,
+) -> List[Dict[str, str]]:
+    """Extract current Feishu approvers and merge duplicate users."""
+    if not isinstance(detail, dict):
+        return []
+    data = detail.get("data") or detail.get("event") or detail
+    if not isinstance(data, dict):
+        return []
+    tasks = data.get("task_list") or data.get("tasks") or []
+    if not isinstance(tasks, list):
+        return []
+
+    targets_by_user: Dict[str, Dict[str, str]] = {}
+    for task in tasks:
+        if not isinstance(task, dict):
+            continue
+        status = str(
+            task.get("status") or task.get("task_status") or ""
+        ).strip().upper()
+        if status not in PENDING_FEISHU_TASK_STATUSES:
+            continue
+        raw_user_ids = (
+            task.get("user_ids")
+            or task.get("assignee_ids")
+            or task.get("user_id")
+            or task.get("assignee_id")
+            or []
+        )
+        if not isinstance(raw_user_ids, list):
+            raw_user_ids = [raw_user_ids]
+        node_id = str(
+            task.get("node_id") or task.get("node_code") or ""
+        ).strip()
+        node_name = str(
+            task.get("node_name")
+            or task.get("name")
+            or node_id
+            or "待审批"
+        ).strip()
+        task_id = str(task.get("task_id") or task.get("id") or "").strip()
+        for raw_user_id in raw_user_ids:
+            user_id = str(raw_user_id or "").strip()
+            if not user_id:
+                continue
+            target = targets_by_user.get(user_id)
+            if target is None:
+                targets_by_user[user_id] = {
+                    "user_id": user_id,
+                    "node_id": node_id,
+                    "node_name": node_name,
+                    "task_id": task_id,
+                }
+                continue
+            existing_names = [
+                value.strip()
+                for value in target["node_name"].split("/")
+                if value.strip()
+            ]
+            if node_name not in existing_names:
+                target["node_name"] = (
+                    f"{target['node_name']} / {node_name}"
+                )
+
+    return list(targets_by_user.values())
+
+
+def _decimal_or_none(value: Any) -> Optional[Decimal]:
+    if value in (None, ""):
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _build_recharge_recovery_evidence(
+    record: RechargeApprovalRecord,
+    *,
+    recharge_account: str,
+    current_balance: Optional[Decimal],
+    current_days_remaining: Optional[int],
+    observed_at,
+) -> Optional[dict[str, Any]]:
+    alert_record = record.alert_record
+    context = record.context_payload or {}
+    alert_type = str(
+        getattr(alert_record, "alert_type", "")
+        or context.get("alert_type")
+        or ""
+    ).strip()
+    evidence = {
+        "recharge_account": recharge_account,
+        "observed_at": observed_at.isoformat(),
+    }
+    balance_threshold_value = getattr(
+        alert_record,
+        "balance_threshold",
+        None,
+    )
+    if balance_threshold_value is None:
+        balance_threshold_value = context.get("balance_threshold")
+    balance_threshold = _decimal_or_none(balance_threshold_value)
+    baseline_balance_value = context.get("last_observed_balance")
+    if baseline_balance_value is None:
+        baseline_balance_value = getattr(
+            alert_record,
+            "current_balance",
+            None,
+        )
+    if baseline_balance_value is None:
+        baseline_balance_value = context.get("current_balance")
+    baseline_balance = _decimal_or_none(baseline_balance_value)
+    balance_was_triggered = balance_threshold is not None and (
+        alert_type == AlertRecord.ALERT_TYPE_BALANCE
+        or (
+            baseline_balance is not None
+            and baseline_balance < balance_threshold
+        )
+    )
+
+    days_threshold_value = getattr(
+        alert_record,
+        "days_remaining_threshold",
+        None,
+    )
+    if days_threshold_value is None:
+        days_threshold_value = context.get("days_remaining_threshold")
+    baseline_days_value = getattr(
+        alert_record,
+        "current_days_remaining",
+        None,
+    )
+    if baseline_days_value is None:
+        baseline_days_value = context.get("current_days_remaining")
+    try:
+        days_threshold = int(days_threshold_value)
+    except (TypeError, ValueError):
+        days_threshold = None
+    try:
+        baseline_days = int(baseline_days_value)
+    except (TypeError, ValueError):
+        baseline_days = None
+    days_was_triggered = days_threshold is not None and (
+        alert_type == AlertRecord.ALERT_TYPE_DAYS_REMAINING
+        or (
+            baseline_days is not None
+            and baseline_days < days_threshold
+        )
+    )
+
+    signal_details = []
+    balance_increase_detected = (
+        current_balance is not None
+        and baseline_balance is not None
+        and current_balance > baseline_balance
+    )
+    if balance_was_triggered:
+        balance_threshold_recovered = (
+            current_balance is not None
+            and current_balance >= balance_threshold
+        )
+        if not (
+            balance_increase_detected
+            or balance_threshold_recovered
+        ):
+            return None
+        balance_details = {
+            "baseline_balance": (
+                str(baseline_balance)
+                if baseline_balance is not None
+                else ""
+            ),
+            "observed_balance": str(current_balance),
+            "threshold": str(balance_threshold),
+        }
+        if baseline_balance is not None:
+            estimated_recharge_amount = (
+                current_balance - baseline_balance
+            )
+            if estimated_recharge_amount > 0:
+                balance_details["estimated_recharge_amount"] = str(
+                    estimated_recharge_amount
+                )
+        signal_details.append(
+            (
+                (
+                    "balance_threshold_recovered"
+                    if balance_threshold_recovered
+                    else "positive_balance_change_detected"
+                ),
+                balance_details,
+            )
+        )
+    if (
+        days_was_triggered
+        and balance_increase_detected
+        and not balance_was_triggered
+    ):
+        estimated_recharge_amount = current_balance - baseline_balance
+        signal_details.append(
+            (
+                "positive_balance_change_detected",
+                {
+                    "baseline_balance": str(baseline_balance),
+                    "observed_balance": str(current_balance),
+                    "estimated_recharge_amount": str(
+                        estimated_recharge_amount
+                    ),
+                },
+            )
+        )
+    if days_was_triggered:
+        if (
+            current_days_remaining is None
+            or current_days_remaining < days_threshold
+        ):
+            if not balance_increase_detected:
+                return None
+        else:
+            days_evidence = {
+                "baseline_days_remaining": (
+                    baseline_days if baseline_days is not None else ""
+                ),
+                "observed_days_remaining": current_days_remaining,
+                "threshold": days_threshold,
+            }
+            if current_balance is not None:
+                days_evidence["observed_balance"] = str(
+                    current_balance
+                )
+            signal_details.append(
+                (
+                    "days_remaining_threshold_recovered",
+                    days_evidence,
+                )
+            )
+    if not signal_details:
+        return None
+    for signal, details in signal_details:
+        if details.get("estimated_recharge_amount"):
+            evidence["estimated_recharge_amount"] = details[
+                "estimated_recharge_amount"
+            ]
+            break
+    if len(signal_details) == 1:
+        signal, details = signal_details[0]
+        evidence["signal"] = signal
+        evidence.update(details)
+        return evidence
+
+    evidence["signal"] = "all_triggered_health_signals_recovered"
+    evidence["signals"] = [signal for signal, _details in signal_details]
+    evidence["signal_details"] = {
+        signal: details for signal, details in signal_details
+    }
+    return evidence
+
+
+def reconcile_recharge_approvals_for_account(
+    *,
+    provider: CloudProvider,
+    recharge_account: str,
+    current_balance: Optional[Decimal],
+    current_days_remaining: Optional[int],
+    observed_at=None,
+    allow_provider_fallback: bool = False,
+) -> list[dict[str, Any]]:
+    """Reconcile ongoing auto approvals against recovered account health."""
+    recharge_account = str(recharge_account or "").strip()
+    if not recharge_account and not allow_provider_fallback:
+        return []
+    observed_at = observed_at or timezone.now()
+    records = RechargeApprovalRecord.objects.select_related(
+        "alert_record"
+    ).filter(
+        provider=provider,
+        trigger_source=RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+        status__in=ONGOING_RECHARGE_APPROVAL_STATUSES,
+        fulfillment_status=RechargeApprovalRecord.FULFILLMENT_PENDING,
+    )
+    results = []
+    for record in records:
+        context = record.context_payload or {}
+        billing_account_id = str(
+            context.get("billing_account_id") or ""
+        ).strip()
+        configured_recharge_account = extract_recharge_account_from_record(
+            record
+        )
+        account_matches = (
+            billing_account_id == recharge_account
+            if billing_account_id
+            else configured_recharge_account == recharge_account
+        )
+        if not account_matches and not (
+            allow_provider_fallback
+            and not billing_account_id
+            and not configured_recharge_account
+        ):
+            continue
+
+        evidence = _build_recharge_recovery_evidence(
+            record,
+            recharge_account=recharge_account,
+            current_balance=current_balance,
+            current_days_remaining=current_days_remaining,
+            observed_at=observed_at,
+        )
+        if evidence is None:
+            if current_balance is not None:
+                last_observed_balance = _decimal_or_none(
+                    context.get("last_observed_balance")
+                )
+                if (
+                    "last_observed_balance" not in context
+                    or last_observed_balance != current_balance
+                ):
+                    context = dict(context)
+                    context["last_observed_balance"] = str(
+                        current_balance
+                    )
+                    context["last_balance_observed_at"] = (
+                        observed_at.isoformat()
+                    )
+                    record.context_payload = context
+                    record.save(
+                        update_fields=["context_payload", "updated_at"]
+                    )
+            continue
+        record.fulfillment_status = (
+            RechargeApprovalRecord.FULFILLMENT_RECOVERED
+        )
+        record.fulfilled_at = observed_at
+        record.fulfillment_evidence = evidence
+        record.latest_stage = "fulfillment_recovered"
+        record.save(
+            update_fields=[
+                "fulfillment_status",
+                "fulfilled_at",
+                "fulfillment_evidence",
+                "latest_stage",
+                "updated_at",
+            ]
+        )
+        create_recharge_approval_event(
+            record=record,
+            event_type="recharge_fulfillment_recovered",
+            stage="fulfillment_recovered",
+            source="billing_balance",
+            message=(
+                "Recharge objective recovered; the approval remains active "
+                "and no longer blocks a new submission."
+            ),
+            payload=evidence,
+        )
+        results.append(
+            {
+                "record_id": record.id,
+                "recovered": True,
+                "submission_block_released": True,
+                "balance_recovery_detected": bool(
+                    evidence.get("estimated_recharge_amount")
+                ),
+            }
+        )
+    return results
 
 
 def find_ongoing_recharge_approval_for_account(
     *,
     provider: CloudProvider,
     recharge_account: str,
+    allow_provider_fallback: bool = False,
 ) -> Optional[RechargeApprovalRecord]:
     recharge_account = str(recharge_account or "").strip()
-    if not recharge_account:
+    if not recharge_account and not allow_provider_fallback:
         return None
 
     queryset = RechargeApprovalRecord.objects.filter(
         provider=provider,
         status__in=ONGOING_RECHARGE_APPROVAL_STATUSES,
+        fulfillment_status=RechargeApprovalRecord.FULFILLMENT_PENDING,
     ).order_by("-submitted_at", "-updated_at", "-created_at")
     for record in queryset:
-        if extract_recharge_account_from_record(record) == recharge_account:
+        billing_account_id = str(
+            (record.context_payload or {}).get("billing_account_id") or ""
+        ).strip()
+        configured_recharge_account = extract_recharge_account_from_record(
+            record
+        )
+        account_matches = bool(recharge_account) and (
+            billing_account_id == recharge_account
+            or configured_recharge_account == recharge_account
+        )
+        fallback_matches = (
+            allow_provider_fallback
+            and not billing_account_id
+            and not configured_recharge_account
+        )
+        if account_matches or fallback_matches:
             return record
     return None
+
+
+def find_recovered_recharge_approval_for_account(
+    *,
+    provider: CloudProvider,
+    recharge_account: str,
+) -> Optional[RechargeApprovalRecord]:
+    records = find_recovered_recharge_approvals_for_account(
+        provider=provider,
+        recharge_account=recharge_account,
+    )
+    return records[0] if records else None
+
+
+def find_recovered_recharge_approvals_for_account(
+    *,
+    provider: CloudProvider,
+    recharge_account: str,
+) -> List[RechargeApprovalRecord]:
+    recharge_account = str(recharge_account or "").strip()
+    if not recharge_account:
+        return []
+
+    queryset = RechargeApprovalRecord.objects.filter(
+        provider=provider,
+        status__in=ONGOING_RECHARGE_APPROVAL_STATUSES,
+        fulfillment_status=RechargeApprovalRecord.FULFILLMENT_RECOVERED,
+    ).order_by("-submitted_at", "-updated_at", "-created_at")
+    return [
+        record
+        for record in queryset
+        if extract_recharge_account_from_record(record) == recharge_account
+    ]
 
 
 def refresh_recharge_approval_record_status(
@@ -3006,6 +3510,329 @@ def refresh_recharge_approval_record_status(
         "live_status_text": live_status_text,
         "detail": detail,
     }
+
+
+def get_pending_recharge_approval_targets(
+    record: RechargeApprovalRecord,
+) -> List[Dict[str, str]]:
+    """Load the live instance and return its current pending approvers."""
+    refresh_result = refresh_recharge_approval_record_status(record)
+    if not refresh_result.get("is_ongoing"):
+        return []
+
+    live_detail = refresh_result.get("detail")
+    live_data = (
+        live_detail.get("data")
+        if isinstance(live_detail, dict)
+        else None
+    )
+    if not isinstance(live_data, dict) and isinstance(live_detail, dict):
+        live_data = live_detail
+    if isinstance(live_data, dict) and any(
+        key in live_data for key in ("task_list", "tasks")
+    ):
+        return extract_pending_approval_targets(live_detail)
+
+    candidates = [
+        record.callback_payload,
+        record.response_payload,
+    ]
+    for candidate in candidates:
+        targets = extract_pending_approval_targets(candidate)
+        if targets:
+            return targets
+    return []
+
+
+def _approval_progress_status(statuses: List[str]) -> str:
+    """Collapse multiple task statuses into one node status."""
+    normalized = {
+        str(status or "").strip().upper()
+        for status in statuses
+        if str(status or "").strip()
+    }
+    if normalized & PENDING_FEISHU_TASK_STATUSES:
+        return "PENDING"
+    for status in (
+        "REJECTED",
+        "TRANSFERRED",
+    ):
+        if status in normalized:
+            return status
+    if normalized and normalized <= {"APPROVED", "DONE"}:
+        return "APPROVED"
+    return next(iter(normalized), "NOT_STARTED")
+
+
+def _extract_approval_progress_nodes(detail: Any) -> list[dict[str, Any]]:
+    """Normalize and group task entries from an approval instance."""
+    if not isinstance(detail, dict):
+        return []
+    data = detail.get("data") or detail.get("event") or detail
+    if not isinstance(data, dict):
+        return []
+    tasks = data.get("task_list") or data.get("tasks") or []
+    if not isinstance(tasks, list):
+        return []
+
+    nodes_by_id: dict[str, dict[str, Any]] = {}
+    node_statuses: dict[str, List[str]] = {}
+    for index, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        node_id = str(
+            task.get("node_id")
+            or task.get("node_code")
+            or f"task-{index}"
+        ).strip()
+        node = nodes_by_id.get(node_id)
+        if node is None:
+            node = {
+                "node_id": node_id,
+                "node_name": str(
+                    task.get("node_name")
+                    or task.get("name")
+                    or "待审批"
+                ).strip(),
+                "status": "NOT_STARTED",
+                "user_ids": [],
+                "start_time": str(
+                    task.get("start_time") or ""
+                ).strip(),
+                "end_time": str(
+                    task.get("end_time") or ""
+                ).strip(),
+            }
+            nodes_by_id[node_id] = node
+            node_statuses[node_id] = []
+        raw_user_ids = (
+            task.get("user_ids")
+            or task.get("assignee_ids")
+            or task.get("user_id")
+            or task.get("assignee_id")
+            or []
+        )
+        if not isinstance(raw_user_ids, list):
+            raw_user_ids = [raw_user_ids]
+        for raw_user_id in raw_user_ids:
+            user_id = str(raw_user_id or "").strip()
+            if user_id and user_id not in node["user_ids"]:
+                node["user_ids"].append(user_id)
+        node_statuses[node_id].append(
+            str(
+                task.get("status")
+                or task.get("task_status")
+                or ""
+            )
+        )
+        end_time = str(task.get("end_time") or "").strip()
+        if end_time and end_time != "0":
+            node["end_time"] = end_time
+
+    for node_id, node in nodes_by_id.items():
+        node["status"] = _approval_progress_status(
+            node_statuses[node_id]
+        )
+    return list(nodes_by_id.values())
+
+
+def _append_preview_approval_nodes(
+    nodes: list[dict[str, Any]],
+    preview: Any,
+) -> None:
+    """Append future approval nodes without duplicating active tasks."""
+    if not isinstance(preview, dict):
+        return
+    data = preview.get("data") or preview
+    if not isinstance(data, dict):
+        return
+    preview_nodes = data.get("preview_nodes") or []
+    if not isinstance(preview_nodes, list):
+        return
+    existing_node_ids = {
+        str(node.get("node_id") or "").strip() for node in nodes
+    }
+    for index, raw_node in enumerate(preview_nodes):
+        if not isinstance(raw_node, dict):
+            continue
+        user_ids = raw_node.get("user_id_list") or []
+        if not isinstance(user_ids, list):
+            user_ids = [user_ids]
+        normalized_user_ids = [
+            str(user_id or "").strip()
+            for user_id in user_ids
+            if str(user_id or "").strip()
+        ]
+        node_type = str(raw_node.get("node_type") or "").strip()
+        if not node_type and not normalized_user_ids:
+            continue
+        node_id = str(
+            raw_node.get("node_id") or f"preview-{index}"
+        ).strip()
+        if node_id in existing_node_ids:
+            continue
+        existing_node_ids.add(node_id)
+        nodes.append(
+            {
+                "node_id": node_id,
+                "node_name": str(
+                    raw_node.get("node_name") or "待审批"
+                ).strip(),
+                "status": "NOT_STARTED",
+                "user_ids": normalized_user_ids,
+                "start_time": "",
+                "end_time": "",
+            }
+        )
+
+
+def get_recharge_approval_progress(
+    record: RechargeApprovalRecord,
+) -> list[dict[str, Any]]:
+    """Return handled, active, and previewed approval nodes."""
+    refresh_result = refresh_recharge_approval_record_status(record)
+    detail = refresh_result.get("detail")
+    if not isinstance(detail, dict):
+        for candidate in (
+            record.callback_payload,
+            record.response_payload,
+        ):
+            if isinstance(candidate, dict):
+                detail = candidate
+                break
+    nodes = _extract_approval_progress_nodes(detail)
+
+    data = detail.get("data") if isinstance(detail, dict) else None
+    if not isinstance(data, dict) and isinstance(detail, dict):
+        data = detail
+    nodes.sort(
+        key=lambda node: (
+            _history_sort_key(node.get("start_time")) == 0,
+            _history_sort_key(node.get("start_time")),
+        )
+    )
+    tasks = data.get("task_list") if isinstance(data, dict) else []
+    pending_task = next(
+        (
+            task
+            for task in tasks or []
+            if isinstance(task, dict)
+            and str(task.get("status") or "").strip().upper()
+            in PENDING_FEISHU_TASK_STATUSES
+        ),
+        None,
+    )
+    instance_code = str(
+        getattr(record, "feishu_instance_code", "") or ""
+    ).strip()
+    if pending_task and instance_code:
+        task_id = str(
+            pending_task.get("id")
+            or pending_task.get("task_id")
+            or ""
+        ).strip()
+        user_id = str(
+            pending_task.get("user_id")
+            or pending_task.get("assignee_id")
+            or ""
+        ).strip()
+        token = _get_feishu_access_token()
+        if token and task_id and user_id:
+            preview = _feishu_preview_instance(
+                token,
+                instance_code,
+                task_id,
+                user_id,
+            )
+            _append_preview_approval_nodes(nodes, preview)
+
+    try:
+        users = list_feishu_users()
+    except Exception:
+        logger.warning(
+            "Could not resolve approval progress user names",
+            exc_info=True,
+        )
+        users = []
+    names_by_user_id = {
+        str(user.get("user_id") or "").strip(): str(
+            user.get("display_name") or user.get("name") or ""
+        ).strip()
+        for user in users
+        if isinstance(user, dict)
+        and str(user.get("user_id") or "").strip()
+    }
+    progress = [
+        {
+            "node_id": node["node_id"],
+            "node_name": node["node_name"],
+            "status": node["status"],
+            "approver_names": [
+                names_by_user_id[user_id]
+                for user_id in node["user_ids"]
+                if names_by_user_id.get(user_id)
+            ],
+            "start_time": node["start_time"],
+            "end_time": node["end_time"],
+        }
+        for node in nodes
+    ]
+    instance_start_time = str(
+        (data or {}).get("start_time") or ""
+    ).strip()
+    submitter_name = str(
+        getattr(record, "submitter_user_label", "") or ""
+    ).strip()
+    if not submitter_name:
+        submitter_user_id = str(
+            (data or {}).get("user_id") or ""
+        ).strip()
+        submitter_name = names_by_user_id.get(submitter_user_id, "")
+    progress.insert(
+        0,
+        {
+            "node_id": "__start__",
+            "node_name": "发起",
+            "node_kind": "start",
+            "status": "APPROVED",
+            "approver_names": (
+                [submitter_name] if submitter_name else []
+            ),
+            "start_time": instance_start_time,
+            "end_time": instance_start_time,
+        },
+    )
+
+    instance_status = str(
+        (data or {}).get("status") or "PENDING"
+    ).strip().upper()
+    end_statuses = {
+        "APPROVED": "APPROVED",
+        "REJECTED": "REJECTED",
+        "CANCELED": "CANCELED",
+        "CANCELLED": "CANCELED",
+        "DELETED": "CANCELED",
+    }
+    instance_end_time = str(
+        (data or {}).get("end_time") or ""
+    ).strip()
+    if instance_end_time == "0":
+        instance_end_time = ""
+    progress.append(
+        {
+            "node_id": "__end__",
+            "node_name": "结束",
+            "node_kind": "end",
+            "status": end_statuses.get(
+                instance_status,
+                "NOT_STARTED",
+            ),
+            "approver_names": [],
+            "start_time": instance_end_time,
+            "end_time": instance_end_time,
+        }
+    )
+    return progress
 
 
 def find_ongoing_recharge_approval_for_submitter(

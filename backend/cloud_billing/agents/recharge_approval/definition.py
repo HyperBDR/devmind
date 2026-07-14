@@ -653,14 +653,33 @@ def _build_form_payload(data: Dict[str, Any], schema: Dict[str, Dict[str, Any]])
     return form_payload
 
 
-def _detect_duplicate(token: str, approval_code: str, data: Dict[str, Any], base_url: str) -> Optional[Dict[str, Any]]:
+def _detect_duplicate(
+    token: str,
+    approval_code: str,
+    data: Dict[str, Any],
+    base_url: str,
+    excluded_instance_codes: Optional[set[str]] = None,
+) -> Optional[Dict[str, Any]]:
     now = datetime.now(timezone.utc)
     end_ms = int(now.timestamp() * 1000)
     start_ms = int((now - timedelta(days=15)).timestamp() * 1000)
     cloud_type = str(data.get("cloud_type", "")).strip()
     account = str(data.get("recharge_account", "")).strip()
     logger.info("[LocalExecutor] Checking duplicate: cloud_type=%s account=%s lookback=15d", cloud_type, account)
-    for code in _local_list_instances(token, approval_code, start_ms, end_ms, base_url):
+    excluded_instance_codes = excluded_instance_codes or set()
+    for code in _local_list_instances(
+        token,
+        approval_code,
+        start_ms,
+        end_ms,
+        base_url,
+    ):
+        if code in excluded_instance_codes:
+            logger.info(
+                "[LocalExecutor] Ignoring fulfilled instance code=%s",
+                code,
+            )
+            continue
         try:
             detail = _local_get_instance(token, approval_code, code, base_url)
         except Exception as exc:
@@ -770,7 +789,23 @@ def _execute_local(
             record=record, event_type="workflow_step_dedup_started", stage="skill_workflow",
             source=source, message="Checking for duplicate pending approvals.",
         )
-        existing = _detect_duplicate(token, approval_code, parsed_payload, base_url)
+        excluded_instance_codes = {
+            str(code).strip()
+            for code in (
+                (record.context_payload or {}).get(
+                    "excluded_duplicate_instance_codes"
+                )
+                or []
+            )
+            if str(code).strip()
+        }
+        existing = _detect_duplicate(
+            token,
+            approval_code,
+            parsed_payload,
+            base_url,
+            excluded_instance_codes,
+        )
 
         # Step 5: get schema + build form
         logger.info("[LocalExecutor] Step 5/6: Fetching approval definition and building form")

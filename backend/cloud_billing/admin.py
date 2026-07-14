@@ -8,6 +8,7 @@ from .models import (
     AlertRule,
     BillingData,
     CloudProvider,
+    RechargeApprovalApproverNotification,
     RechargeApprovalEvent,
     RechargeApprovalLLMRun,
     RechargeApprovalRecord,
@@ -51,10 +52,13 @@ class AlertRuleAdmin(admin.ModelAdmin):
     list_display = [
         'provider', 'cost_threshold', 'growth_threshold',
         'balance_threshold', 'days_remaining_threshold',
+        'enable_recharge_recovery_detection',
         'auto_submit_recharge_approval', 'auto_recharge_amount', 'is_active',
         'created_at'
     ]
-    list_filter = ['is_active', 'created_at']
+    list_filter = [
+        'is_active', 'enable_recharge_recovery_detection', 'created_at'
+    ]
     search_fields = ['provider__name', 'provider__display_name']
     readonly_fields = ['created_at', 'updated_at']
 
@@ -80,16 +84,33 @@ class AlertRecordAdmin(admin.ModelAdmin):
 @admin.register(RechargeApprovalRecord)
 class RechargeApprovalRecordAdmin(admin.ModelAdmin):
     list_display = [
-        'id', 'provider', 'trigger_source', 'status', 'submitter_identifier',
-        'triggered_by_username_snapshot', 'latest_stage', 'submitted_at',
-        'last_callback_at', 'created_at'
+        'id', 'provider', 'trigger_source', 'status', 'fulfillment_status',
+        'submitter_identifier', 'triggered_by_username_snapshot',
+        'latest_stage', 'submitted_at', 'fulfilled_at', 'last_callback_at',
+        'created_at'
     ]
-    list_filter = ['trigger_source', 'status', 'created_at']
+    list_filter = [
+        'trigger_source', 'status', 'fulfillment_status', 'created_at'
+    ]
     search_fields = [
         'provider__name', 'provider__display_name', 'submitter_identifier',
         'feishu_instance_code', 'feishu_approval_code'
     ]
     readonly_fields = ['trace_id', 'created_at', 'updated_at']
+
+
+@admin.register(RechargeApprovalApproverNotification)
+class RechargeApprovalApproverNotificationAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'record', 'recipient_user_id', 'notification_key',
+        'node_name', 'status', 'attempt_count', 'sent_at', 'created_at'
+    ]
+    list_filter = ['notification_key', 'status', 'created_at']
+    search_fields = [
+        'record__feishu_instance_code', 'recipient_user_id', 'node_name',
+        'message_id'
+    ]
+    readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(RechargeApprovalEvent)

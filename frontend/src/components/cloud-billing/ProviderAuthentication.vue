@@ -766,6 +766,15 @@ const getAlertRuleSummary = (providerId) => {
     })
   }
   items.push({
+    key: 'enable_recharge_recovery_detection',
+    text: `${t('cloudBilling.settings.alertRule.enableRechargeRecoveryDetection')}: ${
+      rule.enable_recharge_recovery_detection
+        ? t('common.enabled')
+        : t('common.disabled')
+    }`,
+    muted: !rule.enable_recharge_recovery_detection
+  })
+  items.push({
     key: 'auto_submit_recharge_approval',
     text: `${t('cloudBilling.settings.alertRule.autoSubmitRechargeApproval')}: ${
       rule.auto_submit_recharge_approval

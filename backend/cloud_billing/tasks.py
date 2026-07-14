@@ -38,6 +38,7 @@ from agentcore_task.adapters.django import (
 )
 from .alert_messages import (
     build_alert_message,
+    build_recharge_approval_notice,
     extract_provider_notes,
     extract_provider_tags,
 )
@@ -54,6 +55,7 @@ from .models import (
     AlertRule,
     BillingData,
     CloudProvider,
+    RechargeApprovalApproverNotification,
     RechargeApprovalRecord,
 )
 from .serializers import get_balance_support_info
@@ -65,20 +67,110 @@ from .services.provider_service import ProviderService
 from .clouds.service import BillingService
 from .services.recharge_approval import (
     CLOUD_TYPE_LABELS,
+    PENDING_FEISHU_TASK_STATUSES,
     _looks_like_legacy_submitter_identifier,
     _redact_feishu_payload_for_log,
     check_ongoing_recharge_approval_submission,
     create_recharge_approval_event,
     execute_recharge_approval_agent,
-    parse_recharge_info,
+    find_ongoing_recharge_approval_for_account,
+    get_recharge_approval_progress,
+    get_pending_recharge_approval_targets,
+    list_feishu_users,
     normalize_feishu_status,
+    parse_recharge_info,
+    reconcile_recharge_approvals_for_account,
+    refresh_recharge_approval_record_status,
     resolve_submitter_identity,
 )
 
 logger = logging.getLogger(__name__)
 RECENT_BURN_WINDOW_DAYS = 30
 MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
+APPROVER_NOTIFICATION_LEASE_SECONDS = 300
+APPROVER_NOTIFICATION_MAX_ATTEMPTS = 3
+APPROVER_NOTIFICATION_RETRY_BASE_SECONDS = 60
+APPROVER_DISCOVERY_MAX_ATTEMPTS = 3
+APPROVER_DISCOVERY_RETRY_BASE_SECONDS = 10
+SUBMITTER_COPY_MAX_ATTEMPTS = 3
+SUBMITTER_COPY_RETRY_BASE_SECONDS = 60
 User = get_user_model()
+
+
+def _schedule_recharge_recovery_notifications(
+    reconciliation_results,
+):
+    """Notify the group once when a positive balance increase is detected."""
+    for reconciliation in reconciliation_results or []:
+        if not reconciliation.get("balance_recovery_detected"):
+            continue
+        record_id = reconciliation.get("record_id")
+        if not record_id:
+            continue
+        try:
+            send_recharge_approval_notification.delay(
+                record_id,
+                "fulfillment_recovered",
+            )
+        except Exception:
+            logger.warning(
+                "Could not schedule recharge recovery group notification "
+                "(record_id=%s)",
+                record_id,
+                exc_info=True,
+            )
+
+
+def _schedule_balance_approval_escalation(
+    *,
+    provider: CloudProvider,
+    recharge_account: str,
+    current_balance: Optional[Decimal],
+    balance_threshold: Optional[Decimal],
+    currency: str,
+    allow_provider_fallback: bool = False,
+):
+    """Schedule one approver escalation for the current balance band."""
+    if current_balance is None or balance_threshold is None:
+        return
+    threshold = Decimal(str(balance_threshold))
+    if threshold <= 0:
+        return
+    balance = Decimal(str(current_balance))
+    raw_ratio = balance / threshold * Decimal("100")
+    ratio = raw_ratio.quantize(Decimal("0.01"))
+    if raw_ratio <= Decimal("30"):
+        level = 30
+    elif raw_ratio <= Decimal("50"):
+        level = 50
+    else:
+        return
+
+    record = find_ongoing_recharge_approval_for_account(
+        provider=provider,
+        recharge_account=recharge_account,
+        allow_provider_fallback=allow_provider_fallback,
+    )
+    if record is None:
+        return
+    if (
+        level == 50
+        and record.approver_notifications.filter(
+            notification_key="balance_30"
+        ).exists()
+    ):
+        return
+    send_pending_recharge_approver_notifications.delay(
+        record.id,
+        notification_key=f"balance_{level}",
+        escalation_context={
+            "level": level,
+            "current_balance": str(balance),
+            "balance_threshold": str(threshold),
+            "balance_ratio": str(ratio),
+            "currency": str(currency or "CNY").strip() or "CNY",
+        },
+    )
 
 
 def _get_alert_min_cost_threshold() -> Decimal:
@@ -1091,6 +1183,7 @@ def check_alert_for_provider(
 
         # Check alerts for each account_id separately
         alerts_created = []
+        allow_provider_fallback = current_billings.count() == 1
         for current_billing in current_billings:
             account_id = current_billing.account_id or ""
 
@@ -1126,16 +1219,6 @@ def check_alert_for_provider(
                     f"hour={current_hour})"
                 )
 
-            if previous_cost <= 0 and current_balance is None:
-                logger.info(
-                    f"Task check_alert_for_provider: "
-                    f"Previous cost is zero or negative "
-                    f"(provider_id={provider.id}, name={provider.name}, "
-                    f"account_id={account_id}, "
-                    f"previous_cost={previous_cost})"
-                )
-                continue
-
             increase_cost = current_cost - previous_cost
             increase_percent = Decimal("0")
             if previous_cost > 0:
@@ -1150,6 +1233,70 @@ def check_alert_for_provider(
                 current_billing,
                 now,
             )
+            if alert_rule.enable_recharge_recovery_detection:
+                try:
+                    reconciliation_results = (
+                        reconcile_recharge_approvals_for_account(
+                            provider=provider,
+                            recharge_account=account_id,
+                            current_balance=current_balance,
+                            current_days_remaining=current_days_remaining,
+                            observed_at=(
+                                current_billing.collected_at or now
+                            ),
+                            allow_provider_fallback=(
+                                allow_provider_fallback
+                            ),
+                        )
+                    )
+                    for reconciliation in reconciliation_results:
+                        logger.info(
+                            "Task check_alert_for_provider: Reconciled "
+                            "recharge approval from account health "
+                            "(provider_id=%s, account_id=%s, result=%s)",
+                            provider.id,
+                            account_id,
+                            reconciliation,
+                        )
+                    _schedule_recharge_recovery_notifications(
+                        reconciliation_results
+                    )
+                except Exception:
+                    logger.warning(
+                        "Task check_alert_for_provider: Recharge "
+                        "fulfillment reconciliation failed "
+                        "(provider_id=%s, account_id=%s)",
+                        provider.id,
+                        account_id,
+                        exc_info=True,
+                    )
+            try:
+                _schedule_balance_approval_escalation(
+                    provider=provider,
+                    recharge_account=account_id,
+                    current_balance=current_balance,
+                    balance_threshold=alert_rule.balance_threshold,
+                    currency=current_billing.currency,
+                    allow_provider_fallback=allow_provider_fallback,
+                )
+            except Exception:
+                logger.warning(
+                    "Could not schedule balance approval escalation "
+                    "(provider_id=%s, account_id=%s)",
+                    provider.id,
+                    account_id,
+                    exc_info=True,
+                )
+
+            if previous_cost <= 0 and current_balance is None:
+                logger.info(
+                    f"Task check_alert_for_provider: "
+                    f"Previous cost is zero or negative "
+                    f"(provider_id={provider.id}, name={provider.name}, "
+                    f"account_id={account_id}, "
+                    f"previous_cost={previous_cost})"
+                )
+                continue
 
             # Cost threshold is absolute and should not depend on a previous
             # billing record. Growth-based rules still need the previous hour.
@@ -1342,6 +1489,34 @@ def check_alert_for_provider(
                 and alert_rule.auto_recharge_amount is not None
                 and bool(str(provider.recharge_info or "").strip())
             )
+            recharge_approval_notice = None
+            if auto_recharge_approval_triggered:
+                ongoing_approval = (
+                    find_ongoing_recharge_approval_for_account(
+                        provider=provider,
+                        recharge_account=account_id,
+                    )
+                )
+                if ongoing_approval is not None:
+                    current_approvers = (
+                        _resolve_current_approver_labels(
+                            ongoing_approval
+                        )
+                    )
+                    ongoing_approval.refresh_from_db(
+                        fields=["status"]
+                    )
+                    if ongoing_approval.status in {
+                        RechargeApprovalRecord.STATUS_PENDING,
+                        RechargeApprovalRecord.STATUS_SUBMITTED,
+                    }:
+                        recharge_approval_notice = (
+                            build_recharge_approval_notice(
+                                language,
+                                existing_approval=True,
+                                current_approvers=current_approvers,
+                            )
+                        )
 
             resource_cost_items = []
             cost_period = "today"  # Default
@@ -1383,6 +1558,7 @@ def check_alert_for_provider(
                 auto_recharge_approval_triggered=(
                     auto_recharge_approval_triggered
                 ),
+                recharge_approval_notice=recharge_approval_notice,
             )
 
             # Always create alert record, even if webhook is not configured
@@ -1424,6 +1600,7 @@ def check_alert_for_provider(
                 submit_kwargs = {
                     "alert_record_id": alert_record.id,
                     "trigger_source": RechargeApprovalRecord.TRIGGER_SOURCE_ALERT,
+                    "billing_account_id": account_id,
                     "amount": str(alert_rule.auto_recharge_amount),
                     "currency": str(current_billing.currency or "").upper(),
                 }
@@ -1530,6 +1707,7 @@ def submit_recharge_approval(
     trigger_reason: str = "",
     recharge_info_override: str = "",
     account_id: str = "",
+    billing_account_id: str = "",
     amount: str = "",
     currency: str = "",
 ):
@@ -1565,6 +1743,7 @@ def submit_recharge_approval(
                 "alert_record_id": alert_record_id,
                 "trigger_source": trigger_source,
                 "user_id": user_id,
+                "billing_account_id": billing_account_id,
             },
             metadata={
                 "provider_id": provider_id,
@@ -1766,6 +1945,22 @@ def submit_recharge_approval(
                     instance_code=existing_payload["instance_code"],
                 ),
             )
+        existing_record_id = ongoing_check.get("record_id")
+        if (
+            ongoing_check.get("reason") == "ongoing_approval_exists"
+            and existing_record_id
+        ):
+            try:
+                send_pending_recharge_approver_notifications.delay(
+                    existing_record_id
+                )
+            except Exception:
+                logger.warning(
+                    "Could not schedule pending approver notification for "
+                    "an existing recharge approval (record_id=%s)",
+                    existing_record_id,
+                    exc_info=True,
+                )
         return existing_payload
     account_state = ongoing_check.get("account_state")
     if account_state and account_state.get("state") == "finished":
@@ -1903,13 +2098,25 @@ def submit_recharge_approval(
         "source_task_id": task_id,
         "triggered_by": effective_triggered_by,
         "submitter_label": effective_submitter_label,
+        "billing_account_id": str(billing_account_id or "").strip(),
+        "excluded_duplicate_instance_codes": list(
+            ongoing_check.get("excluded_duplicate_instance_codes") or []
+        ),
     }
     if alert_record is not None:
         context_payload.update(
             {
                 "alert_type": alert_record.alert_type,
-                "current_balance": str(alert_record.current_balance or ""),
-                "balance_threshold": str(alert_record.balance_threshold or ""),
+                "current_balance": (
+                    str(alert_record.current_balance)
+                    if alert_record.current_balance is not None
+                    else ""
+                ),
+                "balance_threshold": (
+                    str(alert_record.balance_threshold)
+                    if alert_record.balance_threshold is not None
+                    else ""
+                ),
                 "current_days_remaining": alert_record.current_days_remaining,
                 "days_remaining_threshold": (
                     alert_record.days_remaining_threshold
@@ -2109,6 +2316,15 @@ def submit_recharge_approval(
         except Exception as notify_exc:
             logger.warning(
                 "Failed to dispatch recharge approval submitted notification "
+                "(record_id=%s, error=%s)",
+                record.id,
+                notify_exc,
+            )
+        try:
+            send_pending_recharge_approver_notifications.delay(record.id)
+        except Exception as notify_exc:
+            logger.warning(
+                "Failed to dispatch pending approver notifications "
                 "(record_id=%s, error=%s)",
                 record.id,
                 notify_exc,
@@ -2371,18 +2587,70 @@ def send_alert_notification(alert_record_id: int):
         return result
 
 
+def _resolve_current_approver_labels(
+    record: RechargeApprovalRecord,
+) -> list[str]:
+    """Resolve live pending approvers to readable names and node labels."""
+    try:
+        progress = get_recharge_approval_progress(record)
+    except Exception:
+        logger.warning(
+            "Could not load recharge approval progress "
+            "(record_id=%s)",
+            record.id,
+            exc_info=True,
+        )
+        return []
+    if not progress:
+        return []
+
+    context_payload = dict(record.context_payload or {})
+    context_payload["approval_progress"] = progress
+    context_payload["approval_progress_cached_at"] = (
+        timezone.now().isoformat()
+    )
+    record.context_payload = context_payload
+    record.save(
+        update_fields=["context_payload", "updated_at"],
+    )
+
+    labels = []
+    for node in progress:
+        if not isinstance(node, dict):
+            continue
+        status = str(node.get("status") or "").strip().upper()
+        if status not in PENDING_FEISHU_TASK_STATUSES:
+            continue
+        node_name = str(node.get("node_name") or "").strip()
+        for raw_name in node.get("approver_names") or []:
+            display_name = str(raw_name or "").strip()
+            if not display_name:
+                continue
+            label = (
+                f"{display_name}（{node_name}）"
+                if node_name
+                else display_name
+            )
+            if label not in labels:
+                labels.append(label)
+    return labels
+
+
 @shared_task(name="cloud_billing.tasks.send_recharge_approval_notification")
 def send_recharge_approval_notification(
     record_id: int,
     notification_type: str,
 ):
     """
-    Send recharge approval notification via the configured channel.
+    Send recharge approval notifications to the configured channel and the
+    resolved Feishu initiator.
 
-    notification_type is one of: submitted, approved, rejected, canceled, failed.
+    notification_type is one of: submitted, approved, rejected, canceled,
+    failed, or fulfillment_recovered.
 
-    Channel is read from provider.config['notification'] (same as alert notifications).
-    When no channel is configured, no notification is sent (silent skip).
+    Channel is read from provider.config['notification'] (same as alert
+    notifications). The initiator copy uses the resolved user_id stored on the
+    approval record.
     """
     task_id = current_task.request.id if current_task else None
 
@@ -2422,6 +2690,17 @@ def send_recharge_approval_notification(
             )
         return result
 
+    if notification_type == "fulfillment_recovered":
+        try:
+            refresh_recharge_approval_record_status(record)
+        except Exception:
+            logger.warning(
+                "Could not refresh approval status before recharge recovery "
+                "notification (record_id=%s)",
+                record.id,
+                exc_info=True,
+            )
+
     notification = (record.provider.config or {}).get("notification")
     logger.info(
         f"Task send_recharge_approval_notification: channel resolution "
@@ -2445,13 +2724,128 @@ def send_recharge_approval_notification(
                 f"for provider {record.provider.id}; using default webhook."
             )
 
+    current_approvers = []
+    if notification_type == "submitted" or (
+        notification_type == "fulfillment_recovered"
+        and record.status
+        in {
+            RechargeApprovalRecord.STATUS_PENDING,
+            RechargeApprovalRecord.STATUS_SUBMITTED,
+        }
+    ):
+        current_approvers = _resolve_current_approver_labels(record)
+
+    if (
+        notification_type == "submitted"
+        and record.status
+        not in {
+            RechargeApprovalRecord.STATUS_PENDING,
+            RechargeApprovalRecord.STATUS_SUBMITTED,
+        }
+    ):
+        result = {
+            "success": True,
+            "skipped": True,
+            "record_id": record.id,
+            "reason": "stale_submitted_notification",
+            "current_status": record.status,
+        }
+        if task_id:
+            TaskTracker.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.SUCCESS,
+                result=result,
+            )
+        return result
+
     notification_service = RechargeApprovalNotificationService()
-    result = notification_service.send_recharge_notification(
-        record=record,
-        notification_type=notification_type,
-        channel_uuid=channel_uuid,
-        channel_type=channel_type,
-    )
+    try:
+        channel_result = notification_service.send_recharge_notification(
+            record=record,
+            notification_type=notification_type,
+            channel_uuid=channel_uuid,
+            channel_type=channel_type,
+            current_approvers=current_approvers,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Recharge approval channel notification raised unexpectedly "
+            "(record_id=%s, error=%s)",
+            record.id,
+            exc,
+            exc_info=True,
+        )
+        channel_result = {
+            "success": False,
+            "response": None,
+            "error": str(exc),
+        }
+    if notification_type == "fulfillment_recovered":
+        submitter_copy_result = {
+            "success": True,
+            "skipped": True,
+            "recipient_user_id": "",
+            "message_id": "",
+            "error": None,
+        }
+    else:
+        try:
+            submitter_copy_result = (
+                notification_service.send_submitter_copy(
+                    record,
+                    notification_type,
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Recharge approval submitter copy raised unexpectedly "
+                "(record_id=%s, error=%s)",
+                record.id,
+                exc,
+                exc_info=True,
+            )
+            submitter_copy_result = {
+                "success": False,
+                "skipped": False,
+                "recipient_user_id": str(
+                    record.resolved_submitter_user_id or ""
+                ).strip(),
+                "message_id": "",
+                "error": str(exc),
+            }
+    if not submitter_copy_result.get("success"):
+        try:
+            send_recharge_approval_submitter_copy.apply_async(
+                args=[record.id, notification_type],
+                kwargs={"attempt": 1},
+                countdown=SUBMITTER_COPY_RETRY_BASE_SECONDS,
+            )
+        except Exception:
+            logger.warning(
+                "Could not schedule recharge approval submitter copy retry "
+                "(record_id=%s, notification_type=%s)",
+                record.id,
+                notification_type,
+                exc_info=True,
+            )
+    errors = [
+        str(delivery_result.get("error") or "").strip()
+        for delivery_result in (
+            channel_result,
+            submitter_copy_result,
+        )
+        if not delivery_result.get("success")
+    ]
+    result = {
+        **channel_result,
+        "success": (
+            bool(channel_result.get("success"))
+            and bool(submitter_copy_result.get("success"))
+        ),
+        "channel_notification": channel_result,
+        "submitter_copy": submitter_copy_result,
+        "error": "; ".join(error for error in errors if error) or None,
+    }
 
     if result["success"]:
         logger.info(
@@ -2474,6 +2868,413 @@ def send_recharge_approval_notification(
             error=result.get("error") if not result["success"] else None,
         )
 
+    return result
+
+
+@shared_task(
+    name=(
+        "cloud_billing.tasks."
+        "send_recharge_approval_submitter_copy"
+    )
+)
+def send_recharge_approval_submitter_copy(
+    record_id: int,
+    notification_type: str,
+    attempt: int = 1,
+):
+    """Retry only the submitter copy without repeating group delivery."""
+    try:
+        record = RechargeApprovalRecord.objects.select_related(
+            "provider",
+            "provider__created_by",
+            "alert_record",
+        ).get(id=record_id)
+    except RechargeApprovalRecord.DoesNotExist:
+        return {
+            "success": False,
+            "record_id": record_id,
+            "error": "Recharge approval record not found",
+        }
+
+    if notification_type == "submitted":
+        try:
+            refresh_recharge_approval_record_status(record)
+        except Exception:
+            logger.warning(
+                "Could not refresh approval status before submitter copy "
+                "retry (record_id=%s)",
+                record.id,
+                exc_info=True,
+            )
+        if record.status not in {
+            RechargeApprovalRecord.STATUS_PENDING,
+            RechargeApprovalRecord.STATUS_SUBMITTED,
+        }:
+            return {
+                "success": True,
+                "skipped": True,
+                "record_id": record.id,
+                "reason": "stale_submitted_notification",
+                "current_status": record.status,
+            }
+
+    service = RechargeApprovalNotificationService()
+    try:
+        result = service.send_submitter_copy(
+            record,
+            notification_type,
+        )
+    except Exception as exc:
+        result = {
+            "success": False,
+            "error": str(exc),
+        }
+    if not result.get("success") and attempt < SUBMITTER_COPY_MAX_ATTEMPTS:
+        next_attempt = attempt + 1
+        countdown = (
+            SUBMITTER_COPY_RETRY_BASE_SECONDS
+            * (2 ** (attempt - 1))
+        )
+        try:
+            send_recharge_approval_submitter_copy.apply_async(
+                args=[record.id, notification_type],
+                kwargs={"attempt": next_attempt},
+                countdown=countdown,
+            )
+            result["retry_scheduled"] = True
+            result["retry_countdown"] = countdown
+        except Exception:
+            logger.warning(
+                "Could not schedule recharge approval submitter copy retry "
+                "(record_id=%s, notification_type=%s, attempt=%s)",
+                record.id,
+                notification_type,
+                next_attempt,
+                exc_info=True,
+            )
+            result["retry_scheduled"] = False
+    return result
+
+
+def _claim_approver_notification(
+    *,
+    record: RechargeApprovalRecord,
+    target: dict,
+    notification_key: str = "pending",
+) -> Tuple[RechargeApprovalApproverNotification, bool]:
+    """Claim one recipient so concurrent tasks cannot notify twice."""
+    recipient_user_id = str(target.get("user_id") or "").strip()
+    with transaction.atomic():
+        delivery, _created = (
+            RechargeApprovalApproverNotification.objects.get_or_create(
+                record=record,
+                recipient_user_id=recipient_user_id,
+                notification_key=notification_key,
+                defaults={
+                    "node_id": str(target.get("node_id") or "").strip(),
+                    "node_name": str(
+                        target.get("node_name") or ""
+                    ).strip(),
+                    "task_id": str(target.get("task_id") or "").strip(),
+                },
+            )
+        )
+        delivery = (
+            RechargeApprovalApproverNotification.objects.select_for_update()
+            .get(pk=delivery.pk)
+        )
+        if delivery.status == (
+            RechargeApprovalApproverNotification.STATUS_SENT
+        ):
+            return delivery, False
+        sending_lease_cutoff = timezone.now() - timedelta(
+            seconds=APPROVER_NOTIFICATION_LEASE_SECONDS
+        )
+        if (
+            delivery.status
+            == RechargeApprovalApproverNotification.STATUS_SENDING
+            and delivery.updated_at >= sending_lease_cutoff
+        ):
+            return delivery, False
+        if delivery.attempt_count >= APPROVER_NOTIFICATION_MAX_ATTEMPTS:
+            if delivery.status == (
+                RechargeApprovalApproverNotification.STATUS_SENDING
+            ):
+                delivery.status = (
+                    RechargeApprovalApproverNotification.STATUS_FAILED
+                )
+                delivery.error_message = (
+                    "Notification sending lease expired after reaching "
+                    "the maximum attempt count."
+                )
+                delivery.save(
+                    update_fields=[
+                        "status",
+                        "error_message",
+                        "updated_at",
+                    ]
+                )
+            return delivery, False
+        delivery.node_id = str(target.get("node_id") or "").strip()
+        delivery.node_name = str(target.get("node_name") or "").strip()
+        delivery.task_id = str(target.get("task_id") or "").strip()
+        delivery.status = (
+            RechargeApprovalApproverNotification.STATUS_SENDING
+        )
+        delivery.attempt_count += 1
+        delivery.error_message = ""
+        delivery.save(
+            update_fields=[
+                "node_id",
+                "node_name",
+                "task_id",
+                "status",
+                "attempt_count",
+                "error_message",
+                "updated_at",
+            ]
+        )
+    return delivery, True
+
+
+@shared_task(
+    name=(
+        "cloud_billing.tasks."
+        "send_pending_recharge_approver_notifications"
+    )
+)
+def send_pending_recharge_approver_notifications(
+    record_id: int,
+    discovery_attempt: int = 0,
+    notification_key: str = "pending",
+    escalation_context: Optional[dict] = None,
+):
+    """Notify each current Feishu approver at most once per instance."""
+    try:
+        record = RechargeApprovalRecord.objects.select_related(
+            "provider",
+            "alert_record",
+        ).get(id=record_id)
+    except RechargeApprovalRecord.DoesNotExist:
+        return {
+            "success": False,
+            "record_id": record_id,
+            "error": "Recharge approval record not found",
+        }
+
+    targets = get_pending_recharge_approval_targets(record)
+    service = RechargeApprovalNotificationService()
+    result = {
+        "success": True,
+        "record_id": record.id,
+        "targets": len(targets),
+        "notified": 0,
+        "skipped": 0,
+        "failed": 0,
+        "notification_key": notification_key,
+    }
+    retry_identity_kwargs = {}
+    if notification_key != "pending":
+        retry_identity_kwargs = {
+            "notification_key": notification_key,
+            "escalation_context": dict(escalation_context or {}),
+        }
+    if (
+        not targets
+        and record.status
+        in {
+            RechargeApprovalRecord.STATUS_PENDING,
+            RechargeApprovalRecord.STATUS_SUBMITTED,
+        }
+        and discovery_attempt < APPROVER_DISCOVERY_MAX_ATTEMPTS
+    ):
+        next_attempt = discovery_attempt + 1
+        countdown = (
+            APPROVER_DISCOVERY_RETRY_BASE_SECONDS
+            * (2 ** discovery_attempt)
+        )
+        try:
+            send_pending_recharge_approver_notifications.apply_async(
+                args=[record.id],
+                kwargs={
+                    "discovery_attempt": next_attempt,
+                    **retry_identity_kwargs,
+                },
+                countdown=countdown,
+            )
+            result["retry_scheduled"] = True
+            result["retry_countdown"] = countdown
+        except Exception:
+            logger.warning(
+                "Could not schedule pending approver discovery retry "
+                "(record_id=%s, discovery_attempt=%s)",
+                record.id,
+                next_attempt,
+                exc_info=True,
+            )
+            result["retry_scheduled"] = False
+        return result
+    retry_attempts = []
+    lease_retry_countdowns = []
+    lease_recovery_scheduled = False
+    for target in targets:
+        recipient_user_id = str(target.get("user_id") or "").strip()
+        if not recipient_user_id:
+            continue
+        delivery, claimed = _claim_approver_notification(
+            record=record,
+            target=target,
+            notification_key=notification_key,
+        )
+        if not claimed:
+            result["skipped"] += 1
+            if delivery.status == (
+                RechargeApprovalApproverNotification.STATUS_SENDING
+            ):
+                lease_expires_at = delivery.updated_at + timedelta(
+                    seconds=APPROVER_NOTIFICATION_LEASE_SECONDS
+                )
+                remaining_seconds = (
+                    lease_expires_at - timezone.now()
+                ).total_seconds()
+                lease_retry_countdowns.append(
+                    min(
+                        APPROVER_NOTIFICATION_LEASE_SECONDS,
+                        max(1, int(remaining_seconds) + 1),
+                    )
+                )
+            continue
+        if not lease_recovery_scheduled:
+            try:
+                lease_options = {
+                    "args": [record.id],
+                    "countdown": APPROVER_NOTIFICATION_LEASE_SECONDS,
+                }
+                if retry_identity_kwargs:
+                    lease_options["kwargs"] = retry_identity_kwargs
+                send_pending_recharge_approver_notifications.apply_async(
+                    **lease_options
+                )
+                lease_recovery_scheduled = True
+            except Exception:
+                logger.warning(
+                    "Could not schedule approver notification lease "
+                    "recovery (record_id=%s)",
+                    record.id,
+                    exc_info=True,
+                )
+        try:
+            reminder_kwargs = {
+                "recipient_user_id": recipient_user_id,
+                "node_name": delivery.node_name,
+            }
+            if escalation_context:
+                reminder_kwargs["escalation_context"] = dict(
+                    escalation_context
+                )
+            send_result = service.send_approver_reminder(
+                record,
+                **reminder_kwargs,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Pending approver notification failed unexpectedly "
+                "(record_id=%s, recipient_user_id=%s)",
+                record.id,
+                recipient_user_id,
+                exc_info=True,
+            )
+            send_result = {
+                "success": False,
+                "message_id": "",
+                "error": str(exc),
+            }
+        if send_result.get("success"):
+            delivery.status = (
+                RechargeApprovalApproverNotification.STATUS_SENT
+            )
+            delivery.message_id = str(
+                send_result.get("message_id") or ""
+            ).strip()
+            delivery.error_message = ""
+            delivery.sent_at = timezone.now()
+            result["notified"] += 1
+            event_type = "approver_notification_sent"
+            event_message = "Pending approver notified through Feishu."
+        else:
+            delivery.status = (
+                RechargeApprovalApproverNotification.STATUS_FAILED
+            )
+            delivery.error_message = str(
+                send_result.get("error") or "Unknown notification error"
+            ).strip()
+            result["failed"] += 1
+            result["success"] = False
+            if (
+                delivery.attempt_count
+                < APPROVER_NOTIFICATION_MAX_ATTEMPTS
+            ):
+                retry_attempts.append(delivery.attempt_count)
+            event_type = "approver_notification_failed"
+            event_message = "Could not notify pending Feishu approver."
+        delivery.save(
+            update_fields=[
+                "status",
+                "message_id",
+                "error_message",
+                "sent_at",
+                "updated_at",
+            ]
+        )
+        create_recharge_approval_event(
+            record=record,
+            event_type=event_type,
+            stage="approver_notification",
+            source="feishu_im",
+            message=event_message,
+            payload={
+                "recipient_user_id": recipient_user_id,
+                "node_id": delivery.node_id,
+                "node_name": delivery.node_name,
+                "task_id": delivery.task_id,
+                "message_id": delivery.message_id,
+                "error": delivery.error_message,
+                "notification_key": notification_key,
+                "escalation_context": dict(escalation_context or {}),
+            },
+        )
+    retry_countdowns = list(lease_retry_countdowns)
+    if retry_attempts:
+        highest_attempt = max(retry_attempts)
+        retry_countdowns.append(
+            min(
+                APPROVER_NOTIFICATION_RETRY_BASE_SECONDS
+                * (2 ** (highest_attempt - 1)),
+                APPROVER_NOTIFICATION_LEASE_SECONDS,
+            )
+        )
+    if retry_countdowns:
+        countdown = max(retry_countdowns)
+        try:
+            retry_options = {
+                "args": [record.id],
+                "countdown": countdown,
+            }
+            if retry_identity_kwargs:
+                retry_options["kwargs"] = retry_identity_kwargs
+            send_pending_recharge_approver_notifications.apply_async(
+                **retry_options
+            )
+            result["retry_scheduled"] = True
+            result["retry_countdown"] = countdown
+        except Exception:
+            logger.warning(
+                "Could not schedule pending approver notification retry "
+                "(record_id=%s)",
+                record.id,
+                exc_info=True,
+            )
+            result["retry_scheduled"] = False
     return result
 
 
