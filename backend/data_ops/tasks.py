@@ -53,12 +53,17 @@ def dispatch_sync_task(task, job, **kwargs):
     default_retry_delay=300,
     acks_late=True,
 )
-def run_full_sync_task(self, *, job_id: str | None = None) -> dict:
+def run_full_sync_task(
+    self,
+    *,
+    job_id: str | None = None,
+    force: bool = True,
+) -> dict:
     from .services.feishu.sync import run_full_sync
 
     logger.info("data_ops.run_full_sync start", extra={"job_id": job_id})
     try:
-        result = run_full_sync(job_id=job_id)
+        result = run_full_sync(job_id=job_id, force=force)
     except Exception as exc:
         logger.exception("data_ops.run_full_sync failed")
         if self.request.retries < self.max_retries:
@@ -154,6 +159,51 @@ def run_table_sync_task(
 
 
 @shared_task(
+    name="data_ops.tasks.run_scheduled_sync_batch",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def run_scheduled_sync_batch_task(self, *, items: list[dict]) -> dict:
+    """Run due table syncs serially so they do not compete for one lock."""
+    from .models import SyncJob, SyncStatus
+    from .services.feishu.config import (
+        get_bitable_collection_config_by_key,
+        mark_config_scheduled,
+    )
+    from .services.feishu.sync import run_table_sync
+
+    completed = []
+    failed = []
+    for item in items:
+        job = SyncJob.objects.get(id=item["job_id"])
+        try:
+            result = run_table_sync(
+                source_key=item["source_key"],
+                table_key=item["table_key"],
+                job_id=str(job.id),
+            )
+        except Exception as exc:
+            logger.exception(
+                "data_ops scheduled table sync failed",
+                extra=item,
+            )
+            failed.append({**item, "error": str(exc)})
+            continue
+        if (
+            not result.get("skipped")
+            and result.get("status") in {SyncStatus.OK, SyncStatus.WARNING}
+        ):
+            config = get_bitable_collection_config_by_key(
+                item["source_key"],
+                item["table_key"],
+            )
+            mark_config_scheduled(config)
+        completed.append(item)
+    return {"completed": completed, "failed": failed}
+
+
+@shared_task(
     name="data_ops.tasks.run_scheduled_sync",
     bind=True,
     max_retries=0,
@@ -164,36 +214,32 @@ def run_scheduled_sync_task(self) -> dict:
     from .services.feishu.config import due_bitable_collection_configs
 
     queued = []
-    failed = []
+    jobs = []
     for config in due_bitable_collection_configs():
         job = SyncJob.objects.create(
             source_key=config.source_key,
             table_key=config.table_key,
             status=SyncStatus.PENDING,
         )
-        try:
-            dispatch_sync_task(
-                run_table_sync_task,
-                job,
-                source_key=config.source_key,
-                table_key=config.table_key,
-                job_id=str(job.id),
-                mark_scheduled=True,
-            )
-        except SyncTaskDispatchError:
-            failed.append(
-                {
-                    "source_key": config.source_key,
-                    "table_key": config.table_key,
-                    "job_id": str(job.id),
-                }
-            )
-            continue
-        queued.append(
-            {
-                "source_key": config.source_key,
-                "table_key": config.table_key,
-                "job_id": str(job.id),
-            }
-        )
-    return {"queued": queued, "failed": failed}
+        item = {
+            "source_key": config.source_key,
+            "table_key": config.table_key,
+            "job_id": str(job.id),
+        }
+        queued.append(item)
+        jobs.append(job)
+
+    if not queued:
+        return {"queued": [], "failed": []}
+
+    try:
+        async_result = run_scheduled_sync_batch_task.delay(items=queued)
+    except Exception as exc:
+        for job in jobs:
+            mark_sync_job_dispatch_failed(job, exc)
+        return {"queued": [], "failed": queued}
+
+    SyncJob.objects.filter(id__in=[job.id for job in jobs]).update(
+        celery_task_id=async_result.id,
+    )
+    return {"queued": queued, "failed": []}

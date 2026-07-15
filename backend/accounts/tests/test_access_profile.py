@@ -117,3 +117,38 @@ class AccessProfileTests(TestCase):
                 'operations_console',
             ],
         )
+
+    def test_admin_console_role_includes_all_features(self):
+        user = User.objects.create_user(
+            username='admin-role-user',
+            email='admin-role@example.com',
+            password='password123',
+        )
+        role = Role.objects.create(
+            name='Admin Console',
+            visible_features=['admin_console'],
+            preferred_platform='admin_console',
+        )
+        user.platform_roles.add(role)
+
+        access_profile = get_access_profile(user)
+
+        self.assertEqual(
+            access_profile['visible_features'],
+            [
+                'workspace',
+                'operations_console',
+                'hyperbdr_dashboard',
+                'llm_ops',
+                'data_ops',
+                'admin_console',
+                'sales_work_orders',
+            ],
+        )
+        self.assertTrue(
+            any(
+                platform['key'] == 'data_ops'
+                and platform['default_path'] == '/data-ops'
+                for platform in access_profile['available_platforms']
+            )
+        )

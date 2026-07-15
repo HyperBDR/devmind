@@ -90,8 +90,18 @@ export function getAccessProfile(user) {
   )
 }
 
+function hasAdminAccess(user) {
+  if (user?.is_staff === true) return true
+  return (user?.roles || []).some((role) =>
+    normalizeFeatureKeys(role?.visible_features).includes('admin_console')
+  )
+}
+
 export function hasFeature(user, featureKey) {
   const normalizedFeatureKey = FEATURE_ALIASES[featureKey] || featureKey
+  if (hasAdminAccess(user)) {
+    return FEATURE_KEY_SET.has(normalizedFeatureKey)
+  }
   const visibleFeatures = normalizeFeatureKeys(
     getAccessProfile(user).visible_features
   )
@@ -99,6 +109,14 @@ export function hasFeature(user, featureKey) {
 }
 
 export function getAvailablePlatforms(user, t) {
+  if (hasAdminAccess(user)) {
+    return FEATURE_DEFINITIONS.map((item) => ({
+      key: item.key,
+      label: t ? t(item.labelKey) : item.key,
+      defaultPath: item.defaultPath
+    }))
+  }
+
   const accessProfile = getAccessProfile(user)
   const platformMap = new Map(
     (accessProfile.available_platforms || []).map((item) => [
@@ -106,6 +124,11 @@ export function getAvailablePlatforms(user, t) {
       item
     ])
   )
+  normalizeFeatureKeys(accessProfile.visible_features).forEach((key) => {
+    if (!platformMap.has(key)) {
+      platformMap.set(key, { key })
+    }
+  })
 
   return FEATURE_DEFINITIONS.filter((item) => platformMap.has(item.key)).map(
     (item) => {

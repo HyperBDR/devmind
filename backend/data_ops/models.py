@@ -21,6 +21,9 @@ class SourceRecordModel(models.Model):
     source_app_token = models.CharField(max_length=100)
     source_table_id = models.CharField(max_length=100)
     raw_data = models.JSONField(default=dict, blank=True)
+    owner_identities = models.JSONField(default=dict, blank=True)
+    source_modified_time = models.BigIntegerField(null=True, blank=True)
+    source_content_hash = models.CharField(max_length=64, blank=True)
     is_active = models.BooleanField(default=True, db_index=True)
     synced_at = models.DateTimeField(default=timezone.now, db_index=True)
 
@@ -29,6 +32,52 @@ class SourceRecordModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class SourceRecordChangeType(models.TextChoices):
+    CREATED = "created", "Created"
+    UPDATED = "updated", "Updated"
+    DELETED = "deleted", "Deleted"
+    RESTORED = "restored", "Restored"
+
+
+class SourceRecordChange(models.Model):
+    """Normalized source-record differences detected during synchronization."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_key = models.CharField(max_length=50, db_index=True)
+    table_key = models.CharField(max_length=100, db_index=True)
+    model_name = models.CharField(max_length=100, db_index=True)
+    source_record_id = models.CharField(max_length=255, db_index=True)
+    change_type = models.CharField(
+        max_length=20,
+        choices=SourceRecordChangeType.choices,
+        db_index=True,
+    )
+    changed_fields = models.JSONField(default=list, blank=True)
+    source_changed_fields = models.JSONField(default=list, blank=True)
+    before_values = models.JSONField(default=dict, blank=True)
+    after_values = models.JSONField(default=dict, blank=True)
+    source_modified_time = models.BigIntegerField(null=True, blank=True)
+    detected_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["source_key", "table_key", "detected_at"],
+                name="data_ops_src_change_table_idx",
+            ),
+            models.Index(
+                fields=["model_name", "source_record_id", "detected_at"],
+                name="data_ops_src_change_record_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.source_key}/{self.table_key}/"
+            f"{self.source_record_id}: {self.change_type}"
+        )
 
 
 class Contract(SourceRecordModel):
@@ -818,6 +867,7 @@ class SyncCursor(models.Model):
     last_sync_at = models.DateTimeField(null=True, blank=True)
     last_success_at = models.DateTimeField(null=True, blank=True)
     record_count = models.IntegerField(default=0)
+    source_revision = models.CharField(max_length=64, blank=True)
 
     class Meta:
         constraints = [

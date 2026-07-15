@@ -6,7 +6,7 @@
         class="field-sm"
         @change="$emit('update-filter', 'status', $event.target.value)"
       >
-        <option value="">全部状态</option>
+        <option value="">{{ t('dataOps.filters.allStatuses') }}</option>
         <option value="active">active</option>
         <option value="expired">expired</option>
         <option value="pending">pending</option>
@@ -14,17 +14,17 @@
       <input
         :value="filters.region"
         class="field-sm"
-        placeholder="地区"
+        :placeholder="t('dataOps.filters.region')"
         @input="$emit('update-filter', 'region', $event.target.value)"
       />
       <input
         :value="filters.product_type"
         class="field-sm"
-        placeholder="产品类型"
+        :placeholder="t('dataOps.filters.productType')"
         @input="$emit('update-filter', 'product_type', $event.target.value)"
       />
       <button class="btn-secondary" type="button" @click="$emit('load')">
-        查询
+        {{ t('dataOps.common.query') }}
       </button>
       <button
         v-if="canExport"
@@ -32,13 +32,13 @@
         type="button"
         @click="$emit('download')"
       >
-        导出
+        {{ t('dataOps.common.export') }}
       </button>
     </Toolbar>
     <DataTable
       :columns="columns"
       :rows="records"
-      empty-text="暂无海外销售记录"
+      :empty-text="t('dataOps.empty.sales')"
     />
     <Pager
       :page="page"
@@ -50,7 +50,11 @@
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
 import { DataTable, Pager, Toolbar } from './DataOpsPrimitives'
+
+const { t } = useI18n()
 
 defineProps({
   canExport: { type: Boolean, default: false },

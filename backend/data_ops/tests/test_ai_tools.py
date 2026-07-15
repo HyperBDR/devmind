@@ -2,12 +2,14 @@ from decimal import Decimal
 
 import pytest
 
-from data_ops.models import Contract, DomesticLedger
+from data_ops.models import Contract, DomesticLedger, SourceRecordChange
 from data_ops.services.ai_tools import (
+    DATA_OPS_TOOL_SCHEMAS,
+    aggregate_data_ops_records,
     execute_data_ops_tool,
     get_data_ops_schema,
+    get_data_ops_tool_profile,
     query_data_ops_records,
-    run_data_ops_sql,
 )
 
 
@@ -46,8 +48,33 @@ def test_query_records_filters_active_records_only():
     assert result["rows"][0]["total_amount"] == 100.0
 
 
+def test_tool_profile_does_not_expose_raw_sql():
+    tool_names = [
+        item["function"]["name"] for item in DATA_OPS_TOOL_SCHEMAS
+    ]
+    profile = get_data_ops_tool_profile()
+
+    assert "data_ops_run_sql" not in tool_names
+    assert "data_ops_run_sql" not in profile["tools"]
+    assert "sql_rules" not in profile
+    assert profile["query_rules"]
+    assert any(
+        "record_changes" in rule for rule in profile["query_rules"]
+    )
+
+
+def test_raw_sql_tool_call_returns_unknown_tool():
+    result = execute_data_ops_tool(
+        "data_ops_run_sql",
+        {"sql": "SELECT customer_name FROM data_ops_contract"},
+    )
+
+    assert result["ok"] is False
+    assert "unknown tool" in result["error"]
+
+
 @pytest.mark.django_db
-def test_run_sql_allows_read_only_custom_calculation():
+def test_aggregate_handles_custom_calculation_without_raw_sql():
     DomesticLedger.all_objects.create(
         source_app_token="app",
         source_table_id="ledger",
@@ -57,40 +84,34 @@ def test_run_sql_allows_read_only_custom_calculation():
         currency="CNY",
         outstanding=Decimal("60.00"),
     )
+    DomesticLedger.all_objects.create(
+        source_app_token="app",
+        source_table_id="ledger",
+        source_record_id="ledger-2",
+        ledger_type="收入",
+        customer_name="Beta",
+        currency="CNY",
+        outstanding=Decimal("90.00"),
+    )
 
-    result = run_data_ops_sql(
+    result = aggregate_data_ops_records(
         {
-            "sql": (
-                "SELECT customer_name, SUM(outstanding) AS outstanding "
-                "FROM data_ops_domesticledger "
-                "GROUP BY customer_name"
-            ),
+            "table": "domestic_ledgers",
+            "group_by": ["customer_name"],
+            "metrics": [
+                {
+                    "op": "sum",
+                    "field": "outstanding",
+                    "alias": "outstanding",
+                },
+            ],
+            "order_by": ["-outstanding"],
         },
     )
 
-    assert result["row_count"] == 1
-    assert result["rows"][0]["customer_name"] == "Acme"
-    assert result["rows"][0]["outstanding"] == 60
-    assert result["sql"].endswith("LIMIT 30")
-
-
-@pytest.mark.django_db
-def test_run_sql_rejects_mutation_and_sensitive_fields():
-    with pytest.raises(ValueError, match="only SELECT"):
-        run_data_ops_sql({"sql": "DELETE FROM data_ops_contract"})
-
-    with pytest.raises(ValueError, match="forbidden sensitive"):
-        run_data_ops_sql(
-            {
-                "sql": (
-                    "SELECT source_app_token "
-                    "FROM data_ops_contract"
-                ),
-            },
-        )
-
-    with pytest.raises(ValueError, match="SELECT \\*"):
-        run_data_ops_sql({"sql": "SELECT * FROM data_ops_contract"})
+    assert result["row_count"] == 2
+    assert result["rows"][0]["customer_name"] == "Beta"
+    assert result["rows"][0]["outstanding"] == 90
 
 
 def test_schema_exposes_only_safe_fields():
@@ -101,6 +122,37 @@ def test_schema_exposes_only_safe_fields():
     assert "raw_data" not in field_names
     assert "source_app_token" not in field_names
     assert schema["db_table"] == "data_ops_contract"
+
+
+@pytest.mark.django_db
+def test_record_changes_are_available_as_an_ai_data_source():
+    SourceRecordChange.objects.create(
+        source_key="domestic",
+        table_key="contracts",
+        model_name="contract",
+        source_record_id="rec-test",
+        change_type="updated",
+        changed_fields=["customer_name"],
+        before_values={"customer_name": "Example Customer Alpha"},
+        after_values={"customer_name": "Example Customer Beta"},
+    )
+
+    result = query_data_ops_records(
+        {
+            "table": "record_changes",
+            "columns": [
+                "table_key",
+                "change_type",
+                "changed_fields",
+                "before_values",
+                "after_values",
+            ],
+        }
+    )
+
+    assert result["row_count"] == 1
+    assert result["rows"][0]["change_type"] == "updated"
+    assert result["rows"][0]["changed_fields"] == ["customer_name"]
 
 
 def test_unknown_tool_returns_structured_error():

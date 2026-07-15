@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 
 from django.db.utils import OperationalError, ProgrammingError
@@ -7,13 +8,11 @@ from django.db.utils import OperationalError, ProgrammingError
 
 BITABLE_SOURCES = {
     "domestic": {
-        "app_token": "",
-        "name": "Wabotech business management",
+        "name": "项目跟踪管理",
         "tables": {
             "contracts_old": {
-                "table_id": "",
                 "model": "contract",
-                "name": "Contracts before 2025.3",
+                "name": "合同清单2025.3之前",
                 "expected_min_records": 1,
                 "field_map": {
                     "合同编号": "contract_number",
@@ -41,9 +40,8 @@ BITABLE_SOURCES = {
                 ],
             },
             "contracts": {
-                "table_id": "",
                 "model": "contract",
-                "name": "Contracts after 2025.3",
+                "name": "合同清单2025.3之后",
                 "expected_min_records": 1,
                 "field_map": {
                     "合同编号": "contract_number",
@@ -78,9 +76,8 @@ BITABLE_SOURCES = {
                 ],
             },
             "sales_records": {
-                "table_id": "",
                 "model": "sales_record",
-                "name": "Overseas license projects",
+                "name": "海外-落地项目（License）",
                 "expected_min_records": 1,
                 "field_map": {
                     "项目名称": "project_name",
@@ -106,9 +103,8 @@ BITABLE_SOURCES = {
                 ],
             },
             "domestic_ledger_receipt": {
-                "table_id": "",
                 "model": "domestic_ledger_receipt",
-                "name": "Sales product and service income ledger",
+                "name": "销售产品&服务收入台账",
                 "expected_min_records": 1,
                 "field_map": {
                     "收支类型": "ledger_type",
@@ -117,6 +113,7 @@ BITABLE_SOURCES = {
                     "订单编号": "order_number",
                     "合同/订单签订日期": "signing_date",
                     "销售负责人": "sales_person",
+                    "万博提交人": "sales_person",
                     "万博签约主体": "signing_entity",
                     "货币单位": "currency",
                     "应收合同总金额": "total_contract_amount",
@@ -144,7 +141,7 @@ BITABLE_SOURCES = {
                 "expected_fields": [
                     "客户名称",
                     "项目名称",
-                    "销售负责人",
+                    "万博提交人",
                     "应收合同总金额",
                     "回款金额",
                     "待回款",
@@ -152,9 +149,8 @@ BITABLE_SOURCES = {
                 ],
             },
             "domestic_ledger_payment": {
-                "table_id": "",
                 "model": "domestic_ledger_payment",
-                "name": "Project purchase expense ledger",
+                "name": "项目采购支出台账",
                 "expected_min_records": 1,
                 "field_map": {
                     "收支类型": "ledger_type",
@@ -178,9 +174,8 @@ BITABLE_SOURCES = {
                 ],
             },
             "project_init": {
-                "table_id": "",
                 "model": "project_init",
-                "name": "Project initiation",
+                "name": "项目立项",
                 "expected_min_records": 1,
                 "field_map": {
                     "项目编号": "project_code",
@@ -210,13 +205,11 @@ BITABLE_SOURCES = {
         },
     },
     "oversea": {
-        "app_token": "",
-        "name": "Overseas landed project statistics",
+        "name": "海外-落地项目汇总 Overseas Orders",
         "tables": {
             "oversea_projects": {
-                "table_id": "",
                 "model": "oversea_project",
-                "name": "Overseas landed project summary",
+                "name": "海外-落地项目统计",
                 "expected_min_records": 1,
                 "field_map": {
                     "项目名称": "project_name",
@@ -240,6 +233,7 @@ BITABLE_SOURCES = {
                     "币种": "currency",
                     "订单币种": "currency",
                     "统计口径USD": "stat_amount_usd",
+                    "统计口径-USD收入": "stat_amount_usd",
                     "合计金额（统一汇率）": "stat_amount_usd",
                     "分配时间": "allocation_date",
                     "分配数量": "allocation_quantity",
@@ -285,25 +279,23 @@ BITABLE_SOURCES = {
                 },
                 "expected_fields": [
                     "项目名称",
-                    "项目状态",
+                    "项目进度状态",
                     "PO#",
-                    "国家",
+                    "国家地区",
                     "签约客户",
-                    "统计口径USD",
-                    "License到期时间",
-                    "项目负责人",
+                    "统计口径-USD收入",
+                    "授权管理平台到期时间",
+                    "项目负责人 (人员 )",
                 ],
             },
         },
     },
     "oversea_stats": {
-        "app_token": "",
-        "name": "Overseas settlement statistics",
+        "name": "海外结算",
         "tables": {
             "oversea_settlements": {
-                "table_id": "",
                 "model": "oversea_settlement",
-                "name": "Overseas to domestic settlement orders",
+                "name": "海外→国内商务-订单情况",
                 "expected_min_records": 1,
                 "field_map": {
                     "项目名称-英文": "project_name_en",
@@ -369,9 +361,20 @@ DEFAULT_REQUIRED_PERMISSIONS = [
     "bitable:field:readonly",
 ]
 
+ACTIVE_SOURCE_KEYS = {"domestic"}
+
+SOURCE_APP_TOKEN_ENV_NAMES = {
+    "domestic": (
+        "DATA_OPS_FEISHU_DOMESTIC_APP_TOKEN",
+        "DATA_OPS_FEISHU_BITABLE_APP_TOKEN",
+    ),
+}
+
 
 def iter_default_bitable_tables():
     for source_key, source in BITABLE_SOURCES.items():
+        if source_key not in ACTIVE_SOURCE_KEYS:
+            continue
         for table_key, table in source["tables"].items():
             yield source_key, source, table_key, table
 
@@ -383,14 +386,24 @@ def iter_default_collection_configs():
             "table_key": table_key,
             "source_name": source.get("name", ""),
             "table_name": table.get("name", ""),
-            "app_token": source.get("app_token", ""),
-            "table_id": table.get("table_id", ""),
+            "app_token": default_source_app_token(source_key),
+            "table_id": "",
             "expected_min_records": table.get("expected_min_records"),
             "required_permissions": list(DEFAULT_REQUIRED_PERMISSIONS),
         }
 
 
+def default_source_app_token(source_key: str) -> str:
+    for env_name in SOURCE_APP_TOKEN_ENV_NAMES.get(source_key, ()):
+        value = os.getenv(env_name, "").strip()
+        if value:
+            return value
+    return ""
+
+
 def resolve_default_table(source_key: str, table_key: str) -> tuple | None:
+    if source_key not in ACTIVE_SOURCE_KEYS:
+        return None
     source = BITABLE_SOURCES.get(source_key)
     if not source:
         return None
@@ -424,6 +437,8 @@ def iter_bitable_tables(
 
         resolved_source = deepcopy(source)
         resolved_table = deepcopy(table)
+        resolved_source["app_token"] = default_source_app_token(source_key)
+        resolved_table["table_id"] = ""
         if config:
             resolved_source["app_token"] = config.app_token
             resolved_source["name"] = config.source_name or source.get(

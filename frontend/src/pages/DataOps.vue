@@ -1,13 +1,14 @@
 <template>
   <AppLayout :show-sidebar="false" :full-bleed="true">
-    <div class="flex min-h-[calc(100vh-4rem)] bg-slate-50 text-slate-900">
+    <div class="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 lg:flex-row">
       <DataOpsSidebar
         :active-section="activeSection"
+        :nav-groups="navGroups"
         :nav-items="navItems"
         @select="selectSection"
       />
 
-      <main class="min-w-0 flex-1 overflow-auto">
+      <main class="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div class="mx-auto max-w-[1440px] space-y-6 p-4 sm:p-6">
           <DataOpsHeader
             :active-nav="activeNav"
@@ -16,18 +17,41 @@
             :preflight-loading="preflightLoading"
             :sync-loading="syncLoading"
             @full-sync="triggerFullSync"
-            @preflight="runPreflight"
+            @preflight="handlePreflight"
             @refresh="refreshCurrentSection"
           />
 
+          <SyncFailureDetails
+            v-if="syncFailure"
+            :failure="syncFailure"
+          />
+
           <section
-            v-if="error"
+            v-else-if="error"
             class="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700"
           >
             {{ error }}
           </section>
 
+          <section
+            v-if="preflightFeedback"
+            class="rounded-lg border px-4 py-3 text-sm"
+            :class="preflightFeedbackClass"
+          >
+            {{ preflightFeedback }}
+          </section>
+
+          <section
+            v-if="refreshFeedback"
+            class="rounded-lg border px-4 py-3 text-sm"
+            :class="refreshFeedbackClass"
+            role="status"
+          >
+            {{ refreshFeedback }}
+          </section>
+
           <DataOpsSyncBanner
+            v-if="activeSection === 'sync' || activeSection === 'config'"
             :banner-class="syncBannerClass"
             :can-manage-sync="canManageSync"
             :sync-loading="syncLoading"
@@ -40,8 +64,11 @@
             v-if="activeSection === 'executive'"
             :insights="insights"
             :kpi-cards="kpiCards"
+            :overview="overview"
             :opportunities="opportunities"
             :risks="risks"
+            :summary="summary"
+            :top-customers="topCustomers"
           />
 
           <PipelineSection
@@ -82,16 +109,12 @@
             @update-filter="updateSalesFilter"
           />
 
-          <KanbanSection
-            v-else-if="activeSection === 'kanban'"
-            :contract-cards="contractCards"
-            :settlement-cards="settlementCards"
-          />
-
           <SyncSection
             v-else-if="activeSection === 'sync'"
             :columns="syncColumns"
+            :data-quality="dataQuality"
             :recent-jobs="recentJobs"
+            :summary="summary"
             :tables="syncTables"
           />
 
@@ -105,12 +128,8 @@
             <CollectionConfigSection
               :configs="collectionConfigs"
               :frequency-options="frequencyOptions"
-              :permissions-text="permissionsText"
               @preflight="runConfigPreflight"
-              @save="saveSyncConfig"
               @trigger="triggerConfigSync"
-              @update-config-field="updateConfigField"
-              @update-permissions="updatePermissions"
             />
           </template>
 
@@ -119,10 +138,15 @@
 
       <AiAssistantSection
         v-model:input="aiInput"
+        :active-history-id="aiActiveHistoryId"
         :context="aiContext"
+        :history="aiHistory"
         :loading="aiLoading"
         :messages="aiMessages"
         @ask="askAiQuestion"
+        @delete-history="deleteAiHistoryItem"
+        @new-chat="startNewAiConversation"
+        @select-history="selectAiHistoryItem"
         @send="sendAiMessage"
         @stop="stopAiStream"
       />
@@ -132,6 +156,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AiAssistantSection from '@/components/data-ops/AiAssistantSection.vue'
@@ -142,9 +167,9 @@ import DataOpsSidebar from '@/components/data-ops/DataOpsSidebar.vue'
 import DataOpsSyncBanner from '@/components/data-ops/DataOpsSyncBanner.vue'
 import ExecutiveSection from '@/components/data-ops/ExecutiveSection.vue'
 import GlobalConfigPanel from '@/components/data-ops/GlobalConfigPanel.vue'
-import KanbanSection from '@/components/data-ops/KanbanSection.vue'
 import PipelineSection from '@/components/data-ops/PipelineSection.vue'
 import SalesRecordsSection from '@/components/data-ops/SalesRecordsSection.vue'
+import SyncFailureDetails from '@/components/data-ops/SyncFailureDetails.vue'
 import SyncSection from '@/components/data-ops/SyncSection.vue'
 import {
   formatAmount,
@@ -155,19 +180,22 @@ import { useUserStore } from '@/store/user'
 
 const activeSection = ref('executive')
 const userStore = useUserStore()
+const { locale, t } = useI18n()
 const {
+  aiActiveHistoryId,
   aiContext,
+  aiHistory,
   aiInput,
   aiLoading,
   aiMessages,
   askAiQuestion,
   collectionConfigs,
-  contractCards,
   contractFilterOptions,
   contractFilters,
   contractPage,
   contractTotal,
   contracts,
+  dataQuality,
   downloadContracts,
   downloadSales,
   error,
@@ -179,15 +207,21 @@ const {
   loadSalesRecords,
   loading,
   opportunities,
+  overview,
   pageSize,
-  permissionsText,
+  preflightFeedback,
+  preflightFeedbackClass,
   pipelineInsights,
   pipelineProjects,
   pipelineSummary,
   preflightLoading,
   recentJobs,
+  refreshFeedback,
+  refreshFeedbackClass,
   refreshActive,
+  refreshFromFeishu,
   risks,
+  deleteAiHistoryItem,
   runConfigPreflight,
   runPreflight,
   salesFilters,
@@ -195,22 +229,24 @@ const {
   salesRecords,
   salesTotal,
   saveGlobalConfig,
-  saveSyncConfig,
+  selectAiHistoryItem,
   sendAiMessage,
   setContractPage,
   setSalesPage,
-  settlementCards,
+  summary,
+  startNewAiConversation,
   stopAiStream,
   syncBannerClass,
   syncBannerText,
   syncBannerTitle,
+  syncFailure,
   syncLoading,
+  topCustomers,
   syncTables,
   triggerConfigSync,
   triggerFullSync,
   triggerIncrementalSync,
   updateGlobalConfigField,
-  updatePermissions,
 } = useDataOpsConsole()
 
 const canManageSync = computed(
@@ -219,109 +255,142 @@ const canManageSync = computed(
     userStore.userHasFeature('data_ops')
 )
 
-const allNavItems = [
-  {
-    key: 'executive',
-    icon: 'E',
-    label: '经营驾驶舱',
-    description: '合同、回款、风险和机会的经营概览',
-  },
-  {
-    key: 'pipeline',
-    icon: 'P',
-    label: 'Pipeline 看板',
-    description: '国内立项、海外落地和续约风险',
-  },
-  {
-    key: 'contracts',
-    icon: 'C',
-    label: '合同台账',
-    description: '合同记录、筛选、分页和导出',
-  },
-  {
-    key: 'sales',
-    icon: 'S',
-    label: '海外销售记录',
-    description: 'KooGallery 订单和海外销售明细',
-  },
-  {
-    key: 'kanban',
-    icon: 'K',
-    label: '看板视图',
-    description: '按状态分组查看合同和海外结算',
-  },
-  {
-    key: 'sync',
-    icon: 'Y',
-    label: '同步状态',
-    description: '飞书采集任务、权限检查和同步问题',
-  },
-  {
-    key: 'config',
-    icon: 'G',
-    label: '采集配置',
-    description: '配置飞书多维表格 ID、权限、频率和手动触发',
-  },
-]
+const allNavItems = computed(() =>
+  ['executive', 'pipeline', 'contracts', 'sales', 'sync', 'config'].map(
+    (key) => ({
+      key,
+      icon: key.slice(0, 1).toUpperCase(),
+      label: t(`dataOps.nav.items.${key}.label`),
+      description: t(`dataOps.nav.items.${key}.description`)
+    })
+  )
+)
 
-const frequencyOptions = [
-  { value: 'manual', label: '手动' },
-  { value: 'hourly', label: '每小时' },
-  { value: 'daily', label: '每天' },
-  { value: 'weekly', label: '每周' },
-]
+const frequencyOptions = computed(() =>
+  ['manual', 'hourly', 'daily', 'weekly'].map((value) => ({
+    value,
+    label: t(`dataOps.common.${value}`)
+  }))
+)
 
 const navItems = computed(() =>
-  allNavItems.filter((item) => item.key !== 'config' || canManageSync.value)
+  allNavItems.value.filter(
+    (item) => item.key !== 'config' || canManageSync.value
+  )
 )
+
+const navGroups = computed(() => {
+  const grouped = [
+    {
+      key: 'business',
+      label: t('dataOps.nav.groups.business'),
+      items: ['executive', 'pipeline', 'contracts', 'sales'],
+    },
+    {
+      key: 'global-config',
+      label: t('dataOps.nav.groups.global'),
+      items: ['sync', 'config'],
+    },
+  ]
+  const visibleItems = new Map(navItems.value.map((item) => [item.key, item]))
+  return grouped
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .map((key) => visibleItems.get(key))
+        .filter(Boolean),
+    }))
+    .filter((group) => group.items.length)
+})
 
 const activeNav = computed(() =>
-  navItems.value.find((item) => item.key === activeSection.value)
+  normalizeActiveNav(navItems.value.find((item) => item.key === activeSection.value))
 )
 
-const contractColumns = [
-  { key: 'contract_number', label: '合同编号' },
-  { key: 'customer_name', label: '客户名称' },
-  { key: 'signing_entity', label: '签约主体' },
-  { key: 'sales_person', label: '负责人' },
-  { key: 'region', label: '地区' },
-  { key: 'total_amount', label: '金额', format: amountCell },
-  { key: 'currency', label: '币种' },
-  { key: 'signing_date', label: '签订日期' },
-  { key: 'service_end', label: '服务到期' },
-  { key: 'status', label: '状态' },
-]
+const contractColumns = computed(() => [
+  { key: 'contract_number', label: t('dataOps.columns.contractNumber') },
+  { key: 'customer_name', label: t('dataOps.columns.customerName') },
+  { key: 'signing_entity', label: t('dataOps.columns.signingEntity') },
+  { key: 'sales_person', label: t('dataOps.columns.owner') },
+  { key: 'region', label: t('dataOps.columns.region') },
+  {
+    key: 'total_amount',
+    label: t('dataOps.columns.amount'),
+    format: amountCell
+  },
+  { key: 'currency', label: t('dataOps.columns.currency') },
+  { key: 'signing_date', label: t('dataOps.columns.signingDate') },
+  { key: 'service_end', label: t('dataOps.columns.serviceEnd') },
+  { key: 'status', label: t('dataOps.columns.status') }
+])
 
-const salesColumns = [
-  { key: 'project_name', label: '项目名称' },
+const salesColumns = computed(() => [
+  { key: 'project_name', label: t('dataOps.columns.projectName') },
   { key: 'po_number', label: 'PO#' },
-  { key: 'region', label: '地区' },
-  { key: 'product_type', label: '产品类型' },
-  { key: 'total_amount_usd', label: '金额(USD)', format: amountCell },
-  { key: 'allocation_date', label: '分配时间' },
-  { key: 'expiry_date', label: '到期时间' },
-  { key: 'order_type', label: '订单类型' },
-  { key: 'status', label: '状态' },
-  { key: 'sales_person', label: '负责人' },
-]
+  { key: 'region', label: t('dataOps.columns.region') },
+  { key: 'product_type', label: t('dataOps.columns.productType') },
+  {
+    key: 'total_amount_usd',
+    label: `${t('dataOps.columns.amount')} (USD)`,
+    format: amountCell
+  },
+  { key: 'allocation_date', label: t('dataOps.columns.allocationDate') },
+  { key: 'expiry_date', label: t('dataOps.columns.expiryDate') },
+  { key: 'order_type', label: t('dataOps.columns.orderType') },
+  { key: 'status', label: t('dataOps.columns.status') },
+  { key: 'sales_person', label: t('dataOps.columns.owner') }
+])
 
-const syncColumns = [
-  { key: 'source_key', label: '数据源' },
-  { key: 'table_key', label: '表 Key' },
-  { key: 'table_name', label: '表名' },
-  { key: 'status', label: '状态' },
-  { key: 'issue_code', label: '问题' },
-  { key: 'record_count', label: '记录数' },
-  { key: 'message', label: '提示' },
-  { key: 'last_checked_at', label: '最近检查', format: formatDateTime },
-]
+const syncColumns = computed(() => [
+  { key: 'source_key', label: t('dataOps.columns.source') },
+  { key: 'table_key', label: t('dataOps.columns.tableKey') },
+  { key: 'table_name', label: t('dataOps.columns.tableName') },
+  { key: 'status', label: t('dataOps.columns.status') },
+  { key: 'issue_code', label: t('dataOps.columns.issue') },
+  { key: 'record_count', label: t('dataOps.columns.records') },
+  { key: 'message', label: t('dataOps.columns.message') },
+  {
+    key: 'last_checked_at',
+    label: t('dataOps.columns.lastChecked'),
+    format: (value) => formatDateTime(value, locale.value)
+  }
+])
 
 function amountCell(value) {
-  return formatAmount(value)
+  return formatAmount(value, '', { locale: locale.value })
 }
 
-function refreshCurrentSection() {
-  refreshActive(activeSection.value, canManageSync.value)
+function normalizeActiveNav(item) {
+  if (!item || item.key !== 'executive') {
+    return item
+  }
+  const month = overview.value?.meta?.current_month || '—'
+  return {
+    ...item,
+    currentMonth: month,
+    note: t('dataOps.header.currencyNote'),
+    description: `${t('dataOps.header.dataMonth', { month })}  ${t(
+      'dataOps.header.currencyNote'
+    )}`
+  }
+}
+
+async function refreshCurrentSection() {
+  if (canManageSync.value) {
+    await refreshFromFeishu(
+      activeSection.value,
+      canManageSync.value
+    )
+    return
+  }
+  await refreshActive(activeSection.value, false)
+}
+
+async function handlePreflight() {
+  const ok = await runPreflight()
+  if (ok) {
+    activeSection.value = 'sync'
+  }
 }
 
 function selectSection(key) {
@@ -338,10 +407,6 @@ function updateContractFilter(key, value) {
 
 function updateSalesFilter(key, value) {
   salesFilters.value[key] = value
-}
-
-function updateConfigField(config, key, value) {
-  config[key] = value
 }
 
 onMounted(() => loadAll(canManageSync.value))

@@ -1,19 +1,38 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+
 import { dataOpsApi } from '@/api/dataOps'
+import {
+  formatAmount as formatCurrencyAmount,
+  formatAmountByCurrency as formatCurrencyAmounts,
+} from '@/utils/currency'
+import { syncJobError, syncJobFailureDetails } from '@/utils/sync'
 
 const pageSize = 20
+const aiHistoryStorageKey = 'data_ops_ai_chat_history_v1'
+const maxAiHistoryItems = 30
+const syncPollIntervalMs = 1000
+const syncPollMaxAttempts = 120
+const terminalSyncStatuses = new Set(['ok', 'warning', 'failed'])
 
 export function useDataOpsConsole() {
+  const { locale, t } = useI18n()
   const loading = ref(false)
   const preflightLoading = ref(false)
   const syncLoading = ref(false)
   const error = ref('')
+  const syncFailure = ref(null)
+  const preflightFeedback = ref('')
+  const refreshFeedback = ref('')
+  const refreshFeedbackTone = ref('ok')
 
   const summary = ref(null)
   const overview = ref(null)
   const insights = ref(null)
   const risks = ref(null)
   const opportunities = ref(null)
+  const dataQuality = ref(null)
+  const topCustomers = ref(null)
   const pipelineSummary = ref(null)
   const pipelineProjects = ref([])
   const pipelineInsights = ref(null)
@@ -24,18 +43,20 @@ export function useDataOpsConsole() {
   const salesRecords = ref([])
   const salesTotal = ref(0)
   const salesPage = ref(1)
-  const kanbanContracts = ref(null)
-  const overseaSettlements = ref(null)
   const syncStatus = ref(null)
   const globalConfig = ref(defaultGlobalConfig())
   const collectionConfigs = ref([])
   const aiContext = ref(null)
   const aiInput = ref('')
   const aiLoading = ref(false)
+  const aiActiveAssistantMessage = ref(null)
+  const aiActiveHistoryId = ref('')
+  const aiHistory = ref(loadAiHistory())
   const aiStreamController = ref(null)
 
   const contractFilters = ref({
     customer_name: '',
+    signing_entity: '',
     sales_person: '',
     status: '',
   })
@@ -44,12 +65,7 @@ export function useDataOpsConsole() {
     region: '',
     product_type: '',
   })
-  const aiMessages = ref([
-    {
-      role: 'assistant',
-      content: '我会基于当前数据运营上下文回答问题。请先确保飞书数据已同步。',
-    },
-  ])
+  const aiMessages = ref([])
 
   const syncTables = computed(() => syncStatus.value?.tables || [])
   const recentJobs = computed(() => syncStatus.value?.recent_jobs || [])
@@ -58,63 +74,81 @@ export function useDataOpsConsole() {
       ['failed', 'warning'].includes(item.status)
     )
   )
-  const contractCards = computed(() => kanbanContracts.value?.cards || [])
-  const settlementCards = computed(() => overseaSettlements.value?.cards || [])
-
   const kpiCards = computed(() => {
     const data = summary.value || {}
     const kpis = overview.value?.kpis || {}
     return [
-      { label: '合同数量', value: formatNumber(data.total_contracts) },
       {
-        label: '合同金额',
+        label: t('dataOps.kpi.contractCount'),
+        value: formatNumber(data.total_contracts, locale.value)
+      },
+      {
+        label: t('dataOps.kpi.contractAmount'),
         value: formatAmountByCurrency(
           data.total_contract_amount,
-          data.total_contract_amount_by_currency
+          data.total_contract_amount_by_currency,
+          { locale: locale.value }
         ),
       },
       {
-        label: '本月签约',
+        label: t('dataOps.kpi.monthlySigned'),
         value: formatAmountByCurrency(
           kpis.monthly_signed_amount,
-          kpis.monthly_signed_amount_by_currency
+          kpis.monthly_signed_amount_by_currency,
+          { locale: locale.value }
         ),
       },
       {
-        label: '累计回款',
+        label: t('dataOps.kpi.received'),
         value: formatAmountByCurrency(
           data.total_received_amount,
-          data.total_received_amount_by_currency
+          data.total_received_amount_by_currency,
+          { locale: locale.value }
         ),
       },
       {
-        label: '待回款',
+        label: t('dataOps.kpi.outstanding'),
         value: formatAmountByCurrency(
           data.total_outstanding_amount,
-          data.total_outstanding_amount_by_currency
+          data.total_outstanding_amount_by_currency,
+          { locale: locale.value }
         ),
       },
     ]
   })
 
   const syncBannerTitle = computed(() => {
-    if (!syncTables.value.length) return '尚未执行飞书权限检查'
+    if (!syncTables.value.length) return t('dataOps.banner.unchecked')
     const status = syncStatus.value?.overall_status
-    if (status === 'failed') return '飞书同步存在失败项'
-    if (status === 'warning') return '飞书同步需要确认'
-    return '飞书同步状态正常'
+    if (status === 'failed') return t('dataOps.banner.failed')
+    if (status === 'warning') return t('dataOps.banner.warning')
+    return t('dataOps.banner.healthy')
   })
   const syncBannerText = computed(() => {
-    if (!syncTables.value.length) return '尚未执行飞书权限检查。'
+    if (!syncTables.value.length) return t('dataOps.banner.uncheckedText')
     if (syncIssues.value.length) {
-      return `发现 ${syncIssues.value.length} 张表存在权限、字段或数据完整性问题。`
+      return t('dataOps.banner.issues', { count: syncIssues.value.length })
     }
-    return '所有已检查数据表均可读取。'
+    return t('dataOps.banner.allReadable')
   })
   const syncBannerClass = computed(() => {
     const status = syncStatus.value?.overall_status
     if (status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-800'
     if (status === 'warning') {
+      return 'border-amber-200 bg-amber-50 text-amber-800'
+    }
+    return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  })
+  const preflightFeedbackClass = computed(() => {
+    const status = syncStatus.value?.overall_status
+    if (status === 'failed') return 'border-rose-200 bg-rose-50 text-rose-800'
+    if (status === 'warning') {
+      return 'border-amber-200 bg-amber-50 text-amber-800'
+    }
+    return 'border-emerald-200 bg-emerald-50 text-emerald-800'
+  })
+  const refreshFeedbackClass = computed(() => {
+    if (refreshFeedbackTone.value === 'warning') {
       return 'border-amber-200 bg-amber-50 text-amber-800'
     }
     return 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -129,7 +163,6 @@ export function useDataOpsConsole() {
         loadPipeline(),
         loadContracts(),
         loadSalesRecords(),
-        loadKanban(),
         loadSync(includeConfigs),
         loadAiContext(),
       ])
@@ -147,18 +180,24 @@ export function useDataOpsConsole() {
       insightsRes,
       risksRes,
       opportunitiesRes,
+      dataQualityRes,
+      topCustomersRes,
     ] = await Promise.all([
       dataOpsApi.summary(),
       dataOpsApi.executiveOverview(),
       dataOpsApi.insights(),
       dataOpsApi.executiveRisks(),
       dataOpsApi.executiveOpportunities(),
+      dataOpsApi.dataQuality(),
+      dataOpsApi.executiveTopCustomers(),
     ])
     summary.value = extractData(summaryRes)
     overview.value = extractData(overviewRes)
     insights.value = extractData(insightsRes)
     risks.value = extractData(risksRes)
     opportunities.value = extractData(opportunitiesRes)
+    dataQuality.value = extractData(dataQualityRes)
+    topCustomers.value = extractData(topCustomersRes)
   }
 
   async function loadPipeline() {
@@ -202,15 +241,6 @@ export function useDataOpsConsole() {
     salesTotal.value = extractData(countRes)?.total || 0
   }
 
-  async function loadKanban() {
-    const [contractsRes, settlementsRes] = await Promise.all([
-      dataOpsApi.kanbanContracts(),
-      dataOpsApi.kanbanOverseaSettlements(),
-    ])
-    kanbanContracts.value = extractData(contractsRes)
-    overseaSettlements.value = extractData(settlementsRes)
-  }
-
   async function loadSync(includeConfigs = true) {
     const requests = [dataOpsApi.syncStatus()]
     if (includeConfigs) {
@@ -242,7 +272,6 @@ export function useDataOpsConsole() {
         pipeline: loadPipeline,
         contracts: loadContracts,
         sales: loadSalesRecords,
-        kanban: loadKanban,
         sync: () => loadSync(includeConfigs),
         config: () => loadSync(true),
       }
@@ -254,33 +283,128 @@ export function useDataOpsConsole() {
     }
   }
 
+  async function refreshFromFeishu(section, includeConfigs = true) {
+    loading.value = true
+    error.value = ''
+    preflightFeedback.value = ''
+    refreshFeedback.value = ''
+    refreshFeedbackTone.value = 'ok'
+    syncFailure.value = null
+    try {
+      const response = await dataOpsApi.triggerRefreshSync()
+      const queuedJob = extractData(response)
+      const job = await waitForSyncJob(queuedJob?.id)
+      if (!job) {
+        refreshFeedbackTone.value = 'warning'
+        refreshFeedback.value = t('dataOps.feedback.refreshRunning')
+        await refreshActive(section, includeConfigs)
+        return false
+      }
+      if (job.status === 'failed') {
+        syncFailure.value = syncJobFailureDetails(job)
+        throw new Error(syncJobError(job))
+      }
+
+      await refreshActive(section, includeConfigs)
+      const recordsSynced = Number(job.records_synced || 0)
+      const skippedTables = Object.values(job.results || {}).filter(
+        (result) => result?.skipped
+      ).length
+      if (recordsSynced > 0) {
+        refreshFeedback.value = t('dataOps.feedback.recordsUpdated', {
+          count: recordsSynced
+        })
+      } else if (job.status === 'warning' && job.error_message) {
+        refreshFeedback.value = job.error_message
+      } else if (skippedTables > 0) {
+        refreshFeedback.value = t('dataOps.feedback.tablesUnchanged', {
+          count: skippedTables
+        })
+      } else {
+        refreshFeedback.value = t('dataOps.feedback.noChanges')
+      }
+      if (job.status === 'warning') {
+        refreshFeedbackTone.value = 'warning'
+      }
+      return true
+    } catch (err) {
+      error.value = errorMessage(err, t('dataOps.feedback.requestFailed'))
+      return false
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function waitForSyncJob(jobId) {
+    if (!jobId) return null
+    for (let attempt = 0; attempt < syncPollMaxAttempts; attempt += 1) {
+      const response = await dataOpsApi.syncStatus()
+      const data = extractData(response) || {}
+      syncStatus.value = data
+      const job = (data.recent_jobs || []).find(
+        (item) => String(item.id) === String(jobId)
+      )
+      if (job && terminalSyncStatuses.has(job.status)) {
+        return job
+      }
+      await delay(syncPollIntervalMs)
+    }
+    return null
+  }
+
   async function runPreflight() {
     preflightLoading.value = true
     error.value = ''
+    preflightFeedback.value = ''
     try {
       const response = await dataOpsApi.runPreflight()
       const data = extractData(response)
+      const tables = data.tables || []
       syncStatus.value = {
         ...(syncStatus.value || {}),
         overall_status: data.overall_status,
-        tables: data.tables || [],
+        tables,
       }
       await loadSync()
+      preflightFeedback.value = preflightSummary(
+        data.overall_status,
+        tables,
+        data.discovery,
+        t
+      )
+      return true
     } catch (err) {
       setError(err)
+      return false
     } finally {
       preflightLoading.value = false
     }
   }
 
   async function triggerFullSync() {
+    if (syncLoading.value) return false
     syncLoading.value = true
     error.value = ''
+    syncFailure.value = null
     try {
-      await dataOpsApi.triggerSync()
+      const response = await dataOpsApi.triggerSync()
+      const queuedJob = extractData(response)
+      const job = await waitForSyncJob(queuedJob?.id)
       await loadSync()
+      if (!job) {
+        refreshFeedbackTone.value = 'warning'
+        refreshFeedback.value = t('dataOps.feedback.fullSyncRunning')
+        return false
+      }
+      if (job.status === 'failed') {
+        syncFailure.value = syncJobFailureDetails(job)
+        error.value = syncJobError(job)
+        return false
+      }
+      return true
     } catch (err) {
       setError(err)
+      return false
     } finally {
       syncLoading.value = false
     }
@@ -296,23 +420,6 @@ export function useDataOpsConsole() {
       setError(err)
     } finally {
       syncLoading.value = false
-    }
-  }
-
-  async function saveSyncConfig(config) {
-    try {
-      const response = await dataOpsApi.updateSyncConfig(config.id, {
-        table_name: config.table_name,
-        app_token: config.app_token,
-        table_id: config.table_id,
-        is_enabled: config.is_enabled,
-        sync_frequency: config.sync_frequency,
-        expected_min_records: config.expected_min_records,
-        required_permissions: config.required_permissions,
-      })
-      Object.assign(config, extractData(response))
-    } catch (err) {
-      setError(err)
     }
   }
 
@@ -359,11 +466,31 @@ export function useDataOpsConsole() {
   async function sendAiMessage() {
     const message = aiInput.value.trim()
     if (!message || aiLoading.value) return
+    const historyId = ensureAiHistoryId()
     aiMessages.value.push({ role: 'user', content: message })
     aiInput.value = ''
     aiLoading.value = true
-    const assistantMessage = { role: 'assistant', content: '' }
+    const startedAt = Date.now()
+    let timerId = null
+    const assistantMessage = {
+      role: 'assistant',
+      content: '',
+      elapsedMs: 0,
+      progressEvents: [],
+      startedAt,
+      status: 'thinking',
+    }
     aiMessages.value.push(assistantMessage)
+    const assistantIndex = aiMessages.value.length - 1
+    aiActiveAssistantMessage.value = aiMessages.value[assistantIndex]
+    const updateAssistantMessage = (patch) => {
+      const current = aiMessages.value[assistantIndex]
+      if (!current) return
+      Object.assign(current, patch)
+    }
+    timerId = setInterval(() => {
+      updateAssistantMessage({ elapsedMs: Date.now() - startedAt })
+    }, 200)
     aiStreamController.value = new AbortController()
     try {
       await dataOpsApi.chatStream(
@@ -372,28 +499,96 @@ export function useDataOpsConsole() {
           history: aiMessages.value.slice(0, -2),
         },
         {
+          onProgress(event) {
+            const current = aiMessages.value[assistantIndex]
+            updateAssistantMessage({
+              progressEvents: [
+                ...(current?.progressEvents || []),
+                normalizeProgressEvent(event, t, locale.value),
+              ],
+            })
+          },
           onChunk(content) {
-            assistantMessage.content += content
+            const current = aiMessages.value[assistantIndex]
+            updateAssistantMessage({
+              content: sanitizeAiContent(`${current?.content || ''}${content}`),
+              status: 'streaming',
+            })
+          },
+          onDone(payload) {
+            const current = aiMessages.value[assistantIndex]
+            const finalContent =
+              payload?.reply || payload?.answer || payload?.content || ''
+            const patch = {
+              llm: payload?.llm || null,
+              status: 'done',
+              usage: payload?.usage || null,
+            }
+            if (!current?.content && finalContent) {
+              patch.content = sanitizeAiContent(finalContent)
+            } else if (!current?.content) {
+              patch.content =
+                t('dataOps.feedback.analysisEmpty')
+            }
+            updateAssistantMessage({
+              ...patch,
+            })
           },
           onError(detail) {
-            if (!assistantMessage.content) {
-              assistantMessage.content = detail || 'AI 助手流式输出失败'
+            const current = aiMessages.value[assistantIndex]
+            updateAssistantMessage({ status: 'error' })
+            if (!current?.content) {
+              updateAssistantMessage({
+                content: detail || t('dataOps.feedback.streamFailed'),
+              })
             }
           },
         },
         aiStreamController.value.signal
       )
     } catch (err) {
-      if (err?.name !== 'AbortError' && !assistantMessage.content) {
-        assistantMessage.content = errorMessage(err)
+      if (err?.name === 'AbortError') {
+        const current = aiMessages.value[assistantIndex]
+        updateAssistantMessage({ status: 'stopped' })
+        if (!current?.content) {
+          updateAssistantMessage({ content: t('dataOps.feedback.stopped') })
+        }
+      } else {
+        const current = aiMessages.value[assistantIndex]
+        updateAssistantMessage({ status: 'error' })
+        if (!current?.content) {
+          updateAssistantMessage({
+            content: errorMessage(err, t('dataOps.feedback.requestFailed'))
+          })
+        }
       }
     } finally {
+      if (timerId) clearInterval(timerId)
+      const current = aiMessages.value[assistantIndex]
+      updateAssistantMessage({ elapsedMs: Date.now() - startedAt })
+      if (
+        current?.status !== 'error' &&
+        current?.status !== 'stopped'
+      ) {
+        updateAssistantMessage({ status: 'done' })
+      }
+      persistAiConversation(historyId)
       aiLoading.value = false
+      aiActiveAssistantMessage.value = null
       aiStreamController.value = null
     }
   }
 
   function stopAiStream() {
+    if (aiActiveAssistantMessage.value) {
+      aiActiveAssistantMessage.value.status = 'stopped'
+      aiActiveAssistantMessage.value.elapsedMs =
+        Date.now() - aiActiveAssistantMessage.value.startedAt
+      if (!aiActiveAssistantMessage.value.content) {
+        aiActiveAssistantMessage.value.content = t('dataOps.feedback.stopped')
+      }
+      persistAiConversation(aiActiveHistoryId.value)
+    }
     if (aiStreamController.value) {
       aiStreamController.value.abort()
       aiStreamController.value = null
@@ -404,6 +599,63 @@ export function useDataOpsConsole() {
   function askAiQuestion(question) {
     aiInput.value = question
     return sendAiMessage()
+  }
+
+  function ensureAiHistoryId() {
+    if (!aiActiveHistoryId.value) {
+      aiActiveHistoryId.value = `data_ops_ai_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 8)}`
+    }
+    return aiActiveHistoryId.value
+  }
+
+  function persistAiConversation(id) {
+    if (!id) return
+    const messages = cloneMessages(aiMessages.value).filter(
+      (item) => item?.role && (item?.content || item?.progressEvents?.length)
+    )
+    const firstUser = messages.find((item) => item.role === 'user')
+    if (!firstUser) return
+    const item = {
+      id,
+      messageCount: messages.length,
+      messages,
+      title: summarizeAiHistoryTitle(
+        firstUser.content,
+        t('dataOps.feedback.untitledConversation')
+      ),
+      updatedAt: new Date().toISOString(),
+    }
+    aiHistory.value = [
+      item,
+      ...aiHistory.value.filter((entry) => entry.id !== id),
+    ].slice(0, maxAiHistoryItems)
+    saveAiHistory(aiHistory.value)
+  }
+
+  function startNewAiConversation() {
+    if (aiLoading.value) return
+    aiMessages.value = []
+    aiInput.value = ''
+    aiActiveHistoryId.value = ''
+  }
+
+  function selectAiHistoryItem(id) {
+    if (aiLoading.value) return
+    const item = aiHistory.value.find((entry) => entry.id === id)
+    if (!item) return
+    aiMessages.value = cloneMessages(item.messages || [])
+    aiInput.value = ''
+    aiActiveHistoryId.value = item.id
+  }
+
+  function deleteAiHistoryItem(id) {
+    aiHistory.value = aiHistory.value.filter((item) => item.id !== id)
+    saveAiHistory(aiHistory.value)
+    if (aiActiveHistoryId.value === id) {
+      aiActiveHistoryId.value = ''
+    }
   }
 
   function setContractPage(page) {
@@ -426,23 +678,13 @@ export function useDataOpsConsole() {
     downloadBlob(response.data, 'sales_records.csv')
   }
 
-  function permissionsText(config) {
-    return (config.required_permissions || []).join('\n')
-  }
-
-  function updatePermissions(config, event) {
-    config.required_permissions = event.target.value
-      .split(/\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-  }
-
   function updateGlobalConfigField(key, value) {
     globalConfig.value[key] = value
   }
 
   function setError(err) {
-    error.value = errorMessage(err)
+    syncFailure.value = null
+    error.value = errorMessage(err, t('dataOps.feedback.requestFailed'))
   }
 
   onBeforeUnmount(() => {
@@ -453,16 +695,19 @@ export function useDataOpsConsole() {
 
   return {
     aiContext,
+    aiActiveHistoryId,
+    aiHistory,
     aiInput,
     aiLoading,
     aiMessages,
     collectionConfigs,
-    contractCards,
     contractFilterOptions,
     contractFilters,
     contractPage,
     contractTotal,
     contracts,
+    dataQuality,
+    deleteAiHistoryItem,
     downloadContracts,
     downloadSales,
     error,
@@ -474,14 +719,19 @@ export function useDataOpsConsole() {
     loadSalesRecords,
     loading,
     opportunities,
+    overview,
     pageSize,
-    permissionsText,
+    preflightFeedback,
+    preflightFeedbackClass,
     pipelineInsights,
     pipelineProjects,
     pipelineSummary,
     preflightLoading,
     recentJobs,
+    refreshFeedback,
+    refreshFeedbackClass,
     refreshActive,
+    refreshFromFeishu,
     risks,
     runConfigPreflight,
     runPreflight,
@@ -490,23 +740,25 @@ export function useDataOpsConsole() {
     salesRecords,
     salesTotal,
     saveGlobalConfig,
-    saveSyncConfig,
+    selectAiHistoryItem,
     sendAiMessage,
     askAiQuestion,
     setContractPage,
     setSalesPage,
-    settlementCards,
+    summary,
     syncBannerClass,
     syncBannerText,
     syncBannerTitle,
+    syncFailure,
     syncLoading,
     syncTables,
     stopAiStream,
+    startNewAiConversation,
+    topCustomers,
     triggerConfigSync,
     triggerFullSync,
     triggerIncrementalSync,
     updateGlobalConfigField,
-    updatePermissions,
   }
 }
 
@@ -534,46 +786,145 @@ function compactObject(value) {
   )
 }
 
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 function extractData(response) {
   return response?.data?.data || response?.data
 }
 
-function errorMessage(err) {
+function errorMessage(err, fallback = 'Data Ops request failed') {
   return (
     err?.response?.data?.detail ||
     err?.response?.data?.message ||
     err?.message ||
-    '数据运营控制台请求失败'
+    fallback
   )
 }
 
-export function formatNumber(value) {
-  return new Intl.NumberFormat('zh-CN').format(Number(value || 0))
-}
-
-export function formatAmount(value, currency = '') {
-  if (value === null || value === undefined || value === '') return '-'
-  const amount = Number(value || 0)
-  const text = new Intl.NumberFormat('zh-CN', {
-    maximumFractionDigits: 2,
-  }).format(amount)
-  return currency ? `${currency} ${text}` : text
-}
-
-export function formatAmountByCurrency(value, items) {
-  if (Array.isArray(items) && items.length) {
-    return items
-      .map((item) => formatAmount(item.amount, item.currency))
-      .join(' / ')
+function preflightSummary(status, tables, discovery = null, t) {
+  const failed = tables.filter((item) => item.status === 'failed').length
+  const warning = tables.filter((item) => item.status === 'warning').length
+  const total = tables.length
+  const discoveryText = discovery
+    ? t('dataOps.feedback.discovery', {
+        seen: discovery.tables_seen || 0,
+        matched: discovery.matched || 0
+      })
+    : ''
+  if (!total) return t('dataOps.feedback.preflightEmpty')
+  if (status === 'failed') {
+    return t('dataOps.feedback.preflightFailed', {
+      failed,
+      warning,
+      total,
+      discovery: discoveryText
+    })
   }
-  return formatAmount(value)
+  if (status === 'warning') {
+    return t('dataOps.feedback.preflightWarning', {
+      warning,
+      total,
+      discovery: discoveryText
+    })
+  }
+  return t('dataOps.feedback.preflightOk', {
+    total,
+    discovery: discoveryText
+  })
 }
 
-export function formatDateTime(value) {
+function normalizeProgressEvent(event, t, language) {
+  const stage = event?.stage || 'step'
+  const localized = localizedProgressEvent(event, t, language)
+  return {
+    detail: localized?.detail ?? event?.detail ?? '',
+    metadata: event?.metadata || {},
+    stage,
+    status: event?.status || 'done',
+    timestamp: event?.timestamp || new Date().toISOString(),
+    title:
+      localized?.title || event?.title || t('dataOps.feedback.progressStep'),
+  }
+}
+
+function localizedProgressEvent(event, t, language) {
+  if (language === 'zh-CN') return null
+  const stage = event?.stage || 'step'
+  const supportedStages = new Set([
+    'answer',
+    'context',
+    'plan',
+    'question',
+    'tool',
+  ])
+  if (!supportedStages.has(stage)) return null
+  const metadata = event?.metadata || {}
+  return {
+    detail: t(`dataOps.feedback.progress.${stage}Detail`, {
+      count: metadata.tool_count || 0,
+      table: metadata.table || 'Data Ops',
+    }),
+    title: t(`dataOps.feedback.progress.${stage}Title`, {
+      table: metadata.table || 'Data Ops',
+    }),
+  }
+}
+
+function loadAiHistory() {
+  if (typeof localStorage === 'undefined') return []
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(aiHistoryStorageKey) || '[]'
+    )
+    return Array.isArray(parsed) ? parsed.slice(0, maxAiHistoryItems) : []
+  } catch (_) {
+    return []
+  }
+}
+
+function saveAiHistory(items) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(
+    aiHistoryStorageKey,
+    JSON.stringify(items.slice(0, maxAiHistoryItems))
+  )
+}
+
+function cloneMessages(messages) {
+  return JSON.parse(JSON.stringify(messages || []))
+}
+
+function summarizeAiHistoryTitle(value, fallback = 'Untitled conversation') {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text) return fallback
+  return text.length > 32 ? `${text.slice(0, 32)}...` : text
+}
+
+function sanitizeAiContent(content) {
+  return String(content || '')
+    .replace(/<｜｜DSML｜｜tool_calls>[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g, '')
+    .trimStart()
+}
+
+export function formatNumber(value, locale = 'zh-CN') {
+  return new Intl.NumberFormat(locale).format(Number(value || 0))
+}
+
+export function formatAmount(value, currency = '', options = {}) {
+  return formatCurrencyAmount(value, currency, options)
+}
+
+export function formatAmountByCurrency(value, items, options = {}) {
+  return formatCurrencyAmounts(value, items, options)
+}
+
+export function formatDateTime(value, locale = 'zh-CN') {
   if (!value) return '-'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return String(value)
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return date.toLocaleString(locale, { hour12: false })
 }
 
 export function statusPillClass(status) {

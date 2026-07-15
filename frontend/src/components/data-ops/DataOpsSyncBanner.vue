@@ -22,6 +22,11 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+
 defineProps({
   bannerClass: { type: String, required: true },
   canManageSync: { type: Boolean, default: false },
@@ -32,9 +37,7 @@ defineProps({
 
 defineEmits(['incremental-sync'])
 
-const actions = [
-  { key: 'domestic', label: '国内增量' },
-  { key: 'oversea', label: '海外增量' },
-  { key: 'oversea_stats', label: '结算增量' },
-]
+const actions = computed(() => [
+  { key: 'domestic', label: t('dataOps.sync.banner.domestic') }
+])
 </script>

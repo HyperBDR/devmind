@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 from typing import Any, Iterator
 
@@ -31,8 +32,9 @@ SYSTEM_PROMPT = """
 你是数据运营控制台的经营数据助手。
 你只能基于提供的业务上下文回答。
 如果上下文不足，请明确说明需要先同步数据或补充维度。
-不要编造不存在的客户、合同、金额或 SQL 结果。
-回答使用中文，简洁、可执行。
+不要编造不存在的客户、合同、金额或工具结果。
+回答使用与用户问题相同的语言：英文问题用英文回答，中文问题用中文回答。
+回答应简洁、可执行。
 优先指出风险、机会和下一步动作。
 你需要主动围绕合同、回款、海外销售、Pipeline、同步质量、
 风险和机会给出运营洞察，而不是只复述指标。
@@ -40,9 +42,20 @@ SYSTEM_PROMPT = """
 回答前先判断最匹配的 Data Ops skill，并按该 skill 的输出形态组织答案。
 当用户需要明细、排行、分组、趋势、计算或任意数据查询时，
 优先使用 Data Ops tools 获取真实数据，不要只依赖上下文摘要。
-如果内置查询工具无法表达用户需要的计算，可以使用 data_ops_run_sql。
-SQL 只能是只读 SELECT，只能查询工具 schema 中给出的 db_table 和安全字段。
+明细查询使用 data_ops_query_records。
+分组、排行、统计、Top 项和多指标计算使用
+data_ops_aggregate。
+只能使用工具 schema 中公开的表、字段、过滤、
+聚合和排序能力。
 使用 Markdown 输出。适合对比和排行的数据用 GFM Markdown 表格。
+每次回答完成后，必须在正文末尾追加 2 至 3 个与本次结论直接相关、
+可以独立提问的下一轮问题。不要重复用户刚问过的问题。
+中文回答使用“建议追问：”，英文回答使用
+“Suggested follow-up questions:”。不要在建议追问之后输出其他内容。
+中文格式示例：
+建议追问：
+- 第一个问题？
+- 第二个问题？
 适合趋势、分布、Top 项的数据，可追加 dataops-chart 代码块：
 ```dataops-chart
 {
@@ -431,23 +444,57 @@ def stream_chat_with_data_ops_assistant(
     preferred_config_uuid: str = "",
     user_id: int | None = None,
 ) -> Iterator[dict[str, Any]]:
+    yield {
+        "type": "progress",
+        "stage": "question",
+        "title": "拆解业务问题",
+        "detail": _question_progress_detail(message),
+        "status": "done",
+    }
     context = get_ai_context_metrics()
+    yield {
+        "type": "progress",
+        "stage": "context",
+        "title": "读取 Data Ops 上下文",
+        "detail": _context_progress_detail(context),
+        "status": "done",
+    }
     messages = _build_messages(
         message=message,
         history=history or [],
         context=context,
     )
     try:
+        yield {
+            "type": "progress",
+            "stage": "plan",
+            "title": "请求模型规划查询",
+            "detail": (
+                "让模型判断需要查询的表、筛选条件、"
+                "聚合指标和输出形态。"
+            ),
+            "status": "running",
+        }
         (
             final_messages,
             precomputed_content,
             usage,
             settings,
+            progress_events,
         ) = _prepare_messages_with_data_ops_tools(
             messages=messages,
             preferred_config_uuid=preferred_config_uuid,
             user_id=user_id,
         )
+        for event in progress_events:
+            yield event
+        yield {
+            "type": "progress",
+            "stage": "answer",
+            "title": "生成分析回答",
+            "detail": "基于上下文与工具结果组织 Markdown、表格和图表。",
+            "status": "running",
+        }
         if precomputed_content:
             yield from _stream_precomputed_content(
                 content=precomputed_content,
@@ -485,6 +532,58 @@ def _sum_by_currency(queryset, amount_field: str) -> list[dict[str, float]]:
         }
         for item in rows
     ]
+
+
+def _progress_event(
+    *,
+    stage: str,
+    title: str,
+    detail: str,
+    status: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "progress",
+        "stage": stage,
+        "title": title,
+        "detail": detail,
+        "status": status,
+        "metadata": metadata or {},
+        "timestamp": timezone.now().isoformat(),
+    }
+
+
+def _question_progress_detail(message: str) -> str:
+    lowered = message.lower()
+    focuses = []
+    if any(item in message for item in ["回款", "待回款", "催收"]):
+        focuses.append("回款风险")
+    if any(item in message for item in ["合同", "到期", "续约"]):
+        focuses.append("合同与续约")
+    if any(item in message for item in ["pipeline", "Pipeline", "立项"]):
+        focuses.append("Pipeline 转化")
+    if any(item in message for item in ["海外", "license", "License"]):
+        focuses.append("海外业务")
+    if any(item in lowered for item in ["图", "chart", "趋势", "分布"]):
+        focuses.append("图表呈现")
+    if not focuses:
+        focuses.append("经营风险与优先级")
+    return f"识别关注点：{'、'.join(focuses)}。"
+
+
+def _context_progress_detail(context: dict[str, Any]) -> str:
+    contract_count = context.get("contract", {}).get("contract_count") or 0
+    project_count = (
+        context.get("oversea_project", {}).get("project_count") or 0
+    )
+    ledger_amounts = context.get("ledger", {}).get(
+        "outstanding_by_currency",
+    ) or []
+    currency_count = len(ledger_amounts)
+    return (
+        f"已读取合同 {contract_count} 条、海外项目 {project_count} 条，"
+        f"待回款按 {currency_count} 个币种分别保留。"
+    )
 
 
 def _single_currency_amount(items: list[dict[str, float]]) -> float | None:
@@ -549,6 +648,7 @@ def _call_litellm(
         precomputed_content,
         usage,
         settings,
+        _progress_events,
     ) = _prepare_messages_with_data_ops_tools(
         messages=messages,
         preferred_config_uuid=preferred_config_uuid,
@@ -571,10 +671,17 @@ def _prepare_messages_with_data_ops_tools(
     messages: list[dict[str, str]],
     preferred_config_uuid: str,
     user_id: int | None,
-) -> tuple[list[dict[str, Any]], str, dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    list[dict[str, Any]],
+    str,
+    dict[str, Any],
+    dict[str, Any],
+    list[dict[str, Any]],
+]:
     llm_settings = resolve_data_ops_llm_settings(preferred_config_uuid)
     state = _build_litellm_state(user_id)
     working_messages: list[dict[str, Any]] = list(messages)
+    progress_events: list[dict[str, Any]] = []
     usage: dict[str, Any] = {}
     used_tools = False
     for _index in range(4):
@@ -590,30 +697,66 @@ def _prepare_messages_with_data_ops_tools(
             message_payload.get("tool_calls") or [],
         )
         if not tool_calls:
+            tool_calls = _normalize_dsml_tool_calls(
+                str(message_payload.get("content") or ""),
+            )
+            if tool_calls:
+                message_payload = {**message_payload, "content": ""}
+        if not tool_calls:
+            content = _strip_dsml_tool_call_blocks(
+                str(message_payload.get("content") or ""),
+            ).strip()
             if used_tools:
+                if content:
+                    return (
+                        working_messages,
+                        content,
+                        usage,
+                        llm_settings,
+                        progress_events,
+                    )
                 break
             return (
                 working_messages,
-                str(message_payload.get("content") or ""),
+                content,
                 usage,
                 llm_settings,
+                progress_events,
             )
         used_tools = True
+        progress_events.append(
+            _progress_event(
+                stage="plan",
+                title="设计数据查询计划",
+                detail=f"计划执行 {len(tool_calls)} 个 Data Ops 工具查询。",
+                status="done",
+                metadata={
+                    "tool_count": len(tool_calls),
+                    "tools": [
+                        item["function"]["name"] for item in tool_calls
+                    ],
+                },
+            ),
+        )
         working_messages.append(
             _assistant_tool_call_message(message_payload, tool_calls),
         )
-        working_messages.extend(_tool_result_messages(tool_calls))
+        tool_messages, tool_events = _tool_result_messages_with_progress(
+            tool_calls,
+        )
+        working_messages.extend(tool_messages)
+        progress_events.extend(tool_events)
 
     working_messages.append(
         {
             "role": "system",
             "content": (
                 "Data Ops tools 已返回查询结果。请基于这些结果直接回答，"
-                "不要继续调用工具。"
+                "不要继续调用工具，不要输出 DSML、tool_calls 或 XML 标签。"
             ),
         },
     )
-    return working_messages, "", usage, llm_settings
+    return working_messages, "", usage, llm_settings, progress_events
 
 
 def _build_litellm_state(user_id: int | None) -> dict[str, Any]:
@@ -698,6 +841,62 @@ def _normalize_tool_calls(items: list[Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _normalize_dsml_tool_calls(content: str) -> list[dict[str, Any]]:
+    normalized = []
+    invoke_pattern = re.compile(
+        r"<｜｜DSML｜｜invoke\s+name=\"([^\"]+)\"\s*>"
+        r"([\s\S]*?)"
+        r"</｜｜DSML｜｜invoke\s*>",
+    )
+    parameter_pattern = re.compile(
+        r"<｜｜DSML｜｜parameter\s+name=\"([^\"]+)\"\s+"
+        r"string=\"(true|false)\"\s*>"
+        r"([\s\S]*?)"
+        r"</｜｜DSML｜｜parameter\s*>",
+    )
+    for index, match in enumerate(invoke_pattern.finditer(content or "")):
+        name = match.group(1)
+        body = match.group(2)
+        arguments: dict[str, Any] = {}
+        for parameter in parameter_pattern.finditer(body):
+            key = parameter.group(1)
+            is_string = parameter.group(2) == "true"
+            raw_value = parameter.group(3).strip()
+            if is_string:
+                arguments[key] = raw_value
+                continue
+            try:
+                arguments[key] = json.loads(raw_value)
+            except json.JSONDecodeError:
+                arguments[key] = raw_value
+        normalized.append(
+            {
+                "id": f"data_ops_dsml_tool_{index}",
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "arguments": json.dumps(
+                        arguments,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
+                },
+            },
+        )
+    return normalized
+
+
+def _strip_dsml_tool_call_blocks(content: str) -> str:
+    value = str(content or "")
+    value = re.sub(
+        r"<｜｜DSML｜｜tool_calls>[\s\S]*?</｜｜DSML｜｜tool_calls>",
+        "",
+        value,
+    )
+    value = re.sub(r"<｜｜DSML｜｜tool_calls>[\s\S]*$", "", value)
+    return value
+
+
 def _assistant_tool_call_message(
     message_payload: dict[str, Any],
     tool_calls: list[dict[str, Any]],
@@ -712,11 +911,20 @@ def _assistant_tool_call_message(
 def _tool_result_messages(
     tool_calls: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    messages, _events = _tool_result_messages_with_progress(tool_calls)
+    return messages
+
+
+def _tool_result_messages_with_progress(
+    tool_calls: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     messages = []
+    events = []
     for item in tool_calls:
         name = item["function"]["name"]
         arguments = _parse_tool_arguments(item["function"]["arguments"])
         result = execute_data_ops_tool(name, arguments)
+        events.append(_tool_progress_event(name, arguments, result))
         messages.append(
             {
                 "role": "tool",
@@ -729,7 +937,99 @@ def _tool_result_messages(
                 ),
             },
         )
-    return messages
+    return messages, events
+
+
+def _tool_progress_event(
+    name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    table = str(arguments.get("table") or "").strip()
+    title = _tool_progress_title(name, table)
+    detail = _tool_progress_detail(name, arguments, result)
+    return _progress_event(
+        stage="tool",
+        title=title,
+        detail=detail,
+        status="done" if result.get("ok") else "error",
+        metadata={
+            "arguments": arguments,
+            "result_summary": _tool_result_summary(result),
+            "table": table,
+            "tool": name,
+        },
+    )
+
+
+def _tool_progress_title(name: str, table: str) -> str:
+    if name == "data_ops_aggregate":
+        return f"聚合计算 {table or 'Data Ops'}"
+    if name == "data_ops_query_records":
+        return f"查询明细 {table or 'Data Ops'}"
+    if name == "data_ops_get_schema":
+        return "读取可查询字段"
+    return f"执行工具 {name}"
+
+
+def _tool_progress_detail(
+    name: str,
+    arguments: dict[str, Any],
+    result: dict[str, Any],
+) -> str:
+    if not result.get("ok"):
+        return str(result.get("error") or "工具执行失败")
+    table = str(arguments.get("table") or "").strip() or "Data Ops"
+    if name == "data_ops_aggregate":
+        group_by = arguments.get("group_by") or []
+        metrics = arguments.get("metrics") or []
+        filters = arguments.get("filters") or []
+        rows = result.get("result", {}).get("rows") or []
+        group_text = "、".join(group_by) if group_by else "全表"
+        metric_text = _metric_formula_text(metrics)
+        return (
+            f"在 {table} 上按 {group_text} 聚合"
+            f" {metric_text or '指标'}，筛选条件 {len(filters)} 个，"
+            f"返回 {len(rows)} 行结果。"
+        )
+    if name == "data_ops_query_records":
+        columns = arguments.get("columns") or []
+        filters = arguments.get("filters") or []
+        rows = result.get("result", {}).get("rows") or []
+        return (
+            f"在 {table} 查询 {len(columns) or '默认'} 个字段，"
+            f"筛选条件 {len(filters)} 个，返回 {len(rows)} 条明细。"
+        )
+    if name == "data_ops_get_schema":
+        tables = result.get("result", {}).get("tables") or []
+        return f"读取 {len(tables)} 张可查询表的字段定义。"
+    return f"工具 {name} 执行完成。"
+
+
+def _metric_formula_text(metrics: list[dict[str, Any]]) -> str:
+    formulas = []
+    for item in metrics:
+        if not isinstance(item, dict):
+            continue
+        op = str(item.get("op") or "").strip()
+        field = str(item.get("field") or "id").strip()
+        alias = str(item.get("alias") or "").strip()
+        formula = f"{op}({field})"
+        if alias:
+            formula = f"{formula} -> {alias}"
+        formulas.append(formula)
+    return "、".join(formulas)
+
+
+def _tool_result_summary(result: dict[str, Any]) -> dict[str, Any]:
+    payload = result.get("result") if result.get("ok") else {}
+    if not isinstance(payload, dict):
+        return {"ok": bool(result.get("ok"))}
+    rows = payload.get("rows")
+    return {
+        "ok": bool(result.get("ok")),
+        "row_count": len(rows) if isinstance(rows, list) else None,
+    }
 
 
 def _parse_tool_arguments(value: str) -> dict[str, Any]:

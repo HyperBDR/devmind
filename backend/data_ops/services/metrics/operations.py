@@ -20,6 +20,9 @@ from data_ops.models import (
     ProjectScope,
     SalesRecord,
 )
+from data_ops.services.metrics.owner_identities import (
+    owner_payload_from_record,
+)
 
 
 ZERO_DECIMAL = Decimal("0")
@@ -58,11 +61,14 @@ def _split_multi(value: str | None) -> list[str]:
 
 
 def _apply_contract_filters(queryset, params: dict[str, Any]):
+    customer_name = str(params.get("customer_name") or "").strip()
+    if customer_name:
+        queryset = queryset.filter(customer_name__icontains=customer_name)
+
     field_map = {
         "sales_person": "sales_person",
         "platform": "order_platform",
         "status": "status",
-        "customer_name": "customer_name",
         "signing_entity": "signing_entity",
         "channel_type": "channel_type",
         "enduser_customer": "enduser_customer",
@@ -106,6 +112,7 @@ def _contract_row(contract: Contract) -> dict:
         "enduser_customer": contract.enduser_customer,
         "order_platform": contract.order_platform,
         "sales_person": contract.sales_person,
+        **owner_payload_from_record(contract, "sales_person"),
         "region": contract.region,
         "currency": contract.currency,
         "total_amount": _number(contract.total_amount),
@@ -136,6 +143,7 @@ def _sales_row(record: SalesRecord) -> dict:
         "order_type": record.order_type,
         "status": record.status,
         "sales_person": record.sales_person,
+        **owner_payload_from_record(record, "sales_person"),
         "source_record_id": record.source_record_id,
         "synced_at": record.synced_at.isoformat(),
     }
@@ -253,6 +261,9 @@ def get_contract_history_data(
 
 
 def _project_card(project: Project) -> dict:
+    display_amount, display_currency = _project_display_amount_currency(
+        project,
+    )
     return {
         "id": str(project.id),
         "project_scope": project.project_scope,
@@ -261,8 +272,14 @@ def _project_card(project: Project) -> dict:
         "domestic_type": project.domestic_type,
         "customer_full_name": project.customer_full_name,
         "sales_person": project.sales_person,
+        **owner_payload_from_record(project, "sales_person"),
         "estimated_amount": _number(project.estimated_amount),
+        "total_amount": _number(project.total_amount),
+        "payment_amount": _number(project.payment_amount),
         "currency": project.currency,
+        "payment_currency": project.payment_currency,
+        "display_amount": display_amount,
+        "display_currency": display_currency,
         "oa_initiation_date": _date(project.oa_initiation_date),
         "is_high_potential": project.is_high_potential,
         "country": project.country,
@@ -271,6 +288,7 @@ def _project_card(project: Project) -> dict:
         "signing_customer": project.signing_customer,
         "end_customer": project.end_customer,
         "project_owner": project.project_owner,
+        **owner_payload_from_record(project, "project_owner"),
         "product_type": project.product_type,
         "order_type": project.order_type,
         "order_status": project.order_status,
@@ -279,7 +297,38 @@ def _project_card(project: Project) -> dict:
         "stat_amount_usd": _number(project.stat_amount_usd),
         "license_days_left": project.license_days_left,
         "license_risk_level": project.license_risk_level,
+        "source_record_id": project.source_record_id,
     }
+
+
+def _project_display_amount_currency(project: Project) -> tuple[float, str]:
+    """Return the source-table amount and currency used for display."""
+
+    candidates = [
+        (project.payment_amount, project.payment_currency or project.currency),
+        (project.total_amount, project.currency),
+        (project.estimated_amount, project.currency),
+        (project.stat_amount_usd, "USD"),
+    ]
+    for amount, currency in candidates:
+        value = _number(amount)
+        if value:
+            return value, currency or "未知"
+    return 0.0, project.currency or project.payment_currency or ""
+
+
+def _project_amounts_by_currency(queryset) -> list[dict]:
+    buckets: dict[str, float] = {}
+    for project in queryset:
+        amount, currency = _project_display_amount_currency(project)
+        if not amount:
+            continue
+        key = currency or "未知"
+        buckets[key] = buckets.get(key, 0.0) + amount
+    return [
+        {"currency": currency, "amount": amount}
+        for currency, amount in sorted(buckets.items())
+    ]
 
 
 def get_pipeline_projects_data(
@@ -311,6 +360,7 @@ def get_pipeline_ledgers_data() -> dict:
             "customer_name": item.customer_name,
             "project_name": item.project_name,
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "outstanding": _number(item.outstanding),
             "currency": item.currency,
             "expected_payment_date": _date(item.expected_payment_date),
@@ -327,6 +377,8 @@ def get_pipeline_summary_data() -> dict:
     deadline_30 = today + timedelta(days=30)
     domestic_rows = Project.objects.filter(project_scope=ProjectScope.DOMESTIC)
     overseas_rows = Project.objects.filter(project_scope=ProjectScope.OVERSEAS)
+    domestic_amounts = _project_amounts_by_currency(domestic_rows)
+    overseas_amounts = _project_amounts_by_currency(overseas_rows)
     at_risk = Contract.objects.filter(
         service_end__isnull=False,
         service_end__lte=deadline_30,
@@ -349,11 +401,13 @@ def get_pipeline_summary_data() -> dict:
                 value=Coalesce(Sum("estimated_amount"), ZERO_DECIMAL),
             )["value"],
         ),
+        "domestic_amount_by_currency": domestic_amounts,
         "oversea_amount_usd": _number(
             overseas_rows.aggregate(
                 value=Coalesce(Sum("stat_amount_usd"), ZERO_DECIMAL),
             )["value"],
         ),
+        "oversea_amount_by_currency": overseas_amounts,
         "high_potential": Project.objects.filter(
             is_high_potential=True,
         ).count(),
@@ -542,6 +596,7 @@ def list_domestic_ledgers_data(params: dict[str, Any]) -> list[dict]:
             "customer_name": item.customer_name,
             "project_name": item.project_name,
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "currency": item.currency,
             "total_contract_amount": _number(item.total_contract_amount),
             "payment_received": _number(item.payment_received),
@@ -564,6 +619,7 @@ def list_oversea_projects_data() -> list[dict]:
             "stat_amount_usd": _number(item.stat_amount_usd),
             "license_expiry": _date(item.license_expiry),
             "project_owner": item.project_owner,
+            **owner_payload_from_record(item, "project_owner"),
             "order_type": item.order_type,
             "product_type": item.product_type,
             "sales_person": item.project_owner,
@@ -582,6 +638,7 @@ def list_project_inits_data() -> list[dict]:
             "project_name": item.project_name,
             "customer_full_name": item.customer_full_name,
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "domestic_international": item.domestic_international,
             "estimated_amount": _number(item.estimated_amount),
             "currency": item.currency,
@@ -601,6 +658,7 @@ def contract_export_rows() -> list[dict]:
             "终端客户": item.enduser_customer,
             "订单平台": item.order_platform,
             "负责人": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "地区": item.region,
             "币种": item.currency,
             "合同金额": _number(item.total_amount),
@@ -628,6 +686,7 @@ def sales_export_rows() -> list[dict]:
             "订单类型": item.order_type,
             "项目状态": item.status,
             "负责人": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
         }
         for item in SalesRecord.objects.order_by("-synced_at")
     ]
@@ -640,7 +699,10 @@ def summary_export_rows() -> list[dict]:
         {"指标": "国内项目数", "数值": summary["domestic_projects"]},
         {"指标": "海外项目数", "数值": summary["oversea_projects"]},
         {"指标": "国内预估金额", "数值": summary["domestic_amount"]},
-        {"指标": "海外统计金额 USD", "数值": summary["oversea_amount_usd"]},
+        {
+            "指标": "海外统计金额 USD",
+            "数值": summary["oversea_amount_usd"],
+        },
         {"指标": "高潜项目", "数值": summary["high_potential"]},
         {"指标": "风险预警", "数值": summary["at_risk"]},
     ]
@@ -670,6 +732,7 @@ def _upcoming_renewals(today, days: int) -> list[dict]:
     deadline = today + timedelta(days=days)
     rows = Contract.objects.filter(
         service_end__isnull=False,
+        service_end__gte=today,
         service_end__lte=deadline,
     ).exclude(status__in=["已终止", "已归档"]).order_by("service_end")
     return [
@@ -679,6 +742,7 @@ def _upcoming_renewals(today, days: int) -> list[dict]:
             "service_end": _date(item.service_end),
             "days_left": (item.service_end - today).days,
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
         }
         for item in rows[:100]
     ]
@@ -700,33 +764,55 @@ def _license_alerts(today, days: int) -> list[dict]:
             if item.license_days_left is not None
             else (item.license_expiry - today).days,
             "project_owner": item.project_owner,
+            **owner_payload_from_record(item, "project_owner"),
         }
         for item in rows[:100]
     ]
 
 
 def _settlement_trend() -> list[dict]:
+    """Return receivable/received totals bucketed by currency and month.
+
+    Overseas settlements can mix currencies. Keep month + currency buckets
+    separate so charts do not add unrelated monetary units together.
+    """
+
     rows = (
         OverseaSettlement.objects.exclude(payment_date__isnull=True)
         .annotate(month=TruncMonth("payment_date"))
-        .values("month")
+        .values("month", "currency")
         .annotate(
             receivable_amount=Coalesce(
                 Sum("receivable_amount"),
                 ZERO_DECIMAL,
             ),
-            received_amount=Coalesce(Sum("received_amount"), ZERO_DECIMAL),
+            received_amount=Coalesce(
+                Sum("received_amount"),
+                ZERO_DECIMAL,
+            ),
         )
-        .order_by("-month")[:12]
+        .order_by("month", "currency")
     )
-    return [
-        {
-            "month": item["month"].strftime("%Y-%m") if item["month"] else "",
-            "receivable_amount": _number(item["receivable_amount"]),
-            "received_amount": _number(item["received_amount"]),
-        }
-        for item in reversed(list(rows))
-    ]
+    grouped: dict[tuple[str, str], dict] = {}
+    for item in rows:
+        month = item["month"].strftime("%Y-%m") if item["month"] else ""
+        currency = item["currency"] or "未知"
+        bucket = grouped.setdefault(
+            (month, currency),
+            {
+                "month": month,
+                "currency": currency,
+                "receivable_amount": 0.0,
+                "received_amount": 0.0,
+            },
+        )
+        bucket["receivable_amount"] += _number(item["receivable_amount"])
+        bucket["received_amount"] += _number(item["received_amount"])
+    buckets = sorted(
+        grouped.values(),
+        key=lambda item: (item["month"], item["currency"]),
+    )
+    return buckets[-36:]
 
 
 def _monthly_amounts(
@@ -827,8 +913,12 @@ def _monthly_payment_trend() -> list[dict]:
             Q(receipt_time__isnull=False)
             | Q(expected_payment_date__isnull=False)
         )
-        .annotate(month=TruncMonth("receipt_time"))
-        .values("month")
+        .annotate(
+            month=TruncMonth(
+                Coalesce("receipt_time", "expected_payment_date"),
+            )
+        )
+        .values("month", "currency")
         .annotate(
             payment_received=Coalesce(Sum("payment_received"), ZERO_DECIMAL),
             outstanding=Coalesce(Sum("outstanding"), ZERO_DECIMAL),
@@ -838,6 +928,7 @@ def _monthly_payment_trend() -> list[dict]:
     return [
         {
             "month": item["month"].strftime("%Y-%m") if item["month"] else "",
+            "currency": item["currency"] or "未知",
             "payment_received": _number(item["payment_received"]),
             "outstanding": _number(item["outstanding"]),
         }

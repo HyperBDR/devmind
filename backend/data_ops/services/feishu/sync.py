@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from datetime import datetime
 from datetime import timezone as datetime_timezone
@@ -10,12 +12,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from django.core.cache import cache
-from django.db import transaction
+from django.core.serializers.json import DjangoJSONEncoder
+from django.db import models, transaction
 from django.utils import timezone
 
 from data_ops.models import (
     Contract,
-    ContractHistory,
     DomesticLedger,
     OverseaProject,
     OverseaSettlement,
@@ -23,6 +25,8 @@ from data_ops.models import (
     ProjectInit,
     ProjectScope,
     SalesRecord,
+    SourceRecordChange,
+    SourceRecordChangeType,
     SyncCursor,
     SyncIssueCode,
     SyncJob,
@@ -30,9 +34,14 @@ from data_ops.models import (
     SyncTableStatus,
 )
 
-from .client import FeishuBitableClient, _classify_feishu_error
+from .client import (
+    FeishuBitableClient,
+    FeishuCheckResult,
+    build_bitable_table_url,
+    _classify_feishu_error,
+)
 from .global_config import get_feishu_date_timezone_name
-from .mappings import BITABLE_SOURCES, iter_bitable_tables
+from .mappings import ACTIVE_SOURCE_KEYS, iter_bitable_tables
 
 
 MODEL_MAP = {
@@ -93,8 +102,19 @@ INTEGER_FIELDS = {"order_month", "order_year", "purchase_cycle"}
 BOOLEAN_FIELDS = {"has_contract_attachment", "has_initial_quote_attachment"}
 SYNC_LOCK_KEY = "data_ops:feishu_sync:global_lock"
 SYNC_LOCK_TIMEOUT = 60 * 60 * 2
-def run_full_sync(*, job_id: str | None = None) -> dict:
-    return _run_sync(source_key=None, table_key=None, job_id=job_id)
+
+
+def run_full_sync(
+    *,
+    job_id: str | None = None,
+    force: bool = True,
+) -> dict:
+    return _run_sync(
+        source_key=None,
+        table_key=None,
+        job_id=job_id,
+        skip_unchanged=not force,
+    )
 
 
 def run_incremental_sync(
@@ -102,9 +122,14 @@ def run_incremental_sync(
     source_key: str,
     job_id: str | None = None,
 ) -> dict:
-    if source_key not in BITABLE_SOURCES:
+    if source_key not in ACTIVE_SOURCE_KEYS:
         raise ValueError(f"Unknown source_key: {source_key}")
-    return _run_sync(source_key=source_key, table_key=None, job_id=job_id)
+    return _run_sync(
+        source_key=source_key,
+        table_key=None,
+        job_id=job_id,
+        skip_unchanged=True,
+    )
 
 
 def run_table_sync(
@@ -127,6 +152,7 @@ def run_table_sync(
         source_key=source_key,
         table_key=table_key,
         job_id=job_id,
+        skip_unchanged=False,
     )
 
 
@@ -135,7 +161,14 @@ def _run_sync(
     source_key: str | None,
     table_key: str | None,
     job_id: str | None,
+    skip_unchanged: bool,
 ) -> dict:
+    from .config import (
+        discover_bitable_table_ids,
+        ensure_bitable_collection_configs,
+    )
+
+    ensure_bitable_collection_configs()
     job = _resolve_job(
         job_id=job_id,
         source_key=source_key,
@@ -188,9 +221,15 @@ def _run_sync(
     total_records = 0
     failed_tables = 0
     warning_tables = 0
+    skipped_tables = 0
     client = FeishuBitableClient()
 
     try:
+        discovery = discover_bitable_table_ids(
+            client=client,
+            source_key=source_key,
+            table_key=table_key,
+        )
         table_iter = list(
             iter_bitable_tables(
                 source_filter=source_key,
@@ -206,6 +245,7 @@ def _run_sync(
                 table_key=table_key,
                 table=table,
                 lock_token=lock_token,
+                skip_unchanged=skip_unchanged,
             )
             _refresh_sync_lock(lock_token)
             results[f"{resolved_source_key}.{table_key}"] = table_result
@@ -214,6 +254,8 @@ def _run_sync(
                 failed_tables += 1
             elif table_result["status"] == SyncStatus.WARNING:
                 warning_tables += 1
+            if table_result.get("skipped"):
+                skipped_tables += 1
 
         if failed_tables:
             job.status = SyncStatus.FAILED
@@ -228,6 +270,8 @@ def _run_sync(
             "records_synced": total_records,
             "failed_tables": failed_tables,
             "warning_tables": warning_tables,
+            "skipped_tables": skipped_tables,
+            "discovery": discovery,
             "results": results,
         }
     except Exception as exc:
@@ -267,6 +311,91 @@ def _resolve_job(
     )
 
 
+def _failed_table_result(check) -> dict:
+    return {
+        "status": SyncStatus.FAILED,
+        "records": 0,
+        "issue_code": check.issue_code,
+        "message": check.message,
+        "resolution_hint": check.resolution_hint,
+        "feishu_detail": check.feishu_detail,
+    }
+
+
+def _config_missing_table_result(
+    *,
+    table_name: str,
+    app_token: str,
+    table_id: str,
+):
+    from .client import FeishuCheckResult
+
+    return FeishuCheckResult(
+        status=SyncStatus.FAILED,
+        issue_code=SyncIssueCode.CONFIG_MISSING,
+        message=(
+            f"飞书多维表格「{table_name}」缺少 app_token 或 "
+            "table_id，无法同步。"
+        ),
+        resolution_hint=(
+            "当前只配置了 base 地址。请确认应用能通过 "
+            "tables 接口列出数据表，或提供具体 table 链接。"
+        ),
+        feishu_detail={
+            "stage": "本地配置检查",
+            "table_url": build_bitable_table_url(app_token, table_id),
+            "app_token": app_token,
+            "table_id": table_id,
+        },
+    )
+
+
+def _check_expected_fields(
+    *,
+    client: FeishuBitableClient,
+    app_token: str,
+    table_id: str,
+    table_name: str,
+    expected_fields: list[str],
+) -> FeishuCheckResult | None:
+    if not expected_fields:
+        return None
+    try:
+        actual_fields = set(client.list_fields(app_token, table_id))
+    except httpx.HTTPStatusError as exc:
+        return _classify_feishu_error(
+            table_name=table_name,
+            stage="字段读取",
+            response=exc.response,
+        )
+    except Exception as exc:
+        return _classify_feishu_error(
+            table_name=table_name,
+            stage="字段读取",
+            exc=exc,
+        )
+
+    missing_fields = [
+        field for field in expected_fields if field not in actual_fields
+    ]
+    if not missing_fields:
+        return None
+    return FeishuCheckResult(
+        status=SyncStatus.FAILED,
+        issue_code=SyncIssueCode.FIELD_MISSING,
+        message=(
+            f"飞书多维表格「{table_name}」缺少预期字段："
+            f"{', '.join(missing_fields)}。"
+        ),
+        resolution_hint=(
+            "请恢复源表字段或更新字段映射后再同步，"
+            "避免用空值覆盖已有数据。"
+        ),
+        expected_fields=expected_fields,
+        missing_fields=missing_fields,
+    )
+
+
 def _sync_one_table(
     *,
     client: FeishuBitableClient,
@@ -275,36 +404,48 @@ def _sync_one_table(
     table_key: str,
     table: dict,
     lock_token: str = "",
+    skip_unchanged: bool = False,
 ) -> dict:
     app_token = source["app_token"]
     table_id = table["table_id"]
     table_name = table["name"]
     expected_fields = table.get("expected_fields", [])
 
-    check = client.check_table_access(
+    if not app_token or not table_id:
+        result = _config_missing_table_result(
+            table_name=table_name,
+            app_token=app_token,
+            table_id=table_id,
+        )
+        _save_table_status_from_check(
+            source_key,
+            table_key,
+            app_token,
+            table_id,
+            table_name,
+            result,
+            expected_fields,
+        )
+        return _failed_table_result(result)
+
+    result = _check_expected_fields(
+        client=client,
         app_token=app_token,
         table_id=table_id,
         table_name=table_name,
         expected_fields=expected_fields,
     )
-    check.expected_min_records = table.get("expected_min_records")
-    if check.status == SyncStatus.FAILED:
-        _save_table_status(
-            source_key=source_key,
-            table_key=table_key,
-            app_token=app_token,
-            table_id=table_id,
-            table_name=table_name,
-            status=check.status,
-            issue_code=check.issue_code,
-            message=check.message,
-            resolution_hint=check.resolution_hint,
-            record_count=check.record_count,
-            expected_fields=check.expected_fields or expected_fields,
-            missing_fields=check.missing_fields or [],
-            expected_min_records=check.expected_min_records,
+    if result is not None:
+        _save_table_status_from_check(
+            source_key,
+            table_key,
+            app_token,
+            table_id,
+            table_name,
+            result,
+            expected_fields,
         )
-        return {"status": SyncStatus.FAILED, "records": 0}
+        return _failed_table_result(result)
 
     try:
         records, incomplete, total = client.list_records(app_token, table_id)
@@ -323,7 +464,7 @@ def _sync_one_table(
             result,
             expected_fields,
         )
-        return {"status": SyncStatus.FAILED, "records": 0}
+        return _failed_table_result(result)
     except Exception as exc:
         result = _classify_feishu_error(
             table_name=table_name,
@@ -339,7 +480,7 @@ def _sync_one_table(
             result,
             expected_fields,
         )
-        return {"status": SyncStatus.FAILED, "records": 0}
+        return _failed_table_result(result)
 
     if incomplete:
         _save_table_status(
@@ -370,14 +511,7 @@ def _sync_one_table(
             "incomplete": True,
         }
 
-    previous = SyncTableStatus.objects.filter(
-        source_key=source_key,
-        table_key=table_key,
-    ).first()
-    expected_floor = _current_record_floor(
-        previous=previous,
-        expected_min_records=table.get("expected_min_records"),
-    )
+    expected_floor = max(int(table.get("expected_min_records") or 0), 0)
     if len(records) < expected_floor:
         _save_table_status(
             source_key=source_key,
@@ -409,53 +543,81 @@ def _sync_one_table(
             "expected_record_floor": expected_floor,
         }
 
+    source_revision = _build_record_revision(records)
+    cursor = SyncCursor.objects.filter(
+        app_token=app_token,
+        table_id=table_id,
+    ).first()
+    if (
+        skip_unchanged
+        and source_revision
+        and cursor
+        and cursor.source_revision == source_revision
+        and cursor.record_count == len(records)
+    ):
+        message = (
+            f"飞书多维表格「{table_name}」无修改，"
+            "已跳过同步。"
+        )
+        _save_table_status(
+            source_key=source_key,
+            table_key=table_key,
+            app_token=app_token,
+            table_id=table_id,
+            table_name=table_name,
+            status=SyncStatus.OK,
+            issue_code="",
+            message=message,
+            resolution_hint="",
+            record_count=len(records),
+            expected_fields=expected_fields,
+            missing_fields=[],
+            expected_min_records=table.get("expected_min_records"),
+        )
+        return {
+            "status": SyncStatus.OK,
+            "records": 0,
+            "source_records": len(records),
+            "total": total,
+            "incomplete": False,
+            "skipped": True,
+            "reason": message,
+        }
+
     model_name = table["model"]
     with transaction.atomic():
-        count = _upsert_records(
+        stats = _upsert_records(
             model_name=model_name,
             records=records,
             field_map=table.get("field_map", {}),
             app_token=app_token,
             table_id=table_id,
+            source_key=source_key,
+            table_key=table_key,
         )
-        if model_name == "project_init":
+        source_count = stats["source_records"]
+        changed_count = sum(
+            stats[key]
+            for key in ("created", "updated", "deleted", "restored")
+        )
+        if model_name == "project_init" and changed_count:
             _sync_projects_from_project_init(
                 records,
                 table,
                 app_token,
                 table_id,
             )
-        elif model_name == "oversea_project":
+        elif model_name == "oversea_project" and changed_count:
             _sync_projects_from_oversea(records, table, app_token, table_id)
-        history_count = 0
-        history_error = None
-        if model_name == "contract":
-            history_count, history_error = _sync_contract_histories(
-                client=client,
-                records=records,
-                app_token=app_token,
-                table_id=table_id,
-                table_name=table_name,
-                lock_token=lock_token,
-            )
         _update_cursor(
             source_key=source_key,
             table_key=table_key,
             app_token=app_token,
             table_id=table_id,
             table_name=table_name,
-            record_count=count,
+            record_count=source_count,
+            source_revision=source_revision,
         )
-
-    final_status = SyncStatus.OK
-    issue_code = ""
-    message = ""
-    resolution_hint = ""
-    if history_error:
-        final_status = SyncStatus.WARNING
-        issue_code = history_error.issue_code
-        message = history_error.message
-        resolution_hint = history_error.resolution_hint
 
     _save_table_status(
         source_key=source_key,
@@ -463,22 +625,49 @@ def _sync_one_table(
         app_token=app_token,
         table_id=table_id,
         table_name=table_name,
-        status=final_status,
-        issue_code=issue_code,
-        message=message,
-        resolution_hint=resolution_hint,
-        record_count=count,
+        status=SyncStatus.OK,
+        issue_code="",
+        message="",
+        resolution_hint="",
+        record_count=source_count,
         expected_fields=expected_fields,
         missing_fields=[],
         expected_min_records=table.get("expected_min_records"),
     )
     return {
-        "status": final_status,
-        "records": count,
+        "status": SyncStatus.OK,
+        "records": changed_count,
+        "source_records": source_count,
         "total": total,
         "incomplete": incomplete,
-        "history_entries": history_count,
+        "skipped": False,
+        **stats,
     }
+
+
+def _build_record_revision(records: list[dict]) -> str:
+    if any(not record.get("record_id") for record in records):
+        return ""
+
+    revision_items = []
+    for record in records:
+        item = {
+            "record_id": str(record["record_id"]),
+            "fields": record.get("fields", {}),
+        }
+        if record.get("last_modified_time") not in (None, ""):
+            item["last_modified_time"] = str(
+                record["last_modified_time"]
+            )
+        revision_items.append(item)
+
+    payload = json.dumps(
+        sorted(revision_items, key=lambda item: item["record_id"]),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _upsert_records(
@@ -488,29 +677,262 @@ def _upsert_records(
     field_map: dict[str, str],
     app_token: str,
     table_id: str,
-) -> int:
+    source_key: str = "",
+    table_key: str = "",
+) -> dict[str, int]:
     model = MODEL_MAP[model_name]
+    existing_records = {
+        item.source_record_id: item
+        for item in model.all_objects.filter(
+            source_app_token=app_token,
+            source_table_id=table_id,
+        )
+    }
+    is_initial_snapshot = not existing_records
+    now = timezone.now()
     source_record_ids = []
+    to_create = []
+    to_update = []
+    metadata_updates = []
+    to_deactivate = []
+    change_events = []
+    unchanged = 0
+    restored = 0
+    business_fields = set(field_map.values())
+
     for record in records:
         values = _map_record(record, field_map, app_token, table_id)
-        source_record_ids.append(values["source_record_id"])
+        values = _coerce_model_values(model, values)
         if model_name == "domestic_ledger_receipt":
             values["ledger_type"] = values.get("ledger_type") or "收入"
         elif model_name == "domestic_ledger_payment":
             values["ledger_type"] = values.get("ledger_type") or "支出"
-        model.all_objects.update_or_create(
-            source_app_token=app_token,
-            source_table_id=table_id,
-            source_record_id=values["source_record_id"],
-            defaults=values,
+        source_record_id = values["source_record_id"]
+        source_record_ids.append(source_record_id)
+        existing = existing_records.get(source_record_id)
+        if existing is None:
+            to_create.append(model(**values))
+            if not is_initial_snapshot:
+                change_events.append(
+                    _build_change_event(
+                        source_key=source_key,
+                        table_key=table_key,
+                        model_name=model_name,
+                        source_record_id=source_record_id,
+                        change_type=SourceRecordChangeType.CREATED,
+                        changed_fields=business_fields,
+                        source_changed_fields=set(values["raw_data"].keys()),
+                        before_values={},
+                        after_values={
+                            field: values.get(field)
+                            for field in business_fields
+                        },
+                        source_modified_time=values["source_modified_time"],
+                    )
+                )
+            continue
+
+        existing_hash = existing.source_content_hash
+        if not existing_hash:
+            existing_hash = _build_record_content_hash(existing.raw_data)
+        content_changed = existing_hash != values["source_content_hash"]
+        was_inactive = not existing.is_active
+        if not content_changed and not was_inactive:
+            metadata_changed = False
+            for field in ("source_modified_time", "source_content_hash"):
+                if getattr(existing, field) != values[field]:
+                    setattr(existing, field, values[field])
+                    metadata_changed = True
+            if metadata_changed:
+                metadata_updates.append(existing)
+            unchanged += 1
+            continue
+
+        before_values, after_values = _business_value_diff(
+            existing,
+            values,
+            business_fields,
         )
-    _mark_missing_inactive(
-        model=model,
-        app_token=app_token,
-        table_id=table_id,
-        source_record_ids=source_record_ids,
+        changed_fields = set(before_values.keys())
+        if was_inactive:
+            before_values["is_active"] = False
+            after_values["is_active"] = True
+            changed_fields.add("is_active")
+            restored += 1
+            change_type = SourceRecordChangeType.RESTORED
+        else:
+            change_type = SourceRecordChangeType.UPDATED
+        source_changed_fields = _source_changed_fields(
+            existing.raw_data,
+            values["raw_data"],
+        )
+        _assign_values(existing, values)
+        to_update.append(existing)
+        if changed_fields:
+            change_events.append(
+                _build_change_event(
+                    source_key=source_key,
+                    table_key=table_key,
+                    model_name=model_name,
+                    source_record_id=source_record_id,
+                    change_type=change_type,
+                    changed_fields=changed_fields,
+                    source_changed_fields=source_changed_fields,
+                    before_values=before_values,
+                    after_values=after_values,
+                    source_modified_time=values[
+                        "source_modified_time"
+                    ],
+                )
+            )
+
+    remote_ids = set(source_record_ids)
+    for source_record_id, existing in existing_records.items():
+        if source_record_id in remote_ids or not existing.is_active:
+            continue
+        existing.is_active = False
+        existing.synced_at = now
+        to_deactivate.append(existing)
+        change_events.append(
+            _build_change_event(
+                source_key=source_key,
+                table_key=table_key,
+                model_name=model_name,
+                source_record_id=source_record_id,
+                change_type=SourceRecordChangeType.DELETED,
+                changed_fields={"is_active"},
+                source_changed_fields=set(),
+                before_values={"is_active": True},
+                after_values={"is_active": False},
+                source_modified_time=existing.source_modified_time,
+            )
+        )
+
+    model.all_objects.bulk_create(to_create, batch_size=500)
+    if to_update:
+        model.all_objects.bulk_update(
+            to_update,
+            _sync_update_fields(model, field_map=field_map),
+            batch_size=500,
+        )
+    if metadata_updates:
+        model.all_objects.bulk_update(
+            metadata_updates,
+            ["source_modified_time", "source_content_hash"],
+            batch_size=500,
+        )
+    if to_deactivate:
+        model.all_objects.bulk_update(
+            to_deactivate,
+            ["is_active", "synced_at"],
+            batch_size=500,
+        )
+    SourceRecordChange.objects.bulk_create(change_events, batch_size=500)
+
+    updated = len(to_update) - restored
+    return {
+        "source_records": len(records),
+        "created": len(to_create),
+        "updated": updated,
+        "deleted": len(to_deactivate),
+        "restored": restored,
+        "unchanged": unchanged,
+        "change_events": len(change_events),
+    }
+
+
+def _sync_update_fields(
+    model,
+    *,
+    field_map: dict[str, str],
+) -> list[str]:
+    field_names = {
+        "is_active",
+        "owner_identities",
+        "raw_data",
+        "source_content_hash",
+        "source_modified_time",
+        "synced_at",
+        *field_map.values(),
+    }
+    return [
+        field.name
+        for field in model._meta.concrete_fields
+        if not field.primary_key and field.name in field_names
+    ]
+
+
+def _assign_values(instance, values: dict) -> None:
+    for field, value in values.items():
+        setattr(instance, field, value)
+
+
+def _business_value_diff(
+    existing,
+    values: dict,
+    business_fields: set[str],
+) -> tuple[dict, dict]:
+    before_values = {}
+    after_values = {}
+    for field in sorted(business_fields):
+        before = getattr(existing, field)
+        after = values.get(field)
+        if before == after:
+            continue
+        before_values[field] = before
+        after_values[field] = after
+    return before_values, after_values
+
+
+def _source_changed_fields(before: dict, after: dict) -> set[str]:
+    return {
+        field
+        for field in set(before) | set(after)
+        if before.get(field) != after.get(field)
+    }
+
+
+def _build_change_event(
+    *,
+    source_key: str,
+    table_key: str,
+    model_name: str,
+    source_record_id: str,
+    change_type: str,
+    changed_fields: set[str],
+    source_changed_fields: set[str],
+    before_values: dict,
+    after_values: dict,
+    source_modified_time: int | None,
+) -> SourceRecordChange:
+    return SourceRecordChange(
+        source_key=source_key,
+        table_key=table_key,
+        model_name=model_name,
+        source_record_id=source_record_id,
+        change_type=change_type,
+        changed_fields=sorted(changed_fields),
+        source_changed_fields=sorted(source_changed_fields),
+        before_values=_json_safe_dict(before_values),
+        after_values=_json_safe_dict(after_values),
+        source_modified_time=source_modified_time,
     )
-    return len(records)
+
+
+def _json_safe_dict(value: dict) -> dict:
+    payload = json.dumps(value, cls=DjangoJSONEncoder, ensure_ascii=False)
+    return json.loads(payload)
+
+
+def _build_record_content_hash(fields: dict) -> str:
+    payload = json.dumps(
+        fields,
+        default=str,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _map_record(
@@ -525,66 +947,71 @@ def _map_record(
         "source_app_token": app_token,
         "source_table_id": table_id,
         "raw_data": fields,
+        "source_content_hash": _build_record_content_hash(fields),
+        "source_modified_time": _parse_source_modified_time(
+            record.get("last_modified_time"),
+        ),
         "is_active": True,
         "synced_at": timezone.now(),
     }
+    owner_identities = {}
     for source_field, model_field in field_map.items():
         if source_field not in fields:
             continue
-        values[model_field] = _parse_value(fields[source_field], model_field)
+        raw_value = fields[source_field]
+        values[model_field] = _parse_value(raw_value, model_field)
+        if model_field in {"sales_person", "project_owner"}:
+            identities = _parse_owner_identities(raw_value)
+            if identities:
+                owner_identities[model_field] = identities
+    for model_field in set(field_map.values()):
+        if model_field not in values:
+            values[model_field] = _parse_value(None, model_field)
+    values["owner_identities"] = owner_identities
     return values
 
 
-def _sync_contract_histories(
-    *,
-    client: FeishuBitableClient,
-    records: list[dict],
-    app_token: str,
-    table_id: str,
-    table_name: str,
-    lock_token: str = "",
-) -> tuple[int, object | None]:
-    written = 0
-    first_error = None
-    for record in records:
-        if lock_token:
-            _refresh_sync_lock(lock_token)
-        record_id = record.get("record_id", "")
-        if not record_id:
+def _parse_source_modified_time(raw: Any) -> int | None:
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_owner_identities(raw: Any) -> list[dict[str, str]]:
+    """Extract stable Feishu person identities without contact details."""
+    items = raw if isinstance(raw, list) else [raw]
+    identities = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
             continue
-        contract = Contract.all_objects.filter(
-            source_app_token=app_token,
-            source_table_id=table_id,
-            source_record_id=record_id,
-        ).first()
-        if contract is None:
+        open_id = str(item.get("open_id") or item.get("id") or "").strip()
+        if not open_id or open_id in seen:
             continue
-        try:
-            history_items = client.list_record_history(
-                app_token,
-                table_id,
-                record_id,
-            )
-        except httpx.HTTPStatusError as exc:
-            first_error = first_error or _classify_feishu_error(
-                table_name=table_name,
-                stage="记录历史读取",
-                response=exc.response,
-            )
+        identity = {"open_id": open_id}
+        for key in ("name", "en_name"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                identity[key] = value
+        identities.append(identity)
+        seen.add(open_id)
+    return identities
+
+
+def _coerce_model_values(model, values: dict) -> dict:
+    coerced = dict(values)
+    for field in model._meta.fields:
+        if field.name not in coerced:
             continue
-        except Exception as exc:
-            first_error = first_error or _classify_feishu_error(
-                table_name=table_name,
-                stage="记录历史读取",
-                exc=exc,
-            )
-            continue
-        written += _upsert_contract_history(
-            contract=contract,
-            source_record_id=record_id,
-            history_items=history_items,
-        )
-    return written, first_error
+        value = coerced[field.name]
+        if isinstance(field, models.CharField) and isinstance(value, str):
+            max_length = field.max_length
+            if max_length and len(value) > max_length:
+                coerced[field.name] = value[:max_length]
+    return coerced
 
 
 def _refresh_sync_lock(lock_token: str) -> None:
@@ -592,57 +1019,6 @@ def _refresh_sync_lock(lock_token: str) -> None:
         return
     if cache.get(SYNC_LOCK_KEY) == lock_token:
         cache.set(SYNC_LOCK_KEY, lock_token, timeout=SYNC_LOCK_TIMEOUT)
-
-
-def _upsert_contract_history(
-    *,
-    contract: Contract,
-    source_record_id: str,
-    history_items: list[dict],
-) -> int:
-    written = 0
-    for item in history_items:
-        changed_at = _parse_history_time(item.get("update_time"))
-        if changed_at is None:
-            continue
-        updater = item.get("updater") or {}
-        old_value = _parse_text(item.get("pre_value"))
-        new_value = _parse_text(item.get("cur_value"))
-        ContractHistory.objects.update_or_create(
-            contract=contract,
-            source_record_id=source_record_id,
-            field_name=str(item.get("field_name") or ""),
-            changed_at=changed_at,
-            defaults={
-                "old_value": old_value,
-                "new_value": new_value,
-                "changed_by": _parse_text(
-                    updater.get("name") or updater.get("id"),
-                ),
-                "change_type": _history_change_type(item),
-            },
-        )
-        written += 1
-    return written
-
-
-def _parse_history_time(raw: Any):
-    if not raw:
-        return None
-    try:
-        timestamp = int(raw) / 1000
-    except (TypeError, ValueError):
-        return None
-    parsed = datetime.fromtimestamp(timestamp, tz=datetime_timezone.utc)
-    return parsed
-
-
-def _history_change_type(item: dict) -> str:
-    if item.get("pre_value") is None:
-        return "create"
-    if item.get("cur_value") is None:
-        return "delete"
-    return "update"
 
 
 def _sync_projects_from_project_init(
@@ -658,6 +1034,7 @@ def _sync_projects_from_project_init(
     source_record_ids = []
     for record in records:
         values = _map_record(record, field_map, app_token, table_id)
+        values = _coerce_model_values(Project, values)
         source_record_ids.append(values["source_record_id"])
         values["project_scope"] = ProjectScope.DOMESTIC
         values["is_landed"] = False
@@ -691,6 +1068,7 @@ def _sync_projects_from_oversea(
             app_token,
             table_id,
         )
+        values = _coerce_model_values(Project, values)
         source_record_ids.append(values["source_record_id"])
         values["project_scope"] = ProjectScope.OVERSEAS
         values["is_landed"] = True
@@ -847,6 +1225,7 @@ def _update_cursor(
     table_id: str,
     table_name: str,
     record_count: int,
+    source_revision: str,
 ) -> None:
     now = timezone.now()
     SyncCursor.objects.update_or_create(
@@ -859,6 +1238,7 @@ def _update_cursor(
             "last_sync_at": now,
             "last_success_at": now,
             "record_count": record_count,
+            "source_revision": source_revision,
         },
     )
 

@@ -1,5 +1,5 @@
 <template>
-  <Panel title="全局飞书配置">
+  <Panel :title="t('dataOps.config.globalTitle')">
     <div class="grid gap-4 lg:grid-cols-4">
       <label class="space-y-1">
         <span class="text-xs font-semibold text-slate-500">App ID</span>
@@ -17,14 +17,14 @@
             v-if="config.has_feishu_app_secret"
             class="ml-1 text-emerald-600"
           >
-            已配置
+            {{ t('dataOps.config.configured') }}
           </span>
         </span>
         <input
           :value="config.feishu_app_secret"
           autocomplete="new-password"
           class="field-sm w-full font-mono"
-          placeholder="留空保持不变"
+          :placeholder="t('dataOps.config.secretPlaceholder')"
           type="password"
           @input="
             $emit('update-field', 'feishu_app_secret', $event.target.value)
@@ -33,7 +33,9 @@
       </label>
 
       <label class="space-y-1">
-        <span class="text-xs font-semibold text-slate-500">日期时区</span>
+        <span class="text-xs font-semibold text-slate-500">
+          {{ t('dataOps.config.timezone') }}
+        </span>
         <input
           :value="config.feishu_date_timezone"
           class="field-sm w-full font-mono"
@@ -45,7 +47,7 @@
 
       <label class="space-y-1">
         <span class="text-xs font-semibold text-slate-500">
-          任务超时(小时)
+          {{ t('dataOps.config.timeout') }}
         </span>
         <input
           :value="config.active_sync_job_timeout_hours"
@@ -65,14 +67,18 @@
 
     <div class="mt-4 flex justify-end">
       <button class="btn-primary h-9 text-sm" type="button" @click="$emit('save')">
-        保存全局配置
+        {{ t('dataOps.config.save') }}
       </button>
     </div>
   </Panel>
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
+
 import { Panel } from './DataOpsPrimitives'
+
+const { t } = useI18n()
 
 defineProps({
   config: { type: Object, required: true },

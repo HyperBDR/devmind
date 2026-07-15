@@ -2,6 +2,8 @@ import { createI18n } from 'vue-i18n'
 
 import en from '../locales/en.json'
 import zhCN from '../locales/zh-CN.json'
+import dataOpsEn from '../locales/data-ops/en.json'
+import dataOpsZhCN from '../locales/data-ops/zh-CN.json'
 import adminEn from '../admin/locales/en.json'
 import adminZhCN from '../admin/locales/zh-CN.json'
 
@@ -45,8 +47,12 @@ const i18n = createI18n({
   locale: getStoredLanguage(),
   fallbackLocale: 'en',
   messages: {
-    en: deepMergeMessages(en, adminEn),
-    'zh-CN': deepMergeMessages(zhCN, adminZhCN)
+    en: deepMergeMessages(deepMergeMessages(en, adminEn), {
+      dataOps: dataOpsEn
+    }),
+    'zh-CN': deepMergeMessages(deepMergeMessages(zhCN, adminZhCN), {
+      dataOps: dataOpsZhCN
+    })
   }
 })
 

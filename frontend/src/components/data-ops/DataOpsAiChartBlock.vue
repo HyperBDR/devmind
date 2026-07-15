@@ -24,10 +24,16 @@
             :key="`${row.key}-${item.name}`"
             class="flex items-center gap-2"
           >
-            <div class="h-2 min-w-0 flex-1 rounded-full bg-slate-100">
+            <div
+              class="h-2 min-w-0 flex-1 rounded-full"
+              :style="{ backgroundColor: towerChartTrackColor }"
+            >
               <div
-                class="h-2 rounded-full bg-indigo-500"
-                :style="{ width: `${item.width}%` }"
+                class="h-2 rounded-full"
+                :style="{
+                  backgroundColor: item.color,
+                  width: `${item.width}%`,
+                }"
               />
             </div>
             <span class="w-16 text-right text-[11px] text-slate-600">
@@ -42,14 +48,30 @@
 
 <script setup>
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
   chart: { type: Object, required: true },
 })
 
-const chartTitle = computed(() => props.chart.title || '数据图表')
+const { locale, t } = useI18n()
+
+const towerChartPalette = [
+  '#8a4cfc',
+  '#2563eb',
+  '#f59e0b',
+  '#60a5fa',
+  '#10b981',
+]
+const towerChartTrackColor = '#f1f5f9'
+
+const chartTitle = computed(
+  () => props.chart.title || t('dataOps.chart.dataChart')
+)
 const chartTypeLabel = computed(() =>
-  props.chart.type === 'line' ? '趋势' : '图表'
+  props.chart.type === 'line'
+    ? t('dataOps.chart.trend')
+    : t('dataOps.chart.chart')
 )
 
 const series = computed(() => {
@@ -58,7 +80,7 @@ const series = computed(() => {
   }
   return [
     {
-      name: props.chart.name || '指标',
+      name: props.chart.name || t('dataOps.chart.metric'),
       data: props.chart.data || props.chart.values || [],
     },
   ]
@@ -81,10 +103,11 @@ const rows = computed(() =>
   labels.value.map((label, index) => ({
     key: `${label}-${index}`,
     label,
-    items: series.value.map((item) => {
+    items: series.value.map((item, seriesIndex) => {
       const value = Number((item.data || [])[index] || 0)
       return {
-        name: item.name || '指标',
+        color: towerChartPalette[seriesIndex % towerChartPalette.length],
+        name: item.name || t('dataOps.chart.metric'),
         value: formatChartValue(value),
         width: chartBarWidth(value),
       }
@@ -98,7 +121,7 @@ function chartBarWidth(value) {
 }
 
 function formatChartValue(value) {
-  return new Intl.NumberFormat('zh-CN', {
+  return new Intl.NumberFormat(locale.value === 'zh-CN' ? 'zh-CN' : 'en-US', {
     maximumFractionDigits: 2,
   }).format(value)
 }

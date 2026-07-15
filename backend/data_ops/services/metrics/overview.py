@@ -16,6 +16,10 @@ from data_ops.models import (
     SyncJob,
     SyncTableStatus,
 )
+from data_ops.services.metrics.owner_identities import (
+    owner_payload,
+    owner_payload_from_record,
+)
 
 
 ZERO_DECIMAL = Decimal("0")
@@ -268,6 +272,7 @@ def get_top_sales() -> dict:
         "top_received": [
             {
                 "sales_person": item["name"],
+                **owner_payload(item["name"]),
                 "received_amount": item["amount"],
                 "outstanding_amount": 0,
                 "customer_count": 0,
@@ -296,6 +301,7 @@ def get_risks() -> dict:
         {
             "customer_name": item.customer_name or "-",
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "project_name": item.project_name,
             "outstanding_amount": _number(item.outstanding),
             "expected_payment_date": (
@@ -530,6 +536,7 @@ def _renewal_risks() -> list:
             "service_end": item.service_end.isoformat(),
             "days_left": (item.service_end - today).days,
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "risk_level": (
                 "high" if (item.service_end - today).days <= 14 else "medium"
             ),
@@ -548,6 +555,7 @@ def _opportunity_items(*, limit: int) -> list:
             "project_name": item.project_name,
             "customer_full_name": item.customer_full_name,
             "sales_person": item.sales_person,
+            **owner_payload_from_record(item, "sales_person"),
             "domestic_international": item.domestic_international,
             "estimated_amount": _number(item.estimated_amount),
             "oa_initiation_date": (
