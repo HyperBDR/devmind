@@ -67,6 +67,17 @@ data_ops_aggregate。
 ```
 """
 
+STREAMING_TOOL_PLANNER_PROMPT = (
+    "当前调用只负责规划 Data Ops 数据查询，不生成最终回答。"
+    "需要更多数据时只调用工具；已有数据足够或无需工具时，"
+    "只返回 DATA_OPS_READY。"
+)
+
+FINAL_ANSWER_PROMPT = (
+    "Data Ops tools 已返回查询结果。请基于这些结果直接回答，"
+    "不要继续调用工具，不要输出 DSML、tool_calls 或 XML 标签。"
+)
+
 DATA_OPS_AI_CAPABILITIES = [
     {
         "key": "executive_health",
@@ -477,7 +488,7 @@ def stream_chat_with_data_ops_assistant(
         }
         (
             final_messages,
-            precomputed_content,
+            _planning_content,
             usage,
             settings,
             progress_events,
@@ -485,6 +496,7 @@ def stream_chat_with_data_ops_assistant(
             messages=messages,
             preferred_config_uuid=preferred_config_uuid,
             user_id=user_id,
+            defer_final_answer=True,
         )
         for event in progress_events:
             yield event
@@ -495,17 +507,12 @@ def stream_chat_with_data_ops_assistant(
             "detail": "基于上下文与工具结果组织 Markdown、表格和图表。",
             "status": "running",
         }
-        if precomputed_content:
-            yield from _stream_precomputed_content(
-                content=precomputed_content,
-                usage=usage,
-                settings=settings,
-            )
-            return
         yield from _stream_litellm(
             messages=final_messages,
             preferred_config_uuid=preferred_config_uuid,
             user_id=user_id,
+            initial_usage=usage,
+            llm_settings=settings,
         )
     except Exception as exc:
         yield {"type": "error", "detail": str(exc)}
@@ -671,6 +678,7 @@ def _prepare_messages_with_data_ops_tools(
     messages: list[dict[str, str]],
     preferred_config_uuid: str,
     user_id: int | None,
+    defer_final_answer: bool = False,
 ) -> tuple[
     list[dict[str, Any]],
     str,
@@ -681,6 +689,11 @@ def _prepare_messages_with_data_ops_tools(
     llm_settings = resolve_data_ops_llm_settings(preferred_config_uuid)
     state = _build_litellm_state(user_id)
     working_messages: list[dict[str, Any]] = list(messages)
+    if defer_final_answer:
+        _insert_system_instruction(
+            working_messages,
+            STREAMING_TOOL_PLANNER_PROMPT,
+        )
     progress_events: list[dict[str, Any]] = []
     usage: dict[str, Any] = {}
     used_tools = False
@@ -706,6 +719,14 @@ def _prepare_messages_with_data_ops_tools(
             content = _strip_dsml_tool_call_blocks(
                 str(message_payload.get("content") or ""),
             ).strip()
+            if defer_final_answer:
+                return (
+                    _build_final_answer_messages(working_messages),
+                    "",
+                    usage,
+                    llm_settings,
+                    progress_events,
+                )
             if used_tools:
                 if content:
                     return (
@@ -748,15 +769,6 @@ def _prepare_messages_with_data_ops_tools(
         progress_events.extend(tool_events)
 
     working_messages = _build_final_answer_messages(working_messages)
-    working_messages.append(
-        {
-            "role": "system",
-            "content": (
-                "Data Ops tools 已返回查询结果。请基于这些结果直接回答，"
-                "不要继续调用工具，不要输出 DSML、tool_calls 或 XML 标签。"
-            ),
-        },
-    )
     return working_messages, "", usage, llm_settings, progress_events
 
 
@@ -766,6 +778,11 @@ def _build_final_answer_messages(
     final_messages: list[dict[str, Any]] = []
     for message in messages:
         role = message.get("role")
+        if (
+            role == "system"
+            and message.get("content") == STREAMING_TOOL_PLANNER_PROMPT
+        ):
+            continue
         if role == "assistant" and message.get("tool_calls"):
             content = _strip_dsml_tool_call_blocks(
                 str(message.get("content") or ""),
@@ -790,7 +807,24 @@ def _build_final_answer_messages(
             )
             continue
         final_messages.append(message)
+    _insert_system_instruction(
+        final_messages,
+        FINAL_ANSWER_PROMPT,
+    )
     return final_messages
+
+
+def _insert_system_instruction(
+    messages: list[dict[str, Any]],
+    content: str,
+) -> None:
+    insert_at = 0
+    while (
+        insert_at < len(messages)
+        and messages[insert_at].get("role") == "system"
+    ):
+        insert_at += 1
+    messages.insert(insert_at, {"role": "system", "content": content})
 
 
 def _build_litellm_state(user_id: int | None) -> dict[str, Any]:
@@ -1093,36 +1127,19 @@ def _merge_usage(
     return merged
 
 
-def _stream_precomputed_content(
-    *,
-    content: str,
-    usage: dict[str, Any],
-    settings: dict[str, Any],
-) -> Iterator[dict[str, Any]]:
-    for index in range(0, len(content), 80):
-        yield {"type": "chunk", "content": content[index:index + 80]}
-    yield {
-        "type": "done",
-        "ok": True,
-        "reply": content,
-        "usage": usage,
-        "llm": {
-            "source": settings.get("source", ""),
-            "label": settings.get("label", ""),
-            "config_uuid": settings.get("config_uuid", ""),
-        },
-    }
-
-
 def _stream_litellm(
     *,
     messages: list[dict[str, str]],
     preferred_config_uuid: str,
     user_id: int | None,
+    initial_usage: dict[str, Any] | None = None,
+    llm_settings: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, Any]]:
     from litellm import completion
 
-    llm_settings = resolve_data_ops_llm_settings(preferred_config_uuid)
+    llm_settings = llm_settings or resolve_data_ops_llm_settings(
+        preferred_config_uuid,
+    )
     params = _build_litellm_completion_params(llm_settings)
     params["messages"] = messages
     params["temperature"] = 0.2
@@ -1137,7 +1154,8 @@ def _stream_litellm(
     params["metadata"]["node_name"] = "data_ops_ai_assistant"
 
     full_content = []
-    usage: dict[str, Any] = {}
+    planning_usage = dict(initial_usage or {})
+    usage: dict[str, Any] = dict(planning_usage)
     for chunk in completion(**params):
         content = _extract_litellm_chunk_content(chunk)
         if content:
@@ -1145,7 +1163,7 @@ def _stream_litellm(
             yield {"type": "chunk", "content": content}
         chunk_usage = _extract_litellm_chunk_usage(chunk)
         if chunk_usage:
-            usage = chunk_usage
+            usage = _merge_usage(planning_usage, chunk_usage)
 
     yield {
         "type": "done",

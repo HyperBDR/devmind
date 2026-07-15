@@ -233,3 +233,50 @@ def test_exhausted_tool_loop_builds_plain_final_answer_context(
         and '"outstanding": 100' in item["content"]
         for item in messages
     )
+
+
+def test_streaming_tool_planner_defers_final_answer(monkeypatch):
+    calls = []
+
+    def fake_call_litellm_message(**kwargs):
+        calls.append(kwargs)
+        return (
+            {"content": "这是一段已经生成的完整答案。"},
+            {"total_tokens": 5},
+        )
+
+    monkeypatch.setattr(
+        "data_ops.services.ai.resolve_data_ops_llm_settings",
+        lambda preferred_config_uuid="": {"source": "test"},
+    )
+    monkeypatch.setattr(
+        "data_ops.services.ai._call_litellm_message",
+        fake_call_litellm_message,
+    )
+
+    result = _prepare_messages_with_data_ops_tools(
+        messages=[{"role": "user", "content": "分析回款健康度"}],
+        preferred_config_uuid="",
+        user_id=None,
+        defer_final_answer=True,
+    )
+    messages, content, usage, _settings, _events = result
+
+    assert content == ""
+    assert usage["total_tokens"] == 5
+    assert len(calls) == 1
+    assert any(
+        "DATA_OPS_READY" in item["content"]
+        for item in calls[0]["messages"]
+        if item["role"] == "system"
+    )
+    assert any(
+        "直接回答" in item["content"]
+        for item in messages
+        if item["role"] == "system"
+    )
+    roles = [item["role"] for item in messages]
+    first_non_system = next(
+        index for index, role in enumerate(roles) if role != "system"
+    )
+    assert "system" not in roles[first_non_system:]
