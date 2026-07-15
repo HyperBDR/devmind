@@ -24,6 +24,10 @@ from data_ops.services.ai_tools import (
 SKILL_ROOT = Path(__file__).resolve().parent / "skills"
 
 
+def _execute_tool(name, _context, arguments):
+    return execute_data_ops_tool(name, arguments)
+
+
 def _build_tools() -> tuple[AssistantTool, ...]:
     tools = []
     for item in DATA_OPS_TOOL_SCHEMAS:
@@ -34,7 +38,7 @@ def _build_tools() -> tuple[AssistantTool, ...]:
                 name=name,
                 description=function.get("description", ""),
                 schema=function.get("parameters", {}),
-                handler=partial(execute_data_ops_tool, name),
+                handler=partial(_execute_tool, name),
             )
         )
     return tuple(tools)

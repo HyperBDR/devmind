@@ -11,7 +11,7 @@ def _tool(name: str) -> AssistantTool:
         name=name,
         description=name,
         schema={},
-        handler=lambda arguments: arguments,
+        handler=lambda context, arguments: arguments,
     )
 
 

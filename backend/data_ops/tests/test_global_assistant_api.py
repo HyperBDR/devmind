@@ -246,3 +246,53 @@ def test_stream_failure_returns_a_safe_error_event(
 
     assert '"type": "error"' in body
     assert "internal provider secret" not in body
+
+
+@pytest.mark.django_db
+def test_capability_without_stream_handler_uses_global_runtime(
+    api_client,
+    data_ops_user,
+    monkeypatch,
+    restore_capabilities,
+):
+    capability_registry.reset()
+    capability_registry.register(
+        AssistantCapability(
+            app_key="data_ops",
+            display_name="Data Ops Assistant",
+            required_feature="data_ops",
+            instructions="Test.",
+            tools=(),
+        )
+    )
+    monkeypatch.setattr(
+        "ai_assistant.services.get_effective_feature_keys",
+        lambda user: ["data_ops"],
+    )
+    monkeypatch.setattr(
+        "ai_assistant.views.stream_assistant_response",
+        lambda **kwargs: iter(
+            [
+                {"type": "chunk", "content": "global"},
+                {"type": "done", "reply": "global", "usage": {}},
+            ]
+        ),
+    )
+    api_client.force_authenticate(user=data_ops_user)
+    conversation = AssistantConversation.objects.create(
+        user=data_ops_user,
+        app_key="data_ops",
+    )
+
+    response = api_client.post(
+        reverse(
+            "assistant-conversation-message-list",
+            kwargs={"conversation_uuid": conversation.uuid},
+        ),
+        {"message": "hello"},
+        format="json",
+    )
+    body = b"".join(response.streaming_content).decode("utf-8")
+
+    assert response.status_code == 200
+    assert '"reply": "global"' in body

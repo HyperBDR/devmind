@@ -7,7 +7,20 @@ from pathlib import Path
 from typing import Any, Callable, Iterator
 
 
-ToolHandler = Callable[[dict[str, Any]], dict[str, Any]]
+@dataclass(frozen=True)
+class ToolExecutionContext:
+    """Request-scoped tool context that is never exposed to the model."""
+
+    user_id: int | None
+    app_key: str
+    conversation_id: str
+    page_context: dict[str, Any]
+
+
+ToolHandler = Callable[
+    [ToolExecutionContext, dict[str, Any]],
+    dict[str, Any],
+]
 StreamHandler = Callable[..., Iterator[dict[str, Any]]]
 ContextLoader = Callable[[], dict[str, Any]]
 

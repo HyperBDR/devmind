@@ -17,7 +17,7 @@ def _capability(app_key: str = "data_ops") -> AssistantCapability:
                 name="data_ops_query_records",
                 description="Query Data Ops records.",
                 schema={},
-                handler=lambda arguments: arguments,
+                handler=lambda context, arguments: arguments,
             ),
         ),
         skill_dirs=(Path("/tmp/data-ops-skills"),),
@@ -46,7 +46,7 @@ def test_registry_rejects_duplicate_tool_names():
         name="data_ops_query_records",
         description="Duplicate tool.",
         schema={},
-        handler=lambda arguments: arguments,
+        handler=lambda context, arguments: arguments,
     )
     capability = _capability()
     capability = AssistantCapability(

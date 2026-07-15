@@ -12,6 +12,7 @@ from rest_framework.views import APIView
 
 from ai_assistant.models import AssistantConversation, AssistantMessage
 from ai_assistant.registry import CapabilityNotFound, capability_registry
+from ai_assistant.runtime import stream_assistant_response
 from ai_assistant.serializers import (
     ConversationCreateSerializer,
     ConversationSerializer,
@@ -177,12 +178,6 @@ class ConversationMessageListCreateAPIView(APIView):
                 "You cannot use this app assistant.",
                 403,
             )
-        if capability.stream_handler is None:
-            return _error(
-                "CAPABILITY_UNAVAILABLE",
-                "This app assistant cannot process messages.",
-                503,
-            )
         serializer = MessageCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         message = serializer.validated_data["message"]
@@ -205,15 +200,33 @@ class ConversationMessageListCreateAPIView(APIView):
             chunks = []
             final_reply = ""
             try:
-                events = capability.stream_handler(
-                    message=message,
-                    history=history,
-                    preferred_config_uuid=serializer.validated_data.get(
-                        "llm_config_uuid",
-                        "",
-                    ),
-                    user_id=request.user.id,
-                )
+                stream_handler = capability.stream_handler
+                if stream_handler is not None:
+                    events = stream_handler(
+                        message=message,
+                        history=history,
+                        preferred_config_uuid=serializer.validated_data.get(
+                            "llm_config_uuid",
+                            "",
+                        ),
+                        user_id=request.user.id,
+                    )
+                else:
+                    events = stream_assistant_response(
+                        capability=capability,
+                        message=message,
+                        history=history,
+                        preferred_config_uuid=serializer.validated_data.get(
+                            "llm_config_uuid",
+                            "",
+                        ),
+                        user_id=request.user.id,
+                        conversation_id=str(conversation.uuid),
+                        page_context=serializer.validated_data.get(
+                            "page_context",
+                            {},
+                        ),
+                    )
                 for event in events:
                     if event.get("type") == "chunk":
                         chunks.append(str(event.get("content") or ""))
