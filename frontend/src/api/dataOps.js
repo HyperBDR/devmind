@@ -1,4 +1,5 @@
 import apiClient from './index'
+import { readDataOpsSseResponse } from '@/utils/dataOpsAiStream'
 
 const base = '/v1/data-ops'
 
@@ -47,47 +48,7 @@ async function postSse(path, payload, callbacks = {}, signal = null) {
     throw error
   }
 
-  await readSseResponse(response, callbacks)
-}
-
-async function readSseResponse(response, callbacks) {
-  const reader = response.body.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ''
-
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
-    buffer = parts.pop() || ''
-    for (const part of parts) {
-      handleSsePart(part, callbacks)
-    }
-  }
-  if (buffer.trim()) handleSsePart(buffer, callbacks)
-}
-
-function handleSsePart(part, callbacks) {
-  const line = part.split('\n').find((item) => item.startsWith('data:'))
-  if (!line) return
-  try {
-    const payload = JSON.parse(line.slice(5).trim())
-    if (
-      (payload.type === 'chunk' || payload.type === 'content') &&
-      payload.content != null
-    ) {
-      callbacks.onChunk?.(payload.content)
-    } else if (payload.type === 'progress') {
-      callbacks.onProgress?.(payload)
-    } else if (payload.type === 'done') {
-      callbacks.onDone?.(payload)
-    } else if (payload.type === 'error') {
-      callbacks.onError?.(payload.detail || 'Stream error')
-    }
-  } catch (_) {
-    // Ignore malformed SSE events and continue reading the stream.
-  }
+  await readDataOpsSseResponse(response, callbacks)
 }
 
 export const dataOpsApi = {

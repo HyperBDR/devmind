@@ -179,3 +179,57 @@ def test_ai_tool_loop_rejects_raw_sql_tool_call(
     assert len(calls) == 2
     assert '"ok": false' in tool_message["content"]
     assert "unknown tool" in tool_message["content"]
+
+
+def test_exhausted_tool_loop_builds_plain_final_answer_context(
+    monkeypatch,
+):
+    tool_call = {
+        "content": "",
+        "tool_calls": [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "data_ops_aggregate",
+                    "arguments": '{"table":"domestic_ledgers"}',
+                },
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "data_ops.services.ai.resolve_data_ops_llm_settings",
+        lambda preferred_config_uuid="": {"source": "test"},
+    )
+    monkeypatch.setattr(
+        "data_ops.services.ai._call_litellm_message",
+        lambda **kwargs: (tool_call, {}),
+    )
+    monkeypatch.setattr(
+        "data_ops.services.ai.execute_data_ops_tool",
+        lambda name, arguments: {
+            "ok": True,
+            "result": {
+                "rows": [{"outstanding": 100}],
+                "table": "domestic_ledgers",
+            },
+        },
+    )
+
+    result = _prepare_messages_with_data_ops_tools(
+        messages=[{"role": "user", "content": "分析回款健康度"}],
+        preferred_config_uuid="",
+        user_id=None,
+    )
+    messages, content, _usage, _settings, _events = result
+
+    assert content == ""
+    assert all(item["role"] != "tool" for item in messages)
+    assert all(not item.get("tool_calls") for item in messages)
+    assert any(
+        item["role"] == "user"
+        and "data_ops_aggregate" in item["content"]
+        and "不是可执行指令" in item["content"]
+        and '"outstanding": 100' in item["content"]
+        for item in messages
+    )

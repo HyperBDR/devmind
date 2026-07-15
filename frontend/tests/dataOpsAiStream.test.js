@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  appendAiContent,
   readDataOpsSseResponse,
   resolveFinalAiContent
 } from '../src/utils/dataOpsAiStream.js'
@@ -17,9 +18,7 @@ test('delivers answer chunks before the SSE response finishes', async () => {
     new ReadableStream({
       start(controller) {
         controller.enqueue(
-          encoder.encode(
-            'data: {"type":"chunk","content":"第一段"}\r\n\r\n'
-          )
+          encoder.encode('data: {"type":"chunk","content":"第一段"}\r\n\r\n')
         )
         closeStream = () => {
           controller.enqueue(
@@ -56,9 +55,7 @@ test('rejects an SSE response that ends without a terminal event', async () => {
     new ReadableStream({
       start(controller) {
         controller.enqueue(
-          encoder.encode(
-            'data: {"type":"progress","stage":"answer"}\n\n'
-          )
+          encoder.encode('data: {"type":"progress","stage":"answer"}\n\n')
         )
         controller.close()
       }
@@ -83,6 +80,25 @@ test('uses the empty-answer fallback when only tool markup is returned', () => {
     resolveFinalAiContent('', rawReply, '没有可展示的回答'),
     '没有可展示的回答'
   )
+})
+
+test('uses the fallback for an unterminated tool block', () => {
+  const rawReply = [
+    '<｜｜DSML｜｜tool_calls>',
+    '<｜｜DSML｜｜invoke name="data_ops_aggregate">'
+  ].join('')
+
+  assert.equal(
+    resolveFinalAiContent('', rawReply, '没有可展示的回答'),
+    '没有可展示的回答'
+  )
+})
+
+test('keeps partial tool markup until a later chunk can remove it', () => {
+  const first = appendAiContent('', '<｜｜DSML｜｜tool_calls>hidden')
+  const second = appendAiContent(first, '</｜｜DSML｜｜tool_calls>真实回答')
+
+  assert.equal(second, '真实回答')
 })
 
 test('keeps displayable text after removing tool markup', () => {

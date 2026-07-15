@@ -31,24 +31,32 @@ export async function readDataOpsSseResponse(response, callbacks = {}) {
   return terminalEvent
 }
 
-export function resolveFinalAiContent(
-  currentContent,
-  finalContent,
-  fallback
-) {
+export function resolveFinalAiContent(currentContent, finalContent, fallback) {
   const current = sanitizeAiContent(currentContent)
   if (current) return current
   return sanitizeAiContent(finalContent) || fallback
 }
 
+export function appendAiContent(currentContent, nextContent) {
+  return stripCompleteToolBlocks(
+    `${currentContent || ''}${nextContent || ''}`
+  ).trimStart()
+}
+
 export function sanitizeAiContent(content) {
+  return stripCompleteToolBlocks(content)
+    .replace(/<｜｜DSML｜｜tool_calls>[\s\S]*$/g, '')
+    .replace(/&lt;｜｜DSML｜｜tool_calls&gt;[\s\S]*$/g, '')
+    .trimStart()
+}
+
+function stripCompleteToolBlocks(content) {
   return String(content || '')
     .replace(/<｜｜DSML｜｜tool_calls>[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g, '')
     .replace(
       /&lt;｜｜DSML｜｜tool_calls&gt;[\s\S]*?&lt;\/｜｜DSML｜｜tool_calls&gt;/g,
       ''
     )
-    .trimStart()
 }
 
 function handleSsePart(part, callbacks) {
