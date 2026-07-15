@@ -157,6 +157,7 @@ import { useI18n } from 'vue-i18n'
 
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import { splitFollowUpQuestions } from '@/utils/aiSuggestions'
+import { normalizeDataOpsChart } from '@/utils/dataOpsChart'
 
 import DataOpsAiChartBlock from './DataOpsAiChartBlock.vue'
 
@@ -305,15 +306,7 @@ function chartFencePattern() {
 function parseChart(rawValue) {
   try {
     const value = JSON.parse(String(rawValue || '').trim())
-    if (!value || typeof value !== 'object') return null
-    if (
-      !Array.isArray(value.labels) &&
-      !Array.isArray(value.data) &&
-      !Array.isArray(value.series)
-    ) {
-      return null
-    }
-    return value
+    return normalizeDataOpsChart(value)
   } catch (_) {
     return null
   }

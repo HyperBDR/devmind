@@ -97,6 +97,7 @@ test('renders categorized presets and direct-send follow-up actions', () => {
   assert.match(aiMessage, /dataOps\.ai\.followUpsTitle/)
   assert.match(aiMessage, /@click="\$emit\('ask', question\)"/)
   assert.match(aiMessage, /status\.value === 'done'/)
+  assert.match(aiMessage, /normalizeDataOpsChart/)
 })
 
 test('opens an empty conversation at the top of its prompt list', () => {
