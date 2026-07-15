@@ -8,6 +8,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "rest_framework",
     "accounts",
+    "ai_assistant",
     "data_ops",
 ]
 

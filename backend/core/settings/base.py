@@ -166,6 +166,7 @@ INSTALLED_APPS = [
 INSTALLED_APPS += [
     'core',
     'accounts',
+    'ai_assistant',
     'cloud_billing',
     'data_collector',
     'data_ops',
