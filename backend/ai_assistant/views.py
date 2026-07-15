@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from django.http import StreamingHttpResponse
 from rest_framework.permissions import IsAuthenticated
@@ -18,9 +19,13 @@ from ai_assistant.serializers import (
     MessageSerializer,
 )
 from ai_assistant.services import (
+    authorized_app_keys,
     list_capabilities_for_user,
     user_can_access_capability,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 def _error(code: str, message: str, status: int) -> Response:
@@ -47,6 +52,7 @@ class ConversationListCreateAPIView(APIView):
     def get(self, request):
         conversations = AssistantConversation.objects.filter(
             user=request.user,
+            app_key__in=authorized_app_keys(request.user),
         )
         app_key = str(request.query_params.get("app_key") or "").strip()
         if app_key:
@@ -104,6 +110,16 @@ class ConversationDetailAPIView(APIView):
                 "Conversation not found.",
                 404,
             )
+        capability = capability_registry.get(conversation.app_key)
+        if capability is None or not user_can_access_capability(
+            request.user,
+            capability,
+        ):
+            return _error(
+                "CAPABILITY_FORBIDDEN",
+                "You cannot use this app assistant.",
+                403,
+            )
         conversation.delete()
         return Response(status=204)
 
@@ -126,6 +142,16 @@ class ConversationMessageListCreateAPIView(APIView):
                 "CONVERSATION_NOT_FOUND",
                 "Conversation not found.",
                 404,
+            )
+        capability = capability_registry.get(conversation.app_key)
+        if capability is None or not user_can_access_capability(
+            request.user,
+            capability,
+        ):
+            return _error(
+                "CAPABILITY_FORBIDDEN",
+                "You cannot use this app assistant.",
+                403,
             )
         return Response(
             {
@@ -178,24 +204,42 @@ class ConversationMessageListCreateAPIView(APIView):
         def event_stream():
             chunks = []
             final_reply = ""
-            events = capability.stream_handler(
-                message=message,
-                history=history,
-                preferred_config_uuid=serializer.validated_data.get(
-                    "llm_config_uuid",
-                    "",
-                ),
-                user_id=request.user.id,
-            )
-            for event in events:
-                if event.get("type") == "chunk":
-                    chunks.append(str(event.get("content") or ""))
-                if event.get("type") == "done":
-                    final_reply = str(event.get("reply") or "")
+            try:
+                events = capability.stream_handler(
+                    message=message,
+                    history=history,
+                    preferred_config_uuid=serializer.validated_data.get(
+                        "llm_config_uuid",
+                        "",
+                    ),
+                    user_id=request.user.id,
+                )
+                for event in events:
+                    if event.get("type") == "chunk":
+                        chunks.append(str(event.get("content") or ""))
+                    if event.get("type") == "done":
+                        final_reply = str(event.get("reply") or "")
+                    if event.get("type") == "error":
+                        event = {
+                            "type": "error",
+                            "detail": "Assistant response failed.",
+                        }
+                    yield "data: " + json.dumps(
+                        event,
+                        ensure_ascii=False,
+                        default=str,
+                    ) + "\n\n"
+            except Exception:
+                logger.exception(
+                    "Assistant stream failed for app %s",
+                    conversation.app_key,
+                )
                 yield "data: " + json.dumps(
-                    event,
+                    {
+                        "type": "error",
+                        "detail": "Assistant response failed.",
+                    },
                     ensure_ascii=False,
-                    default=str,
                 ) + "\n\n"
             content = final_reply or "".join(chunks)
             if content:

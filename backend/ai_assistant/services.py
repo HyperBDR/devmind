@@ -39,3 +39,13 @@ def list_capabilities_for_user(user) -> list[dict]:
             }
         )
     return payload
+
+
+def authorized_app_keys(user) -> tuple[str, ...]:
+    """Return registered app keys the current user may access."""
+
+    return tuple(
+        capability.app_key
+        for capability in capability_registry.all()
+        if user_can_access_capability(user, capability)
+    )

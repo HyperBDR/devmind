@@ -34,6 +34,7 @@ const route = useRoute()
 const userStore = useUserStore()
 const routeAppKey = computed(() => String(route.meta.appKey || ''))
 const isAuthenticated = computed(() => userStore.isAuthenticated)
+const userKey = computed(() => String(userStore.userInfo?.id || ''))
 const {
   activateApp,
   activeHistoryId,
@@ -52,8 +53,9 @@ const {
 } = useGlobalAssistant()
 
 watch(
-  [routeAppKey, isAuthenticated],
-  ([appKey, authenticated]) => activateApp(authenticated ? appKey : ''),
+  [routeAppKey, isAuthenticated, userKey],
+  ([appKey, authenticated, currentUserKey]) =>
+    activateApp(authenticated ? appKey : '', currentUserKey),
   { immediate: true }
 )
 </script>

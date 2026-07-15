@@ -25,6 +25,7 @@ export function useGlobalAssistant() {
   const streamController = ref(null)
   let capabilitiesLoaded = false
   let activationVersion = 0
+  let capabilityUserKey = ''
 
   const context = computed(() => ({
     assistant: currentCapability.value?.profile || {}
@@ -38,9 +39,14 @@ export function useGlobalAssistant() {
     return capabilities.value
   }
 
-  async function activateApp(appKey) {
+  async function activateApp(appKey, userKey = '') {
     const version = ++activationVersion
     stopStream()
+    if (userKey !== capabilityUserKey) {
+      capabilities.value = new Map()
+      capabilitiesLoaded = false
+      capabilityUserKey = userKey
+    }
     activeAppKey.value = appKey || ''
     activeHistoryId.value = ''
     history.value = []
@@ -70,9 +76,12 @@ export function useGlobalAssistant() {
     history.value = (response?.data?.data || []).map(normalizeHistory)
   }
 
-  async function ensureConversation() {
+  async function ensureConversation(appKey, version) {
     if (activeHistoryId.value) return activeHistoryId.value
-    const response = await assistantApi.createConversation(activeAppKey.value)
+    const response = await assistantApi.createConversation(appKey)
+    if (version !== activationVersion || appKey !== activeAppKey.value) {
+      return ''
+    }
     const item = normalizeHistory(response?.data?.data || {})
     activeHistoryId.value = item.id
     history.value = [item, ...history.value]
@@ -82,7 +91,10 @@ export function useGlobalAssistant() {
   async function sendMessage() {
     const message = input.value.trim()
     if (!message || loading.value || !currentCapability.value) return
-    const conversationId = await ensureConversation()
+    const appKey = activeAppKey.value
+    const version = activationVersion
+    const conversationId = await ensureConversation(appKey, version)
+    if (!conversationId || version !== activationVersion) return
     messages.value.push({ role: 'user', content: message })
     input.value = ''
     loading.value = true
@@ -108,7 +120,7 @@ export function useGlobalAssistant() {
         conversationId,
         {
           message,
-          page_context: { app_key: activeAppKey.value }
+          page_context: { app_key: appKey }
         },
         {
           onProgress(event) {
@@ -162,7 +174,7 @@ export function useGlobalAssistant() {
       if (current) current.elapsedMs = Date.now() - startedAt
       streamController.value = null
       loading.value = false
-      await loadHistory()
+      if (version === activationVersion) await loadHistory(version)
     }
   }
 

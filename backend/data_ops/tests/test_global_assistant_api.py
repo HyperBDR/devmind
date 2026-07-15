@@ -56,10 +56,18 @@ def test_conversation_rejects_app_without_registered_capability(
 
 
 @pytest.mark.django_db
-def test_user_can_delete_own_conversation(api_client, data_ops_user):
+def test_user_can_delete_own_conversation(
+    api_client,
+    data_ops_user,
+    monkeypatch,
+):
     conversation = AssistantConversation.objects.create(
         user=data_ops_user,
         app_key="data_ops",
+    )
+    monkeypatch.setattr(
+        "ai_assistant.services.get_effective_feature_keys",
+        lambda user: ["data_ops"],
     )
     api_client.force_authenticate(user=data_ops_user)
 
@@ -73,6 +81,60 @@ def test_user_can_delete_own_conversation(api_client, data_ops_user):
     assert response.status_code == 204
     assert not AssistantConversation.objects.filter(
         uuid=conversation.uuid,
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_conversations_are_hidden_after_app_access_is_removed(
+    api_client,
+    data_ops_user,
+    monkeypatch,
+):
+    AssistantConversation.objects.create(
+        user=data_ops_user,
+        app_key="data_ops",
+        title="Sensitive prior analysis",
+    )
+    monkeypatch.setattr(
+        "ai_assistant.services.get_effective_feature_keys",
+        lambda user: [],
+    )
+    api_client.force_authenticate(user=data_ops_user)
+
+    response = api_client.get(reverse("assistant-conversation-list"))
+
+    assert response.status_code == 200
+    assert response.data["data"] == []
+
+
+@pytest.mark.django_db
+def test_message_rejects_oversized_input(
+    api_client,
+    data_ops_user,
+    monkeypatch,
+):
+    conversation = AssistantConversation.objects.create(
+        user=data_ops_user,
+        app_key="data_ops",
+    )
+    monkeypatch.setattr(
+        "ai_assistant.services.get_effective_feature_keys",
+        lambda user: ["data_ops"],
+    )
+    api_client.force_authenticate(user=data_ops_user)
+
+    response = api_client.post(
+        reverse(
+            "assistant-conversation-message-list",
+            kwargs={"conversation_uuid": conversation.uuid},
+        ),
+        {"message": "x" * 8001},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert not AssistantMessage.objects.filter(
+        conversation=conversation,
     ).exists()
 
 
@@ -138,3 +200,49 @@ def test_message_stream_uses_conversation_app_and_persists_messages(
             conversation=conversation,
         ).values_list("role", "content")
     ) == [("user", "hello"), ("assistant", "world")]
+
+
+@pytest.mark.django_db
+def test_stream_failure_returns_a_safe_error_event(
+    api_client,
+    data_ops_user,
+    monkeypatch,
+    restore_capabilities,
+):
+    def failing_stream(**kwargs):
+        raise RuntimeError("internal provider secret")
+        yield
+
+    capability_registry.reset()
+    capability_registry.register(
+        AssistantCapability(
+            app_key="data_ops",
+            display_name="Data Ops Assistant",
+            required_feature="data_ops",
+            instructions="Test.",
+            tools=(),
+            stream_handler=failing_stream,
+        )
+    )
+    monkeypatch.setattr(
+        "ai_assistant.services.get_effective_feature_keys",
+        lambda user: ["data_ops"],
+    )
+    api_client.force_authenticate(user=data_ops_user)
+    conversation = AssistantConversation.objects.create(
+        user=data_ops_user,
+        app_key="data_ops",
+    )
+
+    response = api_client.post(
+        reverse(
+            "assistant-conversation-message-list",
+            kwargs={"conversation_uuid": conversation.uuid},
+        ),
+        {"message": "hello"},
+        format="json",
+    )
+    body = b"".join(response.streaming_content).decode("utf-8")
+
+    assert '"type": "error"' in body
+    assert "internal provider secret" not in body
