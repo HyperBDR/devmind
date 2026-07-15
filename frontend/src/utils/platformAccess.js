@@ -24,6 +24,12 @@ export const FEATURE_DEFINITIONS = [
     matchers: ['/llm-ops']
   },
   {
+    key: 'data_ops',
+    labelKey: 'platforms.dataOps',
+    defaultPath: '/data-ops',
+    matchers: ['/data-ops']
+  },
+  {
     key: 'sales_work_orders',
     labelKey: 'platforms.salesWorkOrders',
     defaultPath: '/sals/dashboard',
@@ -46,6 +52,7 @@ const FEATURE_MAP = new Map(FEATURE_DEFINITIONS.map((item) => [item.key, item]))
 const FEATURE_ALIASES = {
   cloud_billing: 'operations_console',
   data_collector: 'operations_console',
+  data_operations: 'data_ops',
   sals: 'sales_work_orders',
   llm_operations: 'llm_ops',
   llm_ops_management: 'llm_ops',
@@ -83,8 +90,18 @@ export function getAccessProfile(user) {
   )
 }
 
+function hasAdminAccess(user) {
+  if (user?.is_staff === true) return true
+  return (user?.roles || []).some((role) =>
+    normalizeFeatureKeys(role?.visible_features).includes('admin_console')
+  )
+}
+
 export function hasFeature(user, featureKey) {
   const normalizedFeatureKey = FEATURE_ALIASES[featureKey] || featureKey
+  if (hasAdminAccess(user)) {
+    return FEATURE_KEY_SET.has(normalizedFeatureKey)
+  }
   const visibleFeatures = normalizeFeatureKeys(
     getAccessProfile(user).visible_features
   )
@@ -92,6 +109,14 @@ export function hasFeature(user, featureKey) {
 }
 
 export function getAvailablePlatforms(user, t) {
+  if (hasAdminAccess(user)) {
+    return FEATURE_DEFINITIONS.map((item) => ({
+      key: item.key,
+      label: t ? t(item.labelKey) : item.key,
+      defaultPath: item.defaultPath
+    }))
+  }
+
   const accessProfile = getAccessProfile(user)
   const platformMap = new Map(
     (accessProfile.available_platforms || []).map((item) => [
@@ -99,6 +124,11 @@ export function getAvailablePlatforms(user, t) {
       item
     ])
   )
+  normalizeFeatureKeys(accessProfile.visible_features).forEach((key) => {
+    if (!platformMap.has(key)) {
+      platformMap.set(key, { key })
+    }
+  })
 
   return FEATURE_DEFINITIONS.filter((item) => platformMap.has(item.key)).map(
     (item) => {

@@ -111,6 +111,12 @@ const routes = [
     meta: { requiresAuth: true, requiredFeature: 'llm_ops' }
   },
   {
+    path: '/data-ops',
+    name: 'DataOps',
+    component: () => import('@/pages/DataOps.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'data_ops' }
+  },
+  {
     path: '/cloud-billing/tasks',
     name: 'CloudBillingTasks',
     component: () => import('@/pages/CloudBilling/Tasks.vue'),

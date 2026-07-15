@@ -28,6 +28,11 @@ FEATURE_DEFINITIONS = (
         'default_path': '/llm-ops',
     },
     {
+        'key': 'data_ops',
+        'label': 'Data Operations Console',
+        'default_path': '/data-ops',
+    },
+    {
         'key': 'admin_console',
         'label': 'Admin Console',
         'default_path': '/management/users',
@@ -56,6 +61,7 @@ PLATFORM_DEFAULT_PATHS = FEATURE_DEFAULT_PATHS
 FEATURE_ALIASES = {
     'cloud_billing': 'operations_console',
     'data_collector': 'operations_console',
+    'data_operations': 'data_ops',
     'sals': 'sales_work_orders',
     'llm_operations': 'llm_ops',
     'llm_ops_management': 'llm_ops',
@@ -203,6 +209,9 @@ def get_effective_feature_keys(
         feature_keys.extend(normalize_feature_keys(role.visible_features))
 
     normalized_features = normalize_feature_keys(feature_keys)
+    if 'admin_console' in normalized_features:
+        return list(FEATURE_KEYS)
+
     if not normalized_features:
         normalized_features = list(LEGACY_DEFAULT_FEATURES)
 

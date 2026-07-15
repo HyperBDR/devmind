@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore",
+    "test:unit": "node --test tests/*.test.js",
     "sync:provider-icons": "node scripts/sync-lobehub-provider-icons.mjs",
     "generate-favicons": "node scripts/generate-favicons.mjs",
     "test:e2e": "playwright test",

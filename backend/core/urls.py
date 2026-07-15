@@ -53,6 +53,9 @@ urlpatterns = [
     # Data collector routes (raw data collection from JIRA, Feishu, etc.)
     path('api/v1/data-collector/', include('data_collector.urls')),
 
+    # Data operations routes (business dashboard and Feishu sync)
+    path('api/v1/data-ops/', include('data_ops.urls')),
+
     # HyperBDR Dashboard routes
     path('api/v1/hyperbdr-dashboard/', include('hyperbdr_dashboard.urls')),
 

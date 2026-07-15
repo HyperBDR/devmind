@@ -1,0 +1,556 @@
+{
+  "brand": {
+    "subtitle": "Financial Data Platform"
+  },
+  "nav": {
+    "mobileLabel": "Mobile navigation",
+    "fallback": "Navigation",
+    "groups": {
+      "business": "Business Views",
+      "global": "Global Settings"
+    },
+    "items": {
+      "executive": {
+        "label": "Executive Dashboard",
+        "description": "Overview of contracts, collections, risks, and opportunities"
+      },
+      "pipeline": {
+        "label": "Pipeline Board",
+        "description": "Domestic pipeline, overseas delivery, and renewal risks"
+      },
+      "contracts": {
+        "label": "Contract Ledger",
+        "description": "Contract records, filters, pagination, and exports"
+      },
+      "sales": {
+        "label": "Overseas Sales",
+        "description": "KooGallery orders and overseas sales details"
+      },
+      "sync": {
+        "label": "Sync Status",
+        "description": "Feishu collection jobs, permission checks, and sync issues"
+      },
+      "config": {
+        "label": "Collection Settings",
+        "description": "Review Feishu Base tables, schedules, and manual triggers"
+      }
+    }
+  },
+  "header": {
+    "dataMonth": "Data month {month}",
+    "currencyNote": "Amounts are grouped by original currency without FX conversion",
+    "refresh": "Refresh Data",
+    "refreshing": "Refreshing",
+    "checkPermissions": "Check Feishu Access",
+    "checking": "Checking",
+    "fullSync": "Full Sync",
+    "syncing": "Syncing"
+  },
+  "common": {
+    "query": "Search",
+    "export": "Export",
+    "status": "Status",
+    "unknown": "Unknown",
+    "notSet": "Not set",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "manual": "Manual",
+    "hourly": "Hourly",
+    "daily": "Daily",
+    "weekly": "Weekly",
+    "noData": "No data",
+    "totalPages": "{total} records, {pages} pages",
+    "firstPage": "First",
+    "previousPage": "Previous",
+    "nextPage": "Next",
+    "lastPage": "Last"
+  },
+  "ai": {
+    "openLabel": "Open AI data assistant",
+    "drawerLabel": "AI data assistant",
+    "title": "AI Data Assistant",
+    "subtitle": "Business insights based on the current Data Ops context",
+    "history": "History",
+    "collapseHistory": "Hide History",
+    "newChat": "New Chat",
+    "close": "Close",
+    "historyLabel": "Conversation history",
+    "messagesCount": "{count} messages",
+    "delete": "Delete",
+    "noHistory": "No history yet. Completed conversations are saved automatically.",
+    "startTitle": "Start with a business question",
+    "startDescription": "Choose a suggested question or describe what you want to analyze below",
+    "recommendedQuestions": "Recommended questions",
+    "inputLabel": "Enter a business question",
+    "placeholder": "Enter a business question, for example: list collection risks in a table",
+    "stop": "Stop generating",
+    "send": "Send message",
+    "justNow": "Just now",
+    "followUpsLabel": "Suggested follow-up questions",
+    "followUpsTitle": "Continue exploring",
+    "followUpsDescription": "Click a question to start the next analysis",
+    "user": "Me",
+    "stepsCount": "{count} steps",
+    "tableRef": "Table {table}",
+    "resultRows": "{count} result rows",
+    "status": {
+      "done": "Completed",
+      "error": "Failed",
+      "stopped": "Stopped",
+      "streaming": "Responding",
+      "thinking": "Thinking"
+    },
+    "empty": {
+      "thinking": "Reading context and preparing an answer",
+      "streaming": "Generating an answer",
+      "default": "No output yet"
+    },
+    "questionGroups": {
+      "daily_review": {
+        "title": "Daily Business Review",
+        "questions": [
+          "Which business risks should I prioritize today?",
+          "How healthy are our contracts, collections, and outstanding receivables?",
+          "Which customers or owners need immediate follow-up?"
+        ]
+      },
+      "cash_risk": {
+        "title": "Collections and Risk",
+        "questions": [
+          "Which customers, projects, or owners account for most collection risk?",
+          "Which expiring contracts need attention on collections or renewals?",
+          "Prioritize collection follow-ups by financial impact."
+        ]
+      },
+      "pipeline": {
+        "title": "Pipeline Insights",
+        "questions": [
+          "Where are the conversion risks in the domestic and overseas pipelines?",
+          "Which pipeline projects deserve the strongest sales focus?",
+          "Which high-value pipeline opportunities have stalled?"
+        ]
+      },
+      "oversea": {
+        "title": "Overseas Business",
+        "questions": [
+          "Which countries or product types perform best in overseas sales?",
+          "Which licenses expire soon and need early renewal or delivery follow-up?",
+          "What looks unusual in overseas project revenue, cost, and margin?"
+        ]
+      },
+      "data_quality": {
+        "title": "Data Quality",
+        "questions": [
+          "Are the current Feishu sync results reliable enough for business analysis?",
+          "Which tables have permission, missing-field, or incomplete-collection risks?",
+          "Which data issues must be fixed before this week's business review?"
+        ]
+      }
+    }
+  },
+  "sync": {
+    "banner": {
+      "domestic": "Domestic Incremental",
+      "oversea": "Overseas Incremental",
+      "settlement": "Settlement Incremental"
+    },
+    "records": {
+      "title": "Sync History",
+      "subtitle": "Select a run to review changes for each table",
+      "recent": "Latest {count}",
+      "empty": "No sync history",
+      "created": "Added",
+      "updated": "Modified",
+      "deleted": "Removed",
+      "read": "Read",
+      "restored": "Restored",
+      "unchanged": "Unchanged",
+      "changeEvents": "Business change events",
+      "viewDetails": "View details",
+      "skipped": "No changes, skipped",
+      "noResult": "This job has not produced table-level results yet.",
+      "durationSeconds": "Duration: {seconds}s",
+      "durationMinutes": "Duration: {minutes}m {seconds}s"
+    },
+    "scope": {
+      "all": "All Data",
+      "domestic": "Domestic Data",
+      "oversea": "Overseas Data",
+      "settlement": "Settlement Data"
+    },
+    "status": {
+      "ok": "Succeeded",
+      "warning": "Warning",
+      "failed": "Failed",
+      "running": "Syncing",
+      "pending": "Pending",
+      "unknown": "Unknown"
+    }
+  },
+  "quality": {
+    "label": "Data quality · {status}",
+    "title": "Business Analysis Reliability Check",
+    "description": "Assess whether current data is suitable for business analysis using sync jobs, field completeness, currency treatment, and date anomalies.",
+    "highRisk": "High risk",
+    "attention": "Needs attention",
+    "normal": "Healthy",
+    "runningJobs": "Running jobs",
+    "failedJobs": "Failed jobs",
+    "warningJobs": "Warning jobs",
+    "contractCurrencies": "Contract currencies",
+    "ledgerCurrencies": "Ledger currencies",
+    "noCurrency": "No currency data",
+    "issues": "Quality Issues",
+    "issueTypes": "{count} issue types",
+    "items": "{count} items",
+    "currencyNote": "Amounts are grouped by original currency.",
+    "mixedCurrency": "Mixed-currency aggregation",
+    "mixedCurrencyDetail": "Amounts are grouped by original currency without FX conversion.",
+    "mixedCurrencyRecommendation": "Add a unified FX basis to business views; original-currency totals should be used only for detailed reconciliation."
+  },
+  "config": {
+    "collectionTitle": "Feishu Base Collection Settings",
+    "enabled": "Enabled",
+    "source": "Source",
+    "table": "Feishu Table",
+    "frequency": "Frequency",
+    "status": "Status",
+    "actions": "Actions",
+    "check": "Check",
+    "sync": "Sync",
+    "openTable": "Open in Feishu ↗",
+    "openTableLabel": "Open Feishu table: {name}",
+    "empty": "No collection settings",
+    "globalTitle": "Global Feishu Settings",
+    "configured": "Configured",
+    "secretPlaceholder": "Leave blank to keep unchanged",
+    "timezone": "Date timezone",
+    "timeout": "Job timeout (hours)",
+    "save": "Save Global Settings"
+  },
+  "filters": {
+    "customer": "Customer name",
+    "allEntities": "All signing entities",
+    "allOwners": "All owners",
+    "allStatuses": "All statuses",
+    "region": "Region",
+    "productType": "Product type"
+  },
+  "empty": {
+    "contracts": "No contract records",
+    "sales": "No overseas sales records",
+    "sync": "No sync status"
+  },
+  "columns": {
+    "contractNumber": "Contract No.",
+    "customerName": "Customer",
+    "signingEntity": "Signing Entity",
+    "owner": "Owner",
+    "region": "Region",
+    "amount": "Amount",
+    "currency": "Currency",
+    "signingDate": "Signing Date",
+    "serviceEnd": "Service End",
+    "status": "Status",
+    "projectName": "Project",
+    "productType": "Product Type",
+    "allocationDate": "Allocation Date",
+    "expiryDate": "Expiry Date",
+    "orderType": "Order Type",
+    "source": "Source",
+    "tableKey": "Table Key",
+    "tableName": "Table Name",
+    "issue": "Issue",
+    "records": "Records",
+    "message": "Message",
+    "lastChecked": "Last Checked"
+  },
+  "kpi": {
+    "contractCount": "Contracts",
+    "contractAmount": "Contract Value",
+    "monthlySigned": "Signed This Month",
+    "received": "Collected",
+    "outstanding": "Outstanding"
+  },
+  "banner": {
+    "unchecked": "Feishu access has not been checked",
+    "failed": "Some Feishu syncs failed",
+    "warning": "Feishu sync needs attention",
+    "healthy": "Feishu sync is healthy",
+    "uncheckedText": "Run a Feishu access check to verify data sources.",
+    "issues": "{count} tables have permission, field, or completeness issues.",
+    "allReadable": "All checked tables are readable."
+  },
+  "feedback": {
+    "refreshRunning": "The Feishu update check is still running. Refresh again later.",
+    "recordsUpdated": "Feishu data updated: {count} records synchronized.",
+    "tablesUnchanged": "Feishu data checked: {count} tables had no changes.",
+    "noChanges": "Feishu update check completed with no changes.",
+    "fullSyncRunning": "The full sync is still running. Refresh later to view its status.",
+    "analysisEmpty": "The analysis completed, but the model returned no displayable answer. Try again or narrow the scope.",
+    "streamFailed": "AI assistant streaming failed",
+    "stopped": "Generation stopped.",
+    "requestFailed": "Data Ops request failed",
+    "preflightEmpty": "Feishu access check completed: no tables available to check.",
+    "preflightFailed": "Feishu access check completed: {failed} failed, {warning} warnings, {total} checked. {discovery}",
+    "preflightWarning": "Feishu access check completed: {warning} need attention, {total} checked. {discovery}",
+    "preflightOk": "Feishu access check completed: all {total} tables are readable. {discovery}",
+    "discovery": "Discovered {seen} Feishu tables and matched {matched} automatically.",
+    "progressStep": "Processing step",
+    "progress": {
+      "questionTitle": "Understand the business question",
+      "questionDetail": "Identify the analysis focus and business priorities.",
+      "contextTitle": "Load Data Ops context",
+      "contextDetail": "Load the latest contract, collection, pipeline, and sync context.",
+      "planTitle": "Plan data queries",
+      "planDetail": "Determine the tables, filters, metrics, and output needed for the answer.",
+      "toolTitle": "Query {table}",
+      "toolDetail": "Read and aggregate the business data required for this analysis.",
+      "answerTitle": "Prepare the analysis",
+      "answerDetail": "Organize the findings, priorities, and recommended next actions."
+    },
+    "untitledConversation": "Untitled conversation"
+  },
+  "context": {
+    "title": "Current Context",
+    "contracts": "Contracts",
+    "contractAmount": "Contract Value",
+    "outstanding": "Outstanding",
+    "overseasProjects": "Overseas Projects",
+    "skills": "Assistant Skills"
+  },
+  "chart": {
+    "dataChart": "Data Chart",
+    "trend": "Trend",
+    "chart": "Chart",
+    "metric": "Metric"
+  },
+  "project": {
+    "unnamed": "Unnamed project"
+  },
+  "executive": {
+    "conclusion": "{month} Business Summary",
+    "todayPriority": "Today's Priorities",
+    "items": "{count} items",
+    "noPriority": "No priority actions",
+    "dashboardGroups": "Executive dashboard sections",
+    "resourceGroups": "Business sections",
+    "actionList": "Action List",
+    "actionListDescription": "Priority actions derived from cash collection, renewals, and growth opportunities.",
+    "owner": "Owner",
+    "timeBasis": "Timing",
+    "noActions": "No priority actions",
+    "trendTitle": "Business Trends",
+    "trendDescription": "Review monthly, quarterly, or yearly trends with period-over-period comparisons.",
+    "keyCustomers": "Key Customers",
+    "keyCustomersDescription": "Collections and outstanding amounts aggregated from the revenue ledger",
+    "salesRanking": "Sales Ranking",
+    "salesRankingDescription": "Owners ranked by high-potential projects and outstanding amounts",
+    "riskTitle": "Business Risks",
+    "riskDescription": "Focus on renewal alerts and large outstanding balances.",
+    "renewalAlerts": "Renewal alerts {count}",
+    "largeOutstanding": "Large outstanding {count}",
+    "renewalTop": "Top Renewal Alerts",
+    "outstandingTop": "Top Outstanding Balances",
+    "opportunityPool": "High-Potential Opportunities",
+    "opportunitySummary": "{count} high-potential projects · Total {amount}",
+    "unnamedProject": "Unnamed project",
+    "unassignedOwner": "Unassigned owner",
+    "closeDetails": "Close details",
+    "recommendedAction": "Recommended Action",
+    "period": {
+      "month": "Month",
+      "quarter": "Quarter",
+      "year": "Year",
+      "last3": "Last 3",
+      "last6": "Last 6",
+      "last12": "Last 12",
+      "ytd": "Year to date"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "trend": "Trends",
+      "customer": "Customers & Sales",
+      "risk": "Risks",
+      "opportunity": "Opportunities"
+    },
+    "metrics": {
+      "monthlySigned": "Signed This Month",
+      "monthlyReceived": "Collected This Month",
+      "outstandingBalance": "Outstanding Balance",
+      "noComparison": "No comparable prior period",
+      "fullBalance": "Total balance, not new this month"
+    },
+    "severity": {
+      "high": "High risk",
+      "attention": "Needs attention",
+      "normal": "Healthy"
+    },
+    "headline": {
+      "stalled": "Collections have stalled; prioritize outstanding receivables",
+      "outstanding": "Large outstanding balances need owner follow-up",
+      "renewal": "Renewal windows are approaching; confirm plans early",
+      "normal": "No significant high-risk signals in current business data"
+    },
+    "unknownCustomer": "Unknown customer",
+    "customerMeta": "{contracts} contracts · Outstanding {outstanding}",
+    "riskLevel": "Risk: {level}",
+    "salesMeta": "{customers} customers · {opportunities} high-potential projects",
+    "salesOutstanding": "Outstanding: {amount}",
+    "days": "{count} days",
+    "priority": {
+      "high": "High priority",
+      "medium": "Medium priority"
+    },
+    "type": {
+      "cash": "Cash Collection",
+      "renewal": "Renewal",
+      "growth": "Growth Opportunity"
+    },
+    "fields": {
+      "customer": "Customer",
+      "project": "Project",
+      "outstanding": "Outstanding",
+      "expectedPayment": "Expected payment date",
+      "contractNumber": "Contract No.",
+      "remainingDays": "Days remaining",
+      "serviceEnd": "Service end date",
+      "estimatedAmount": "Estimated amount",
+      "initiationDate": "Initiation date"
+    },
+    "pendingConfirmation": "To be confirmed",
+    "confirmPaymentDate": "Confirm expected payment date",
+    "confirmExpiryDate": "Confirm expiry date",
+    "confirmActivity": "Confirm latest activity",
+    "actions": {
+      "cashTitle": "Advance collection from {name}",
+      "cashDetail": "Outstanding {amount}",
+      "cashNext": "Confirm the expected payment date and blockers, then update this week's collection progress.",
+      "renewalTitle": "Confirm renewal plan for {name}",
+      "renewalDetail": "Contract {contract} · {days} days remaining",
+      "renewalNext": "Confirm renewal intent, pricing, and internal approval timing, then establish a clear renewal plan.",
+      "growthTitle": "Update progress for {name}",
+      "growthDetail": "Estimated amount {amount}",
+      "growthNext": "Add the current stage, next milestone, and expected signing date."
+    },
+    "summary": {
+      "signed": "Signed this month {value}",
+      "received": "Collected this month {value}",
+      "outstanding": "Outstanding {value}",
+      "largeOutstanding": "{count} large outstanding items",
+      "renewal": "{count} renewal alerts in the next {days} days",
+      "opportunities": "{count} high-potential opportunities",
+      "none": "No priority actions"
+    },
+    "trend": {
+      "latestSigned": "Latest complete signing change",
+      "latestReceived": "Latest complete collection change",
+      "latestNet": "Latest complete net operating change",
+      "signedTitle": "Signed Amount and Period Change",
+      "signedDescription": "Bars show amounts; the line shows adjacent-period growth.",
+      "signedAmount": "Signed amount",
+      "cashTitle": "Collections vs. Expenses",
+      "cashDescription": "Compare cash inflow and expenses, with a line for the net difference.",
+      "receivedAmount": "Collected amount",
+      "netTitle": "Net Operating Difference and Period Change",
+      "netDescription": "Track whether net operating inflow and its rate of change are improving.",
+      "netAmount": "Net operating difference",
+      "momGrowth": "Period-over-period growth",
+      "mom": "Period over period",
+      "yoy": "Year over year",
+      "down": "↓ PoP {value}",
+      "up": "↑ PoP {value}"
+    },
+    "unit": {
+      "hundredMillion": "{value} hundred million",
+      "tenThousand": "{value} ten thousand"
+    }
+  },
+  "pipeline": {
+    "title": "Project Pipeline Analytics",
+    "subtitle": "{count} projects · Synced from Feishu Base",
+    "includeLanded": "Include landed",
+    "distribution": "Project Distribution",
+    "contractStatus": "Contract Status Distribution",
+    "funnel": "Project Conversion Funnel",
+    "conversionRate": "Overall conversion rate",
+    "contribution": "Individual Pipeline Contribution",
+    "projectsCount": "{count} projects",
+    "settlementTrend": "Monthly Overseas Settlement Trend",
+    "received": "Received",
+    "signingTrend": "Monthly Signing Trend",
+    "renewalAlert": "Upcoming Contract Renewals",
+    "renewalSummary": "{future} contracts expire in the next 90 days · {expired} already expired",
+    "urgent": "{count} urgent",
+    "details": "Project Details",
+    "records": "{count} records",
+    "allOwners": "All owners",
+    "allRegions": "All regions",
+    "pagination": "{count} records / {pages} pages",
+    "empty": "No project data",
+    "tabs": {
+      "all": "All",
+      "domestic": "Domestic",
+      "overseas": "Overseas"
+    },
+    "captionSplit": "Domestic {domestic} / Overseas {overseas}",
+    "captionAmount": "Domestic {domestic} · Overseas {overseas}",
+    "totalProjects": "Pipeline Projects",
+    "estimatedTotal": "Estimated Contract Value",
+    "potentialCaption": "Based on project flags; amounts remain in original currencies",
+    "highPotential": "High-Potential Projects",
+    "riskCaption": "Due within 30 days or overdue collection",
+    "riskAlerts": "Risk Alerts",
+    "funnelStages": {
+      "potential": "Potential",
+      "followUp": "Project Follow-up",
+      "negotiation": "Negotiation",
+      "signed": "Signed / Execution"
+    },
+    "unnamed": "Unnamed project",
+    "unknown": "Unknown",
+    "uncategorized": "Uncategorized",
+    "unassigned": "Unassigned",
+    "notUpdated": "Not updated",
+    "noData": "No data",
+    "currencyCount": "{count} currencies"
+  },
+  "failure": {
+    "title": "Feishu Data Sync Failed",
+    "summary": "{count} Feishu tables failed to sync.",
+    "details": "View detailed errors and recommendations for {count} tables",
+    "readFailed": "Failed to read the Feishu table.",
+    "stage": "Failure stage",
+    "httpStatus": "HTTP status",
+    "errorCode": "Feishu error code",
+    "response": "Feishu response",
+    "logId": "Feishu Log ID",
+    "suggestions": "Recommendations",
+    "openTable": "Open the Feishu table ↗",
+    "retry": "Save the settings, run an access check, and retry the affected table before starting a full sync.",
+    "recommendations": {
+      "app_access_denied": "Add the Feishu application as a collaborator on the target Base and grant record read access.",
+      "config_missing": "Use a Feishu Base URL containing the table parameter to provide both App Token and Table ID.",
+      "field_access_denied": "Grant field read access to the application and publish the updated permission configuration.",
+      "field_missing": "Check whether source fields were renamed or deleted, then update the field mapping.",
+      "network_error": "Check network, DNS, and proxy access from the service to open.feishu.cn.",
+      "pagination_incomplete": "Use the request trace ID to inspect Feishu API logs and pagination tokens.",
+      "table_access_denied": "Verify that App Token and Table ID belong to the same Base and grant record read access.",
+      "token_error": "Verify the Feishu App ID and App Secret and confirm that the application is enabled.",
+      "unknown": "Inspect API logs using the request ID and Feishu response details.",
+      "zero_records_unexpected": "Check source record counts, view filters, and the application's data visibility."
+    },
+    "issues": {
+      "app_access_denied": "Application access denied",
+      "config_missing": "Missing configuration",
+      "field_access_denied": "Field access denied",
+      "field_missing": "Missing fields",
+      "network_error": "Network error",
+      "pagination_incomplete": "Incomplete pagination",
+      "table_access_denied": "Table record access denied",
+      "token_error": "Credential error",
+      "unknown": "Unknown error",
+      "zero_records_unexpected": "Unexpected record count"
+    }
+  }
+}

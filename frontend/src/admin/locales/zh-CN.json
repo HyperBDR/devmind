@@ -53,6 +53,8 @@
     "operationsConsole": "运营控制台",
     "adminConsole": "管理员控制台",
     "llmConsole": "LLM 控制台",
+    "llmOps": "大模型运营管理",
+    "dataOps": "数据运营控制台",
     "taskManagementConsole": "任务控制台",
     "notificationConsole": "通知控制台",
     "hyperbdrDashboard": "HyperMotion / HyperBDR数据仪表盘"

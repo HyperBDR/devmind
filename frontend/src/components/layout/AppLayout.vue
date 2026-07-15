@@ -13,6 +13,7 @@
     <div class="flex-1 flex flex-col min-w-0 w-0 h-full overflow-hidden">
       <!-- Header -->
       <AppHeader
+        v-if="showHeader"
         :show-menu-button="resolvedShowSidebar"
         @toggle-menu="showMobileMenu = !showMobileMenu"
       />
@@ -50,6 +51,10 @@ const props = defineProps({
   fullBleed: {
     type: Boolean,
     default: false
+  },
+  showHeader: {
+    type: Boolean,
+    default: true
   }
 })
 
