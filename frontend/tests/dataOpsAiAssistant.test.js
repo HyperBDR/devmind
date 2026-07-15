@@ -105,3 +105,16 @@ test('opens an empty conversation at the top of its prompt list', () => {
     /messagesEl\.value\.scrollTop\s*=\s*isEmptyConversation\.value\s*\?\s*0/
   )
 })
+
+test('anchors a follow-up question near the top quarter while streaming', () => {
+  assert.match(assistantSection, /v-if="loading"[\s\S]*data-ops-stream-reserve/)
+  assert.match(
+    assistantSection,
+    /latestUserTop\s*-\s*messagesEl\.value\.clientHeight\s*\*\s*0\.25/
+  )
+  assert.match(assistantSection, /keepStreamingAnswerVisible/)
+  assert.doesNotMatch(
+    assistantSection,
+    /lastMessageContent\.value,[\s\S]*\(\)\s*=>\s*scrollToBottom\(\)/
+  )
+})

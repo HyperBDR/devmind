@@ -253,6 +253,11 @@
               :message="message"
               @ask="$emit('ask', $event)"
             />
+            <div
+              v-if="loading"
+              aria-hidden="true"
+              class="data-ops-stream-reserve"
+            />
           </div>
 
           <form
@@ -334,7 +339,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
@@ -368,6 +373,7 @@ defineEmits([
 const isOpen = ref(false)
 const historyOpen = ref(false)
 const messagesEl = ref(null)
+let streamScrollFrame = null
 const assistantProfile = computed(() => props.context?.assistant || {})
 const localizedQuestionGroups = computed(() => {
   const translatedGroups = tm('dataOps.ai.questionGroups') || {}
@@ -419,13 +425,27 @@ const lastProgressCount = computed(() => {
 })
 
 watch(
-  () => [
-    props.messages.length,
-    props.loading,
-    lastMessageContent.value,
-    lastProgressCount.value
-  ],
-  () => scrollToBottom()
+  () => [props.messages.length, props.loading],
+  ([messageCount, loading], [previousCount, wasLoading] = []) => {
+    if (loading && (messageCount > (previousCount || 0) || !wasLoading)) {
+      positionLatestUserQuestion()
+      return
+    }
+    if (!loading && messageCount !== previousCount) {
+      scrollToBottom()
+    }
+  }
+)
+
+watch(
+  () => [lastMessageContent.value, lastProgressCount.value],
+  () => {
+    if (props.loading) {
+      scheduleStreamingScroll()
+      return
+    }
+    scrollToBottom()
+  }
 )
 
 function openDrawer() {
@@ -457,6 +477,48 @@ async function scrollToBottom() {
   }
 }
 
+async function positionLatestUserQuestion() {
+  await nextTick()
+  if (!messagesEl.value) return
+  const userRows = messagesEl.value.querySelectorAll(
+    '.data-ops-message-row-user'
+  )
+  const latestUser = userRows[userRows.length - 1]
+  if (!latestUser) return
+  const containerRect = messagesEl.value.getBoundingClientRect()
+  const latestUserRect = latestUser.getBoundingClientRect()
+  const latestUserTop =
+    latestUserRect.top - containerRect.top + messagesEl.value.scrollTop
+  messagesEl.value.scrollTop = Math.max(
+    0,
+    latestUserTop - messagesEl.value.clientHeight * 0.25
+  )
+}
+
+function scheduleStreamingScroll() {
+  if (streamScrollFrame !== null) return
+  streamScrollFrame = requestAnimationFrame(() => {
+    streamScrollFrame = null
+    keepStreamingAnswerVisible()
+  })
+}
+
+async function keepStreamingAnswerVisible() {
+  await nextTick()
+  if (!messagesEl.value) return
+  const assistantRows = messagesEl.value.querySelectorAll(
+    '.data-ops-message-row:not(.data-ops-message-row-user)'
+  )
+  const latestAssistant = assistantRows[assistantRows.length - 1]
+  if (!latestAssistant) return
+  const containerRect = messagesEl.value.getBoundingClientRect()
+  const assistantRect = latestAssistant.getBoundingClientRect()
+  const overflow = assistantRect.bottom - (containerRect.bottom - 24)
+  if (overflow > 0) {
+    messagesEl.value.scrollTop += overflow
+  }
+}
+
 async function positionConversationOnOpen() {
   await nextTick()
   if (messagesEl.value) {
@@ -465,6 +527,12 @@ async function positionConversationOnOpen() {
       : messagesEl.value.scrollHeight
   }
 }
+
+onBeforeUnmount(() => {
+  if (streamScrollFrame !== null) {
+    cancelAnimationFrame(streamScrollFrame)
+  }
+})
 </script>
 
 <style scoped>
@@ -483,5 +551,10 @@ async function positionConversationOnOpen() {
 .data-ops-ai-drawer-enter-from,
 .data-ops-ai-drawer-leave-to {
   transform: translateX(100%);
+}
+
+.data-ops-stream-reserve {
+  height: 75%;
+  min-height: 18rem;
 }
 </style>
