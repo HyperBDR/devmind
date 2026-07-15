@@ -88,6 +88,26 @@ class ConversationListCreateAPIView(APIView):
         )
 
 
+class ConversationDetailAPIView(APIView):
+    """Delete one conversation owned by the current user."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, conversation_uuid):
+        conversation = AssistantConversation.objects.filter(
+            uuid=conversation_uuid,
+            user=request.user,
+        ).first()
+        if conversation is None:
+            return _error(
+                "CONVERSATION_NOT_FOUND",
+                "Conversation not found.",
+                404,
+            )
+        conversation.delete()
+        return Response(status=204)
+
+
 class ConversationMessageListCreateAPIView(APIView):
     """List messages or stream a response from the bound app Agent."""
 
@@ -146,6 +166,9 @@ class ConversationMessageListCreateAPIView(APIView):
                 "content",
             )
         )[-8:]
+        if not conversation.title:
+            conversation.title = message[:80]
+            conversation.save(update_fields=["title", "updated_at"])
         AssistantMessage.objects.create(
             conversation=conversation,
             role=AssistantMessage.Role.USER,

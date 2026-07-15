@@ -2,7 +2,7 @@
   <button
     class="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg shadow-slate-300 transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
     type="button"
-    :aria-label="t('dataOps.ai.openLabel')"
+    :aria-label="openLabel || t('dataOps.ai.openLabel')"
     @click="openDrawer"
   >
     <svg
@@ -39,7 +39,7 @@
     <aside
       v-if="isOpen"
       class="fixed inset-y-0 right-0 z-50 flex w-full max-w-[980px] flex-col border-l border-slate-200 bg-white shadow-2xl"
-      :aria-label="t('dataOps.ai.drawerLabel')"
+      :aria-label="drawerLabel || t('dataOps.ai.drawerLabel')"
     >
       <header class="border-b border-slate-200 px-5 py-4">
         <div
@@ -47,10 +47,10 @@
         >
           <div>
             <p class="text-base font-semibold text-slate-900">
-              {{ t('dataOps.ai.title') }}
+              {{ title || t('dataOps.ai.title') }}
             </p>
             <p class="mt-1 text-xs text-slate-500">
-              {{ t('dataOps.ai.subtitle') }}
+              {{ subtitle || t('dataOps.ai.subtitle') }}
             </p>
           </div>
           <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -355,7 +355,11 @@ const props = defineProps({
   history: { type: Array, default: () => [] },
   input: { type: String, default: '' },
   loading: { type: Boolean, default: false },
-  messages: { type: Array, default: () => [] }
+  messages: { type: Array, default: () => [] },
+  drawerLabel: { type: String, default: '' },
+  openLabel: { type: String, default: '' },
+  subtitle: { type: String, default: '' },
+  title: { type: String, default: '' }
 })
 
 const { locale, t, tm } = useI18n()
@@ -385,9 +389,7 @@ const localizedQuestionGroups = computed(() => {
     .filter((key) => translatedGroups[key])
     .map((key) => ({ key, ...translatedGroups[key] }))
 })
-const questionGroups = computed(
-  () => localizedQuestionGroups.value
-)
+const questionGroups = computed(() => localizedQuestionGroups.value)
 const hasUserMessages = computed(() =>
   props.messages.some((message) => message.role === 'user')
 )

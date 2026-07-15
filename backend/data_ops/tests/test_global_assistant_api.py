@@ -56,6 +56,27 @@ def test_conversation_rejects_app_without_registered_capability(
 
 
 @pytest.mark.django_db
+def test_user_can_delete_own_conversation(api_client, data_ops_user):
+    conversation = AssistantConversation.objects.create(
+        user=data_ops_user,
+        app_key="data_ops",
+    )
+    api_client.force_authenticate(user=data_ops_user)
+
+    response = api_client.delete(
+        reverse(
+            "assistant-conversation-detail",
+            kwargs={"conversation_uuid": conversation.uuid},
+        )
+    )
+
+    assert response.status_code == 204
+    assert not AssistantConversation.objects.filter(
+        uuid=conversation.uuid,
+    ).exists()
+
+
+@pytest.mark.django_db
 def test_message_stream_uses_conversation_app_and_persists_messages(
     api_client,
     data_ops_user,
@@ -111,6 +132,7 @@ def test_message_stream_uses_conversation_app_and_persists_messages(
         uuid=conversation_uuid,
     )
     assert conversation.app_key == "data_ops"
+    assert conversation.title == "hello"
     assert list(
         AssistantMessage.objects.filter(
             conversation=conversation,
