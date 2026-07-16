@@ -12,6 +12,7 @@ from data_ops.models import (
     ProjectScope,
 )
 from data_ops.services.metrics.operations import (
+    _monthly_net_trend,
     _monthly_payment_trend,
     get_pipeline_insights_data,
     get_pipeline_projects_data,
@@ -166,6 +167,15 @@ def test_payment_trend_uses_receipt_or_expected_date_and_keeps_currency():
         payment_received=Decimal("0"),
         outstanding=Decimal("800"),
     )
+    DomesticLedger.all_objects.create(
+        source_app_token="app",
+        source_table_id="ledger",
+        source_record_id="pending-default-currency",
+        ledger_type="收入",
+        expected_payment_date=next_month,
+        payment_received=Decimal("0"),
+        outstanding=Decimal("50"),
+    )
 
     rows = _monthly_payment_trend()
 
@@ -179,8 +189,41 @@ def test_payment_trend_uses_receipt_or_expected_date_and_keeps_currency():
         "month": next_month.strftime("%Y-%m"),
         "currency": "CNY",
         "payment_received": 0.0,
-        "outstanding": 800.0,
+        "outstanding": 850.0,
     } in rows
+
+
+@pytest.mark.django_db
+def test_net_trend_subtracts_expenses_from_received_by_currency():
+    today = timezone.localdate()
+    DomesticLedger.all_objects.create(
+        source_app_token="app",
+        source_table_id="ledger",
+        source_record_id="net-income",
+        ledger_type="收入",
+        currency="CNY",
+        receipt_time=today,
+        payment_received=Decimal("100"),
+    )
+    DomesticLedger.all_objects.create(
+        source_app_token="app",
+        source_table_id="ledger",
+        source_record_id="net-expense",
+        ledger_type="支出",
+        currency="CNY",
+        signing_date=today,
+        payment_amount=Decimal("30"),
+    )
+
+    rows = _monthly_net_trend()
+
+    assert rows == [
+        {
+            "month": today.strftime("%Y-%m"),
+            "currency": "CNY",
+            "amount": 70.0,
+        }
+    ]
 
 
 @pytest.mark.django_db

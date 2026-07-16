@@ -34,11 +34,13 @@ export function useDataOpsConsole() {
 
   const summary = ref(null)
   const overview = ref(null)
+  const trends = ref(null)
   const insights = ref(null)
   const risks = ref(null)
   const opportunities = ref(null)
   const dataQuality = ref(null)
   const topCustomers = ref(null)
+  const topSales = ref(null)
   const pipelineSummary = ref(null)
   const pipelineProjects = ref([])
   const pipelineInsights = ref(null)
@@ -183,27 +185,33 @@ export function useDataOpsConsole() {
     const [
       summaryRes,
       overviewRes,
+      trendsRes,
       insightsRes,
       risksRes,
       opportunitiesRes,
       dataQualityRes,
       topCustomersRes,
+      topSalesRes,
     ] = await Promise.all([
       dataOpsApi.summary(),
       dataOpsApi.executiveOverview(),
+      dataOpsApi.executiveTrends(),
       dataOpsApi.insights(),
       dataOpsApi.executiveRisks(),
       dataOpsApi.executiveOpportunities(),
       dataOpsApi.dataQuality(),
       dataOpsApi.executiveTopCustomers(),
+      dataOpsApi.executiveTopSales(),
     ])
     summary.value = extractData(summaryRes)
     overview.value = extractData(overviewRes)
+    trends.value = extractData(trendsRes)
     insights.value = extractData(insightsRes)
     risks.value = extractData(risksRes)
     opportunities.value = extractData(opportunitiesRes)
     dataQuality.value = extractData(dataQualityRes)
     topCustomers.value = extractData(topCustomersRes)
+    topSales.value = extractData(topSalesRes)
   }
 
   async function loadPipeline() {
@@ -753,6 +761,8 @@ export function useDataOpsConsole() {
     stopAiStream,
     startNewAiConversation,
     topCustomers,
+    topSales,
+    trends,
     triggerConfigSync,
     triggerFullSync,
     triggerIncrementalSync,

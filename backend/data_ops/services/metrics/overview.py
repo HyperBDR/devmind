@@ -12,10 +12,12 @@ from data_ops.models import (
     Contract,
     DomesticLedger,
     OverseaProject,
+    Project,
     ProjectInit,
     SyncJob,
     SyncTableStatus,
 )
+from data_ops.services.metrics.currency import normalize_currency
 from data_ops.services.metrics.owner_identities import (
     owner_payload,
     owner_payload_from_record,
@@ -39,12 +41,15 @@ def _amounts_by_currency(queryset, amount_field: str) -> list[dict]:
         .annotate(amount=Coalesce(Sum(amount_field), ZERO_DECIMAL))
         .order_by("currency")
     )
+    buckets = {}
+    for item in rows:
+        currency = normalize_currency(item["currency"])
+        buckets[currency] = buckets.get(currency, 0.0) + _number(
+            item["amount"]
+        )
     return [
-        {
-            "currency": item["currency"] or "未知",
-            "amount": _number(item["amount"]),
-        }
-        for item in rows
+        {"currency": currency, "amount": amount}
+        for currency, amount in sorted(buckets.items())
     ]
 
 
@@ -52,6 +57,64 @@ def _single_currency_amount(items: list[dict]) -> float | None:
     if len(items) != 1:
         return None
     return items[0]["amount"]
+
+
+def _amount_map(items: list[dict], value_key: str = "amount") -> dict:
+    return {
+        item["currency"]: item[value_key]
+        for item in items
+    }
+
+
+def _percentage_change(current: float | None, previous: float | None):
+    if current is None or previous in (None, 0):
+        return None
+    return (current - previous) / previous * 100
+
+
+def _changes_by_currency(
+    current_items: list[dict],
+    previous_items: list[dict],
+) -> list[dict]:
+    current = _amount_map(current_items)
+    previous = _amount_map(previous_items)
+    return [
+        {
+            "currency": currency,
+            "current_amount": current.get(currency, 0.0),
+            "previous_amount": previous.get(currency, 0.0),
+            "change_rate": _percentage_change(
+                current.get(currency, 0.0),
+                previous.get(currency, 0.0),
+            ),
+        }
+        for currency in sorted(set(current) | set(previous))
+    ]
+
+
+def _ratios_by_currency(
+    numerator_items: list[dict],
+    denominator_items: list[dict],
+) -> list[dict]:
+    numerators = _amount_map(numerator_items)
+    denominators = _amount_map(denominator_items)
+    return [
+        {
+            "currency": currency,
+            "ratio": (
+                numerators.get(currency, 0.0) / denominators[currency] * 100
+                if denominators.get(currency)
+                else None
+            ),
+        }
+        for currency in sorted(set(numerators) | set(denominators))
+    ]
+
+
+def _single_value(items: list[dict], value_key: str):
+    if len(items) != 1:
+        return None
+    return items[0][value_key]
 
 
 def get_summary() -> dict:
@@ -92,6 +155,8 @@ def get_summary() -> dict:
 def get_executive_overview() -> dict:
     today = timezone.localdate()
     month_start = today.replace(day=1)
+    previous_month_end = month_start - timedelta(days=1)
+    previous_month_start = previous_month_end.replace(day=1)
     signed_amounts = _amounts_by_currency(
         Contract.objects.filter(
             signing_date__gte=month_start,
@@ -119,6 +184,61 @@ def get_executive_overview() -> dict:
         ),
         "payment_amount",
     )
+    previous_signed_amounts = _amounts_by_currency(
+        Contract.objects.filter(
+            signing_date__gte=previous_month_start,
+            signing_date__lte=previous_month_end,
+        ),
+        "total_amount",
+    )
+    previous_received_amounts = _amounts_by_currency(
+        DomesticLedger.objects.filter(
+            ledger_type="收入",
+            receipt_time__gte=previous_month_start,
+            receipt_time__lte=previous_month_end,
+        ),
+        "payment_received",
+    )
+    previous_expense_amounts = _amounts_by_currency(
+        DomesticLedger.objects.filter(
+            ledger_type="支出",
+            signing_date__gte=previous_month_start,
+            signing_date__lte=previous_month_end,
+        ),
+        "payment_amount",
+    )
+    expense_received_ratios = _ratios_by_currency(
+        expense_amounts,
+        received_amounts,
+    )
+    previous_expense_received_ratios = _ratios_by_currency(
+        previous_expense_amounts,
+        previous_received_amounts,
+    )
+    signed_changes = _changes_by_currency(
+        signed_amounts,
+        previous_signed_amounts,
+    )
+    received_changes = _changes_by_currency(
+        received_amounts,
+        previous_received_amounts,
+    )
+    expense_changes = _changes_by_currency(
+        expense_amounts,
+        previous_expense_amounts,
+    )
+    ratio_changes = _changes_by_currency(
+        [
+            {"currency": item["currency"], "amount": item["ratio"]}
+            for item in expense_received_ratios
+            if item["ratio"] is not None
+        ],
+        [
+            {"currency": item["currency"], "amount": item["ratio"]}
+            for item in previous_expense_received_ratios
+            if item["ratio"] is not None
+        ],
+    )
 
     return {
         "kpis": {
@@ -134,19 +254,41 @@ def get_executive_overview() -> dict:
             "monthly_outstanding_amount_by_currency": outstanding_amounts,
             "monthly_expense_amount": _single_currency_amount(expense_amounts),
             "monthly_expense_amount_by_currency": expense_amounts,
-            "expense_received_ratio": None,
+            "expense_received_ratio": _single_value(
+                expense_received_ratios,
+                "ratio",
+            ),
+            "expense_received_ratio_by_currency": expense_received_ratios,
             "target_achievement_rate": None,
         },
         "mom": {
-            "monthly_signed_amount": None,
-            "monthly_received_amount": None,
+            "monthly_signed_amount": _single_value(
+                signed_changes,
+                "change_rate",
+            ),
+            "monthly_received_amount": _single_value(
+                received_changes,
+                "change_rate",
+            ),
             "monthly_outstanding_amount": None,
-            "monthly_expense_amount": None,
-            "expense_received_ratio": None,
+            "monthly_expense_amount": _single_value(
+                expense_changes,
+                "change_rate",
+            ),
+            "expense_received_ratio": _single_value(
+                ratio_changes,
+                "change_rate",
+            ),
+        },
+        "mom_by_currency": {
+            "monthly_signed_amount": signed_changes,
+            "monthly_received_amount": received_changes,
+            "monthly_expense_amount": expense_changes,
+            "expense_received_ratio": ratio_changes,
         },
         "meta": {
             "current_month": month_start.strftime("%Y-%m"),
-            "previous_month": None,
+            "previous_month": previous_month_start.strftime("%Y-%m"),
             "currency_note": "Amounts follow source table currencies.",
         },
     }
@@ -189,114 +331,236 @@ def get_data_quality() -> dict:
 
 
 def get_trends() -> dict:
+    monthly_signed = _monthly_amounts(
+        Contract.objects.exclude(signing_date__isnull=True),
+        "signing_date",
+        "total_amount",
+    )
+    monthly_received = _monthly_amounts(
+        DomesticLedger.objects.filter(ledger_type="收入").exclude(
+            receipt_time__isnull=True,
+        ),
+        "receipt_time",
+        "payment_received",
+    )
+    monthly_expense = _monthly_amounts(
+        DomesticLedger.objects.filter(ledger_type="支出").exclude(
+            signing_date__isnull=True,
+        ),
+        "signing_date",
+        "payment_amount",
+    )
+    monthly_net = _subtract_amount_series(
+        monthly_received,
+        monthly_expense,
+        "month",
+    )
     return {
-        "monthly_signed": _monthly_amounts(
-            Contract.objects.exclude(signing_date__isnull=True),
-            "signing_date",
-            "total_amount",
+        "monthly_signed": monthly_signed,
+        "monthly_received": monthly_received,
+        "monthly_expense": monthly_expense,
+        "monthly_net": monthly_net,
+        "quarterly_signed": _aggregate_amount_period(
+            monthly_signed,
+            "quarter",
         ),
-        "monthly_received": _monthly_amounts(
-            DomesticLedger.objects.filter(ledger_type="收入").exclude(
-                receipt_time__isnull=True,
-            ),
-            "receipt_time",
-            "payment_received",
+        "quarterly_received": _aggregate_amount_period(
+            monthly_received,
+            "quarter",
         ),
-        "monthly_expense": _monthly_amounts(
-            DomesticLedger.objects.filter(ledger_type="支出").exclude(
-                signing_date__isnull=True,
-            ),
-            "signing_date",
-            "payment_amount",
+        "quarterly_expense": _aggregate_amount_period(
+            monthly_expense,
+            "quarter",
         ),
-        "monthly_net": [],
-        "quarterly_signed": [],
-        "quarterly_received": [],
-        "quarterly_expense": [],
-        "quarterly_net": [],
-        "yearly_signed": [],
-        "yearly_received": [],
-        "yearly_expense": [],
-        "yearly_net": [],
+        "quarterly_net": _aggregate_amount_period(
+            monthly_net,
+            "quarter",
+        ),
+        "yearly_signed": _aggregate_amount_period(monthly_signed, "year"),
+        "yearly_received": _aggregate_amount_period(
+            monthly_received,
+            "year",
+        ),
+        "yearly_expense": _aggregate_amount_period(
+            monthly_expense,
+            "year",
+        ),
+        "yearly_net": _aggregate_amount_period(monthly_net, "year"),
     }
 
 
 def get_top_customers() -> dict:
-    received = _rank_amounts(
-        DomesticLedger.objects.filter(ledger_type="收入"),
-        "customer_name",
-        "payment_received",
+    income_rows = DomesticLedger.objects.filter(
+        ledger_type="收入",
+    ).exclude(customer_name="")
+    contract_counts = {
+        item["customer_name"]: item["contract_count"]
+        for item in Contract.objects.exclude(customer_name="")
+        .values("customer_name")
+        .annotate(contract_count=Count("id"))
+    }
+    sales_by_customer_currency = {}
+    sales_rows = (
+        income_rows.exclude(sales_person="")
+        .values("customer_name", "currency", "sales_person")
+        .distinct()
+        .order_by("customer_name", "currency", "sales_person")
     )
-    outstanding = _rank_amounts(
-        DomesticLedger.objects.filter(ledger_type="收入"),
-        "customer_name",
-        "outstanding",
+    for item in sales_rows:
+        key = (
+            item["customer_name"],
+            normalize_currency(item["currency"]),
+        )
+        sales_by_customer_currency.setdefault(key, []).append(
+            item["sales_person"]
+        )
+
+    customer_amounts = {}
+    amount_rows = (
+        income_rows.values("customer_name", "currency")
+        .annotate(
+            received_amount=Coalesce(
+                Sum("payment_received"),
+                ZERO_DECIMAL,
+            ),
+            outstanding_amount=Coalesce(
+                Sum("outstanding"),
+                ZERO_DECIMAL,
+            ),
+        )
     )
+    for item in amount_rows:
+        customer_name = item["customer_name"]
+        currency = normalize_currency(item["currency"])
+        key = (customer_name, currency)
+        amounts = customer_amounts.setdefault(
+            key,
+            {"received_amount": 0.0, "outstanding_amount": 0.0},
+        )
+        amounts["received_amount"] += _number(item["received_amount"])
+        amounts["outstanding_amount"] += _number(
+            item["outstanding_amount"]
+        )
+
+    customer_rows = []
+    for (customer_name, currency), amounts in customer_amounts.items():
+        outstanding_amount = amounts["outstanding_amount"]
+        customer_rows.append(
+            {
+                "customer_name": customer_name,
+                "currency": currency,
+                "sales_person": "、".join(
+                    sales_by_customer_currency.get(
+                        (customer_name, currency),
+                        [],
+                    )
+                ),
+                "received_amount": amounts["received_amount"],
+                "outstanding_amount": outstanding_amount,
+                "contract_count": contract_counts.get(customer_name, 0),
+                "risk_level": (
+                    "medium" if outstanding_amount > 0 else "low"
+                ),
+            }
+        )
+
     return {
-        "top_received": [
-            {
-                "customer_name": item["name"],
-                "received_amount": item["amount"],
-                "outstanding_amount": 0,
-                "contract_count": 0,
-                "risk_level": "low",
-            }
-            for item in received
-        ],
-        "top_outstanding": [
-            {
-                "customer_name": item["name"],
-                "received_amount": 0,
-                "outstanding_amount": item["amount"],
-                "contract_count": 0,
-                "risk_level": "medium" if item["amount"] else "low",
-            }
-            for item in outstanding
-        ],
+        "top_received": _rank_customer_rows(
+            customer_rows,
+            "received_amount",
+        ),
+        "top_outstanding": _rank_customer_rows(
+            customer_rows,
+            "outstanding_amount",
+        ),
         "renewal_risks": _renewal_risks(),
     }
 
 
 def get_top_sales() -> dict:
-    received = _rank_amounts(
-        DomesticLedger.objects.filter(ledger_type="收入"),
-        "sales_person",
-        "payment_received",
+    income_rows = DomesticLedger.objects.filter(
+        ledger_type="收入",
+    ).exclude(sales_person="")
+    customer_counts = {
+        item["sales_person"]: item["customer_count"]
+        for item in income_rows.exclude(customer_name="")
+        .values("sales_person")
+        .annotate(customer_count=Count("customer_name", distinct=True))
+    }
+    high_potential_counts = {
+        item["sales_person"]: item["project_count"]
+        for item in Project.objects.filter(is_high_potential=True)
+        .exclude(sales_person="")
+        .values("sales_person")
+        .annotate(project_count=Count("id"))
+    }
+    amount_buckets = {}
+    amount_rows = (
+        income_rows.values("sales_person", "currency")
+        .annotate(
+            received_amount=Coalesce(
+                Sum("payment_received"),
+                ZERO_DECIMAL,
+            ),
+            outstanding_amount=Coalesce(
+                Sum("outstanding"),
+                ZERO_DECIMAL,
+            ),
+        )
     )
-    outstanding = _rank_amounts(
-        DomesticLedger.objects.filter(ledger_type="收入"),
-        "sales_person",
-        "outstanding",
-    )
+    for item in amount_rows:
+        sales_person = item["sales_person"]
+        currency = normalize_currency(item["currency"])
+        key = (sales_person, currency)
+        amounts = amount_buckets.setdefault(
+            key,
+            {"received_amount": 0.0, "outstanding_amount": 0.0},
+        )
+        amounts["received_amount"] += _number(item["received_amount"])
+        amounts["outstanding_amount"] += _number(
+            item["outstanding_amount"]
+        )
+
+    sales_rows = []
+    for (sales_person, currency), amounts in amount_buckets.items():
+        outstanding_amount = amounts["outstanding_amount"]
+        sales_rows.append(
+            {
+                "sales_person": sales_person,
+                **owner_payload(sales_person),
+                "currency": currency,
+                "received_amount": amounts["received_amount"],
+                "outstanding_amount": outstanding_amount,
+                "customer_count": customer_counts.get(sales_person, 0),
+                "high_potential_count": high_potential_counts.get(
+                    sales_person,
+                    0,
+                ),
+                "risk_level": (
+                    "medium" if outstanding_amount > 0 else "low"
+                ),
+            }
+        )
     return {
-        "top_received": [
-            {
-                "sales_person": item["name"],
-                **owner_payload(item["name"]),
-                "received_amount": item["amount"],
-                "outstanding_amount": 0,
-                "customer_count": 0,
-                "high_potential_count": 0,
-                "risk_level": "low",
-            }
-            for item in received
-        ],
-        "top_outstanding": [
-            {
-                "sales_person": item["name"],
-                "received_amount": 0,
-                "outstanding_amount": item["amount"],
-                "customer_count": 0,
-                "high_potential_count": 0,
-                "risk_level": "medium" if item["amount"] else "low",
-            }
-            for item in outstanding
-        ],
+        "top_received": _rank_sales_rows(
+            sales_rows,
+            "received_amount",
+        ),
+        "top_outstanding": _rank_sales_rows(
+            sales_rows,
+            "outstanding_amount",
+        ),
     }
 
 
 def get_risks() -> dict:
-    renewal_alerts = _renewal_risks()
+    today = timezone.localdate()
+    renewal_queryset = _renewal_risk_queryset(today)
+    renewal_alerts = _renewal_risks(queryset=renewal_queryset)
+    high_outstanding_queryset = DomesticLedger.objects.filter(
+        ledger_type="收入",
+        outstanding__gt=0,
+    )
     high_outstanding = [
         {
             "customer_name": item.customer_name or "-",
@@ -309,35 +573,46 @@ def get_risks() -> dict:
                 if item.expected_payment_date
                 else None
             ),
-            "risk_level": "high",
+            "risk_level": (
+                "high"
+                if item.expected_payment_date
+                and item.expected_payment_date < today
+                else "medium"
+            ),
         }
-        for item in DomesticLedger.objects.filter(
-            ledger_type="收入",
-            outstanding__gt=0,
-        ).order_by("-outstanding")[:20]
+        for item in high_outstanding_queryset.order_by("-outstanding")[:20]
     ]
     opportunities = _opportunity_items(limit=20)
+    key_customer_risks = [
+        item
+        for item in get_top_customers()["top_received"]
+        if item["outstanding_amount"] > 0
+    ]
     return {
         "summary": {
-            "renewal_alert_count": len(renewal_alerts),
-            "high_outstanding_count": len(high_outstanding),
+            "renewal_alert_count": renewal_queryset.count(),
+            "high_outstanding_count": high_outstanding_queryset.count(),
             "stalled_opportunity_count": len(opportunities),
-            "key_customer_risk_count": 0,
+            "key_customer_risk_count": len(key_customer_risks),
         },
         "renewal_alerts": renewal_alerts,
         "high_outstanding_items": high_outstanding,
         "stalled_opportunities": opportunities,
-        "key_customer_risks": [],
+        "key_customer_risks": key_customer_risks,
     }
 
 
 def get_opportunities() -> dict:
     items = _opportunity_items(limit=100)
+    summary = _opportunity_queryset().aggregate(
+        count=Count("id"),
+        total_amount=Coalesce(Sum("estimated_amount"), ZERO_DECIMAL),
+    )
     return {
         "summary": {
-            "high_potential_count": len(items),
-            "high_potential_total_amount": sum(
-                item["estimated_amount"] for item in items
+            "high_potential_count": summary["count"],
+            "high_potential_total_amount": _number(
+                summary["total_amount"]
             ),
         },
         "items": items,
@@ -369,7 +644,8 @@ def get_contract_kanban() -> dict:
 
 
 def get_contract_cards() -> dict:
-    contracts = Contract.objects.order_by("-synced_at")[:500]
+    queryset = Contract.objects.order_by("-synced_at")
+    contracts = queryset[:500]
     cards = [
         {
             "id": str(item.id),
@@ -377,7 +653,7 @@ def get_contract_cards() -> dict:
             "customer_name": item.customer_name,
             "sales_person": item.sales_person,
             "order_platform": item.order_platform,
-            "currency": item.currency,
+            "currency": normalize_currency(item.currency),
             "total_amount": _number(item.total_amount),
             "signing_date": (
                 item.signing_date.isoformat() if item.signing_date else None
@@ -388,13 +664,14 @@ def get_contract_cards() -> dict:
     ]
     return {
         "cards": cards,
-        "total": len(cards),
+        "total": queryset.count(),
         "filters": _contract_filters(),
     }
 
 
 def get_project_init_kanban() -> dict:
-    rows = ProjectInit.objects.order_by("-synced_at")[:500]
+    queryset = ProjectInit.objects.order_by("-synced_at")
+    rows = queryset[:500]
     cards = [
         {
             "id": str(item.id),
@@ -409,15 +686,28 @@ def get_project_init_kanban() -> dict:
             "project_name": item.project_name,
             "sales_person": item.sales_person,
             "estimated_amount": _number(item.estimated_amount),
-            "currency": item.currency,
+            "currency": normalize_currency(item.currency),
         }
         for item in rows
     ]
-    return {"cards": cards, "total": len(cards), "filters": {}}
+    return {
+        "cards": cards,
+        "total": queryset.count(),
+        "filters": _filter_options(
+            ProjectInit,
+            (
+                "domestic_international",
+                "sales_person",
+                "currency",
+                "signing_party_type",
+            ),
+        ),
+    }
 
 
 def get_oversea_project_kanban() -> dict:
-    rows = OverseaProject.objects.order_by("-synced_at")[:500]
+    queryset = OverseaProject.objects.order_by("-synced_at")
+    rows = queryset[:500]
     cards = [
         {
             "id": str(item.id),
@@ -439,13 +729,30 @@ def get_oversea_project_kanban() -> dict:
         }
         for item in rows
     ]
-    return {"cards": cards, "total": len(cards), "filters": {}}
+    return {
+        "cards": cards,
+        "total": queryset.count(),
+        "filters": _filter_options(
+            OverseaProject,
+            (
+                "country",
+                "project_owner",
+                "currency",
+                "product_type",
+                "status",
+                "order_type",
+                "order_status",
+                "acceptance_status",
+            ),
+        ),
+    }
 
 
 def get_domestic_ledger_kanban() -> dict:
-    rows = DomesticLedger.objects.filter(
+    queryset = DomesticLedger.objects.filter(
         ledger_type="收入",
-    ).order_by("expected_payment_date")[:500]
+    )
+    rows = queryset.order_by("expected_payment_date")[:500]
     cards = [
         {
             "id": str(item.id),
@@ -467,9 +774,19 @@ def get_domestic_ledger_kanban() -> dict:
     ]
     return {
         "cards": cards,
-        "total": len(cards),
-        "groups": [],
-        "filters": {},
+        "total": queryset.count(),
+        "groups": _domestic_ledger_groups(queryset),
+        "filters": _filter_options(
+            DomesticLedger,
+            (
+                "sales_person",
+                "signing_entity",
+                "payment_status",
+                "currency",
+                "year",
+            ),
+            base_queryset=queryset,
+        ),
     }
 
 
@@ -480,15 +797,57 @@ def _monthly_amounts(queryset, date_field: str, amount_field: str) -> list:
         .annotate(amount=Coalesce(Sum(amount_field), Decimal("0")))
         .order_by("period", "currency")
     )
+    buckets = {}
+    for item in rows:
+        if not item["period"]:
+            continue
+        key = (
+            item["period"].strftime("%Y-%m"),
+            normalize_currency(item["currency"]),
+        )
+        buckets[key] = buckets.get(key, 0.0) + _number(item["amount"])
     return [
-        {
-            "month": item["period"].strftime("%Y-%m"),
-            "currency": item["currency"] or "未知",
-            "amount": _number(item["amount"]),
-        }
-        for item in rows
-        if item["period"]
-    ][-12:]
+        {"month": month, "currency": currency, "amount": amount}
+        for (month, currency), amount in sorted(buckets.items())
+    ]
+
+
+def _subtract_amount_series(
+    minuend_items: list[dict],
+    subtrahend_items: list[dict],
+    period_key: str,
+) -> list[dict]:
+    buckets = {}
+    for item in minuend_items:
+        key = (item[period_key], item["currency"])
+        buckets[key] = buckets.get(key, 0.0) + item["amount"]
+    for item in subtrahend_items:
+        key = (item[period_key], item["currency"])
+        buckets[key] = buckets.get(key, 0.0) - item["amount"]
+    return [
+        {period_key: period, "currency": currency, "amount": amount}
+        for (period, currency), amount in sorted(buckets.items())
+    ]
+
+
+def _aggregate_amount_period(
+    monthly_items: list[dict],
+    period_type: str,
+) -> list[dict]:
+    buckets = {}
+    for item in monthly_items:
+        year, month = item["month"].split("-")
+        if period_type == "quarter":
+            quarter = (int(month) - 1) // 3 + 1
+            period = f"{year}-Q{quarter}"
+        else:
+            period = year
+        key = (period, item["currency"])
+        buckets[key] = buckets.get(key, 0.0) + item["amount"]
+    return [
+        {period_type: period, "currency": currency, "amount": amount}
+        for (period, currency), amount in sorted(buckets.items())
+    ]
 
 
 def _rank_amounts(queryset, name_field: str, amount_field: str) -> list:
@@ -498,17 +857,29 @@ def _rank_amounts(queryset, name_field: str, amount_field: str) -> list:
         .annotate(amount=Coalesce(Sum(amount_field), Decimal("0")))
         .order_by("currency", "-amount")
     )
+    amount_buckets = {}
+    for item in rows:
+        key = (
+            item[name_field] or "-",
+            normalize_currency(item["currency"]),
+        )
+        amount_buckets[key] = amount_buckets.get(key, 0.0) + _number(
+            item["amount"]
+        )
+
     ranked = []
     counts = {}
-    for item in rows:
-        currency = item["currency"] or "未知"
+    ordered_rows = sorted(
+        amount_buckets.items(),
+        key=lambda item: (item[0][1], -item[1], item[0][0]),
+    )
+    for (name, currency), amount in ordered_rows:
         if counts.get(currency, 0) >= 10:
             continue
         counts[currency] = counts.get(currency, 0) + 1
-        amount = _number(item["amount"])
         ranked.append(
             {
-                "name": item[name_field] or "-",
+                "name": name,
                 "currency": currency,
                 "amount": amount,
                 "amount_by_currency": [
@@ -522,13 +893,58 @@ def _rank_amounts(queryset, name_field: str, amount_field: str) -> list:
     return ranked
 
 
-def _renewal_risks() -> list:
-    today = timezone.localdate()
+def _rank_customer_rows(rows: list[dict], amount_field: str) -> list[dict]:
+    ordered_rows = sorted(
+        rows,
+        key=lambda item: (
+            item["currency"],
+            -item[amount_field],
+            item["customer_name"],
+        ),
+    )
+    ranked = []
+    counts = {}
+    for item in ordered_rows:
+        currency = item["currency"]
+        if counts.get(currency, 0) >= 10:
+            continue
+        counts[currency] = counts.get(currency, 0) + 1
+        ranked.append(item)
+    return ranked
+
+
+def _rank_sales_rows(rows: list[dict], amount_field: str) -> list[dict]:
+    ordered_rows = sorted(
+        rows,
+        key=lambda item: (
+            item["currency"],
+            -item[amount_field],
+            item["sales_person"],
+        ),
+    )
+    ranked = []
+    counts = {}
+    for item in ordered_rows:
+        currency = item["currency"]
+        if counts.get(currency, 0) >= 10:
+            continue
+        counts[currency] = counts.get(currency, 0) + 1
+        ranked.append(item)
+    return ranked
+
+
+def _renewal_risk_queryset(today=None):
+    today = today or timezone.localdate()
     deadline = today + timedelta(days=30)
-    rows = Contract.objects.filter(
+    return Contract.objects.filter(
         service_end__gte=today,
         service_end__lte=deadline,
-    ).order_by("service_end")[:20]
+    ).order_by("service_end")
+
+
+def _renewal_risks(*, queryset=None) -> list:
+    today = timezone.localdate()
+    rows = queryset if queryset is not None else _renewal_risk_queryset(today)
     return [
         {
             "customer_name": item.customer_name or "-",
@@ -541,14 +957,12 @@ def _renewal_risks() -> list:
                 "high" if (item.service_end - today).days <= 14 else "medium"
             ),
         }
-        for item in rows
+        for item in rows[:20]
     ]
 
 
 def _opportunity_items(*, limit: int) -> list:
-    rows = ProjectInit.objects.filter(
-        estimated_amount__gt=Decimal("500000"),
-    ).order_by("-estimated_amount")[:limit]
+    rows = _opportunity_queryset()[:limit]
     return [
         {
             "id": str(item.id),
@@ -567,6 +981,12 @@ def _opportunity_items(*, limit: int) -> list:
         }
         for item in rows
     ]
+
+
+def _opportunity_queryset():
+    return ProjectInit.objects.filter(
+        estimated_amount__gt=Decimal("500000"),
+    ).order_by("-estimated_amount")
 
 
 def _contract_filters() -> dict:
@@ -588,3 +1008,63 @@ def _contract_filters() -> dict:
         )
         for key, field in fields.items()
     }
+
+
+def _filter_options(
+    model,
+    fields: tuple[str, ...],
+    *,
+    base_queryset=None,
+) -> dict:
+    queryset = base_queryset if base_queryset is not None else model.objects
+    payload = {}
+    for field in fields:
+        values = queryset.values_list(field, flat=True).distinct()
+        if field == "currency":
+            payload[field] = sorted(
+                {normalize_currency(value) for value in values}
+            )
+        else:
+            payload[field] = sorted(value for value in values if value)
+    return payload
+
+
+def _domestic_ledger_groups(queryset) -> list[dict]:
+    rows = (
+        queryset.values("payment_status", "currency")
+        .annotate(
+            record_count=Count("id"),
+            total_contract_amount=Coalesce(
+                Sum("total_contract_amount"),
+                ZERO_DECIMAL,
+            ),
+            payment_received=Coalesce(
+                Sum("payment_received"),
+                ZERO_DECIMAL,
+            ),
+            outstanding=Coalesce(Sum("outstanding"), ZERO_DECIMAL),
+        )
+        .order_by("payment_status", "currency")
+    )
+    buckets = {}
+    for item in rows:
+        payment_status = item["payment_status"] or "未更新"
+        currency = normalize_currency(item["currency"])
+        bucket = buckets.setdefault(
+            (payment_status, currency),
+            {
+                "payment_status": payment_status,
+                "currency": currency,
+                "record_count": 0,
+                "total_contract_amount": 0.0,
+                "payment_received": 0.0,
+                "outstanding": 0.0,
+            },
+        )
+        bucket["record_count"] += item["record_count"]
+        bucket["total_contract_amount"] += _number(
+            item["total_contract_amount"]
+        )
+        bucket["payment_received"] += _number(item["payment_received"])
+        bucket["outstanding"] += _number(item["outstanding"])
+    return [buckets[key] for key in sorted(buckets)]

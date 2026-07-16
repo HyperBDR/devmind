@@ -37,6 +37,7 @@ from data_ops.services.ai_tools import (
     execute_data_ops_tool,
     get_data_ops_tool_profile,
 )
+from data_ops.services.metrics.currency import normalize_currency
 from data_ops.services.metrics.overview import _number
 
 ZERO_DECIMAL = Decimal("0")
@@ -825,12 +826,15 @@ def _sum_by_currency(queryset, amount_field: str) -> list[dict[str, float]]:
         .annotate(value=Coalesce(Sum(amount_field), ZERO_DECIMAL))
         .order_by("currency")
     )
+    buckets = {}
+    for item in rows:
+        currency = normalize_currency(item["currency"])
+        buckets[currency] = buckets.get(currency, 0.0) + _number(
+            item["value"]
+        )
     return [
-        {
-            "currency": item["currency"] or "未知",
-            "amount": _number(item["value"]),
-        }
-        for item in rows
+        {"currency": currency, "amount": amount}
+        for currency, amount in sorted(buckets.items())
     ]
 
 
