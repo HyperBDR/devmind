@@ -70,8 +70,15 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_AGENT_OUTCOME: ${{ steps.pr_agent.outcome }}
+          PROJECT_NAME: DevMind
+          PR_ADDITIONS: ${{ github.event.pull_request.additions }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+          PR_DELETIONS: ${{ github.event.pull_request.deletions }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_STATE: ${{ github.event.pull_request.state }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
@@ -81,12 +88,6 @@ jobs:
             echo "::warning::FEISHU_WEBHOOK is not configured;" \
               "skipping notification."
             exit 0
-          fi
-
-          if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
-            STATUS="✅ AI Code Review completed"
-          else
-            STATUS="❌ AI Code Review failed"
           fi
 
           REVIEW=""
@@ -120,25 +121,93 @@ jobs:
             )"
           fi
 
-          if [ -n "${REVIEW}" ]; then
-            REVIEW_PREVIEW="$(
-              jq -nr --arg review "${REVIEW}" '$review[0:2000]'
-            )"
-          else
-            REVIEW_PREVIEW="Review and summary are available on the pull "\
-              "request."
+          REQUIREMENTS_TABLE="$(
+            awk '
+              /Compliant requirements:/ {
+                capture = 1
+                next
+              }
+              capture && /^- / {
+                requirement = $0
+                sub(/^- /, "", requirement)
+                gsub(/\|/, "\\\\|", requirement)
+                printf "| %s | ✅ Covered |\n", requirement
+                found = 1
+                next
+              }
+              capture && found && NF {
+                exit
+              }
+            ' <<< "${REVIEW}"
+          )"
+
+          if [ -z "${REQUIREMENTS_TABLE}" ]; then
+            if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+              REQUIREMENTS_TABLE="$(
+                printf '%s' \
+                  '| Review 需求覆盖详情 | ℹ️ 见完整 Review |'
+              )"
+            else
+              REQUIREMENTS_TABLE="| PR-Agent 审查 | ❌ Failed |"
+            fi
           fi
 
-          MESSAGE="$(printf \
-            '%s\n\nRepository: %s\nPR: #%s %s\nAuthor: %s\n\n'\
-          'Review:\n%s\n\nPR URL:\n%s' \
-            "${STATUS}" \
-            "${GITHUB_REPOSITORY}" \
-            "${PR_NUMBER}" \
-            "${PR_TITLE}" \
-            "${PR_AUTHOR}" \
-            "${REVIEW_PREVIEW}" \
-            "${PR_URL}")"
+          if [ "${PR_AGENT_OUTCOME}" != "success" ]; then
+            ISSUES="PR-Agent 审查未成功，"
+            ISSUES+="请检查 GitHub Actions 日志。"
+            TESTS="- 审查失败，未完成测试覆盖分析"
+            MERGE_STATUS="Not ready"
+            MERGE_ADVICE="请先修复 AI Review 工作流，"
+            MERGE_ADVICE+="再进行人工验证。"
+          elif grep -qi "No major issues detected" <<< "${REVIEW}"; then
+            ISSUES="未发现重大问题。"
+            MERGE_STATUS="Ready after verification"
+            MERGE_ADVICE="未发现阻塞问题，"
+            MERGE_ADVICE+="建议人工确认后再合并。"
+          else
+            ISSUES="$(
+              jq -nr --arg review "${REVIEW}" '$review[0:3000]'
+            )"
+            MERGE_STATUS="Needs human review"
+            MERGE_ADVICE="发现需要关注的审查内容，"
+            MERGE_ADVICE+="请人工确认后再合并。"
+          fi
+
+          if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+            if grep -qi "No relevant tests" <<< "${REVIEW}"; then
+              TESTS="- PR-Agent 未识别到相关自动化测试"
+            else
+              TESTS="- PR-Agent 已完成测试与验证检查，"
+              TESTS+="详情见完整 Review"
+            fi
+          fi
+
+          REPORT_DATE="$(TZ=Asia/Shanghai date +%F)"
+          PR_STATE_UPPER="$(
+            printf '%s' "${PR_STATE}" | tr '[:lower:]' '[:upper:]'
+          )"
+          MESSAGE="$(
+            printf '🔍 %s PR Review 报告\n' "${PROJECT_NAME}"
+            printf '仓库: %s\n' "${GITHUB_REPOSITORY}"
+            printf '时间: %s\n' "${REPORT_DATE}"
+            printf '📋 PR #%s — %s\n\n' "${PR_NUMBER}" "${PR_TITLE}"
+            printf '作者: %s\n' "${PR_AUTHOR}"
+            printf '状态: %s\n' "${PR_STATE_UPPER}"
+            printf '分支: %s → %s\n' "${PR_HEAD_REF}" "${PR_BASE_REF}"
+            printf '文件变更: %s files | +%s / -%s\n\n' \
+              "${PR_CHANGED_FILES}" \
+              "${PR_ADDITIONS}" \
+              "${PR_DELETIONS}"
+            printf '📋 需求覆盖检查\n\n'
+            printf '| 需求 | 状态 |\n'
+            printf '| --- | --- |\n'
+            printf '%s\n\n' "${REQUIREMENTS_TABLE}"
+            printf '⚠️ 发现的问题\n\n%s\n\n' "${ISSUES}"
+            printf '🧪 测试与验证\n\n%s\n\n' "${TESTS}"
+            printf '🔀 合并建议：%s\n\n' "${MERGE_STATUS}"
+            printf '%s\n' "${MERGE_ADVICE}"
+            printf '📎 完整 Review: %s\n' "${PR_URL}"
+          )"
 
           PAYLOAD="$(
             jq -cn --arg text "${MESSAGE}" \
