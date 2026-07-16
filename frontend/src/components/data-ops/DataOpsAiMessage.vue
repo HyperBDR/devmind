@@ -87,6 +87,7 @@
           <MarkdownRenderer
             v-if="displayMarkdownContent"
             :content="displayMarkdownContent"
+            :relative-internal-links="true"
             class="data-ops-ai-markdown"
             :class="{ 'data-ops-ai-markdown-streaming': isActive }"
           />
@@ -157,13 +158,14 @@ import { useI18n } from 'vue-i18n'
 
 import MarkdownRenderer from '@/components/ui/MarkdownRenderer.vue'
 import { splitFollowUpQuestions } from '@/utils/aiSuggestions'
+import { normalizeDataOpsChart } from '@/utils/dataOpsChart'
+import { localizeDataOpsProgressEvent } from '@/utils/dataOpsProgress'
 
 import DataOpsAiChartBlock from './DataOpsAiChartBlock.vue'
 
 const { t } = useI18n()
 
 const props = defineProps({
-  fallbackSuggestions: { type: Array, default: () => [] },
   message: { type: Object, required: true }
 })
 defineEmits(['ask'])
@@ -233,12 +235,14 @@ const hasProcessPanel = computed(
 const shouldShowPending = computed(
   () => isActive.value || ['error', 'stopped'].includes(status.value)
 )
+const maxChartsPerAnswer = 2
 
 const charts = computed(() => {
   const items = []
   for (const match of content.value.matchAll(chartFencePattern())) {
     const chart = parseChart(match[1])
     if (chart) items.push({ ...chart, key: `${items.length}-${chart.title}` })
+    if (items.length >= maxChartsPerAnswer) break
   }
   return items
 })
@@ -249,11 +253,7 @@ const plainContent = computed(() =>
 const parsedContent = computed(() => splitFollowUpQuestions(plainContent.value))
 const markdownContent = computed(() => parsedContent.value.body)
 const displayMarkdownContent = computed(() => markdownContent.value.trim())
-const followUpQuestions = computed(() =>
-  parsedContent.value.questions.length
-    ? parsedContent.value.questions
-    : props.fallbackSuggestions
-)
+const followUpQuestions = computed(() => parsedContent.value.questions)
 const showFollowUpQuestions = computed(
   () => status.value === 'done' && followUpQuestions.value.length > 0
 )
@@ -305,15 +305,7 @@ function chartFencePattern() {
 function parseChart(rawValue) {
   try {
     const value = JSON.parse(String(rawValue || '').trim())
-    if (!value || typeof value !== 'object') return null
-    if (
-      !Array.isArray(value.labels) &&
-      !Array.isArray(value.data) &&
-      !Array.isArray(value.series)
-    ) {
-      return null
-    }
-    return value
+    return normalizeDataOpsChart(value)
   } catch (_) {
     return null
   }
@@ -349,7 +341,8 @@ function groupProgressSteps(events) {
 }
 
 function normalizeStep(event) {
-  const metadata = event?.metadata || {}
+  const localized = localizeDataOpsProgressEvent(event, t)
+  const metadata = localized.metadata
   const table = metadata.table
     ? t('dataOps.ai.tableRef', { table: metadata.table })
     : ''
@@ -360,10 +353,10 @@ function normalizeStep(event) {
       : t('dataOps.ai.resultRows', { count: result.row_count })
   const fallbackDetail = [table, rows].filter(Boolean).join(', ')
   return {
-    detail: event?.detail || fallbackDetail,
-    stage: event?.stage || 'step',
-    status: event?.status || 'done',
-    title: event?.title || t('dataOps.feedback.progressStep')
+    detail: localized.detail || fallbackDetail,
+    stage: localized.stage,
+    status: localized.status,
+    title: localized.title || t('dataOps.feedback.progressStep')
   }
 }
 

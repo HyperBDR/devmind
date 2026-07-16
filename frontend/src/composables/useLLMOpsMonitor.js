@@ -1,160 +1,97 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { asArray, asObject } from '@/utils/llmOpsPagination'
+import {
+  isMonitorRowVisible,
+  operationScopeForRow,
+  summarizeMonitorRows
+} from '@/utils/llmOpsMonitor'
+import { asArray } from '@/utils/llmOpsPagination'
 
-export function useLLMOpsMonitor({ channels, procurementRows, summary }) {
+export function useLLMOpsMonitor({ summary }) {
   const { t } = useI18n()
 
   const simulationStatus = ref('priority')
 
   const simulationStatusOptions = computed(() => [
-    { label: t('llmOps.filters.priority'), value: 'priority' },
-    { label: t('llmOps.filters.allModels'), value: 'all' },
-    { label: t('llmOps.decision.status.no_supply'), value: 'no_supply' },
     {
-      label: t('llmOps.decision.status.currency_unresolved'),
-      value: 'currency_unresolved'
+      label: t('llmOps.overview.filters.operationalPriority'),
+      value: 'priority'
     },
     {
-      label: t('llmOps.decision.status.platform_fee_unresolved'),
-      value: 'platform_fee_unresolved'
+      label: t('llmOps.overview.filters.operational'),
+      value: 'operational'
     },
-    { label: t('llmOps.decision.status.low_yield'), value: 'low_yield' },
     {
-      label: t('llmOps.decision.status.not_lowest_channel'),
-      value: 'not_lowest_channel'
+      label: t('llmOps.decision.status.ready'),
+      value: 'ready'
     },
-    { label: t('llmOps.decision.status.unlisted'), value: 'unlisted' },
     {
-      label: t('llmOps.decision.status.single_channel'),
-      value: 'single_channel'
-    },
-    { label: t('llmOps.decision.status.ready'), value: 'ready' }
+      label: t('llmOps.overview.filters.marketReference'),
+      value: 'market_reference'
+    }
   ])
 
   const agioneDiagnostics = computed(() =>
     asArray(summary.value.agione?.diagnostics)
   )
-  const summaryKpis = computed(() => asObject(summary.value.kpis))
-
-  const operationalChannelCount = computed(() =>
-    numberOrFallback(
-      summaryKpis.value.active_channels,
-      asArray(channels.value).length
-    )
-  )
-
   const enrichedProcurementRows = computed(() =>
-    (agioneDiagnostics.value.length
-      ? agioneDiagnostics.value
-      : procurementRows.value
-    ).map((row) => {
-      const options = asArray(row.options)
-      const bestChannel = row.best_channel || null
+    agioneDiagnostics.value.map((row) => {
+      const operationScope = operationScopeForRow(row)
       const decisionStatus = row.decision_status || 'ready'
+      const decisionPriority = row.decision_priority || 8
       return {
         ...row,
-        best_channel: bestChannel,
-        display_channel: bestChannel,
-        coverage_count: row.coverage_count ?? options.length,
-        is_agione_listed: Boolean(row.is_agione_listed),
-        has_lowest_listing: Boolean(row.has_lowest_listing),
-        requires_currency_conversion: Boolean(row.requires_currency_conversion),
+        operation_scope: operationScope,
         decision_status: decisionStatus,
-        decision_action: row.decision_action || '',
-        decision_priority: row.decision_priority || 8,
+        decision_priority: decisionPriority,
         input_yield: row.yield_metrics?.input_yield ?? null,
         output_yield: row.yield_metrics?.output_yield ?? null,
         data_event_type: row.data_event_type || 'updated',
         last_data_event_at: row.last_data_event_at || null,
-        status_label: '',
-        status_tone: decisionTone(decisionStatus),
-        status_priority: row.decision_priority || 8
+        status_tone: decisionTone(decisionStatus)
       }
     })
   )
 
   const kpiCards = computed(() => {
-    const total = enrichedProcurementRows.value.length || 1
-    const pendingListing = enrichedProcurementRows.value.filter(
-      (row) => row.decision_status === 'unlisted'
-    ).length
-    const missingChannel = enrichedProcurementRows.value.filter(
-      (row) => row.decision_status === 'no_supply'
-    ).length
-    const lowYield = enrichedProcurementRows.value.filter(
-      (row) => row.decision_status === 'low_yield'
-    ).length
-    const dataAnomaly = enrichedProcurementRows.value.filter(
-      (row) => row.is_data_anomaly
-    ).length
+    const counts = summarizeMonitorRows(enrichedProcurementRows.value)
     return [
       {
-        key: 'pending_listing',
-        group: 'supply',
-        label: t('llmOps.overview.kpi.pendingListing.label'),
-        value: pendingListing,
-        badge: `${percentage(pendingListing, total)}%`,
-        hint: t('llmOps.overview.kpi.pendingListing.hint'),
-        progress: percentage(pendingListing, total),
-        tone: pendingListing ? 'warn' : 'good',
-        barClass: 'bg-agione-500'
+        key: 'needs_action',
+        label: t('llmOps.overview.kpi.needsAction.label'),
+        value: counts.needsAction,
+        filter: 'priority',
+        tone: counts.needsAction ? 'warn' : 'success'
       },
       {
         key: 'missing_channel',
-        group: 'supply',
         label: t('llmOps.overview.kpi.missingChannel.label'),
-        value: missingChannel,
-        badge: `${percentage(missingChannel, total)}%`,
-        hint: t('llmOps.overview.kpi.missingChannel.hint'),
-        progress: percentage(missingChannel, total),
-        tone: missingChannel ? 'danger' : 'good',
-        barClass: 'bg-rose-500'
+        value: counts.missingChannel,
+        filter: 'no_supply',
+        tone: counts.missingChannel ? 'danger' : 'success'
+      },
+      {
+        key: 'pending_listing',
+        label: t('llmOps.overview.kpi.pendingListing.label'),
+        value: counts.pendingListing,
+        filter: 'unlisted',
+        tone: counts.pendingListing ? 'warn' : 'success'
       },
       {
         key: 'low_yield',
-        group: 'yield',
         label: t('llmOps.overview.kpi.lowYield.label'),
-        value: lowYield,
-        badge: `${percentage(lowYield, total)}%`,
-        hint: t('llmOps.overview.kpi.lowYield.hint'),
-        progress: percentage(lowYield, total),
-        tone: lowYield ? 'danger' : 'good',
-        barClass: 'bg-amber-500'
-      },
-      {
-        key: 'data_anomaly',
-        group: 'data',
-        label: t('llmOps.overview.kpi.dataAnomaly.label'),
-        value: dataAnomaly,
-        badge: dataAnomaly
-          ? t('llmOps.status.needsHandling')
-          : t('llmOps.status.normal'),
-        hint: t('llmOps.overview.kpi.dataAnomaly.hint'),
-        progress: dataAnomaly ? 100 : 0,
-        tone: dataAnomaly ? 'danger' : 'good',
-        barClass: dataAnomaly ? 'bg-rose-500' : 'bg-emerald-500'
+        value: counts.lowYield,
+        filter: 'low_yield',
+        tone: counts.lowYield ? 'danger' : 'success'
       }
     ]
   })
 
-  const filteredProcurementRows = computed(() => {
-    return enrichedProcurementRows.value.map((row) => ({
-      ...row,
-      display_channel: row.best_channel
-    }))
-  })
-
   const monitorTableRows = computed(() => {
-    const rows = filteredProcurementRows.value.filter((row) => {
-      if (simulationStatus.value === 'all') return true
-      return (
-        row.decision_status === simulationStatus.value ||
-        (simulationStatus.value === 'priority' &&
-          (row.decision_priority < 8 || row.is_data_anomaly))
-      )
-    })
+    const rows = enrichedProcurementRows.value.filter((row) =>
+      isMonitorRowVisible(row, simulationStatus.value)
+    )
     const inputYieldMagnitude = (row) => {
       const value = Number(row.input_yield)
       if (Number.isFinite(value)) return Math.abs(value)
@@ -183,7 +120,8 @@ export function useLLMOpsMonitor({ channels, procurementRows, summary }) {
     not_lowest_channel: 'warn',
     unlisted: 'warn',
     single_channel: 'info',
-    ready: 'success'
+    ready: 'success',
+    market_reference: 'info'
   }
 
   function decisionTone(status) {
@@ -194,21 +132,9 @@ export function useLLMOpsMonitor({ channels, procurementRows, summary }) {
     kpiCards,
     monitorModelSubtitle,
     monitorTableRows,
-    operationalChannelCount,
     simulationStatus,
     simulationStatusOptions
   }
-}
-
-function percentage(value, total) {
-  if (!total) return 0
-  return Math.round((Number(value || 0) / Number(total)) * 100)
-}
-
-function numberOrFallback(value, fallback = 0) {
-  const numberValue = Number(value)
-  if (Number.isFinite(numberValue)) return numberValue
-  return Number(fallback || 0)
 }
 
 function monitorModelSubtitle(row) {

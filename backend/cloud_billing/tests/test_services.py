@@ -270,6 +270,83 @@ class TestProviderService:
             },
         )
 
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_deepseek_normalizes_config(self, mock_factory):
+        """Test DeepSeek API key normalization before provider creation."""
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        service = ProviderService()
+        result = service.create_provider(
+            "deepseek",
+            {
+                "DEEPSEEK_API_KEY": "sk-test-key",
+                "DEEPSEEK_TIMEOUT": 15,
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "deepseek",
+            {
+                "api_key": "sk-test-key",
+                "timeout": 15,
+            },
+        )
+
+    def test_classify_deepseek_invalid_api_key(self):
+        """Classify DeepSeek HTTP 401 as a credential error."""
+        result = ProviderService()._classify_error(
+            "deepseek",
+            "401 Client Error: Unauthorized",
+        )
+
+        assert result == {
+            "error_code": "deepseek_invalid_api_key",
+            "error_type": "credential_error",
+            "required_permissions": [],
+        }
+
+    @patch("cloud_billing.services.provider_service.ProviderFactory")
+    def test_create_provider_yunce_normalizes_config(self, mock_factory):
+        """Test Yunce credential normalization before provider creation."""
+        mock_provider_instance = Mock()
+        mock_factory.create_provider.return_value = mock_provider_instance
+
+        result = ProviderService().create_provider(
+            "yunce",
+            {
+                "YUNCE_USERNAME": "account",
+                "YUNCE_PASSWORD": "pass",
+                "YUNCE_API_KEY": "sk-selected-secret",
+                "YUNCE_TIMEOUT": 20,
+            },
+        )
+
+        assert result == mock_provider_instance
+        mock_factory.create_provider.assert_called_once_with(
+            "yunce",
+            {
+                "username": "account",
+                "password": "pass",
+                "api_key": "sk-selected-secret",
+                "timeout": 20,
+            },
+        )
+
+    def test_classify_yunce_unauthorized(self):
+        """Classify Yunce HTTP 401 as a credential error."""
+        result = ProviderService()._classify_error(
+            "yunce",
+            "401 Client Error: Unauthorized",
+        )
+
+        assert result == {
+            "error_code": "yunce_invalid_credentials",
+            "error_type": "credential_error",
+            "required_permissions": [],
+        }
+
     @patch(
         "cloud_billing.services.provider_service."
         "ProviderService.create_provider"

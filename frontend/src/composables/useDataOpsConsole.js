@@ -6,6 +6,12 @@ import {
   formatAmount as formatCurrencyAmount,
   formatAmountByCurrency as formatCurrencyAmounts,
 } from '@/utils/currency'
+import {
+  appendAiContent,
+  resolveFinalAiContent,
+  sanitizeAiContent,
+} from '@/utils/dataOpsAiStream'
+import { normalizeDataOpsProgressEvent } from '@/utils/dataOpsProgress'
 import { syncJobError, syncJobFailureDetails } from '@/utils/sync'
 
 const pageSize = 20
@@ -504,14 +510,14 @@ export function useDataOpsConsole() {
             updateAssistantMessage({
               progressEvents: [
                 ...(current?.progressEvents || []),
-                normalizeProgressEvent(event, t, locale.value),
+                normalizeDataOpsProgressEvent(event),
               ],
             })
           },
           onChunk(content) {
             const current = aiMessages.value[assistantIndex]
             updateAssistantMessage({
-              content: sanitizeAiContent(`${current?.content || ''}${content}`),
+              content: appendAiContent(current?.content, content),
               status: 'streaming',
             })
           },
@@ -524,12 +530,11 @@ export function useDataOpsConsole() {
               status: 'done',
               usage: payload?.usage || null,
             }
-            if (!current?.content && finalContent) {
-              patch.content = sanitizeAiContent(finalContent)
-            } else if (!current?.content) {
-              patch.content =
-                t('dataOps.feedback.analysisEmpty')
-            }
+            patch.content = resolveFinalAiContent(
+              current?.content,
+              finalContent,
+              t('dataOps.feedback.analysisEmpty')
+            )
             updateAssistantMessage({
               ...patch,
             })
@@ -537,7 +542,7 @@ export function useDataOpsConsole() {
           onError(detail) {
             const current = aiMessages.value[assistantIndex]
             updateAssistantMessage({ status: 'error' })
-            if (!current?.content) {
+            if (!sanitizeAiContent(current?.content)) {
               updateAssistantMessage({
                 content: detail || t('dataOps.feedback.streamFailed'),
               })
@@ -556,7 +561,7 @@ export function useDataOpsConsole() {
       } else {
         const current = aiMessages.value[assistantIndex]
         updateAssistantMessage({ status: 'error' })
-        if (!current?.content) {
+        if (!sanitizeAiContent(current?.content)) {
           updateAssistantMessage({
             content: errorMessage(err, t('dataOps.feedback.requestFailed'))
           })
@@ -564,14 +569,7 @@ export function useDataOpsConsole() {
       }
     } finally {
       if (timerId) clearInterval(timerId)
-      const current = aiMessages.value[assistantIndex]
       updateAssistantMessage({ elapsedMs: Date.now() - startedAt })
-      if (
-        current?.status !== 'error' &&
-        current?.status !== 'stopped'
-      ) {
-        updateAssistantMessage({ status: 'done' })
-      }
       persistAiConversation(historyId)
       aiLoading.value = false
       aiActiveAssistantMessage.value = null
@@ -835,43 +833,6 @@ function preflightSummary(status, tables, discovery = null, t) {
   })
 }
 
-function normalizeProgressEvent(event, t, language) {
-  const stage = event?.stage || 'step'
-  const localized = localizedProgressEvent(event, t, language)
-  return {
-    detail: localized?.detail ?? event?.detail ?? '',
-    metadata: event?.metadata || {},
-    stage,
-    status: event?.status || 'done',
-    timestamp: event?.timestamp || new Date().toISOString(),
-    title:
-      localized?.title || event?.title || t('dataOps.feedback.progressStep'),
-  }
-}
-
-function localizedProgressEvent(event, t, language) {
-  if (language === 'zh-CN') return null
-  const stage = event?.stage || 'step'
-  const supportedStages = new Set([
-    'answer',
-    'context',
-    'plan',
-    'question',
-    'tool',
-  ])
-  if (!supportedStages.has(stage)) return null
-  const metadata = event?.metadata || {}
-  return {
-    detail: t(`dataOps.feedback.progress.${stage}Detail`, {
-      count: metadata.tool_count || 0,
-      table: metadata.table || 'Data Ops',
-    }),
-    title: t(`dataOps.feedback.progress.${stage}Title`, {
-      table: metadata.table || 'Data Ops',
-    }),
-  }
-}
-
 function loadAiHistory() {
   if (typeof localStorage === 'undefined') return []
   try {
@@ -900,12 +861,6 @@ function summarizeAiHistoryTitle(value, fallback = 'Untitled conversation') {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   if (!text) return fallback
   return text.length > 32 ? `${text.slice(0, 32)}...` : text
-}
-
-function sanitizeAiContent(content) {
-  return String(content || '')
-    .replace(/<｜｜DSML｜｜tool_calls>[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g, '')
-    .trimStart()
 }
 
 export function formatNumber(value, locale = 'zh-CN') {

@@ -2,7 +2,7 @@
   <button
     class="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg shadow-slate-300 transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-300"
     type="button"
-    :aria-label="t('dataOps.ai.openLabel')"
+    :aria-label="openLabel || t('dataOps.ai.openLabel')"
     @click="openDrawer"
   >
     <svg
@@ -39,7 +39,7 @@
     <aside
       v-if="isOpen"
       class="fixed inset-y-0 right-0 z-50 flex w-full max-w-[980px] flex-col border-l border-slate-200 bg-white shadow-2xl"
-      :aria-label="t('dataOps.ai.drawerLabel')"
+      :aria-label="drawerLabel || t('dataOps.ai.drawerLabel')"
     >
       <header class="border-b border-slate-200 px-5 py-4">
         <div
@@ -47,10 +47,10 @@
         >
           <div>
             <p class="text-base font-semibold text-slate-900">
-              {{ t('dataOps.ai.title') }}
+              {{ title || t('dataOps.ai.title') }}
             </p>
             <p class="mt-1 text-xs text-slate-500">
-              {{ t('dataOps.ai.subtitle') }}
+              {{ subtitle || t('dataOps.ai.subtitle') }}
             </p>
           </div>
           <div class="flex shrink-0 flex-wrap items-center gap-2">
@@ -182,10 +182,10 @@
                   </svg>
                 </span>
                 <h2 class="mt-3 text-lg font-semibold text-slate-900">
-                  {{ t('dataOps.ai.startTitle') }}
+                  {{ title || t('dataOps.ai.startTitle') }}
                 </h2>
                 <p class="mt-1 text-sm text-slate-500">
-                  {{ t('dataOps.ai.startDescription') }}
+                  {{ subtitle || t('dataOps.ai.startDescription') }}
                 </p>
               </div>
 
@@ -247,11 +247,13 @@
             <DataOpsAiMessage
               v-for="(message, index) in messages"
               :key="index"
-              :fallback-suggestions="
-                index === lastAssistantIndex ? fallbackSuggestions : []
-              "
               :message="message"
               @ask="$emit('ask', $event)"
+            />
+            <div
+              v-if="loading"
+              aria-hidden="true"
+              class="data-ops-stream-reserve"
             />
           </div>
 
@@ -334,12 +336,13 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
   buildQuickPrompts,
-  selectFollowUpQuestions
+  resolveAssistantQuestionGroups,
+  resolveQuickPromptLimit
 } from '@/utils/aiSuggestions'
 
 import DataOpsAiMessage from './DataOpsAiMessage.vue'
@@ -350,7 +353,11 @@ const props = defineProps({
   history: { type: Array, default: () => [] },
   input: { type: String, default: '' },
   loading: { type: Boolean, default: false },
-  messages: { type: Array, default: () => [] }
+  messages: { type: Array, default: () => [] },
+  drawerLabel: { type: String, default: '' },
+  openLabel: { type: String, default: '' },
+  subtitle: { type: String, default: '' },
+  title: { type: String, default: '' }
 })
 
 const { locale, t, tm } = useI18n()
@@ -368,46 +375,34 @@ defineEmits([
 const isOpen = ref(false)
 const historyOpen = ref(false)
 const messagesEl = ref(null)
+let streamScrollFrame = null
 const assistantProfile = computed(() => props.context?.assistant || {})
-const localizedQuestionGroups = computed(() => {
-  const translatedGroups = tm('dataOps.ai.questionGroups') || {}
-  const sourceGroups = assistantProfile.value.question_groups || []
-  const keys = sourceGroups.length
-    ? sourceGroups.map((group) => group.key)
-    : Object.keys(translatedGroups)
-  return keys
-    .filter((key) => translatedGroups[key])
-    .map((key) => ({ key, ...translatedGroups[key] }))
-})
-const questionGroups = computed(
-  () => localizedQuestionGroups.value
+const questionGroupsKey = computed(
+  () =>
+    assistantProfile.value.ui_i18n?.question_groups_key ||
+    'dataOps.ai.questionGroups'
 )
+const localizedQuestionGroups = computed(() => {
+  const translatedGroups = tm(questionGroupsKey.value) || {}
+  const sourceGroups = assistantProfile.value.question_groups || []
+  return resolveAssistantQuestionGroups(sourceGroups, translatedGroups)
+})
+const questionGroups = computed(() => localizedQuestionGroups.value)
 const hasUserMessages = computed(() =>
   props.messages.some((message) => message.role === 'user')
 )
 const isEmptyConversation = computed(
   () => props.messages.length === 0 && !props.loading
 )
-const quickPrompts = computed(() => buildQuickPrompts(questionGroups.value, 6))
+const quickPromptLimit = computed(() =>
+  resolveQuickPromptLimit(assistantProfile.value.quick_question_limit)
+)
+const quickPrompts = computed(() =>
+  buildQuickPrompts(questionGroups.value, quickPromptLimit.value)
+)
 const showQuickQuestions = computed(
   () =>
     quickPrompts.value.length > 0 && !hasUserMessages.value && !props.loading
-)
-const lastAssistantIndex = computed(() => {
-  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-    if (props.messages[index]?.role === 'assistant') return index
-  }
-  return -1
-})
-const latestUserQuestion = computed(() => {
-  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-    const message = props.messages[index]
-    if (message?.role === 'user') return message.content || ''
-  }
-  return ''
-})
-const fallbackSuggestions = computed(() =>
-  selectFollowUpQuestions(latestUserQuestion.value, questionGroups.value)
 )
 const lastMessageContent = computed(() => {
   const lastMessage = props.messages[props.messages.length - 1]
@@ -419,13 +414,27 @@ const lastProgressCount = computed(() => {
 })
 
 watch(
-  () => [
-    props.messages.length,
-    props.loading,
-    lastMessageContent.value,
-    lastProgressCount.value
-  ],
-  () => scrollToBottom()
+  () => [props.messages.length, props.loading],
+  ([messageCount, loading], [previousCount, wasLoading] = []) => {
+    if (loading && (messageCount > (previousCount || 0) || !wasLoading)) {
+      positionLatestUserQuestion()
+      return
+    }
+    if (!loading && messageCount !== previousCount) {
+      scrollToBottom()
+    }
+  }
+)
+
+watch(
+  () => [lastMessageContent.value, lastProgressCount.value],
+  () => {
+    if (props.loading) {
+      scheduleStreamingScroll()
+      return
+    }
+    scrollToBottom()
+  }
 )
 
 function openDrawer() {
@@ -457,6 +466,48 @@ async function scrollToBottom() {
   }
 }
 
+async function positionLatestUserQuestion() {
+  await nextTick()
+  if (!messagesEl.value) return
+  const userRows = messagesEl.value.querySelectorAll(
+    '.data-ops-message-row-user'
+  )
+  const latestUser = userRows[userRows.length - 1]
+  if (!latestUser) return
+  const containerRect = messagesEl.value.getBoundingClientRect()
+  const latestUserRect = latestUser.getBoundingClientRect()
+  const latestUserTop =
+    latestUserRect.top - containerRect.top + messagesEl.value.scrollTop
+  messagesEl.value.scrollTop = Math.max(
+    0,
+    latestUserTop - messagesEl.value.clientHeight * 0.25
+  )
+}
+
+function scheduleStreamingScroll() {
+  if (streamScrollFrame !== null) return
+  streamScrollFrame = requestAnimationFrame(() => {
+    streamScrollFrame = null
+    keepStreamingAnswerVisible()
+  })
+}
+
+async function keepStreamingAnswerVisible() {
+  await nextTick()
+  if (!messagesEl.value) return
+  const assistantRows = messagesEl.value.querySelectorAll(
+    '.data-ops-message-row:not(.data-ops-message-row-user)'
+  )
+  const latestAssistant = assistantRows[assistantRows.length - 1]
+  if (!latestAssistant) return
+  const containerRect = messagesEl.value.getBoundingClientRect()
+  const assistantRect = latestAssistant.getBoundingClientRect()
+  const overflow = assistantRect.bottom - (containerRect.bottom - 24)
+  if (overflow > 0) {
+    messagesEl.value.scrollTop += overflow
+  }
+}
+
 async function positionConversationOnOpen() {
   await nextTick()
   if (messagesEl.value) {
@@ -465,6 +516,12 @@ async function positionConversationOnOpen() {
       : messagesEl.value.scrollHeight
   }
 }
+
+onBeforeUnmount(() => {
+  if (streamScrollFrame !== null) {
+    cancelAnimationFrame(streamScrollFrame)
+  }
+})
 </script>
 
 <style scoped>
@@ -483,5 +540,10 @@ async function positionConversationOnOpen() {
 .data-ops-ai-drawer-enter-from,
 .data-ops-ai-drawer-leave-to {
   transform: translateX(100%);
+}
+
+.data-ops-stream-reserve {
+  height: 75%;
+  min-height: 18rem;
 }
 </style>

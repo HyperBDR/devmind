@@ -742,6 +742,42 @@
     }
   },
   "llmOps": {
+    "assistant": {
+      "title": "LLM Operations Assistant",
+      "description": "Query operational tasks, market prices, listing yield, and collection issues.",
+      "drawerLabel": "LLM operations assistant",
+      "openLabel": "Open LLM operations assistant",
+      "questionGroups": {
+        "operations": {
+          "title": "Operational Tasks",
+          "questions": [
+            "Which operational models need attention now?",
+            "Which operational models are missing channel prices?"
+          ]
+        },
+        "listing": {
+          "title": "Listings and Yield",
+          "questions": [
+            "Which operational models are not listed yet?",
+            "Which models are below the yield warning threshold?",
+            "Which listings are not using the lowest-cost channel?"
+          ]
+        },
+        "market": {
+          "title": "Market Prices",
+          "questions": [
+            "Show all market reference prices for a meta model.",
+            "Which procurement prices changed the most recently?"
+          ]
+        },
+        "quality": {
+          "title": "Data Quality",
+          "questions": [
+            "Which price sources recently failed or reported anomalies?"
+          ]
+        }
+      }
+    },
     "shell": {
       "title": "LLM Operations",
       "subtitle": "A dedicated view for pricing, channels, resale, and reconciliation"
@@ -1433,6 +1469,11 @@
       "emptyListingRecords": "No listing records yet.",
       "emptyReconciliationRecords": "No reconciliation records yet.",
       "emptyStandardPrices": "No standard price items yet.",
+      "filters": {
+        "all": "All models",
+        "marketReference": "Market reference",
+        "operational": "Operational models"
+      },
       "kpi": {
         "channelCoverage": "Channel coverage",
         "channelCoverageHint": "Available procurement channel count",
@@ -3140,60 +3181,43 @@
     },
     "overview": {
       "kpi": {
+        "needsAction": {
+          "label": "Needs action"
+        },
         "pendingListing": {
-          "label": "Pending listing",
-          "hint": "Models with supply but not yet listed on the current platform"
+          "label": "Pending listing"
         },
         "missingChannel": {
-          "label": "Missing channel price",
-          "hint": "Models without usable procurement pricing"
+          "label": "Missing channel price"
         },
         "lowYield": {
-          "label": "Low yield",
-          "hint": "Listed models below the platform yield_warning threshold"
-        },
-        "dataAnomaly": {
-          "label": "Data anomaly",
-          "hint": "Collection failures, source disabled, reconciliation anomalies"
+          "label": "Low yield"
         }
       },
       "decisionTable": {
-        "title": "Model Resale Decision Table",
-        "subtitle": "Sorted by decision priority: missing channel -> currency -> platform fee -> low yield -> not lowest -> unlisted."
+        "title": "Model Operations Decisions"
       },
       "columns": {
+        "decision": "Decision",
+        "listing": "Listing",
+        "lastUpdate": "Last update",
         "model": "Model",
-        "provider": "Provider",
-        "coverage": "Coverage",
-        "recommended": "Recommended channel",
-        "currentListing": "Current listing",
-        "purchasePrice": "Purchase price",
-        "listingPrice": "Listing price",
-        "inputYield": "Input yield",
-        "outputYield": "Output yield",
-        "action": "Recommended action",
-        "lastUpdate": "Last update"
+        "procurement": "Procurement",
+        "yield": "Yield"
       },
-      "emptyDecisionRows": "No models match the current filters.",
-      "kpiGroup": {
-        "supply": "Supply",
-        "yield": "Yield",
-        "data": "Data"
+      "coverageCount": "{count} channels",
+      "queueSummaryLabel": "Operational queue filters",
+      "filters": {
+        "label": "Decision status filters",
+        "marketReference": "Market references",
+        "operationalPriority": "Operational tasks",
+        "operational": "All operational models"
       },
       "event": {
-        "updated": "Updated",
         "collectionFailed": "Collection failed",
         "sourceDisabled": "Source disabled",
         "reconciliationAnomaly": "Reconciliation anomaly",
         "stale": "Stale price"
-      },
-      "hover": {
-        "action": "Action",
-        "recommended": "Recommended",
-        "current": "Current",
-        "purchasePrice": "Purchase price",
-        "listingPrice": "Listing price",
-        "yield": "Yield"
       },
       "time": {
         "justNow": "just now",
@@ -3202,7 +3226,7 @@
         "hoursAgo": "{count}h ago",
         "daysAgo": "{count}d ago"
       },
-      "emptyDecisionAllReady": "No models need handling. All ready.",
+      "emptyDecisionAllReady": "No operational models need handling.",
       "emptyDecisionFiltered": "No models match the current filters."
     },
     "decision": {
@@ -3214,7 +3238,8 @@
         "not_lowest_channel": "Not on lowest channel",
         "unlisted": "Unlisted",
         "single_channel": "Single channel",
-        "ready": "Ready"
+        "ready": "Ready",
+        "market_reference": "Market price reference"
       },
       "action": {
         "configureChannel": "Configure channel",
@@ -3224,7 +3249,8 @@
         "switchLowestChannel": "Evaluate switching to lowest channel",
         "publishToPlatform": "Open publishing workspace",
         "addChannelCoverage": "Add backup channel",
-        "keep": "Keep"
+        "keep": "Keep",
+        "viewMarketPrice": "Reference price only"
       }
     },
     "channel": {
@@ -3986,6 +4012,12 @@
         "zhipu_invalid_credentials": "Validation failed: Invalid username or password. Please check your Zhipu login credentials.",
         "zhipu_invalid_token": "Validation failed: Invalid or expired login token. Please check your Zhipu login session.",
         "zhipu_no_permission": "Validation failed: Account has no finance access for the selected organization or project.",
+        "deepseek_invalid_api_key": "Validation failed: Invalid DeepSeek API key.",
+        "deepseek_no_permission": "Validation failed: This API key cannot access the DeepSeek balance endpoint.",
+        "deepseek_rate_limit": "Validation failed: Too many DeepSeek requests. Please try again later.",
+        "yunce_invalid_credentials": "Validation failed: Invalid Yunce username or password.",
+        "yunce_no_permission": "Validation failed: This account cannot access the Yunce account APIs.",
+        "yunce_rate_limit": "Validation failed: Too many Yunce requests. Please try again later.",
         "volcengine_invalid_credentials": "Validation failed: Invalid access key. Please check your Volcengine Access Key ID and Secret Access Key.",
         "volcengine_invalid_secret": "Validation failed: Invalid signing secret. Please check your Volcengine Secret Access Key and signing configuration.",
         "volcengine_rate_limit": "Validation failed: Too many requests. Please try again later.",
@@ -4164,6 +4196,18 @@
       "zhipuPassword": "Password",
       "zhipuPasswordDesc": "Zhipu BigModel login password",
       "zhipuPasswordPlaceholder": "Enter Zhipu password",
+      "deepseekApiKey": "API Key",
+      "deepseekApiKeyDesc": "API key used to query the DeepSeek balance endpoint",
+      "deepseekApiKeyPlaceholder": "Enter DeepSeek API Key",
+      "yunceUsername": "Username",
+      "yunceUsernameDesc": "Yunce platform login username",
+      "yunceUsernamePlaceholder": "Enter Yunce username",
+      "yuncePassword": "Password",
+      "yuncePasswordDesc": "Yunce platform login password",
+      "yuncePasswordPlaceholder": "Enter Yunce password",
+      "yunceApiKey": "API Key (optional)",
+      "yunceApiKeyDesc": "When set, the displayed balance is the lower of the account balance and this API Key's remaining quota. Unlimited keys use the account balance.",
+      "yunceApiKeyPlaceholder": "Enter a Yunce API Key to limit the balance",
       "volcengineAccessKeyId": "Access Key ID",
       "volcengineAccessKeyIdDesc": "Volcengine access key ID",
       "volcengineAccessKeyIdPlaceholder": "Enter Volcengine Access Key ID",
@@ -4208,6 +4252,8 @@
         "alibaba": "Alibaba Cloud",
         "azure": "Azure",
         "zhipu": "Zhipu AI",
+        "deepseek": "DeepSeek",
+        "yunce": "Yunce",
         "volcengine": "Volcengine",
         "baidu": "Baidu AI Cloud"
       },

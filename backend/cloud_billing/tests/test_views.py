@@ -309,6 +309,8 @@ class TestCloudProviderViewSet:
         assert "volcengine" in provider_types
         assert "baidu" in provider_types
         assert "zhipu" in provider_types
+        assert "deepseek" in provider_types
+        assert "yunce" in provider_types
 
         volcengine = api_client.get(url + "?provider_type=volcengine")
         assert volcengine.status_code == 200
@@ -352,6 +354,27 @@ class TestCloudProviderViewSet:
             for field in zhipu.data["provider"]["optional_fields"]
         }
         assert "ZHIPU_USER_TYPE" in zhipu_optional
+
+        deepseek = api_client.get(url + "?provider_type=deepseek")
+        assert deepseek.status_code == 200
+        deepseek_required = {
+            field["name"]
+            for field in deepseek.data["provider"]["required_fields"]
+        }
+        assert deepseek_required == {"DEEPSEEK_API_KEY"}
+
+        yunce = api_client.get(url + "?provider_type=yunce")
+        assert yunce.status_code == 200
+        yunce_required = {
+            field["name"]
+            for field in yunce.data["provider"]["required_fields"]
+        }
+        assert yunce_required == {"YUNCE_USERNAME", "YUNCE_PASSWORD"}
+        yunce_optional = {
+            field["name"]
+            for field in yunce.data["provider"]["optional_fields"]
+        }
+        assert "YUNCE_API_KEY" in yunce_optional
 
     def test_provider_tags_returns_unique_sorted_tags(
         self, api_client, cloud_provider, cloud_provider_inactive, user

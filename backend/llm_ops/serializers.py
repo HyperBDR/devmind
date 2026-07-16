@@ -134,9 +134,8 @@ class PriceCollectionSourceSerializer(serializers.ModelSerializer):
         return instance.model_price_items.filter(is_current=True).count()
 
     def get_latest_run_status(self, instance):
-        value = getattr(instance, "latest_run_status", None)
-        if value is not None:
-            return value
+        if hasattr(instance, "latest_run_status"):
+            return instance.latest_run_status
         return (
             instance.collection_runs.order_by("-started_at", "-id")
             .values_list("status", flat=True)
@@ -1013,7 +1012,9 @@ def business_source_category_for_catalog(source):
     ):
         return PriceCollectionSource.SOURCE_CATEGORY_UNKNOWN
 
-    models = list(source.models.select_related("meta_model"))
+    models = getattr(source, "_business_category_models", None)
+    if models is None:
+        models = list(source.models.select_related("meta_model"))
     if not models:
         return PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
 

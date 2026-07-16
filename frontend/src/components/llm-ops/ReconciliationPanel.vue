@@ -246,6 +246,10 @@ import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
 const props = defineProps({
+  focusModelId: {
+    type: [Number, String],
+    default: null
+  },
   channels: {
     type: Array,
     required: true
@@ -264,6 +268,14 @@ const emit = defineEmits(['refresh'])
 const { t } = useI18n()
 
 const form = ref(defaults())
+
+watch(
+  () => props.focusModelId,
+  (modelId) => {
+    if (modelId) form.value.model = modelId
+  },
+  { immediate: true }
+)
 
 const selectedModel = computed(() =>
   props.models.find((model) => String(model.id) === String(form.value.model))

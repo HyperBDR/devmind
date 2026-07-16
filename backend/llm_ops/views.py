@@ -1,8 +1,17 @@
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Count, IntegerField, Max, OuterRef, Q, Subquery
-from django.db.models import Value
+from django.db.models import (
+    Count,
+    IntegerField,
+    Max,
+    OuterRef,
+    Prefetch,
+    Q,
+    Subquery,
+    Value,
+)
+from django.db.models.functions import Coalesce
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
@@ -79,6 +88,8 @@ from .serializers import (
     YunceCollectionRequestSerializer,
 )
 from .services import (
+    OPERATION_SCOPE_MARKET_REFERENCE,
+    OPERATION_SCOPE_OPERATIONAL,
     build_currency_conversion_context,
     calculate_usage_cost,
     compute_model_decision,
@@ -222,21 +233,59 @@ class PriceCollectionSourceViewSet(
     serializer_class = PriceCollectionSourceSerializer
 
     def get_queryset(self):
+        price_items_by_source = (
+            ModelPriceItem.objects.filter(source=OuterRef("pk"))
+            .order_by()
+            .values("source")
+        )
+        models_by_source = (
+            LLMModel.objects.filter(source=OuterRef("pk"))
+            .order_by()
+            .values("source")
+        )
+        business_category_models = (
+            LLMModel.objects.select_related("meta_model")
+            .only(
+                "id",
+                "source_id",
+                "meta_model_id",
+                "meta_model__code",
+                "meta_model__owner_code",
+            )
+            .order_by()
+        )
         queryset = (
             PriceCollectionSource.objects.select_related(
                 "provider",
                 "channel",
             )
+            .prefetch_related(
+                Prefetch(
+                    "models",
+                    queryset=business_category_models,
+                    to_attr="_business_category_models",
+                )
+            )
             .annotate(
-                current_price_item_count=Count(
-                    "model_price_items",
-                    filter=Q(model_price_items__is_current=True),
-                    distinct=True,
+                current_price_item_count=Coalesce(
+                    Subquery(
+                        price_items_by_source.filter(is_current=True)
+                        .annotate(total=Count("id"))
+                        .values("total")[:1],
+                        output_field=IntegerField(),
+                    ),
+                    Value(0),
                 ),
-                current_meta_model_count=Count(
-                    "model_price_items__meta_model",
-                    filter=Q(model_price_items__is_current=True),
-                    distinct=True,
+                current_meta_model_count=Coalesce(
+                    Subquery(
+                        price_items_by_source.filter(is_current=True)
+                        .annotate(
+                            total=Count("meta_model_id", distinct=True),
+                        )
+                        .values("total")[:1],
+                        output_field=IntegerField(),
+                    ),
+                    Value(0),
                 ),
                 latest_run_status=Subquery(
                     PriceCollectionRun.objects.filter(
@@ -245,18 +294,30 @@ class PriceCollectionSourceViewSet(
                     .order_by("-started_at", "-id")
                     .values("status")[:1],
                 ),
-                model_count=Count("models", distinct=True),
-                price_item_count=Count("model_price_items", distinct=True),
+                model_count=Coalesce(
+                    Subquery(
+                        models_by_source.annotate(total=Count("id")).values(
+                            "total"
+                        )[:1],
+                        output_field=IntegerField(),
+                    ),
+                    Value(0),
+                ),
+                price_item_count=Coalesce(
+                    Subquery(
+                        price_items_by_source.annotate(
+                            total=Count("id")
+                        ).values("total")[:1],
+                        output_field=IntegerField(),
+                    ),
+                    Value(0),
+                ),
             )
         )
         search = self.request.query_params.get("search")
         source_category = self.request.query_params.get("source_category")
-        source_owner_type = self.request.query_params.get(
-            "source_owner_type"
-        )
-        collection_method = self.request.query_params.get(
-            "collection_method"
-        )
+        source_owner_type = self.request.query_params.get("source_owner_type")
+        collection_method = self.request.query_params.get("collection_method")
         is_enabled = self.request.query_params.get("is_enabled")
         if source_category:
             queryset = queryset.filter(source_category=source_category)
@@ -689,12 +750,8 @@ class PriceCollectionRunViewSet(
         source = self.request.query_params.get("source")
         status_value = self.request.query_params.get("status")
         source_category = self.request.query_params.get("source_category")
-        source_owner_type = self.request.query_params.get(
-            "source_owner_type"
-        )
-        collection_method = self.request.query_params.get(
-            "collection_method"
-        )
+        source_owner_type = self.request.query_params.get("source_owner_type")
+        collection_method = self.request.query_params.get("collection_method")
         provider = self.request.query_params.get("provider")
         keyword = self.request.query_params.get("q")
         if source:
@@ -1523,7 +1580,11 @@ class ResaleWorkflowConfigViewSet(
             config = self._apply_global_feishu_policy(config)
             if not self._has_publish_path(config):
                 return Response(
-                    {"detail": "At least one publishing path must be enabled."},
+                    {
+                        "detail": (
+                            "At least one publishing path must be enabled."
+                        )
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             instance, _created = ResaleWorkflowConfig.objects.update_or_create(
@@ -2776,8 +2837,15 @@ def _diagnostic_status(
     coverage_count: int,
     is_agione_listed: bool,
     has_lowest_listing: bool,
+    operation_scope: str = OPERATION_SCOPE_OPERATIONAL,
     requires_currency_conversion: bool = False,
 ) -> dict:
+    if operation_scope == OPERATION_SCOPE_MARKET_REFERENCE:
+        return {
+            "status": "market_reference",
+            "status_label": "market_reference",
+            "status_priority": 6,
+        }
     if requires_currency_conversion:
         return {
             "status": "currency_mismatch",
@@ -2812,6 +2880,35 @@ def _diagnostic_status(
         "status": "ready",
         "status_label": "ready",
         "status_priority": 5,
+    }
+
+
+def _model_operation_scope(
+    *,
+    model_id: int,
+    channel_model_ids: set[int],
+    platform_listing_model_ids: set[int],
+    platform_excluded_model_ids: set[int],
+) -> dict[str, str]:
+    """Return whether a model belongs to resale operations or reference."""
+    if model_id in platform_listing_model_ids:
+        return {
+            "operation_scope": OPERATION_SCOPE_OPERATIONAL,
+            "scope_reason": "platform_listing",
+        }
+    if model_id in platform_excluded_model_ids:
+        return {
+            "operation_scope": OPERATION_SCOPE_MARKET_REFERENCE,
+            "scope_reason": "platform_excluded",
+        }
+    if model_id in channel_model_ids:
+        return {
+            "operation_scope": OPERATION_SCOPE_OPERATIONAL,
+            "scope_reason": "channel_configured",
+        }
+    return {
+        "operation_scope": OPERATION_SCOPE_MARKET_REFERENCE,
+        "scope_reason": "price_reference",
     }
 
 
@@ -3172,9 +3269,7 @@ def _summary_listing_rows(
                     if cost_cache_input_display is not None
                     else cost_cache_input
                 ),
-                "original_cost_input_price_per_million": _as_float(
-                    cost_input
-                ),
+                "original_cost_input_price_per_million": _as_float(cost_input),
                 "original_cost_output_price_per_million": _as_float(
                     cost_output
                 ),
@@ -3191,6 +3286,57 @@ def _summary_listing_rows(
             }
         )
     return listing_rows
+
+
+_MONITOR_DIAGNOSTIC_FIELDS = (
+    "model_id",
+    "model_name",
+    "model_code",
+    "provider_name",
+    "coverage_count",
+    "operation_scope",
+    "reference_price",
+    "recommended_channel",
+    "current_listing",
+    "yield_metrics",
+    "decision_status",
+    "decision_action",
+    "decision_priority",
+    "data_event_type",
+    "last_data_event_at",
+)
+
+_MONITOR_RECOMMENDED_CHANNEL_FIELDS = (
+    "channel_id",
+    "channel_name",
+    "currency",
+    "input_price_per_million",
+    "output_price_per_million",
+)
+
+_MONITOR_YIELD_FIELDS = (
+    "input_yield",
+    "output_yield",
+    "is_resolved",
+)
+
+
+def _monitor_diagnostic_payload(diagnostic):
+    """Return the canonical fields used by the monitor decision queue."""
+    payload = {
+        field: diagnostic.get(field) for field in _MONITOR_DIAGNOSTIC_FIELDS
+    }
+    recommended_channel = diagnostic.get("recommended_channel")
+    if recommended_channel:
+        payload["recommended_channel"] = {
+            field: recommended_channel.get(field)
+            for field in _MONITOR_RECOMMENDED_CHANNEL_FIELDS
+        }
+    yield_metrics = diagnostic.get("yield_metrics") or {}
+    payload["yield_metrics"] = {
+        field: yield_metrics.get(field) for field in _MONITOR_YIELD_FIELDS
+    }
+    return payload
 
 
 class SummaryAPIView(LLMOpsPermissionMixin, APIView):
@@ -3243,6 +3389,22 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "price_source",
             )
         }
+        channel_model_ids = {
+            override.model_id for override in overrides.values()
+        }
+        platform_listing_model_ids = set()
+        platform_excluded_model_ids = set()
+        if selected_platform:
+            platform_listing_model_ids = set(
+                ResaleListing.objects.filter(
+                    platform=selected_platform,
+                ).values_list("model_id", flat=True)
+            )
+            platform_excluded_model_ids = set(
+                ResaleListingExclusion.objects.filter(
+                    platform=selected_platform,
+                ).values_list("model_id", flat=True)
+            )
         listed_overrides = [
             override for override in overrides.values() if override.is_listed
         ]
@@ -3348,6 +3510,15 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "meta_model_code": model.meta_model.code,
                     "provider_name": model.provider.name,
                     "currency": model.currency,
+                    "reference_price": {
+                        "currency": model.currency,
+                        "input_price_per_million": _as_float(
+                            model.input_price_per_million
+                        ),
+                        "output_price_per_million": _as_float(
+                            model.output_price_per_million
+                        ),
+                    },
                     "requires_currency_conversion": (
                         requires_currency_conversion
                     ),
@@ -3520,6 +3691,12 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 and option["channel_id"] == best_channel["channel_id"]
                 for option in active_options
             )
+            scope_payload = _model_operation_scope(
+                model_id=row["model_id"],
+                channel_model_ids=channel_model_ids,
+                platform_listing_model_ids=platform_listing_model_ids,
+                platform_excluded_model_ids=platform_excluded_model_ids,
+            )
             cheapest_active = (
                 sorted(
                     active_options,
@@ -3528,15 +3705,18 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 if active_options
                 else None
             )
-            status_payload = _diagnostic_status(
-                best_channel=best_channel,
-                coverage_count=len(options),
-                is_agione_listed=bool(active_model_listings),
-                has_lowest_listing=has_lowest_listing,
-                requires_currency_conversion=row[
-                    "requires_currency_conversion"
-                ],
-            )
+            status_payload = {}
+            if not is_monitor_scope:
+                status_payload = _diagnostic_status(
+                    best_channel=best_channel,
+                    coverage_count=len(options),
+                    is_agione_listed=bool(active_model_listings),
+                    has_lowest_listing=has_lowest_listing,
+                    operation_scope=scope_payload["operation_scope"],
+                    requires_currency_conversion=row[
+                        "requires_currency_conversion"
+                    ],
+                )
             listing_payloads = selected_platform_listing_payloads_by_model.get(
                 row["model_id"],
                 [],
@@ -3566,6 +3746,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 procurement_row=row,
                 current_listing=listing_payload,
                 platform=selected_platform,
+                operation_scope=scope_payload["operation_scope"],
                 data_event_type=data_event.get("type", "updated"),
                 last_data_event_at=last_data_event_at,
             )
@@ -3592,9 +3773,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 }
             yield_metrics_payload = {
                 "fee_rate": _as_optional_float(
-                    selected_platform.fee_rate
-                    if selected_platform
-                    else None
+                    selected_platform.fee_rate if selected_platform else None
                 ),
                 "service_fee_rate": _as_optional_float(
                     selected_platform.service_fee_rate
@@ -3602,9 +3781,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     else None
                 ),
                 "tax_rate": _as_optional_float(
-                    selected_platform.tax_rate
-                    if selected_platform
-                    else None
+                    selected_platform.tax_rate if selected_platform else None
                 ),
                 "settlement_rate": _as_optional_float(
                     selected_platform.settlement_rate
@@ -3640,6 +3817,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "meta_model_code": row["meta_model_code"],
                 "provider_name": row["provider_name"],
                 "currency": row["currency"],
+                "reference_price": row["reference_price"],
                 "requires_currency_conversion": row[
                     "requires_currency_conversion"
                 ],
@@ -3651,6 +3829,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     cheapest_active,
                     best_channel,
                 ),
+                **scope_payload,
                 **status_payload,
                 "best_channel": recommended_channel,
                 "recommended_channel": recommended_channel,
@@ -3662,6 +3841,26 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 diagnostic = {**row, **diagnostic}
             diagnostics.append(diagnostic)
 
+        if is_monitor_scope:
+            monitor_diagnostics = [
+                _monitor_diagnostic_payload(item) for item in diagnostics
+            ]
+            return Response(
+                {
+                    "scope": "monitor",
+                    "currency": _exchange_rate_payload(currency_context),
+                    "agione": {
+                        "platform_id": (
+                            selected_platform.id if selected_platform else None
+                        ),
+                        "platform_name": (
+                            selected_platform.name if selected_platform else ""
+                        ),
+                        "diagnostics": monitor_diagnostics,
+                    },
+                }
+            )
+
         diagnostic_counts = {
             "currency_mismatch": 0,
             "missing_channel": 0,
@@ -3669,11 +3868,19 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             "not_lowest": 0,
             "low_coverage": 0,
             "ready": 0,
+            "market_reference": 0,
         }
         for row in diagnostics:
             diagnostic_counts[row["status"]] += 1
+
         total_models = len(models)
         ready_count = diagnostic_counts["ready"]
+        operational_model_count = sum(
+            1
+            for item in diagnostics
+            if item["operation_scope"] == OPERATION_SCOPE_OPERATIONAL
+        )
+        market_reference_model_count = total_models - operational_model_count
         agione_listed_model_count = len(
             {listing.model_id for listing in selected_platform_listing_rows}
         )
@@ -3692,6 +3899,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         }
         return Response(
             {
+                "scope": "full",
                 "kpis": {
                     "providers": LLMProvider.objects.count(),
                     "models": LLMModel.objects.count(),
@@ -3717,6 +3925,8 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         agione_listed_model_count
                     ),
                     "ready_models": ready_count,
+                    "operational_models": operational_model_count,
+                    "market_reference_models": (market_reference_model_count),
                     "reconciliation_anomalies": (
                         UsageReconciliationRecord.objects.exclude(
                             status=UsageReconciliationRecord.STATUS_PERFECT

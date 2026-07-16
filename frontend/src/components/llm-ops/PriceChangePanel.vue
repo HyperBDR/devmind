@@ -85,6 +85,7 @@ import CompactSelect from './CompactSelect.vue'
 
 const props = defineProps({
   channelHistory: { type: Array, default: () => [] },
+  focusModelId: { type: [Number, String], default: null },
   listingHistory: { type: Array, default: () => [] },
   priceItems: { type: Array, default: () => [] }
 })
@@ -102,6 +103,7 @@ const changeRows = computed(() => {
   const channelRows = props.channelHistory.map((item) => ({
     key: `channel-${item.id}`,
     type: 'channel',
+    modelId: item.model,
     type_label: t('llmOps.priceChangePanel.types.channel'),
     tone: 'info',
     name:
@@ -118,6 +120,7 @@ const changeRows = computed(() => {
   const listingRows = props.listingHistory.map((item) => ({
     key: `listing-${item.id}`,
     type: 'listing',
+    modelId: item.model,
     type_label: t('llmOps.priceChangePanel.types.listing'),
     tone: 'warn',
     name:
@@ -140,9 +143,16 @@ const changeRows = computed(() => {
 })
 
 const filteredRows = computed(() => {
-  const rows = changeRows.value.slice(0, 120)
-  if (typeFilter.value === 'all') return rows
-  return rows.filter((row) => row.type === typeFilter.value)
+  let rows = changeRows.value
+  if (props.focusModelId) {
+    rows = rows.filter(
+      (row) => String(row.modelId) === String(props.focusModelId)
+    )
+  }
+  if (typeFilter.value !== 'all') {
+    rows = rows.filter((row) => row.type === typeFilter.value)
+  }
+  return rows.slice(0, 120)
 })
 
 const metrics = computed(() => [
@@ -164,9 +174,10 @@ const metrics = computed(() => [
 ])
 
 function recentOfficialRows() {
-  return props.priceItems.slice(0, 80).map((item) => ({
+  return props.priceItems.map((item) => ({
     key: `official-${item.id}`,
     type: 'official',
+    modelId: item.model,
     type_label: t('llmOps.priceChangePanel.types.official'),
     tone: 'success',
     name:

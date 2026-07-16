@@ -89,6 +89,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { operationScopeForRow } from '@/utils/llmOpsMonitor'
 import { asArray } from '@/utils/llmOpsPagination'
 
 import CompactSelect from './CompactSelect.vue'
@@ -126,6 +127,7 @@ const listingRows = computed(() => {
 const riskRows = computed(() => {
   const rows = []
   diagnosticRows.value.forEach((row) => {
+    if (operationScopeForRow(row) === 'market_reference') return
     if (row.status === 'ready' || row.status === 'low_coverage') return
     rows.push({
       key: `diag-${row.model_id}-${row.status}`,

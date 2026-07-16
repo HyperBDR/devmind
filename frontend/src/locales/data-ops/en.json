@@ -298,12 +298,14 @@
     "discovery": "Discovered {seen} Feishu tables and matched {matched} automatically.",
     "progressStep": "Processing step",
     "progress": {
-      "questionTitle": "Understand the business question",
-      "questionDetail": "Identify the analysis focus and business priorities.",
+      "questionTitle": "Identify request intent",
+      "questionDetail": "Decide whether business data is needed and select the analysis domain.",
       "contextTitle": "Load Data Ops context",
       "contextDetail": "Load the latest contract, collection, pipeline, and sync context.",
       "planTitle": "Plan data queries",
       "planDetail": "Determine the tables, filters, metrics, and output needed for the answer.",
+      "reasoningTitle": "Select root-cause diagnosis",
+      "reasoningDetail": "Use business evidence to separate symptoms, root-cause hypotheses, system impact, and validation actions.",
       "toolTitle": "Query {table}",
       "toolDetail": "Read and aggregate the business data required for this analysis.",
       "answerTitle": "Prepare the analysis",
@@ -323,7 +325,13 @@
     "dataChart": "Data Chart",
     "trend": "Trend",
     "chart": "Chart",
-    "metric": "Metric"
+    "metric": "Metric",
+    "types": {
+      "bar": "Bar chart",
+      "line": "Line chart",
+      "pie": "Pie chart",
+      "doughnut": "Doughnut chart"
+    }
   },
   "project": {
     "unnamed": "Unnamed project"

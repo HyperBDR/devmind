@@ -42,6 +42,9 @@ urlpatterns = [
     # Includes authentication endpoints provided by custom accounts.urls
     path('', include('accounts.urls')),
 
+    # Global AI assistant routes
+    path('api/v1/assistant/', include('ai_assistant.urls')),
+
     # Cloud billing routes
     # Includes cloud billing management endpoints
     path('api/v1/cloud-billing/', include('cloud_billing.urls')),

@@ -62,6 +62,12 @@
               <option value="zhipu">
                 {{ t('cloudBilling.providers.types.zhipu') }}
               </option>
+              <option value="deepseek">
+                {{ t('cloudBilling.providers.types.deepseek') }}
+              </option>
+              <option value="yunce">
+                {{ t('cloudBilling.providers.types.yunce') }}
+              </option>
             </select>
           </div>
         </div>
@@ -342,6 +348,7 @@
               />
             </div>
           </div>
+
         </template>
 
         <!-- Huawei Configuration -->
@@ -994,6 +1001,107 @@
             </div>
           </div>
         </template>
+
+        <template v-if="formData.provider_type === 'deepseek'">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="deepseekApiKey"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('cloudBilling.providers.deepseekApiKey') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('cloudBilling.providers.deepseekApiKeyDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <PasswordInput
+                id="deepseekApiKey"
+                v-model="configFields.deepseek_api_key"
+                :placeholder="
+                  t('cloudBilling.providers.deepseekApiKeyPlaceholder')
+                "
+                required
+              />
+            </div>
+          </div>
+        </template>
+
+        <template v-if="formData.provider_type === 'yunce'">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="yunceUsername"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('cloudBilling.providers.yunceUsername') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('cloudBilling.providers.yunceUsernameDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <BaseInput
+                id="yunceUsername"
+                v-model="configFields.yunce_username"
+                type="text"
+                :placeholder="
+                  t('cloudBilling.providers.yunceUsernamePlaceholder')
+                "
+                required
+                class="w-full"
+              />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="yuncePassword"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('cloudBilling.providers.yuncePassword') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('cloudBilling.providers.yuncePasswordDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <PasswordInput
+                id="yuncePassword"
+                v-model="configFields.yunce_password"
+                :placeholder="
+                  t('cloudBilling.providers.yuncePasswordPlaceholder')
+                "
+                required
+              />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+            <div class="md:col-span-1">
+              <label
+                for="yunceApiKey"
+                class="block text-sm font-medium text-gray-700 mb-1"
+              >
+                {{ t('cloudBilling.providers.yunceApiKey') }}
+              </label>
+              <p class="text-xs text-gray-500 mb-2 md:mb-0">
+                {{ t('cloudBilling.providers.yunceApiKeyDesc') }}
+              </p>
+            </div>
+            <div class="md:col-span-2">
+              <PasswordInput
+                id="yunceApiKey"
+                v-model="configFields.yunce_api_key"
+                :placeholder="
+                  t('cloudBilling.providers.yunceApiKeyPlaceholder')
+                "
+              />
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- Alert Rule Section -->
@@ -1515,8 +1623,7 @@ import {
   reactive,
   onMounted,
   onBeforeUnmount,
-  computed,
-  nextTick
+  computed
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
@@ -1617,7 +1724,11 @@ const configFields = reactive({
   baidu_access_key_id: '',
   baidu_secret_access_key: '',
   zhipu_username: '',
-  zhipu_password: ''
+  zhipu_password: '',
+  deepseek_api_key: '',
+  yunce_username: '',
+  yunce_password: '',
+  yunce_api_key: ''
 })
 
 const alertRuleData = reactive({
@@ -1753,7 +1864,9 @@ watch(
         azure: t('cloudBilling.providers.types.azure'),
         volcengine: t('cloudBilling.providers.types.volcengine'),
         baidu: t('cloudBilling.providers.types.baidu'),
-        zhipu: t('cloudBilling.providers.types.zhipu')
+        zhipu: t('cloudBilling.providers.types.zhipu'),
+        deepseek: t('cloudBilling.providers.types.deepseek'),
+        yunce: t('cloudBilling.providers.types.yunce')
       }
       formData.display_name = typeLabels[type] || type
       formData.name = generateName(type, formData.display_name)
@@ -1796,7 +1909,11 @@ const getCurrentConfigFieldValues = () => ({
   baidu_access_key_id: configFields.baidu_access_key_id,
   baidu_secret_access_key: configFields.baidu_secret_access_key,
   zhipu_username: configFields.zhipu_username,
-  zhipu_password: configFields.zhipu_password
+  zhipu_password: configFields.zhipu_password,
+  deepseek_api_key: configFields.deepseek_api_key,
+  yunce_username: configFields.yunce_username,
+  yunce_password: configFields.yunce_password,
+  yunce_api_key: configFields.yunce_api_key
 })
 
 const initialConfigSnapshot = ref({})
@@ -1831,7 +1948,11 @@ watch(
     configFields.baidu_access_key_id,
     configFields.baidu_secret_access_key,
     configFields.zhipu_username,
-    configFields.zhipu_password
+    configFields.zhipu_password,
+    configFields.deepseek_api_key,
+    configFields.yunce_username,
+    configFields.yunce_password,
+    configFields.yunce_api_key
   ],
   () => {
     if (!props.provider) {
@@ -2026,6 +2147,36 @@ watch(
         initialConfigSnapshot.value = getCurrentConfigFieldValues()
         configChangedSinceValidation.value = true
         isValidated.value = false
+      } else if (newProvider.provider_type === 'deepseek') {
+        configFields.deepseek_api_key =
+          config.DEEPSEEK_API_KEY ||
+          config.deepseek_api_key ||
+          config.api_key ||
+          ''
+
+        initialConfigSnapshot.value = getCurrentConfigFieldValues()
+        configChangedSinceValidation.value = true
+        isValidated.value = false
+      } else if (newProvider.provider_type === 'yunce') {
+        configFields.yunce_username =
+          config.YUNCE_USERNAME ||
+          config.yunce_username ||
+          config.username ||
+          ''
+        configFields.yunce_password =
+          config.YUNCE_PASSWORD ||
+          config.yunce_password ||
+          config.password ||
+          ''
+        configFields.yunce_api_key =
+          config.YUNCE_API_KEY ||
+          config.yunce_api_key ||
+          config.api_key ||
+          ''
+
+        initialConfigSnapshot.value = getCurrentConfigFieldValues()
+        configChangedSinceValidation.value = true
+        isValidated.value = false
       }
 
       // Load alert rule if exists and showAlertRule is true
@@ -2096,7 +2247,9 @@ watch(
         azure: t('cloudBilling.providers.types.azure'),
         volcengine: t('cloudBilling.providers.types.volcengine'),
         baidu: t('cloudBilling.providers.types.baidu'),
-        zhipu: t('cloudBilling.providers.types.zhipu')
+        zhipu: t('cloudBilling.providers.types.zhipu'),
+        deepseek: t('cloudBilling.providers.types.deepseek'),
+        yunce: t('cloudBilling.providers.types.yunce')
       }
       Object.assign(formData, {
         name: '',
@@ -2135,7 +2288,11 @@ watch(
         baidu_access_key_id: '',
         baidu_secret_access_key: '',
         zhipu_username: '',
-        zhipu_password: ''
+        zhipu_password: '',
+        deepseek_api_key: '',
+        yunce_username: '',
+        yunce_password: '',
+        yunce_api_key: ''
       })
       existingAlertRuleId.value = null
       alertRuleData.is_active = false
@@ -2433,6 +2590,30 @@ const buildConfig = () => {
     if (preservedMaxRetries) {
       config.ZHIPU_MAX_RETRIES = preservedMaxRetries
     }
+  } else if (formData.provider_type === 'deepseek') {
+    if (configFields.deepseek_api_key) {
+      config.DEEPSEEK_API_KEY = configFields.deepseek_api_key
+    }
+    const preservedTimeout =
+      existingConfig.DEEPSEEK_TIMEOUT || existingConfig.timeout
+    if (preservedTimeout) {
+      config.DEEPSEEK_TIMEOUT = preservedTimeout
+    }
+  } else if (formData.provider_type === 'yunce') {
+    if (configFields.yunce_username) {
+      config.YUNCE_USERNAME = configFields.yunce_username
+    }
+    if (configFields.yunce_password) {
+      config.YUNCE_PASSWORD = configFields.yunce_password
+    }
+    if (configFields.yunce_api_key) {
+      config.YUNCE_API_KEY = configFields.yunce_api_key
+    }
+    const preservedTimeout =
+      existingConfig.YUNCE_TIMEOUT || existingConfig.timeout
+    if (preservedTimeout) {
+      config.YUNCE_TIMEOUT = preservedTimeout
+    }
   }
   const raw = (selectedChannelValue.value || '').trim()
   if (raw) {
@@ -2563,7 +2744,6 @@ const handleSubmit = async () => {
   }
 
   saving.value = true
-  let requestPayload = null
   try {
     // Auto-generate display_name and name if not editing existing provider
     if (!props.provider) {
@@ -2573,7 +2753,9 @@ const handleSubmit = async () => {
         'huawei-intl': t('cloudBilling.providers.types.huaweiIntl'),
         tencentcloud: t('cloudBilling.providers.types.tencentcloud'),
         alibaba: t('cloudBilling.providers.types.alibaba'),
-        azure: t('cloudBilling.providers.types.azure')
+        azure: t('cloudBilling.providers.types.azure'),
+        deepseek: t('cloudBilling.providers.types.deepseek'),
+        yunce: t('cloudBilling.providers.types.yunce')
       }
       if (!formData.display_name) {
         formData.display_name =
@@ -2607,7 +2789,6 @@ const handleSubmit = async () => {
       data.recharge_info = formData.recharge_info.trim()
     }
     data.tags = [...formData.tags]
-    requestPayload = { ...data }
 
     let providerId
     let successMessage
@@ -2690,7 +2871,6 @@ const handleSubmit = async () => {
   } catch (error) {
     console.error('Failed to save provider:', error)
     console.error('Error response data:', error.response?.data)
-    console.error('Request data sent:', requestPayload)
 
     // Show more detailed error message
     let errorMessage = t('cloudBilling.providers.saveError')

@@ -301,6 +301,48 @@ class ProviderService:
                 normalized["timeout"] = int(timeout)
             if max_retries is not None and max_retries != "":
                 normalized["max_retries"] = int(max_retries)
+        elif provider_type == "deepseek":
+            api_key = (
+                config_dict.get("DEEPSEEK_API_KEY")
+                or config_dict.get("deepseek_api_key")
+                or config_dict.get("api_key")
+            )
+            timeout = (
+                config_dict.get("DEEPSEEK_TIMEOUT")
+                or config_dict.get("timeout")
+            )
+            if api_key:
+                normalized["api_key"] = api_key
+            if timeout is not None and timeout != "":
+                normalized["timeout"] = int(timeout)
+        elif provider_type == "yunce":
+            username = (
+                config_dict.get("YUNCE_USERNAME")
+                or config_dict.get("yunce_username")
+                or config_dict.get("username")
+            )
+            password = (
+                config_dict.get("YUNCE_PASSWORD")
+                or config_dict.get("yunce_password")
+                or config_dict.get("password")
+            )
+            api_key = (
+                config_dict.get("YUNCE_API_KEY")
+                or config_dict.get("yunce_api_key")
+                or config_dict.get("api_key")
+            )
+            timeout = (
+                config_dict.get("YUNCE_TIMEOUT")
+                or config_dict.get("timeout")
+            )
+            if username:
+                normalized["username"] = username
+            if password:
+                normalized["password"] = password
+            if api_key:
+                normalized["api_key"] = api_key
+            if timeout is not None and timeout != "":
+                normalized["timeout"] = int(timeout)
         else:
             # For unknown types, pass through as-is
             normalized = config_dict.copy()
@@ -786,6 +828,44 @@ class ProviderService:
                 return {
                     "error_code": "zhipu_no_permission",
                     "error_type": "permission_error",
+                    "required_permissions": [],
+                }
+        elif provider_type == "deepseek":
+            if "401" in error_lower or "unauthorized" in error_lower:
+                return {
+                    "error_code": "deepseek_invalid_api_key",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "403" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "deepseek_no_permission",
+                    "error_type": "permission_error",
+                    "required_permissions": [],
+                }
+            if "429" in error_lower or "rate limit" in error_lower:
+                return {
+                    "error_code": "deepseek_rate_limit",
+                    "error_type": "service_error",
+                    "required_permissions": [],
+                }
+        elif provider_type == "yunce":
+            if "401" in error_lower or "unauthorized" in error_lower:
+                return {
+                    "error_code": "yunce_invalid_credentials",
+                    "error_type": "credential_error",
+                    "required_permissions": [],
+                }
+            if "403" in error_lower or "forbidden" in error_lower:
+                return {
+                    "error_code": "yunce_no_permission",
+                    "error_type": "permission_error",
+                    "required_permissions": [],
+                }
+            if "429" in error_lower or "rate limit" in error_lower:
+                return {
+                    "error_code": "yunce_rate_limit",
+                    "error_type": "service_error",
                     "required_permissions": [],
                 }
 

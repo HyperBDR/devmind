@@ -31,6 +31,8 @@ class CloudProvider(models.Model):
         ("volcengine", "Volcengine"),
         ("baidu", "Baidu AI Cloud"),
         ("zhipu", "Zhipu AI"),
+        ("deepseek", "DeepSeek"),
+        ("yunce", "Yunce"),
     ]
 
     name = models.CharField(

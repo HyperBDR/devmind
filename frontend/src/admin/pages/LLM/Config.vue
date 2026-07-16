@@ -940,6 +940,7 @@
               variant="primary"
               :loading="formSaving"
               :disabled="submitDisabled"
+              class="min-w-24 shadow-sm"
             >
               {{ editingId ? t('common.save') : t('llm.config.addConfig') }}
             </BaseButton>

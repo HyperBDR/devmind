@@ -10,7 +10,9 @@ const PROVIDER_TYPE_LABEL_KEYS = {
   azure: 'cloudBilling.providers.types.azure',
   volcengine: 'cloudBilling.providers.types.volcengine',
   baidu: 'cloudBilling.providers.types.baidu',
-  zhipu: 'cloudBilling.providers.types.zhipu'
+  zhipu: 'cloudBilling.providers.types.zhipu',
+  deepseek: 'cloudBilling.providers.types.deepseek',
+  yunce: 'cloudBilling.providers.types.yunce'
 }
 
 const LOCALE_MESSAGES = [en, zhCN]

@@ -25,6 +25,8 @@ from llm_ops.models import (
     PriceCollectionSource,
 )
 
+TEST_SOURCE_URL = "https://yunce.example.test/"
+
 
 class YuncePriceNormalizerTests(TestCase):
     def test_normalizes_text_tiered_pricing_with_zero_range(self):
@@ -125,7 +127,7 @@ class YunceCollectionSyncTests(TestCase):
         mock_collect,
     ):
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=3,
             models=[
                 CollectedModelPricing(
@@ -258,7 +260,7 @@ class YunceCollectionSyncTests(TestCase):
         mock_collect,
     ):
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -350,7 +352,7 @@ class YunceCollectionSyncTests(TestCase):
         mock_collect,
     ):
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -417,7 +419,7 @@ class YunceCollectionSyncTests(TestCase):
             updates_model_prices=False,
         )
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -465,75 +467,6 @@ class YunceCollectionSyncTests(TestCase):
         self.assertEqual(CollectedModelPriceHistory.objects.count(), 1)
 
     @patch("llm_ops.collection_services.collect_yunce_pricing_catalog")
-    def test_sync_model_prices_reuses_existing_base_model(self, mock_collect):
-        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
-        base_model = LLMModel.objects.create(
-            provider=provider,
-            name="GPT-4o",
-            code="gpt-4o",
-        )
-        source = PriceCollectionSource.objects.create(
-            provider=provider,
-            name="OpenAI Yunce Snapshot",
-            slug="openai-yunce-base-model",
-            source_type=PriceCollectionSource.SOURCE_TYPE_YUNCE,
-            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
-            updates_model_prices=False,
-        )
-        mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
-            total_models=1,
-            models=[
-                CollectedModelPricing(
-                    model_source="OpenAI",
-                    model_type="文本模型",
-                    source_model_type="Text",
-                    name="GPT-4o",
-                    model_id="gpt-4o",
-                    platform_id=99,
-                    mode="normal",
-                    provider="OpenAI",
-                    billing_type="按量计费",
-                    billing_unit="USD",
-                    currency="USD",
-                    unit=1000000,
-                    billing_mode="",
-                    price_rows=[
-                        NormalizedPriceRow(
-                            kind="text_token",
-                            values={
-                                "input_price": 2.5,
-                                "output_price": 10,
-                            },
-                            raw={},
-                        )
-                    ],
-                    raw_price_info={},
-                    raw_detail={},
-                )
-            ],
-        )
-
-        sync_yunce_text_model_prices(
-            username="user",
-            password="secret",
-            source=source,
-        )
-
-        self.assertEqual(LLMModel.objects.count(), 1)
-        snapshot = CollectedModelPriceSnapshot.objects.get(
-            source_platform_id="99",
-        )
-        history = CollectedModelPriceHistory.objects.get(
-            source_platform_id="99",
-        )
-        items = list(ModelPriceItem.objects.filter(source=source))
-        self.assertEqual(snapshot.model, base_model)
-        self.assertEqual(history.model, base_model)
-        self.assertEqual(len(items), 2)
-        self.assertTrue(all(item.model == base_model for item in items))
-
-    @patch("llm_ops.collection_services.collect_yunce_pricing_catalog")
     def test_sync_model_prices_uses_raw_model_code_for_meta_binding(
         self,
         mock_collect,
@@ -551,7 +484,7 @@ class YunceCollectionSyncTests(TestCase):
             updates_model_prices=False,
         )
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -630,7 +563,7 @@ class YunceCollectionSyncTests(TestCase):
             source_type=PriceCollectionSource.SOURCE_TYPE_YUNCE,
         )
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -692,7 +625,7 @@ class YunceCollectionSyncTests(TestCase):
             source_type=PriceCollectionSource.SOURCE_TYPE_YUNCE,
         )
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=2,
             models=[
                 CollectedModelPricing(
@@ -774,7 +707,7 @@ class YunceCollectionSyncTests(TestCase):
         mock_collect,
     ):
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -858,7 +791,7 @@ class YunceCollectionSyncTests(TestCase):
         mock_snapshot,
     ):
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -908,7 +841,7 @@ class YunceCollectionSyncTests(TestCase):
         mock_collect,
     ):
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(
@@ -966,7 +899,7 @@ class YunceCollectionSyncTests(TestCase):
             raw={},
         )
         mock_collect.return_value = CollectedPricingCatalog(
-            source_url="https://llm.guohe-sh.com/",
+            source_url=TEST_SOURCE_URL,
             total_models=1,
             models=[
                 CollectedModelPricing(

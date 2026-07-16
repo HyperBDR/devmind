@@ -1,21 +1,13 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
   buildQuickPrompts,
-  selectFollowUpQuestions,
+  resolveAssistantQuestionGroups,
+  resolveQuickPromptLimit,
   splitFollowUpQuestions
 } from '../src/utils/aiSuggestions.js'
-
-const assistantSection = readFileSync(
-  new URL('../src/components/data-ops/AiAssistantSection.vue', import.meta.url),
-  'utf8'
-)
-const aiMessage = readFileSync(
-  new URL('../src/components/data-ops/DataOpsAiMessage.vue', import.meta.url),
-  'utf8'
-)
+import { relativizeSameOriginUrls } from '../src/utils/markdownLinks.js'
 
 test('extracts clickable next-round questions from an AI answer', () => {
   const result = splitFollowUpQuestions(`经营风险总体可控。
@@ -56,24 +48,6 @@ test('keeps the full answer when it has no suggestion marker', () => {
   })
 })
 
-test('selects fallback suggestions from the matching prompt group', () => {
-  const groups = [
-    {
-      key: 'daily_review',
-      questions: ['今天有哪些风险？', '整体经营健康度如何？']
-    },
-    {
-      key: 'pipeline',
-      questions: ['哪些立项最值得推进？', 'Pipeline 转化卡在哪里？']
-    }
-  ]
-
-  assert.deepEqual(selectFollowUpQuestions('请分析 Pipeline 转化', groups), [
-    '哪些立项最值得推进？',
-    'Pipeline 转化卡在哪里？'
-  ])
-})
-
 test('balances preset prompts across business question groups', () => {
   const prompts = buildQuickPrompts(
     [
@@ -90,18 +64,61 @@ test('balances preset prompts across business question groups', () => {
   )
 })
 
-test('renders categorized presets and direct-send follow-up actions', () => {
-  assert.match(assistantSection, /prompt\.groupTitle/)
-  assert.match(assistantSection, /@click="\$emit\('ask', prompt\.question\)"/)
-  assert.match(assistantSection, /:fallback-suggestions="/)
-  assert.match(aiMessage, /dataOps\.ai\.followUpsTitle/)
-  assert.match(aiMessage, /@click="\$emit\('ask', question\)"/)
-  assert.match(aiMessage, /status\.value === 'done'/)
+test('uses app-owned question groups when no locale override exists', () => {
+  const groups = resolveAssistantQuestionGroups(
+    [
+      {
+        key: 'operations',
+        title: '运营待办',
+        questions: ['哪些运营模型需要处理？']
+      }
+    ],
+    {}
+  )
+
+  assert.deepEqual(groups, [
+    {
+      key: 'operations',
+      title: '运营待办',
+      questions: ['哪些运营模型需要处理？']
+    }
+  ])
 })
 
-test('opens an empty conversation at the top of its prompt list', () => {
-  assert.match(
-    assistantSection,
-    /messagesEl\.value\.scrollTop\s*=\s*isEmptyConversation\.value\s*\?\s*0/
+test('prefers localized question groups for matching app group keys', () => {
+  const groups = resolveAssistantQuestionGroups(
+    [{ key: 'daily_review', title: 'Backend', questions: ['Backend?'] }],
+    {
+      daily_review: {
+        title: 'Localized',
+        questions: ['Localized?']
+      }
+    }
+  )
+
+  assert.equal(groups[0].title, 'Localized')
+  assert.deepEqual(groups[0].questions, ['Localized?'])
+})
+
+test('uses an app-owned quick question limit with safe bounds', () => {
+  assert.equal(resolveQuickPromptLimit(8), 8)
+  assert.equal(resolveQuickPromptLimit(99), 12)
+  assert.equal(resolveQuickPromptLimit('invalid'), 6)
+})
+
+test('converts same-origin assistant URLs to relative paths', () => {
+  const content = [
+    '[进入工作台](http://localhost:8000/llm-ops?section=reseller)',
+    '当前页：http://localhost:8000/llm-ops?section=monitor',
+    '[外部文档](https://example.com/docs)'
+  ].join('\n')
+
+  assert.equal(
+    relativizeSameOriginUrls(content, 'http://localhost:8000'),
+    [
+      '[进入工作台](/llm-ops?section=reseller)',
+      '当前页：/llm-ops?section=monitor',
+      '[外部文档](https://example.com/docs)'
+    ].join('\n')
   )
 })

@@ -1,6 +1,8 @@
 <template>
   <AppLayout :show-sidebar="false" :full-bleed="true">
-    <div class="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 lg:flex-row">
+    <div
+      class="flex h-full min-h-0 flex-col bg-slate-50 text-slate-900 lg:flex-row"
+    >
       <DataOpsSidebar
         :active-section="activeSection"
         :nav-groups="navGroups"
@@ -21,10 +23,7 @@
             @refresh="refreshCurrentSection"
           />
 
-          <SyncFailureDetails
-            v-if="syncFailure"
-            :failure="syncFailure"
-          />
+          <SyncFailureDetails v-if="syncFailure" :failure="syncFailure" />
 
           <section
             v-else-if="error"
@@ -132,24 +131,8 @@
               @trigger="triggerConfigSync"
             />
           </template>
-
         </div>
       </main>
-
-      <AiAssistantSection
-        v-model:input="aiInput"
-        :active-history-id="aiActiveHistoryId"
-        :context="aiContext"
-        :history="aiHistory"
-        :loading="aiLoading"
-        :messages="aiMessages"
-        @ask="askAiQuestion"
-        @delete-history="deleteAiHistoryItem"
-        @new-chat="startNewAiConversation"
-        @select-history="selectAiHistoryItem"
-        @send="sendAiMessage"
-        @stop="stopAiStream"
-      />
     </div>
   </AppLayout>
 </template>
@@ -159,7 +142,6 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
-import AiAssistantSection from '@/components/data-ops/AiAssistantSection.vue'
 import CollectionConfigSection from '@/components/data-ops/CollectionConfigSection.vue'
 import ContractsSection from '@/components/data-ops/ContractsSection.vue'
 import DataOpsHeader from '@/components/data-ops/DataOpsHeader.vue'
@@ -174,7 +156,7 @@ import SyncSection from '@/components/data-ops/SyncSection.vue'
 import {
   formatAmount,
   formatDateTime,
-  useDataOpsConsole,
+  useDataOpsConsole
 } from '@/composables/useDataOpsConsole'
 import { useUserStore } from '@/store/user'
 
@@ -182,13 +164,6 @@ const activeSection = ref('executive')
 const userStore = useUserStore()
 const { locale, t } = useI18n()
 const {
-  aiActiveHistoryId,
-  aiContext,
-  aiHistory,
-  aiInput,
-  aiLoading,
-  aiMessages,
-  askAiQuestion,
   collectionConfigs,
   contractFilterOptions,
   contractFilters,
@@ -221,7 +196,6 @@ const {
   refreshActive,
   refreshFromFeishu,
   risks,
-  deleteAiHistoryItem,
   runConfigPreflight,
   runPreflight,
   salesFilters,
@@ -229,13 +203,9 @@ const {
   salesRecords,
   salesTotal,
   saveGlobalConfig,
-  selectAiHistoryItem,
-  sendAiMessage,
   setContractPage,
   setSalesPage,
   summary,
-  startNewAiConversation,
-  stopAiStream,
   syncBannerClass,
   syncBannerText,
   syncBannerTitle,
@@ -246,7 +216,7 @@ const {
   triggerConfigSync,
   triggerFullSync,
   triggerIncrementalSync,
-  updateGlobalConfigField,
+  updateGlobalConfigField
 } = useDataOpsConsole()
 
 const canManageSync = computed(
@@ -284,27 +254,27 @@ const navGroups = computed(() => {
     {
       key: 'business',
       label: t('dataOps.nav.groups.business'),
-      items: ['executive', 'pipeline', 'contracts', 'sales'],
+      items: ['executive', 'pipeline', 'contracts', 'sales']
     },
     {
       key: 'global-config',
       label: t('dataOps.nav.groups.global'),
-      items: ['sync', 'config'],
-    },
+      items: ['sync', 'config']
+    }
   ]
   const visibleItems = new Map(navItems.value.map((item) => [item.key, item]))
   return grouped
     .map((group) => ({
       ...group,
-      items: group.items
-        .map((key) => visibleItems.get(key))
-        .filter(Boolean),
+      items: group.items.map((key) => visibleItems.get(key)).filter(Boolean)
     }))
     .filter((group) => group.items.length)
 })
 
 const activeNav = computed(() =>
-  normalizeActiveNav(navItems.value.find((item) => item.key === activeSection.value))
+  normalizeActiveNav(
+    navItems.value.find((item) => item.key === activeSection.value)
+  )
 )
 
 const contractColumns = computed(() => [
@@ -377,10 +347,7 @@ function normalizeActiveNav(item) {
 
 async function refreshCurrentSection() {
   if (canManageSync.value) {
-    await refreshFromFeishu(
-      activeSection.value,
-      canManageSync.value
-    )
+    await refreshFromFeishu(activeSection.value, canManageSync.value)
     return
   }
   await refreshActive(activeSection.value, false)

@@ -15,6 +15,8 @@ import bash from 'highlight.js/lib/languages/bash'
 import json from 'highlight.js/lib/languages/json'
 import xml from 'highlight.js/lib/languages/xml'
 
+import { relativizeSameOriginUrls } from '@/utils/markdownLinks'
+
 // Register languages
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('python', python)
@@ -30,6 +32,10 @@ const props = defineProps({
   enableHighlight: {
     type: Boolean,
     default: true
+  },
+  relativeInternalLinks: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -54,6 +60,9 @@ const renderedContent = computed(() => {
 
   try {
     let markdown = props.content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+    if (props.relativeInternalLinks) {
+      markdown = relativizeSameOriginUrls(markdown, window.location.origin)
+    }
 
     // Convert relative image paths to absolute URLs
     // Always use local HTTP service, never object storage URLs
@@ -77,14 +86,14 @@ const renderedContent = computed(() => {
 
           // Try pattern: /admin/articles/{article_id}/images/{filename}
           const adminMatch = trimmedPath.match(
-            /\/admin\/articles\/([^\/]+)\/images\/([^\/]+)$/
+            /\/admin\/articles\/([^/]+)\/images\/([^/]+)$/
           )
           if (adminMatch) {
             ;[, articleId, filename] = adminMatch
           } else {
             // Try pattern: /media/articles/{article_id}/{filename}
             const mediaMatch = trimmedPath.match(
-              /\/media\/articles\/([^\/]+)\/([^\/]+)$/
+              /\/media\/articles\/([^/]+)\/([^/]+)$/
             )
             if (mediaMatch) {
               ;[, articleId, filename] = mediaMatch
@@ -156,14 +165,14 @@ const renderedContent = computed(() => {
 
           // Try pattern: /admin/articles/{article_id}/images/{filename}
           const adminMatch = trimmedSrc.match(
-            /\/admin\/articles\/([^\/]+)\/images\/([^\/]+)$/
+            /\/admin\/articles\/([^/]+)\/images\/([^/]+)$/
           )
           if (adminMatch) {
             ;[, articleId, filename] = adminMatch
           } else {
             // Try pattern: /media/articles/{article_id}/{filename}
             const mediaMatch = trimmedSrc.match(
-              /\/media\/articles\/([^\/]+)\/([^\/]+)$/
+              /\/media\/articles\/([^/]+)\/([^/]+)$/
             )
             if (mediaMatch) {
               ;[, articleId, filename] = mediaMatch

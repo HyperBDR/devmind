@@ -86,13 +86,21 @@ const routes = [
     path: '/sals/dashboard',
     name: 'SalesDashboard',
     component: () => import('@/pages/Sales/SalesDashboard.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'sales_work_orders' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'sales_work_orders',
+      appKey: 'sals'
+    }
   },
   {
     path: '/hyperbdr-dashboard',
     name: 'HyperBRDDashboard',
     component: () => import('@/pages/HyperBDRDashboard.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'hyperbdr_dashboard' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'hyperbdr_dashboard',
+      appKey: 'hyperbdr_dashboard'
+    }
   },
   {
     path: '/cloud-billing',
@@ -102,37 +110,61 @@ const routes = [
     path: '/cloud-billing/billing',
     name: 'CloudBillingBilling',
     component: () => import('@/pages/CloudBilling/Billing.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'cloud_billing'
+    }
   },
   {
     path: '/llm-ops',
     name: 'LLMOps',
     component: () => import('@/pages/LLMOps.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'llm_ops' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'llm_ops',
+      appKey: 'llm_ops'
+    }
   },
   {
     path: '/data-ops',
     name: 'DataOps',
     component: () => import('@/pages/DataOps.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'data_ops' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'data_ops',
+      appKey: 'data_ops'
+    }
   },
   {
     path: '/cloud-billing/tasks',
     name: 'CloudBillingTasks',
     component: () => import('@/pages/CloudBilling/Tasks.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'cloud_billing'
+    }
   },
   {
     path: '/cloud-billing/alerts',
     name: 'CloudBillingAlerts',
     component: () => import('@/pages/CloudBilling/Alerts/Records.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'cloud_billing'
+    }
   },
   {
     path: '/cloud-billing/settings',
     name: 'CloudBillingSettings',
     component: () => import('@/pages/CloudBilling/Settings.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'cloud_billing'
+    }
   },
   {
     path: '/data-collector',
@@ -142,31 +174,51 @@ const routes = [
     path: '/data-collector/stats',
     name: 'DataCollectorStats',
     component: () => import('@/pages/DataCollector/Stats.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'data_collector'
+    }
   },
   {
     path: '/data-collector/records',
     name: 'DataCollectorRecords',
     component: () => import('@/pages/DataCollector/Records.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'data_collector'
+    }
   },
   {
     path: '/data-collector/records/:uuid',
     name: 'DataCollectorRecordDetail',
     component: () => import('@/pages/DataCollector/RecordDetail.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'data_collector'
+    }
   },
   {
     path: '/data-collector/tasks',
     name: 'DataCollectorTasks',
     component: () => import('@/pages/DataCollector/Tasks.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'data_collector'
+    }
   },
   {
     path: '/data-collector/settings',
     name: 'DataCollectorSettings',
     component: () => import('@/pages/DataCollector/Settings.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'operations_console' }
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'operations_console',
+      appKey: 'data_collector'
+    }
   },
   {
     path: '/hyperbdr-monitor/:pathMatch(.*)*',

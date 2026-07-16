@@ -405,7 +405,7 @@
 <script setup>
 import '@/components/llm-ops/providerManagement.css'
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useProviderSourceRows } from '@/composables/useProviderSourceRows'
@@ -423,6 +423,10 @@ import {
 } from '@/utils/llmOpsPagination'
 
 const props = defineProps({
+  focusSourceId: {
+    type: [Number, String],
+    default: null
+  },
   providers: {
     type: Array,
     required: true
@@ -485,6 +489,7 @@ const selectedProviderPage = ref(1)
 const selectedProviderPageSize = ref(10)
 const selectedProviderTotal = ref(0)
 const selectedProviderPriceItems = ref([])
+const openedFocusSourceId = ref(null)
 const localPriceEntryMetaModels = ref([])
 const localPriceEntryModels = ref([])
 
@@ -516,6 +521,23 @@ const {
 
 const officialResetBusy = computed(
   () => officialResetPreviewing.value || officialResetExecuting.value
+)
+
+watch(
+  [() => props.focusSourceId, filteredSourceProviderRows],
+  ([sourceId, rows]) => {
+    if (!sourceId || String(openedFocusSourceId.value) === String(sourceId)) {
+      return
+    }
+    const provider = rows.find(
+      (row) => String(row.primary_source?.id) === String(sourceId)
+    )
+    if (!provider) return
+    openedFocusSourceId.value = sourceId
+    sourceSearch.value = provider.primary_source?.name || provider.name || ''
+    openSourceDetail(provider)
+  },
+  { immediate: true }
 )
 
 const officialResetPreviewItems = computed(() => {
