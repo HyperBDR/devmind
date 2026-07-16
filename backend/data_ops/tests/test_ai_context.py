@@ -4,10 +4,17 @@ import pytest
 
 from data_ops.models import Contract, DomesticLedger, SalesRecord
 from data_ops.services.ai import (
+    REASONING_ARCHITECTURE_SKILL_KEY,
     SYSTEM_PROMPT,
+    _build_final_answer_messages,
     _build_messages,
+    _configured_max_tokens,
     _prepare_messages_with_data_ops_tools,
+    _recognize_intent,
+    _select_analysis_skill,
+    get_data_ops_ai_assistant_profile,
     get_ai_context_metrics,
+    stream_chat_with_data_ops_assistant,
 )
 
 
@@ -92,6 +99,7 @@ def test_ai_context_exposes_data_ops_assistant_question_groups():
         "pipeline_conversion_diagnosis",
         "overseas_business_review",
         "data_quality_guard",
+        "reasoning_architecture_diagnosis",
     }
     assert expected_skill_keys.issubset(
         {skill["key"] for skill in assistant["skills"]},
@@ -121,6 +129,99 @@ def test_ai_prompt_includes_data_ops_capabilities_and_guidance():
     assert "SQL" not in prompt_text
     assert "建议追问：" in prompt_text
     assert "2 至 3 个" in prompt_text
+    assert "图表不是默认输出" in prompt_text
+    assert "只有图表能比文字或表格更清楚" in prompt_text
+    assert '"type": "bar | line | pie | doughnut"' in prompt_text
+    assert "不同币种未统一换算" in prompt_text
+    assert "最多 1 至 2 张" in prompt_text
+    assert "放在建议追问之前" in prompt_text
+    assert "Do not provide source code" in prompt_text
+    assert "operational findings" in prompt_text
+
+
+def test_ai_messages_exclude_duplicate_ui_only_assistant_context():
+    messages = _build_messages(
+        message="分析 Pipeline 风险",
+        history=[],
+        context={
+            "assistant": get_data_ops_ai_assistant_profile(),
+            "contract": {"contract_count": 2},
+        },
+    )
+    prompt_text = "\n".join(item["content"] for item in messages)
+
+    assert prompt_text.count('"capabilities"') == 1
+    assert '"question_groups"' not in prompt_text
+    assert '"query_tools"' not in prompt_text
+    assert '"contract_count": 2' in prompt_text
+
+
+def test_answer_limit_uses_the_selected_model_configuration():
+    assert _configured_max_tokens({"config": {"max_tokens": 60000}}) == 60000
+    assert _configured_max_tokens({"config": {}}) == 1600
+
+
+def test_analysis_skill_router_only_selects_complex_diagnosis():
+    assert (
+        _select_analysis_skill("为什么回款风险持续集中在这些客户？")
+        == REASONING_ARCHITECTURE_SKILL_KEY
+    )
+    assert (
+        _select_analysis_skill("从经营架构看 Pipeline 卡在哪里？")
+        == REASONING_ARCHITECTURE_SKILL_KEY
+    )
+    assert _select_analysis_skill("列出未来 30 天到期合同") is None
+
+
+def test_conversation_router_uses_only_the_latest_user_question():
+    intent = _recognize_intent(
+        "再按负责人分组呢？",
+        history=[
+            {"role": "user", "content": "哪些客户需要优先催收？"},
+            {"role": "assistant", "content": "这里是回款分析结果。"},
+        ],
+    )
+
+    assert intent.key == "cash_collection"
+    assert intent.skill_key == "cash_collection_risk"
+
+
+def test_conversation_router_drops_root_cause_mode_on_topic_switch():
+    intent = _recognize_intent(
+        "未来 60 天有哪些 License 到期？",
+        history=[
+            {
+                "role": "user",
+                "content": "为什么回款风险持续集中在这些客户？",
+            },
+        ],
+    )
+
+    assert intent.key == "renewal_expiry"
+    assert intent.analysis_skill_key is None
+
+
+def test_final_answer_injects_selected_reasoning_framework():
+    messages = _build_final_answer_messages(
+        [{"role": "user", "content": "为什么回款持续下降？"}],
+        analysis_skill_key=REASONING_ARCHITECTURE_SKILL_KEY,
+    )
+    system_text = "\n".join(
+        item["content"] for item in messages if item["role"] == "system"
+    )
+
+    assert "经营根因诊断" in system_text
+    assert "根因假设" in system_text
+    assert "证据不足" in system_text
+    assert "不要输出内部思维链" in system_text
+
+    plain_messages = _build_final_answer_messages(
+        [{"role": "user", "content": "列出未来 30 天到期合同"}],
+    )
+    plain_system_text = "\n".join(
+        item["content"] for item in plain_messages if item["role"] == "system"
+    )
+    assert "经营根因诊断" not in plain_system_text
 
 
 @pytest.mark.django_db
@@ -131,7 +232,7 @@ def test_ai_tool_loop_rejects_raw_sql_tool_call(
         source_app_token="app",
         source_table_id="table",
         source_record_id="contract",
-        customer_name="Acme",
+        customer_name="Example Customer",
         currency="CNY",
         total_amount=Decimal("100.00"),
     )
@@ -259,6 +360,7 @@ def test_streaming_tool_planner_defers_final_answer(monkeypatch):
         preferred_config_uuid="",
         user_id=None,
         defer_final_answer=True,
+        analysis_skill_key=REASONING_ARCHITECTURE_SKILL_KEY,
     )
     messages, content, usage, _settings, _events = result
 
@@ -275,8 +377,67 @@ def test_streaming_tool_planner_defers_final_answer(monkeypatch):
         for item in messages
         if item["role"] == "system"
     )
+    assert any(
+        "经营根因诊断" in item["content"]
+        for item in messages
+        if item["role"] == "system"
+    )
     roles = [item["role"] for item in messages]
     first_non_system = next(
         index for index, role in enumerate(roles) if role != "system"
     )
     assert "system" not in roles[first_non_system:]
+
+
+def test_stream_chat_exposes_selected_reasoning_skill(monkeypatch):
+    captured = {}
+
+    def fake_context(data_sources=None):
+        captured["data_sources"] = data_sources
+        return {
+            "contract": {"contract_count": 2},
+            "ledger": {"outstanding_by_currency": []},
+            "oversea_project": {"project_count": 0},
+        }
+
+    monkeypatch.setattr(
+        "data_ops.services.ai.get_ai_context_metrics",
+        fake_context,
+    )
+
+    def fake_prepare_messages(**kwargs):
+        captured.update(kwargs)
+        return (
+            [{"role": "user", "content": "分析"}],
+            "",
+            {},
+            {"source": "test"},
+            [],
+        )
+
+    monkeypatch.setattr(
+        "data_ops.services.ai._prepare_messages_with_data_ops_tools",
+        fake_prepare_messages,
+    )
+    monkeypatch.setattr(
+        "data_ops.services.ai._stream_litellm",
+        lambda **kwargs: iter([{"type": "done", "ok": True}]),
+    )
+
+    events = list(
+        stream_chat_with_data_ops_assistant(
+            message="为什么回款风险持续集中在这些客户？",
+        )
+    )
+
+    reasoning_event = next(
+        item for item in events if item.get("stage") == "reasoning"
+    )
+    assert reasoning_event["metadata"]["skill"] == (
+        REASONING_ARCHITECTURE_SKILL_KEY
+    )
+    assert captured["analysis_skill_key"] == (REASONING_ARCHITECTURE_SKILL_KEY)
+    assert captured["data_sources"] == (
+        "contracts",
+        "domestic_ledgers",
+    )

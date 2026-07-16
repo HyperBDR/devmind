@@ -178,6 +178,7 @@
     />
     <ChannelModelDrawer
       :channel="selectedChannelForModels"
+      :initial-model-id="focusModelId"
       :providers="providers"
       :meta-models="metaModels"
       :models="models"
@@ -258,6 +259,10 @@ import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 
 const props = defineProps({
+  focusModelId: {
+    type: [Number, String],
+    default: null
+  },
   channels: {
     type: Array,
     required: true

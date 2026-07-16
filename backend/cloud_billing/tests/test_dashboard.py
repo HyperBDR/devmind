@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from cloud_billing.dashboard import (
+    LLM_PROVIDER_TYPES,
     _build_account_detail,
     _build_accounts,
     _build_currency_breakdown,
@@ -30,6 +31,9 @@ class ExchangeRateInfoTests(SimpleTestCase):
 
 
 class PaymentTypeTests(SimpleTestCase):
+    def test_yunce_is_classified_as_an_llm_provider(self):
+        self.assertIn('yunce', LLM_PROVIDER_TYPES)
+
     def test_code_defined_postpaid_provider_types_take_priority(self):
         aws_provider = SimpleNamespace(provider_type='aws', config={'payment_type': 'prepaid'})
         azure_provider = SimpleNamespace(provider_type='azure', config={})

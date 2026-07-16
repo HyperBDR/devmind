@@ -49,8 +49,8 @@
               :kpi-cards="kpiCards"
               :monitor-model-subtitle="monitorModelSubtitle"
               :monitor-table-rows="monitorTableRows"
-              :operational-channel-count="operationalChannelCount"
               :simulation-status-options="simulationStatusOptions"
+              @navigate-to-section="onNavigateToSection"
               @navigate-to-workspace="onNavigateToWorkspace"
             />
 
@@ -160,6 +160,7 @@
 
             <ModelWorkbenchPanel
               v-else-if="activeSection === 'modelWorkbench'"
+              :focus-model-id="operationTargetModelId"
               :summary="summary"
               :models="models"
               :channels="channels"
@@ -176,6 +177,7 @@
 
             <PriceChangePanel
               v-else-if="activeSection === 'priceChanges'"
+              :focus-model-id="operationTargetModelId"
               :channel-history="channelPriceHistory"
               :listing-history="listingPriceHistory"
               :price-items="modelPriceItems"
@@ -203,6 +205,7 @@
 
             <ProviderManagement
               v-else-if="activeSection === 'providers'"
+              :focus-source-id="operationTargetSourceId"
               :providers="providers"
               :meta-models="metaModels"
               :models="models"
@@ -226,6 +229,7 @@
 
             <ChannelManagement
               v-else-if="activeSection === 'channels'"
+              :focus-model-id="operationTargetModelId"
               :channels="channels"
               :providers="providers"
               :meta-models="metaModels"
@@ -240,6 +244,7 @@
 
             <ReconciliationPanel
               v-else-if="activeSection === 'reconciler'"
+              :focus-model-id="operationTargetModelId"
               :channels="channels"
               :models="models"
               :records="records"
@@ -326,6 +331,7 @@ import {
 } from '@/composables/useLLMOpsNavigation'
 import { useLLMOpsResalePublishing } from '@/composables/useLLMOpsResalePublishing'
 import { errorMessage } from '@/utils/llmOpsPagination'
+import { parseLLMOpsOperationTarget } from '@/utils/llmOpsOperationEntry'
 
 const { showError } = useToast()
 const { t } = useI18n()
@@ -431,16 +437,16 @@ const {
   kpiCards,
   monitorModelSubtitle,
   monitorTableRows,
-  operationalChannelCount,
   simulationStatus,
   simulationStatusOptions
 } = useLLMOpsMonitor({
-  channels,
-  procurementRows,
   summary
 })
 
 const resaleWorkspaceFocusModelId = ref(null)
+const operationTargetModelId = ref(null)
+const operationTargetSourceId = ref(null)
+const operationTargetSection = ref('')
 const resaleWorkspaceFocusAutoListing = ref(false)
 const inlineWorkspacePayload = ref(null)
 const inlineWorkspaceRef = ref(null)
@@ -482,6 +488,16 @@ function onNavigateToWorkspace(payload) {
   activeSection.value = 'reseller'
 }
 
+function onNavigateToSection(target) {
+  const section = typeof target === 'object' ? target.section : target
+  if (!SECTION_KEYS.has(section)) return
+  if (target && typeof target === 'object' && target.modelId) {
+    operationTargetModelId.value = target.modelId
+    operationTargetSection.value = section
+  }
+  activeSection.value = section
+}
+
 function onInlineWorkspaceChange(payload) {
   inlineWorkspacePayload.value = payload
 }
@@ -517,7 +533,9 @@ async function handleInlinePublish() {
 }
 
 function handleRefreshAll() {
-  refreshAll(activeSection.value)
+  return refreshAll(activeSection.value, {
+    modelId: operationTargetModelId.value
+  })
 }
 
 watch(displayCurrency, (currency) => {
@@ -538,12 +556,20 @@ watch(displayCurrency, (currency) => {
 
 watch(activeSection, (section) => {
   if (!SECTION_KEYS.has(section)) return
+  if (section !== operationTargetSection.value) {
+    operationTargetModelId.value = null
+  }
   if (
     DATA_HEAVY_SECTIONS.has(section) &&
     !secondaryDataLoaded.value &&
     !loading.value
   ) {
-    refreshSectionData(section).catch((error) => {
+    refreshSectionData(section, {
+      modelId:
+        section === operationTargetSection.value
+          ? operationTargetModelId.value
+          : null
+    }).catch((error) => {
       showError(errorMessage(error, t('llmOps.dataErrors.loadSection')))
     })
   }
@@ -560,7 +586,39 @@ watch(activeSection, (section) => {
 
 onMounted(() => {
   document.body.classList.add('llm-ops-theme')
-  handleRefreshAll()
+  const operationTarget = parseLLMOpsOperationTarget(window.location.search)
+  if (
+    operationTarget.section === 'reseller' &&
+    operationTarget.modelId !== null
+  ) {
+    resaleWorkspaceFocusModelId.value = operationTarget.modelId
+  }
+  const modelScopedSections = [
+    'channels',
+    'modelWorkbench',
+    'priceChanges',
+    'reconciler'
+  ]
+  if (
+    modelScopedSections.includes(operationTarget.section) &&
+    operationTarget.modelId !== null
+  ) {
+    operationTargetModelId.value = operationTarget.modelId
+    operationTargetSection.value = operationTarget.section
+  }
+  if (
+    operationTarget.section === 'providers' &&
+    operationTarget.sourceId !== null
+  ) {
+    operationTargetSourceId.value = operationTarget.sourceId
+  }
+  handleRefreshAll().then(() => {
+    if (!operationTarget.openPlatformConfig) return
+    const platform = resalePlatforms.value.find(
+      (item) => String(item.id) === String(operationTarget.platformId)
+    )
+    openPlatformModal(platform || agionePlatform.value)
+  })
 })
 
 onBeforeUnmount(() => {

@@ -73,11 +73,11 @@ export function useLLMOpsData() {
   })
   const pointConversion = computed(() => summary.value.point_conversion || null)
 
-  async function refreshAll(section) {
+  async function refreshAll(section, options = {}) {
     loading.value = true
     try {
       await refreshCoreData(section)
-      await refreshSectionData(section)
+      await refreshSectionData(section, options)
     } finally {
       loading.value = false
     }
@@ -89,15 +89,12 @@ export function useLLMOpsData() {
 
   async function refreshCoreData(section) {
     if (section === 'monitor') {
-      const [channelRes, platformRes, summaryRes] = await Promise.all([
-        fetchList(llmOpsApi.listChannels),
+      const [platformRes, summaryRes] = await Promise.all([
         fetchList(llmOpsApi.listResalePlatforms),
         llmOpsApi.getSummary(summaryParams('monitor'))
       ])
-      channels.value = asArray(extract(channelRes))
       resalePlatforms.value = asArray(extract(platformRes))
       summary.value = normalizeSummary(extract(summaryRes))
-      await loadResaleWorkflowConfig()
       return
     }
 
@@ -166,7 +163,7 @@ export function useLLMOpsData() {
     }
   }
 
-  async function refreshSectionData(section) {
+  async function refreshSectionData(section, options = {}) {
     if (!DATA_HEAVY_SECTIONS.has(section)) return
     if (section === 'providers') {
       await refreshProviderManagementData()
@@ -208,7 +205,10 @@ export function useLLMOpsData() {
       return
     }
     if (section === 'priceChanges') {
-      await Promise.all([refreshModelPriceItems(), refreshPriceHistoryData()])
+      await Promise.all([
+        refreshModelPriceItems(),
+        refreshPriceHistoryData(options.modelId)
+      ])
       return
     }
     if (section === 'reconciler') {
@@ -272,12 +272,17 @@ export function useLLMOpsData() {
     )
   }
 
-  async function refreshPriceHistoryData() {
+  async function refreshPriceHistoryData(modelId = null) {
+    const model = Number(modelId)
+    const modelFilter =
+      Number.isInteger(model) && model > 0 ? { model } : {}
     const [channelHistoryData, listingHistoryData] = await Promise.all([
       fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
+        ...modelFilter,
         page_size: PRICE_HISTORY_PAGE_SIZE
       }),
       fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
+        ...modelFilter,
         page_size: PRICE_HISTORY_PAGE_SIZE
       })
     ])

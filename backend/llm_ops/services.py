@@ -2162,6 +2162,10 @@ DECISION_STATUS_NOT_LOWEST_CHANNEL = "not_lowest_channel"
 DECISION_STATUS_UNLISTED = "unlisted"
 DECISION_STATUS_SINGLE_CHANNEL = "single_channel"
 DECISION_STATUS_READY = "ready"
+DECISION_STATUS_MARKET_REFERENCE = "market_reference"
+
+OPERATION_SCOPE_OPERATIONAL = "operational"
+OPERATION_SCOPE_MARKET_REFERENCE = "market_reference"
 
 
 _DECISION_PRIORITY = {
@@ -2173,6 +2177,7 @@ _DECISION_PRIORITY = {
     DECISION_STATUS_UNLISTED: 6,
     DECISION_STATUS_SINGLE_CHANNEL: 7,
     DECISION_STATUS_READY: 8,
+    DECISION_STATUS_MARKET_REFERENCE: 9,
 }
 
 
@@ -2185,6 +2190,7 @@ _DECISION_ACTION = {
     DECISION_STATUS_UNLISTED: "publish_listing",
     DECISION_STATUS_SINGLE_CHANNEL: "add_channel_coverage",
     DECISION_STATUS_READY: "keep",
+    DECISION_STATUS_MARKET_REFERENCE: "view_market_price",
 }
 
 
@@ -2247,6 +2253,7 @@ def compute_model_decision(
     procurement_row,
     current_listing,
     platform,
+    operation_scope=OPERATION_SCOPE_OPERATIONAL,
     data_event_type="updated",
     last_data_event_at=None,
 ):
@@ -2261,6 +2268,9 @@ def compute_model_decision(
         Currently active listing payload for the selected platform.
     platform : ResalePlatform or None
         Selected resale platform used for fee/yield lookup.
+    operation_scope : str
+        ``operational`` for channel/resale decisions or
+        ``market_reference`` for price-only catalog rows.
     data_event_type : str
         ``updated`` | ``collection_failed`` | ``source_disabled`` |
         ``reconciliation_anomaly`` | ``stale``.
@@ -2281,6 +2291,24 @@ def compute_model_decision(
     listing_requires_currency_conversion = bool(
         (current_listing or {}).get("requires_currency_conversion")
     )
+
+    if operation_scope == OPERATION_SCOPE_MARKET_REFERENCE:
+        status = DECISION_STATUS_MARKET_REFERENCE
+        return {
+            "decision_status": status,
+            "decision_action": _DECISION_ACTION[status],
+            "decision_priority": _DECISION_PRIORITY[status],
+            "input_yield": None,
+            "output_yield": None,
+            "data_event_type": data_event_type,
+            "last_data_event_at": (
+                last_data_event_at.isoformat()
+                if last_data_event_at is not None
+                else None
+            ),
+            "is_data_anomaly": data_event_type
+            in DECISION_ANOMALY_EVENT_TYPES,
+        }
 
     if best_channel is None:
         status = DECISION_STATUS_NO_SUPPLY

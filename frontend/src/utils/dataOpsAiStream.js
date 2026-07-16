@@ -33,8 +33,8 @@ export async function readDataOpsSseResponse(response, callbacks = {}) {
 
 export function resolveFinalAiContent(currentContent, finalContent, fallback) {
   const current = sanitizeAiContent(currentContent)
-  if (current) return current
-  return sanitizeAiContent(finalContent) || fallback
+  const final = sanitizeAiContent(finalContent)
+  return final || current || fallback
 }
 
 export function appendAiContent(currentContent, nextContent) {

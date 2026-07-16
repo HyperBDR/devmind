@@ -56,6 +56,16 @@ def _build_provider_mapping():
             "config_class": "ZhipuConfig",
             "provider_class": "ZhipuCloud",
         },
+        "deepseek": {
+            "module": "cloud_billing.clouds.deepseek_provider",
+            "config_class": "DeepSeekConfig",
+            "provider_class": "DeepSeekCloud",
+        },
+        "yunce": {
+            "module": "cloud_billing.clouds.yunce_provider",
+            "config_class": "YunceConfig",
+            "provider_class": "YunceCloud",
+        },
     }
     mapping["tencentcloud"] = {
         "module": "cloud_billing.clouds.tencent_provider",

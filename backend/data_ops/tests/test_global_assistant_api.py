@@ -6,6 +6,7 @@ from django.urls import reverse
 from ai_assistant.contracts import AssistantCapability
 from ai_assistant.models import AssistantConversation, AssistantMessage
 from ai_assistant.registry import capability_registry
+from ai_assistant.suggestions import extract_suggested_questions
 
 
 @pytest.fixture
@@ -190,16 +191,21 @@ def test_message_stream_uses_conversation_app_and_persists_messages(
 
     assert response.status_code == 200
     assert payloads[-1]["type"] == "done"
+    assert payloads[-1]["reply"].startswith("world")
+    assert 2 <= len(extract_suggested_questions(payloads[-1]["reply"])) <= 3
     conversation = AssistantConversation.objects.get(
         uuid=conversation_uuid,
     )
     assert conversation.app_key == "data_ops"
     assert conversation.title == "hello"
-    assert list(
+    stored_messages = list(
         AssistantMessage.objects.filter(
             conversation=conversation,
         ).values_list("role", "content")
-    ) == [("user", "hello"), ("assistant", "world")]
+    )
+    assert stored_messages[0] == ("user", "hello")
+    assert stored_messages[1][0] == "assistant"
+    assert stored_messages[1][1] == payloads[-1]["reply"]
 
 
 @pytest.mark.django_db
@@ -293,6 +299,12 @@ def test_capability_without_stream_handler_uses_global_runtime(
         format="json",
     )
     body = b"".join(response.streaming_content).decode("utf-8")
+    payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in body.splitlines()
+        if line.startswith("data: ")
+    ]
 
     assert response.status_code == 200
-    assert '"reply": "global"' in body
+    assert payloads[-1]["reply"].startswith("global")
+    assert 2 <= len(extract_suggested_questions(payloads[-1]["reply"])) <= 3

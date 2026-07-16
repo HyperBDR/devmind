@@ -10,9 +10,11 @@ nullable with no global fallback.
 ## Objective
 
 Refactor the LLM Ops Monitor overview page into a single
-"模型挂售决策表" worktable. Remove duplicate status views, drop the
-drawer on the overview page, and route row clicks to the Resale
-Publishing Workspace.
+"模型运营决策与价格参考" worktable. Channel and listing actions apply
+only to operational models; other price-catalog models remain visible as
+market references. Remove duplicate status views, drop the drawer on the
+overview page, and route operational row clicks to the Resale Publishing
+Workspace.
 
 ## Root Cause
 
@@ -22,6 +24,10 @@ instead of by operator decisions. Status, action and margin are
 recomputed in multiple components with inconsistent ordering and no
 recommended action. Margin thresholds are global (10%) instead of
 per-platform fee configuration.
+
+The original implementation also treated every active price-catalog model
+as a resale candidate. This made reference-only prices appear as missing
+channel configuration and overwhelmed the real operational queue.
 
 ## Scope
 
@@ -56,6 +62,10 @@ matching `fee_rate` precision (`max_digits=8, decimal_places=4`):
 
 For each model row emit:
 
+- `operation_scope` — `operational` | `market_reference`
+- `scope_reason` — `platform_listing` | `channel_configured` |
+  `platform_excluded` | `price_reference`
+- `reference_price` — source model currency and Input/Output benchmark price
 - `recommended_channel` — `{channel_id, channel_name, currency, input_price_per_million, output_price_per_million, cache_input_price_per_million, estimated_cost}`
 - `current_listing` — `{channel_id, channel_name, currency, retail_input_price_per_million, retail_output_price_per_million, retail_cache_input_price_per_million, is_listed}`
 - `yield_metrics` — `{fee_rate, service_fee_rate, tax_rate, settlement_rate, yield_warning, yield_target, input_yield, output_yield, is_resolved}`
@@ -63,6 +73,19 @@ For each model row emit:
 - `decision_action` (string, see mapping)
 - `last_data_event_at` (datetime)
 - `data_event_type` (enum: `updated` | `collection_failed` | `source_disabled` | `reconciliation_anomaly` | `stale`)
+
+### 2.1 Operational scope contract
+
+- A model is `operational` when it has any `ChannelModelPrice` or has a
+  listing record for the selected resale platform.
+- A platform listing takes precedence over a stale exclusion record.
+- A platform exclusion is `market_reference` with reason
+  `platform_excluded`.
+- A model with only collected/official/supplier pricing is
+  `market_reference` with reason `price_reference`.
+- Market-reference rows never emit channel, listing, or yield actions.
+- This scope is derived from existing records; do not add a second registry
+  or duplicate intent flag.
 
 ### 3. Yield calculation
 
@@ -84,6 +107,8 @@ Per-platform, no global fallback. Implementation rule:
 6. `unlisted` — best_channel present and not listed
 7. `single_channel` — options.length == 1
 8. `ready` — all checks pass
+9. `market_reference` — price benchmark only; excluded from operational
+   priority queues
 
 ### 5. decision_action mapping
 
@@ -97,6 +122,7 @@ Per-platform, no global fallback. Implementation rule:
 | `unlisted` | 去挂售 |
 | `single_channel` | 增加备选渠道 |
 | `ready` | 保持 |
+| `market_reference` | 仅作价格参考 |
 
 ### 6. Sort order
 
@@ -105,32 +131,40 @@ Per-platform, no global fallback. Implementation rule:
 3. last_data_event_at asc (oldest first)
 4. provider_name asc
 
-### 7. KPI strip collapse to 4 cards
+### 7. KPI strip grouped by scope and action
 
+- `operational_models` — models in channel/listing operations
+- `market_reference_models` — price-only catalog models
 - `pending_listing` — count of `decision_status == unlisted`
 - `missing_channel` — count of `decision_status == no_supply`
 - `low_yield` — count of `decision_status == low_yield`
 - `data_anomaly` — count where `data_event_type in {collection_failed, source_disabled, reconciliation_anomaly, stale}`
 
+Action KPI percentages use `operational_models` as their denominator. Market
+references must not inflate missing-channel, pending-listing, or yield KPIs.
+
 Remove cards for: total channels, total models, providers, active listings, channel coverage rate, ready_models percentage.
 
 ### 8. Overview page composition (LLMOpsMonitorDashboard.vue)
 
-- Top: four KPI cards in one row.
+- Top: scope and action KPI groups.
 - Body: decision table only.
 - Removed from this page: provider matrix, channel coverage module, listing risk board, collection health panel, any drawer/modal trigger.
 
 ### 9. Row click navigation
 
 - Row binds to `model_id`.
-- Click navigates to `ResalePublishingWorkspace` scoped to that model.
+- Clicking an operational row navigates to `ResalePublishingWorkspace`
+  scoped to that model.
+- Market-reference rows are read-only and do not open the publishing
+  workspace.
 - Workspace decides edit vs create mode based on `current_listing.is_listed`.
 - `ResalePublishingDrawer` reference is removed from overview page only. Other call sites may keep it.
 
 ### 10. Locale keys (zh-CN + en)
 
-- `decision.status.<status>` for all 8 statuses
-- `decision.action.<key>` for all 8 actions
+- `decision.status.<status>` for all 9 statuses
+- `decision.action.<key>` for all 9 actions
 - `overview.kpi.{pendingListing,missingChannel,lowYield,dataAnomaly}.{label,hint}`
 - `overview.table.columns.{model,provider,coverage,recommended,recommendedPrice,currentListing,currentPrice,inputYield,outputYield,status,action,lastUpdate,dataEventType}`
 
@@ -146,16 +180,20 @@ Remove cards for: total channels, total models, providers, active listings, chan
 
 ## Acceptance Tests
 
-1. Overview page renders only KPI strip (4 cards) and decision table.
+1. Overview page renders only the grouped KPI strip and decision table.
 2. Each decision row contains all canonical fields.
 3. no_supply rows appear first.
 4. platform_fee_unresolved rows appear before low_yield.
 5. low_yield rows appear after platform_fee_unresolved but before not_lowest_channel.
 6. data_event_type=updated does NOT increase data_anomaly.
 7. data_event_type in {collection_failed, source_disabled, reconciliation_anomaly} increases data_anomaly; stale is reserved until source cadence is modeled.
-8. Clicking a decision row opens ResalePublishingWorkspace for that model; no drawer opens on overview.
+8. Clicking an operational row opens ResalePublishingWorkspace for that
+   model; reference rows stay read-only and no drawer opens on overview.
 9. i18n keys present in both locales.
 10. SummaryAPIView returns canonical decision fields; backend test asserts presence.
+11. Reference-only models emit `operation_scope=market_reference` and never
+    increase missing-channel or pending-listing KPIs.
+12. Operational and market-reference counts add up to active models.
 
 ## Attempt Rule
 

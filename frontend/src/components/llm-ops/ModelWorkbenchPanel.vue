@@ -10,13 +10,20 @@
             {{ t('llmOps.modelWorkbenchPanel.subtitle') }}
           </p>
         </div>
-        <CompactSelect
-          v-model="selectedModelId"
-          :options="modelSelectOptions"
-          class-name="w-full lg:w-80"
-          searchable
-          :menu-min-width="360"
-        />
+        <div class="flex flex-col gap-2 sm:flex-row lg:justify-end">
+          <CompactSelect
+            v-model="catalogScope"
+            :options="catalogScopeOptions"
+            class-name="w-full sm:w-44"
+          />
+          <CompactSelect
+            v-model="selectedModelId"
+            :options="modelSelectOptions"
+            class-name="w-full lg:w-80"
+            searchable
+            :menu-min-width="360"
+          />
+        </div>
       </div>
     </div>
 
@@ -194,12 +201,29 @@ const props = defineProps({
   channels: { type: Array, default: () => [] },
   priceItems: { type: Array, default: () => [] },
   channelPriceItems: { type: Array, default: () => [] },
+  focusModelId: { type: [Number, String], default: null },
   listings: { type: Array, default: () => [] },
   records: { type: Array, default: () => [] }
 })
 
 const { t } = useI18n()
+const catalogScope = ref('all')
 const selectedModelId = ref('')
+
+const catalogScopeOptions = computed(() => [
+  {
+    label: t('llmOps.modelWorkbenchPanel.filters.all'),
+    value: 'all'
+  },
+  {
+    label: t('llmOps.modelWorkbenchPanel.filters.operational'),
+    value: 'operational'
+  },
+  {
+    label: t('llmOps.modelWorkbenchPanel.filters.marketReference'),
+    value: 'market_reference'
+  }
+])
 
 const officialColumns = computed(() => [
   t('llmOps.modelWorkbenchPanel.columns.dimension'),
@@ -231,13 +255,21 @@ const modelOptions = computed(() =>
     id: row.model_id,
     name: row.model_name,
     code: row.model_code,
+    operation_scope: row.operation_scope,
     provider_name: row.provider_name,
     meta_model_name: row.meta_model_name
   }))
 )
 
+const filteredModelOptions = computed(() => {
+  if (catalogScope.value === 'all') return modelOptions.value
+  return modelOptions.value.filter(
+    (model) => model.operation_scope === catalogScope.value
+  )
+})
+
 const modelSelectOptions = computed(() =>
-  modelOptions.value.map((model) => ({
+  filteredModelOptions.value.map((model) => ({
     label: `${model.provider_name} / ${model.name}`,
     searchText: `${model.provider_name} ${model.name} ${model.code}`,
     value: String(model.id)
@@ -245,10 +277,17 @@ const modelSelectOptions = computed(() =>
 )
 
 watch(
-  modelOptions,
-  (options) => {
+  [filteredModelOptions, () => props.focusModelId],
+  ([options, focusModelId]) => {
     if (!options.length) {
       selectedModelId.value = ''
+      return
+    }
+    const focusExists = options.some(
+      (option) => String(option.id) === String(focusModelId)
+    )
+    if (focusModelId && focusExists) {
+      selectedModelId.value = String(focusModelId)
       return
     }
     const exists = options.some(

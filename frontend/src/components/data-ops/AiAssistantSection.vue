@@ -182,10 +182,10 @@
                   </svg>
                 </span>
                 <h2 class="mt-3 text-lg font-semibold text-slate-900">
-                  {{ t('dataOps.ai.startTitle') }}
+                  {{ title || t('dataOps.ai.startTitle') }}
                 </h2>
                 <p class="mt-1 text-sm text-slate-500">
-                  {{ t('dataOps.ai.startDescription') }}
+                  {{ subtitle || t('dataOps.ai.startDescription') }}
                 </p>
               </div>
 
@@ -247,9 +247,6 @@
             <DataOpsAiMessage
               v-for="(message, index) in messages"
               :key="index"
-              :fallback-suggestions="
-                index === lastAssistantIndex ? fallbackSuggestions : []
-              "
               :message="message"
               @ask="$emit('ask', $event)"
             />
@@ -344,7 +341,8 @@ import { useI18n } from 'vue-i18n'
 
 import {
   buildQuickPrompts,
-  selectFollowUpQuestions
+  resolveAssistantQuestionGroups,
+  resolveQuickPromptLimit
 } from '@/utils/aiSuggestions'
 
 import DataOpsAiMessage from './DataOpsAiMessage.vue'
@@ -379,15 +377,15 @@ const historyOpen = ref(false)
 const messagesEl = ref(null)
 let streamScrollFrame = null
 const assistantProfile = computed(() => props.context?.assistant || {})
+const questionGroupsKey = computed(
+  () =>
+    assistantProfile.value.ui_i18n?.question_groups_key ||
+    'dataOps.ai.questionGroups'
+)
 const localizedQuestionGroups = computed(() => {
-  const translatedGroups = tm('dataOps.ai.questionGroups') || {}
+  const translatedGroups = tm(questionGroupsKey.value) || {}
   const sourceGroups = assistantProfile.value.question_groups || []
-  const keys = sourceGroups.length
-    ? sourceGroups.map((group) => group.key)
-    : Object.keys(translatedGroups)
-  return keys
-    .filter((key) => translatedGroups[key])
-    .map((key) => ({ key, ...translatedGroups[key] }))
+  return resolveAssistantQuestionGroups(sourceGroups, translatedGroups)
 })
 const questionGroups = computed(() => localizedQuestionGroups.value)
 const hasUserMessages = computed(() =>
@@ -396,26 +394,15 @@ const hasUserMessages = computed(() =>
 const isEmptyConversation = computed(
   () => props.messages.length === 0 && !props.loading
 )
-const quickPrompts = computed(() => buildQuickPrompts(questionGroups.value, 6))
+const quickPromptLimit = computed(() =>
+  resolveQuickPromptLimit(assistantProfile.value.quick_question_limit)
+)
+const quickPrompts = computed(() =>
+  buildQuickPrompts(questionGroups.value, quickPromptLimit.value)
+)
 const showQuickQuestions = computed(
   () =>
     quickPrompts.value.length > 0 && !hasUserMessages.value && !props.loading
-)
-const lastAssistantIndex = computed(() => {
-  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-    if (props.messages[index]?.role === 'assistant') return index
-  }
-  return -1
-})
-const latestUserQuestion = computed(() => {
-  for (let index = props.messages.length - 1; index >= 0; index -= 1) {
-    const message = props.messages[index]
-    if (message?.role === 'user') return message.content || ''
-  }
-  return ''
-})
-const fallbackSuggestions = computed(() =>
-  selectFollowUpQuestions(latestUserQuestion.value, questionGroups.value)
 )
 const lastMessageContent = computed(() => {
   const lastMessage = props.messages[props.messages.length - 1]

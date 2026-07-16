@@ -6,10 +6,10 @@ from functools import partial
 from pathlib import Path
 
 from ai_assistant.contracts import (
-    AssistantCapability,
     AssistantTool,
     MemoryPolicy,
 )
+from ai_assistant.provider import AssistantCapabilityProvider
 from data_ops.services.ai import (
     SYSTEM_PROMPT,
     get_data_ops_ai_assistant_profile,
@@ -19,7 +19,6 @@ from data_ops.services.ai_tools import (
     DATA_OPS_TOOL_SCHEMAS,
     execute_data_ops_tool,
 )
-
 
 SKILL_ROOT = Path(__file__).resolve().parent / "skills"
 
@@ -44,22 +43,38 @@ def _build_tools() -> tuple[AssistantTool, ...]:
     return tuple(tools)
 
 
-def build_capability() -> AssistantCapability:
-    """Build the immutable Data Ops assistant capability."""
+class DataOpsAssistantProvider(AssistantCapabilityProvider):
+    """Declare the Data Ops assistant through the shared template."""
 
-    return AssistantCapability(
-        app_key="data_ops",
-        display_name="Data Ops 助手",
-        required_feature="data_ops",
-        description="分析合同、回款、Pipeline 和数据质量。",
-        instructions=SYSTEM_PROMPT.strip(),
-        tools=_build_tools(),
-        skill_dirs=(SKILL_ROOT,),
-        memory_policy=MemoryPolicy(
+    app_key = "data_ops"
+    display_name = "Data Ops 助手"
+    required_feature = "data_ops"
+    description = "分析合同、回款、Pipeline 和数据质量。"
+
+    def get_instructions(self):
+        return SYSTEM_PROMPT
+
+    def get_tools(self):
+        return _build_tools()
+
+    def get_skill_dirs(self):
+        return (SKILL_ROOT,)
+
+    def get_memory_policy(self):
+        return MemoryPolicy(
             enable_conversation_summary=True,
             enable_user_preferences=False,
             retention_days=90,
-        ),
-        profile_loader=get_data_ops_ai_assistant_profile,
-        stream_handler=stream_chat_with_data_ops_assistant,
-    )
+        )
+
+    def get_profile_loader(self):
+        return get_data_ops_ai_assistant_profile
+
+    def get_stream_handler(self):
+        return stream_chat_with_data_ops_assistant
+
+
+def build_capability():
+    """Build the Data Ops capability for compatibility callers."""
+
+    return DataOpsAssistantProvider().build_capability()

@@ -1,24 +1,28 @@
-const groupMatchers = [
-  {
-    key: 'data_quality',
-    pattern:
-      /同步|数据质量|权限|字段缺失|可信|抓取|sync|data quality|permission|missing field|reliab/iu
-  },
-  {
-    key: 'pipeline',
-    pattern: /pipeline|立项|转化|高潜|停滞|conversion|opportunit|stalled/iu
-  },
-  {
-    key: 'oversea',
-    pattern:
-      /海外|license|国家|产品类型|利润|结算|overseas|country|product type|margin|settlement/iu
-  },
-  {
-    key: 'cash_risk',
-    pattern:
-      /回款|待回款|催收|合同|续约|到期|collection|receivable|contract|renewal|expir/iu
-  }
-]
+export function resolveAssistantQuestionGroups(profileGroups, localizedGroups) {
+  const sourceGroups = Array.isArray(profileGroups) ? profileGroups : []
+  const translations = localizedGroups || {}
+  const keys = sourceGroups.length
+    ? sourceGroups.map((group) => group?.key).filter(Boolean)
+    : Object.keys(translations)
+
+  return keys
+    .map((key) => {
+      const source = sourceGroups.find((group) => group?.key === key) || {}
+      const localized = translations[key]
+      return {
+        key,
+        title: localized?.title || source.title || key,
+        questions: localized?.questions || source.questions || []
+      }
+    })
+    .filter((group) => group.questions.length > 0)
+}
+
+export function resolveQuickPromptLimit(value, fallback = 6) {
+  const normalized = Number(value)
+  if (!Number.isInteger(normalized) || normalized < 1) return fallback
+  return Math.min(normalized, 12)
+}
 
 export function buildQuickPrompts(groups, limit = 6) {
   const availableGroups = Array.isArray(groups) ? groups : []
@@ -57,25 +61,6 @@ export function splitFollowUpQuestions(value) {
   const questions = extractFollowUpQuestions(tail)
   if (!questions.length) return { body: text, questions: [] }
   return { body, questions }
-}
-
-export function selectFollowUpQuestions(question, groups, limit = 3) {
-  const availableGroups = Array.isArray(groups) ? groups : []
-  if (!availableGroups.length) return []
-
-  const source = String(question || '').trim()
-  const matchedKey = groupMatchers.find((item) =>
-    item.pattern.test(source)
-  )?.key
-  const selectedGroup =
-    availableGroups.find((group) => group.key === matchedKey) ||
-    availableGroups.find((group) => group.key === 'daily_review') ||
-    availableGroups[0]
-
-  return [...new Set(selectedGroup?.questions || [])]
-    .filter((item) => String(item || '').trim())
-    .filter((item) => String(item).trim() !== source)
-    .slice(0, Math.max(0, Number(limit) || 0))
 }
 
 function extractFollowUpQuestions(value) {

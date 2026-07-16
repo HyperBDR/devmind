@@ -4,6 +4,7 @@ from importlib import import_module
 
 from django.apps import apps
 
+from ai_assistant.provider import AssistantCapabilityProvider
 from ai_assistant.registry import capability_registry
 
 
@@ -18,6 +19,15 @@ def autodiscover_capabilities() -> None:
             if exc.name == module_name:
                 continue
             raise
+        provider = getattr(module, "assistant_provider", None)
+        if provider is not None:
+            if not isinstance(provider, AssistantCapabilityProvider):
+                raise TypeError(
+                    f"{module_name}.assistant_provider must inherit "
+                    "AssistantCapabilityProvider"
+                )
+            capability_registry.register(provider.build_capability())
+            continue
         loader = getattr(module, "get_assistant_capability", None)
         if loader is None:
             continue

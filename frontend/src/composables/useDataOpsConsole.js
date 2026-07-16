@@ -11,6 +11,7 @@ import {
   resolveFinalAiContent,
   sanitizeAiContent,
 } from '@/utils/dataOpsAiStream'
+import { normalizeDataOpsProgressEvent } from '@/utils/dataOpsProgress'
 import { syncJobError, syncJobFailureDetails } from '@/utils/sync'
 
 const pageSize = 20
@@ -509,7 +510,7 @@ export function useDataOpsConsole() {
             updateAssistantMessage({
               progressEvents: [
                 ...(current?.progressEvents || []),
-                normalizeProgressEvent(event, t, locale.value),
+                normalizeDataOpsProgressEvent(event),
               ],
             })
           },
@@ -830,43 +831,6 @@ function preflightSummary(status, tables, discovery = null, t) {
     total,
     discovery: discoveryText
   })
-}
-
-function normalizeProgressEvent(event, t, language) {
-  const stage = event?.stage || 'step'
-  const localized = localizedProgressEvent(event, t, language)
-  return {
-    detail: localized?.detail ?? event?.detail ?? '',
-    metadata: event?.metadata || {},
-    stage,
-    status: event?.status || 'done',
-    timestamp: event?.timestamp || new Date().toISOString(),
-    title:
-      localized?.title || event?.title || t('dataOps.feedback.progressStep'),
-  }
-}
-
-function localizedProgressEvent(event, t, language) {
-  if (language === 'zh-CN') return null
-  const stage = event?.stage || 'step'
-  const supportedStages = new Set([
-    'answer',
-    'context',
-    'plan',
-    'question',
-    'tool',
-  ])
-  if (!supportedStages.has(stage)) return null
-  const metadata = event?.metadata || {}
-  return {
-    detail: t(`dataOps.feedback.progress.${stage}Detail`, {
-      count: metadata.tool_count || 0,
-      table: metadata.table || 'Data Ops',
-    }),
-    title: t(`dataOps.feedback.progress.${stage}Title`, {
-      table: metadata.table || 'Data Ops',
-    }),
-  }
 }
 
 function loadAiHistory() {

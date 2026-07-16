@@ -19,16 +19,16 @@ def test_query_records_filters_active_records_only():
         source_app_token="app",
         source_table_id="table",
         source_record_id="active",
-        customer_name="Acme",
-        sales_person="Alice",
+        customer_name="Example Customer A",
+        sales_person="Test Owner A",
         total_amount=Decimal("100.00"),
     )
     Contract.all_objects.create(
         source_app_token="app",
         source_table_id="table",
         source_record_id="inactive",
-        customer_name="Acme",
-        sales_person="Bob",
+        customer_name="Example Customer A",
+        sales_person="Test Owner B",
         total_amount=Decimal("900.00"),
         is_active=False,
     )
@@ -38,29 +38,29 @@ def test_query_records_filters_active_records_only():
             "table": "contracts",
             "columns": ["customer_name", "sales_person", "total_amount"],
             "filters": [
-                {"field": "customer_name", "op": "eq", "value": "Acme"},
+                {
+                    "field": "customer_name",
+                    "op": "eq",
+                    "value": "Example Customer A",
+                },
             ],
         },
     )
 
     assert result["row_count"] == 1
-    assert result["rows"][0]["sales_person"] == "Alice"
+    assert result["rows"][0]["sales_person"] == "Test Owner A"
     assert result["rows"][0]["total_amount"] == 100.0
 
 
 def test_tool_profile_does_not_expose_raw_sql():
-    tool_names = [
-        item["function"]["name"] for item in DATA_OPS_TOOL_SCHEMAS
-    ]
+    tool_names = [item["function"]["name"] for item in DATA_OPS_TOOL_SCHEMAS]
     profile = get_data_ops_tool_profile()
 
     assert "data_ops_run_sql" not in tool_names
     assert "data_ops_run_sql" not in profile["tools"]
     assert "sql_rules" not in profile
     assert profile["query_rules"]
-    assert any(
-        "record_changes" in rule for rule in profile["query_rules"]
-    )
+    assert any("record_changes" in rule for rule in profile["query_rules"])
 
 
 def test_raw_sql_tool_call_returns_unknown_tool():
@@ -80,7 +80,7 @@ def test_aggregate_handles_custom_calculation_without_raw_sql():
         source_table_id="ledger",
         source_record_id="ledger-1",
         ledger_type="收入",
-        customer_name="Acme",
+        customer_name="Example Customer A",
         currency="CNY",
         outstanding=Decimal("60.00"),
     )
@@ -89,7 +89,7 @@ def test_aggregate_handles_custom_calculation_without_raw_sql():
         source_table_id="ledger",
         source_record_id="ledger-2",
         ledger_type="收入",
-        customer_name="Beta",
+        customer_name="Example Customer B",
         currency="CNY",
         outstanding=Decimal("90.00"),
     )
@@ -110,7 +110,7 @@ def test_aggregate_handles_custom_calculation_without_raw_sql():
     )
 
     assert result["row_count"] == 2
-    assert result["rows"][0]["customer_name"] == "Beta"
+    assert result["rows"][0]["customer_name"] == "Example Customer B"
     assert result["rows"][0]["outstanding"] == 90
 
 

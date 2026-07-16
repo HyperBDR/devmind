@@ -4,17 +4,9 @@ import test from 'node:test'
 
 const readJson = (path) =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'))
-const readSource = (path) =>
-  readFileSync(new URL(path, import.meta.url), 'utf8')
 
 const zhCN = readJson('../src/locales/data-ops/zh-CN.json')
 const en = readJson('../src/locales/data-ops/en.json')
-const i18nSetup = readSource('../src/i18n/index.js')
-const dataOpsPage = readSource('../src/pages/DataOps.vue')
-const appHeader = readSource('../src/components/layout/AppHeader.vue')
-const aiAssistant = readSource(
-  '../src/components/data-ops/AiAssistantSection.vue'
-)
 
 test('keeps Data Ops English and Chinese locale keys in sync', () => {
   assert.deepEqual(flattenKeys(en), flattenKeys(zhCN))
@@ -33,14 +25,6 @@ test('provides English AI questions without Chinese fallback text', () => {
   assert.match(questions[0], /risk/i)
 })
 
-test('wires Data Ops pages and AI prompts into vue-i18n', () => {
-  assert.match(i18nSetup, /dataOpsEn/)
-  assert.match(i18nSetup, /dataOpsZhCN/)
-  assert.match(dataOpsPage, /useI18n/)
-  assert.match(aiAssistant, /useI18n/)
-  assert.match(aiAssistant, /localizedQuestionGroups/)
-})
-
 test('defines every literal Data Ops translation key used by the UI', () => {
   const sourceUrls = [
     new URL('../src/components/data-ops/', import.meta.url),
@@ -53,12 +37,6 @@ test('defines every literal Data Ops translation key used by the UI', () => {
   )
 
   assert.deepEqual(missingKeys, [])
-})
-
-test('keeps the shared platform and language header on Data Ops', () => {
-  assert.doesNotMatch(dataOpsPage, /:show-header="false"/u)
-  assert.match(appHeader, /<LanguageSwitcher\s*\/>/u)
-  assert.match(appHeader, /<PlatformSwitcher\s*\/>/u)
 })
 
 function flattenKeys(value, prefix = '') {

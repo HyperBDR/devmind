@@ -126,6 +126,12 @@ def get_provider_auth_identifier(provider):
             "zhipu_username",
             "username",
         ),
+        "yunce": (
+            "username",
+            "YUNCE_USERNAME",
+            "yunce_username",
+            "username",
+        ),
     }
 
     _, *keys = identifier_keys.get(provider_type, ("identifier",))
@@ -147,6 +153,7 @@ def get_provider_auth_identifier_kind(provider):
         "baidu": "access_key_id",
         "azure": "client_id",
         "zhipu": "username",
+        "yunce": "username",
     }
     return kind_map.get(provider_type, "identifier")
 

@@ -913,6 +913,10 @@ const props = defineProps({
     type: Object,
     default: null
   },
+  initialModelId: {
+    type: [Number, String],
+    default: null
+  },
   providers: {
     type: Array,
     default: () => []
@@ -1146,6 +1150,7 @@ const {
   availableModelGroups,
   availableModelOptions,
   canAddSelectedModels,
+  candidateMetaModelGroups,
   clearSelectedModels,
   isModelSelected,
   selectBatchPriceSourceModel,
@@ -1243,6 +1248,7 @@ watch(
     )
     baselineDrafts.value = snapshotDrafts(drafts.value)
     recentlyAddedModelId.value = null
+    focusInitialModel()
   },
   { immediate: true }
 )
@@ -1267,6 +1273,32 @@ function reset() {
   baselineDrafts.value = {}
   pendingRefresh.value = false
   recentlyAddedModelId.value = null
+}
+
+function focusInitialModel() {
+  if (!props.initialModelId) return
+  const target = asArray(props.models).find(
+    (model) => String(model.id) === String(props.initialModelId)
+  )
+  if (!target) return
+  const draft = drafts.value[target.id]
+  if (draft?.is_configured || shouldPersist(draft || {})) {
+    search.value = target.name || target.code || ''
+    configuredRowsExpanded.value = true
+    return
+  }
+  const group = candidateMetaModelGroups.value.find((item) =>
+    item.models.some((model) => String(model.id) === String(target.id))
+  )
+  if (!group) return
+  selectedVendorKey.value = metaModelVendorKey(group)
+  modelSearch.value = group.name || group.code || ''
+  if (!isModelSelected(group.key)) {
+    toggleModelSelection(group)
+  }
+  selectBatchPriceSourceModel(group.key, target.id)
+  modelDropdownOpen.value = true
+  nextTick(() => modelSearchInput.value?.focus())
 }
 
 function close() {

@@ -413,6 +413,66 @@ PROVIDER_CONFIG_SCHEMAS = {
             },
         ],
     },
+    "deepseek": {
+        "provider_type": "deepseek",
+        "display_name": "DeepSeek",
+        "description": (
+            "Use the official DeepSeek API to collect account balance."
+        ),
+        "required_fields": [
+            {
+                "name": "DEEPSEEK_API_KEY",
+                "backend_name": "api_key",
+                "label": "API Key",
+                "type": "password",
+            },
+        ],
+        "optional_fields": [
+            {
+                "name": "DEEPSEEK_TIMEOUT",
+                "backend_name": "timeout",
+                "label": "Timeout",
+                "type": "integer",
+                "default": 30,
+            },
+        ],
+    },
+    "yunce": {
+        "provider_type": "yunce",
+        "display_name": "Yunce",
+        "description": (
+            "Use Yunce account APIs to collect balance and API key usage."
+        ),
+        "required_fields": [
+            {
+                "name": "YUNCE_USERNAME",
+                "backend_name": "username",
+                "label": "Username",
+                "type": "string",
+            },
+            {
+                "name": "YUNCE_PASSWORD",
+                "backend_name": "password",
+                "label": "Password",
+                "type": "password",
+            },
+        ],
+        "optional_fields": [
+            {
+                "name": "YUNCE_API_KEY",
+                "backend_name": "api_key",
+                "label": "API Key",
+                "type": "password",
+            },
+            {
+                "name": "YUNCE_TIMEOUT",
+                "backend_name": "timeout",
+                "label": "Timeout",
+                "type": "integer",
+                "default": 30,
+            },
+        ],
+    },
 }
 
 

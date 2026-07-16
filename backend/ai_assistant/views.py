@@ -11,6 +11,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ai_assistant.models import AssistantConversation, AssistantMessage
+from ai_assistant.policies import (
+    build_operations_only_reply,
+    finalize_operations_answer,
+    is_technical_implementation_request,
+    sanitize_operations_history,
+)
 from ai_assistant.registry import CapabilityNotFound, capability_registry
 from ai_assistant.runtime import stream_assistant_response
 from ai_assistant.serializers import (
@@ -24,7 +30,6 @@ from ai_assistant.services import (
     list_capabilities_for_user,
     user_can_access_capability,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +192,7 @@ class ConversationMessageListCreateAPIView(APIView):
                 "content",
             )
         )[-8:]
+        operational_history = sanitize_operations_history(history)
         if not conversation.title:
             conversation.title = message[:80]
             conversation.save(update_fields=["title", "updated_at"])
@@ -200,11 +206,28 @@ class ConversationMessageListCreateAPIView(APIView):
             chunks = []
             final_reply = ""
             try:
-                stream_handler = capability.stream_handler
-                if stream_handler is not None:
+                if is_technical_implementation_request(message):
+                    content = finalize_operations_answer(
+                        build_operations_only_reply(message),
+                        message=message,
+                        history=operational_history,
+                    )
+                    events = iter(
+                        [
+                            {"type": "chunk", "content": content},
+                            {
+                                "type": "done",
+                                "ok": True,
+                                "reply": content,
+                                "usage": {"total_tokens": 0},
+                            },
+                        ]
+                    )
+                elif capability.stream_handler is not None:
+                    stream_handler = capability.stream_handler
                     events = stream_handler(
                         message=message,
-                        history=history,
+                        history=operational_history,
                         preferred_config_uuid=serializer.validated_data.get(
                             "llm_config_uuid",
                             "",
@@ -215,7 +238,7 @@ class ConversationMessageListCreateAPIView(APIView):
                     events = stream_assistant_response(
                         capability=capability,
                         message=message,
-                        history=history,
+                        history=operational_history,
                         preferred_config_uuid=serializer.validated_data.get(
                             "llm_config_uuid",
                             "",
@@ -231,7 +254,13 @@ class ConversationMessageListCreateAPIView(APIView):
                     if event.get("type") == "chunk":
                         chunks.append(str(event.get("content") or ""))
                     if event.get("type") == "done":
-                        final_reply = str(event.get("reply") or "")
+                        raw_reply = str(event.get("reply") or "".join(chunks))
+                        final_reply = finalize_operations_answer(
+                            raw_reply,
+                            message=message,
+                            history=operational_history,
+                        )
+                        event = {**event, "reply": final_reply}
                     if event.get("type") == "error":
                         event = {
                             "type": "error",

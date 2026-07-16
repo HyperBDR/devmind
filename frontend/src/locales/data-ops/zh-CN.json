@@ -298,12 +298,14 @@
     "discovery": "已发现 {seen} 张飞书数据表，自动匹配 {matched} 张。",
     "progressStep": "处理步骤",
     "progress": {
-      "questionTitle": "拆解业务问题",
-      "questionDetail": "识别本次分析的关注点和业务优先级。",
+      "questionTitle": "识别问题意图",
+      "questionDetail": "判断是否需要业务数据，并匹配对应的分析领域。",
       "contextTitle": "读取 Data Ops 上下文",
       "contextDetail": "读取最新合同、回款、Pipeline 和同步上下文。",
       "planTitle": "规划数据查询",
       "planDetail": "确定回答所需的数据表、筛选条件、指标和输出形式。",
+      "reasoningTitle": "选择经营根因诊断",
+      "reasoningDetail": "基于业务证据区分现象、根因假设、系统影响和验证行动。",
       "toolTitle": "查询 {table}",
       "toolDetail": "读取并聚合本次分析需要的业务数据。",
       "answerTitle": "生成分析回答",
@@ -323,7 +325,13 @@
     "dataChart": "数据图表",
     "trend": "趋势",
     "chart": "图表",
-    "metric": "指标"
+    "metric": "指标",
+    "types": {
+      "bar": "柱状图",
+      "line": "折线图",
+      "pie": "饼图",
+      "doughnut": "环形图"
+    }
   },
   "project": {
     "unnamed": "未命名项目"

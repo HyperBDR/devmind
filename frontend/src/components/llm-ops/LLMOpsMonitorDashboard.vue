@@ -1,101 +1,70 @@
 <template>
-  <section class="space-y-6">
-    <div class="kpi-decision-groups">
-      <div
-        v-for="group in groupedKpiCards"
-        :key="group.key"
-        class="kpi-decision-group"
+  <section class="space-y-4">
+    <div
+      class="queue-summary-grid"
+      :aria-label="t('llmOps.overview.queueSummaryLabel')"
+    >
+      <button
+        v-for="item in kpiCards"
+        :key="item.key"
+        type="button"
+        :aria-pressed="simulationStatus === item.filter"
+        :class="[
+          'queue-summary-card',
+          item.tone,
+          { 'is-active': simulationStatus === item.filter }
+        ]"
+        @click="simulationStatusModel = item.filter"
       >
-        <div class="kpi-decision-group-head">
-          <span class="kpi-decision-group-mark" :class="group.markClass" />
-          <span>{{ group.label }}</span>
-        </div>
-        <div
-          class="grid gap-3"
-          :class="group.items.length > 1 ? 'md:grid-cols-2' : 'md:grid-cols-1'"
-        >
-          <div v-for="item in group.items" :key="item.key" class="kpi-card">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-xs font-medium text-slate-500">
-                  {{ item.label }}
-                </p>
-                <p class="kpi-value mt-2 text-2xl font-semibold">
-                  {{ item.value }}
-                </p>
-              </div>
-              <span :class="['kpi-tone', item.tone]">
-                {{ item.badge }}
-              </span>
-            </div>
-            <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-200">
-              <div
-                class="h-full rounded-full transition-all"
-                :class="item.barClass"
-                :style="{ width: `${item.progress}%` }"
-              />
-            </div>
-            <p class="mt-2 text-xs text-slate-500">
-              {{ item.hint }}
-            </p>
-          </div>
-        </div>
-      </div>
+        <span class="queue-summary-label">{{ item.label }}</span>
+        <strong class="queue-summary-value">{{ item.value }}</strong>
+      </button>
     </div>
 
     <div class="panel overflow-hidden p-0">
-      <div class="table-toolbar">
-        <div>
-          <h3 class="panel-title">
-            {{ t('llmOps.overview.decisionTable.title') }}
-          </h3>
-          <p class="mt-1 text-xs text-slate-500">
-            {{ t('llmOps.overview.decisionTable.subtitle') }}
-          </p>
-        </div>
-        <div class="flex flex-col gap-2 sm:flex-row">
-          <CompactSelect
-            v-model="simulationStatusModel"
-            :options="simulationStatusOptions"
-            class-name="w-40"
-            size="sm"
-          />
+      <div class="table-toolbar gap-3">
+        <h3 class="panel-title">
+          {{ t('llmOps.overview.decisionTable.title') }}
+        </h3>
+        <div
+          class="decision-filter-group"
+          :aria-label="t('llmOps.overview.filters.label')"
+          role="group"
+        >
+          <button
+            v-for="option in simulationStatusOptions"
+            :key="option.value"
+            type="button"
+            :aria-pressed="simulationStatus === option.value"
+            :class="[
+              'decision-filter-button',
+              { 'is-active': simulationStatus === option.value }
+            ]"
+            @click="simulationStatusModel = option.value"
+          >
+            {{ option.label }}
+          </button>
         </div>
       </div>
+
       <div class="overflow-x-auto">
         <table class="data-table decision-table">
           <thead>
             <tr>
-              <th class="table-head w-10" />
               <th class="table-head">
                 {{ t('llmOps.overview.columns.model') }}
               </th>
               <th class="table-head">
-                {{ t('llmOps.overview.columns.provider') }}
-              </th>
-              <th class="table-head text-right">
-                {{ t('llmOps.overview.columns.coverage') }}
+                {{ t('llmOps.overview.columns.procurement') }}
               </th>
               <th class="table-head">
-                {{ t('llmOps.overview.columns.recommended') }}
+                {{ t('llmOps.overview.columns.listing') }}
               </th>
               <th class="table-head">
-                {{ t('llmOps.overview.columns.currentListing') }}
-              </th>
-              <th class="table-head text-right">
-                {{ t('llmOps.overview.columns.purchasePrice') }}
-              </th>
-              <th class="table-head text-right">
-                {{ t('llmOps.overview.columns.listingPrice') }}
-              </th>
-              <th class="table-head text-right">
-                {{ t('llmOps.overview.columns.inputYield') }}
-              </th>
-              <th class="table-head text-right">
-                {{ t('llmOps.overview.columns.outputYield') }}
+                {{ t('llmOps.overview.columns.yield') }}
               </th>
               <th class="table-head">
-                {{ t('llmOps.overview.columns.action') }}
+                {{ t('llmOps.overview.columns.decision') }}
               </th>
               <th class="table-head">
                 {{ t('llmOps.overview.columns.lastUpdate') }}
@@ -107,131 +76,71 @@
               v-for="row in monitorTableRows"
               :key="row.model_id"
               :aria-label="rowAriaLabel(row)"
-              :class="['decision-row', rowClass(row)]"
-              class="cursor-pointer transition"
-              role="button"
-              tabindex="0"
+              :class="[
+                'decision-row transition',
+                rowClass(row),
+                isOperationalRow(row) ? 'cursor-pointer' : 'cursor-default'
+              ]"
               @click="handleRowClick(row)"
-              @keydown.enter="handleRowClick(row)"
-              @keydown.space.prevent="handleRowClick(row)"
             >
-              <td class="table-cell">
-                <span
-                  :class="['status-icon', row.status_tone]"
-                  :title="statusTitle(row)"
-                >
-                  {{ statusGlyph(row.decision_status) }}
-                </span>
-              </td>
-              <td class="table-cell">
+              <td class="table-cell min-w-52">
                 <p class="font-medium text-slate-900">
                   {{ row.model_name }}
                 </p>
-                <p
-                  v-if="monitorModelSubtitle(row)"
-                  class="mt-1 font-mono text-xs text-slate-500"
-                >
-                  {{ monitorModelSubtitle(row) }}
+                <p class="mt-1 text-xs text-slate-500">
+                  {{ modelContext(row) }}
                 </p>
               </td>
-              <td class="table-cell">{{ row.provider_name }}</td>
-              <td class="table-cell text-right font-mono">
-                {{ row.coverage_count }} / {{ operationalChannelCount }}
-              </td>
-              <td class="table-cell">
-                <span v-if="row.recommended_channel?.channel_name">
+              <td class="table-cell min-w-52">
+                <p class="font-medium text-slate-900">
                   {{ channelText(row.recommended_channel) }}
-                </span>
-                <span v-else class="text-slate-400">-</span>
+                </p>
+                <p class="mt-1 text-xs text-slate-500">
+                  {{ coverageLabel(row) }}
+                </p>
+                <PricePair :rows="procurementPriceRows(row)" />
               </td>
-              <td class="table-cell">
-                <span v-if="row.current_listing?.is_listed" class="badge-ok">
+              <td class="table-cell min-w-48">
+                <span
+                  :class="
+                    row.current_listing?.is_listed ? 'badge-ok' : 'badge-muted'
+                  "
+                >
                   {{ currentListingText(row) }}
                 </span>
-                <span v-else class="badge-muted">
-                  {{ t('llmOps.status.unlisted') }}
+                <PricePair :rows="listingPriceRows(row)" />
+              </td>
+              <td class="table-cell min-w-36">
+                <PricePair :rows="yieldRows(row)" />
+              </td>
+              <td class="table-cell min-w-52">
+                <span :class="['status-pill', row.status_tone]">
+                  {{ statusTitle(row) }}
                 </span>
+                <button
+                  type="button"
+                  class="decision-action-button"
+                  @click.stop="handleRowClick(row)"
+                >
+                  {{ actionLabel(row) }}
+                </button>
               </td>
-              <td class="table-cell text-right font-mono text-xs">
-                <div v-if="procurementPriceRows(row).length" class="price-pair">
-                  <span
-                    v-for="price in procurementPriceRows(row)"
-                    :key="price.label"
-                    class="price-pair-row"
-                  >
-                    <span class="price-pair-label">{{ price.label }}</span>
-                    <span>{{ price.value }}</span>
-                  </span>
-                </div>
-                <span v-else class="text-slate-400">-</span>
-              </td>
-              <td class="table-cell text-right font-mono text-xs">
-                <div v-if="listingPriceRows(row).length" class="price-pair">
-                  <span
-                    v-for="price in listingPriceRows(row)"
-                    :key="price.label"
-                    class="price-pair-row"
-                  >
-                    <span class="price-pair-label">{{ price.label }}</span>
-                    <span>{{ price.value }}</span>
-                  </span>
-                </div>
-                <span v-else class="text-slate-400">-</span>
-              </td>
-              <td class="table-cell text-right font-mono">
-                {{ percent(row.input_yield) }}
-              </td>
-              <td class="table-cell text-right font-mono">
-                {{ percent(row.output_yield) }}
-              </td>
-              <td class="table-cell">
-                <div class="decision-action-cell">
-                  <span :class="['status-pill', row.status_tone]">
-                    {{ actionLabel(row) }}
-                  </span>
-                  <div class="decision-hover-panel" role="status">
-                    <div class="decision-hover-title">
-                      {{ statusTitle(row) }}
-                    </div>
-                    <div class="decision-hover-grid">
-                      <span>{{ t('llmOps.overview.hover.action') }}</span>
-                      <strong>{{ actionLabel(row) }}</strong>
-                      <span>{{ t('llmOps.overview.hover.recommended') }}</span>
-                      <strong>{{
-                        channelText(row.recommended_channel)
-                      }}</strong>
-                      <span>{{ t('llmOps.overview.hover.current') }}</span>
-                      <strong>{{ currentListingText(row) }}</strong>
-                      <span>{{
-                        t('llmOps.overview.hover.purchasePrice')
-                      }}</span>
-                      <strong>{{
-                        priceSummary(procurementPriceRows(row))
-                      }}</strong>
-                      <span>{{ t('llmOps.overview.hover.listingPrice') }}</span>
-                      <strong>{{ priceSummary(listingPriceRows(row)) }}</strong>
-                      <span>{{ t('llmOps.overview.hover.yield') }}</span>
-                      <strong>{{ yieldSummary(row) }}</strong>
-                    </div>
-                  </div>
-                </div>
-              </td>
-              <td class="table-cell text-xs text-slate-500">
-                <div class="flex flex-col gap-1">
-                  <span :title="absoluteTime(row.last_data_event_at)">
-                    {{ relativeTime(row.last_data_event_at) }}
-                  </span>
-                  <span
-                    v-if="row.data_event_type"
-                    :class="['event-pill', eventTone(row.data_event_type)]"
-                  >
-                    {{ eventLabel(row.data_event_type) }}
-                  </span>
-                </div>
+              <td class="table-cell min-w-36 text-xs text-slate-500">
+                <span :title="absoluteTime(row.last_data_event_at)">
+                  {{ relativeTime(row.last_data_event_at) }}
+                </span>
+                <button
+                  v-if="isDataEvent(row.data_event_type)"
+                  type="button"
+                  :class="['event-link', eventTone(row.data_event_type)]"
+                  @click.stop="handleDataEvent(row.data_event_type)"
+                >
+                  {{ eventLabel(row.data_event_type) }}
+                </button>
               </td>
             </tr>
             <tr v-if="!monitorTableRows.length">
-              <td class="table-cell text-slate-500" colspan="12">
+              <td class="table-cell text-slate-500" colspan="6">
                 {{ emptyMessage }}
               </td>
             </tr>
@@ -243,21 +152,45 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, defineComponent, h } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+const PricePair = defineComponent({
+  props: {
+    rows: { type: Array, default: () => [] }
+  },
+  setup(props) {
+    return () => {
+      if (!props.rows.length) {
+        return h('span', { class: 'text-slate-400' }, '-')
+      }
+      return h(
+        'div',
+        { class: 'price-pair mt-2 font-mono text-xs' },
+        props.rows.map((row) =>
+          h('span', { class: 'price-pair-row', key: row.label }, [
+            h('span', { class: 'price-pair-label' }, row.label),
+            h('span', row.value)
+          ])
+        )
+      )
+    }
+  }
+})
 
 const props = defineProps({
   kpiCards: { type: Array, required: true },
   monitorModelSubtitle: { type: Function, required: true },
   monitorTableRows: { type: Array, required: true },
-  operationalChannelCount: { type: Number, required: true },
   simulationStatus: { type: String, required: true },
   simulationStatusOptions: { type: Array, required: true }
 })
 
-const emit = defineEmits(['navigateToWorkspace', 'update:simulationStatus'])
+const emit = defineEmits([
+  'navigateToSection',
+  'navigateToWorkspace',
+  'update:simulationStatus'
+])
 
 const { t } = useI18n()
 
@@ -267,32 +200,20 @@ const simulationStatusModel = computed({
 })
 
 const emptyMessage = computed(() => {
-  if (props.simulationStatus === 'all') {
-    return t('llmOps.overview.emptyDecisionRows')
-  }
   if (props.simulationStatus === 'priority') {
     return t('llmOps.overview.emptyDecisionAllReady')
   }
   return t('llmOps.overview.emptyDecisionFiltered')
 })
 
-const KPI_GROUP_ORDER = ['supply', 'yield', 'data']
-const KPI_GROUP_MARKS = {
-  supply: 'mark-supply',
-  yield: 'mark-yield',
-  data: 'mark-data'
-}
-
-const groupedKpiCards = computed(() =>
-  KPI_GROUP_ORDER.map((key) => ({
-    key,
-    label: kpiGroupLabel(key),
-    markClass: KPI_GROUP_MARKS[key],
-    items: props.kpiCards.filter((item) => item.group === key)
-  })).filter((group) => group.items.length)
-)
-
 function handleRowClick(row) {
+  if (!isOperationalRow(row)) {
+    emit('navigateToSection', {
+      modelId: row.model_id,
+      section: 'modelWorkbench'
+    })
+    return
+  }
   emit('navigateToWorkspace', {
     autoListing: Boolean(
       row.current_listing?.is_listed && row.current_listing.channel_id === null
@@ -301,25 +222,35 @@ function handleRowClick(row) {
   })
 }
 
+function handleDataEvent(type) {
+  emit(
+    'navigateToSection',
+    type === 'reconciliation_anomaly' ? 'reconciler' : 'collectionHealth'
+  )
+}
+
+function isOperationalRow(row) {
+  return row.operation_scope === 'operational'
+}
+
+function isDataEvent(type) {
+  return Boolean(type && type !== 'updated')
+}
+
+function modelContext(row) {
+  const subtitle = props.monitorModelSubtitle(row)
+  return [row.provider_name, subtitle].filter(Boolean).join(' / ') || '-'
+}
+
+function coverageLabel(row) {
+  return t('llmOps.overview.coverageCount', {
+    count: Number(row.coverage_count || 0)
+  })
+}
+
 function percent(value) {
   if (value === null || value === undefined || value === '') return '-'
-  const num = Number(value) * 100
-  return `${num.toFixed(1)}%`
-}
-
-const STATUS_GLYPHS = {
-  no_supply: '!',
-  currency_unresolved: '?',
-  platform_fee_unresolved: '⚙',
-  low_yield: '¥',
-  not_lowest_channel: '↧',
-  unlisted: '+',
-  single_channel: '◐',
-  ready: '✓'
-}
-
-function statusGlyph(status) {
-  return STATUS_GLYPHS[status] || '·'
+  return `${(Number(value) * 100).toFixed(1)}%`
 }
 
 function statusTitle(row) {
@@ -332,14 +263,14 @@ function rowAriaLabel(row) {
 }
 
 function rowClass(row) {
-  const statusClass = `decision-row-${row.decision_status || 'ready'}`
-  return row.is_data_anomaly
-    ? `${statusClass} decision-row-data_anomaly`
-    : statusClass
+  return `decision-row-${row.decision_status || 'ready'}`
 }
 
 function channelText(channel) {
-  if (!channel) return '-'
+  if (props.simulationStatus === 'market_reference') {
+    return t('llmOps.decision.status.market_reference')
+  }
+  if (!channel) return t('llmOps.status.noSupply')
   if (channel.channel_type === 'auto_best' || channel.channel_id === null) {
     return t('llmOps.channel.autoBest')
   }
@@ -347,6 +278,9 @@ function channelText(channel) {
 }
 
 function currentListingText(row) {
+  if (!isOperationalRow(row)) {
+    return t('llmOps.decision.status.market_reference')
+  }
   if (!row.current_listing?.is_listed) return t('llmOps.status.unlisted')
   const listing = row.current_listing
   if (listing.channel_type === 'auto_best' || listing.channel_id === null) {
@@ -356,36 +290,36 @@ function currentListingText(row) {
 }
 
 function procurementPriceRows(row) {
-  const channel = row.recommended_channel
+  const channel = row.recommended_channel || row.reference_price
   if (!channel) return []
-  return [
-    priceRow(
-      t('llmOps.price.input'),
-      channel.input_price_per_million,
-      channel.currency
-    ),
-    priceRow(
-      t('llmOps.price.output'),
-      channel.output_price_per_million,
-      channel.currency
-    )
-  ]
+  return priceRows(
+    channel.input_price_per_million,
+    channel.output_price_per_million,
+    channel.currency
+  )
 }
 
 function listingPriceRows(row) {
   const listing = row.current_listing
   if (!listing?.is_listed) return []
+  return priceRows(
+    listing.retail_input_price_per_million,
+    listing.retail_output_price_per_million,
+    listing.currency
+  )
+}
+
+function priceRows(input, output, currency) {
   return [
-    priceRow(
-      t('llmOps.price.input'),
-      listing.retail_input_price_per_million,
-      listing.currency
-    ),
-    priceRow(
-      t('llmOps.price.output'),
-      listing.retail_output_price_per_million,
-      listing.currency
-    )
+    priceRow(t('llmOps.price.input'), input, currency),
+    priceRow(t('llmOps.price.output'), output, currency)
+  ]
+}
+
+function yieldRows(row) {
+  return [
+    { label: t('llmOps.price.input'), value: percent(row.input_yield) },
+    { label: t('llmOps.price.output'), value: percent(row.output_yield) }
   ]
 }
 
@@ -403,26 +337,16 @@ function formatPrice(value, currency) {
   return `${currency || ''} ${numberValue.toFixed(4)}`.trim()
 }
 
-function priceSummary(rows) {
-  if (!rows.length) return '-'
-  return rows.map((row) => `${row.label}: ${row.value}`).join(' / ')
-}
-
-function yieldSummary(row) {
-  return `${percent(row.input_yield)} / ${percent(row.output_yield)}`
-}
-
-const GROUP_LABELS = {
-  supply: 'llmOps.overview.kpiGroup.supply',
-  yield: 'llmOps.overview.kpiGroup.yield',
-  data: 'llmOps.overview.kpiGroup.data'
-}
-
-function kpiGroupLabel(group) {
-  return t(GROUP_LABELS[group] || GROUP_LABELS.supply)
-}
-
 const DECISION_ACTION_LABELS = {
+  configure_channel: 'llmOps.decision.action.configureChannel',
+  configure_exchange_rate: 'llmOps.decision.action.configureExchange',
+  configure_platform_fee: 'llmOps.decision.action.configurePlatformFee',
+  review_pricing_or_channel: 'llmOps.decision.action.reviewMargin',
+  switch_lowest_channel: 'llmOps.decision.action.switchLowestChannel',
+  publish_listing: 'llmOps.decision.action.publishToPlatform',
+  add_channel_coverage: 'llmOps.decision.action.addChannelCoverage',
+  keep: 'llmOps.decision.action.keep',
+  view_market_price: 'llmOps.decision.action.viewMarketPrice',
   no_supply: 'llmOps.decision.action.configureChannel',
   currency_unresolved: 'llmOps.decision.action.configureExchange',
   platform_fee_unresolved: 'llmOps.decision.action.configurePlatformFee',
@@ -430,16 +354,21 @@ const DECISION_ACTION_LABELS = {
   not_lowest_channel: 'llmOps.decision.action.switchLowestChannel',
   unlisted: 'llmOps.decision.action.publishToPlatform',
   single_channel: 'llmOps.decision.action.addChannelCoverage',
+  market_reference: 'llmOps.decision.action.viewMarketPrice',
   ready: 'llmOps.decision.action.keep'
 }
 
 function actionLabel(row) {
+  const action = row.decision_action
   const status = row.decision_status || 'ready'
-  return t(DECISION_ACTION_LABELS[status] || DECISION_ACTION_LABELS.ready)
+  return t(
+    DECISION_ACTION_LABELS[action] ||
+      DECISION_ACTION_LABELS[status] ||
+      DECISION_ACTION_LABELS.ready
+  )
 }
 
 const EVENT_LABELS = {
-  updated: 'llmOps.overview.event.updated',
   collection_failed: 'llmOps.overview.event.collectionFailed',
   source_disabled: 'llmOps.overview.event.sourceDisabled',
   reconciliation_anomaly: 'llmOps.overview.event.reconciliationAnomaly',
@@ -447,19 +376,18 @@ const EVENT_LABELS = {
 }
 
 const EVENT_TONES = {
-  updated: 'event-pill-muted',
-  collection_failed: 'event-pill-danger',
-  source_disabled: 'event-pill-warn',
-  reconciliation_anomaly: 'event-pill-warn',
-  stale: 'event-pill-info'
+  collection_failed: 'event-link-danger',
+  source_disabled: 'event-link-warn',
+  reconciliation_anomaly: 'event-link-warn',
+  stale: 'event-link-info'
 }
 
 function eventLabel(type) {
-  return t(EVENT_LABELS[type] || EVENT_LABELS.updated)
+  return t(EVENT_LABELS[type] || EVENT_LABELS.collection_failed)
 }
 
 function eventTone(type) {
-  return EVENT_TONES[type] || 'event-pill-muted'
+  return EVENT_TONES[type] || 'event-link-info'
 }
 
 function absoluteTime(value) {
@@ -486,164 +414,99 @@ function relativeTime(value) {
 </script>
 
 <style scoped>
-.kpi-decision-groups {
+.queue-summary-grid {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
 }
-.kpi-decision-group {
-  min-width: 0;
-}
-.kpi-decision-group-head {
+.queue-summary-card {
   display: flex;
+  min-height: 4.5rem;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  color: var(--ui-text-muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--ui-border-soft);
+  border-left: 0.2rem solid var(--ui-color-primary);
+  border-radius: 0.5rem;
+  background: var(--ui-bg-card);
+  padding: 0.875rem 1rem;
+  color: var(--ui-text-primary);
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease;
 }
-.kpi-decision-group-mark {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 9999px;
-  background: var(--ui-color-primary);
+.queue-summary-card:hover,
+.queue-summary-card:focus-visible,
+.queue-summary-card.is-active {
+  border-color: var(--ui-color-primary);
+  background: var(--ui-color-primary-subtle);
+  outline: none;
 }
-.kpi-decision-group-mark.mark-supply {
-  background: var(--ui-color-primary);
+.queue-summary-card.danger {
+  border-left-color: var(--ui-color-destructive);
 }
-.kpi-decision-group-mark.mark-yield {
-  background: var(--ui-color-warning);
+.queue-summary-card.warn {
+  border-left-color: var(--ui-color-warning);
 }
-.kpi-decision-group-mark.mark-data {
-  background: var(--ui-color-info);
+.queue-summary-card.success {
+  border-left-color: var(--ui-color-success);
 }
-.status-icon {
+.queue-summary-label {
+  color: var(--ui-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+.queue-summary-value {
+  color: var(--ui-text-primary);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+.decision-filter-group {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
-  border-radius: 9999px;
-  font-weight: 700;
-  font-size: 0.7rem;
+  overflow: hidden;
+  border: 1px solid var(--ui-border-default);
+  border-radius: 0.5rem;
+  background: var(--ui-bg-card);
+}
+.decision-filter-button {
+  min-height: 2rem;
+  padding: 0.35rem 0.75rem;
+  color: var(--ui-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.decision-filter-button + .decision-filter-button {
+  border-left: 1px solid var(--ui-border-default);
+}
+.decision-filter-button:hover,
+.decision-filter-button:focus-visible,
+.decision-filter-button.is-active {
   background: var(--ui-color-primary-subtle);
   color: var(--ui-color-primary);
-  border: 1px solid var(--ui-border-soft);
-}
-.status-icon.danger {
-  background: var(--ui-color-destructive-subtle);
-  color: var(--ui-color-destructive);
-}
-.status-icon.warn {
-  background: var(--ui-color-warning-subtle);
-  color: var(--ui-color-warning);
-}
-.status-icon.success {
-  background: var(--ui-color-success-subtle);
-  color: var(--ui-color-success);
-}
-.status-icon.info {
-  background: var(--ui-color-info-subtle);
-  color: var(--ui-color-info);
-}
-.event-pill {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 9999px;
-  padding: 0 0.5rem;
-  height: 1.25rem;
-  font-size: 0.7rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  border: 1px solid var(--ui-border-soft);
-  background: var(--ui-bg-muted);
-  color: var(--ui-text-secondary);
-}
-.event-pill-muted {
-  background: var(--ui-bg-muted);
-  color: var(--ui-text-muted);
-}
-.event-pill-danger {
-  background: var(--ui-color-destructive-subtle);
-  color: var(--ui-color-destructive);
-  border-color: rgba(225, 29, 72, 0.2);
-}
-.event-pill-warn {
-  background: var(--ui-color-warning-subtle);
-  color: var(--ui-color-warning);
-  border-color: rgba(217, 119, 6, 0.2);
-}
-.event-pill-info {
-  background: var(--ui-color-info-subtle);
-  color: var(--ui-color-info);
-  border-color: rgba(37, 99, 235, 0.2);
+  outline: none;
 }
 .decision-table tbody tr {
   border-bottom: 1px solid var(--ui-border-soft);
 }
 .decision-row {
-  position: relative;
-  outline: none;
+  transition: background 0.16s ease;
 }
-.decision-row::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 0.2rem;
-  background: transparent;
-}
-.decision-row:hover,
-.decision-row:focus-visible {
+.decision-row:hover {
   background: var(--ui-bg-subtle);
-}
-.decision-row:focus-visible {
-  box-shadow: inset 0 0 0 2px rgba(95, 78, 207, 0.28);
-}
-.decision-row-no_supply,
-.decision-row-low_yield {
-  background: rgba(255, 241, 242, 0.42);
-}
-.decision-row-no_supply::before,
-.decision-row-low_yield::before {
-  background: var(--ui-color-destructive);
 }
 .decision-row-no_supply > td:first-child,
 .decision-row-low_yield > td:first-child {
   box-shadow: inset 0.2rem 0 0 var(--ui-color-destructive);
-}
-.decision-row-platform_fee_unresolved,
-.decision-row-currency_unresolved,
-.decision-row-single_channel {
-  background: rgba(239, 246, 255, 0.42);
-}
-.decision-row-platform_fee_unresolved::before,
-.decision-row-currency_unresolved::before,
-.decision-row-single_channel::before {
-  background: var(--ui-color-info);
 }
 .decision-row-platform_fee_unresolved > td:first-child,
 .decision-row-currency_unresolved > td:first-child,
 .decision-row-single_channel > td:first-child {
   box-shadow: inset 0.2rem 0 0 var(--ui-color-info);
 }
-.decision-row-not_lowest_channel,
-.decision-row-unlisted {
-  background: rgba(255, 251, 235, 0.5);
-}
-.decision-row-not_lowest_channel::before,
-.decision-row-unlisted::before {
-  background: var(--ui-color-warning);
-}
 .decision-row-not_lowest_channel > td:first-child,
 .decision-row-unlisted > td:first-child {
   box-shadow: inset 0.2rem 0 0 var(--ui-color-warning);
-}
-.decision-row-data_anomaly > td:first-child {
-  box-shadow: inset 0.2rem 0 0 var(--ui-color-destructive);
 }
 .price-pair {
   display: inline-flex;
@@ -653,85 +516,66 @@ function relativeTime(value) {
 }
 .price-pair-row {
   display: flex;
-  justify-content: flex-end;
-  gap: 0.45rem;
+  justify-content: space-between;
+  gap: 0.75rem;
   white-space: nowrap;
 }
 .price-pair-label {
   color: var(--ui-text-muted);
   font-family: inherit;
 }
-.decision-action-cell {
-  position: relative;
-  display: inline-flex;
-}
-.decision-hover-panel {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 0.5rem);
-  right: 0;
-  width: min(22rem, calc(100vw - 2rem));
-  padding: 0.75rem;
-  border: 1px solid var(--ui-border-default);
-  border-radius: 0.5rem;
-  background: var(--ui-bg-card);
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
-  opacity: 0;
-  transform: translateY(-0.25rem);
-  pointer-events: none;
-  transition:
-    opacity 0.16s ease,
-    transform 0.16s ease;
-}
-.decision-row:hover .decision-hover-panel,
-.decision-row:focus-within .decision-hover-panel {
-  opacity: 1;
-  transform: translateY(0);
-}
-.decision-hover-title {
-  margin-bottom: 0.5rem;
-  color: var(--ui-text-primary);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-.decision-hover-grid {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
-  gap: 0.35rem 0.75rem;
-  color: var(--ui-text-muted);
-  font-size: 0.75rem;
-}
-.decision-hover-grid strong {
-  min-width: 0;
-  color: var(--ui-text-primary);
+.event-link {
+  display: block;
+  margin-top: 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
 }
-.badge-ok {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 0.5rem;
-  background: var(--ui-color-success-subtle);
-  color: var(--ui-color-success);
-  padding: 0.125rem 0.5rem;
+.decision-action-button {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--ui-color-primary);
   font-size: 0.75rem;
-  font-weight: 500;
+  font-weight: 600;
+  text-align: left;
 }
+.decision-action-button:hover,
+.decision-action-button:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 0.15rem;
+  outline: none;
+}
+.event-link-danger {
+  color: var(--ui-color-destructive);
+}
+.event-link-warn {
+  color: var(--ui-color-warning);
+}
+.event-link-info {
+  color: var(--ui-color-info);
+}
+.badge-ok,
 .badge-muted {
   display: inline-flex;
   align-items: center;
   border-radius: 0.5rem;
-  background: var(--ui-bg-muted);
-  color: var(--ui-text-muted);
   padding: 0.125rem 0.5rem;
   font-size: 0.75rem;
   font-weight: 500;
 }
-@media (max-width: 1024px) {
-  .kpi-decision-groups {
-    grid-template-columns: 1fr;
+.badge-ok {
+  background: var(--ui-color-success-subtle);
+  color: var(--ui-color-success);
+}
+.badge-muted {
+  background: var(--ui-bg-muted);
+  color: var(--ui-text-muted);
+}
+@media (min-width: 768px) {
+  .queue-summary-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 </style>

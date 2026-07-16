@@ -752,6 +752,40 @@
     }
   },
   "llmOps": {
+    "assistant": {
+      "title": "大模型运营助手",
+      "description": "查询运营待办、市场价格、挂售收益和采集异常。",
+      "drawerLabel": "大模型运营助手",
+      "openLabel": "打开大模型运营助手",
+      "questionGroups": {
+        "operations": {
+          "title": "运营待办",
+          "questions": [
+            "当前需要处理的运营模型有哪些？",
+            "哪些运营模型缺少渠道价格？"
+          ]
+        },
+        "listing": {
+          "title": "挂售与收益",
+          "questions": [
+            "哪些运营模型还没有挂售？",
+            "哪些模型收益率低于预警线？",
+            "当前挂售没有使用最低采购渠道的模型有哪些？"
+          ]
+        },
+        "market": {
+          "title": "市场价格",
+          "questions": [
+            "查询某个元模型的全部市场参考价。",
+            "最近采购渠道价格变化最大的模型有哪些？"
+          ]
+        },
+        "quality": {
+          "title": "数据质量",
+          "questions": ["最近采集失败或数据异常的价格源有哪些？"]
+        }
+      }
+    },
     "shell": {
       "title": "大模型运营管理",
       "subtitle": "价格、渠道、转售与对账的独立运营视图"
@@ -1443,6 +1477,11 @@
       "emptyListingRecords": "暂无挂售记录。",
       "emptyReconciliationRecords": "暂无对账记录。",
       "emptyStandardPrices": "暂无标准价格项。",
+      "filters": {
+        "all": "全部模型",
+        "marketReference": "市场参考",
+        "operational": "运营模型"
+      },
       "kpi": {
         "channelCoverage": "渠道覆盖",
         "channelCoverageHint": "可用采购渠道数量",
@@ -3150,102 +3189,43 @@
     },
     "overview": {
       "kpi": {
+        "needsAction": {
+          "label": "运营待处理"
+        },
         "pendingListing": {
-          "label": "待上架",
-          "hint": "有供应但尚未挂售到当前平台的模型数"
+          "label": "待上架"
         },
         "missingChannel": {
-          "label": "缺渠道价",
-          "hint": "无法计算采购成本，必须先补渠道价"
+          "label": "缺渠道价"
         },
         "lowYield": {
-          "label": "低收益率",
-          "hint": "已挂售但低于平台 yield_warning 阈值的模型"
-        },
-        "dataAnomaly": {
-          "label": "数据异常",
-          "hint": "采集失败 / 源失效 / 对账异常 的模型"
+          "label": "低收益率"
         }
       },
       "decisionTable": {
-        "title": "模型挂售决策表",
-        "subtitle": "按决策优先级排序：先处理缺渠道价、汇率、平台费用，再处理低收益率、非最低渠道、未挂售。"
+        "title": "模型运营决策"
       },
       "columns": {
+        "decision": "决策",
+        "listing": "挂售",
+        "lastUpdate": "数据时间",
         "model": "模型",
-        "provider": "服务商",
-        "coverage": "渠道覆盖",
-        "recommended": "推荐采购渠道",
-        "currentListing": "当前挂售",
-        "purchasePrice": "采购价",
-        "listingPrice": "挂售价",
-        "inputYield": "Input 收益率",
-        "outputYield": "Output 收益率",
-        "action": "推荐动作",
-        "lastUpdate": "数据时间"
+        "procurement": "采购",
+        "yield": "收益率"
       },
-      "emptyDecisionRows": "当前筛选条件下没有需要处理的模型。",
-      "statusOptions": [
-        {
-          "value": "priority",
-          "label": "优先处理"
-        },
-        {
-          "value": "all",
-          "label": "全部"
-        },
-        {
-          "value": "no_supply",
-          "label": "缺渠道价"
-        },
-        {
-          "value": "currency_unresolved",
-          "label": "需要汇率"
-        },
-        {
-          "value": "platform_fee_unresolved",
-          "label": "平台费用未配置"
-        },
-        {
-          "value": "low_yield",
-          "label": "低收益率"
-        },
-        {
-          "value": "not_lowest_channel",
-          "label": "非最低渠道"
-        },
-        {
-          "value": "unlisted",
-          "label": "未挂售"
-        },
-        {
-          "value": "single_channel",
-          "label": "单渠道覆盖"
-        },
-        {
-          "value": "ready",
-          "label": "已就绪"
-        }
-      ],
-      "kpiGroup": {
-        "supply": "供给",
-        "yield": "收益",
-        "data": "数据"
+      "coverageCount": "{count} 个渠道",
+      "queueSummaryLabel": "运营待办筛选",
+      "filters": {
+        "label": "决策状态筛选",
+        "marketReference": "市场参考",
+        "operationalPriority": "运营待处理",
+        "operational": "全部运营模型"
       },
       "event": {
-        "updated": "已更新",
         "collectionFailed": "采集失败",
         "sourceDisabled": "源已停用",
         "reconciliationAnomaly": "对账异常",
         "stale": "价格过期"
-      },
-      "hover": {
-        "action": "动作",
-        "recommended": "推荐",
-        "current": "当前",
-        "purchasePrice": "采购价",
-        "listingPrice": "挂售价",
-        "yield": "收益"
       },
       "time": {
         "justNow": "刚刚",
@@ -3254,7 +3234,7 @@
         "hoursAgo": "{count} 小时前",
         "daysAgo": "{count} 天前"
       },
-      "emptyDecisionAllReady": "当前没有需要处理的模型，全部就绪。",
+      "emptyDecisionAllReady": "当前没有需要处理的运营模型。",
       "emptyDecisionFiltered": "当前筛选条件下没有匹配的模型。"
     },
     "decision": {
@@ -3266,7 +3246,8 @@
         "not_lowest_channel": "非最低渠道",
         "unlisted": "未挂售",
         "single_channel": "单渠道覆盖",
-        "ready": "已就绪"
+        "ready": "已就绪",
+        "market_reference": "市场价格参考"
       },
       "action": {
         "configureChannel": "去渠道配置",
@@ -3276,7 +3257,8 @@
         "switchLowestChannel": "评估切换到最低渠道",
         "publishToPlatform": "去挂售",
         "addChannelCoverage": "增加备选渠道",
-        "keep": "保持"
+        "keep": "保持",
+        "viewMarketPrice": "仅作价格参考"
       }
     },
     "channel": {
@@ -4032,6 +4014,12 @@
         "zhipu_invalid_credentials": "凭证验证失败：用户名或密码无效。请检查智谱登录凭证。",
         "zhipu_invalid_token": "凭证验证失败：登录令牌无效或已失效。请重新检查智谱登录状态。",
         "zhipu_no_permission": "凭证验证失败：账号没有对应组织或项目的财务访问权限。",
+        "deepseek_invalid_api_key": "凭证验证失败：API Key 无效。请检查 DeepSeek API Key。",
+        "deepseek_no_permission": "凭证验证失败：当前 API Key 无权访问 DeepSeek 余额接口。",
+        "deepseek_rate_limit": "凭证验证失败：DeepSeek 请求过于频繁，请稍后重试。",
+        "yunce_invalid_credentials": "凭证验证失败：用户名或密码无效。请检查云策登录凭证。",
+        "yunce_no_permission": "凭证验证失败：当前账号无权访问云策账户接口。",
+        "yunce_rate_limit": "凭证验证失败：云策请求过于频繁，请稍后重试。",
         "volcengine_invalid_credentials": "凭证验证失败：访问密钥无效。请检查您的火山引擎 Access Key ID 和 Secret Access Key。",
         "volcengine_invalid_secret": "凭证验证失败：签名密钥无效。请检查您的火山引擎 Secret Access Key 和签名配置。",
         "volcengine_rate_limit": "凭证验证失败：请求过于频繁，请稍后重试。",
@@ -4210,6 +4198,18 @@
       "zhipuPassword": "密码",
       "zhipuPasswordDesc": "智谱开放平台登录密码",
       "zhipuPasswordPlaceholder": "输入智谱密码",
+      "deepseekApiKey": "API Key",
+      "deepseekApiKeyDesc": "用于调用 DeepSeek 余额接口的 API Key",
+      "deepseekApiKeyPlaceholder": "输入 DeepSeek API Key",
+      "yunceUsername": "用户名",
+      "yunceUsernameDesc": "云策平台登录用户名",
+      "yunceUsernamePlaceholder": "输入云策用户名",
+      "yuncePassword": "密码",
+      "yuncePasswordDesc": "云策平台登录密码",
+      "yuncePasswordPlaceholder": "输入云策密码",
+      "yunceApiKey": "API Key（可选）",
+      "yunceApiKeyDesc": "填写后取账户余额与该 API Key 剩余额度的较小值；不限额的 Key 直接使用账户余额。",
+      "yunceApiKeyPlaceholder": "输入需要限定余额的云策 API Key",
       "volcengineAccessKeyId": "Access Key ID",
       "volcengineAccessKeyIdDesc": "火山引擎访问密钥 ID",
       "volcengineAccessKeyIdPlaceholder": "输入火山引擎 Access Key ID",
@@ -4254,6 +4254,8 @@
         "alibaba": "阿里云",
         "azure": "Azure",
         "zhipu": "智谱 AI",
+        "deepseek": "DeepSeek",
+        "yunce": "云策",
         "volcengine": "火山引擎",
         "baidu": "百度智能云"
       },

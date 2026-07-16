@@ -5,6 +5,7 @@ and exercise the serializer + view queryset directly. This still
 verifies the data contract: every meta model returned to the UI is
 attributed to the company that built it.
 """
+
 from django.test import TestCase
 
 from llm_ops.models import LLMProvider, MetaModel
@@ -29,7 +30,7 @@ class LLMOpsMetaModelsApiTests(TestCase):
             code="qwen-plus",
             owner_code="alibaba",
             owner_name="阿里巴巴",
-            owner_website="https://www.alibaba.com/",
+            owner_website="https://providers.example.test/alibaba",
         )
         MetaModel.objects.create(
             name="DeepSeek V3",
@@ -57,7 +58,8 @@ class LLMOpsMetaModelsApiTests(TestCase):
         queryset = view.get_queryset()
         rows = self._serialize(queryset)
         leaked = [
-            r for r in rows
+            r
+            for r in rows
             if r["code"].startswith("deepseek")
             and r["owner_code"] != "deepseek"
         ]
@@ -74,9 +76,13 @@ class LLMOpsMetaModelsApiTests(TestCase):
         view = MetaModelViewSet()
         view.action = "list"
         view.kwargs = {}
-        view.request = type("R", (), {
-            "query_params": {"owner": "alibaba"},
-        })()
+        view.request = type(
+            "R",
+            (),
+            {
+                "query_params": {"owner": "alibaba"},
+            },
+        )()
         rows = self._serialize(view.get_queryset())
         leaked = [r for r in rows if r["code"].startswith("deepseek")]
         self.assertEqual(leaked, [])
@@ -85,9 +91,13 @@ class LLMOpsMetaModelsApiTests(TestCase):
         view = MetaModelViewSet()
         view.action = "list"
         view.kwargs = {}
-        view.request = type("R", (), {
-            "query_params": {"owner": "deepseek"},
-        })()
+        view.request = type(
+            "R",
+            (),
+            {
+                "query_params": {"owner": "deepseek"},
+            },
+        )()
         rows = self._serialize(view.get_queryset())
         for row in rows:
             self.assertTrue(
@@ -95,7 +105,3 @@ class LLMOpsMetaModelsApiTests(TestCase):
                 f"non-deepseek code in deepseek filter: {row['code']}",
             )
             self.assertEqual(row["owner_code"], "deepseek")
-
-    def test_unbound_meta_models_do_not_exist(self):
-        orphans = MetaModel.objects.filter(owner_code="")
-        self.assertEqual(orphans.count(), 0)

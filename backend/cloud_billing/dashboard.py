@@ -21,7 +21,7 @@ from django.utils.translation import gettext as _
 from .models import BillingData, CloudProvider
 from .serializers import get_balance_support_info
 
-LLM_PROVIDER_TYPES = {'zhipu'}
+LLM_PROVIDER_TYPES = {'deepseek', 'yunce', 'zhipu'}
 CNY_RATE = Decimal('7.15')
 EXCHANGE_RATE_API_URL = 'https://v6.exchangerate-api.com/v6/{api_key}/latest/USD'
 EXCHANGE_RATE_SOURCE_URL = 'https://www.exchangerate-api.com/'

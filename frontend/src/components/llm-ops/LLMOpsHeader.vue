@@ -86,7 +86,7 @@
               size="sm"
             />
           </div>
-          <div class="page-toolbar-button-group">
+          <div v-if="showPlatformActions" class="page-toolbar-button-group">
             <button
               type="button"
               class="btn-secondary page-toolbar-button btn-action-config"
@@ -181,6 +181,7 @@ const selectedResalePlatformIdModel = computed({
 const showPlatformControl = computed(() =>
   ['monitor', 'reseller'].includes(props.activeSection)
 )
+const showPlatformActions = computed(() => props.activeSection === 'reseller')
 const showGlobalToolbar = computed(() => props.activeSection !== 'workflow')
 const showHeroActions = computed(
   () => showGlobalToolbar.value || showPlatformControl.value

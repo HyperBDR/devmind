@@ -76,6 +76,25 @@ class TestCloudProviderSerializer:
         assert not serializer.is_valid()
         assert "config" in serializer.errors
 
+    def test_serialize_yunce_username_as_auth_identifier(self, user):
+        """Use the non-secret Yunce username as the account identifier."""
+        provider = CloudProvider.objects.create(
+            name="yunce_account",
+            provider_type="yunce",
+            display_name="云策",
+            config={
+                "YUNCE_USERNAME": "account",
+                "YUNCE_PASSWORD": "pass",
+            },
+            created_by=user,
+            updated_by=user,
+        )
+
+        data = CloudProviderSerializer(provider).data
+
+        assert data["auth_identifier"] == "account"
+        assert data["auth_identifier_kind"] == "username"
+
 
 @pytest.mark.django_db
 class TestAlertRuleSerializer:

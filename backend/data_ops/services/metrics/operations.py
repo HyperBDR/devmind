@@ -737,6 +737,7 @@ def _upcoming_renewals(today, days: int) -> list[dict]:
     ).exclude(status__in=["已终止", "已归档"]).order_by("service_end")
     return [
         {
+            "customer_name": item.customer_name or "-",
             "customer": item.customer_name or "-",
             "contract_number": item.contract_number,
             "service_end": _date(item.service_end),

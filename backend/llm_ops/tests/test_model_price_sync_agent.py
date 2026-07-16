@@ -1,6 +1,9 @@
 from unittest import mock
 
+import pytest
 from django.test import TestCase
+
+pytest.importorskip("deepagents")
 
 from llm_ops.agents.model_price_sync import (
     LiteLLMTrackedChatModel,
@@ -57,7 +60,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
                 "model": "claude-sonnet-4",
                 "api_key": "key",
                 "api_base": "https://api.anthropic.com",
-                "config_uuid": "8b33ddcb-2896-4df4-bbfc-85b42cb65ec7",
+                "config_uuid": "00000000-0000-4000-8000-000000000001",
                 "config": {},
             },
         ):
@@ -68,7 +71,7 @@ class ModelPriceSyncAgentRunnerTests(TestCase):
         self.assertEqual(result.model_name, "claude-sonnet-4")
         self.assertEqual(
             result.config_uuid,
-            "8b33ddcb-2896-4df4-bbfc-85b42cb65ec7",
+            "00000000-0000-4000-8000-000000000001",
         )
 
     def test_model_builder_normalizes_google_config_to_gemini(self):

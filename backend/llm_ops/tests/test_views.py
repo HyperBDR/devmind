@@ -65,7 +65,7 @@ class LLMOpsViewTests(TestCase):
             {
                 "username": "user",
                 "password": "secret",
-                "base_url": "https://llm.guohe-sh.com/admin/api",
+                "base_url": "https://yunce.example.test/admin/api",
             },
             format="json",
         )
@@ -75,13 +75,13 @@ class LLMOpsViewTests(TestCase):
         mock_sync.assert_called_once_with(
             username="user",
             password="secret",
-            base_url="https://llm.guohe-sh.com/admin/api",
+            base_url="https://yunce.example.test/admin/api",
         )
 
     @patch("llm_ops.views.sync_yunce_model_prices")
     def test_yunce_collection_endpoint_accepts_source_id(self, mock_sync):
         source = PriceCollectionSource.objects.create(
-            name="Yunce Production",
+            name="Yunce Test Source",
             slug="yunce-production",
             source_type=PriceCollectionSource.SOURCE_TYPE_YUNCE,
             endpoint_url="https://example.com/admin/api",
@@ -181,10 +181,7 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(response.data["count"], 2)
         self.assertEqual(len(response.data["results"]), 2)
         self.assertEqual(
-            {
-                item["meta_model_code"]
-                for item in response.data["results"]
-            },
+            {item["meta_model_code"] for item in response.data["results"]},
             {"gpt-4o"},
         )
 
@@ -344,9 +341,7 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         rows = [
-            row
-            for row in response.data["results"]
-            if row["code"] == "alibaba"
+            row for row in response.data["results"] if row["code"] == "alibaba"
         ]
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["name"], "阿里巴巴")
@@ -935,6 +930,79 @@ class LLMOpsViewTests(TestCase):
         self.assertEqual(audit.action, AuditLog.ACTION_DELETE)
         self.assertEqual(audit.category, AuditLog.CATEGORY_CONFIGURATION)
         self.assertEqual(audit.before["slug"], "manual-source")
+
+    def test_collection_source_list_uses_constant_query_count(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        meta_model = MetaModel.objects.create(
+            name="DeepSeek Chat",
+            code="deepseek-chat",
+            owner_code="deepseek",
+            owner_name="DeepSeek",
+        )
+        for index in range(3):
+            source = PriceCollectionSource.objects.create(
+                name=f"DeepSeek Source {index}",
+                slug=f"deepseek-source-{index}",
+                provider=provider,
+                source_category=(
+                    PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+                ),
+                source_owner_type=(
+                    PriceCollectionSource.SOURCE_OWNER_MODEL_PROVIDER_OFFICIAL
+                ),
+            )
+            model = LLMModel.objects.create(
+                provider=provider,
+                meta_model=meta_model,
+                source=source,
+                name=f"DeepSeek Chat {index}",
+                code=f"deepseek-chat-{index}",
+            )
+            ModelPriceItem.objects.create(
+                provider=provider,
+                model=model,
+                meta_model=meta_model,
+                source=source,
+                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="CNY",
+                unit_price=Decimal("0.150000"),
+                price_fingerprint=f"deepseek-input-{index}",
+            )
+            if index == 0:
+                PriceCollectionRun.objects.create(
+                    source=source,
+                    status=PriceCollectionRun.STATUS_SUCCEEDED,
+                )
+
+        with self.assertNumQueries(3):
+            response = self.client.get(
+                reverse("collection-source-list"),
+                {"page": 1, "page_size": 200},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 3)
+        self.assertEqual(len(response.data["results"]), 3)
+        for source_data in response.data["results"]:
+            self.assertEqual(source_data["model_count"], 1)
+            self.assertEqual(source_data["price_item_count"], 1)
+            self.assertEqual(source_data["current_meta_model_count"], 1)
+            self.assertEqual(source_data["current_price_item_count"], 1)
+            self.assertEqual(
+                source_data["business_source_category"],
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER,
+            )
+        self.assertEqual(
+            {
+                source_data["latest_run_status"]
+                for source_data in response.data["results"]
+            },
+            {PriceCollectionRun.STATUS_SUCCEEDED, None},
+        )
 
     def test_channel_delete_removes_channel_listings_without_auto_conflict(
         self,
@@ -3137,9 +3205,7 @@ class LLMOpsViewTests(TestCase):
 
         self.assertEqual(patch_response.status_code, 200)
         saved = ResaleWorkflowConfig.objects.get(platform=platform)
-        self.assertFalse(
-            saved.config["policies"]["feishu_approval_enabled"]
-        )
+        self.assertFalse(saved.config["policies"]["feishu_approval_enabled"])
         response_config = patch_response.data["config"]
         self.assertFalse(
             response_config["policies"]["feishu_approval_enabled"]
@@ -3722,10 +3788,51 @@ class LLMOpsViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["procurement"], [])
-        self.assertEqual(response.data["listings"], [])
+        self.assertEqual(response.data["scope"], "monitor")
+        for omitted_key in (
+            "kpis",
+            "listings",
+            "point_conversion",
+            "procurement",
+            "simulation",
+            "status_counts",
+        ):
+            self.assertNotIn(omitted_key, response.data)
         diagnostic = response.data["agione"]["diagnostics"][0]
-        self.assertNotIn("options", diagnostic)
+        self.assertEqual(
+            set(diagnostic),
+            {
+                "coverage_count",
+                "current_listing",
+                "data_event_type",
+                "decision_action",
+                "decision_priority",
+                "decision_status",
+                "last_data_event_at",
+                "model_code",
+                "model_id",
+                "model_name",
+                "operation_scope",
+                "provider_name",
+                "reference_price",
+                "recommended_channel",
+                "yield_metrics",
+            },
+        )
+        self.assertEqual(
+            set(diagnostic["recommended_channel"]),
+            {
+                "channel_id",
+                "channel_name",
+                "currency",
+                "input_price_per_million",
+                "output_price_per_million",
+            },
+        )
+        self.assertEqual(
+            set(diagnostic["yield_metrics"]),
+            {"input_yield", "is_resolved", "output_yield"},
+        )
         self.assertEqual(diagnostic["model_id"], model.id)
         self.assertEqual(
             diagnostic["recommended_channel"]["channel_name"],
@@ -3735,9 +3842,110 @@ class LLMOpsViewTests(TestCase):
         self.assertIn("decision_status", diagnostic)
         self.assertIn("yield_metrics", diagnostic)
 
+    def test_summary_separates_market_reference_from_operational_models(self):
+        provider = LLMProvider.objects.create(
+            name="Reference Provider",
+            code="reference-provider",
+        )
+        reference_model = LLMModel.objects.create(
+            provider=provider,
+            name="Reference Only",
+            code="reference-only",
+            input_price_per_million="1.5",
+            output_price_per_million="3.0",
+        )
+        operational_model = LLMModel.objects.create(
+            provider=provider,
+            name="Operational Model",
+            code="operational-model",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Configured Channel",
+            code="configured-channel",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=operational_model,
+            is_listed=False,
+        )
+        platform = ResalePlatform.objects.create(
+            code="scope-platform",
+            name="Scope Platform",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {
+                "resale_platform": platform.id,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostics = {
+            item["model_code"]: item
+            for item in response.data["agione"]["diagnostics"]
+        }
+        reference = diagnostics[reference_model.code]
+        self.assertEqual(reference["operation_scope"], "market_reference")
+        self.assertEqual(reference["scope_reason"], "price_reference")
+        self.assertEqual(reference["status"], "market_reference")
+        self.assertEqual(reference["decision_status"], "market_reference")
+        self.assertEqual(reference["decision_action"], "view_market_price")
+        self.assertEqual(
+            reference["reference_price"],
+            {
+                "currency": "USD",
+                "input_price_per_million": 1.5,
+                "output_price_per_million": 3.0,
+            },
+        )
+        operational = diagnostics[operational_model.code]
+        self.assertEqual(operational["operation_scope"], "operational")
+        self.assertEqual(operational["scope_reason"], "channel_configured")
+        self.assertEqual(operational["status"], "missing_channel")
+        self.assertEqual(operational["decision_status"], "no_supply")
+        self.assertEqual(response.data["kpis"]["operational_models"], 1)
+        self.assertEqual(
+            response.data["kpis"]["market_reference_models"],
+            1,
+        )
+
+        monitor_response = self.client.get(
+            reverse("llm-ops-summary"),
+            {
+                "resale_platform": platform.id,
+                "scope": "monitor",
+            },
+        )
+        monitor_diagnostics = monitor_response.data["agione"]["diagnostics"]
+        self.assertEqual(monitor_response.data["scope"], "monitor")
+        self.assertEqual(len(monitor_diagnostics), 2)
+        monitor_by_model = {
+            item["model_id"]: item for item in monitor_diagnostics
+        }
+        self.assertEqual(
+            monitor_by_model[reference_model.id]["operation_scope"],
+            "market_reference",
+        )
+        self.assertEqual(
+            monitor_by_model[reference_model.id]["reference_price"],
+            {
+                "currency": "USD",
+                "input_price_per_million": 1.5,
+                "output_price_per_million": 3.0,
+            },
+        )
+        self.assertEqual(
+            monitor_by_model[operational_model.id]["operation_scope"],
+            "operational",
+        )
+
     def test_summary_decision_fields_for_listed_model(self):
         from llm_ops.services import compute_model_decision
-        provider = LLMProvider.objects.create(name="Anthropic", code="anthropic")
+
+        provider = LLMProvider.objects.create(
+            name="Anthropic", code="anthropic"
+        )
         model = LLMModel.objects.create(
             provider=provider,
             name="Claude-Test",
