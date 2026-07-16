@@ -121,7 +121,7 @@ jobs:
             )"
           fi
 
-          REQUIREMENTS_TABLE="$(
+          REQUIREMENTS="$(
             awk '
               /Compliant requirements:/ {
                 capture = 1
@@ -130,8 +130,7 @@ jobs:
               capture && /^- / {
                 requirement = $0
                 sub(/^- /, "", requirement)
-                gsub(/\|/, "\\\\|", requirement)
-                printf "| %s | ✅ Covered |\n", requirement
+                print requirement
                 found = 1
                 next
               }
@@ -141,18 +140,40 @@ jobs:
             ' <<< "${REVIEW}"
           )"
 
-          if [ -z "${REQUIREMENTS_TABLE}" ]; then
+          if [ -n "${REQUIREMENTS}" ]; then
+            REQUIREMENTS_JSON="$(
+              jq -Rsc '
+                split("\n")
+                | map(select(length > 0))
+                | map({
+                    requirement: .,
+                    status: "✅ Covered"
+                  })
+              ' <<< "${REQUIREMENTS}"
+            )"
+          else
             if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
-              REQUIREMENTS_TABLE="$(
-                printf '%s' \
-                  '| Review 需求覆盖详情 | ℹ️ 见完整 Review |'
-              )"
+              REQUIREMENT_LABEL="Review 需求覆盖详情"
+              REQUIREMENT_STATUS="ℹ️ 见完整 Review"
             else
-              REQUIREMENTS_TABLE="| PR-Agent 审查 | ❌ Failed |"
+              REQUIREMENT_LABEL="PR-Agent 审查"
+              REQUIREMENT_STATUS="❌ Failed"
             fi
+            REQUIREMENTS_JSON="$(
+              jq -cn \
+                --arg requirement "${REQUIREMENT_LABEL}" \
+                --arg status "${REQUIREMENT_STATUS}" \
+                '[{
+                  requirement: $requirement,
+                  status: $status
+                }]'
+            )"
           fi
 
           if [ "${PR_AGENT_OUTCOME}" != "success" ]; then
+            CARD_TEMPLATE="red"
+            STATUS_COLOR="red"
+            STATUS_ICON="❌"
             ISSUES="PR-Agent 审查未成功，"
             ISSUES+="请检查 GitHub Actions 日志。"
             TESTS="- 审查失败，未完成测试覆盖分析"
@@ -160,11 +181,17 @@ jobs:
             MERGE_ADVICE="请先修复 AI Review 工作流，"
             MERGE_ADVICE+="再进行人工验证。"
           elif grep -qi "No major issues detected" <<< "${REVIEW}"; then
+            CARD_TEMPLATE="green"
+            STATUS_COLOR="green"
+            STATUS_ICON="✅"
             ISSUES="未发现重大问题。"
             MERGE_STATUS="Ready after verification"
             MERGE_ADVICE="未发现阻塞问题，"
             MERGE_ADVICE+="建议人工确认后再合并。"
           else
+            CARD_TEMPLATE="orange"
+            STATUS_COLOR="orange"
+            STATUS_ICON="⚠️"
             ISSUES="$(
               jq -nr --arg review "${REVIEW}" '$review[0:3000]'
             )"
@@ -186,32 +213,178 @@ jobs:
           PR_STATE_UPPER="$(
             printf '%s' "${PR_STATE}" | tr '[:lower:]' '[:upper:]'
           )"
-          MESSAGE="$(
-            printf '🔍 %s PR Review 报告\n' "${PROJECT_NAME}"
-            printf '仓库: %s\n' "${GITHUB_REPOSITORY}"
-            printf '时间: %s\n' "${REPORT_DATE}"
-            printf '📋 PR #%s — %s\n\n' "${PR_NUMBER}" "${PR_TITLE}"
-            printf '作者: %s\n' "${PR_AUTHOR}"
-            printf '状态: %s\n' "${PR_STATE_UPPER}"
-            printf '分支: %s → %s\n' "${PR_HEAD_REF}" "${PR_BASE_REF}"
-            printf '文件变更: %s files | +%s / -%s\n\n' \
-              "${PR_CHANGED_FILES}" \
-              "${PR_ADDITIONS}" \
-              "${PR_DELETIONS}"
-            printf '📋 需求覆盖检查\n\n'
-            printf '| 需求 | 状态 |\n'
-            printf '| --- | --- |\n'
-            printf '%s\n\n' "${REQUIREMENTS_TABLE}"
-            printf '⚠️ 发现的问题\n\n%s\n\n' "${ISSUES}"
-            printf '🧪 测试与验证\n\n%s\n\n' "${TESTS}"
-            printf '🔀 合并建议：%s\n\n' "${MERGE_STATUS}"
-            printf '%s\n' "${MERGE_ADVICE}"
-            printf '📎 完整 Review: %s\n' "${PR_URL}"
-          )"
-
+          STATUS_HIGHLIGHT="${STATUS_ICON} "
+          STATUS_HIGHLIGHT+="<font color='${STATUS_COLOR}'>"
+          STATUS_HIGHLIGHT+="**${MERGE_STATUS}**</font>"
+          FOOTER="<font color='grey'>由 PR-Agent 自动生成，"
+          FOOTER+="请在合并前完成人工复核。</font>"
           PAYLOAD="$(
-            jq -cn --arg text "${MESSAGE}" \
-              '{msg_type: "text", content: {text: $text}}'
+            jq -cn \
+              --arg project "${PROJECT_NAME}" \
+              --arg repository "${GITHUB_REPOSITORY}" \
+              --arg report_date "${REPORT_DATE}" \
+              --arg pr_number "${PR_NUMBER}" \
+              --arg pr_title "${PR_TITLE}" \
+              --arg pr_author "${PR_AUTHOR}" \
+              --arg pr_state "${PR_STATE_UPPER}" \
+              --arg head_ref "${PR_HEAD_REF}" \
+              --arg base_ref "${PR_BASE_REF}" \
+              --arg changed_files "${PR_CHANGED_FILES}" \
+              --arg additions "${PR_ADDITIONS}" \
+              --arg deletions "${PR_DELETIONS}" \
+              --arg card_template "${CARD_TEMPLATE}" \
+              --arg status_highlight "${STATUS_HIGHLIGHT}" \
+              --arg issues "${ISSUES}" \
+              --arg tests "${TESTS}" \
+              --arg merge_status "${MERGE_STATUS}" \
+              --arg merge_advice "${MERGE_ADVICE}" \
+              --arg footer "${FOOTER}" \
+              --arg pr_url "${PR_URL}" \
+              --argjson requirements "${REQUIREMENTS_JSON}" \
+              '
+              def markdown($content):
+                {
+                  tag: "markdown",
+                  content: $content
+                };
+
+              def column($content; $weight):
+                {
+                  tag: "column",
+                  width: "weighted",
+                  weight: $weight,
+                  vertical_align: "center",
+                  elements: [markdown($content)]
+                };
+
+              def column_set($background; $columns):
+                {
+                  tag: "column_set",
+                  flex_mode: "stretch",
+                  background_style: $background,
+                  columns: $columns
+                };
+
+              def requirement_row($item; $index):
+                column_set(
+                  (if ($index % 2) == 0 then "grey" else "default" end);
+                  [
+                    column($item.requirement; 4),
+                    column($item.status; 2)
+                  ]
+                );
+
+              {
+                msg_type: "interactive",
+                card: {
+                  schema: "2.0",
+                  config: {
+                    wide_screen_mode: true
+                  },
+                  header: {
+                    title: {
+                      tag: "plain_text",
+                      content: (
+                        "[代码审查] "
+                        + $project
+                        + " PR #"
+                        + $pr_number
+                      )
+                    },
+                    template: $card_template
+                  },
+                  body: {
+                    elements: (
+                      [
+                        markdown(
+                          $status_highlight
+                          + "\n"
+                          + $merge_advice
+                        ),
+                        markdown(
+                          "**仓库**："
+                          + $repository
+                          + "\n**作者**："
+                          + $pr_author
+                          + "\n**时间**："
+                          + $report_date
+                          + "\n**PR**：#"
+                          + $pr_number
+                          + " — "
+                          + $pr_title
+                        ),
+                        {tag: "hr"},
+                        column_set(
+                          "grey";
+                          [
+                            column(
+                              "**状态**\n" + $pr_state;
+                              1
+                            ),
+                            column(
+                              "**文件变更**\n"
+                              + $changed_files
+                              + " files | +"
+                              + $additions
+                              + " / -"
+                              + $deletions;
+                              1
+                            )
+                          ]
+                        ),
+                        column_set(
+                          "default";
+                          [
+                            column(
+                              "**源分支**\n" + $head_ref;
+                              1
+                            ),
+                            column(
+                              "**目标分支**\n" + $base_ref;
+                              1
+                            )
+                          ]
+                        ),
+                        {tag: "hr"},
+                        markdown("**📋 需求覆盖检查**"),
+                        column_set(
+                          "blue";
+                          [
+                            column("**需求**"; 4),
+                            column("**状态**"; 2)
+                          ]
+                        )
+                      ]
+                      + [
+                        range(0; $requirements | length) as $index
+                        | requirement_row(
+                            $requirements[$index];
+                            $index
+                          )
+                      ]
+                      + [
+                        {tag: "hr"},
+                        markdown(
+                          "**⚠️ 发现的问题**\n"
+                          + $issues
+                        ),
+                        markdown(
+                          "**🧪 测试与验证**\n"
+                          + $tests
+                        ),
+                        {tag: "hr"},
+                        markdown(
+                          "🔗 [查看完整 Review]("
+                          + $pr_url
+                          + ")"
+                        ),
+                        markdown($footer)
+                      ]
+                    )
+                  }
+                }
+              }
+              '
           )"
 
           RESPONSE="$(
