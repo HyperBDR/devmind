@@ -1,0 +1,149 @@
+name: AI PR Review
+
+# Required secrets: LLM_API_KEY, LLM_BASE_URL, FEISHU_WEBHOOK.
+# Optional variables: LLM_MODEL, LLM_MODEL_MAX_TOKENS.
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.sender.type != 'Bot' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Review and summarize pull request
+        id: pr_agent
+        # v0.39.0
+        uses: The-PR-Agent/pr-agent@8e4d32e5497defd43c023a404f73560c62728961
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_KEY: ${{ secrets.LLM_API_KEY }}
+          OPENAI.API_BASE: ${{ secrets.LLM_BASE_URL }}
+          CONFIG.MODEL: ${{ vars.LLM_MODEL || 'openai/deepseek-v3' }}
+          CONFIG.FALLBACK_MODELS: >-
+            ["${{ vars.LLM_MODEL || 'openai/deepseek-v3' }}"]
+          CONFIG.CUSTOM_MODEL_MAX_TOKENS: >-
+            ${{ vars.LLM_MODEL_MAX_TOKENS || '64000' }}
+          CONFIG.RESPONSE_LANGUAGE: zh-CN
+          GITHUB_ACTION_CONFIG.AUTO_DESCRIBE: "true"
+          GITHUB_ACTION_CONFIG.AUTO_REVIEW: "true"
+          GITHUB_ACTION_CONFIG.AUTO_IMPROVE: "false"
+          GITHUB_ACTION_CONFIG.HANDLE_PUSH_TRIGGER: "true"
+          GITHUB_ACTION_CONFIG.PR_ACTIONS: >-
+            ["opened", "reopened", "ready_for_review", "synchronize"]
+
+      - name: Notify Feishu
+        if: always()
+        shell: bash
+        env:
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_AGENT_OUTCOME: ${{ steps.pr_agent.outcome }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${FEISHU_WEBHOOK}" ]; then
+            echo "::warning::FEISHU_WEBHOOK is not configured;" \
+              "skipping notification."
+            exit 0
+          fi
+
+          if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+            STATUS="✅ AI Code Review completed"
+          else
+            STATUS="❌ AI Code Review failed"
+          fi
+
+          REVIEW=""
+          if [ "${PR_AGENT_OUTCOME}" = "success" ]; then
+            COMMENTS_URL="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+            COMMENTS_URL="${COMMENTS_URL}/issues/${PR_NUMBER}/comments"
+            COMMENTS_URL="${COMMENTS_URL}?per_page=100"
+            if ! COMMENTS="$(
+              curl --fail --silent --show-error \
+                --retry 3 \
+                --max-time 20 \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "${COMMENTS_URL}"
+            )"; then
+              echo "::warning::Unable to read the PR-Agent review comment."
+              COMMENTS="[]"
+            fi
+
+            REVIEW="$(
+              jq -r '
+                [
+                  .[]
+                  | select(.user.login == "github-actions[bot]")
+                  | select(.body | test("PR Reviewer Guide|PR Review"; "i"))
+                ]
+                | last
+                | .body // ""
+              ' <<< "${COMMENTS}"
+            )"
+          fi
+
+          if [ -n "${REVIEW}" ]; then
+            REVIEW_PREVIEW="$(
+              jq -nr --arg review "${REVIEW}" '$review[0:2000]'
+            )"
+          else
+            REVIEW_PREVIEW="Review and summary are available on the pull "\
+              "request."
+          fi
+
+          MESSAGE="$(printf \
+            '%s\n\nRepository: %s\nPR: #%s %s\nAuthor: %s\n\n'\
+          'Review:\n%s\n\nPR URL:\n%s' \
+            "${STATUS}" \
+            "${GITHUB_REPOSITORY}" \
+            "${PR_NUMBER}" \
+            "${PR_TITLE}" \
+            "${PR_AUTHOR}" \
+            "${REVIEW_PREVIEW}" \
+            "${PR_URL}")"
+
+          PAYLOAD="$(
+            jq -cn --arg text "${MESSAGE}" \
+              '{msg_type: "text", content: {text: $text}}'
+          )"
+
+          RESPONSE="$(
+            curl --fail --silent --show-error \
+              --retry 3 \
+              --max-time 20 \
+              -X POST \
+              -H "Content-Type: application/json" \
+              --data "${PAYLOAD}" \
+              "${FEISHU_WEBHOOK}"
+          )"
+
+          if ! jq -e \
+            '(.code? == 0) or (.StatusCode? == 0)' \
+            <<< "${RESPONSE}" > /dev/null; then
+            echo "::error::Feishu rejected the notification payload."
+            exit 1
+          fi
