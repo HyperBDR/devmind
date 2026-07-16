@@ -28,6 +28,20 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Validate required LLM configuration
+        shell: bash
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${LLM_API_KEY}" ] || [ -z "${LLM_BASE_URL}" ]; then
+            echo "::error::LLM_API_KEY and LLM_BASE_URL must be" \
+              "configured as repository secrets."
+            exit 1
+          fi
+
       - name: Review and summarize pull request
         id: pr_agent
         # v0.39.0
