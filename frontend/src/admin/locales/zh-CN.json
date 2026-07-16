@@ -57,7 +57,8 @@
     "dataOps": "数据运营控制台",
     "taskManagementConsole": "任务控制台",
     "notificationConsole": "通知控制台",
-    "hyperbdrDashboard": "HyperMotion / HyperBDR数据仪表盘"
+    "hyperbdrDashboard": "HyperMotion / HyperBDR数据仪表盘",
+    "quotationManagement": "报价台"
   },
   "llm": {
     "menuTitle": "大模型管理",

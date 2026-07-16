@@ -3,7 +3,12 @@ export const FEATURE_DEFINITIONS = [
     key: 'workspace',
     labelKey: 'platforms.workspace',
     defaultPath: '/dashboard',
-    matchers: ['/dashboard', '/settings', '/cloud-billing', '/data-collector']
+    matchers: [
+      '/dashboard',
+      '/settings',
+      '/cloud-billing',
+      '/data-collector'
+    ]
   },
   {
     key: 'operations_console',
@@ -34,6 +39,12 @@ export const FEATURE_DEFINITIONS = [
     labelKey: 'platforms.salesWorkOrders',
     defaultPath: '/sals/dashboard',
     matchers: ['/sals']
+  },
+  {
+    key: 'quotation_management',
+    labelKey: 'platforms.quotationManagement',
+    defaultPath: '/quotation/dashboard',
+    matchers: ['/quotation']
   },
   {
     key: 'admin_console',
@@ -130,7 +141,9 @@ export function getAvailablePlatforms(user, t) {
     }
   })
 
-  return FEATURE_DEFINITIONS.filter((item) => platformMap.has(item.key)).map(
+  return FEATURE_DEFINITIONS.filter(
+    (item) => platformMap.has(item.key) && item.platformVisible !== false
+  ).map(
     (item) => {
       const resolved = platformMap.get(item.key)
       return {

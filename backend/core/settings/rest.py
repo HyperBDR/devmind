@@ -23,6 +23,8 @@ DRF Parameters:
 - DEFAULT_PARSER_CLASSES: Parses incoming camelCase request data to snake_case.
   - CamelCaseJSONParser: Handles JSON with camelCase keys for internal
     processing.
+  - CamelCaseFormParser / CamelCaseMultiPartParser: Supports form and
+    file upload (multipart/form-data) requests.
 """
 
 from datetime import timedelta
@@ -38,6 +40,8 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PARSER_CLASSES': (
         'djangorestframework_camel_case.parser.CamelCaseJSONParser',
+        'djangorestframework_camel_case.parser.CamelCaseFormParser',
+        'djangorestframework_camel_case.parser.CamelCaseMultiPartParser',
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',

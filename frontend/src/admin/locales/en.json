@@ -57,7 +57,8 @@
     "dataOps": "Data Operations",
     "taskManagementConsole": "Task Console",
     "notificationConsole": "Notification Console",
-    "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard"
+    "hyperbdrDashboard": "HyperMotion / HyperBDR Dashboard",
+    "quotationManagement": "Quote Desk"
   },
   "llm": {
     "menuTitle": "Models",

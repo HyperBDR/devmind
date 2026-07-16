@@ -278,7 +278,14 @@ const pageTitle = computed(() => {
     Tasks: t('tasks.title'),
     ScheduledTasks: t('scheduledTasks.title'),
     Settings: t('common.settings'),
-    HyperBRDDashboard: t('platforms.hyperbdrDashboard')
+    HyperBRDDashboard: t('platforms.hyperbdrDashboard'),
+    QuotationManagement: t('platforms.quotationManagement'),
+    QuotationDashboard: t('quotation.dashboard'),
+    QuotationList: t('quotation.list'),
+    QuotationCreate: t('quotation.create'),
+    QuotationImports: t('quotation.imports'),
+    QuotationCatalog: t('quotation.catalog'),
+    QuotationDetails: t('quotation.list')
   }
   return routeNames[route.name] || t('common.appName')
 })

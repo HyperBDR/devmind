@@ -6,6 +6,8 @@ import dataOpsEn from '../locales/data-ops/en.json'
 import dataOpsZhCN from '../locales/data-ops/zh-CN.json'
 import adminEn from '../admin/locales/en.json'
 import adminZhCN from '../admin/locales/zh-CN.json'
+import quotationEn from '../modules/quotation/locales/en.json'
+import quotationZhCN from '../modules/quotation/locales/zh-CN.json'
 
 export const SUPPORTED_UI_LANGUAGES = ['en', 'zh-CN']
 
@@ -47,12 +49,18 @@ const i18n = createI18n({
   locale: getStoredLanguage(),
   fallbackLocale: 'en',
   messages: {
-    en: deepMergeMessages(deepMergeMessages(en, adminEn), {
-      dataOps: dataOpsEn
-    }),
-    'zh-CN': deepMergeMessages(deepMergeMessages(zhCN, adminZhCN), {
-      dataOps: dataOpsZhCN
-    })
+    en: deepMergeMessages(
+      deepMergeMessages(deepMergeMessages(en, adminEn), {
+        dataOps: dataOpsEn
+      }),
+      quotationEn
+    ),
+    'zh-CN': deepMergeMessages(
+      deepMergeMessages(deepMergeMessages(zhCN, adminZhCN), {
+        dataOps: dataOpsZhCN
+      }),
+      quotationZhCN
+    )
   }
 })
 

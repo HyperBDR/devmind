@@ -107,6 +107,7 @@
       "
     >
       <div class="flex-1 space-y-1">
+        <template v-if="!isQuotationPlatform">
         <router-link
           v-if="userStore.userHasFeature('workspace')"
           to="/dashboard"
@@ -502,6 +503,198 @@
             </div>
           </Transition>
         </div>
+        </template>
+
+        <!-- Quote Desk platform navigation -->
+        <div
+          v-if="isQuotationPlatform"
+          class="menu-group"
+          :class="collapsed && !isMobile ? 'menu-group-collapsed' : ''"
+        >
+          <button
+            @click="toggleQuotationMenu"
+            class="nav-item nav-item-parent w-full"
+            :class="collapsed && !isMobile ? 'nav-item-collapsed' : ''"
+            :title="
+              collapsed && !isMobile ? t('quotation.menuTitle') : undefined
+            "
+          >
+            <svg
+              class="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 14h6m-6-4h6m2 10H7a2 2 0 01-2-2V6a2 2 0 012-2h5l5 5v9a2 2 0 01-2 2z"
+              />
+            </svg>
+            <span v-if="isMobile || !collapsed" class="flex-1 text-left">{{
+              t('quotation.menuTitle')
+            }}</span>
+            <svg
+              v-if="isMobile || !collapsed"
+              class="w-4 h-4 transition-transform"
+              :class="quotationMenuOpen ? 'rotate-90' : ''"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+
+          <Transition
+            enter-active-class="transition-all duration-200 ease-out"
+            enter-from-class="opacity-0 max-h-0"
+            enter-to-class="opacity-100 max-h-96"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 max-h-96"
+            leave-to-class="opacity-0 max-h-0"
+          >
+            <div
+              v-if="quotationMenuOpen || (collapsed && !isMobile)"
+              class="submenu"
+              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
+            >
+              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
+                {{ t('quotation.menuTitle') }}
+              </div>
+              <router-link
+                to="/quotation/dashboard"
+                class="nav-item nav-item-child"
+                :class="
+                  isActive('/quotation/dashboard') ? 'nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/dashboard')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+                  />
+                </svg>
+                <span>{{ t('quotation.dashboard') }}</span>
+              </router-link>
+              <router-link
+                to="/quotation/list"
+                class="nav-item nav-item-child"
+                :class="isActive('/quotation/list') ? 'nav-item-active' : ''"
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/list')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                <span>{{ t('quotation.list') }}</span>
+              </router-link>
+              <router-link
+                to="/quotation/create"
+                class="nav-item nav-item-child"
+                :class="
+                  isActive('/quotation/create') ? 'nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/create')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span>{{ t('quotation.create') }}</span>
+              </router-link>
+              <router-link
+                to="/quotation/imports"
+                class="nav-item nav-item-child"
+                :class="
+                  isActive('/quotation/imports') ? 'nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/imports')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
+                  />
+                </svg>
+                <span>{{ t('quotation.imports') }}</span>
+              </router-link>
+              <router-link
+                to="/quotation/catalog"
+                class="nav-item nav-item-child"
+                :class="
+                  isActive('/quotation/catalog') ? 'nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/catalog')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                  />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                  />
+                </svg>
+                <span>{{ t('quotation.catalog') }}</span>
+              </router-link>
+            </div>
+          </Transition>
+        </div>
       </div>
 
       <!-- Settings Menu -->
@@ -547,6 +740,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
+import { getCurrentPlatformKey } from '@/utils/platformAccess'
 
 defineProps({
   showMobileMenu: {
@@ -565,11 +759,19 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
-const homePath = computed(() => userStore.getUserLandingPath())
+const isQuotationPlatform = computed(
+  () => getCurrentPlatformKey(route.path) === 'quotation_management'
+)
+const homePath = computed(() =>
+  isQuotationPlatform.value
+    ? '/quotation/dashboard'
+    : userStore.getUserLandingPath()
+)
 
 // Menu expand/collapse state - default to expanded
 const cloudBillingMenuOpen = ref(true)
 const dataCollectorMenuOpen = ref(true)
+const quotationMenuOpen = ref(true)
 
 // Load expanded state from localStorage
 const loadExpandedState = () => {
@@ -590,6 +792,14 @@ const loadExpandedState = () => {
       // Ignore parse errors
     }
   }
+  const savedQuotation = localStorage.getItem('sidebar_quotation_expanded')
+  if (savedQuotation !== null) {
+    try {
+      quotationMenuOpen.value = JSON.parse(savedQuotation)
+    } catch (e) {
+      // Ignore parse errors
+    }
+  }
 }
 
 // Save expanded state to localStorage
@@ -602,6 +812,10 @@ const saveExpandedState = () => {
   localStorage.setItem(
     'sidebar_data_collector_expanded',
     JSON.stringify(dataCollectorMenuOpen.value)
+  )
+  localStorage.setItem(
+    'sidebar_quotation_expanded',
+    JSON.stringify(quotationMenuOpen.value)
   )
 }
 
@@ -630,6 +844,11 @@ const toggleDataCollectorMenu = () => {
   saveExpandedState()
 }
 
+const toggleQuotationMenu = () => {
+  quotationMenuOpen.value = !quotationMenuOpen.value
+  saveExpandedState()
+}
+
 // Auto-expand menu if current route is in that section
 watch(
   () => route.path,
@@ -640,6 +859,10 @@ watch(
     }
     if (newPath.startsWith('/data-collector')) {
       dataCollectorMenuOpen.value = true
+      saveExpandedState()
+    }
+    if (newPath.startsWith('/quotation')) {
+      quotationMenuOpen.value = true
       saveExpandedState()
     }
   },
