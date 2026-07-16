@@ -217,6 +217,27 @@
             {{ t('dataOps.executive.trendDescription') }}
           </p>
           <div class="flex flex-wrap items-center gap-2">
+            <div
+              v-if="trendCurrencies.length"
+              class="inline-flex rounded-lg border border-slate-200 bg-white p-1"
+              :aria-label="t('dataOps.columns.currency')"
+              role="group"
+            >
+              <button
+                v-for="currency in trendCurrencies"
+                :key="currency"
+                type="button"
+                class="h-8 rounded-md px-3 text-xs font-medium transition-colors"
+                :class="
+                  selectedTrendCurrency === currency
+                    ? 'bg-slate-900 text-white'
+                    : 'text-slate-600 hover:bg-slate-100'
+                "
+                @click="selectedTrendCurrency = currency"
+              >
+                {{ currency }}
+              </button>
+            </div>
             <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1">
               <button
                 v-for="item in trendPeriodOptions"
@@ -280,6 +301,7 @@
             :chart-data="item.chartData"
             :chart-options="item.chartOptions"
             :description="item.description"
+            :empty="!hasTrendData"
             :title="item.title"
           />
         </div>
@@ -476,7 +498,7 @@
 </template>
 
 <script setup>
-import { computed, h, nextTick, ref } from 'vue'
+import { computed, h, nextTick, ref, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart } from 'vue-chartjs'
 import {
@@ -496,6 +518,11 @@ import {
   hasNonZeroAmount,
   topAmountsByCurrency,
 } from '@/utils/currency'
+import {
+  availableTrendCurrencies,
+  buildAmountTrendRows,
+  buildCashTrendRows,
+} from '@/utils/dataOpsTrends'
 
 const { locale, t } = useI18n()
 
@@ -518,11 +545,13 @@ const props = defineProps({
   summary: { type: Object, default: null },
   topCustomers: { type: Object, default: null },
   topSales: { type: Object, default: null },
+  trends: { type: Object, default: null },
 })
 
 const activeTab = ref('overview')
 const detailDialog = ref(null)
 const selectedAction = ref(null)
+const selectedTrendCurrency = ref('')
 const selectedTrendPeriod = ref('month')
 const selectedTrendRange = ref('6')
 let actionTrigger = null
@@ -532,6 +561,7 @@ const towerChartColors = {
   blue: '#2563eb',
   grid: '#f1f5f9',
   purple: '#8a4cfc',
+  rose: '#e11d48',
   tick: '#94a3b8',
 }
 
@@ -541,12 +571,17 @@ const trendPeriodOptions = computed(() => [
   { key: 'year', label: t('dataOps.executive.period.year') }
 ])
 
-const trendRangeOptions = computed(() => [
-  { key: '3', label: t('dataOps.executive.period.last3') },
-  { key: '6', label: t('dataOps.executive.period.last6') },
-  { key: '12', label: t('dataOps.executive.period.last12') },
-  { key: 'ytd', label: t('dataOps.executive.period.ytd') }
-])
+const trendRangeOptions = computed(() => {
+  const options = [
+    { key: '3', label: t('dataOps.executive.period.last3') },
+    { key: '6', label: t('dataOps.executive.period.last6') },
+    { key: '12', label: t('dataOps.executive.period.last12') },
+    { key: 'ytd', label: t('dataOps.executive.period.ytd') }
+  ]
+  return selectedTrendPeriod.value === 'year'
+    ? options.filter((item) => item.key !== 'ytd')
+    : options
+})
 
 const cockpitTabs = computed(() => [
   {
@@ -584,6 +619,34 @@ const cockpitTabs = computed(() => [
 const currentMonth = computed(
   () => props.overview?.meta?.current_month || new Date().toISOString().slice(0, 7)
 )
+
+const trendCurrencies = computed(() =>
+  availableTrendCurrencies(
+    props.trends?.monthly_signed || [],
+    props.trends?.monthly_received || [],
+    props.trends?.monthly_expense || [],
+    props.trends?.monthly_net || []
+  )
+)
+const hasTrendData = computed(() => Boolean(selectedTrendCurrency.value))
+const trendQueryOptions = computed(() => ({
+  currency: selectedTrendCurrency.value,
+  currentMonth: currentMonth.value,
+  period: selectedTrendPeriod.value,
+  range: selectedTrendRange.value,
+}))
+
+watchEffect(() => {
+  if (!trendCurrencies.value.includes(selectedTrendCurrency.value)) {
+    selectedTrendCurrency.value = trendCurrencies.value[0] || ''
+  }
+  if (
+    selectedTrendPeriod.value === 'year' &&
+    selectedTrendRange.value === 'ytd'
+  ) {
+    selectedTrendRange.value = '6'
+  }
+})
 
 const overviewKpis = computed(() => props.overview?.kpis || {})
 const highOutstandingItems = computed(
@@ -758,34 +821,49 @@ const executiveSummary = computed(() => {
   }.`
 })
 
-const trendSummaries = computed(() => [
-  latestTrendSummary(
-    t('dataOps.executive.trend.latestSigned'),
-    props.insights?.monthly_signings || [],
-    'amount'
-  ),
-  latestTrendSummary(
-    t('dataOps.executive.trend.latestReceived'),
-    props.insights?.monthly_payment_trend || [],
-    'payment_received'
-  ),
-  latestNetTrendSummary(),
-])
-
 const signedTrendRows = computed(() =>
-  buildTrendRows(props.insights?.monthly_signings || [], 'amount')
+  buildAmountTrendRows(
+    props.trends?.monthly_signed || [],
+    trendQueryOptions.value
+  )
 )
 
 const receivedTrendRows = computed(() =>
-  buildTrendRows(
-    props.insights?.monthly_payment_trend || [],
-    'payment_received'
+  buildAmountTrendRows(
+    props.trends?.monthly_received || [],
+    trendQueryOptions.value
+  )
+)
+
+const cashTrendRows = computed(() =>
+  buildCashTrendRows(
+    props.trends?.monthly_received || [],
+    props.trends?.monthly_expense || [],
+    trendQueryOptions.value
   )
 )
 
 const netTrendRows = computed(() =>
-  buildNetTrendRows(props.insights?.monthly_net_trend || [])
+  buildAmountTrendRows(
+    props.trends?.monthly_net || [],
+    trendQueryOptions.value
+  )
 )
+
+const trendSummaries = computed(() => [
+  latestTrendSummary(
+    t('dataOps.executive.trend.latestSigned'),
+    signedTrendRows.value
+  ),
+  latestTrendSummary(
+    t('dataOps.executive.trend.latestReceived'),
+    receivedTrendRows.value
+  ),
+  latestTrendSummary(
+    t('dataOps.executive.trend.latestNet'),
+    netTrendRows.value
+  ),
+])
 
 const trendPanelConfigs = computed(() => [
   {
@@ -793,7 +871,7 @@ const trendPanelConfigs = computed(() => [
     description: t('dataOps.executive.trend.signedDescription'),
     chartData: buildTrendChartData(
       signedTrendRows.value,
-      t('dataOps.executive.trend.signedAmount'),
+      trendDatasetLabel(t('dataOps.executive.trend.signedAmount')),
       towerChartColors.purple
     ),
     chartOptions: buildTrendChartOptions(),
@@ -801,19 +879,15 @@ const trendPanelConfigs = computed(() => [
   {
     title: t('dataOps.executive.trend.cashTitle'),
     description: t('dataOps.executive.trend.cashDescription'),
-    chartData: buildTrendChartData(
-      receivedTrendRows.value,
-      t('dataOps.executive.trend.receivedAmount'),
-      towerChartColors.blue
-    ),
-    chartOptions: buildTrendChartOptions(),
+    chartData: buildCashTrendChartData(cashTrendRows.value),
+    chartOptions: buildTrendChartOptions(false),
   },
   {
     title: t('dataOps.executive.trend.netTitle'),
     description: t('dataOps.executive.trend.netDescription'),
     chartData: buildTrendChartData(
       netTrendRows.value,
-      t('dataOps.executive.trend.netAmount'),
+      trendDatasetLabel(t('dataOps.executive.trend.netAmount')),
       towerChartColors.amber
     ),
     chartOptions: buildTrendChartOptions(),
@@ -1147,9 +1221,8 @@ function previousMonth(month) {
   return `${nextYear}-${nextMonth}`
 }
 
-function latestTrendSummary(label, items, valueKey) {
-  const rows = buildTrendRows(items, valueKey)
-  const currentRow = rows[rows.length - 1]
+function latestTrendSummary(label, rows) {
+  const currentRow = hasTrendData.value ? rows[rows.length - 1] : null
   const delta = currentRow?.delta ?? null
   return {
     label,
@@ -1163,92 +1236,9 @@ function latestTrendSummary(label, items, valueKey) {
   }
 }
 
-function latestNetTrendSummary() {
-  const rows = buildNetTrendSource(props.insights?.monthly_net_trend || [])
-  return latestTrendSummary(
-    t('dataOps.executive.trend.latestNet'),
-    rows,
-    'amount'
-  )
-}
-
-function buildTrendRows(items, valueKey) {
-  if (hasMixedCurrencies(items)) return []
-  const totals = new Map()
-  for (const item of items) {
-    const period = periodBucket(item.month)
-    if (!period) continue
-    const row = totals.get(period.key) || {
-      amount: 0,
-      label: period.label,
-      sortKey: period.sortKey,
-      year: period.year,
-    }
-    row.amount += Number(item[valueKey] || 0)
-    totals.set(period.key, row)
-  }
-  const rows = [...totals.values()].sort((left, right) =>
-    left.sortKey.localeCompare(right.sortKey)
-  )
-  const rowsWithDelta = rows.map((item, index) => {
-    const previous = rows[index - 1]?.amount || 0
-    return {
-      ...item,
-      delta: previous ? ((item.amount - previous) / previous) * 100 : null,
-    }
-  })
-  return filterTrendRows(rowsWithDelta)
-}
-
-function buildNetTrendRows(items) {
-  return buildTrendRows(buildNetTrendSource(items), 'amount')
-}
-
-function buildNetTrendSource(items) {
-  return items.map((item) => ({
-    amount: Number(item.amount || 0),
-    currency: item.currency,
-    month: item.month,
-  }))
-}
-
-function periodBucket(month) {
-  const [year, monthIndex] = String(month || '').split('-').map(Number)
-  if (!year || !monthIndex) return null
-  if (selectedTrendPeriod.value === 'year') {
-    return {
-      key: String(year),
-      label: String(year),
-      sortKey: String(year),
-      year,
-    }
-  }
-  if (selectedTrendPeriod.value === 'quarter') {
-    const quarter = Math.floor((monthIndex - 1) / 3) + 1
-    return {
-      key: `${year}-Q${quarter}`,
-      label: `${year} Q${quarter}`,
-      sortKey: `${year}-${String(quarter).padStart(2, '0')}`,
-      year,
-    }
-  }
-  return {
-    key: `${year}-${String(monthIndex).padStart(2, '0')}`,
-    label: `${year}-${String(monthIndex).padStart(2, '0')}`,
-    sortKey: `${year}-${String(monthIndex).padStart(2, '0')}`,
-    year,
-  }
-}
-
-function filterTrendRows(rows) {
-  if (selectedTrendRange.value === 'ytd') {
-    const currentYear = Number(String(currentMonth.value).slice(0, 4))
-    const latestYear = rows[rows.length - 1]?.year
-    const year = currentYear || latestYear
-    return rows.filter((item) => item.year === year)
-  }
-  const limit = Number(selectedTrendRange.value || 6)
-  return rows.slice(-limit)
+function trendDatasetLabel(label) {
+  if (!selectedTrendCurrency.value) return label
+  return `${label} (${selectedTrendCurrency.value})`
 }
 
 function buildTrendChartData(rows, barLabel, barColor) {
@@ -1284,7 +1274,51 @@ function buildTrendChartData(rows, barLabel, barColor) {
   }
 }
 
-function buildTrendChartOptions() {
+function buildCashTrendChartData(rows) {
+  return {
+    labels: rows.map((item) => item.label),
+    datasets: [
+      {
+        type: 'line',
+        label: trendDatasetLabel(t('dataOps.executive.trend.netAmount')),
+        data: rows.map((item) => item.net),
+        borderColor: towerChartColors.amber,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointBackgroundColor: towerChartColors.amber,
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        pointRadius: 3,
+        tension: 0.3,
+        yAxisID: 'y',
+      },
+      {
+        type: 'bar',
+        label: trendDatasetLabel(
+          t('dataOps.executive.trend.receivedAmount')
+        ),
+        data: rows.map((item) => item.received),
+        backgroundColor: towerChartColors.blue,
+        borderRadius: 4,
+        borderSkipped: false,
+        yAxisID: 'y',
+      },
+      {
+        type: 'bar',
+        label: trendDatasetLabel(
+          t('dataOps.executive.trend.expenseAmount')
+        ),
+        data: rows.map((item) => item.expense),
+        backgroundColor: towerChartColors.rose,
+        borderRadius: 4,
+        borderSkipped: false,
+        yAxisID: 'y',
+      },
+    ],
+  }
+}
+
+function buildTrendChartOptions(showPercentageAxis = true) {
   return {
     maintainAspectRatio: false,
     responsive: true,
@@ -1351,6 +1385,7 @@ function buildTrendChartOptions() {
         },
       },
       y1: {
+        display: showPercentageAxis,
         border: {
           display: false,
         },
@@ -1396,6 +1431,7 @@ const TrendPanel = {
     chartData: { type: Object, required: true },
     chartOptions: { type: Object, required: true },
     description: { type: String, required: true },
+    empty: { type: Boolean, default: false },
     title: { type: String, required: true },
   },
   setup(panelProps) {
@@ -1403,13 +1439,27 @@ const TrendPanel = {
       h('section', { class: 'rounded-xl bg-slate-50 p-4' }, [
         h('h4', { class: 'mb-1 text-sm font-medium text-slate-700' }, panelProps.title),
         h('p', { class: 'mb-3 text-xs text-slate-500' }, panelProps.description),
-        h('div', { class: 'h-[300px]' }, [
-          h(Chart, {
-            data: panelProps.chartData,
-            options: panelProps.chartOptions,
-            type: 'bar',
-          }),
-        ]),
+        h(
+          'div',
+          {
+            class: [
+              'h-[300px]',
+              panelProps.empty
+                ? 'flex items-center justify-center text-sm text-slate-400'
+                : '',
+            ],
+            role: panelProps.empty ? 'status' : undefined,
+          },
+          panelProps.empty
+            ? t('dataOps.executive.trend.noData')
+            : [
+                h(Chart, {
+                  data: panelProps.chartData,
+                  options: panelProps.chartOptions,
+                  type: 'bar',
+                }),
+              ]
+        ),
       ])
   },
 }

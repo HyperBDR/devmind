@@ -34,6 +34,7 @@ export function useDataOpsConsole() {
 
   const summary = ref(null)
   const overview = ref(null)
+  const trends = ref(null)
   const insights = ref(null)
   const risks = ref(null)
   const opportunities = ref(null)
@@ -184,6 +185,7 @@ export function useDataOpsConsole() {
     const [
       summaryRes,
       overviewRes,
+      trendsRes,
       insightsRes,
       risksRes,
       opportunitiesRes,
@@ -193,6 +195,7 @@ export function useDataOpsConsole() {
     ] = await Promise.all([
       dataOpsApi.summary(),
       dataOpsApi.executiveOverview(),
+      dataOpsApi.executiveTrends(),
       dataOpsApi.insights(),
       dataOpsApi.executiveRisks(),
       dataOpsApi.executiveOpportunities(),
@@ -202,6 +205,7 @@ export function useDataOpsConsole() {
     ])
     summary.value = extractData(summaryRes)
     overview.value = extractData(overviewRes)
+    trends.value = extractData(trendsRes)
     insights.value = extractData(insightsRes)
     risks.value = extractData(risksRes)
     opportunities.value = extractData(opportunitiesRes)
@@ -758,6 +762,7 @@ export function useDataOpsConsole() {
     startNewAiConversation,
     topCustomers,
     topSales,
+    trends,
     triggerConfigSync,
     triggerFullSync,
     triggerIncrementalSync,
