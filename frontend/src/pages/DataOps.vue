@@ -68,6 +68,7 @@
             :risks="risks"
             :summary="summary"
             :top-customers="topCustomers"
+            :top-sales="topSales"
           />
 
           <PipelineSection
@@ -212,6 +213,7 @@ const {
   syncFailure,
   syncLoading,
   topCustomers,
+  topSales,
   syncTables,
   triggerConfigSync,
   triggerFullSync,

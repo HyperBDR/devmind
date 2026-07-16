@@ -20,6 +20,7 @@ from data_ops.models import (
     ProjectScope,
     SalesRecord,
 )
+from data_ops.services.metrics.currency import normalize_currency
 from data_ops.services.metrics.owner_identities import (
     owner_payload_from_record,
 )
@@ -114,7 +115,7 @@ def _contract_row(contract: Contract) -> dict:
         "sales_person": contract.sales_person,
         **owner_payload_from_record(contract, "sales_person"),
         "region": contract.region,
-        "currency": contract.currency,
+        "currency": normalize_currency(contract.currency),
         "total_amount": _number(contract.total_amount),
         "product_category": contract.product_category,
         "signing_type": contract.signing_type,
@@ -276,8 +277,10 @@ def _project_card(project: Project) -> dict:
         "estimated_amount": _number(project.estimated_amount),
         "total_amount": _number(project.total_amount),
         "payment_amount": _number(project.payment_amount),
-        "currency": project.currency,
-        "payment_currency": project.payment_currency,
+        "currency": normalize_currency(project.currency),
+        "payment_currency": normalize_currency(
+            project.payment_currency or project.currency
+        ),
         "display_amount": display_amount,
         "display_currency": display_currency,
         "oa_initiation_date": _date(project.oa_initiation_date),
@@ -313,8 +316,10 @@ def _project_display_amount_currency(project: Project) -> tuple[float, str]:
     for amount, currency in candidates:
         value = _number(amount)
         if value:
-            return value, currency or "未知"
-    return 0.0, project.currency or project.payment_currency or ""
+            return value, normalize_currency(currency)
+    return 0.0, normalize_currency(
+        project.currency or project.payment_currency
+    )
 
 
 def _project_amounts_by_currency(queryset) -> list[dict]:
@@ -323,7 +328,7 @@ def _project_amounts_by_currency(queryset) -> list[dict]:
         amount, currency = _project_display_amount_currency(project)
         if not amount:
             continue
-        key = currency or "未知"
+        key = normalize_currency(currency)
         buckets[key] = buckets.get(key, 0.0) + amount
     return [
         {"currency": currency, "amount": amount}
@@ -362,7 +367,7 @@ def get_pipeline_ledgers_data() -> dict:
             "sales_person": item.sales_person,
             **owner_payload_from_record(item, "sales_person"),
             "outstanding": _number(item.outstanding),
-            "currency": item.currency,
+            "currency": normalize_currency(item.currency),
             "expected_payment_date": _date(item.expected_payment_date),
             "is_overdue": _is_overdue(item.expected_payment_date),
             "overdue_days": _overdue_days(item.expected_payment_date),
@@ -467,6 +472,7 @@ def get_insights_data() -> dict:
             "status",
         ),
         "monthly_payment_trend": _monthly_payment_trend(),
+        "monthly_net_trend": _monthly_net_trend(),
         "oversea_projects_by_country_top10": _top_amounts(
             OverseaProject,
             "country",
@@ -560,7 +566,7 @@ def get_oversea_settlement_kanban_data(params: dict[str, Any]) -> dict:
             "actual_revenue": _number(item.actual_revenue),
             "receivable_amount": _number(item.receivable_amount),
             "received_amount": _number(item.received_amount),
-            "currency": item.currency,
+            "currency": normalize_currency(item.currency),
             "huawei_est_payment_time": item.huawei_est_payment_time,
             "payment_date": _date(item.payment_date),
             "huawei_settlement_party": item.huawei_settlement_party,
@@ -597,7 +603,7 @@ def list_domestic_ledgers_data(params: dict[str, Any]) -> list[dict]:
             "project_name": item.project_name,
             "sales_person": item.sales_person,
             **owner_payload_from_record(item, "sales_person"),
-            "currency": item.currency,
+            "currency": normalize_currency(item.currency),
             "total_contract_amount": _number(item.total_contract_amount),
             "payment_received": _number(item.payment_received),
             "payment_amount": _number(item.payment_amount),
@@ -641,7 +647,7 @@ def list_project_inits_data() -> list[dict]:
             **owner_payload_from_record(item, "sales_person"),
             "domestic_international": item.domestic_international,
             "estimated_amount": _number(item.estimated_amount),
-            "currency": item.currency,
+            "currency": normalize_currency(item.currency),
             "oa_initiation_date": _date(item.oa_initiation_date),
         }
         for item in ProjectInit.objects.order_by("-synced_at")[:500]
@@ -660,7 +666,7 @@ def contract_export_rows() -> list[dict]:
             "负责人": item.sales_person,
             **owner_payload_from_record(item, "sales_person"),
             "地区": item.region,
-            "币种": item.currency,
+            "币种": normalize_currency(item.currency),
             "合同金额": _number(item.total_amount),
             "产品大类": item.product_category,
             "合同类型": item.signing_type,
@@ -797,7 +803,7 @@ def _settlement_trend() -> list[dict]:
     grouped: dict[tuple[str, str], dict] = {}
     for item in rows:
         month = item["month"].strftime("%Y-%m") if item["month"] else ""
-        currency = item["currency"] or "未知"
+        currency = normalize_currency(item["currency"])
         bucket = grouped.setdefault(
             (month, currency),
             {
@@ -832,13 +838,15 @@ def _monthly_amounts(
         .annotate(amount=Coalesce(Sum(amount_field), ZERO_DECIMAL))
         .order_by("month")
     )
+    buckets = {}
+    for item in rows:
+        month = item["month"].strftime("%Y-%m") if item["month"] else ""
+        currency = normalize_currency(item.get(currency_field))
+        key = (month, currency)
+        buckets[key] = buckets.get(key, 0.0) + _number(item["amount"])
     return [
-        {
-            "month": item["month"].strftime("%Y-%m") if item["month"] else "",
-            "amount": _number(item["amount"]),
-            "currency": item.get(currency_field) or "未知",
-        }
-        for item in rows
+        {"month": month, "amount": amount, "currency": currency}
+        for (month, currency), amount in sorted(buckets.items())
     ]
 
 
@@ -926,15 +934,46 @@ def _monthly_payment_trend() -> list[dict]:
         )
         .order_by("month")
     )
+    buckets = {}
+    for item in rows:
+        if not item["month"]:
+            continue
+        month = item["month"].strftime("%Y-%m")
+        currency = normalize_currency(item["currency"])
+        bucket = buckets.setdefault(
+            (month, currency),
+            {
+                "month": month,
+                "currency": currency,
+                "payment_received": 0.0,
+                "outstanding": 0.0,
+            },
+        )
+        bucket["payment_received"] += _number(item["payment_received"])
+        bucket["outstanding"] += _number(item["outstanding"])
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def _monthly_net_trend() -> list[dict]:
+    payment_rows = _monthly_payment_trend()
+    expense_rows = _monthly_amounts(
+        DomesticLedger.objects.filter(ledger_type="支出").exclude(
+            signing_date__isnull=True,
+        ),
+        "signing_date",
+        "payment_amount",
+        currency_field="currency",
+    )
+    buckets = {}
+    for item in payment_rows:
+        key = (item["month"], item["currency"])
+        buckets[key] = buckets.get(key, 0.0) + item["payment_received"]
+    for item in expense_rows:
+        key = (item["month"], item["currency"])
+        buckets[key] = buckets.get(key, 0.0) - item["amount"]
     return [
-        {
-            "month": item["month"].strftime("%Y-%m") if item["month"] else "",
-            "currency": item["currency"] or "未知",
-            "payment_received": _number(item["payment_received"]),
-            "outstanding": _number(item["outstanding"]),
-        }
-        for item in rows
-        if item["month"]
+        {"month": month, "currency": currency, "amount": amount}
+        for (month, currency), amount in sorted(buckets.items())
     ]
 
 

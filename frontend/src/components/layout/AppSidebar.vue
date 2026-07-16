@@ -304,36 +304,6 @@
           </Transition>
         </div>
 
-        <router-link
-          v-if="userStore.userHasFeature('data_ops')"
-          to="/data-ops"
-          class="nav-item"
-          :class="[
-            isActive('/data-ops') ? 'nav-item-active' : '',
-            collapsed && !isMobile ? 'nav-item-collapsed' : ''
-          ]"
-          @click="isMobile && $emit('close')"
-          @mouseenter="preloadRoute('/data-ops')"
-          :title="collapsed && !isMobile ? t('platforms.dataOps') : undefined"
-        >
-          <svg
-            class="w-5 h-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M4 19V5m0 14h16M8 16v-5m4 5V8m4 8v-8"
-            />
-          </svg>
-          <span v-if="isMobile || !collapsed">{{
-            t('platforms.dataOps')
-          }}</span>
-        </router-link>
-
         <!-- Data Collector Menu with Submenu -->
         <div
           v-if="userStore.userHasFeature('operations_console')"

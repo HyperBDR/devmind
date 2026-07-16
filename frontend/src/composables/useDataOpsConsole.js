@@ -39,6 +39,7 @@ export function useDataOpsConsole() {
   const opportunities = ref(null)
   const dataQuality = ref(null)
   const topCustomers = ref(null)
+  const topSales = ref(null)
   const pipelineSummary = ref(null)
   const pipelineProjects = ref([])
   const pipelineInsights = ref(null)
@@ -188,6 +189,7 @@ export function useDataOpsConsole() {
       opportunitiesRes,
       dataQualityRes,
       topCustomersRes,
+      topSalesRes,
     ] = await Promise.all([
       dataOpsApi.summary(),
       dataOpsApi.executiveOverview(),
@@ -196,6 +198,7 @@ export function useDataOpsConsole() {
       dataOpsApi.executiveOpportunities(),
       dataOpsApi.dataQuality(),
       dataOpsApi.executiveTopCustomers(),
+      dataOpsApi.executiveTopSales(),
     ])
     summary.value = extractData(summaryRes)
     overview.value = extractData(overviewRes)
@@ -204,6 +207,7 @@ export function useDataOpsConsole() {
     opportunities.value = extractData(opportunitiesRes)
     dataQuality.value = extractData(dataQualityRes)
     topCustomers.value = extractData(topCustomersRes)
+    topSales.value = extractData(topSalesRes)
   }
 
   async function loadPipeline() {
@@ -753,6 +757,7 @@ export function useDataOpsConsole() {
     stopAiStream,
     startNewAiConversation,
     topCustomers,
+    topSales,
     triggerConfigSync,
     triggerFullSync,
     triggerIncrementalSync,

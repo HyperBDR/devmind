@@ -517,6 +517,7 @@ const props = defineProps({
   risks: { type: Object, default: null },
   summary: { type: Object, default: null },
   topCustomers: { type: Object, default: null },
+  topSales: { type: Object, default: null },
 })
 
 const activeTab = ref('overview')
@@ -783,7 +784,7 @@ const receivedTrendRows = computed(() =>
 )
 
 const netTrendRows = computed(() =>
-  buildNetTrendRows(props.insights?.monthly_payment_trend || [])
+  buildNetTrendRows(props.insights?.monthly_net_trend || [])
 )
 
 const trendPanelConfigs = computed(() => [
@@ -830,7 +831,7 @@ const customerRankItems = computed(() =>
     .map((item) => ({
       title: `${
         item.customer_name || t('dataOps.executive.unknownCustomer')
-      } · ${item.currency || '未知'}`,
+      } · ${ownerLabel(item) || t('dataOps.executive.unassignedOwner')}`,
       meta: t('dataOps.executive.customerMeta', {
         contracts: item.contract_count || 0,
         outstanding: formatAmountByCurrency(
@@ -850,50 +851,34 @@ const customerRankItems = computed(() =>
     }))
 )
 
-const salesRankItems = computed(() => {
-  const rows = new Map()
-  for (const item of opportunityItems.value) {
-    const name = ownerLabel(item) || t('dataOps.executive.unassignedOwner')
-    const row = rows.get(name) || {
-      title: name,
-      amount: 0,
-      customers: new Set(),
-      opportunities: 0,
-      outstanding: 0,
-    }
-    row.amount += Number(item.estimated_amount || 0)
-    row.opportunities += 1
-    if (item.customer_full_name) row.customers.add(item.customer_full_name)
-    rows.set(name, row)
-  }
-  for (const item of highOutstandingItems.value) {
-    const name = ownerLabel(item) || t('dataOps.executive.unassignedOwner')
-    const row = rows.get(name) || {
-      title: name,
-      amount: 0,
-      customers: new Set(),
-      opportunities: 0,
-      outstanding: 0,
-    }
-    row.outstanding += Number(item.outstanding_amount || 0)
-    if (item.customer_name) row.customers.add(item.customer_name)
-    rows.set(name, row)
-  }
-  return [...rows.values()]
-    .sort((left, right) => right.amount + right.outstanding - left.amount - left.outstanding)
-    .slice(0, 10)
+const salesRankItems = computed(() =>
+  topAmountsByCurrency(
+    (props.topSales?.top_received || []).filter(
+      (item) => Number(item.received_amount || 0) > 0
+    ),
+    'received_amount',
+    10
+  )
     .map((item) => ({
-      title: item.title,
+      title: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
       meta: t('dataOps.executive.salesMeta', {
-        customers: item.customers.size,
-        opportunities: item.opportunities
+        customers: item.customer_count || 0,
+        opportunities: item.high_potential_count || 0
       }),
-      value: formatPlainAmount(item.amount || item.outstanding),
+      value: formatAmountByCurrency(
+        null,
+        [{ amount: item.received_amount, currency: item.currency }],
+        { locale: locale.value }
+      ),
       status: t('dataOps.executive.salesOutstanding', {
-        amount: formatPlainAmount(item.outstanding)
+        amount: formatAmountByCurrency(
+          null,
+          [{ amount: item.outstanding_amount, currency: item.currency }],
+          { locale: locale.value }
+        )
       }),
     }))
-})
+)
 
 const renewalRiskList = computed(() =>
   effectiveRenewalItems.value.slice(0, 8).map((item) => ({
@@ -1080,8 +1065,8 @@ function metricFromCurrency(value, items, options = {}) {
 function ownerLabel(item) {
   if (!item) return ''
   return (
-    item.owner_canonical ||
     item.owner_display ||
+    item.owner_canonical ||
     item.sales_person ||
     ''
   )
@@ -1179,7 +1164,7 @@ function latestTrendSummary(label, items, valueKey) {
 }
 
 function latestNetTrendSummary() {
-  const rows = buildNetTrendSource(props.insights?.monthly_payment_trend || [])
+  const rows = buildNetTrendSource(props.insights?.monthly_net_trend || [])
   return latestTrendSummary(
     t('dataOps.executive.trend.latestNet'),
     rows,
@@ -1220,15 +1205,11 @@ function buildNetTrendRows(items) {
 }
 
 function buildNetTrendSource(items) {
-  const rows = []
-  for (const item of items) {
-    const month = item.month
-    if (!month) continue
-    const amount =
-      Number(item.payment_received || 0) - Number(item.outstanding || 0)
-    rows.push({ amount, currency: item.currency, month })
-  }
-  return rows
+  return items.map((item) => ({
+    amount: Number(item.amount || 0),
+    currency: item.currency,
+    month: item.month,
+  }))
 }
 
 function periodBucket(month) {
