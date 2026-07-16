@@ -243,9 +243,12 @@ class QuotationRollbackTests(TestCase):
             ),
         )
         with (
-            patch("quotation.views.feishu._client", return_value=fake_client),
             patch(
-                "quotation.views.feishu.create_version_snapshot",
+                "quotation.views.feishu.common._client",
+                return_value=fake_client,
+            ),
+            patch(
+                "quotation.views.feishu.upload.create_version_snapshot",
                 side_effect=RuntimeError("snapshot unavailable"),
             ),
         ):

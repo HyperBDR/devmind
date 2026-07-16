@@ -86,7 +86,10 @@ class FeishuOAuthReturnTests(TestCase):
         with override_settings(FRONTEND_URL="http://localhost:18000"):
             from unittest.mock import patch
 
-            with patch("quotation.views.feishu._client", return_value=FakeClient()):
+            with patch(
+                "quotation.views.feishu.common._client",
+                return_value=FakeClient(),
+            ):
                 response = self.api.get(
                     "/api/v1/quotation/feishu/oauth/callback",
                     {"code": "auth-code", "state": state},

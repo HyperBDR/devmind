@@ -362,7 +362,7 @@ class FeishuImportMetadataTests(TestCase):
         feishu_url = "https://oneprocloud.feishu.cn/file/file_v3_imported"
 
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.post(
                 "/api/v1/quotation/feishu/import/file_v3_imported?"
@@ -479,7 +479,7 @@ class FeishuUploadReuseTests(TestCase):
             content_type="application/pdf",
         )
 
-        with patch("quotation.views.feishu._client", return_value=fake_client):
+        with patch("quotation.views.feishu.common._client", return_value=fake_client):
             conflict_response = api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -507,7 +507,7 @@ class FeishuUploadReuseTests(TestCase):
             b"%PDF-hello world",
             content_type="application/pdf",
         )
-        with patch("quotation.views.feishu._client", return_value=fake_client):
+        with patch("quotation.views.feishu.common._client", return_value=fake_client):
             response = api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -618,7 +618,7 @@ class FeishuUploadReuseTests(TestCase):
             content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
-        with patch("quotation.views.feishu._client", return_value=fake_client):
+        with patch("quotation.views.feishu.common._client", return_value=fake_client):
             response = api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -714,7 +714,7 @@ class FeishuUploadReuseTests(TestCase):
             content_type="application/pdf",
         )
 
-        with patch("quotation.views.feishu._client", return_value=fake_client):
+        with patch("quotation.views.feishu.common._client", return_value=fake_client):
             response = api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -807,7 +807,7 @@ class FeishuDriveTreeTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
@@ -899,7 +899,7 @@ class FeishuDriveTreeTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
@@ -958,7 +958,7 @@ class FeishuDriveTreeTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
@@ -1037,7 +1037,7 @@ class FeishuDriveTreeTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
@@ -1108,7 +1108,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
                 "/api/v1/quotation/feishu/files/file_v3_missing/access"
@@ -1165,7 +1165,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
                 "/api/v1/quotation/feishu/files/file_v3_orphan/access"
@@ -1213,7 +1213,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
                 "/api/v1/quotation/feishu/files/file_v3_alive/access"
@@ -1285,7 +1285,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
                 "/api/v1/quotation/feishu/files/file_v3_download_gone/access"
@@ -1376,7 +1376,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.post(
                 "/api/v1/quotation/feishu/files/access/batch",
@@ -1476,7 +1476,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.post(
                 "/api/v1/quotation/feishu/files/access/batch",
@@ -1539,7 +1539,7 @@ class FeishuFileAccessTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=user)
         with patch(
-            "quotation.views.feishu._client", return_value=FakeFeishuClient()
+            "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.post(
                 "/api/v1/quotation/feishu/files/access/batch",

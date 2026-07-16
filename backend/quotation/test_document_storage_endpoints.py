@@ -108,7 +108,7 @@ class DocumentStorageEndpointTests(TestCase):
                 return b"feishu-file", "application/pdf", "飞书报价.pdf"
 
         with patch(
-            "quotation.views.feishu._client", return_value=FakeClient()
+            "quotation.views.feishu.common._client", return_value=FakeClient()
         ):
             response = self.api.post(
                 "/api/v1/quotation/feishu/import/file_test?file_type=file"
@@ -143,7 +143,7 @@ class DocumentStorageEndpointTests(TestCase):
                 }
 
         with patch(
-            "quotation.views.feishu._client", return_value=FakeClient()
+            "quotation.views.feishu.common._client", return_value=FakeClient()
         ):
             response = self.api.post(
                 "/api/v1/quotation/feishu/upload",
