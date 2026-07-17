@@ -21,22 +21,18 @@
       </div>
 
       <!-- Login Form -->
-      <form class="mt-6 space-y-4" @submit.prevent="handleLogin">
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
-            {{ t('auth.username') }}
-          </label>
-          <BaseInput
-            v-model="formData.username"
-            type="text"
-            name="username"
-            autocomplete="username"
-            :placeholder="t('auth.username')"
-            required
-            :error="errors.username"
-            :disabled="loading"
-          />
-        </div>
+      <form class="mt-6 space-y-4" novalidate @submit.prevent="handleLogin">
+        <BaseInput
+          v-model="formData.username"
+          :label="t('auth.username')"
+          type="text"
+          name="username"
+          autocomplete="username"
+          :placeholder="t('auth.username')"
+          required
+          :error="errors.username"
+          :disabled="loading"
+        />
 
         <BaseInput
           v-model="formData.password"

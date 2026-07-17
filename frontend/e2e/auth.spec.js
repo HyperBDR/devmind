@@ -66,20 +66,27 @@ test.describe('Login page', () => {
     expect(page.url()).toContain('/login')
 
     // Should show error message
-    const errorMsg = page
-      .locator('text=/error|登录失败|invalid|错误/i')
-      .first()
+    const errorMsg = page.locator('.bg-red-50 p.text-red-700')
     await expect(errorMsg).toBeVisible({ timeout: 5000 })
   })
 
   test('login button is disabled while loading', async ({ page }) => {
+    await page.route('**/api/v1/auth/login', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      await route.fulfill({
+        status: 401,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: 'Invalid credentials' })
+      })
+    })
     await page.goto('/login')
     await page.waitForLoadState('networkidle')
 
     await page.fill('input[name="username"]', 'admin')
     await page.fill('input[name="password"]', 'adminpassword')
 
-    await page.click('button[type="submit"]')
+    const loginRequest = page.waitForResponse('**/api/v1/auth/login')
+    await page.click('button[type="submit"]', { noWaitAfter: true })
 
     // Button should be disabled or show loading state during request
     const btn = page.locator('button[type="submit"]').first()
@@ -88,6 +95,7 @@ test.describe('Login page', () => {
       (await btn.isDisabled()) ||
       (await btn.getAttribute('aria-disabled')) === 'true'
     expect(isDisabled).toBeTruthy()
+    await loginRequest
   })
 
   test('successful login redirects away from /login', async ({ page }) => {
@@ -103,7 +111,8 @@ test.describe('Auth guards', () => {
   test('unauthenticated user is redirected to /login for protected routes', async ({
     page
   }) => {
-    localStorage.clear()
+    await page.goto('/login')
+    await page.evaluate(() => localStorage.clear())
     await page.context().clearCookies()
 
     const protectedRoutes = [
@@ -271,7 +280,7 @@ test.describe('Language switcher', () => {
   test('language switcher is present on login page', async ({ page }) => {
     await page.goto('/login')
     await page.waitForLoadState('networkidle')
-    const langSwitcher = page.locator('select').first()
+    const langSwitcher = page.getByRole('button', { name: /🇺🇸|🇨🇳/ })
     await expect(langSwitcher).toBeVisible({ timeout: 5000 })
   })
 })

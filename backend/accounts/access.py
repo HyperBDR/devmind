@@ -42,6 +42,11 @@ FEATURE_DEFINITIONS = (
         'label': 'Sales Work Orders',
         'default_path': '/sals/dashboard',
     },
+    {
+        'key': 'quotation_management',
+        'label': 'Quote Desk',
+        'default_path': '/quotation/dashboard',
+    },
 )
 
 FEATURE_KEYS = tuple(item['key'] for item in FEATURE_DEFINITIONS)

@@ -93,6 +93,46 @@ const routes = [
     }
   },
   {
+    path: '/quotation',
+    redirect: '/quotation/dashboard'
+  },
+  {
+    path: '/quotation/dashboard',
+    name: 'QuotationDashboard',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/list',
+    name: 'QuotationList',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/create',
+    name: 'QuotationCreate',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/imports',
+    name: 'QuotationImports',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/catalog',
+    name: 'QuotationCatalog',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/details/:id',
+    name: 'QuotationDetails',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
     path: '/hyperbdr-dashboard',
     name: 'HyperBRDDashboard',
     component: () => import('@/pages/HyperBDRDashboard.vue'),

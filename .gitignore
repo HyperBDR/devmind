@@ -275,3 +275,7 @@ backend/ai_pricehub/runtime/
 
 # Code review graph evaluation
 evaluate/
+
+# Local integration artifacts
+backend/backup/
+work/

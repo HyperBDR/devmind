@@ -11,6 +11,7 @@
 
     <div class="relative">
       <input
+        v-bind="$attrs"
         :id="inputId"
         :type="type"
         :value="modelValue"
@@ -85,6 +86,8 @@
 
 <script setup>
 import { computed, ref, useSlots } from 'vue'
+
+defineOptions({ inheritAttrs: false })
 
 const props = defineProps({
   modelValue: {

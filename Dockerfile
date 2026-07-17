@@ -121,9 +121,11 @@ RUN rm -rf /root/.cache /tmp/* \
 FROM python:3.12-slim-bookworm AS backend
 
 ARG USE_MIRROR=false
+ARG INSTALL_PLAYWRIGHT_CHROMIUM=true
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/venv/bin:$PATH" \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -160,6 +162,15 @@ WORKDIR /opt/backend
 
 COPY --from=backend-builder /opt/venv /opt/venv
 COPY --from=backend-builder /opt/backend /opt/backend
+
+# Quotation PDF rendering uses Playwright. Keep Chromium enabled by default,
+# but allow smaller deployments to opt out when that endpoint is unused.
+RUN if [ "$INSTALL_PLAYWRIGHT_CHROMIUM" = "true" ]; then \
+        python -m playwright install --with-deps chromium; \
+    else \
+        echo "Skipping Playwright Chromium install"; \
+    fi \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
 # Create necessary directories.
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/backend

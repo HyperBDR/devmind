@@ -730,7 +730,16 @@
     "llmConsole": "LLM Console",
     "taskManagementConsole": "Task Console",
     "notificationConsole": "Notification Console",
-    "salesWorkOrders": "After-Sales Dashboard"
+    "salesWorkOrders": "After-Sales Dashboard",
+    "quotationManagement": "Quote Desk"
+  },
+  "quotation": {
+    "menuTitle": "Quote Desk",
+    "dashboard": "Overview",
+    "list": "Quotes",
+    "create": "New Quote",
+    "imports": "Import Queue",
+    "catalog": "Catalog"
   },
   "operations": {
     "menuTitle": "Operations Dashboard",

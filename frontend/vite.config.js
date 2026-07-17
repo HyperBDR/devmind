@@ -54,6 +54,7 @@ export default defineConfig({
     // Listen on all interfaces for Docker / remote access
     host: '0.0.0.0',
     port: 3000,
+    allowedHosts: ['localhost', '127.0.0.1', 'nginx'],
     hmr: {
       overlay: false
     },

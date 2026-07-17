@@ -173,6 +173,7 @@ INSTALLED_APPS += [
     'hyperbdr_dashboard',
     'llm_ops',
     'sals',
+    'quotation',
     'agentcore_metering.adapters.django',
     'agentcore_task.adapters.django',
     'agentcore_notifier.adapters.django',
@@ -542,6 +543,8 @@ DATA_COLLECTOR_ROOT = os.getenv(
     "DATA_COLLECTOR_ROOT",
     os.path.join(STORAGE_ROOT, "data_collector"),
 )
+
+from .quotation import *
 
 # ============================
 # DRF Spectacular Configuration

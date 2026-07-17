@@ -39,6 +39,25 @@ export default {
           700: '#4a3eb0',
           800: '#3d3399',
           900: '#312870'
+        },
+        dm: {
+          page: '#f0f2f5',
+          container: '#ffffff',
+          primary: '#1677ff',
+          'primary-hover': '#4096ff',
+          'primary-bg': '#e6f4ff',
+          border: '#e4e7ed',
+          'border-light': '#f0f0f0',
+          text: '#262626',
+          'text-secondary': '#595959',
+          'text-tertiary': '#8c8c8c',
+          'table-head': '#fafafa',
+          success: '#52c41a',
+          'success-bg': '#f6ffed',
+          warning: '#faad14',
+          'warning-bg': '#fffbe6',
+          error: '#ff4d4f',
+          'error-bg': '#fff2f0'
         }
       },
       fontFamily: {
@@ -50,12 +69,16 @@ export default {
         md: '12px',
         lg: '16px',
         xl: '20px',
-        '2xl': '24px'
+        '2xl': '24px',
+        dm: '8px',
+        'dm-lg': '12px'
       },
       boxShadow: {
         soft: '0 2px 8px rgba(0, 0, 0, 0.08)',
         'soft-md': '0 4px 12px rgba(0, 0, 0, 0.10)',
-        'soft-lg': '0 8px 16px rgba(0, 0, 0, 0.12)'
+        'soft-lg': '0 8px 16px rgba(0, 0, 0, 0.12)',
+        dm: '0 1px 2px 0 rgba(0, 0, 0, 0.03), 0 1px 6px -1px rgba(0, 0, 0, 0.02)',
+        'dm-card': '0 1px 2px 0 rgba(0, 0, 0, 0.03)'
       },
       container: {
         center: true,
