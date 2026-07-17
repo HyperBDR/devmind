@@ -33,7 +33,7 @@ docker-compose -f docker-compose.dev.yml up -d
 ### 生产部署
 ```bash
 cp env.sample .env
-APP_VERSION=1.2.3 docker-compose up -d
+DEPLOY_APP_VERSION=1.2.3 ./scripts/install.sh v1.2.3
 # 默认端口 HTTP 10080 / HTTPS 10443
 ```
 

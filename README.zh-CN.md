@@ -140,15 +140,15 @@ Design principles (English): [docs/DESIGN_PRINCIPLES.md](docs/DESIGN_PRINCIPLES.
 ```bash
 cp env.sample .env
 # 编辑 .env：SECRET_KEY、DJANGO_DEBUG=false、ALLOWED_HOSTS、数据库、AI 服务等
-APP_VERSION=1.2.3 docker-compose -f docker-compose.yml up -d
+DEPLOY_APP_VERSION=1.2.3 ./scripts/install.sh v1.2.3
 ```
 
 **默认端口**：HTTP 10080、HTTPS 10443（通过 `NGINX_HTTP_PORT`、`NGINX_HTTPS_PORT` 修改）
 
-> 生产镜像版本由 `APP_VERSION` 决定。打 tag 发布时，GitHub Actions 会自动
-> 把 `v1.2.3` 转成 `APP_VERSION=1.2.3`，再执行 `docker-compose pull` 和
-> `docker-compose up -d`。手工部署时也要显式传这个变量，否则 compose 会
-> 因为 `APP_VERSION is required` 直接失败。
+> 生产部署现在走蓝绿发布。`scripts/install.sh` 会运行 schema/runtime 初始化，
+> 启动闲置颜色的 API/UI，健康检查通过后 reload nginx 切流，然后滚动更新
+> worker 和 scheduler。`APP_VERSION` 由脚本从 `DEPLOY_APP_VERSION` 或 git
+> ref 推导。
 
 ## 前端
 

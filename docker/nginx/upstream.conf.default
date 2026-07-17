@@ -1,0 +1,13 @@
+# Bootstrap template for docker/nginx/conf.d/upstream.conf.
+# scripts/install.sh copies this file only when upstream.conf is missing.
+# After that, upstream.conf is runtime state and records the active color.
+#
+# Use maps plus variable proxy_pass in default.conf so nginx resolves Docker
+# service names at request time instead of config-parse time.
+map $host $devmind_backend_active {
+    default backend-api-blue:8000;
+}
+
+map $host $devmind_frontend_active {
+    default frontend-blue:80;
+}

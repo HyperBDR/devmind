@@ -48,7 +48,7 @@ sudo cp /etc/letsencrypt/live/yourdomain.com/privkey.pem ./nginx-selfsigned.key
 sudo certbot renew --dry-run
 
 # Setup auto-renewal (cron)
-0 0 * * * certbot renew --quiet --post-hook "docker restart backend-nginx"
+0 0 * * * certbot renew --quiet --post-hook "docker exec nginx nginx -s reload"
 ```
 
 ### Option 2: Commercial CA (e.g., DigiCert, GeoTrust)
@@ -93,7 +93,7 @@ Or for production:
 - `production.crt` - Production certificate
 - `production.key` - Production private key
 
-Update `docker/nginx/default.conf` accordingly:
+Update `docker/nginx/conf.d/default.conf` accordingly:
 ```nginx
 ssl_certificate /etc/nginx/certs/production.crt;
 ssl_certificate_key /etc/nginx/certs/production.key;
@@ -101,10 +101,11 @@ ssl_certificate_key /etc/nginx/certs/production.key;
 
 ## Security Notes
 
-⚠️ **Certificate files are committed to version control for convenience.**
+Certificate files are runtime secrets and are ignored by git.
 
-**Note:** These are self-signed certificates for development/testing.
-For production, consider using Let's Encrypt or other trusted CA certificates.
+If these files are missing during production install, `scripts/install.sh`
+generates a self-signed certificate so nginx can start. Replace it with a
+trusted certificate for real production traffic.
 
 ## Certificate Validation
 
@@ -124,8 +125,7 @@ openssl rsa -noout -modulus -in nginx-selfsigned.key | openssl md5
 
 ### Development:
 ```bash
-# Already generated (self-signed)
-# Just start services
+# Generate local certificates first if they do not exist.
 docker-compose -f docker-compose.dev.yml up -d
 ```
 
@@ -134,6 +134,6 @@ docker-compose -f docker-compose.dev.yml up -d
 # 1. Obtain real certificate (Let's Encrypt or CA)
 # 2. Copy to this directory
 # 3. Ensure files are named correctly
-# 4. Restart nginx
-docker restart backend-nginx
+# 4. Reload nginx
+docker exec nginx nginx -s reload
 ```
