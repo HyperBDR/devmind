@@ -30,8 +30,9 @@ DevMind 是 AI 驱动的企业内部门户平台，后端为 Django REST API，
 - `hyperbdr_dashboard`：HyperBDR 迁移看板。
 - `agentcore_*`：统一任务、计量和通知基础设施。
 
-`sals/backend` 与 `sals/frontend` 是 git submodules，默认不要跨边界
-提出侵入式修改建议。
+SALS 正式后端位于 `backend/sals`，页面位于主仓 `frontend/`。git
+submodules 仅用于 `backend/agentcore/` 下的共享基础设施；审查这些
+子模块指针变更时，需要同时核对对应子仓提交与兼容性。
 
 ## 输入
 
