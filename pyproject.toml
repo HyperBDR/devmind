@@ -38,7 +38,6 @@ dependencies = [
     "cryptography>=44.0.0",
     "pydantic>=2.7.0",
     "langchain-openai>=1.0.0,<2.0.0",
-    "litellm==1.89.4",
     "deepagents==0.4.9",
     "langfuse>=4.0.0,<5.0.0",
     "jira>=3.10.0",
