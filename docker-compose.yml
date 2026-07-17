@@ -1,37 +1,75 @@
+name: devmind
+
+x-backend-service-common: &backend-service-common
+  image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
+  env_file:
+    - ./.env
+  volumes:
+    - ./data/django/staticfiles:/opt/backend/core/staticfiles
+    - ./data/logs/api:/var/log/gunicorn
+    - ./data/storage:/opt/storage
+    - ./cache:/opt/cache
+    - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
+  networks:
+    - backend_network
+  depends_on:
+    postgresql:
+      condition: service_healthy
+
+x-backend-api-common: &backend-api-common
+  <<: *backend-service-common
+  restart: unless-stopped
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: backend
+    args:
+      USE_MIRROR: ${USE_MIRROR:-true}
+      DEV_MODE: "0"
+  command: gunicorn
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 120s
+
+x-frontend-common: &frontend-common
+  image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-frontend:${APP_VERSION:?APP_VERSION is required}
+  restart: unless-stopped
+  build:
+    context: .
+    dockerfile: Dockerfile
+    target: frontend
+    args:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_APP_VERSION: ${VITE_APP_VERSION:-${APP_VERSION}}
+  expose:
+    - "80"
+  networks:
+    - backend_network
+  healthcheck:
+    test:
+      - "CMD"
+      - "sh"
+      - "-c"
+      - "wget -Y off --quiet --tries=1 --spider http://127.0.0.1 || exit 1"
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 60s
+
 services:
   backend-init:
-    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
+    <<: *backend-service-common
     container_name: backend-init
     restart: "no"
-    env_file:
-      - ./.env
-    volumes:
-      - ./data/django/staticfiles:/opt/backend/core/staticfiles
-      - ./data/logs/api:/var/log/gunicorn
-      - ./data/storage:/opt/storage
-      - ./cache:/opt/cache
-      - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
-    networks:
-      - backend_network
-    depends_on:
-      postgresql:
-        condition: service_healthy
     command: init-schema
 
   backend-runtime-init:
-    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
+    <<: *backend-service-common
     container_name: backend-runtime-init
     restart: "no"
-    env_file:
-      - ./.env
-    volumes:
-      - ./data/django/staticfiles:/opt/backend/core/staticfiles
-      - ./data/logs/api:/var/log/gunicorn
-      - ./data/storage:/opt/storage
-      - ./cache:/opt/cache
-      - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
-    networks:
-      - backend_network
     depends_on:
       backend-init:
         condition: service_completed_successfully
@@ -39,39 +77,25 @@ services:
         condition: service_healthy
     command: init-runtime
 
-  backend-api:
-    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
-    container_name: backend-api
-    restart: unless-stopped
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: backend
-      args:
-        USE_MIRROR: ${USE_MIRROR:-true}
-        DEV_MODE: "0"
-    env_file:
-      - ./.env
-    volumes:
-      - ./data/django/staticfiles:/opt/backend/core/staticfiles
-      - ./data/logs/api:/var/log/gunicorn
-      - ./data/storage:/opt/storage
-      - ./cache:/opt/cache
-      - ./docker/nginx/certs:/opt/backend/docker/nginx/certs
-    networks:
-      - backend_network
-    depends_on:
-      backend-init:
-        condition: service_completed_successfully
-      postgresql:
-        condition: service_healthy
-    command: gunicorn
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
+  backend-api-blue:
+    <<: *backend-api-common
+    container_name: backend-api-blue
+    profiles: ["blue"]
+
+  backend-api-green:
+    <<: *backend-api-common
+    container_name: backend-api-green
+    profiles: ["green"]
+
+  frontend-blue:
+    <<: *frontend-common
+    container_name: frontend-blue
+    profiles: ["blue"]
+
+  frontend-green:
+    <<: *frontend-common
+    container_name: frontend-green
+    profiles: ["green"]
 
   backend-worker:
     image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
@@ -87,8 +111,6 @@ services:
     networks:
       - backend_network
     depends_on:
-      backend-api:
-        condition: service_started
       postgresql:
         condition: service_healthy
       redis:
@@ -107,44 +129,18 @@ services:
     networks:
       - backend_network
     depends_on:
-      backend-runtime-init:
-        condition: service_completed_successfully
       postgresql:
         condition: service_healthy
       redis:
         condition: service_healthy
     command: celery-beat
 
-  frontend:
-    container_name: frontend
-    restart: unless-stopped
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: frontend
-      args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
-        VITE_APP_VERSION: ${VITE_APP_VERSION:-${APP_VERSION}}
-    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-frontend:${APP_VERSION:?APP_VERSION is required}
-    pull_policy: missing
-    expose:
-      - "80"
-    networks:
-      - backend_network
-    healthcheck:
-      test: ["CMD", "sh", "-c", "wget -Y off --quiet --tries=1 --spider http://127.0.0.1 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-
-  # Recommend to use nginx proxy manager to manage the outside access
   nginx:
     image: nginx:latest
     container_name: nginx
     restart: unless-stopped
     volumes:
-      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
       - ./docker/nginx/certs:/etc/nginx/certs:ro
       - ./data/django/staticfiles:/staticfiles:ro
       - ./data/storage:/opt/storage:ro
@@ -154,11 +150,6 @@ services:
       - "${NGINX_HTTPS_PORT:-10443}:443"
     networks:
       - backend_network
-    depends_on:
-      backend-api:
-        condition: service_healthy
-      frontend:
-        condition: service_started
     healthcheck:
       test: ["CMD", "nginx", "-t"]
       interval: 30s
@@ -177,14 +168,16 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-backend}
       PGDATA: /var/lib/postgresql/data/pgdata
-      # Allow password authentication from any host (safe in Docker network)
       POSTGRES_HOST_AUTH_METHOD: md5
     volumes:
       - ./docker/postgresql/initdb.d:/docker-entrypoint-initdb.d:ro
       - ./docker/postgresql/etc/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./data/postgresql/data:/var/lib/postgresql/data
       - ./data/logs/postgresql:/var/log/postgresql
-    entrypoint: ["bash", "-c", "mkdir -p /var/log/postgresql && chown -R postgres:postgres /var/log/postgresql && chmod -R 755 /var/log/postgresql && exec docker-entrypoint.sh \"$$@\""]
+    entrypoint:
+      - "bash"
+      - "-c"
+      - "mkdir -p /var/log/postgresql && chown -R postgres:postgres /var/log/postgresql && chmod -R 755 /var/log/postgresql && exec docker-entrypoint.sh \"$$@\""
     command:
       - "postgres"
       - "-c"
@@ -192,7 +185,9 @@ services:
     networks:
       - backend_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-backend}"]
+      test:
+        - "CMD-SHELL"
+        - "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-backend}"
       interval: 10s
       timeout: 5s
       retries: 5

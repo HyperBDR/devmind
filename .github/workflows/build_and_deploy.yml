@@ -15,6 +15,9 @@ concurrency:
   group: devmind-deploy
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   REGISTRY: ${{ vars.REGISTRY }}
   SSH_HOST: ${{ vars.DEVMIND_SSH_HOST }}
@@ -27,6 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      ref: ${{ steps.version.outputs.ref }}
     steps:
       - name: Resolve version
         id: version
@@ -34,12 +38,16 @@ jobs:
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ -n "${GITHUB_REF_NAME}" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
+            REF="${GITHUB_REF_NAME}"
           elif [ -n "${{ inputs.version }}" ]; then
             VERSION="${{ inputs.version }}"
+            REF="v${{ inputs.version }}"
           else
             VERSION="${GITHUB_SHA::7}"
+            REF="${GITHUB_SHA}"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
   build-images:
     runs-on: ubuntu-latest
@@ -103,37 +111,45 @@ jobs:
           port: ${{ env.SSH_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           command_timeout: 3600s
+          script_stop: true
           script: |
+            set -euo pipefail
+            mkdir -p ${{ env.DEPLOY_PATH }}
             cd ${{ env.DEPLOY_PATH }}
+
             APP_VERSION="${{ needs.prepare-version.outputs.version }}"
-            LOCK_FILE="/tmp/devmind-deploy.lock"
-            MAX_WAIT=300
-            WAIT_INTERVAL=5
-            ELAPSED=0
+            TARGET_REF="${{ needs.prepare-version.outputs.ref }}"
 
-            # Wait for any existing deployment to complete
-            while [ -f "$LOCK_FILE" ] && [ $ELAPSED -lt $MAX_WAIT ]; do
-              echo "Deployment in progress, waiting... (${ELAPSED}s/${MAX_WAIT}s)"
-              sleep $WAIT_INTERVAL
-              ELAPSED=$((ELAPSED + WAIT_INTERVAL))
-            done
+            read_dotenv_value() {
+              key="$1"
+              [ -f .env ] || return 0
+              line="$(grep -E "^(export[[:space:]]+)?${key}=" .env | tail -1 || true)"
+              [ -n "$line" ] || return 0
+              line="${line#export }"
+              value="${line#*=}"
+              value="${value%\"}"
+              value="${value#\"}"
+              value="${value%\'}"
+              value="${value#\'}"
+              printf "%s" "$value"
+            }
 
-            if [ -f "$LOCK_FILE" ]; then
-              echo "Timeout waiting for deployment lock. Proceeding anyway..."
+            DEPLOY_GITHUB_TOKEN="$(read_dotenv_value DEPLOY_GITHUB_TOKEN)"
+            WORKFLOW_GITHUB_TOKEN="${{ secrets.DEPLOY_GITHUB_TOKEN || github.token }}"
+            DEPLOY_GITHUB_TOKEN="${DEPLOY_GITHUB_TOKEN:-$WORKFLOW_GITHUB_TOKEN}"
+            INSTALL_URL="https://raw.githubusercontent.com/${{ github.repository }}/${TARGET_REF}/scripts/install.sh"
+            if [ -n "$DEPLOY_GITHUB_TOKEN" ]; then
+              curl -fsSL -H "Authorization: token ${DEPLOY_GITHUB_TOKEN}" \
+                "$INSTALL_URL" -o install.sh.tmp
+            else
+              curl -fsSL "$INSTALL_URL" -o install.sh.tmp
             fi
+            mv install.sh.tmp install.sh
+            chmod +x install.sh
 
-            # Create lock file
-            echo "$$ $(date)" > "$LOCK_FILE"
-            trap "rm -f $LOCK_FILE" EXIT
-
-            echo "Starting devmind deployment for version ${APP_VERSION}..."
-            # Pull the specified image tag
-            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml pull
-            # Start containers in detached mode - this returns immediately
-            # The containers will gracefully shutdown old tasks in the background
-            APP_VERSION="${APP_VERSION}" docker-compose -f docker-compose.yml up -d --force-recreate
-            docker system prune -f
+            DEPLOY_REPO="${{ github.repository }}" \
+              DEPLOY_APP_VERSION="${APP_VERSION}" \
+              DEPLOY_GITHUB_TOKEN="${DEPLOY_GITHUB_TOKEN}" \
+              ./install.sh "${TARGET_REF}"
 
             echo "devmind deployment completed for version ${APP_VERSION}"
-            echo "Note: Celery workers are gracefully shutting down old tasks in the background (up to 30 minutes)"
-            rm -f "$LOCK_FILE"

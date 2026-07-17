@@ -1,3 +1,5 @@
+name: devmind-dev
+
 services:
   backend-init:
     image: devmind-backend:dev

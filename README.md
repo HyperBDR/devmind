@@ -141,16 +141,15 @@ For decoupling, **each application (app) must manage its own resources**—inclu
 ```bash
 cp env.sample .env
 # Edit .env: SECRET_KEY, DJANGO_DEBUG=false, ALLOWED_HOSTS, database, AI services, etc.
-APP_VERSION=1.2.3 docker-compose -f docker-compose.yml up -d
+DEPLOY_APP_VERSION=1.2.3 ./scripts/install.sh v1.2.3
 ```
 
 **Default ports**: HTTP 10080, HTTPS 10443 (configurable via `NGINX_HTTP_PORT` / `NGINX_HTTPS_PORT`)
 
-> The production image version is controlled by `APP_VERSION`. When deploying from a
-> Git tag, GitHub Actions strips the leading `v` (for example, `v1.2.3` becomes
-> `APP_VERSION=1.2.3`) and runs `docker-compose pull` plus `docker-compose up -d`.
-> For manual deployments, set `APP_VERSION` explicitly or Compose will fail with
-> `APP_VERSION is required`.
+> Production deploys are blue/green. `scripts/install.sh` runs schema/runtime
+> initialization, starts the idle API/UI color, health-checks it, reloads nginx,
+> then rolls worker and scheduler. `APP_VERSION` is set by the script from
+> `DEPLOY_APP_VERSION` or the git ref.
 
 ## Frontend
 
