@@ -110,6 +110,26 @@
             @update-filter="updateSalesFilter"
           />
 
+          <ObservationSection
+            v-else-if="activeSection === 'observations'"
+            :can-run="canManageSync"
+            :detail-loading="observationDetailLoading"
+            :error="observationError"
+            :feedback="observationFeedback"
+            :filters="observationFilters"
+            :observations="observations"
+            :page="observationPage"
+            :page-size="pageSize"
+            :run-loading="observationRunLoading"
+            :selected-observation="selectedObservation"
+            :total="observationTotal"
+            @load="handleObservationLoad"
+            @page-change="setObservationPage"
+            @run="runObservationProducer"
+            @select="selectObservation"
+            @update-filter="updateObservationFilter"
+          />
+
           <SyncSection
             v-else-if="activeSection === 'sync'"
             :columns="syncColumns"
@@ -151,6 +171,7 @@ import DataOpsSidebar from '@/components/data-ops/DataOpsSidebar.vue'
 import DataOpsSyncBanner from '@/components/data-ops/DataOpsSyncBanner.vue'
 import ExecutiveSection from '@/components/data-ops/ExecutiveSection.vue'
 import GlobalConfigPanel from '@/components/data-ops/GlobalConfigPanel.vue'
+import ObservationSection from '@/components/data-ops/ObservationSection.vue'
 import PipelineSection from '@/components/data-ops/PipelineSection.vue'
 import SalesRecordsSection from '@/components/data-ops/SalesRecordsSection.vue'
 import SyncFailureDetails from '@/components/data-ops/SyncFailureDetails.vue'
@@ -181,8 +202,17 @@ const {
   kpiCards,
   loadAll,
   loadContracts,
+  loadObservations,
   loadSalesRecords,
   loading,
+  observationDetailLoading,
+  observationError,
+  observationFeedback,
+  observationFilters,
+  observationPage,
+  observationRunLoading,
+  observations,
+  observationTotal,
   opportunities,
   overview,
   pageSize,
@@ -199,13 +229,17 @@ const {
   refreshFromFeishu,
   risks,
   runConfigPreflight,
+  runObservationProducer,
   runPreflight,
   salesFilters,
   salesPage,
   salesRecords,
   salesTotal,
   saveGlobalConfig,
+  selectObservation,
+  selectedObservation,
   setContractPage,
+  setObservationPage,
   setSalesPage,
   summary,
   syncBannerClass,
@@ -230,14 +264,20 @@ const canManageSync = computed(
 )
 
 const allNavItems = computed(() =>
-  ['executive', 'pipeline', 'contracts', 'sales', 'sync', 'config'].map(
-    (key) => ({
-      key,
-      icon: key.slice(0, 1).toUpperCase(),
-      label: t(`dataOps.nav.items.${key}.label`),
-      description: t(`dataOps.nav.items.${key}.description`)
-    })
-  )
+  [
+    'executive',
+    'pipeline',
+    'contracts',
+    'sales',
+    'observations',
+    'sync',
+    'config'
+  ].map((key) => ({
+    key,
+    icon: key.slice(0, 1).toUpperCase(),
+    label: t(`dataOps.nav.items.${key}.label`),
+    description: t(`dataOps.nav.items.${key}.description`)
+  }))
 )
 
 const frequencyOptions = computed(() =>
@@ -258,7 +298,7 @@ const navGroups = computed(() => {
     {
       key: 'business',
       label: t('dataOps.nav.groups.business'),
-      items: ['executive', 'pipeline', 'contracts', 'sales']
+      items: ['executive', 'pipeline', 'contracts', 'sales', 'observations']
     },
     {
       key: 'global-config',
@@ -350,6 +390,10 @@ function normalizeActiveNav(item) {
 }
 
 async function refreshCurrentSection() {
+  if (activeSection.value === 'observations') {
+    await refreshActive(activeSection.value, canManageSync.value)
+    return
+  }
   if (canManageSync.value) {
     await refreshFromFeishu(activeSection.value, canManageSync.value)
     return
@@ -378,6 +422,15 @@ function updateContractFilter(key, value) {
 
 function updateSalesFilter(key, value) {
   salesFilters.value[key] = value
+}
+
+function updateObservationFilter(key, value) {
+  observationFilters.value[key] = value
+}
+
+function handleObservationLoad() {
+  observationPage.value = 1
+  loadObservations()
 }
 
 onMounted(() => loadAll(canManageSync.value))

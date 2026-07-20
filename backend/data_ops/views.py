@@ -31,8 +31,8 @@ from .serializers import (
     ObservationSerializer,
     SyncCursorSerializer,
     SyncJobSerializer,
-    SyncTriggerSerializer,
     SyncTableStatusSerializer,
+    SyncTriggerSerializer,
 )
 from .services.ai import (
     chat_with_data_ops_assistant,
@@ -55,20 +55,8 @@ from .services.feishu.mappings import ACTIVE_SOURCE_KEYS
 from .services.knowledge.contract_renewal import (
     produce_contract_renewal_observations,
 )
-from .services.metrics.overview import (
-    get_contract_cards,
-    get_contract_kanban,
-    get_data_quality,
-    get_domestic_ledger_kanban,
-    get_executive_overview,
-    get_opportunities,
-    get_oversea_project_kanban,
-    get_project_init_kanban,
-    get_risks,
-    get_summary,
-    get_top_customers,
-    get_top_sales,
-    get_trends,
+from .services.knowledge.receivable_overdue import (
+    produce_receivable_overdue_observations,
 )
 from .services.metrics.operations import (
     contract_export_rows,
@@ -92,6 +80,21 @@ from .services.metrics.operations import (
     sales_export_rows,
     summary_export_rows,
 )
+from .services.metrics.overview import (
+    get_contract_cards,
+    get_contract_kanban,
+    get_data_quality,
+    get_domestic_ledger_kanban,
+    get_executive_overview,
+    get_opportunities,
+    get_oversea_project_kanban,
+    get_project_init_kanban,
+    get_risks,
+    get_summary,
+    get_top_customers,
+    get_top_sales,
+    get_trends,
+)
 from .tasks import (
     SyncTaskDispatchError,
     dispatch_sync_task,
@@ -100,8 +103,11 @@ from .tasks import (
     run_table_sync_task,
 )
 
-
 FEATURE_KEY = "data_ops"
+OBSERVATION_PRODUCERS = {
+    "contract-renewal-risk": produce_contract_renewal_observations,
+    "receivable-overdue-risk": produce_receivable_overdue_observations,
+}
 
 
 class DataOpsPermissionMixin:
@@ -162,7 +168,8 @@ class ObservationRunCreateAPIView(DataOpsAdminPermissionMixin, APIView):
             data=request.data,
         )
         serializer.is_valid(raise_exception=True)
-        run = produce_contract_renewal_observations()
+        producer_key = serializer.validated_data["producer_key"]
+        run = OBSERVATION_PRODUCERS[producer_key]()
         return Response(
             KnowledgeProductionRunSerializer(run).data,
             status=status.HTTP_201_CREATED,
@@ -302,12 +309,7 @@ class FeishuCollectionConfigTriggerAPIView(
         config = get_bitable_collection_config(config_id)
         if not config.is_enabled:
             return Response(
-                {
-                    "detail": (
-                        "该采集配置已停用，"
-                        "启用后才能手动触发。"
-                    )
-                },
+                {"detail": "该采集配置已停用，启用后才能手动触发。"},
                 status=400,
             )
         job = SyncJob.objects.create(

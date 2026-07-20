@@ -26,6 +26,10 @@
         "label": "海外销售记录",
         "description": "KooGallery 订单和海外销售明细"
       },
+      "observations": {
+        "label": "风险观察",
+        "description": "查看可追溯风险事实、生产运行和源数据证据"
+      },
       "sync": {
         "label": "同步状态",
         "description": "飞书采集任务、权限检查和同步问题"
@@ -64,6 +68,62 @@
     "previousPage": "上一页",
     "nextPage": "下一页",
     "lastPage": "末页"
+  },
+  "observations": {
+    "title": "Observation Explorer",
+    "description": "从业务风险事实追溯到生产规则和源数据证据；金额始终保留原始币种。",
+    "producer": "生产规则",
+    "runNow": "立即生产",
+    "running": "生产中…",
+    "runSucceeded": "生产完成：新增 {created}，更新 {updated}，解除 {resolved}",
+    "runFailed": "风险观察生产失败",
+    "listFailed": "风险观察列表加载失败",
+    "detailFailed": "风险观察详情加载失败",
+    "type": "观察类型",
+    "allTypes": "全部类型",
+    "allStatuses": "全部状态",
+    "severityLabel": "严重度",
+    "allSeverities": "全部严重度",
+    "empty": "当前筛选条件下没有风险观察",
+    "detailTitle": "观察与证据",
+    "detailDescription": "审核业务事实、计算结果和当前源数据快照",
+    "loadingDetail": "正在加载证据…",
+    "selectPrompt": "选择一条观察，查看事实和证据链",
+    "lastEvaluated": "最近评估",
+    "factsTitle": "结构化事实",
+    "evidenceTitle": "支持证据",
+    "capturedAt": "采集于",
+    "noEvidence": "当前观察没有可用证据",
+    "types": {
+      "contractRenewal": "合同临期",
+      "receivableOverdue": "逾期回款"
+    },
+    "producers": {
+      "contractRenewal": "合同临期风险",
+      "receivableOverdue": "逾期回款风险"
+    },
+    "severity": {
+      "critical": "严重",
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "status": {
+      "active": "待处理",
+      "resolved": "已解除",
+      "superseded": "已取代",
+      "invalidated": "已失效"
+    },
+    "fields": {
+      "daysOverdue": "逾期天数",
+      "daysUntilExpiry": "距到期天数",
+      "contractStatus": "合同状态",
+      "expectedPaymentDate": "预计回款日期",
+      "expiryStatus": "到期状态",
+      "ledgerType": "台账类型",
+      "paymentStatus": "回款状态",
+      "outstanding": "未回款金额"
+    }
   },
   "ai": {
     "openLabel": "打开 AI 数据助手",

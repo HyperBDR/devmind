@@ -185,7 +185,10 @@ class ObservationFilterSerializer(serializers.Serializer):
 
 class KnowledgeProductionRunCreateSerializer(serializers.Serializer):
     producer_key = serializers.ChoiceField(
-        choices=[("contract-renewal-risk", "Contract renewal risk")],
+        choices=[
+            ("contract-renewal-risk", "Contract renewal risk"),
+            ("receivable-overdue-risk", "Receivable overdue risk"),
+        ],
     )
 
     def validate(self, attrs):
