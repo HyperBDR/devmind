@@ -4,7 +4,10 @@ import json
 from datetime import timedelta
 
 from django.http import HttpResponse, StreamingHttpResponse
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -12,6 +15,7 @@ from accounts.permissions import HasRequiredFeature
 
 from .models import (
     DataOpsGlobalConfig,
+    Observation,
     SyncCursor,
     SyncJob,
     SyncStatus,
@@ -21,10 +25,19 @@ from .permissions import HasDataOpsAdminAccess
 from .serializers import (
     DataOpsGlobalConfigSerializer,
     FeishuBitableCollectionConfigSerializer,
+    KnowledgeProductionRunCreateSerializer,
+    KnowledgeProductionRunSerializer,
+    ObservationFilterSerializer,
+    ObservationSerializer,
     SyncCursorSerializer,
     SyncJobSerializer,
     SyncTriggerSerializer,
     SyncTableStatusSerializer,
+)
+from .services.ai import (
+    chat_with_data_ops_assistant,
+    get_ai_context_metrics,
+    stream_chat_with_data_ops_assistant,
 )
 from .services.feishu.client import (
     FeishuBitableClient,
@@ -39,10 +52,8 @@ from .services.feishu.config import (
 )
 from .services.feishu.global_config import get_active_sync_job_timeout_hours
 from .services.feishu.mappings import ACTIVE_SOURCE_KEYS
-from .services.ai import (
-    chat_with_data_ops_assistant,
-    get_ai_context_metrics,
-    stream_chat_with_data_ops_assistant,
+from .services.knowledge.contract_renewal import (
+    produce_contract_renewal_observations,
 )
 from .services.metrics.overview import (
     get_contract_cards,
@@ -104,6 +115,58 @@ class DataOpsAdminPermissionMixin:
     """Require elevated Data Ops access for sensitive operations."""
 
     permission_classes = [HasDataOpsAdminAccess]
+
+
+class ObservationPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class ObservationListAPIView(DataOpsPermissionMixin, APIView):
+    """List traceable observations with stable, validated filters."""
+
+    def get(self, request):
+        filters = ObservationFilterSerializer(data=request.query_params)
+        filters.is_valid(raise_exception=True)
+        queryset = (
+            Observation.objects.select_related("run")
+            .prefetch_related("evidence_links__evidence")
+            .order_by("-generated_at", "-id")
+        )
+        for field, value in filters.validated_data.items():
+            queryset = queryset.filter(**{field: value})
+
+        paginator = ObservationPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = ObservationSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
+
+
+class ObservationDetailAPIView(DataOpsPermissionMixin, APIView):
+    """Return one observation and its current supporting evidence."""
+
+    def get(self, request, observation_id):
+        queryset = Observation.objects.select_related("run").prefetch_related(
+            "evidence_links__evidence",
+        )
+        observation = get_object_or_404(queryset, id=observation_id)
+        return Response(ObservationSerializer(observation).data)
+
+
+class ObservationRunCreateAPIView(DataOpsAdminPermissionMixin, APIView):
+    """Create a deterministic knowledge production run."""
+
+    def post(self, request):
+        serializer = KnowledgeProductionRunCreateSerializer(
+            data=request.data,
+        )
+        serializer.is_valid(raise_exception=True)
+        run = produce_contract_renewal_observations()
+        return Response(
+            KnowledgeProductionRunSerializer(run).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class DataOpsGlobalConfigAPIView(DataOpsAdminPermissionMixin, APIView):
