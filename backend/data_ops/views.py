@@ -31,8 +31,8 @@ from .serializers import (
     ObservationSerializer,
     SyncCursorSerializer,
     SyncJobSerializer,
-    SyncTriggerSerializer,
     SyncTableStatusSerializer,
+    SyncTriggerSerializer,
 )
 from .services.ai import (
     chat_with_data_ops_assistant,
@@ -58,21 +58,6 @@ from .services.knowledge.contract_renewal import (
 from .services.knowledge.receivable_overdue import (
     produce_receivable_overdue_observations,
 )
-from .services.metrics.overview import (
-    get_contract_cards,
-    get_contract_kanban,
-    get_data_quality,
-    get_domestic_ledger_kanban,
-    get_executive_overview,
-    get_opportunities,
-    get_oversea_project_kanban,
-    get_project_init_kanban,
-    get_risks,
-    get_summary,
-    get_top_customers,
-    get_top_sales,
-    get_trends,
-)
 from .services.metrics.operations import (
     contract_export_rows,
     count_contracts_data,
@@ -94,6 +79,21 @@ from .services.metrics.operations import (
     list_sales_records_data,
     sales_export_rows,
     summary_export_rows,
+)
+from .services.metrics.overview import (
+    get_contract_cards,
+    get_contract_kanban,
+    get_data_quality,
+    get_domestic_ledger_kanban,
+    get_executive_overview,
+    get_opportunities,
+    get_oversea_project_kanban,
+    get_project_init_kanban,
+    get_risks,
+    get_summary,
+    get_top_customers,
+    get_top_sales,
+    get_trends,
 )
 from .tasks import (
     SyncTaskDispatchError,
@@ -309,12 +309,7 @@ class FeishuCollectionConfigTriggerAPIView(
         config = get_bitable_collection_config(config_id)
         if not config.is_enabled:
             return Response(
-                {
-                    "detail": (
-                        "该采集配置已停用，"
-                        "启用后才能手动触发。"
-                    )
-                },
+                {"detail": "该采集配置已停用，启用后才能手动触发。"},
                 status=400,
             )
         job = SyncJob.objects.create(
