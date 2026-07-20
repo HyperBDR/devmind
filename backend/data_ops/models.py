@@ -80,6 +80,182 @@ class SourceRecordChange(models.Model):
         )
 
 
+class KnowledgeProductionRun(models.Model):
+    """One reproducible execution of a knowledge producer."""
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "Running"
+        SUCCEEDED = "succeeded", "Succeeded"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    producer_key = models.CharField(max_length=100, db_index=True)
+    producer_version = models.CharField(max_length=50)
+    parameters = models.JSONField(default=dict, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.RUNNING,
+        db_index=True,
+    )
+    started_at = models.DateTimeField(default=timezone.now, db_index=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    result_counts = models.JSONField(default=dict, blank=True)
+    error_message = models.CharField(max_length=2000, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["producer_key", "started_at"],
+                name="data_ops_kp_run_producer_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.producer_key}@{self.producer_version}: {self.status}"
+
+
+class Evidence(models.Model):
+    """Immutable source snapshot supporting a knowledge observation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    source_model = models.CharField(max_length=100, db_index=True)
+    source_object_id = models.CharField(max_length=255, db_index=True)
+    source_record_id = models.CharField(max_length=255, blank=True)
+    source_locator = models.JSONField(default=dict, blank=True)
+    source_content_hash = models.CharField(max_length=64, blank=True)
+    snapshot = models.JSONField(default=dict, blank=True)
+    captured_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "source_model",
+                    "source_object_id",
+                    "source_content_hash",
+                ],
+                name="uq_data_ops_evidence_source_version",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["source_model", "source_record_id"],
+                name="data_ops_evidence_record_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.source_model}:{self.source_object_id}"
+
+
+class Observation(models.Model):
+    """A traceable fact produced from one or more pieces of evidence."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        RESOLVED = "resolved", "Resolved"
+        SUPERSEDED = "superseded", "Superseded"
+        INVALIDATED = "invalidated", "Invalidated"
+
+    class Severity(models.TextChoices):
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+        CRITICAL = "critical", "Critical"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    observation_type = models.CharField(max_length=100, db_index=True)
+    subject_type = models.CharField(max_length=100, db_index=True)
+    subject_key = models.CharField(max_length=255, db_index=True)
+    statement = models.TextField()
+    structured_value = models.JSONField(default=dict, blank=True)
+    severity = models.CharField(
+        max_length=20,
+        choices=Severity.choices,
+        default=Severity.LOW,
+        db_index=True,
+    )
+    confidence = models.CharField(max_length=20, default="high")
+    producer_key = models.CharField(max_length=100, db_index=True)
+    producer_version = models.CharField(max_length=50)
+    fingerprint = models.CharField(max_length=64, unique=True)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
+    window_start = models.DateField(null=True, blank=True)
+    window_end = models.DateField(null=True, blank=True)
+    generated_at = models.DateTimeField(default=timezone.now, db_index=True)
+    last_evaluated_at = models.DateTimeField(default=timezone.now)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    run = models.ForeignKey(
+        KnowledgeProductionRun,
+        null=True,
+        blank=True,
+        related_name="observations",
+        on_delete=models.SET_NULL,
+    )
+    evidence = models.ManyToManyField(
+        Evidence,
+        related_name="observations",
+        through="ObservationEvidence",
+    )
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["status", "severity", "generated_at"],
+                name="data_ops_obs_attention_idx",
+            ),
+            models.Index(
+                fields=["subject_type", "subject_key", "status"],
+                name="data_ops_obs_subject_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return self.statement
+
+
+class ObservationEvidence(models.Model):
+    """Explain how evidence supports or contradicts an observation."""
+
+    class Role(models.TextChoices):
+        SUPPORTING = "supporting", "Supporting"
+        CONTRADICTING = "contradicting", "Contradicting"
+
+    observation = models.ForeignKey(
+        Observation,
+        related_name="evidence_links",
+        on_delete=models.CASCADE,
+    )
+    evidence = models.ForeignKey(
+        Evidence,
+        related_name="observation_links",
+        on_delete=models.CASCADE,
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=Role.choices,
+        default=Role.SUPPORTING,
+    )
+    linked_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["observation", "evidence"],
+                name="uq_data_ops_observation_evidence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.observation_id}: {self.evidence_id}"
+
+
 class Contract(SourceRecordModel):
     contract_number = models.CharField(max_length=100, blank=True)
     customer_name = models.CharField(max_length=255, blank=True)
