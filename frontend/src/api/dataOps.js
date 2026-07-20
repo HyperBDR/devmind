@@ -155,6 +155,20 @@ export const dataOpsApi = {
     return apiClient.get(`${base}/domestic-ledgers/`, paramsOrEmpty(params))
   },
 
+  observations(params) {
+    return apiClient.get(`${base}/observations/`, paramsOrEmpty(params))
+  },
+
+  observation(observationId) {
+    return apiClient.get(`${base}/observations/${observationId}/`)
+  },
+
+  createObservationRun(producerKey) {
+    return apiClient.post(`${base}/observation-runs/`, {
+      producer_key: producerKey
+    })
+  },
+
   overseaProjects() {
     return apiClient.get(`${base}/oversea-projects/`)
   },
@@ -225,6 +239,5 @@ export const dataOpsApi = {
     return apiClient.post(`${base}/sync/incremental/`, {
       source_key: sourceKey
     })
-  },
-
+  }
 }

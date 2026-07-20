@@ -4,12 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { dataOpsApi } from '@/api/dataOps'
 import {
   formatAmount as formatCurrencyAmount,
-  formatAmountByCurrency as formatCurrencyAmounts,
+  formatAmountByCurrency as formatCurrencyAmounts
 } from '@/utils/currency'
 import {
   appendAiContent,
   resolveFinalAiContent,
-  sanitizeAiContent,
+  sanitizeAiContent
 } from '@/utils/dataOpsAiStream'
 import { normalizeDataOpsProgressEvent } from '@/utils/dataOpsProgress'
 import { syncJobError, syncJobFailureDetails } from '@/utils/sync'
@@ -51,6 +51,14 @@ export function useDataOpsConsole() {
   const salesRecords = ref([])
   const salesTotal = ref(0)
   const salesPage = ref(1)
+  const observations = ref([])
+  const observationTotal = ref(0)
+  const observationPage = ref(1)
+  const selectedObservation = ref(null)
+  const observationDetailLoading = ref(false)
+  const observationRunLoading = ref(false)
+  const observationFeedback = ref('')
+  const observationError = ref('')
   const syncStatus = ref(null)
   const globalConfig = ref(defaultGlobalConfig())
   const collectionConfigs = ref([])
@@ -66,12 +74,17 @@ export function useDataOpsConsole() {
     customer_name: '',
     signing_entity: '',
     sales_person: '',
-    status: '',
+    status: ''
   })
   const salesFilters = ref({
     status: '',
     region: '',
-    product_type: '',
+    product_type: ''
+  })
+  const observationFilters = ref({
+    observation_type: '',
+    severity: '',
+    status: 'active'
   })
   const aiMessages = ref([])
 
@@ -96,7 +109,7 @@ export function useDataOpsConsole() {
           data.total_contract_amount,
           data.total_contract_amount_by_currency,
           { locale: locale.value }
-        ),
+        )
       },
       {
         label: t('dataOps.kpi.monthlySigned'),
@@ -104,7 +117,7 @@ export function useDataOpsConsole() {
           kpis.monthly_signed_amount,
           kpis.monthly_signed_amount_by_currency,
           { locale: locale.value }
-        ),
+        )
       },
       {
         label: t('dataOps.kpi.received'),
@@ -112,7 +125,7 @@ export function useDataOpsConsole() {
           data.total_received_amount,
           data.total_received_amount_by_currency,
           { locale: locale.value }
-        ),
+        )
       },
       {
         label: t('dataOps.kpi.outstanding'),
@@ -120,8 +133,8 @@ export function useDataOpsConsole() {
           data.total_outstanding_amount,
           data.total_outstanding_amount_by_currency,
           { locale: locale.value }
-        ),
-      },
+        )
+      }
     ]
   })
 
@@ -171,8 +184,9 @@ export function useDataOpsConsole() {
         loadPipeline(),
         loadContracts(),
         loadSalesRecords(),
+        loadObservations(),
         loadSync(includeConfigs),
-        loadAiContext(),
+        loadAiContext()
       ])
     } catch (err) {
       setError(err)
@@ -191,7 +205,7 @@ export function useDataOpsConsole() {
       opportunitiesRes,
       dataQualityRes,
       topCustomersRes,
-      topSalesRes,
+      topSalesRes
     ] = await Promise.all([
       dataOpsApi.summary(),
       dataOpsApi.executiveOverview(),
@@ -201,7 +215,7 @@ export function useDataOpsConsole() {
       dataOpsApi.executiveOpportunities(),
       dataOpsApi.dataQuality(),
       dataOpsApi.executiveTopCustomers(),
-      dataOpsApi.executiveTopSales(),
+      dataOpsApi.executiveTopSales()
     ])
     summary.value = extractData(summaryRes)
     overview.value = extractData(overviewRes)
@@ -218,7 +232,7 @@ export function useDataOpsConsole() {
     const [summaryRes, projectsRes, insightsRes] = await Promise.all([
       dataOpsApi.pipelineSummary(),
       dataOpsApi.pipelineProjects(),
-      dataOpsApi.pipelineInsights(),
+      dataOpsApi.pipelineInsights()
     ])
     pipelineSummary.value = extractData(summaryRes)
     pipelineProjects.value = extractData(projectsRes)?.cards || []
@@ -229,12 +243,12 @@ export function useDataOpsConsole() {
     const params = {
       ...compactObject(contractFilters.value),
       page: contractPage.value,
-      page_size: pageSize,
+      page_size: pageSize
     }
     const [listRes, countRes, optionsRes] = await Promise.all([
       dataOpsApi.contracts(params),
       dataOpsApi.contractCount(params),
-      dataOpsApi.contractFilterOptions(),
+      dataOpsApi.contractFilterOptions()
     ])
     contracts.value = extractData(listRes) || []
     contractTotal.value = extractData(countRes)?.total || 0
@@ -245,14 +259,43 @@ export function useDataOpsConsole() {
     const params = {
       ...compactObject(salesFilters.value),
       page: salesPage.value,
-      page_size: pageSize,
+      page_size: pageSize
     }
     const [listRes, countRes] = await Promise.all([
       dataOpsApi.salesRecords(params),
-      dataOpsApi.salesRecordCount(params),
+      dataOpsApi.salesRecordCount(params)
     ])
     salesRecords.value = extractData(listRes) || []
     salesTotal.value = extractData(countRes)?.total || 0
+  }
+
+  async function loadObservations() {
+    const params = {
+      ...compactObject(observationFilters.value),
+      page: observationPage.value,
+      page_size: pageSize
+    }
+    observationError.value = ''
+    try {
+      const response = await dataOpsApi.observations(params)
+      const data = extractData(response) || {}
+      observations.value = data.results || []
+      observationTotal.value = Number(data.count || 0)
+      const selectedId = selectedObservation.value?.id
+      if (
+        selectedId &&
+        !observations.value.some((item) => item.id === selectedId)
+      ) {
+        selectedObservation.value = null
+      }
+      return true
+    } catch (err) {
+      observationError.value = errorMessage(
+        err,
+        t('dataOps.observations.listFailed')
+      )
+      return false
+    }
   }
 
   async function loadSync(includeConfigs = true) {
@@ -286,8 +329,9 @@ export function useDataOpsConsole() {
         pipeline: loadPipeline,
         contracts: loadContracts,
         sales: loadSalesRecords,
+        observations: loadObservations,
         sync: () => loadSync(includeConfigs),
-        config: () => loadSync(true),
+        config: () => loadSync(true)
       }
       await (loaders[section] || loadExecutive)()
     } catch (err) {
@@ -377,7 +421,7 @@ export function useDataOpsConsole() {
       syncStatus.value = {
         ...(syncStatus.value || {}),
         overall_status: data.overall_status,
-        tables,
+        tables
       }
       await loadSync()
       preflightFeedback.value = preflightSummary(
@@ -444,7 +488,7 @@ export function useDataOpsConsole() {
         feishu_date_timezone: globalConfig.value.feishu_date_timezone,
         active_sync_job_timeout_hours: Number(
           globalConfig.value.active_sync_job_timeout_hours || 3
-        ),
+        )
       }
       if (globalConfig.value.feishu_app_secret) {
         payload.feishu_app_secret = globalConfig.value.feishu_app_secret
@@ -492,7 +536,7 @@ export function useDataOpsConsole() {
       elapsedMs: 0,
       progressEvents: [],
       startedAt,
-      status: 'thinking',
+      status: 'thinking'
     }
     aiMessages.value.push(assistantMessage)
     const assistantIndex = aiMessages.value.length - 1
@@ -510,7 +554,7 @@ export function useDataOpsConsole() {
       await dataOpsApi.chatStream(
         {
           message,
-          history: aiMessages.value.slice(0, -2),
+          history: aiMessages.value.slice(0, -2)
         },
         {
           onProgress(event) {
@@ -518,15 +562,15 @@ export function useDataOpsConsole() {
             updateAssistantMessage({
               progressEvents: [
                 ...(current?.progressEvents || []),
-                normalizeDataOpsProgressEvent(event),
-              ],
+                normalizeDataOpsProgressEvent(event)
+              ]
             })
           },
           onChunk(content) {
             const current = aiMessages.value[assistantIndex]
             updateAssistantMessage({
               content: appendAiContent(current?.content, content),
-              status: 'streaming',
+              status: 'streaming'
             })
           },
           onDone(payload) {
@@ -536,7 +580,7 @@ export function useDataOpsConsole() {
             const patch = {
               llm: payload?.llm || null,
               status: 'done',
-              usage: payload?.usage || null,
+              usage: payload?.usage || null
             }
             patch.content = resolveFinalAiContent(
               current?.content,
@@ -544,7 +588,7 @@ export function useDataOpsConsole() {
               t('dataOps.feedback.analysisEmpty')
             )
             updateAssistantMessage({
-              ...patch,
+              ...patch
             })
           },
           onError(detail) {
@@ -552,10 +596,10 @@ export function useDataOpsConsole() {
             updateAssistantMessage({ status: 'error' })
             if (!sanitizeAiContent(current?.content)) {
               updateAssistantMessage({
-                content: detail || t('dataOps.feedback.streamFailed'),
+                content: detail || t('dataOps.feedback.streamFailed')
               })
             }
-          },
+          }
         },
         aiStreamController.value.signal
       )
@@ -631,11 +675,11 @@ export function useDataOpsConsole() {
         firstUser.content,
         t('dataOps.feedback.untitledConversation')
       ),
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }
     aiHistory.value = [
       item,
-      ...aiHistory.value.filter((entry) => entry.id !== id),
+      ...aiHistory.value.filter((entry) => entry.id !== id)
     ].slice(0, maxAiHistoryItems)
     saveAiHistory(aiHistory.value)
   }
@@ -672,6 +716,59 @@ export function useDataOpsConsole() {
   function setSalesPage(page) {
     salesPage.value = page
     loadSalesRecords()
+  }
+
+  function setObservationPage(page) {
+    observationPage.value = page
+    loadObservations()
+  }
+
+  async function selectObservation(observationId) {
+    observationDetailLoading.value = true
+    observationError.value = ''
+    try {
+      const response = await dataOpsApi.observation(observationId)
+      selectedObservation.value = extractData(response)
+    } catch (err) {
+      selectedObservation.value = null
+      observationError.value = errorMessage(
+        err,
+        t('dataOps.observations.detailFailed')
+      )
+    } finally {
+      observationDetailLoading.value = false
+    }
+  }
+
+  async function runObservationProducer(producerKey) {
+    if (observationRunLoading.value) return false
+    observationRunLoading.value = true
+    observationFeedback.value = ''
+    observationError.value = ''
+    const selectedId = selectedObservation.value?.id
+    try {
+      const response = await dataOpsApi.createObservationRun(producerKey)
+      const run = extractData(response) || {}
+      const counts = run.result_counts || {}
+      observationFeedback.value = t('dataOps.observations.runSucceeded', {
+        created: counts.created || 0,
+        resolved: counts.resolved || 0,
+        updated: counts.updated || 0
+      })
+      await loadObservations()
+      if (selectedId) {
+        await selectObservation(selectedId)
+      }
+      return true
+    } catch (err) {
+      observationError.value = errorMessage(
+        err,
+        t('dataOps.observations.runFailed')
+      )
+      return false
+    } finally {
+      observationRunLoading.value = false
+    }
   }
 
   async function downloadContracts() {
@@ -722,8 +819,17 @@ export function useDataOpsConsole() {
     kpiCards,
     loadAll,
     loadContracts,
+    loadObservations,
     loadSalesRecords,
     loading,
+    observationDetailLoading,
+    observationError,
+    observationFeedback,
+    observationFilters,
+    observationPage,
+    observationRunLoading,
+    observations,
+    observationTotal,
     opportunities,
     overview,
     pageSize,
@@ -746,10 +852,13 @@ export function useDataOpsConsole() {
     salesRecords,
     salesTotal,
     saveGlobalConfig,
+    selectObservation,
     selectAiHistoryItem,
+    selectedObservation,
     sendAiMessage,
     askAiQuestion,
     setContractPage,
+    setObservationPage,
     setSalesPage,
     summary,
     syncBannerClass,
@@ -766,7 +875,8 @@ export function useDataOpsConsole() {
     triggerConfigSync,
     triggerFullSync,
     triggerIncrementalSync,
-    updateGlobalConfigField,
+    runObservationProducer,
+    updateGlobalConfigField
   }
 }
 
@@ -776,7 +886,7 @@ function defaultGlobalConfig() {
     feishu_app_secret: '',
     has_feishu_app_secret: false,
     feishu_date_timezone: 'Asia/Shanghai',
-    active_sync_job_timeout_hours: 3,
+    active_sync_job_timeout_hours: 3
   }
 }
 
@@ -784,7 +894,7 @@ function normalizeGlobalConfig(config) {
   return {
     ...defaultGlobalConfig(),
     ...(config || {}),
-    feishu_app_secret: '',
+    feishu_app_secret: ''
   }
 }
 
@@ -846,9 +956,7 @@ function preflightSummary(status, tables, discovery = null, t) {
 function loadAiHistory() {
   if (typeof localStorage === 'undefined') return []
   try {
-    const parsed = JSON.parse(
-      localStorage.getItem(aiHistoryStorageKey) || '[]'
-    )
+    const parsed = JSON.parse(localStorage.getItem(aiHistoryStorageKey) || '[]')
     return Array.isArray(parsed) ? parsed.slice(0, maxAiHistoryItems) : []
   } catch (_) {
     return []
@@ -868,7 +976,9 @@ function cloneMessages(messages) {
 }
 
 function summarizeAiHistoryTitle(value, fallback = 'Untitled conversation') {
-  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
   if (!text) return fallback
   return text.length > 32 ? `${text.slice(0, 32)}...` : text
 }

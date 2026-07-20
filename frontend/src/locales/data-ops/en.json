@@ -26,6 +26,10 @@
         "label": "Overseas Sales",
         "description": "KooGallery orders and overseas sales details"
       },
+      "observations": {
+        "label": "Risk Observations",
+        "description": "Review traceable risk facts, production runs, and source evidence"
+      },
       "sync": {
         "label": "Sync Status",
         "description": "Feishu collection jobs, permission checks, and sync issues"
@@ -64,6 +68,62 @@
     "previousPage": "Previous",
     "nextPage": "Next",
     "lastPage": "Last"
+  },
+  "observations": {
+    "title": "Observation Explorer",
+    "description": "Trace business risk facts to production rules and source evidence. Amounts remain in their original currency.",
+    "producer": "Producer",
+    "runNow": "Run now",
+    "running": "Running…",
+    "runSucceeded": "Run completed: {created} created, {updated} updated, {resolved} resolved",
+    "runFailed": "Failed to produce risk observations",
+    "listFailed": "Failed to load risk observations",
+    "detailFailed": "Failed to load observation details",
+    "type": "Observation type",
+    "allTypes": "All types",
+    "allStatuses": "All statuses",
+    "severityLabel": "Severity",
+    "allSeverities": "All severities",
+    "empty": "No risk observations match these filters",
+    "detailTitle": "Observation and evidence",
+    "detailDescription": "Review the business fact, calculation, and current source snapshot",
+    "loadingDetail": "Loading evidence…",
+    "selectPrompt": "Select an observation to inspect its facts and evidence chain",
+    "lastEvaluated": "Last evaluated",
+    "factsTitle": "Structured facts",
+    "evidenceTitle": "Supporting evidence",
+    "capturedAt": "Captured at",
+    "noEvidence": "No evidence is available for this observation",
+    "types": {
+      "contractRenewal": "Contract renewal",
+      "receivableOverdue": "Overdue receivable"
+    },
+    "producers": {
+      "contractRenewal": "Contract renewal risk",
+      "receivableOverdue": "Overdue receivable risk"
+    },
+    "severity": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "status": {
+      "active": "Active",
+      "resolved": "Resolved",
+      "superseded": "Superseded",
+      "invalidated": "Invalidated"
+    },
+    "fields": {
+      "daysOverdue": "Days overdue",
+      "daysUntilExpiry": "Days until expiry",
+      "contractStatus": "Contract status",
+      "expectedPaymentDate": "Expected payment date",
+      "expiryStatus": "Expiry status",
+      "ledgerType": "Ledger type",
+      "paymentStatus": "Payment status",
+      "outstanding": "Outstanding amount"
+    }
   },
   "ai": {
     "openLabel": "Open AI data assistant",

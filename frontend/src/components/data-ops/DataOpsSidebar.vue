@@ -68,7 +68,9 @@
         :key="group.key"
         class="space-y-1"
       >
-        <p class="px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <p
+          class="px-3 text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+        >
           {{ group.label }}
         </p>
         <button
@@ -103,7 +105,9 @@
       </div>
     </nav>
 
-    <div class="shrink-0 border-t border-slate-800 px-5 py-4 text-[10px] text-slate-500">
+    <div
+      class="shrink-0 border-t border-slate-800 px-5 py-4 text-[10px] text-slate-500"
+    >
       Tower v0.1.0
     </div>
   </aside>
@@ -118,7 +122,7 @@ const { t } = useI18n()
 const props = defineProps({
   activeSection: { type: String, required: true },
   navGroups: { type: Array, default: () => [] },
-  navItems: { type: Array, required: true },
+  navItems: { type: Array, required: true }
 })
 
 defineEmits(['select'])
@@ -141,9 +145,12 @@ function iconPath(key) {
     executive: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
     pipeline: 'M4 7h16 M4 12h10 M4 17h16',
     contracts: 'M6 3h9l3 3v15H6z M14 3v4h4 M8 12h8 M8 16h8',
-    sales: 'M12 3a9 9 0 100 18 9 9 0 000-18z M3 12h18 M12 3c2 3 2 15 0 18 M12 3c-2 3-2 15 0 18',
+    sales:
+      'M12 3a9 9 0 100 18 9 9 0 000-18z M3 12h18 M12 3c2 3 2 15 0 18 M12 3c-2 3-2 15 0 18',
+    observations: 'M4 5h16v14H4z M8 9h8 M8 13h5 M16 16l2 2 3-4',
     sync: 'M6 7h9a3 3 0 010 6H9a3 3 0 000 6h9 M6 7l3-3 M6 7l3 3 M18 17l-3-3 M18 17l-3 3',
-    config: 'M12 8a4 4 0 100 8 4 4 0 000-8z M12 2v3 M12 19v3 M4.9 4.9l2.1 2.1 M17 17l2.1 2.1 M2 12h3 M19 12h3 M4.9 19.1L7 17 M17 7l2.1-2.1',
+    config:
+      'M12 8a4 4 0 100 8 4 4 0 000-8z M12 2v3 M12 19v3 M4.9 4.9l2.1 2.1 M17 17l2.1 2.1 M2 12h3 M19 12h3 M4.9 19.1L7 17 M17 7l2.1-2.1'
   }
   return paths[key] || paths.executive
 }
