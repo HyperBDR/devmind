@@ -31,6 +31,9 @@ from .views import (
     LLMChatAPIView,
     LLMChatStreamAPIView,
     LLMQueryAPIView,
+    ObservationDetailAPIView,
+    ObservationListAPIView,
+    ObservationRunCreateAPIView,
     OverseaProjectListAPIView,
     OverseaProjectKanbanAPIView,
     OverseaSettlementKanbanAPIView,
@@ -70,6 +73,21 @@ urlpatterns = [
     ),
     path("llm/query/", LLMQueryAPIView.as_view(), name="data-ops-llm-query"),
     path("insights/", InsightsAPIView.as_view(), name="data-ops-insights"),
+    path(
+        "observations/",
+        ObservationListAPIView.as_view(),
+        name="data-ops-observations",
+    ),
+    path(
+        "observations/<uuid:observation_id>/",
+        ObservationDetailAPIView.as_view(),
+        name="data-ops-observation-detail",
+    ),
+    path(
+        "observation-runs/",
+        ObservationRunCreateAPIView.as_view(),
+        name="data-ops-observation-runs",
+    ),
     path(
         "executive/briefing/",
         ExecutiveBriefingAPIView.as_view(),

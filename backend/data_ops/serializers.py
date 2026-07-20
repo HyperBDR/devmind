@@ -6,6 +6,8 @@ from .models import (
     Contract,
     DataOpsGlobalConfig,
     FeishuBitableCollectionConfig,
+    KnowledgeProductionRun,
+    Observation,
     SalesRecord,
     SyncCursor,
     SyncJob,
@@ -95,6 +97,102 @@ class ContractSerializer(serializers.ModelSerializer):
             "source_record_id",
             "synced_at",
         ]
+
+
+class KnowledgeProductionRunSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = KnowledgeProductionRun
+        fields = [
+            "id",
+            "producer_key",
+            "producer_version",
+            "parameters",
+            "status",
+            "started_at",
+            "finished_at",
+            "result_counts",
+            "error_message",
+        ]
+
+
+class ObservationEvidenceSerializer(serializers.Serializer):
+    id = serializers.UUIDField(source="evidence.id")
+    role = serializers.CharField()
+    source_model = serializers.CharField(source="evidence.source_model")
+    source_object_id = serializers.CharField(
+        source="evidence.source_object_id",
+    )
+    source_record_id = serializers.CharField(
+        source="evidence.source_record_id",
+    )
+    source_locator = serializers.JSONField(
+        source="evidence.source_locator",
+    )
+    source_content_hash = serializers.CharField(
+        source="evidence.source_content_hash",
+    )
+    snapshot = serializers.JSONField(source="evidence.snapshot")
+    captured_at = serializers.DateTimeField(
+        source="evidence.captured_at",
+    )
+
+
+class ObservationSerializer(serializers.ModelSerializer):
+    run = KnowledgeProductionRunSerializer(read_only=True)
+    evidence = ObservationEvidenceSerializer(
+        source="evidence_links",
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = Observation
+        fields = [
+            "id",
+            "observation_type",
+            "subject_type",
+            "subject_key",
+            "statement",
+            "structured_value",
+            "severity",
+            "confidence",
+            "producer_key",
+            "producer_version",
+            "status",
+            "window_start",
+            "window_end",
+            "generated_at",
+            "last_evaluated_at",
+            "resolved_at",
+            "run",
+            "evidence",
+        ]
+
+
+class ObservationFilterSerializer(serializers.Serializer):
+    observation_type = serializers.CharField(required=False)
+    subject_type = serializers.CharField(required=False)
+    subject_key = serializers.CharField(required=False)
+    status = serializers.ChoiceField(
+        choices=Observation.Status.choices,
+        required=False,
+    )
+    severity = serializers.ChoiceField(
+        choices=Observation.Severity.choices,
+        required=False,
+    )
+
+
+class KnowledgeProductionRunCreateSerializer(serializers.Serializer):
+    producer_key = serializers.ChoiceField(
+        choices=[("contract-renewal-risk", "Contract renewal risk")],
+    )
+    as_of = serializers.DateField(required=False)
+    horizon_days = serializers.IntegerField(
+        default=30,
+        min_value=1,
+        max_value=365,
+    )
 
 
 class SalesRecordSerializer(serializers.ModelSerializer):
