@@ -162,10 +162,7 @@ class ObservationRunCreateAPIView(DataOpsAdminPermissionMixin, APIView):
             data=request.data,
         )
         serializer.is_valid(raise_exception=True)
-        run = produce_contract_renewal_observations(
-            as_of=serializer.validated_data.get("as_of"),
-            horizon_days=serializer.validated_data["horizon_days"],
-        )
+        run = produce_contract_renewal_observations()
         return Response(
             KnowledgeProductionRunSerializer(run).data,
             status=status.HTTP_201_CREATED,

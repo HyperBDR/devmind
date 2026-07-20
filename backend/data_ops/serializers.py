@@ -187,12 +187,17 @@ class KnowledgeProductionRunCreateSerializer(serializers.Serializer):
     producer_key = serializers.ChoiceField(
         choices=[("contract-renewal-risk", "Contract renewal risk")],
     )
-    as_of = serializers.DateField(required=False)
-    horizon_days = serializers.IntegerField(
-        default=30,
-        min_value=1,
-        max_value=365,
-    )
+
+    def validate(self, attrs):
+        unknown_fields = set(self.initial_data) - {"producer_key"}
+        if unknown_fields:
+            raise serializers.ValidationError(
+                {
+                    field: ["This field is not supported."]
+                    for field in sorted(unknown_fields)
+                }
+            )
+        return attrs
 
 
 class SalesRecordSerializer(serializers.ModelSerializer):

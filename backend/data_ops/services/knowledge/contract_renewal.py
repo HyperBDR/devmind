@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import date, timedelta
 
 from django.db import transaction
@@ -15,12 +16,12 @@ from data_ops.models import (
 PRODUCER_KEY = "contract-renewal-risk"
 PRODUCER_VERSION = "1.0"
 OBSERVATION_TYPE = "contract_renewal_risk"
+HORIZON_DAYS = 30
 
 
 def produce_contract_renewal_observations(
     *,
     as_of: date | None = None,
-    horizon_days: int = 30,
 ) -> KnowledgeProductionRun:
     """Produce traceable observations for contracts nearing expiry."""
     effective_date = as_of or timezone.localdate()
@@ -29,12 +30,12 @@ def produce_contract_renewal_observations(
         producer_version=PRODUCER_VERSION,
         parameters={
             "as_of": effective_date.isoformat(),
-            "horizon_days": horizon_days,
+            "horizon_days": HORIZON_DAYS,
         },
     )
     try:
         with transaction.atomic():
-            counts = _produce(run, effective_date, horizon_days)
+            counts = _produce(run, effective_date, HORIZON_DAYS)
     except Exception as exc:
         run.status = KnowledgeProductionRun.Status.FAILED
         run.error_message = str(exc)
@@ -117,17 +118,21 @@ def _upsert_observation(*, contract, run, as_of, window_end):
             "run": run,
         },
     )
+    snapshot = _snapshot(contract)
+    source_content_hash = contract.source_content_hash or _snapshot_hash(
+        snapshot,
+    )
     evidence, _created = Evidence.objects.get_or_create(
         source_model="data_ops.Contract",
         source_object_id=subject_key,
-        source_content_hash=contract.source_content_hash,
+        source_content_hash=source_content_hash,
         defaults={
             "source_record_id": contract.source_record_id,
             "source_locator": {
                 "app_token": contract.source_app_token,
                 "table_id": contract.source_table_id,
             },
-            "snapshot": _snapshot(contract),
+            "snapshot": snapshot,
         },
     )
     ObservationEvidence.objects.get_or_create(
@@ -162,3 +167,13 @@ def _snapshot(contract) -> dict:
         "status": contract.status,
         "expiry_status": contract.expiry_status,
     }
+
+
+def _snapshot_hash(snapshot: dict) -> str:
+    payload = json.dumps(
+        snapshot,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()

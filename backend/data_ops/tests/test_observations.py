@@ -110,3 +110,21 @@ def test_contract_renewal_producer_ignores_contract_outside_window():
         "updated": 0,
     }
     assert Observation.objects.count() == 0
+
+
+@pytest.mark.django_db
+def test_contract_renewal_producer_versions_evidence_without_source_hash():
+    as_of = date(2026, 7, 20)
+    contract = _create_contract(service_end=as_of + timedelta(days=10))
+    contract.source_content_hash = ""
+    contract.save(update_fields=["source_content_hash"])
+    produce_contract_renewal_observations(as_of=as_of)
+
+    contract.contract_number = "C-002"
+    contract.save(update_fields=["contract_number"])
+    produce_contract_renewal_observations(as_of=as_of)
+
+    observation = Observation.objects.get()
+    current_evidence = observation.evidence.get()
+    assert Evidence.objects.count() == 2
+    assert current_evidence.snapshot["contract_number"] == "C-002"

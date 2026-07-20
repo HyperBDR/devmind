@@ -2,6 +2,7 @@ from datetime import date, timedelta
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from data_ops.models import Contract, Observation
 from data_ops.services.knowledge.contract_renewal import (
@@ -87,17 +88,13 @@ def test_admin_can_create_contract_renewal_observation_run(
     api_client,
     data_ops_admin,
 ):
-    as_of = date(2026, 7, 20)
+    as_of = timezone.localdate()
     _create_expiring_contract(as_of=as_of, days_until_expiry=5)
     api_client.force_authenticate(user=data_ops_admin)
 
     response = api_client.post(
         reverse("data-ops-observation-runs"),
-        {
-            "producer_key": "contract-renewal-risk",
-            "as_of": as_of.isoformat(),
-            "horizon_days": 30,
-        },
+        {"producer_key": "contract-renewal-risk"},
         format="json",
     )
 
@@ -105,6 +102,26 @@ def test_admin_can_create_contract_renewal_observation_run(
     assert response.data["status"] == "succeeded"
     assert response.data["result_counts"]["created"] == 1
     assert Observation.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_observation_run_rejects_historical_parameters(
+    api_client,
+    data_ops_admin,
+):
+    api_client.force_authenticate(user=data_ops_admin)
+
+    response = api_client.post(
+        reverse("data-ops-observation-runs"),
+        {
+            "producer_key": "contract-renewal-risk",
+            "as_of": "2025-01-01",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "as_of" in response.data
 
 
 @pytest.mark.django_db
