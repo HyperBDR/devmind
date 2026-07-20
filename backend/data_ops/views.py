@@ -55,6 +55,9 @@ from .services.feishu.mappings import ACTIVE_SOURCE_KEYS
 from .services.knowledge.contract_renewal import (
     produce_contract_renewal_observations,
 )
+from .services.knowledge.receivable_overdue import (
+    produce_receivable_overdue_observations,
+)
 from .services.metrics.overview import (
     get_contract_cards,
     get_contract_kanban,
@@ -100,8 +103,11 @@ from .tasks import (
     run_table_sync_task,
 )
 
-
 FEATURE_KEY = "data_ops"
+OBSERVATION_PRODUCERS = {
+    "contract-renewal-risk": produce_contract_renewal_observations,
+    "receivable-overdue-risk": produce_receivable_overdue_observations,
+}
 
 
 class DataOpsPermissionMixin:
@@ -162,7 +168,8 @@ class ObservationRunCreateAPIView(DataOpsAdminPermissionMixin, APIView):
             data=request.data,
         )
         serializer.is_valid(raise_exception=True)
-        run = produce_contract_renewal_observations()
+        producer_key = serializer.validated_data["producer_key"]
+        run = OBSERVATION_PRODUCERS[producer_key]()
         return Response(
             KnowledgeProductionRunSerializer(run).data,
             status=status.HTTP_201_CREATED,

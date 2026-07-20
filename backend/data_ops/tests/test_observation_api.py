@@ -1,10 +1,11 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 from django.urls import reverse
 from django.utils import timezone
 
-from data_ops.models import Contract, Observation
+from data_ops.models import Contract, DomesticLedger, Observation
 from data_ops.services.knowledge.contract_renewal import (
     produce_contract_renewal_observations,
 )
@@ -102,6 +103,38 @@ def test_admin_can_create_contract_renewal_observation_run(
     assert response.data["status"] == "succeeded"
     assert response.data["result_counts"]["created"] == 1
     assert Observation.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_admin_can_create_receivable_overdue_observation_run(
+    api_client,
+    data_ops_admin,
+):
+    as_of = timezone.localdate()
+    DomesticLedger.all_objects.create(
+        source_app_token="app-token",
+        source_table_id="domestic-ledger-table",
+        source_record_id="ledger-api-1",
+        ledger_type="收入",
+        currency="CNY",
+        customer_name="API Customer",
+        outstanding=Decimal("8000"),
+        expected_payment_date=as_of - timedelta(days=35),
+    )
+    api_client.force_authenticate(user=data_ops_admin)
+
+    response = api_client.post(
+        reverse("data-ops-observation-runs"),
+        {"producer_key": "receivable-overdue-risk"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.data["producer_key"] == "receivable-overdue-risk"
+    assert response.data["status"] == "succeeded"
+    assert response.data["result_counts"]["created"] == 1
+    observation = Observation.objects.get()
+    assert observation.observation_type == "receivable_overdue_risk"
 
 
 @pytest.mark.django_db
