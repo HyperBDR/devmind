@@ -247,6 +247,21 @@ class BillingData(models.Model):
         )
 
 
+def exclude_shadow_default_accounts(
+    queryset: models.QuerySet,
+) -> models.QuerySet:
+    """Exclude blank account rows once a provider has a real account ID."""
+    identified_accounts = BillingData.objects.filter(
+        provider_id=models.OuterRef("provider_id")
+    ).exclude(account_id="")
+    return queryset.annotate(
+        has_identified_account=models.Exists(identified_accounts)
+    ).exclude(
+        account_id="",
+        has_identified_account=True,
+    )
+
+
 class AlertRule(models.Model):
     """
     Alert rule model for billing cost monitoring.

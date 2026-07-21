@@ -1,11 +1,10 @@
-from unittest.mock import Mock, patch
-
-from django.test import SimpleTestCase
-
-from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
+from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
+
+from django.test import SimpleTestCase, TestCase
 
 from cloud_billing.dashboard import (
     LLM_PROVIDER_TYPES,
@@ -14,10 +13,57 @@ from cloud_billing.dashboard import (
     _build_currency_breakdown,
     _build_exchange_rate_info,
     _build_financial_health,
+    _latest_billings,
     _recent_spend_from_snapshots,
     _payment_type_for_provider,
     _build_trend_ranges,
 )
+from cloud_billing.models import BillingData, CloudProvider
+
+
+class LatestBillingsTests(TestCase):
+    def setUp(self):
+        self.provider = CloudProvider.objects.create(
+            name='baidu-test',
+            provider_type='baidu',
+            display_name='Baidu Test',
+            config={},
+        )
+
+    def test_excludes_blank_account_when_provider_has_identified_account(self):
+        BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 20).date(),
+            hour=9,
+            total_cost=Decimal('200.00'),
+            currency='CNY',
+            account_id='',
+        )
+        identified = BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 20).date(),
+            hour=8,
+            total_cost=Decimal('100.00'),
+            currency='CNY',
+            account_id='967',
+        )
+
+        self.assertEqual(_latest_billings(), [identified])
+
+    def test_keeps_blank_account_when_provider_has_no_identified_account(self):
+        default_account = BillingData.objects.create(
+            provider=self.provider,
+            period='2026-07',
+            day=datetime(2026, 7, 20).date(),
+            hour=9,
+            total_cost=Decimal('200.00'),
+            currency='CNY',
+            account_id='',
+        )
+
+        self.assertEqual(_latest_billings(), [default_account])
 
 
 class ExchangeRateInfoTests(SimpleTestCase):

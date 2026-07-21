@@ -18,7 +18,11 @@ from django.db.models import Prefetch
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from .models import BillingData, CloudProvider
+from .models import (
+    BillingData,
+    CloudProvider,
+    exclude_shadow_default_accounts,
+)
 from .serializers import get_balance_support_info
 
 LLM_PROVIDER_TYPES = {'deepseek', 'yunce', 'zhipu'}
@@ -211,9 +215,11 @@ def _recent_collected_days_from_snapshots(account_rows, now, local_tz) -> int:
 def _daily_rows_for_current_month(local_tz):
     now = timezone.now().astimezone(local_tz)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    rows = BillingData.objects.select_related('provider').filter(
-        provider__is_active=True,
-        collected_at__gte=month_start.astimezone(dt_timezone.utc),
+    rows = exclude_shadow_default_accounts(
+        BillingData.objects.select_related('provider').filter(
+            provider__is_active=True,
+            collected_at__gte=month_start.astimezone(dt_timezone.utc),
+        )
     ).order_by('provider_id', 'account_id', 'day', 'hour', 'collected_at')
     return now, month_start, list(rows)
 
@@ -228,9 +234,11 @@ def _billing_rows_for_current_year(local_tz):
         second=0,
         microsecond=0,
     )
-    rows = BillingData.objects.select_related('provider').filter(
-        provider__is_active=True,
-        collected_at__gte=year_start.astimezone(dt_timezone.utc),
+    rows = exclude_shadow_default_accounts(
+        BillingData.objects.select_related('provider').filter(
+            provider__is_active=True,
+            collected_at__gte=year_start.astimezone(dt_timezone.utc),
+        )
     ).order_by('provider_id', 'account_id', 'day', 'hour', 'collected_at')
     return now, year_start, list(rows)
 
@@ -243,9 +251,11 @@ def _billing_rows_for_recent_days(local_tz, days: int = 30):
         second=0,
         microsecond=0,
     )
-    rows = BillingData.objects.select_related('provider').filter(
-        provider__is_active=True,
-        collected_at__gte=window_start.astimezone(dt_timezone.utc),
+    rows = exclude_shadow_default_accounts(
+        BillingData.objects.select_related('provider').filter(
+            provider__is_active=True,
+            collected_at__gte=window_start.astimezone(dt_timezone.utc),
+        )
     ).order_by('provider_id', 'account_id', 'day', 'hour', 'collected_at')
     return now, window_start, list(rows)
 
@@ -255,7 +265,9 @@ def _latest_billings():
         'display_name',
         'id',
     )
-    billings = BillingData.objects.select_related('provider').order_by(
+    billings = exclude_shadow_default_accounts(
+        BillingData.objects.select_related('provider')
+    ).order_by(
         'provider_id',
         'account_id',
         '-day',
