@@ -555,6 +555,39 @@ class TestBillingDataViewSet:
         assert response.data["average_cost"] == 102.5
         assert response.data["cost_by_period"] == {"2026-04": 205.0}
 
+    def test_stats_excludes_shadow_default_account(
+        self, api_client, cloud_provider
+    ):
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-07",
+            day=datetime(2026, 7, 20).date(),
+            hour=9,
+            total_cost=Decimal("200.00"),
+            currency="CNY",
+            account_id="",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-07",
+            day=datetime(2026, 7, 20).date(),
+            hour=8,
+            total_cost=Decimal("100.00"),
+            currency="CNY",
+            account_id="967",
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/stats/"
+            "?start_period=2026-07&end_period=2026-07"
+        )
+
+        assert response.status_code == 200
+        assert response.data["total_cost"] == 100.0
+        assert list(response.data["by_provider"]) == [
+            f"{cloud_provider.id}_967"
+        ]
+
     def test_list_filters_by_search(self, api_client, cloud_provider):
         """
         Billing list should support backend search by provider name and account.
@@ -656,6 +689,38 @@ class TestBillingDataViewSet:
             },
         ]
 
+    def test_daily_series_excludes_shadow_default_account(
+        self, api_client, cloud_provider
+    ):
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-07",
+            day=datetime(2026, 7, 20).date(),
+            hour=9,
+            total_cost=Decimal("200.00"),
+            currency="CNY",
+            account_id="",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-07",
+            day=datetime(2026, 7, 20).date(),
+            hour=8,
+            total_cost=Decimal("100.00"),
+            currency="CNY",
+            account_id="967",
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/daily-series/"
+            "?start_date=2026-07-20&end_date=2026-07-20"
+        )
+
+        assert response.status_code == 200
+        assert [
+            item["account_id"] for item in response.data["results"]
+        ] == ["967"]
+
     def test_list_serializer_includes_change_from_last_hour_from_db(
         self, cloud_provider
     ):
@@ -736,6 +801,37 @@ class TestBillingDataViewSet:
             item["account_id"] == "acct-1" and item["hour"] == 18
             for item in response.data
         )
+
+    def test_latest_by_provider_account_excludes_shadow_default_account(
+        self, api_client, cloud_provider
+    ):
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-07",
+            day=datetime(2026, 7, 20).date(),
+            hour=9,
+            total_cost=Decimal("200.00"),
+            currency="CNY",
+            account_id="",
+        )
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period="2026-07",
+            day=datetime(2026, 7, 20).date(),
+            hour=8,
+            total_cost=Decimal("100.00"),
+            currency="CNY",
+            account_id="967",
+        )
+
+        response = api_client.get(
+            "/api/v1/cloud-billing/billing-data/"
+            "latest-by-provider-account/?provider_id="
+            f"{cloud_provider.id}"
+        )
+
+        assert response.status_code == 200
+        assert [item["account_id"] for item in response.data] == ["967"]
 
     def test_list_excludes_inactive_provider_data(
         self, api_client, cloud_provider_inactive

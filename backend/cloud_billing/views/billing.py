@@ -12,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from ..dashboard import CNY_RATE, _build_exchange_rate_info, build_dashboard_overview
-from ..models import BillingData
+from ..models import BillingData, exclude_shadow_default_accounts
 from ..serializers import (
     BillingDataListSerializer,
     BillingDataSerializer,
@@ -143,6 +143,7 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         if end_period:
             queryset = queryset.filter(period__lte=end_period)
 
+        queryset = exclude_shadow_default_accounts(queryset)
         latest_billings_queryset = self._latest_per_period_queryset(queryset)
         latest_billings = list(
             latest_billings_queryset.select_related('provider').order_by(
@@ -326,9 +327,9 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
         """
         Return the latest billing record for each provider/account/day.
         """
-        queryset = self._latest_per_day_queryset(self.get_queryset()).order_by(
-            'day', 'provider__display_name', 'account_id'
-        )
+        queryset = self._latest_per_day_queryset(
+            exclude_shadow_default_accounts(self.get_queryset())
+        ).order_by('day', 'provider__display_name', 'account_id')
         results = [
             {
                 'provider_id': billing.provider_id,
@@ -382,6 +383,8 @@ class BillingDataViewSet(viewsets.ReadOnlyModelViewSet):
             end_day = parse_date(end_date)
             if end_day:
                 queryset = queryset.filter(day__lte=end_day)
+
+        queryset = exclude_shadow_default_accounts(queryset)
 
         # Get the latest billing record for each provider + account_id
         # combination using subquery
