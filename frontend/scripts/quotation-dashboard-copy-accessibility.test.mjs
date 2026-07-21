@@ -18,8 +18,12 @@ test('dashboard explains the win-rate denominator and labels both quote counts',
   const copy = english.quotation.pages.dashboard
   assert.equal(copy.kpiSuccessRateHint, 'Won out of won and open quotes')
   assert.equal(copy.kpiActiveDraftsLabel, 'Open quotes and drafts')
-  assert.equal(copy.kpiActiveDraftsValue, '{open} open · {drafts} drafts')
-  assert.match(dashboard, /kpiActiveDraftsValue/)
+  assert.equal(copy.kpiActiveOpenLabel, 'open')
+  assert.equal(copy.kpiActiveDraftLabel, 'drafts')
+  assert.match(dashboard, /kpiActiveOpenLabel/)
+  assert.match(dashboard, /kpiActiveDraftLabel/)
+  assert.match(dashboard, /\{\{ activeCount \}\}/)
+  assert.match(dashboard, /\{\{ draftCount \}\}/)
   assert.doesNotMatch(dashboard, /\{\{ activeCount \}\} \/ \{\{ draftCount \}\}/)
 })
 

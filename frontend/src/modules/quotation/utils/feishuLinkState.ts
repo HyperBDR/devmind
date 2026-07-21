@@ -7,14 +7,17 @@ import {
 
 const FEISHU_LINK_KEYS = [
   'feishuExcelFileToken',
+  'feishuExcelDocumentId',
   'feishuExcelUrl',
   'feishuExcelPath',
   'feishuExcelUploadedAt',
   'feishuPdfFileToken',
+  'feishuPdfDocumentId',
   'feishuPdfUrl',
   'feishuPdfPath',
   'feishuPdfUploadedAt',
   'feishuFileToken',
+  'feishuDocumentId',
   'feishuUrl',
   'feishuPath',
   'feishuUploadedAt',
@@ -44,6 +47,7 @@ export function clearedFeishuFields(
   if (format === 'excel') {
     return {
       feishuExcelFileToken: undefined,
+      feishuExcelDocumentId: undefined,
       feishuExcelUrl: undefined,
       feishuExcelPath: undefined,
       feishuExcelUploadedAt: undefined,
@@ -51,6 +55,7 @@ export function clearedFeishuFields(
   }
   return {
     feishuPdfFileToken: undefined,
+    feishuPdfDocumentId: undefined,
     feishuPdfUrl: undefined,
     feishuPdfPath: undefined,
     feishuPdfUploadedAt: undefined,
@@ -62,18 +67,14 @@ function buildQuotationFeishuBatchItems(
 ): FeishuFileAccessBatchItem[] {
   const items: FeishuFileAccessBatchItem[] = []
   for (const quote of quotations) {
-    if (quote.feishuExcelFileToken) {
+    if (quote.feishuExcelDocumentId) {
       items.push({
-        file_token: quote.feishuExcelFileToken,
-        quotation_id: quote.id,
-        doc_type: 'excel',
+        document_id: quote.feishuExcelDocumentId,
       })
     }
-    if (quote.feishuPdfFileToken) {
+    if (quote.feishuPdfDocumentId) {
       items.push({
-        file_token: quote.feishuPdfFileToken,
-        quotation_id: quote.id,
-        doc_type: 'pdf',
+        document_id: quote.feishuPdfDocumentId,
       })
     }
   }

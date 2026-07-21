@@ -19,7 +19,6 @@ test.describe('Quotation desktop experience', () => {
     ['/quotation/dashboard', 'Quote Breakdown'],
     ['/quotation/list', 'Quotes'],
     ['/quotation/create', 'New Quote'],
-    ['/quotation/imports', 'Import Queue'],
     ['/quotation/catalog', 'Catalog']
   ]
 
@@ -30,11 +29,16 @@ test.describe('Quotation desktop experience', () => {
 
       const layout = await page.evaluate(() => {
         const root = document.documentElement
+        const intentionallyClipped = (element) =>
+          element.classList.contains('sr-only') ||
+          element.classList.contains('truncate') ||
+          [...element.classList].some((name) => name.startsWith('line-clamp-'))
         const clippedControls = [
           ...document.querySelectorAll('button, h1, h2, h3, h4, label, th')
         ]
           .filter((element) => {
             const rect = element.getBoundingClientRect()
+            if (intentionallyClipped(element)) return false
             return (
               rect.width > 0 &&
               rect.height > 0 &&
@@ -57,13 +61,33 @@ test.describe('Quotation desktop experience', () => {
   }
 
   test('sidebar links expose the complete quote workflow', async ({ page }) => {
+    await page.route('**/api/v1/quotation/feishu/sync-folder', async (route) => {
+      await route.fulfill({
+        json: {
+          created_count: 0,
+          skipped_count: 0,
+          errors: [],
+          folders: [],
+          file_locations: [],
+        },
+      })
+    })
+    await page.route('**/api/v1/quotation/documents?source=feishu', async (route) => {
+      await route.fulfill({ json: [] })
+    })
+
     await page.goto('/quotation/dashboard')
 
     await expect(page.getByRole('link', { name: 'Overview' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Quotes' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'New Quote' })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Import Queue' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Catalog' })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Quotes' }).click()
+    await expect(page.getByLabel('Imported file filters')).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: 'Sync Feishu archive' }),
+    ).toBeVisible()
   })
 
   test('platform switch opens Quote Desk without an embedded sign-in error', async ({

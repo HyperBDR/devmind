@@ -27,7 +27,7 @@ const emit = defineEmits<{
       </span>
       <span
         v-if="subtitle"
-        class="qmp-dropdown-option-subtitle block text-[11px] leading-4 text-dm-text-tertiary"
+        class="qmp-dropdown-option-subtitle block text-xs leading-4 text-dm-text-tertiary"
       >
         {{ subtitle }}
       </span>

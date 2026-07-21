@@ -26,6 +26,7 @@ def test_init_backend_registers_periodic_tasks_after_migrations():
 
     assert call_command.call_args_list == [
         call("migrate", interactive=False, verbosity=1),
+        call("migrate_feishu_control_plane", "--apply", verbosity=1),
     ]
     discover_and_register.assert_called_once_with()
 
@@ -54,7 +55,9 @@ def test_init_backend_runtime_phase_skips_migrations():
         ) as discover_and_register:
             _run_command(phase="runtime", skip_collectstatic=True)
 
-    assert call_command.call_args_list == []
+    assert call_command.call_args_list == [
+        call("migrate_feishu_control_plane", "--apply", verbosity=1),
+    ]
     discover_and_register.assert_called_once_with()
 
 

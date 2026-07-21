@@ -20,6 +20,8 @@ import {
   X,
 } from 'lucide-vue-next'
 
+type CatalogCurrency = 'CNY' | 'USD' | 'EUR'
+
 function buildAutoCode(prefix: string): string {
   return `${prefix}-${Date.now().toString(36).toUpperCase().slice(-7)}`
 }
@@ -76,11 +78,13 @@ const filteredDiscounts = computed(() => props.discounts.filter((item) =>
 
 const pName = ref('')
 const pPrice = ref(0)
+const pCurrency = ref<CatalogCurrency>('USD')
 const pCategory = ref('')
 const pDesc = ref('')
 
 const sName = ref('')
 const sPrice = ref(0)
+const sCurrency = ref<CatalogCurrency>('USD')
 const sDesc = ref('')
 
 const dName = ref('')
@@ -145,11 +149,13 @@ function handleCreateProduct(e: Event) {
     name: pName.value,
     code: buildAutoCode('SW'),
     listPrice: pPrice.value,
+    currency: pCurrency.value,
     category: pCategory.value,
     description: pDesc.value || t('quotation.pages.catalog.noDescription'),
   })
   pName.value = ''
   pPrice.value = 0
+  pCurrency.value = 'USD'
   pDesc.value = ''
   isFormOpen.value = false
 }
@@ -165,11 +171,13 @@ function handleCreateService(e: Event) {
     name: sName.value,
     code: buildAutoCode('OT'),
     listPrice: sPrice.value,
+    currency: sCurrency.value,
     unit: 'item',
     description: sDesc.value || t('quotation.pages.catalog.noServiceDetails'),
   })
   sName.value = ''
   sPrice.value = 0
+  sCurrency.value = 'USD'
   sDesc.value = ''
   isFormOpen.value = false
 }
@@ -209,6 +217,26 @@ const categoryOptions = computed(() => {
   return options
 })
 
+const currencyOptions = [
+  { value: 'USD', label: 'USD' },
+  { value: 'CNY', label: 'CNY' },
+  { value: 'EUR', label: 'EUR' },
+]
+
+function formatCatalogItemPrice(
+  listPrice: number,
+  pricingNote?: string,
+  currency: CatalogCurrency = 'USD',
+) {
+  if (pricingNote && listPrice <= 0) {
+    return formatCatalogPrice(listPrice, pricingNote)
+  }
+  return `${currency} ${Number(listPrice || 0).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
 watch(
   categoryOptions,
   (options) => {
@@ -231,14 +259,14 @@ watch(
 
     <div data-catalog-layout class="grid min-h-[520px] min-w-0 grid-cols-1 overflow-hidden rounded-lg border border-dm-border-light bg-white lg:grid-cols-[260px_minmax(0,1fr)]">
       <aside data-catalog-tree class="border-b border-dm-border-light p-3 lg:border-b-0 lg:border-r" :aria-label="t('quotation.pages.catalog.configuration')">
-        <p class="px-1 pb-2 text-xs font-semibold text-dm-text">{{ t('quotation.pages.catalog.configuration') }}</p>
+        <p class="px-1 pb-2 text-sm font-semibold text-dm-text">{{ t('quotation.pages.catalog.configuration') }}</p>
 
         <div data-catalog-parent="quote-descriptions" class="space-y-1">
-          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-xs font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="quoteDescriptionsExpanded" @click="quoteDescriptionsExpanded = !quoteDescriptionsExpanded">
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-sm font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="quoteDescriptionsExpanded" @click="quoteDescriptionsExpanded = !quoteDescriptionsExpanded">
             <ChevronDown class="h-3.5 w-3.5 text-dm-text-tertiary transition-transform" :class="quoteDescriptionsExpanded ? '' : '-rotate-90'" />
             <FolderOpen class="h-4 w-4 text-dm-text-tertiary" />
             <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.quoteDescriptions') }}</span>
-            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-dm-text-tertiary">{{ products.length + services.length }}</span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-dm-text-tertiary">{{ products.length + services.length }}</span>
           </button>
           <div v-show="quoteDescriptionsExpanded" class="ml-4 space-y-1 border-l border-dm-border-light pl-2">
             <button data-catalog-child="products" type="button" class="catalog-tree-item" :class="subTab === 'products' ? 'catalog-tree-item-active' : ''" :aria-current="subTab === 'products' ? 'page' : undefined" @click="setSubTab('products')">
@@ -251,10 +279,10 @@ watch(
         </div>
 
         <div data-catalog-parent="discount-settings" class="mt-2 space-y-1">
-          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-xs font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="discountSettingsExpanded" @click="discountSettingsExpanded = !discountSettingsExpanded">
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-sm font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="discountSettingsExpanded" @click="discountSettingsExpanded = !discountSettingsExpanded">
             <ChevronDown class="h-3.5 w-3.5 text-dm-text-tertiary transition-transform" :class="discountSettingsExpanded ? '' : '-rotate-90'" /><Percent class="h-4 w-4 text-dm-text-tertiary" />
             <span class="min-w-0 flex-1 truncate">{{ t('quotation.pages.catalog.discountSettings') }}</span>
-            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-dm-text-tertiary">{{ discounts.length }}</span>
+            <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-dm-text-tertiary">{{ discounts.length }}</span>
           </button>
           <div v-show="discountSettingsExpanded" class="ml-4 border-l border-dm-border-light pl-2">
             <button type="button" class="catalog-tree-item" :class="subTab === 'discounts' ? 'catalog-tree-item-active' : ''" :aria-current="subTab === 'discounts' ? 'page' : undefined" @click="setSubTab('discounts')">
@@ -264,12 +292,12 @@ watch(
         </div>
 
         <div data-catalog-parent="system-settings" class="mt-2">
-          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-xs font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="systemSettingsExpanded" @click="systemSettingsExpanded = !systemSettingsExpanded">
+          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-sm font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="systemSettingsExpanded" @click="systemSettingsExpanded = !systemSettingsExpanded">
             <ChevronDown class="h-3.5 w-3.5 text-dm-text-tertiary transition-transform" :class="systemSettingsExpanded ? '' : '-rotate-90'" /><Settings class="h-4 w-4 text-dm-text-tertiary" />
             <span>{{ t('quotation.pages.catalog.systemSettings') }}</span>
           </button>
           <div v-show="systemSettingsExpanded" class="ml-4 space-y-0.5 border-l border-dm-border-light pl-2">
-            <span v-for="key in ['productCategories', 'currenciesPricing', 'paymentTerms', 'quoteNumbering']" :key="key" class="flex h-8 items-center px-3 text-xs text-dm-text-tertiary">
+            <span v-for="key in ['productCategories', 'currenciesPricing', 'paymentTerms', 'quoteNumbering']" :key="key" class="flex h-8 items-center px-3 text-sm text-dm-text-tertiary">
               {{ t(`quotation.pages.catalog.${key}`) }}
             </span>
           </div>
@@ -280,14 +308,14 @@ watch(
         <div class="flex flex-col gap-3 border-b border-dm-border-light px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div class="min-w-0">
             <h3 class="text-base font-bold text-dm-text">{{ t(`quotation.pages.catalog.${subTab}Title`) }}</h3>
-            <p class="mt-0.5 text-xs text-dm-text-tertiary">{{ t(`quotation.pages.catalog.${subTab}Subtitle`) }}</p>
+            <p class="mt-0.5 text-sm text-dm-text-tertiary">{{ t(`quotation.pages.catalog.${subTab}Subtitle`) }}</p>
           </div>
           <div class="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
             <label class="relative block min-w-0 sm:w-48">
               <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dm-text-tertiary" />
-              <input data-catalog-search v-model="searchQuery" type="search" :aria-label="t('quotation.pages.catalog.search')" :placeholder="t(`quotation.pages.catalog.${subTab}Search`)" class="h-9 w-full rounded-lg border border-dm-border bg-white pl-9 pr-3 text-xs text-dm-text outline-none focus:border-dm-primary" />
+              <input data-catalog-search v-model="searchQuery" type="search" :aria-label="t('quotation.pages.catalog.search')" :placeholder="t(`quotation.pages.catalog.${subTab}Search`)" class="h-9 w-full rounded-lg border border-dm-border bg-white pl-9 pr-3 text-sm text-dm-text outline-none focus:border-dm-primary" />
             </label>
-            <button data-catalog-add type="button" class="flex h-9 shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-dm-primary px-4 text-xs font-semibold text-white hover:bg-dm-primary-hover" @click="isFormOpen = true">
+            <button data-catalog-add type="button" class="dm-btn-primary h-9 shrink-0 cursor-pointer px-4 text-sm font-semibold" @click="isFormOpen = true">
               <Plus class="h-4 w-4" />{{ t(`quotation.pages.catalog.${subTab}Add`) }}
             </button>
           </div>
@@ -295,7 +323,7 @@ watch(
 
         <div
           v-if="pendingDelete"
-          class="flex flex-wrap items-center justify-between gap-3 border-b border-rose-100 bg-rose-50 px-4 py-3 text-xs"
+          class="flex flex-wrap items-center justify-between gap-3 border-b border-rose-100 bg-rose-50 px-4 py-3 text-sm"
         >
           <p class="font-medium text-rose-700">
             <template v-if="pendingDelete.kind === 'product'">
@@ -337,10 +365,10 @@ watch(
             </button>
           </div>
         </div>
-        <div class="overflow-x-auto text-xs">
+        <div class="overflow-x-auto text-sm">
           <table v-if="subTab === 'products'" class="w-full text-left">
             <thead>
-              <tr class="border-b border-dm-border-light bg-[#fafafa] text-[10px] font-bold uppercase text-dm-text-tertiary">
+              <tr class="border-b border-dm-border-light bg-[#fafafa] text-xs font-bold uppercase text-dm-text-tertiary">
                 <th class="px-4 py-2.5">{{ t('quotation.pages.catalog.tableProductName') }}</th>
                 <th class="px-4 py-2.5">{{ t('quotation.pages.catalog.tableCategory') }}</th>
                 <th class="px-4 py-2.5 text-right">{{ t('quotation.pages.catalog.tableListPrice') }}</th>
@@ -361,11 +389,11 @@ watch(
                 <td class="px-4 py-3">
                   <div>
                     <p class="font-semibold text-dm-text">{{ p.name }}</p>
-                    <p class="mt-0.5 max-w-xs truncate text-[10px] text-dm-text-tertiary">{{ p.description }}</p>
+                    <p class="mt-0.5 max-w-xs truncate text-xs text-dm-text-tertiary">{{ p.description }}</p>
                   </div>
                 </td>
                 <td class="px-4 py-3 text-dm-text-tertiary">{{ p.category }}</td>
-                <td class="px-4 py-3 text-right font-mono font-bold text-dm-text">{{ formatCatalogPrice(p.listPrice, p.pricingNote) }}</td>
+                <td class="px-4 py-3 text-right font-mono font-bold text-dm-text">{{ formatCatalogItemPrice(p.listPrice, p.pricingNote, p.currency || 'USD') }}</td>
                 <td class="px-4 py-3 text-center">
                   <button
                     type="button"
@@ -383,7 +411,7 @@ watch(
 
           <table v-else-if="subTab === 'services'" class="w-full text-left">
             <thead>
-              <tr class="border-b border-dm-border-light bg-[#fafafa] text-[10px] font-bold uppercase text-dm-text-tertiary">
+              <tr class="border-b border-dm-border-light bg-[#fafafa] text-xs font-bold uppercase text-dm-text-tertiary">
                 <th class="px-4 py-2.5">{{ t('quotation.pages.catalog.tableServiceName') }}</th>
                 <th class="px-4 py-2.5 text-right">{{ t('quotation.pages.catalog.tableRefPrice') }}</th>
                 <th class="px-4 py-2.5 text-center">{{ t('quotation.pages.catalog.tableActions') }}</th>
@@ -403,10 +431,10 @@ watch(
                 <td class="px-4 py-3">
                   <div>
                     <p class="font-semibold text-dm-text">{{ s.name }}</p>
-                    <p class="mt-0.5 max-w-xs truncate text-[10px] text-dm-text-tertiary">{{ s.description }}</p>
+                    <p class="mt-0.5 max-w-xs truncate text-xs text-dm-text-tertiary">{{ s.description }}</p>
                   </div>
                 </td>
-                <td class="px-4 py-3 text-right font-mono font-bold text-dm-text">{{ formatCatalogPrice(s.listPrice, s.pricingNote) }}</td>
+                <td class="px-4 py-3 text-right font-mono font-bold text-dm-text">{{ formatCatalogItemPrice(s.listPrice, s.pricingNote, s.currency || 'USD') }}</td>
                 <td class="px-4 py-3 text-center">
                   <button
                     type="button"
@@ -424,7 +452,7 @@ watch(
 
           <table v-else class="w-full text-left">
             <thead>
-              <tr class="border-b border-dm-border-light bg-[#fafafa] text-[10px] font-bold uppercase text-dm-text-tertiary">
+              <tr class="border-b border-dm-border-light bg-[#fafafa] text-xs font-bold uppercase text-dm-text-tertiary">
                 <th class="px-4 py-2.5">{{ t('quotation.pages.catalog.tableDiscountId') }}</th>
                 <th class="px-4 py-2.5">{{ t('quotation.pages.catalog.tableDiscountLabel') }}</th>
                 <th class="px-4 py-2.5 text-right">{{ t('quotation.pages.catalog.tableDiscountPercent') }}</th>
@@ -446,7 +474,7 @@ watch(
                 <td class="px-4 py-3 font-semibold text-dm-text">{{ d.name }}</td>
                 <td class="px-4 py-3 text-right font-mono font-bold text-emerald-600">{{ d.percent }}%</td>
                 <td class="px-4 py-3 text-center">
-                  <span v-if="d.percent === 0" class="select-none text-[10px] font-bold text-slate-300">{{ t('quotation.pages.catalog.systemLocked') }}</span>
+                  <span v-if="d.percent === 0" class="select-none text-xs font-bold text-slate-300">{{ t('quotation.pages.catalog.systemLocked') }}</span>
                   <button
                     v-else
                     type="button"
@@ -461,7 +489,7 @@ watch(
               </tr>
             </tbody>
           </table>
-          <div v-if="(subTab === 'products' && !filteredProducts.length) || (subTab === 'services' && !filteredServices.length) || (subTab === 'discounts' && !filteredDiscounts.length)" class="flex h-52 items-center justify-center text-xs text-dm-text-tertiary">
+          <div v-if="(subTab === 'products' && !filteredProducts.length) || (subTab === 'services' && !filteredServices.length) || (subTab === 'discounts' && !filteredDiscounts.length)" class="flex h-52 items-center justify-center text-sm text-dm-text-tertiary">
             {{ searchQuery ? t('quotation.pages.catalog.noSearchResults') : t(`quotation.pages.catalog.${subTab}Empty`) }}
           </div>
         </div>
@@ -474,22 +502,28 @@ watch(
           <h3 class="text-sm font-bold text-dm-text">{{ t(`quotation.pages.catalog.${subTab}Add`) }}</h3>
           <button type="button" class="rounded-md p-1 text-dm-text-tertiary hover:bg-slate-100 hover:text-dm-text" :aria-label="t('quotation.common.close')" @click="isFormOpen = false"><X class="h-4 w-4" /></button>
         </div>
-        <form v-if="subTab === 'products'" class="space-y-4 p-5 text-xs" @submit="handleCreateProduct">
+        <form v-if="subTab === 'products'" class="space-y-4 p-5 text-sm" @submit="handleCreateProduct">
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productName') }} *</span><input v-model="pName" required :placeholder="t('quotation.pages.catalog.productNamePlaceholder')" class="catalog-input" /></label>
-          <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productPrice') }} *</span><input v-model.number="pPrice" type="number" min="0.01" step="0.01" required class="catalog-input font-mono" /></label>
+          <div class="grid grid-cols-[120px_1fr] gap-3">
+            <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.priceCurrency') }} *</span><FormSelect v-model="pCurrency" :options="currencyOptions" /></label>
+            <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productPrice') }} *</span><input v-model.number="pPrice" type="number" min="0.01" step="0.01" required class="catalog-input font-mono" /></label>
+          </div>
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productCategory') }}</span><FormSelect v-model="pCategory" :options="categoryOptions" /></label>
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.productDesc') }}</span><textarea v-model="pDesc" rows="3" :placeholder="t('quotation.pages.catalog.productDescPlaceholder')" class="catalog-input h-auto resize-y" /></label>
           <button type="submit" class="catalog-save-button">{{ t('quotation.actions.saveSoftware') }}</button>
         </form>
-        <form v-else-if="subTab === 'services'" class="space-y-4 p-5 text-xs" @submit="handleCreateService">
+        <form v-else-if="subTab === 'services'" class="space-y-4 p-5 text-sm" @submit="handleCreateService">
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.serviceName') }} *</span><input v-model="sName" required :placeholder="t('quotation.pages.catalog.serviceNamePlaceholder')" class="catalog-input" /></label>
-          <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.servicePrice') }} *</span><input v-model.number="sPrice" type="number" min="0.01" step="0.01" required class="catalog-input font-mono" /></label>
+          <div class="grid grid-cols-[120px_1fr] gap-3">
+            <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.priceCurrency') }} *</span><FormSelect v-model="sCurrency" :options="currencyOptions" /></label>
+            <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.servicePrice') }} *</span><input v-model.number="sPrice" type="number" min="0.01" step="0.01" required class="catalog-input font-mono" /></label>
+          </div>
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.serviceDesc') }}</span><textarea v-model="sDesc" rows="3" :placeholder="t('quotation.pages.catalog.serviceDescPlaceholder')" class="catalog-input h-auto resize-y" /></label>
           <button type="submit" class="catalog-save-button">{{ t('quotation.actions.saveService') }}</button>
         </form>
-        <form v-else class="space-y-4 p-5 text-xs" @submit="handleCreateDiscount">
+        <form v-else class="space-y-4 p-5 text-sm" @submit="handleCreateDiscount">
           <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.discountName') }} *</span><input v-model="dName" required :placeholder="t('quotation.pages.catalog.discountNamePlaceholder')" class="catalog-input" /></label>
-          <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.discountPercent') }} *</span><input v-model.number="dPercent" type="number" min="0" max="100" required class="catalog-input font-mono" /><span class="mt-1 block text-[10px] text-dm-text-tertiary">{{ t('quotation.pages.catalog.discountHint') }}</span></label>
+          <label class="block"><span class="mb-1 block font-semibold text-dm-text-tertiary">{{ t('quotation.pages.catalog.discountPercent') }} *</span><input v-model.number="dPercent" type="number" min="0" max="100" required class="catalog-input font-mono" /><span class="mt-1 block text-xs text-dm-text-tertiary">{{ t('quotation.pages.catalog.discountHint') }}</span></label>
           <button type="submit" class="catalog-save-button">{{ t('quotation.actions.saveDiscount') }}</button>
         </form>
       </div>
@@ -498,8 +532,13 @@ watch(
 </template>
 
 <style scoped>
-.catalog-tree-item { @apply flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-3 text-left text-xs text-dm-text-secondary transition-colors hover:bg-slate-50 hover:text-dm-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500; }
+.catalog-tree-item { @apply flex h-8 w-full cursor-pointer items-center gap-2 rounded-md px-3 text-left text-sm text-dm-text-secondary transition-colors hover:bg-slate-50 hover:text-dm-text focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500; }
 .catalog-tree-item-active { @apply bg-blue-50 font-medium text-dm-primary hover:bg-blue-50 hover:text-dm-primary; box-shadow: inset 2px 0 0 #1677ff; }
-.catalog-input { @apply h-9 w-full rounded-lg border border-dm-border bg-white px-3 text-xs text-dm-text outline-none focus:border-dm-primary; }
-.catalog-save-button { @apply h-9 w-full cursor-pointer rounded-lg bg-dm-primary font-semibold text-white hover:bg-dm-primary-hover; }
+.catalog-input { @apply h-9 w-full rounded-lg border border-dm-border bg-white px-3 text-sm text-dm-text outline-none focus:border-dm-primary; }
+.catalog-save-button {
+  @apply h-9 w-full cursor-pointer rounded-lg font-semibold text-white;
+  background-color: var(--dm-primary);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+.catalog-save-button:hover { background-color: var(--dm-primary-hover); }
 </style>

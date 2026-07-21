@@ -8,8 +8,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from quotation.access import (
+    can_access_quotation,
+    filter_accessible_quotations,
+    forbidden_response,
+)
+from quotation.audit import set_request_audit_target
 from quotation.models import Quotation, QuoteStatus
-from quotation.permissions import can_view_all_quotations, user_display_email
+from quotation.permissions import user_display_email
 from quotation.serializers import (
     QuotationCreateSerializer,
     QuotationGenerateSerializer,
@@ -26,14 +32,9 @@ from quotation.services.storage import delete_documents_after_commit
 
 
 def _ensure_access(user, quotation: Quotation) -> Response | None:
-    if can_view_all_quotations(user):
+    if can_access_quotation(user, quotation):
         return None
-    if (
-        quotation.created_by_email
-        and quotation.created_by_email.lower() == user_display_email(user)
-    ):
-        return None
-    return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+    return forbidden_response()
 
 
 class QuotationListCreateView(APIView):
@@ -43,10 +44,7 @@ class QuotationListCreateView(APIView):
         qs = Quotation.objects.prefetch_related(
             "items", "documents", "versions"
         ).all()
-        if not can_view_all_quotations(request.user):
-            qs = qs.filter(
-                created_by_email__iexact=user_display_email(request.user)
-            )
+        qs = filter_accessible_quotations(request.user, qs)
         status_value = request.query_params.get("status")
         if status_value:
             if status_value not in QuoteStatus.values:
@@ -104,6 +102,7 @@ class QuotationDetailView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
+        set_request_audit_target(request, target_label=quotation.quote_no)
         return Response(QuotationSerializer(quotation).data)
 
     def put(self, request, quotation_id: str):
@@ -113,6 +112,7 @@ class QuotationDetailView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
+        set_request_audit_target(request, target_label=quotation.quote_no)
         ser = QuotationUpdateSerializer(
             data=request.data,
             context={"quotation": quotation},
@@ -194,6 +194,7 @@ class QuotationDetailView(APIView):
         except IntegrityError:
             return Response({"detail": "quote_no already exists"}, status=409)
         quotation = self.get_object(quotation_id)
+        set_request_audit_target(request, target_label=quotation.quote_no)
         return Response(QuotationSerializer(quotation).data)
 
     def delete(self, request, quotation_id: str):
@@ -203,6 +204,7 @@ class QuotationDetailView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
+        set_request_audit_target(request, target_label=quotation.quote_no)
         storage_keys = list(
             quotation.documents.exclude(storage_key="").values_list(
                 "storage_key",
@@ -231,6 +233,7 @@ class QuotationGenerateView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
+        set_request_audit_target(request, target_label=quotation.quote_no)
         ser = QuotationGenerateSerializer(data=request.data or {})
         ser.is_valid(raise_exception=True)
         quotation.status = QuoteStatus.GENERATED

@@ -17,6 +17,8 @@ class QuotationSettingsTests(SimpleTestCase):
         )
         self.assertIn("drive:file:upload", settings.FEISHU_OAUTH_SCOPES)
         self.assertIn("offline_access", settings.FEISHU_OAUTH_SCOPES)
+        self.assertTrue(settings.QUOTATION_STORAGE_ROUTER_ENABLED)
+        self.assertTrue(settings.QUOTATION_DOCUMENT_REPLICA_ENABLED)
 
     def test_quotation_limits_have_production_defaults(self):
         self.assertEqual(

@@ -50,6 +50,8 @@ type TrendGrain = 'weekly' | 'monthly'
 
 const TREND_WEEK_COUNT = 8
 const TREND_MONTH_COUNT = 6
+const QUOTE_BREAKDOWN_MIN_SHARE = 2
+const QUOTE_BREAKDOWN_MAX_SLICES = 8
 
 const QUOTE_BREAKDOWN_COLORS = [
   '#2b9da3',
@@ -71,13 +73,9 @@ const emit = defineEmits<{
   navigateToTab: [tab: string]
 }>()
 
-const { t, locale } = useQuotationI18n()
+const { t, locale, quoteStatusLabel } = useQuotationI18n()
 
 const trendGrain = ref<TrendGrain>('monthly')
-
-const chartQuotes = computed(() =>
-  props.quotations.filter((q) => isChartQuoteStatus(q.status)),
-)
 
 function currencySymbol(currency: Quotation['currency']): string {
   if (currency === 'USD') return t('quotation.common.currencyUsd')
@@ -120,7 +118,7 @@ const draftCount = computed(
 )
 
 const quoteBreakdownData = computed(() =>
-  [...chartQuotes.value]
+  props.quotations
     .filter((quote) => quote.grandTotal > 0)
     .sort((a, b) => b.grandTotal - a.grandTotal)
     .map((quote, index) => {
@@ -131,6 +129,9 @@ const quoteBreakdownData = computed(() =>
         value: quote.grandTotal,
         color: QUOTE_BREAKDOWN_COLORS[index % QUOTE_BREAKDOWN_COLORS.length],
         amountLabel,
+        currency: quote.currency,
+        share: 0,
+        status: quote.status,
         label: `${quote.quoteNo} · ${amountLabel}`,
       }
     }),
@@ -140,108 +141,151 @@ const quoteBreakdownTotal = computed(() =>
   quoteBreakdownData.value.reduce((sum, row) => sum + row.value, 0),
 )
 
+const quoteBreakdownChartRows = computed(() => {
+  const total = quoteBreakdownTotal.value || 1
+  const rows = quoteBreakdownData.value.map((row) => ({
+    ...row,
+    share: (row.value / total) * 100,
+  }))
+  const visible = rows
+    .filter((row) => row.share >= QUOTE_BREAKDOWN_MIN_SHARE)
+    .slice(0, QUOTE_BREAKDOWN_MAX_SLICES)
+  return visible.length ? visible : rows.slice(0, 1)
+})
+
+const quoteBreakdownRotation = computed(() => {
+  const total = quoteBreakdownChartRows.value.reduce(
+    (sum, row) => sum + row.value,
+    0,
+  )
+  const largestShare = total
+    ? quoteBreakdownChartRows.value[0]?.value / total
+    : 0
+  return 180 - largestShare * 180
+})
+
+type PieLeaderLabel = {
+  index: number
+  side: -1 | 1
+  anchorX: number
+  anchorY: number
+  labelY: number
+}
+
+function arrangePieLineLabels(
+  entries: PieLeaderLabel[],
+  minY: number,
+  maxY: number,
+  gap: number,
+) {
+  const sorted = [...entries].sort((a, b) => a.labelY - b.labelY)
+  sorted.forEach((entry, index) => {
+    const floor = index === 0 ? minY : sorted[index - 1].labelY + gap
+    entry.labelY = Math.max(entry.labelY, floor)
+  })
+  for (let index = sorted.length - 1; index >= 0; index -= 1) {
+    const ceiling = index === sorted.length - 1
+      ? maxY
+      : sorted[index + 1].labelY - gap
+    sorted[index].labelY = Math.min(sorted[index].labelY, ceiling)
+  }
+  return sorted
+}
+
+const quotePieLeaderLabelPlugin: Plugin<'pie'> = {
+  id: 'quotePieLeaderLabelPlugin',
+  afterDatasetsDraw(chart) {
+    const meta = chart.getDatasetMeta(0)
+    if (!meta.data.length) return
+    const entries: PieLeaderLabel[] = meta.data.map((element, index) => {
+      const arc = element as ArcElement
+      const angle = (arc.startAngle + arc.endAngle) / 2
+      const side: -1 | 1 = Math.cos(angle) >= 0 ? 1 : -1
+      return {
+        index,
+        side,
+        anchorX: arc.x + Math.cos(angle) * arc.outerRadius,
+        anchorY: arc.y + Math.sin(angle) * arc.outerRadius,
+        labelY: arc.y + Math.sin(angle) * (arc.outerRadius + 10),
+      }
+    })
+    const minY = chart.chartArea.top + 12
+    const maxY = chart.chartArea.bottom - 12
+    const arranged = [
+      ...arrangePieLineLabels(
+        entries.filter((entry) => entry.side === -1),
+        minY,
+        maxY,
+        40,
+      ),
+      ...arrangePieLineLabels(
+        entries.filter((entry) => entry.side === 1),
+        minY,
+        maxY,
+        40,
+      ),
+    ]
+    const { ctx } = chart
+    ctx.save()
+    arranged.forEach((entry) => {
+      const row = quoteBreakdownChartRows.value[entry.index]
+      if (!row) return
+      const bendX = entry.anchorX + entry.side * 22
+      const lineEndX = bendX + entry.side * 44
+      const textX = lineEndX + entry.side * 6
+      const availableTextWidth = entry.side === 1
+        ? chart.width - textX - 6
+        : textX - 6
+      const maxTextWidth = Math.max(64, availableTextWidth)
+      ctx.strokeStyle = row.color
+      ctx.lineWidth = 1.25
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.beginPath()
+      ctx.moveTo(entry.anchorX, entry.anchorY)
+      ctx.lineTo(bendX, entry.labelY)
+      ctx.lineTo(lineEndX, entry.labelY)
+      ctx.stroke()
+      ctx.fillStyle = '#334155'
+      ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, monospace'
+      ctx.textAlign = entry.side === 1 ? 'left' : 'right'
+      ctx.textBaseline = 'bottom'
+      ctx.fillText(row.quoteNo, textX, entry.labelY - 2, maxTextWidth)
+      ctx.fillStyle = '#64748b'
+      ctx.font = '11px ui-sans-serif, system-ui, sans-serif'
+      ctx.textBaseline = 'top'
+      ctx.fillText(
+        row.amountLabel,
+        textX,
+        entry.labelY + 2,
+        maxTextWidth,
+      )
+    })
+    ctx.restore()
+  },
+}
+
 const quoteBreakdownPieData = computed<ChartData<'pie'>>(() => ({
-  labels: quoteBreakdownData.value.map((row) => row.label),
+  labels: quoteBreakdownChartRows.value.map((row) => row.label),
   datasets: [
     {
-      data: quoteBreakdownData.value.map((row) => row.value),
-      backgroundColor: quoteBreakdownData.value.map((row) => row.color),
+      data: quoteBreakdownChartRows.value.map((row) => row.value),
+      backgroundColor: quoteBreakdownChartRows.value.map((row) => row.color),
       borderColor: '#ffffff',
       borderWidth: 2,
-      hoverOffset: 12,
+      radius: '92%',
+      hoverOffset: 6,
       hoverBorderWidth: 2,
     },
   ],
 }))
 
-function truncateCanvasText(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-): string {
-  if (ctx.measureText(text).width <= maxWidth) return text
-  const ellipsis = '...'
-  let next = text
-  while (next.length > 0 && ctx.measureText(`${next}${ellipsis}`).width > maxWidth) {
-    next = next.slice(0, -1)
-  }
-  return `${next}${ellipsis}`
-}
-
-const quotePieLeaderLinePlugin: Plugin<'pie'> = {
-  id: 'quotePieLeaderLinePlugin',
-  afterDatasetsDraw(chart) {
-    if (chart.width < 420) return
-    const dataset = chart.data.datasets[0]
-    const meta = chart.getDatasetMeta(0)
-    if (!dataset || !meta?.data?.length) return
-
-    const ctx = chart.ctx
-    ctx.save()
-    ctx.font =
-      '600 9px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
-    ctx.textBaseline = 'middle'
-    ctx.lineWidth = 1
-    ctx.strokeStyle = '#cbd5e1'
-    ctx.fillStyle = '#475569'
-
-    meta.data.forEach((arc, index) => {
-      const value = Number(dataset.data[index]) || 0
-      const label = String(chart.data.labels?.[index] || '')
-      if (!value || !label) return
-
-      const section = arc as unknown as {
-        x: number
-        y: number
-        startAngle: number
-        endAngle: number
-        outerRadius: number
-      }
-      const angle = (section.startAngle + section.endAngle) / 2
-      const side = Math.cos(angle) >= 0 ? 1 : -1
-      const startX = section.x + Math.cos(angle) * section.outerRadius
-      const startY = section.y + Math.sin(angle) * section.outerRadius
-      const bendX = section.x + Math.cos(angle) * (section.outerRadius + 18)
-      const bendY = section.y + Math.sin(angle) * (section.outerRadius + 18)
-      const labelReserve = Math.min(190, Math.max(150, chart.width * 0.27))
-      const minLeaderLineLength = Math.min(44, Math.max(32, chart.width * 0.06))
-      const minTextWidth = 96
-      const preferredEndX = side > 0 ? chart.width - labelReserve : labelReserve
-      const endX = side > 0
-        ? Math.min(
-            Math.max(preferredEndX, startX + minLeaderLineLength),
-            chart.width - minTextWidth - 12,
-          )
-        : Math.max(
-            Math.min(preferredEndX, startX - minLeaderLineLength),
-            minTextWidth + 12,
-          )
-      const textX = side > 0 ? endX + 8 : endX - 8
-      const maxTextWidth = side > 0 ? chart.width - textX - 10 : textX - 10
-
-      ctx.beginPath()
-      ctx.moveTo(startX, startY)
-      ctx.lineTo(bendX, bendY)
-      ctx.lineTo(endX, bendY)
-      ctx.stroke()
-      ctx.textAlign = side > 0 ? 'left' : 'right'
-      ctx.fillText(truncateCanvasText(ctx, label, maxTextWidth), textX, bendY)
-    })
-
-    ctx.restore()
-  },
-}
-
 const quoteBreakdownPieOptions = computed<ChartOptions<'pie'>>(() => ({
   responsive: true,
   maintainAspectRatio: false,
+  rotation: quoteBreakdownRotation.value,
   layout: {
-    padding: {
-      top: 26,
-      right: 130,
-      bottom: 22,
-      left: 130,
-    },
+    padding: { top: 20, right: 72, bottom: 20, left: 72 },
   },
   animation: {
     animateRotate: true,
@@ -261,13 +305,10 @@ const quoteBreakdownPieOptions = computed<ChartOptions<'pie'>>(() => ({
       callbacks: {
         label: (item: TooltipItem<'pie'>) => {
           const value = Number(item.raw) || 0
-          const row = quoteBreakdownData.value[item.dataIndex]
-          const total = quoteBreakdownTotal.value || 1
-          const percent = ((value / total) * 100).toFixed(1)
-          return t('quotation.pages.dashboard.chartAmountPieTooltip', {
-            amount: row?.amountLabel || value.toLocaleString(),
-            wan: (value / 10000).toFixed(1),
-            percent,
+          const row = quoteBreakdownChartRows.value[item.dataIndex]
+          const amount = row?.amountLabel || value.toLocaleString()
+          return t('quotation.pages.dashboard.chartAmountValueTooltip', {
+            amount,
           })
         },
       },
@@ -563,88 +604,95 @@ function setTrendGrain(grain: TrendGrain) {
       </button>
     </div>
 
-    <div id="dashboard-kpis" class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div id="dashboard-kpis" class="grid grid-cols-1 gap-4 sm:grid-cols-2 2xl:grid-cols-4">
       <div
         id="kpi-card-revenue"
-        class="dm-card flex items-center justify-between p-5"
+        class="dm-card flex min-w-0 items-center justify-between gap-4 p-5"
       >
         <div class="space-y-1">
-          <span class="block text-xs text-dm-text-tertiary">
+          <span class="block text-sm text-dm-text-tertiary">
             {{ t('quotation.pages.dashboard.kpiRevenueLabel') }}
           </span>
           <div class="font-mono text-2xl font-semibold text-dm-text">
             ¥{{ signedAmount.toLocaleString() }}
           </div>
-          <div class="flex items-center gap-1 text-[10px] font-medium text-emerald-500">
+          <div class="flex items-center gap-1 text-xs font-medium text-emerald-500">
             <TrendingUp class="h-3 w-3" />
             <span>{{ t('quotation.pages.dashboard.kpiRevenueHint') }}</span>
           </div>
         </div>
-        <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-500">
           <TrendingUp class="h-6 w-6" />
         </div>
       </div>
 
       <div
         id="kpi-card-active"
-        class="dm-card flex items-center justify-between p-5"
+        class="dm-card flex min-w-0 items-center justify-between gap-4 p-5"
       >
         <div class="space-y-1">
-          <span class="block text-xs font-semibold text-dm-text-tertiary">
+          <span class="block text-sm font-semibold text-dm-text-tertiary">
             {{ t('quotation.pages.dashboard.kpiSuccessRateLabel') }}
           </span>
           <div class="font-mono text-2xl font-extrabold text-dm-text">{{ successRate }}%</div>
-          <p class="text-[10px] font-medium text-dm-text-tertiary">
+          <p class="text-xs font-medium text-dm-text-tertiary">
             {{ t('quotation.pages.dashboard.kpiSuccessRateHint') }}
           </p>
         </div>
-        <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-dm-primary-bg text-dm-primary">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-dm-primary-bg text-dm-primary">
           <FileCheck class="h-6 w-6" />
         </div>
       </div>
 
       <div
         id="kpi-card-feishu"
-        class="dm-card flex items-center justify-between p-5"
+        class="dm-card flex min-w-0 items-center justify-between gap-4 p-5"
       >
         <div class="space-y-1">
-          <span class="block text-xs font-semibold text-dm-text-tertiary">
+          <span class="block text-sm font-semibold text-dm-text-tertiary">
             {{ t('quotation.pages.dashboard.kpiExpiringLabel') }}
           </span>
           <div class="font-mono text-2xl font-extrabold text-dm-text">
             {{ t('quotation.pages.dashboard.kpiExpiringCount', { count: expiringSoonCount }) }}
           </div>
-          <div class="flex items-center gap-1 text-[10px] font-medium text-amber-500">
+          <div class="flex items-center gap-1 text-xs font-medium text-amber-500">
             <Clock class="h-3 w-3" />
             <span>{{ t('quotation.pages.dashboard.kpiExpiringHint') }}</span>
           </div>
         </div>
-        <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-amber-50 text-amber-500">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-500">
           <Clock class="h-6 w-6" />
         </div>
       </div>
 
       <div
         id="kpi-card-drafts"
-        class="dm-card flex items-center justify-between p-5"
+        class="dm-card flex min-w-0 items-center justify-between gap-4 p-5"
       >
         <div class="space-y-1">
-          <span class="block text-xs font-semibold text-dm-text-tertiary">
+          <span class="block text-sm font-semibold text-dm-text-tertiary">
             {{ t('quotation.pages.dashboard.kpiActiveDraftsLabel') }}
           </span>
-          <div class="font-mono text-2xl font-extrabold text-dm-text">
-            {{
-              t('quotation.pages.dashboard.kpiActiveDraftsValue', {
-                open: activeCount,
-                drafts: draftCount,
-              })
-            }}
+          <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-dm-text">
+            <span class="whitespace-nowrap font-mono text-2xl font-extrabold">
+              {{ activeCount }}
+              <span class="font-sans text-sm font-semibold">
+                {{ t('quotation.pages.dashboard.kpiActiveOpenLabel') }}
+              </span>
+            </span>
+            <span class="hidden h-4 border-l border-dm-border sm:block" />
+            <span class="whitespace-nowrap font-mono text-2xl font-extrabold">
+              {{ draftCount }}
+              <span class="font-sans text-sm font-semibold">
+                {{ t('quotation.pages.dashboard.kpiActiveDraftLabel') }}
+              </span>
+            </span>
           </div>
-          <p class="text-[10px] font-medium text-dm-text-tertiary">
+          <p class="text-xs font-medium text-dm-text-tertiary">
             {{ t('quotation.pages.dashboard.kpiActiveDraftsHint') }}
           </p>
         </div>
-        <div class="flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-50 text-indigo-500">
+        <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-500">
           <Users class="h-6 w-6" />
         </div>
       </div>
@@ -652,7 +700,7 @@ function setTrendGrain(grain: TrendGrain) {
 
     <div
       id="dashboard-charts"
-      class="grid grid-cols-1 items-stretch gap-6 xl:grid-cols-[minmax(0,1.18fr)_minmax(480px,0.82fr)]"
+      class="grid grid-cols-1 items-stretch gap-6 2xl:grid-cols-[minmax(0,1.18fr)_minmax(480px,0.82fr)]"
     >
       <div id="chart-quote-amount" class="dm-card flex h-full flex-col p-5">
         <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -660,25 +708,33 @@ function setTrendGrain(grain: TrendGrain) {
             <h3 class="text-sm font-semibold text-dm-text">
               {{ t('quotation.pages.dashboard.chartAmountTitle') }}
             </h3>
-            <p class="mt-0.5 text-xs text-dm-text-tertiary">
+            <p class="mt-0.5 text-sm text-dm-text-tertiary">
               {{ t('quotation.pages.dashboard.chartAmountSubtitle') }}
             </p>
           </div>
         </div>
 
-        <div class="relative flex h-64 flex-1 items-center justify-center overflow-hidden px-1 py-2">
+        <div class="relative flex min-h-[16rem] flex-1 items-center justify-center overflow-hidden px-1 py-2">
           <div
             v-if="quoteBreakdownData.length === 0"
-            class="absolute inset-0 flex items-center justify-center text-xs text-dm-text-tertiary"
+            class="absolute inset-0 flex items-center justify-center text-sm text-dm-text-tertiary"
           >
             {{ t('quotation.pages.dashboard.chartAmountEmpty') }}
           </div>
-          <div v-else class="h-full w-full max-w-[680px]">
-            <Pie
-              :data="quoteBreakdownPieData"
-              :options="quoteBreakdownPieOptions"
-              :plugins="[quotePieLeaderLinePlugin]"
-            />
+          <div
+            v-else
+            id="quote-breakdown-layout"
+            class="flex w-full min-w-0 items-center justify-center"
+          >
+            <div class="flex min-h-[320px] w-full items-center justify-center">
+              <div class="relative h-80 w-[min(100%,700px)]">
+                <Pie
+                  :data="quoteBreakdownPieData"
+                  :options="quoteBreakdownPieOptions"
+                  :plugins="[quotePieLeaderLabelPlugin]"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -692,7 +748,7 @@ function setTrendGrain(grain: TrendGrain) {
             <h3 class="text-sm font-semibold text-dm-text">
               {{ t('quotation.pages.dashboard.chartTrendTitle') }}
             </h3>
-            <p class="mt-0.5 text-xs text-dm-text-tertiary">
+            <p class="mt-0.5 text-sm text-dm-text-tertiary">
               {{
                 trendGrain === 'monthly'
                   ? t('quotation.pages.dashboard.chartTrendSubtitleMonthly')
@@ -707,7 +763,7 @@ function setTrendGrain(grain: TrendGrain) {
           >
             <button
               type="button"
-              class="rounded-md px-2.5 py-1 text-[11px] font-semibold transition"
+              class="rounded-md px-2.5 py-1 text-xs font-semibold transition"
               :class="
                 trendGrain === 'weekly'
                   ? 'bg-white text-dm-text shadow-xs'
@@ -719,7 +775,7 @@ function setTrendGrain(grain: TrendGrain) {
             </button>
             <button
               type="button"
-              class="rounded-md px-2.5 py-1 text-[11px] font-semibold transition"
+              class="rounded-md px-2.5 py-1 text-xs font-semibold transition"
               :class="
                 trendGrain === 'monthly'
                   ? 'bg-white text-dm-text shadow-xs'
@@ -735,7 +791,7 @@ function setTrendGrain(grain: TrendGrain) {
         <div class="relative h-64 w-full">
           <div
             v-if="!hasTrendData"
-            class="absolute inset-0 flex items-center justify-center text-xs text-dm-text-tertiary"
+            class="absolute inset-0 flex items-center justify-center text-sm text-dm-text-tertiary"
           >
             {{ t('quotation.pages.dashboard.chartTrendEmpty') }}
           </div>
@@ -747,7 +803,7 @@ function setTrendGrain(grain: TrendGrain) {
         </div>
 
         <div
-          class="mt-4 flex items-center justify-between border-t border-slate-50 pt-3 text-xs text-dm-text-tertiary"
+          class="mt-4 flex items-center justify-between border-t border-slate-50 pt-3 text-sm text-dm-text-tertiary"
         >
           <span>{{ t('quotation.pages.dashboard.chartTrendFooterSource') }}</span>
           <span>{{ t('quotation.pages.dashboard.chartTrendFooterHint') }}</span>
@@ -757,7 +813,7 @@ function setTrendGrain(grain: TrendGrain) {
 
     <div
       id="dashboard-recent-grid"
-      class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1.18fr)_minmax(480px,0.82fr)]"
+      class="grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,1.18fr)_minmax(480px,0.82fr)]"
     >
       <div
         id="dashboard-recent-quotes"
@@ -768,14 +824,14 @@ function setTrendGrain(grain: TrendGrain) {
             <h3 class="text-sm font-semibold text-dm-text">
               {{ t('quotation.pages.dashboard.recentQuotesTitle') }}
             </h3>
-            <p class="mt-0.5 text-xs text-dm-text-tertiary">
+            <p class="mt-0.5 text-sm text-dm-text-tertiary">
               {{ t('quotation.pages.dashboard.recentQuotesSubtitle') }}
             </p>
           </div>
           <button
             id="link-go-to-list"
             type="button"
-            class="flex cursor-pointer items-center gap-1 text-xs font-medium text-dm-primary hover:text-dm-primary"
+            class="flex cursor-pointer items-center gap-1 text-sm font-medium text-dm-primary hover:text-dm-primary"
             @click="emit('navigateToTab', 'list')"
           >
             <span>{{ t('quotation.actions.viewAll') }}</span>
@@ -790,17 +846,17 @@ function setTrendGrain(grain: TrendGrain) {
             class="flex cursor-pointer items-center justify-between rounded-lg px-2 py-3 transition duration-150 hover:bg-[#fafafa]"
             @click="emit('viewQuote', quote.id)"
           >
-            <div class="space-y-1">
+            <div class="min-w-0 space-y-1">
               <div class="flex items-center gap-2">
-                <span class="font-mono text-xs font-medium text-dm-primary">{{ quote.quoteNo }}</span>
-                <span class="text-xs text-dm-text-tertiary">|</span>
+                <span class="font-mono text-sm font-medium text-dm-primary">{{ quote.quoteNo }}</span>
+                <span class="text-sm text-dm-text-tertiary">|</span>
                 <span
-                  class="max-w-[200px] truncate text-xs font-semibold text-dm-text-secondary sm:max-w-sm"
+                  class="max-w-[200px] truncate text-sm font-semibold text-dm-text-secondary sm:max-w-sm"
                 >
                   {{ quote.projectName }}
                 </span>
               </div>
-              <div class="flex items-center gap-3 text-[11px] text-dm-text-tertiary">
+              <div class="flex items-center gap-3 text-xs text-dm-text-tertiary">
                 <span>
                   {{ t('quotation.pages.dashboard.recentQuoteCompany', { company: quote.clientCompany }) }}
                 </span>
@@ -815,17 +871,19 @@ function setTrendGrain(grain: TrendGrain) {
               </div>
             </div>
 
-            <div class="flex items-center gap-4">
-              <div class="text-right">
-                <div class="font-mono text-xs font-bold text-dm-text">
+            <div class="grid shrink-0 grid-cols-[8.5rem_5.5rem] items-center gap-3">
+              <div class="min-w-0 text-right">
+                <div class="font-mono text-sm font-bold text-dm-text">
                   {{ currencySymbol(quote.currency) }}{{ quote.grandTotal.toLocaleString() }}
                 </div>
-                <span class="text-[10px] text-dm-text-tertiary">
+                <span class="text-xs text-dm-text-tertiary">
                   {{ t('quotation.pages.dashboard.recentQuoteTotal') }}
                 </span>
               </div>
 
-              <StatusBadge :status="quote.status" />
+              <div class="flex justify-center">
+                <StatusBadge :status="quote.status" />
+              </div>
             </div>
           </div>
         </div>
@@ -840,10 +898,10 @@ function setTrendGrain(grain: TrendGrain) {
             {{ t('quotation.pages.dashboard.guideTitle') }}
           </h3>
 
-          <div class="space-y-3 text-xs text-dm-text-secondary">
+          <div class="space-y-3 text-sm text-dm-text-secondary">
             <div class="flex items-start gap-2">
               <div
-                class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-dm-primary-bg text-[10px] font-bold text-dm-primary"
+                class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-dm-primary-bg text-xs font-bold text-dm-primary"
               >
                 1
               </div>
@@ -859,7 +917,7 @@ function setTrendGrain(grain: TrendGrain) {
 
             <div class="flex items-start gap-2">
               <div
-                class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-[10px] font-bold text-emerald-500"
+                class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-bold text-emerald-500"
               >
                 2
               </div>
@@ -875,7 +933,7 @@ function setTrendGrain(grain: TrendGrain) {
 
             <div class="flex items-start gap-2">
               <div
-                class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-[10px] font-bold text-indigo-500"
+                class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-xs font-bold text-indigo-500"
               >
                 3
               </div>
@@ -893,7 +951,7 @@ function setTrendGrain(grain: TrendGrain) {
 
         <div class="flex items-center gap-2.5 rounded-lg bg-[#fafafa] p-3">
           <Building class="h-8 w-8 shrink-0 text-dm-text-tertiary" />
-          <div class="text-[11px] text-dm-text-tertiary">
+          <div class="text-xs text-dm-text-tertiary">
             <p class="font-medium text-dm-text">
               {{ t('quotation.pages.dashboard.securityTitle') }}
             </p>

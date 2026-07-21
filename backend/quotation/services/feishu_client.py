@@ -1,14 +1,62 @@
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import logging
+from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlencode
 
 import httpx
 from django.conf import settings as dj_settings
+
+from quotation.audit import AUDIT_CONTEXT
+from quotation.metrics import record_storage_operation
+
+
+logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _external_call(operation: str, storage_connection_id: str = ""):
+    """Log one sanitized Feishu call with request correlation fields."""
+    started = perf_counter()
+    context = AUDIT_CONTEXT.get()
+    result = "success"
+    error_code = ""
+    try:
+        yield
+    except Exception as exc:
+        result = "failed"
+        code = getattr(exc, "code", None)
+        error_code = (
+            f"feishu_{code}" if code is not None else "transport_error"
+        )
+        raise
+    finally:
+        duration_seconds = perf_counter() - started
+        record_storage_operation(
+            provider="feishu",
+            operation=operation,
+            result=result,
+            duration_seconds=duration_seconds,
+        )
+        logger.info(
+            "quotation_external_call",
+            extra={
+                "provider": "feishu",
+                "operation": operation,
+                "result": result,
+                "duration_ms": round(duration_seconds * 1000),
+                "error_code": error_code,
+                "storage_connection_id": storage_connection_id,
+                "request_id": context.get("request_id", ""),
+                "trace_id": context.get("trace_id", ""),
+            },
+        )
 
 
 def _feishu_settings() -> SimpleNamespace:
@@ -67,9 +115,10 @@ def extract_feishu_token_from_url(url_or_token: str) -> str:
 
 
 class FeishuClient:
-    def __init__(self, settings=None):
+    def __init__(self, settings=None, storage_connection_id: str = ""):
         self.settings = settings or _feishu_settings()
         self.base_url = self.settings.feishu_base_url.rstrip("/")
+        self.storage_connection_id = storage_connection_id
 
     def _ensure_app_credentials(self) -> None:
         if (
@@ -90,35 +139,54 @@ class FeishuClient:
         json_body: dict[str, Any] | None = None,
         timeout: float = 30.0,
     ) -> dict[str, Any]:
-        headers: dict[str, str] = {}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        url = f"{self.base_url}{path}"
-        with httpx.Client(timeout=timeout) as client:
-            response = client.request(
-                method, url, headers=headers, params=params, json=json_body
-            )
-        try:
-            payload = response.json()
-        except Exception as exc:  # noqa: BLE001
-            raise FeishuAPIError(
-                f"Feishu non-JSON response ({response.status_code})"
-            ) from exc
-        if response.status_code >= 400:
-            raise FeishuAPIError(
-                "Feishu HTTP "
-                f"{response.status_code}: {payload.get('msg') or payload}",
-                code=payload.get("code"),
-                payload=payload,
-            )
-        code = payload.get("code")
-        if code not in (0, None):
-            raise FeishuAPIError(
-                f"Feishu API error {code}: {payload.get('msg')}",
-                code=code,
-                payload=payload,
-            )
-        return payload
+        operation = f"{method.upper()} {self._operation_path(path)}"
+        with _external_call(operation, self.storage_connection_id):
+            headers: dict[str, str] = {}
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            url = f"{self.base_url}{path}"
+            with httpx.Client(timeout=timeout) as client:
+                response = client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    params=params,
+                    json=json_body,
+                )
+            try:
+                payload = response.json()
+            except Exception as exc:  # noqa: BLE001
+                raise FeishuAPIError(
+                    f"Feishu non-JSON response ({response.status_code})"
+                ) from exc
+            if response.status_code >= 400:
+                raise FeishuAPIError(
+                    "Feishu HTTP "
+                    f"{response.status_code}: {payload.get('msg') or payload}",
+                    code=payload.get("code"),
+                    payload=payload,
+                )
+            code = payload.get("code")
+            if code not in (0, None):
+                raise FeishuAPIError(
+                    f"Feishu API error {code}: {payload.get('msg')}",
+                    code=code,
+                    payload=payload,
+                )
+            return payload
+
+    @staticmethod
+    def _operation_path(path: str) -> str:
+        """Return a low-cardinality path without remote object tokens."""
+        segments = []
+        for segment in path.split("?")[0].split("/"):
+            if not segment:
+                continue
+            if segment.isdigit() or len(segment) >= 20:
+                segments.append("{id}")
+            else:
+                segments.append(segment)
+        return "/" + "/".join(segments)
 
     def get_tenant_access_token(self) -> str:
         self._ensure_app_credentials()
@@ -356,23 +424,29 @@ class FeishuClient:
         path = f"/open-apis/drive/v1/files/{quote(file_token)}/download"
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {user_access_token}"}
-        with httpx.Client(timeout=60.0) as client:
-            response = client.get(url, headers=headers)
-        if response.status_code >= 400:
-            try:
-                payload = response.json()
-            except Exception:  # noqa: BLE001
-                payload = {"msg": response.text}
-            raise FeishuAPIError(
-                "download failed HTTP "
-                f"{response.status_code}: {payload.get('msg') or payload}",
-                code=(
-                    payload.get("code") if isinstance(payload, dict) else None
-                ),
-                payload=payload if isinstance(payload, dict) else {},
-            )
-        content_type = response.headers.get("content-type")
-        return response.content, content_type
+        with _external_call(
+            "GET drive.file.download",
+            self.storage_connection_id,
+        ):
+            with httpx.Client(timeout=60.0) as client:
+                response = client.get(url, headers=headers)
+            if response.status_code >= 400:
+                try:
+                    payload = response.json()
+                except Exception:  # noqa: BLE001
+                    payload = {"msg": response.text}
+                raise FeishuAPIError(
+                    "download failed HTTP "
+                    f"{response.status_code}: {payload.get('msg') or payload}",
+                    code=(
+                        payload.get("code")
+                        if isinstance(payload, dict)
+                        else None
+                    ),
+                    payload=payload if isinstance(payload, dict) else {},
+                )
+            content_type = response.headers.get("content-type")
+            return response.content, content_type
 
     def export_and_download(
         self,
@@ -432,22 +506,29 @@ class FeishuClient:
         )
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {user_access_token}"}
-        with httpx.Client(timeout=120.0) as client:
-            response = client.get(url, headers=headers)
-        if response.status_code >= 400:
-            try:
-                payload = response.json()
-            except Exception:  # noqa: BLE001
-                payload = {"msg": response.text}
-            raise FeishuAPIError(
-                "export download failed HTTP "
-                f"{response.status_code}: {payload.get('msg') or payload}",
-                code=(
-                    payload.get("code") if isinstance(payload, dict) else None
-                ),
-                payload=payload if isinstance(payload, dict) else {},
-            )
-        return response.content, response.headers.get("content-type")
+        with _external_call(
+            "GET drive.export.download",
+            self.storage_connection_id,
+        ):
+            with httpx.Client(timeout=120.0) as client:
+                response = client.get(url, headers=headers)
+            if response.status_code >= 400:
+                try:
+                    payload = response.json()
+                except Exception:  # noqa: BLE001
+                    payload = {"msg": response.text}
+                raise FeishuAPIError(
+                    "export download failed HTTP "
+                    f"{response.status_code}: "
+                    f"{payload.get('msg') or payload}",
+                    code=(
+                        payload.get("code")
+                        if isinstance(payload, dict)
+                        else None
+                    ),
+                    payload=payload if isinstance(payload, dict) else {},
+                )
+            return response.content, response.headers.get("content-type")
 
     def download_drive_item(
         self,
@@ -537,23 +618,30 @@ class FeishuClient:
             "parent_node": folder_token,
             "size": str(len(content)),
         }
-        with httpx.Client(timeout=120.0) as client:
-            response = client.post(
-                url, headers=headers, data=data, files=files
-            )
-        try:
-            payload = response.json()
-        except Exception as exc:  # noqa: BLE001
-            raise FeishuAPIError(
-                f"upload non-JSON response ({response.status_code})"
-            ) from exc
-        if response.status_code >= 400 or payload.get("code") not in (0, None):
-            raise FeishuAPIError(
-                f"upload failed: {payload.get('msg') or payload}",
-                code=payload.get("code"),
-                payload=payload,
-            )
-        return payload.get("data") or {}
+        with _external_call(
+            "POST drive.file.upload",
+            self.storage_connection_id,
+        ):
+            with httpx.Client(timeout=120.0) as client:
+                response = client.post(
+                    url, headers=headers, data=data, files=files
+                )
+            try:
+                payload = response.json()
+            except Exception as exc:  # noqa: BLE001
+                raise FeishuAPIError(
+                    f"upload non-JSON response ({response.status_code})"
+                ) from exc
+            if (
+                response.status_code >= 400
+                or payload.get("code") not in (0, None)
+            ):
+                raise FeishuAPIError(
+                    f"upload failed: {payload.get('msg') or payload}",
+                    code=payload.get("code"),
+                    payload=payload,
+                )
+            return payload.get("data") or {}
 
     def delete_file(self, user_access_token: str, file_token: str) -> None:
         self._request(

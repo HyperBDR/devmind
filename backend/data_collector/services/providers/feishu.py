@@ -15,6 +15,7 @@ Design notes (aligned with JiraProvider):
 import hashlib
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 FEISHU_BASE_URL = "https://open.feishu.cn"
 DEFAULT_FEISHU_AUTH_CONFIG = {
-    "app_id": "cli_a94e1db5fe7a1ccc",
-    "app_secret": "KlXfq3ONeklauzCBY7W3NdizXXuGYbup",
+    "app_id": os.getenv("FEISHU_APP_ID", ""),
+    "app_secret": os.getenv("FEISHU_APP_SECRET", ""),
 }
 TENANT_TOKEN_URL = f"{FEISHU_BASE_URL}/open-apis/auth/v3/tenant_access_token/internal"
 APPROVAL_LIST_URL = f"{FEISHU_BASE_URL}/open-apis/approval/v4/approvals"

@@ -1,13 +1,17 @@
+from django.db import transaction
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from quotation.models import UserQuotationCatalog
+from quotation.audit import record_audit_event
+from quotation.models import AuditEvent, UserQuotationCatalog
 from quotation.serializers import (
     UserQuotationCatalogSerializer,
     UserQuotationCatalogWriteSerializer,
 )
 from quotation.services.catalog_service import (
+    catalog_item_changes,
+    catalog_snapshot,
     empty_catalog_data,
     initialize_catalog,
     replace_catalog,
@@ -32,8 +36,29 @@ class UserQuotationCatalogView(APIView):
     def put(self, request):
         serializer = UserQuotationCatalogWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        catalog = replace_catalog(request.user, serializer.validated_data)
-        return Response(serialize_catalog(catalog))
+        with transaction.atomic():
+            existing = UserQuotationCatalog.objects.select_for_update().filter(
+                user=request.user
+            ).first()
+            before = catalog_snapshot(existing)
+            catalog = replace_catalog(request.user, serializer.validated_data)
+            after = catalog_snapshot(catalog)
+            for change in catalog_item_changes(before, after):
+                record_audit_event(
+                    request=request,
+                    module="catalog",
+                    action=change["action"],
+                    result=AuditEvent.RESULT_SUCCEEDED,
+                    target_type=change["target_type"],
+                    target_id=change["target_id"],
+                    target_label=change["target_label"],
+                    changes={"fields": change["fields"]}
+                    if change["fields"]
+                    else {},
+                )
+        response = Response(serialize_catalog(catalog))
+        response._quotation_audit_handled = True
+        return response
 
 
 class LegacyCatalogImportView(APIView):

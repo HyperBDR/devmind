@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from django.conf import settings
 from django.db import transaction
 from djangorestframework_camel_case.parser import (
     CamelCaseFormParser,
@@ -12,7 +13,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from quotation.models import DocumentAsset, Quotation, QuoteStatus
+from quotation.access import (
+    DocumentAction,
+    filter_accessible_documents,
+    get_accessible_quotation,
+)
+from quotation.audit import set_request_audit_target
+from quotation.models import DocumentAsset, QuoteStatus
 from quotation.permissions import user_display_email
 from quotation.serializers import build_feishu_file_url
 from quotation.services.feishu_client import FeishuAPIError
@@ -22,9 +29,14 @@ from quotation.services.storage import (
     document_storage_key,
     write_document,
 )
+from quotation.services.storage_control import (
+    StorageRouter,
+    register_uploaded_replica,
+)
 from quotation.services.upload_validation import validate_quotation_upload
 
 from . import common
+
 
 class FeishuUploadView(APIView):
     permission_classes = [IsAuthenticated]
@@ -35,11 +47,6 @@ class FeishuUploadView(APIView):
     ]
 
     def post(self, request):
-        try:
-            connection = common._require_connection(user_display_email(request.user))
-        except PermissionError as exc:
-            return Response({"detail": str(exc)}, status=401)
-
         upload = request.FILES.get("file")
         if not upload:
             return Response({"detail": "file required"}, status=400)
@@ -52,6 +59,7 @@ class FeishuUploadView(APIView):
             return Response({"detail": "Empty file"}, status=400)
 
         file_name = upload.name or f"upload-{uuid4().hex}.bin"
+        set_request_audit_target(request, target_label=file_name)
         conflict_action = (
             str(request.data.get("conflict_action") or "").strip().lower()
         )
@@ -61,13 +69,30 @@ class FeishuUploadView(APIView):
                 status=400,
             )
 
+        quotation_id = request.data.get("quotation_id") or None
+        quotation = None
+        if quotation_id:
+            quotation, denied = get_accessible_quotation(
+                request.user, quotation_id, DocumentAction.UPLOAD
+            )
+            if denied:
+                return denied
+            set_request_audit_target(
+                request,
+                target_label=quotation.quote_no,
+            )
+
         try:
-            client = common._client()
-            access_token = common._ensure_fresh_user_token(connection)
-            folder_token, _, _ = common._resolve_folder_token(
-                folder=request.data.get("folder"),
-                connection=connection,
+            client, access_token, root_folder_token = (
+                common._system_drive_context()
+            )
+            requested_folder = (
+                request.data.get("folder_token") or request.data.get("folder")
+            )
+            folder_token = common._managed_folder_token(
+                client=client,
                 access_token=access_token,
+                requested_token=requested_folder or root_folder_token,
             )
             existing = common._find_existing_file_in_folder(
                 client=client,
@@ -79,12 +104,6 @@ class FeishuUploadView(APIView):
             renamed_from = None
 
             if existing is not None and not conflict_action:
-                existing_token = str(existing.get("token") or "")
-                existing_url = existing.get("url") or (
-                    build_feishu_file_url(existing_token)
-                    if existing_token
-                    else None
-                )
                 existing_names = common._list_folder_file_names(
                     client=client,
                     access_token=access_token,
@@ -98,13 +117,15 @@ class FeishuUploadView(APIView):
                         "file_name": file_name,
                         "size_bytes": len(content),
                         "existing": {
-                            "file_token": existing_token,
+                            "file_token": existing.get("token"),
                             "file_name": existing.get("name") or file_name,
-                            "url": existing_url,
                             "size_bytes": common._item_size_bytes(existing),
+                            "url": existing.get("url"),
                         },
-                        "suggested_file_name": common._suggest_unique_file_name(
-                            file_name, existing_names
+                        "suggested_file_name": (
+                            common._suggest_unique_file_name(
+                                file_name, existing_names
+                            )
                         ),
                         "actions": ["reuse", "rename", "cancel"],
                     },
@@ -142,18 +163,23 @@ class FeishuUploadView(APIView):
                     data.get("file_token") or data.get("token") or ""
                 )
                 if uploaded_token and not data.get("url"):
-                    uploaded_meta = common._find_file_by_token_or_name_in_folder(
-                        client=client,
-                        access_token=access_token,
-                        folder_token=folder_token,
-                        file_token=uploaded_token,
-                        file_name=file_name,
+                    uploaded_meta = (
+                        common._find_file_by_token_or_name_in_folder(
+                            client=client,
+                            access_token=access_token,
+                            folder_token=folder_token,
+                            file_token=uploaded_token,
+                            file_name=file_name,
+                        )
                     )
                     if uploaded_meta and uploaded_meta.get("url"):
                         data["url"] = uploaded_meta.get("url")
-        except (FeishuAPIError, ValueError, PermissionError) as exc:
-            code = 401 if isinstance(exc, PermissionError) else 400
-            return Response({"detail": str(exc)}, status=code)
+        except PermissionError:
+            return Response({"detail": "Forbidden"}, status=403)
+        except FeishuAPIError as exc:
+            return common._feishu_error_response(exc, operation="upload")
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
 
         file_token = str(data.get("file_token") or data.get("token") or "")
         if not file_token:
@@ -163,22 +189,26 @@ class FeishuUploadView(APIView):
             )
 
         doc_type = common._guess_doc_type(file_name, upload.content_type)
-        quotation_id = request.data.get("quotation_id") or None
         feishu_url = data.get("url") or build_feishu_file_url(file_token)
         local_storage_key = None
+        recorded_asset_id = None
         try:
             with transaction.atomic():
                 if reused_existing:
-                    matching_assets = DocumentAsset.objects.filter(
-                        quotation_id=quotation_id,
-                        doc_type=doc_type,
-                        source="feishu_upload",
-                        feishu_file_token=file_token,
+                    matching_assets = filter_accessible_documents(
+                        request.user,
+                        DocumentAsset.objects.filter(
+                            quotation_id=quotation_id,
+                            doc_type=doc_type,
+                            source="feishu_upload",
+                            feishu_file_token=file_token,
+                        ).select_related("quotation"),
                     )
                     existing_asset = matching_assets.order_by(
                         "-created_at"
                     ).first()
                     if existing_asset:
+                        recorded_asset_id = existing_asset.id
                         for duplicate in matching_assets.exclude(
                             pk=existing_asset.pk
                         ):
@@ -207,6 +237,7 @@ class FeishuUploadView(APIView):
                         )
                     else:
                         asset_id = str(uuid4())
+                        recorded_asset_id = asset_id
                         local_storage_key = document_storage_key(
                             asset_id, quotation_id
                         )
@@ -227,6 +258,7 @@ class FeishuUploadView(APIView):
                         )
                 else:
                     asset_id = str(uuid4())
+                    recorded_asset_id = asset_id
                     local_storage_key = document_storage_key(
                         asset_id, quotation_id
                     )
@@ -246,9 +278,6 @@ class FeishuUploadView(APIView):
                         created_by_email=user_display_email(request.user),
                     )
                 if quotation_id:
-                    quotation = Quotation.objects.filter(
-                        pk=quotation_id
-                    ).first()
                     if quotation:
                         if quotation.status != QuoteStatus.UPLOADED:
                             quotation.status = QuoteStatus.UPLOADED
@@ -279,13 +308,36 @@ class FeishuUploadView(APIView):
             )
 
         payload = {
-            "file_token": file_token,
+            "document_id": recorded_asset_id,
             "file_name": file_name,
             "folder_token": folder_token,
+            "file_token": file_token,
             "url": feishu_url,
             "size_bytes": len(content),
             "reused_existing": reused_existing,
+            "direct_access_allowed": True,
         }
         if renamed_from:
             payload["renamed_from"] = renamed_from
+        if (
+            settings.QUOTATION_DOCUMENT_REPLICA_ENABLED
+            and recorded_asset_id
+        ):
+            try:
+                asset = DocumentAsset.objects.select_related(
+                    "quotation"
+                ).get(pk=recorded_asset_id)
+                route = StorageRouter().resolve(document_type=doc_type)
+                replica = register_uploaded_replica(
+                    request=request,
+                    asset=asset,
+                    route=route,
+                    remote_file_token=file_token,
+                    remote_url=feishu_url,
+                    folder_token=folder_token,
+                )
+                payload["replica_id"] = replica.id
+                payload["storage_connection_id"] = replica.connection_id
+            except (LookupError, ValueError):
+                payload["replica_pending"] = True
         return Response(payload)

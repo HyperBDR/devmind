@@ -12,6 +12,7 @@ export interface DescriptionHistoryOption {
   key: string
   meta?: {
     listPrice?: number
+    currency?: Quotation['currency']
     source: 'catalog' | 'quote'
   }
 }
@@ -39,7 +40,8 @@ export function buildDescriptionHistoryOptions(
   itemType: ItemType,
   products: Product[],
   services: Service[],
-  quotations: Array<Pick<Quotation, 'items' | 'createdAt'>>,
+  quotations: Array<Pick<Quotation, 'items' | 'createdAt' | 'currency'>>,
+  currency: Quotation['currency'] = 'USD',
 ): DescriptionHistoryOption[] {
   const options: DescriptionHistoryOption[] = []
   const seen = new Set<string>()
@@ -63,44 +65,64 @@ export function buildDescriptionHistoryOptions(
 
   if (isSoftwareType(itemType)) {
     products.forEach((product) => {
+      if ((product.currency || 'USD') !== currency) return
       const text = descriptionText(product)
       if (!text) return
+      const itemCurrency = product.currency || 'USD'
       pushOption(text, {
         listPrice: product.listPrice,
+        currency: itemCurrency,
         source: 'catalog',
-      })
+      }, product.listPrice
+        ? `${itemCurrency} ${product.listPrice.toLocaleString('en-US')}`
+        : product.pricingNote)
     })
   } else {
     services.forEach((service) => {
+      if ((service.currency || 'USD') !== currency) return
       const text = descriptionText(service)
       if (!text) return
+      const itemCurrency = service.currency || 'USD'
       pushOption(text, {
         listPrice: service.listPrice,
+        currency: itemCurrency,
         source: 'catalog',
-      })
+      }, service.listPrice
+        ? `${itemCurrency} ${service.listPrice.toLocaleString('en-US')}`
+        : service.pricingNote)
     })
   }
 
   const quoteItems = quotations
     .slice()
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    .flatMap((quote) => quote.items || [])
-    .filter((item) =>
+    .flatMap((quote) =>
+      (quote.items || []).map((item) => ({
+        item,
+        currency: quote.currency,
+      })),
+    )
+    .filter(({ item, currency: quoteCurrency }) =>
+      quoteCurrency === currency && (
       isSoftwareType(itemType)
         ? item.type === 'Software'
-        : item.type !== 'Software',
+        : item.type !== 'Software'
+      ),
     )
 
-  quoteItems.forEach((item) => {
+  quoteItems.forEach(({ item, currency: quoteCurrency }) => {
     const text = descriptionText(item)
     if (!text) return
     pushOption(
       text,
       {
         listPrice: item.listPrice,
+        currency: quoteCurrency,
         source: 'quote',
       },
-      item.listPrice ? `List ${item.listPrice}` : undefined,
+      item.listPrice
+        ? `${quoteCurrency} ${item.listPrice.toLocaleString('en-US')}`
+        : undefined,
     )
   })
 
@@ -120,6 +142,7 @@ export function upsertDescriptionsToCatalog(
   products: Product[],
   services: Service[],
   productLineLabel = 'HyperBDR',
+  currency: Quotation['currency'] = 'USD',
 ): { products: Product[]; services: Service[]; added: number } {
   const nextProducts = [...products]
   const nextServices = [...services]
@@ -127,10 +150,14 @@ export function upsertDescriptionsToCatalog(
   const category = productLineLabel.trim() || 'HyperBDR'
 
   const productKeys = new Set(
-    nextProducts.map((item) => normalize(descriptionText(item))).filter(Boolean),
+    nextProducts
+      .map((item) => normalize(descriptionText(item)))
+      .filter(Boolean),
   )
   const serviceKeys = new Set(
-    nextServices.map((item) => normalize(descriptionText(item))).filter(Boolean),
+    nextServices
+      .map((item) => normalize(descriptionText(item)))
+      .filter(Boolean),
   )
 
   items.forEach((item, index) => {
@@ -146,6 +173,7 @@ export function upsertDescriptionsToCatalog(
         name: text.slice(0, 120),
         code: buildAutoCode('SW'),
         listPrice: Number(item.listPrice) || 0,
+        currency,
         category,
         description: text,
       })
@@ -160,6 +188,7 @@ export function upsertDescriptionsToCatalog(
       name: text.slice(0, 120),
       code: buildAutoCode('OT'),
       listPrice: Number(item.listPrice) || 0,
+      currency,
       unit: 'item',
       description: text,
     })

@@ -7,8 +7,17 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from quotation.models import DocumentAsset, DocumentType, Quotation
-from quotation.permissions import user_display_email, user_role
+from quotation.access import (
+    DocumentAction,
+    can_delete_document,
+    filter_accessible_documents,
+    forbidden_response,
+    get_accessible_document,
+    get_accessible_quotation,
+)
+from quotation.audit import set_request_audit_target
+from quotation.models import DocumentAsset, DocumentType
+from quotation.permissions import user_display_email
 from quotation.serializers import DocumentAssetSerializer
 from quotation.services.storage import (
     delete_document,
@@ -23,11 +32,34 @@ class DocumentListView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = DocumentAsset.objects.all()
         source = request.query_params.get("source")
-        email = user_display_email(request.user)
-        if source in {"feishu", "feishu_upload"}:
-            qs = qs.filter(source=source, created_by_email__iexact=email)
+        if source == "feishu":
+            qs = (
+                DocumentAsset.objects.filter(
+                    source="feishu",
+                    created_by_email__iexact=user_display_email(request.user),
+                )
+                .order_by("-created_at")[:1000]
+            )
+            documents = []
+            seen_tokens = set()
+            for document in qs:
+                token = document.feishu_file_token or document.id
+                if token in seen_tokens:
+                    continue
+                seen_tokens.add(token)
+                documents.append(document)
+                if len(documents) >= 200:
+                    break
+            return Response(
+                DocumentAssetSerializer(documents, many=True).data
+            )
+
+        qs = filter_accessible_documents(
+            request.user, DocumentAsset.objects.select_related("quotation")
+        )
+        if source == "feishu_upload":
+            qs = qs.filter(source=source)
         elif source:
             qs = qs.filter(source=source)
         qs = qs.order_by("-created_at")[:200]
@@ -38,17 +70,31 @@ class QuotationDocumentListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, quotation_id: str):
-        if not Quotation.objects.filter(pk=quotation_id).exists():
-            return Response({"detail": "quotation not found"}, status=404)
+        quotation, denied = get_accessible_quotation(
+            request.user,
+            quotation_id,
+        )
+        if denied:
+            return denied
+        set_request_audit_target(
+            request,
+            target_label=quotation.quote_no,
+        )
         qs = DocumentAsset.objects.filter(quotation_id=quotation_id).order_by(
             "-created_at"
         )
         return Response(DocumentAssetSerializer(qs, many=True).data)
 
     def post(self, request, quotation_id: str):
-        quotation = Quotation.objects.filter(pk=quotation_id).first()
-        if not quotation:
-            return Response({"detail": "quotation not found"}, status=404)
+        quotation, denied = get_accessible_quotation(
+            request.user, quotation_id, DocumentAction.UPLOAD
+        )
+        if denied:
+            return denied
+        set_request_audit_target(
+            request,
+            target_label=quotation.quote_no,
+        )
         upload = request.FILES.get("file")
         if not upload:
             return Response({"detail": "file required"}, status=400)
@@ -89,9 +135,19 @@ class DocumentDownloadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, document_id: str):
-        asset = DocumentAsset.objects.filter(pk=document_id).first()
-        if not asset:
-            return Response({"detail": "document not found"}, status=404)
+        asset, denied = get_accessible_document(
+            request.user, document_id, DocumentAction.DOWNLOAD
+        )
+        if denied:
+            return denied
+        set_request_audit_target(
+            request,
+            target_label=(
+                asset.quotation.quote_no
+                if asset.quotation_id
+                else asset.file_name
+            ),
+        )
         path = resolve_document_path(asset.storage_key)
         if not path.is_file():
             return Response({"detail": "file missing on disk"}, status=404)
@@ -104,18 +160,21 @@ class DocumentDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def delete(self, request, document_id: str):
-        asset = DocumentAsset.objects.filter(pk=document_id).first()
-        if not asset:
-            return Response({"detail": "document not found"}, status=404)
-
-        email = user_display_email(request.user)
-        role = user_role(request.user)
-        if (
-            asset.created_by_email
-            and asset.created_by_email.lower() != email.lower()
-        ):
-            if role not in {"admin", "sales_director"}:
-                return Response({"detail": "Forbidden"}, status=403)
+        asset, denied = get_accessible_document(
+            request.user, document_id, DocumentAction.DELETE
+        )
+        if denied:
+            return denied
+        if not can_delete_document(request.user, asset):
+            return forbidden_response()
+        set_request_audit_target(
+            request,
+            target_label=(
+                asset.quotation.quote_no
+                if asset.quotation_id
+                else asset.file_name
+            ),
+        )
 
         try:
             delete_document(asset.storage_key)

@@ -18,7 +18,10 @@
   <!-- Sidebar -->
   <aside
     :class="[
-      'relative bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ease-in-out flex-shrink-0 h-full',
+      'relative flex h-full flex-shrink-0 flex-col border-r transition-all duration-300 ease-in-out',
+      isQuotationPlatform
+        ? 'quotation-sidebar border-slate-800'
+        : 'border-gray-200 bg-white',
       !isMobile && collapsed ? 'w-16' : 'w-64',
       isMobile ? 'fixed inset-y-0 left-0 z-50' : 'static',
       isMobile && !showMobileMenu ? '-translate-x-full' : 'translate-x-0'
@@ -26,12 +29,14 @@
   >
     <!-- Logo and close button -->
     <div
-      class="flex items-center h-16 border-b border-gray-200"
-      :class="
+      class="flex h-16 items-center border-b"
+      :class="[
+        isQuotationPlatform ? 'border-slate-800' : 'border-gray-200',
         !isMobile && collapsed ? 'justify-center px-2' : 'justify-between px-4'
-      "
+      ]"
     >
       <router-link
+        v-if="!(isQuotationPlatform && collapsed && !isMobile)"
         :to="homePath"
         class="flex items-center min-w-0"
         :class="!isMobile && collapsed ? 'justify-center' : 'space-x-2 flex-1'"
@@ -39,12 +44,20 @@
         :title="!isMobile && collapsed ? t('common.appName') : undefined"
       >
         <img
-          src="/android-chrome-192x192.png"
-          alt="DevMind Logo"
+          :src="isQuotationPlatform ? quoteDeskLogo : '/android-chrome-192x192.png'"
+          :alt="isQuotationPlatform ? 'Quote Desk logo' : 'DevMind logo'"
           class="w-8 h-8"
         />
+        <div
+          v-if="isQuotationPlatform && (isMobile || !collapsed)"
+          class="min-w-0"
+        >
+          <div class="truncate text-sm font-semibold text-white">
+            {{ t('quotation.menuTitle') }}
+          </div>
+        </div>
         <span
-          v-if="isMobile || !collapsed"
+          v-else-if="isMobile || !collapsed"
           class="text-xl font-semibold text-gray-900 truncate"
           >{{ t('common.appName') }}</span
         >
@@ -53,6 +66,12 @@
         v-if="!isMobile"
         type="button"
         class="sidebar-toggle"
+        :class="[
+          isQuotationPlatform ? 'sidebar-toggle-quotation' : '',
+          isQuotationPlatform && collapsed
+            ? 'sidebar-toggle-quotation-collapsed'
+            : ''
+        ]"
         :aria-label="
           collapsed ? t('common.expandSidebar') : t('common.collapseSidebar')
         "
@@ -100,11 +119,15 @@
     <!-- Navigation -->
     <nav
       class="flex-1 py-4 space-y-1 flex flex-col"
-      :class="
+      :class="[
+        isQuotationPlatform ? 'quotation-navigation' : '',
+        isQuotationPlatform && collapsed && !isMobile
+          ? 'quotation-navigation-collapsed'
+          : '',
         collapsed && !isMobile
           ? 'overflow-visible px-2'
           : 'overflow-y-auto px-3'
-      "
+      ]"
     >
       <div class="flex-1 space-y-1">
         <template v-if="!isQuotationPlatform">
@@ -533,11 +556,7 @@
             <div
               v-if="quotationMenuOpen || (collapsed && !isMobile)"
               class="submenu"
-              :class="collapsed && !isMobile ? 'submenu-flyout' : ''"
             >
-              <div v-if="collapsed && !isMobile" class="submenu-flyout-title">
-                {{ t('quotation.menuTitle') }}
-              </div>
               <router-link
                 to="/quotation/dashboard"
                 class="nav-item nav-item-child"
@@ -609,30 +628,6 @@
                 <span>{{ t('quotation.create') }}</span>
               </router-link>
               <router-link
-                to="/quotation/imports"
-                class="nav-item nav-item-child"
-                :class="
-                  isActive('/quotation/imports') ? 'nav-item-active' : ''
-                "
-                @click="isMobile && $emit('close')"
-                @mouseenter="preloadRoute('/quotation/imports')"
-              >
-                <svg
-                  class="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"
-                  />
-                </svg>
-                <span>{{ t('quotation.imports') }}</span>
-              </router-link>
-              <router-link
                 to="/quotation/catalog"
                 class="nav-item nav-item-child"
                 :class="
@@ -662,18 +657,46 @@
                 </svg>
                 <span>{{ t('quotation.catalog') }}</span>
               </router-link>
+              <router-link
+                to="/quotation/audit"
+                class="nav-item nav-item-child"
+                :class="
+                  isActive('/quotation/audit') ? 'nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/audit')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6M9 8h2m6 13H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"
+                  />
+                </svg>
+                <span>{{ t('quotation.audit') }}</span>
+              </router-link>
             </div>
           </Transition>
         </div>
       </div>
 
       <!-- Settings Menu -->
-      <div class="mt-auto pt-4 border-t border-gray-200">
+      <div
+        class="mt-auto border-t pt-4"
+        :class="isQuotationPlatform ? 'quotation-settings' : 'border-gray-200'"
+      >
         <router-link
           :to="{ name: 'SettingsNotifications' }"
           class="nav-item"
           :class="[
             isActive('/settings/notifications') ? 'nav-item-active' : '',
+            isQuotationPlatform ? 'quotation-settings-link' : '',
             collapsed && !isMobile ? 'nav-item-collapsed' : ''
           ]"
           @mouseenter="preloadRoute('/settings/notifications')"
@@ -711,6 +734,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import { getCurrentPlatformKey } from '@/utils/platformAccess'
+import quoteDeskLogo from '@/assets/quote-desk-logo.svg'
 
 defineProps({
   showMobileMenu: {
@@ -991,5 +1015,125 @@ onMounted(() => {
 
 .sidebar-toggle {
   @apply absolute -right-3 top-5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500;
+}
+
+.quotation-sidebar {
+  background: #070a18;
+  color: #cbd5e1;
+}
+
+.quotation-navigation .menu-group {
+  margin-bottom: 0;
+}
+
+.quotation-navigation .menu-group::before {
+  display: block;
+  padding: 0.25rem 0.75rem 0.5rem;
+  color: #7783a0;
+  content: 'BUSINESS VIEWS';
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.quotation-navigation-collapsed .menu-group::before {
+  display: none;
+}
+
+.quotation-navigation .nav-item-parent {
+  display: none;
+}
+
+.quotation-navigation .submenu {
+  margin-top: 0;
+  overflow: visible;
+}
+
+.quotation-navigation-collapsed .submenu {
+  overflow: visible;
+}
+
+.quotation-navigation-collapsed .nav-item-child {
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-right: auto;
+  margin-left: auto;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+  border-radius: 0.5rem;
+}
+
+.quotation-navigation-collapsed .nav-item-child span {
+  display: none;
+}
+
+.quotation-navigation .nav-item-child {
+  margin-left: 0;
+  border-radius: 9999px;
+  padding: 0.625rem 0.75rem;
+  color: #c4cbe0;
+  font-weight: 600;
+}
+
+.quotation-navigation .nav-item-child::before {
+  content: none;
+}
+
+.quotation-navigation .nav-item-child:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.quotation-navigation .nav-item-child.nav-item-active {
+  background-color: #2563eb;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.quotation-navigation.quotation-navigation-collapsed .nav-item-child {
+  margin-right: auto;
+  margin-left: auto;
+  padding: 0;
+  border-radius: 0.5rem;
+}
+
+.quotation-settings {
+  border-color: #1e293b;
+}
+
+.quotation-settings-link {
+  color: #c4cbe0;
+}
+
+.quotation-settings-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.quotation-sidebar .quotation-settings .nav-item-collapsed {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.sidebar-toggle-quotation {
+  right: 0.75rem;
+  border-color: #334155;
+  background: #111827;
+  color: #94a3b8;
+}
+
+.sidebar-toggle-quotation:hover {
+  background: #1e293b;
+  color: #ffffff;
+}
+
+.sidebar-toggle-quotation-collapsed {
+  top: 1rem;
+  right: auto;
+  left: 50%;
+  width: 2rem;
+  height: 2rem;
+  transform: translateX(-50%);
 }
 </style>

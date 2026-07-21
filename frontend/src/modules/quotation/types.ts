@@ -116,12 +116,15 @@ export interface Quotation {
   feishuUrl?: string;
   feishuPath?: string;
   feishuUploadedAt?: string;
+  feishuDocumentId?: string;
   feishuExcelFileToken?: string;
   feishuExcelUrl?: string;
+  feishuExcelDocumentId?: string;
   feishuExcelPath?: string;
   feishuExcelUploadedAt?: string;
   feishuPdfFileToken?: string;
   feishuPdfUrl?: string;
+  feishuPdfDocumentId?: string;
   feishuPdfPath?: string;
   feishuPdfUploadedAt?: string;
 
@@ -134,6 +137,7 @@ export interface Product {
   name: string;
   code: string;
   listPrice: number;
+  currency?: Quotation['currency'];
   category: string;
   description: string;
   pricingNote?: string;
@@ -146,6 +150,7 @@ export interface Service {
   name: string;
   code: string;
   listPrice: number;
+  currency?: Quotation['currency'];
   unit: string; // e.g., 人天, 项, 月
   description: string;
   quantityRange?: string;

@@ -780,6 +780,7 @@ function descriptionOptionsFor(itemType: QuotationLineItem['type']) {
     props.products,
     props.services,
     historySourceQuotations.value,
+    currency.value,
   )
 }
 
@@ -788,12 +789,23 @@ function handleDescriptionSelect(
   option: NormalizedHistoryOption,
 ) {
   const listPrice = Number(
-    (option.meta as { listPrice?: number } | undefined)?.listPrice,
+    (option.meta as {
+      listPrice?: number
+      currency?: 'CNY' | 'USD' | 'EUR'
+    } | undefined)?.listPrice,
   )
+  const optionCurrency = (option.meta as {
+    currency?: 'CNY' | 'USD' | 'EUR'
+  } | undefined)?.currency
   const patch: Partial<QuotationLineItem> = {
     description: option.value,
   }
-  if (Number.isFinite(listPrice) && listPrice > 0 && !item.listPrice) {
+  if (
+    Number.isFinite(listPrice)
+    && listPrice > 0
+    && !item.listPrice
+    && (!optionCurrency || optionCurrency === currency.value)
+  ) {
     patch.listPrice = listPrice
   }
   handleRowChange(item.id, patch)
@@ -1031,7 +1043,7 @@ const itemErrorEntries = computed(() =>
         <h2 class="text-base font-bold text-dm-text">
           {{ editingQuote ? t('quotation.pages.create.titleEdit') : t('quotation.pages.create.titleCreate') }}
         </h2>
-        <p class="mt-0.5 text-xs text-dm-text-tertiary">
+        <p class="mt-0.5 text-sm text-dm-text-tertiary">
           {{
             editingQuote
               ? t('quotation.pages.create.subtitleEdit')
@@ -1040,7 +1052,7 @@ const itemErrorEntries = computed(() =>
         </p>
       </div>
       <div class="text-right">
-        <span class="block text-[10px] font-medium text-dm-text-tertiary">
+        <span class="block text-xs font-medium text-dm-text-tertiary">
           {{ t('quotation.pages.create.currentQuoteNo') }}
         </span>
         <span
@@ -1066,7 +1078,7 @@ const itemErrorEntries = computed(() =>
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step1Title') }}</h3>
             </div>
 
-            <div class="text-xs">
+            <div class="text-sm">
               <label class="mb-1 block font-semibold text-dm-text-tertiary">
                 {{ t('quotation.pages.create.issuerCompany') }}
               </label>
@@ -1078,7 +1090,7 @@ const itemErrorEntries = computed(() =>
               />
             </div>
 
-            <div class="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2">
+            <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
               <div>
                 <label class="mb-1 block font-semibold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.quoteDate') }}
@@ -1101,12 +1113,12 @@ const itemErrorEntries = computed(() =>
               </div>
             </div>
 
-            <div class="space-y-3 rounded-lg border border-dm-border-light bg-[#fafafa]/60 p-3 text-xs">
+            <div class="space-y-3 rounded-lg border border-dm-border-light bg-[#fafafa]/60 p-3 text-sm">
               <div class="flex items-center justify-between gap-3">
-                <span class="text-[11px] font-bold text-dm-text-tertiary">
+                <span class="text-xs font-bold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.numberingSettings') }}
                 </span>
-                <span v-if="editingQuote" class="text-[10px] font-semibold text-dm-primary">
+                <span v-if="editingQuote" class="text-xs font-semibold text-dm-primary">
                   {{ t('quotation.pages.create.revisionAutoSuffix') }}
                 </span>
               </div>
@@ -1187,7 +1199,7 @@ const itemErrorEntries = computed(() =>
                 class="space-y-2 rounded-lg border border-[#91caff] bg-dm-primary-bg/40 p-3"
               >
                 <div class="flex items-center justify-between gap-3">
-                  <span class="text-[11px] font-bold text-blue-700">
+                  <span class="text-xs font-bold text-blue-700">
                     {{ t('quotation.pages.create.addProductLine') }}
                   </span>
                   <button
@@ -1230,7 +1242,7 @@ const itemErrorEntries = computed(() =>
                 </div>
                 <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <p
-                    class="text-[10px] font-medium"
+                    class="text-xs font-medium"
                     :class="productLineError ? 'text-red-500' : 'text-dm-text-tertiary'"
                   >
                     {{
@@ -1240,7 +1252,7 @@ const itemErrorEntries = computed(() =>
                   </p>
                   <button
                     type="button"
-                    class="shrink-0 cursor-pointer rounded-md bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-blue-700"
+                    class="dm-btn-primary shrink-0 cursor-pointer px-3 py-1.5 text-xs font-bold"
                     @click="handleAddProductLine"
                   >
                     {{ t('quotation.actions.saveProductLine') }}
@@ -1256,7 +1268,7 @@ const itemErrorEntries = computed(() =>
                   <button
                     v-if="quoteNoMode === 'auto'"
                     type="button"
-                    class="cursor-pointer text-[10px] font-semibold text-dm-primary hover:text-blue-700"
+                    class="cursor-pointer text-xs font-semibold text-dm-primary hover:text-blue-700"
                     @click="regenerateQuoteNo()"
                   >
                     {{ t('quotation.actions.regenerate') }}
@@ -1276,7 +1288,7 @@ const itemErrorEntries = computed(() =>
                   ]"
                 />
                 <p
-                  class="mt-1 text-[10px] font-medium"
+                  class="mt-1 text-xs font-medium"
                   :class="quoteNoIsUnique ? 'text-dm-text-tertiary' : 'text-red-500'"
                 >
                   {{
@@ -1285,7 +1297,7 @@ const itemErrorEntries = computed(() =>
                       : t('quotation.pages.create.quoteNumberHintDuplicate')
                   }}
                 </p>
-                <p v-if="errors.quoteNo" class="mt-1 text-[10px] text-red-500">{{ errors.quoteNo }}</p>
+                <p v-if="errors.quoteNo" class="mt-1 text-xs text-red-500">{{ errors.quoteNo }}</p>
               </div>
             </div>
           </div>
@@ -1297,7 +1309,7 @@ const itemErrorEntries = computed(() =>
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step2Title') }}</h3>
             </div>
 
-            <div class="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2">
+            <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
               <div>
                 <label class="mb-1 block font-semibold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.customerCompany') }}
@@ -1373,12 +1385,12 @@ const itemErrorEntries = computed(() =>
                 class="grid grid-cols-1 gap-3 rounded-lg border border-dm-border-light bg-[#fafafa]/60 p-3 sm:col-span-2 sm:grid-cols-3"
               >
                 <div class="flex items-center justify-between sm:col-span-3">
-                  <span class="text-[11px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+                  <span class="text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
                     {{ t('quotation.pages.create.billToSection') }}
                   </span>
                   <button
                     type="button"
-                    class="cursor-pointer text-[10px] font-semibold text-dm-primary hover:text-blue-700"
+                    class="cursor-pointer text-xs font-semibold text-dm-primary hover:text-blue-700"
                     @click="
                       () => {
                         billingCompany = clientCompany
@@ -1456,7 +1468,7 @@ const itemErrorEntries = computed(() =>
           </div>
 
           <!-- Step 3 -->
-          <div class="space-y-4 dm-card p-5 text-xs shadow-xs">
+          <div class="space-y-4 dm-card p-5 text-sm shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
               <Briefcase class="h-4 w-4 text-dm-text-tertiary" />
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step3Title') }}</h3>
@@ -1482,10 +1494,10 @@ const itemErrorEntries = computed(() =>
                     }
                   "
                 />
-                <p class="mt-1 text-[10px] text-dm-text-tertiary">
+                <p class="mt-1 text-xs text-dm-text-tertiary">
                   {{ t('quotation.pages.create.contactPersonHelper') }}
                 </p>
-                <p v-if="errors.issuerContactName" class="mt-1 text-[10px] text-red-500">
+                <p v-if="errors.issuerContactName" class="mt-1 text-xs text-red-500">
                   {{ errors.issuerContactName }}
                 </p>
               </div>
@@ -1502,7 +1514,7 @@ const itemErrorEntries = computed(() =>
                   class="w-full rounded-lg border p-2 focus:border-blue-500 focus:outline-hidden"
                   :class="errors.issuerContactEmail ? 'border-red-400 bg-red-50/20' : 'border-dm-border'"
                 />
-                <p v-if="errors.issuerContactEmail" class="mt-1 text-[10px] text-red-500">
+                <p v-if="errors.issuerContactEmail" class="mt-1 text-xs text-red-500">
                   {{ errors.issuerContactEmail }}
                 </p>
               </div>
@@ -1519,7 +1531,7 @@ const itemErrorEntries = computed(() =>
                   class="w-full rounded-lg border p-2 focus:border-blue-500 focus:outline-hidden"
                   :class="errors.projectName ? 'border-red-400 bg-red-50/20' : 'border-dm-border'"
                 />
-                <p v-if="errors.projectName" class="mt-1 text-[10px] text-red-500">{{ errors.projectName }}</p>
+                <p v-if="errors.projectName" class="mt-1 text-xs text-red-500">{{ errors.projectName }}</p>
               </div>
             </div>
 
@@ -1542,7 +1554,7 @@ const itemErrorEntries = computed(() =>
                 class="mt-2 w-full resize-y rounded-lg border p-2 focus:border-blue-500 focus:outline-hidden"
                 :class="errors.paymentTerms ? 'border-red-400 bg-red-50/20' : 'border-dm-border'"
               />
-              <p v-if="errors.paymentTerms" class="mt-1 text-[10px] text-red-500">{{ errors.paymentTerms }}</p>
+              <p v-if="errors.paymentTerms" class="mt-1 text-xs text-red-500">{{ errors.paymentTerms }}</p>
             </div>
 
             <div>
@@ -1567,7 +1579,7 @@ const itemErrorEntries = computed(() =>
               </div>
               <button
                 type="button"
-                class="flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-blue-400 px-2.5 py-1.5 text-xs font-semibold text-dm-primary transition duration-150 hover:bg-dm-primary-bg/50"
+                class="flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-blue-400 px-2.5 py-1.5 text-sm font-semibold text-dm-primary transition duration-150 hover:bg-dm-primary-bg/50"
                 @click="handleAddLineItem"
               >
                 <Plus class="h-3.5 w-3.5" />
@@ -1577,7 +1589,7 @@ const itemErrorEntries = computed(() =>
 
             <div
               v-if="itemErrorEntries.length"
-              class="space-y-1 rounded-lg border border-red-100 bg-red-50 p-3 text-xs text-red-600"
+              class="space-y-1 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-600"
             >
               <p class="font-semibold">{{ t('quotation.pages.create.lineItemErrorsTitle') }}</p>
               <ul class="list-disc space-y-0.5 pl-4">
@@ -1592,7 +1604,7 @@ const itemErrorEntries = computed(() =>
                 class="group relative space-y-3 rounded-xl border border-dm-border-light bg-[#fafafa]/40 p-4 transition duration-150 hover:bg-[#fafafa]"
               >
                 <span
-                  class="absolute -left-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white bg-slate-200 text-xs font-bold text-dm-text"
+                  class="absolute -left-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-white bg-slate-200 text-sm font-bold text-dm-text"
                 >
                   {{ index + 1 }}
                 </span>
@@ -1604,7 +1616,7 @@ const itemErrorEntries = computed(() =>
                   <Trash2 class="h-4 w-4" />
                 </button>
 
-                <div class="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2 2xl:grid-cols-4">
+                <div class="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2 2xl:grid-cols-4">
                   <div>
                     <label class="mb-1 block font-semibold text-dm-text-tertiary">
                       {{ t('quotation.pages.create.lineItemCategory') }}
@@ -1632,7 +1644,7 @@ const itemErrorEntries = computed(() =>
                     >
                       {{ autoItemNumber(index, item.type) }}
                     </div>
-                    <p class="mt-1 text-[10px] text-dm-text-tertiary">
+                    <p class="mt-1 text-xs text-dm-text-tertiary">
                       {{
                         t('quotation.pages.create.lineItemAutoNumberHint', {
                           type:
@@ -1729,13 +1741,13 @@ const itemErrorEntries = computed(() =>
                   </div>
 
                   <div class="flex flex-col justify-end">
-                    <span class="text-[10px] font-medium text-dm-text-tertiary">
+                    <span class="text-xs font-medium text-dm-text-tertiary">
                       {{ t('quotation.pages.create.lineItemSubtotal') }}
                     </span>
                     <p class="pt-2 font-mono text-sm font-bold text-dm-text">
                       {{ currencySymbol }}{{ item.extendedPrice.toLocaleString() }}
                     </p>
-                    <p class="font-mono text-[10px] text-emerald-500">
+                    <p class="font-mono text-xs text-emerald-500">
                       {{
                         t('quotation.pages.create.lineItemNetUnit', {
                           amount: `${currencySymbol}${item.netUnitPrice.toLocaleString()}`,
@@ -1751,7 +1763,7 @@ const itemErrorEntries = computed(() =>
 
         <div class="space-y-6">
           <!-- Step 5 -->
-          <div class="relative space-y-4 overflow-hidden dm-card p-5 text-xs shadow-xs">
+          <div class="relative space-y-4 overflow-hidden dm-card p-5 text-sm shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
               <DollarSign class="h-4 w-4 text-dm-text-tertiary" />
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step5Title') }}</h3>
@@ -1819,14 +1831,14 @@ const itemErrorEntries = computed(() =>
                       class="w-full rounded-lg border bg-white p-2 font-mono text-dm-text placeholder:text-slate-300 focus:border-blue-500 focus:outline-hidden"
                       :class="errors.vatRate ? 'border-red-400 bg-red-50/20' : 'border-dm-border'"
                     />
-                    <p v-if="errors.vatRate" class="mt-1 text-[10px] text-red-500">{{ errors.vatRate }}</p>
-                    <p class="mt-1 text-[10px] font-medium text-dm-text-tertiary">
+                    <p v-if="errors.vatRate" class="mt-1 text-xs text-red-500">{{ errors.vatRate }}</p>
+                    <p class="mt-1 text-xs font-medium text-dm-text-tertiary">
                       {{ t('quotation.pages.create.taxRateHelper') }}
                     </p>
                   </div>
                 </div>
                 <div class="text-right">
-                  <span class="block text-[10px] font-semibold text-dm-text-tertiary">
+                  <span class="block text-xs font-semibold text-dm-text-tertiary">
                     {{
                       t('quotation.pages.create.taxAmount', {
                         taxLabel: resolveTaxLabel(taxLabel),
@@ -1850,7 +1862,7 @@ const itemErrorEntries = computed(() =>
           </div>
 
           <!-- Step 6 -->
-          <div class="space-y-4 dm-card p-5 text-xs shadow-xs">
+          <div class="space-y-4 dm-card p-5 text-sm shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
               <FileText class="h-4 w-4 text-dm-text-tertiary" />
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step6Title') }}</h3>
@@ -1862,7 +1874,7 @@ const itemErrorEntries = computed(() =>
                 </label>
                 <button
                   type="button"
-                  class="cursor-pointer text-[10px] font-semibold text-dm-primary hover:text-blue-700"
+                  class="cursor-pointer text-xs font-semibold text-dm-primary hover:text-blue-700"
                   @click="remarksDisclaimer = DEFAULT_REMARKS_DISCLAIMER"
                 >
                   {{ t('quotation.actions.showTemplate') }}
@@ -1874,7 +1886,7 @@ const itemErrorEntries = computed(() =>
                 :placeholder="t('quotation.pages.create.remarksPlaceholder')"
                 class="w-full rounded-lg border border-dm-border p-2 leading-relaxed text-dm-text focus:border-blue-500 focus:outline-hidden"
               />
-              <p class="mt-1 text-[10px] font-medium text-dm-text-tertiary">
+              <p class="mt-1 text-xs font-medium text-dm-text-tertiary">
                 {{ t('quotation.pages.create.remarksHint') }}
               </p>
             </div>
@@ -1897,7 +1909,7 @@ const itemErrorEntries = computed(() =>
                 }
               "
             />
-            <p class="text-[10px] font-medium text-dm-text-tertiary">
+            <p class="text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.create.signatureHint') }}
             </p>
           </div>
@@ -1905,7 +1917,7 @@ const itemErrorEntries = computed(() =>
           <div class="space-y-2 pt-2">
             <button
               type="button"
-              class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg bg-dm-primary py-3 text-xs font-bold text-white shadow-xs transition duration-150 hover:bg-dm-primary-hover active:bg-blue-700"
+              class="dm-btn-primary w-full cursor-pointer py-3 text-sm font-bold"
               @click="handleSubmit('Generated')"
             >
               <FileSpreadsheet class="h-4 w-4" />
@@ -1913,7 +1925,7 @@ const itemErrorEntries = computed(() =>
             </button>
             <button
               type="button"
-              class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dm-border bg-[#fafafa] py-2.5 text-xs font-semibold text-dm-text transition duration-150 hover:bg-slate-100"
+              class="flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-dm-border bg-[#fafafa] py-2.5 text-sm font-semibold text-dm-text transition duration-150 hover:bg-slate-100"
               @click="handleSubmit('Draft')"
             >
               <Save class="h-4 w-4" />
@@ -1921,7 +1933,7 @@ const itemErrorEntries = computed(() =>
             </button>
             <button
               type="button"
-              class="block w-full cursor-pointer py-1 text-center text-[11px] font-semibold text-dm-text-tertiary transition duration-150 hover:text-dm-text-secondary"
+              class="block w-full cursor-pointer py-1 text-center text-xs font-semibold text-dm-text-tertiary transition duration-150 hover:text-dm-text-secondary"
               @click="emit('navigateToTab', 'list')"
             >
               {{ t('quotation.actions.cancelAndReturn') }}
