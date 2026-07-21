@@ -7,6 +7,10 @@ POSTGRES_DNS_ERROR = (
     'could not translate host name "postgresql" to address: '
     "Temporary failure in name resolution"
 )
+POSTGRES_CONNECTION_REFUSED_PARTS = (
+    'connection to server at "postgresql"',
+    "port 5432 failed: Connection refused",
+)
 CELERY_BEAT_LOGGER = "django_celery_beat.schedulers"
 CELERY_CONSUMER_LOGGER = "celery.worker.consumer.consumer"
 REDIS_BROKER_RECONNECT_PREFIX = "consumer: Cannot connect to redis://"
@@ -17,14 +21,14 @@ def before_send(event, hint):
     """
     Drop expected transient infrastructure logs before sending to Sentry.
     """
-    if _is_celery_beat_postgres_dns_error(event):
+    if _is_celery_beat_postgres_connection_error(event):
         return None
     if _is_celery_redis_broker_reconnect_log(event):
         return None
     return event
 
 
-def _is_celery_beat_postgres_dns_error(event):
+def _is_celery_beat_postgres_connection_error(event):
     if event.get("logger") != CELERY_BEAT_LOGGER:
         return False
 
@@ -47,13 +51,20 @@ def _exception_matches(event):
     for value in values:
         if value.get("type") != "OperationalError":
             continue
-        if POSTGRES_DNS_ERROR in str(value.get("value", "")):
+        if _postgres_connection_error_matches(value.get("value", "")):
             return True
     return False
 
 
 def _logentry_matches(event):
-    return POSTGRES_DNS_ERROR in _logentry_message(event)
+    return _postgres_connection_error_matches(_logentry_message(event))
+
+
+def _postgres_connection_error_matches(message):
+    message = str(message)
+    return POSTGRES_DNS_ERROR in message or all(
+        part in message for part in POSTGRES_CONNECTION_REFUSED_PARTS
+    )
 
 
 def _logentry_message(event):

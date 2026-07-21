@@ -35,6 +35,26 @@ def test_before_send_drops_celery_beat_postgres_dns_errors():
     assert core_sentry.before_send(event, {}) is None
 
 
+def test_before_send_drops_celery_beat_postgres_connection_refused():
+    event = {
+        "logger": "django_celery_beat.schedulers",
+        "exception": {
+            "values": [
+                {
+                    "type": "OperationalError",
+                    "value": (
+                        'connection to server at "postgresql" '
+                        "(172.18.0.4), port 5432 failed: "
+                        "Connection refused\n"
+                    ),
+                }
+            ]
+        },
+    }
+
+    assert core_sentry.before_send(event, {}) is None
+
+
 def test_before_send_drops_celery_redis_broker_reconnect_logs():
     event = {
         "logger": "celery.worker.consumer.consumer",
