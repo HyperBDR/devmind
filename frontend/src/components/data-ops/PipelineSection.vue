@@ -158,7 +158,10 @@
                     {{ item.owner }}
                   </span>
                   <span class="shrink-0 text-[11px] font-bold text-slate-500">
-                    {{ t('dataOps.pipeline.projectsCount', { count: item.count }) }} ·
+                    {{
+                      t('dataOps.pipeline.projectsCount', { count: item.count })
+                    }}
+                    ·
                     {{ currencyCountLabel(item.amountByCurrency) }}
                   </span>
                 </div>
@@ -254,7 +257,9 @@
           {{ t('dataOps.pipeline.details') }}
         </h3>
         <span class="ml-auto text-xs text-slate-400">
-          {{ t('dataOps.pipeline.records', { count: filteredProjects.length }) }}
+          {{
+            t('dataOps.pipeline.records', { count: filteredProjects.length })
+          }}
         </span>
       </div>
 
@@ -398,6 +403,10 @@
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { formatAmountByCurrency } from '@/composables/useDataOpsConsole'
+import {
+  isDomesticProject,
+  isOverseasProject
+} from '@/utils/dataOpsProjectScope'
 
 const { locale, t } = useI18n()
 
@@ -426,16 +435,22 @@ const funnelColors = ['#94a3b8', '#6366f1', '#f59e0b', '#10b981']
 
 const totalProjects = computed(() => filteredProjects.value.length)
 const domesticProjects = computed(
-  () => filteredProjects.value.filter((project) => isDomestic(project)).length
+  () =>
+    filteredProjects.value.filter((project) => isDomesticProject(project))
+      .length
 )
 const overseaProjects = computed(
-  () => filteredProjects.value.filter((project) => isOverseas(project)).length
+  () =>
+    filteredProjects.value.filter((project) => isOverseasProject(project))
+      .length
 )
 const domesticBaseProjects = computed(
-  () => baseProjects.value.filter((project) => isDomestic(project)).length
+  () =>
+    baseProjects.value.filter((project) => isDomesticProject(project)).length
 )
 const overseaBaseProjects = computed(
-  () => baseProjects.value.filter((project) => isOverseas(project)).length
+  () =>
+    baseProjects.value.filter((project) => isOverseasProject(project)).length
 )
 
 const scopeTabs = computed(() => [
@@ -465,9 +480,9 @@ const baseProjects = computed(() =>
 const filteredProjects = computed(() => {
   let rows = baseProjects.value
   if (activeScope.value === 'domestic') {
-    rows = rows.filter((project) => isDomestic(project))
+    rows = rows.filter((project) => isDomesticProject(project))
   } else if (activeScope.value === 'overseas') {
-    rows = rows.filter((project) => isOverseas(project))
+    rows = rows.filter((project) => isOverseasProject(project))
   }
   return rows
 })
@@ -517,10 +532,14 @@ const scopeDistribution = computed(() =>
 )
 
 const domesticAmountByCurrency = computed(() =>
-  amountBuckets(filteredProjects.value.filter((project) => isDomestic(project)))
+  amountBuckets(
+    filteredProjects.value.filter((project) => isDomesticProject(project))
+  )
 )
 const overseaAmountByCurrency = computed(() =>
-  amountBuckets(filteredProjects.value.filter((project) => isOverseas(project)))
+  amountBuckets(
+    filteredProjects.value.filter((project) => isOverseasProject(project))
+  )
 )
 const totalAmountByCurrency = computed(() =>
   amountBuckets(filteredProjects.value)
@@ -859,7 +878,9 @@ function projectScope(project) {
 }
 
 function projectStatus(project) {
-  return project.status || project.order_status || t('dataOps.pipeline.notUpdated')
+  return (
+    project.status || project.order_status || t('dataOps.pipeline.notUpdated')
+  )
 }
 
 function customerName(project) {
@@ -959,18 +980,6 @@ function ownerInitial(value) {
       .toUpperCase()
   }
   return text.slice(0, 1)
-}
-
-function isDomestic(project) {
-  return String(project.project_scope || '')
-    .toLowerCase()
-    .includes('domestic')
-}
-
-function isOverseas(project) {
-  return String(project.project_scope || '')
-    .toLowerCase()
-    .includes('oversea')
 }
 
 function isLanded(project) {

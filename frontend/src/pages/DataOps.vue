@@ -10,7 +10,10 @@
         @select="selectSection"
       />
 
-      <main class="min-h-0 min-w-0 flex-1 overflow-y-auto">
+      <main
+        ref="scrollContainer"
+        class="min-h-0 min-w-0 flex-1 overflow-y-auto"
+      >
         <div class="mx-auto max-w-[1440px] space-y-6 p-4 sm:p-6">
           <DataOpsHeader
             :active-nav="activeNav"
@@ -61,11 +64,13 @@
 
           <ExecutiveSection
             v-if="activeSection === 'executive'"
+            :data-quality="dataQuality"
             :insights="insights"
             :kpi-cards="kpiCards"
             :overview="overview"
             :opportunities="opportunities"
             :risks="risks"
+            :recent-jobs="recentJobs"
             :summary="summary"
             :top-customers="topCustomers"
             :top-sales="topSales"
@@ -90,8 +95,8 @@
             :page-size="pageSize"
             :total="contractTotal"
             @download="downloadContracts"
-            @load="loadContracts"
-            @page-change="setContractPage"
+            @load="handleContractLoad"
+            @page-change="handleContractPageChange"
             @update-filter="updateContractFilter"
           />
 
@@ -105,8 +110,8 @@
             :records="salesRecords"
             :total="salesTotal"
             @download="downloadSales"
-            @load="loadSalesRecords"
-            @page-change="setSalesPage"
+            @load="handleSalesLoad"
+            @page-change="handleSalesPageChange"
             @update-filter="updateSalesFilter"
           />
 
@@ -120,11 +125,12 @@
             :observations="observations"
             :page="observationPage"
             :page-size="pageSize"
+            :production="observationProduction"
             :run-loading="observationRunLoading"
             :selected-observation="selectedObservation"
             :total="observationTotal"
             @load="handleObservationLoad"
-            @page-change="setObservationPage"
+            @page-change="handleObservationPageChange"
             @run="runObservationProducer"
             @select="selectObservation"
             @update-filter="updateObservationFilter"
@@ -160,8 +166,9 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CollectionConfigSection from '@/components/data-ops/CollectionConfigSection.vue'
@@ -182,8 +189,18 @@ import {
   useDataOpsConsole
 } from '@/composables/useDataOpsConsole'
 import { useUserStore } from '@/store/user'
+import {
+  dataOpsSectionPath,
+  resolveDataOpsSection
+} from '@/utils/dataOpsNavigation'
 
-const activeSection = ref('executive')
+const route = useRoute()
+const router = useRouter()
+const scrollContainer = ref(null)
+const originalDocumentTitle = document.title
+const activeSection = computed(() =>
+  resolveDataOpsSection(route.params.section)
+)
 const userStore = useUserStore()
 const { locale, t } = useI18n()
 const {
@@ -201,15 +218,13 @@ const {
   insights,
   kpiCards,
   loadAll,
-  loadContracts,
-  loadObservations,
-  loadSalesRecords,
   loading,
   observationDetailLoading,
   observationError,
   observationFeedback,
   observationFilters,
   observationPage,
+  observationProduction,
   observationRunLoading,
   observations,
   observationTotal,
@@ -238,9 +253,6 @@ const {
   saveGlobalConfig,
   selectObservation,
   selectedObservation,
-  setContractPage,
-  setObservationPage,
-  setSalesPage,
   summary,
   syncBannerClass,
   syncBannerText,
@@ -319,6 +331,14 @@ const activeNav = computed(() =>
   normalizeActiveNav(
     navItems.value.find((item) => item.key === activeSection.value)
   )
+)
+
+watch(
+  () => activeNav.value?.label,
+  (label) => {
+    document.title = label ? `${label} · Tower` : 'Tower'
+  },
+  { immediate: true }
 )
 
 const contractColumns = computed(() => [
@@ -404,7 +424,7 @@ async function refreshCurrentSection() {
 async function handlePreflight() {
   const ok = await runPreflight()
   if (ok) {
-    activeSection.value = 'sync'
+    selectSection('sync')
   }
 }
 
@@ -412,8 +432,7 @@ function selectSection(key) {
   if (key === 'config' && !canManageSync.value) {
     return
   }
-  activeSection.value = key
-  refreshActive(key, canManageSync.value)
+  router.push(dataOpsSectionPath(key))
 }
 
 function updateContractFilter(key, value) {
@@ -430,15 +449,148 @@ function updateObservationFilter(key, value) {
 
 function handleObservationLoad() {
   observationPage.value = 1
-  loadObservations()
+  commitSectionQuery('observations')
 }
 
-onMounted(() => loadAll(canManageSync.value))
+function handleContractLoad() {
+  contractPage.value = 1
+  commitSectionQuery('contracts')
+}
+
+function handleSalesLoad() {
+  salesPage.value = 1
+  commitSectionQuery('sales')
+}
+
+function handleContractPageChange(page) {
+  contractPage.value = page
+  commitSectionQuery('contracts')
+}
+
+function handleSalesPageChange(page) {
+  salesPage.value = page
+  commitSectionQuery('sales')
+}
+
+function handleObservationPageChange(page) {
+  observationPage.value = page
+  commitSectionQuery('observations')
+}
+
+function sectionQuery(section) {
+  if (section === 'contracts') {
+    return compactQuery({
+      ...contractFilters.value,
+      page: contractPage.value > 1 ? contractPage.value : ''
+    })
+  }
+  if (section === 'sales') {
+    return compactQuery({
+      ...salesFilters.value,
+      page: salesPage.value > 1 ? salesPage.value : ''
+    })
+  }
+  if (section === 'observations') {
+    return compactQuery({
+      ...observationFilters.value,
+      status:
+        observationFilters.value.status === 'active'
+          ? ''
+          : observationFilters.value.status,
+      page: observationPage.value > 1 ? observationPage.value : ''
+    })
+  }
+  return {}
+}
+
+async function commitSectionQuery(section) {
+  const query = sectionQuery(section)
+  if (sameQuery(route.query, query)) {
+    await refreshActive(section, canManageSync.value)
+    return
+  }
+  await router.replace({ path: dataOpsSectionPath(section), query })
+}
+
+function hydrateSectionQuery(section) {
+  const query = route.query
+  if (section === 'contracts') {
+    Object.assign(contractFilters.value, {
+      customer_name: queryValue(query.customer_name),
+      signing_entity: queryValue(query.signing_entity),
+      sales_person: queryValue(query.sales_person),
+      status: queryValue(query.status)
+    })
+    contractPage.value = queryPage(query.page)
+  } else if (section === 'sales') {
+    Object.assign(salesFilters.value, {
+      status: queryValue(query.status),
+      region: queryValue(query.region),
+      product_type: queryValue(query.product_type)
+    })
+    salesPage.value = queryPage(query.page)
+  } else if (section === 'observations') {
+    Object.assign(observationFilters.value, {
+      observation_type: queryValue(query.observation_type),
+      severity: queryValue(query.severity),
+      status: queryValue(query.status) || 'active'
+    })
+    observationPage.value = queryPage(query.page)
+  }
+}
+
+function compactQuery(values) {
+  return Object.fromEntries(
+    Object.entries(values).filter(([, value]) => value !== '' && value != null)
+  )
+}
+
+function queryValue(value) {
+  return Array.isArray(value) ? String(value[0] || '') : String(value || '')
+}
+
+function queryPage(value) {
+  const page = Number(queryValue(value))
+  return Number.isInteger(page) && page > 0 ? page : 1
+}
+
+function sameQuery(left, right) {
+  const normalize = (value) =>
+    JSON.stringify(
+      Object.entries(value)
+        .map(([key, item]) => [key, queryValue(item)])
+        .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
+    )
+  return normalize(left) === normalize(right)
+}
+
+let routeReady = false
+
+watch(
+  () => route.fullPath,
+  async () => {
+    if (!routeReady) return
+    hydrateSectionQuery(activeSection.value)
+    await nextTick()
+    scrollContainer.value?.scrollTo({ top: 0 })
+    await refreshActive(activeSection.value, canManageSync.value)
+  }
+)
+
+onMounted(async () => {
+  hydrateSectionQuery(activeSection.value)
+  await loadAll(canManageSync.value)
+  routeReady = true
+})
+
+onBeforeUnmount(() => {
+  document.title = originalDocumentTitle
+})
 </script>
 
 <style>
 .field-sm {
-  height: 2.25rem;
+  height: 2.75rem;
   border-radius: 0.5rem;
   border: 1px solid rgb(226 232 240);
   background: white;

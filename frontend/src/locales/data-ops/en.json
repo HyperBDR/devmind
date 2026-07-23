@@ -58,6 +58,9 @@
     "notSet": "Not set",
     "enabled": "Enabled",
     "disabled": "Disabled",
+    "active": "Active",
+    "expired": "Expired",
+    "pending": "Pending",
     "manual": "Manual",
     "hourly": "Hourly",
     "daily": "Daily",
@@ -85,6 +88,8 @@
     "severityLabel": "Severity",
     "allSeverities": "All severities",
     "empty": "No risk observations match these filters",
+    "notProducedYet": "Risk producers have not run yet, so no observations are available",
+    "noFilterResults": "Risk producers have run, but no observations match these filters",
     "detailTitle": "Observation and evidence",
     "detailDescription": "Review the business fact, calculation, and current source snapshot",
     "loadingDetail": "Loading evidence…",
@@ -270,6 +275,8 @@
   },
   "config": {
     "collectionTitle": "Feishu Base Collection Settings",
+    "showTechnicalIds": "Show technical IDs",
+    "hideTechnicalIds": "Hide technical IDs",
     "enabled": "Enabled",
     "source": "Source",
     "table": "Feishu Table",
@@ -286,7 +293,15 @@
     "secretPlaceholder": "Leave blank to keep unchanged",
     "timezone": "Date timezone",
     "timeout": "Job timeout (hours)",
-    "save": "Save Global Settings"
+    "save": "Save Global Settings",
+    "syncStatuses": {
+      "ok": "Sync healthy",
+      "warning": "Needs attention",
+      "failed": "Sync failed",
+      "pending": "Waiting to sync",
+      "running": "Syncing",
+      "unknown": "Status unknown"
+    }
   },
   "filters": {
     "customer": "Customer name",
@@ -398,6 +413,18 @@
   },
   "executive": {
     "conclusion": "{month} Business Summary",
+    "dataMonthLabel": "Data month {month}",
+    "lastSync": "Last sync {time}",
+    "lastSyncUnknown": "No successful sync yet",
+    "analysisReady": "Analysis basis ready",
+    "analysisLimited": "Analysis limited: review each currency separately",
+    "analysisBlocked": "Sync failure: avoid decisions until resolved",
+    "riskSummary": "Risk Category Summary",
+    "renewalCategory": "Contract renewals",
+    "receivableCategory": "Outstanding receivables",
+    "riskHorizon": "Next {days} days",
+    "needsFollowUp": "Needs follow-up",
+    "highPotentialLabel": "High potential",
     "todayPriority": "Today's Priorities",
     "items": "{count} items",
     "noPriority": "No priority actions",

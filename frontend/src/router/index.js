@@ -177,6 +177,16 @@ const routes = [
     }
   },
   {
+    path: '/data-ops/:section(pipeline|contracts|sales|observations|sync|config)',
+    name: 'DataOpsSection',
+    component: () => import('@/pages/DataOps.vue'),
+    meta: {
+      requiresAuth: true,
+      requiredFeature: 'data_ops',
+      appKey: 'data_ops'
+    }
+  },
+  {
     path: '/cloud-billing/tasks',
     name: 'CloudBillingTasks',
     component: () => import('@/pages/CloudBilling/Tasks.vue'),

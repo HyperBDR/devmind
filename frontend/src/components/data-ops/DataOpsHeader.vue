@@ -39,7 +39,7 @@
     <div class="flex flex-wrap items-center gap-2">
       <button
         type="button"
-        class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:bg-slate-800 disabled:opacity-100"
+        class="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 disabled:cursor-wait disabled:bg-slate-800 disabled:opacity-100"
         :aria-busy="loading"
         :disabled="loading || syncLoading"
         @click="$emit('refresh')"
@@ -61,15 +61,13 @@
           <path d="M16 16h5v5" />
         </svg>
         {{
-          loading
-            ? t('dataOps.header.refreshing')
-            : t('dataOps.header.refresh')
+          loading ? t('dataOps.header.refreshing') : t('dataOps.header.refresh')
         }}
       </button>
       <button
-        v-if="canManageSync && activeNav?.key !== 'executive'"
+        v-if="canManageSync && showSyncActions"
         type="button"
-        class="inline-flex h-10 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:cursor-wait disabled:text-slate-400"
+        class="inline-flex h-11 items-center justify-center rounded-lg bg-white px-4 text-sm font-medium text-slate-700 ring-1 ring-inset ring-slate-300 transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-400 disabled:cursor-wait disabled:text-slate-400"
         :disabled="preflightLoading || loading || syncLoading"
         @click="$emit('preflight')"
       >
@@ -80,9 +78,9 @@
         }}
       </button>
       <button
-        v-if="canManageSync && activeNav?.key !== 'executive'"
+        v-if="canManageSync && showSyncActions"
         type="button"
-        class="inline-flex h-10 min-w-28 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:cursor-wait disabled:bg-indigo-500 disabled:opacity-100"
+        class="inline-flex h-11 min-w-28 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white transition-colors hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:ring-offset-2 disabled:cursor-wait disabled:bg-indigo-500 disabled:opacity-100"
         :aria-busy="syncLoading"
         :disabled="syncLoading || loading || preflightLoading"
         @click="$emit('full-sync')"
@@ -112,17 +110,22 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
 
-defineProps({
+const props = defineProps({
   activeNav: { type: Object, default: null },
   canManageSync: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
   preflightLoading: { type: Boolean, default: false },
-  syncLoading: { type: Boolean, default: false },
+  syncLoading: { type: Boolean, default: false }
 })
+
+const showSyncActions = computed(() =>
+  ['sync', 'config'].includes(props.activeNav?.key)
+)
 
 defineEmits(['refresh', 'preflight', 'full-sync'])
 </script>

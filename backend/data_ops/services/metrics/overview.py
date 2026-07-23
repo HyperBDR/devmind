@@ -3,11 +3,6 @@ from __future__ import annotations
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Count, Sum
-from django.db.models.functions import Coalesce
-from django.db.models.functions import TruncMonth
-from django.utils import timezone
-
 from data_ops.models import (
     Contract,
     DomesticLedger,
@@ -22,7 +17,9 @@ from data_ops.services.metrics.owner_identities import (
     owner_payload,
     owner_payload_from_record,
 )
-
+from django.db.models import Count, Sum
+from django.db.models.functions import Coalesce, TruncMonth
+from django.utils import timezone
 
 ZERO_DECIMAL = Decimal("0")
 
@@ -44,9 +41,7 @@ def _amounts_by_currency(queryset, amount_field: str) -> list[dict]:
     buckets = {}
     for item in rows:
         currency = normalize_currency(item["currency"])
-        buckets[currency] = buckets.get(currency, 0.0) + _number(
-            item["amount"]
-        )
+        buckets[currency] = buckets.get(currency, 0.0) + _number(item["amount"])
     return [
         {"currency": currency, "amount": amount}
         for currency, amount in sorted(buckets.items())
@@ -60,10 +55,7 @@ def _single_currency_amount(items: list[dict]) -> float | None:
 
 
 def _amount_map(items: list[dict], value_key: str = "amount") -> dict:
-    return {
-        item["currency"]: item[value_key]
-        for item in items
-    }
+    return {item["currency"]: item[value_key] for item in items}
 
 
 def _percentage_change(current: float | None, previous: float | None):
@@ -295,38 +287,78 @@ def get_executive_overview() -> dict:
 
 
 def get_data_quality() -> dict:
-    statuses = list(
-        SyncTableStatus.objects.order_by("source_key", "table_key")
-    )
+    statuses = list(SyncTableStatus.objects.order_by("source_key", "table_key"))
     running_sync_count = SyncJob.objects.filter(
         status__in=["pending", "running"],
     ).count()
     failed_count = sum(1 for item in statuses if item.status == "failed")
     warning_count = sum(1 for item in statuses if item.status == "warning")
-    overall_status = "ok"
+    sync_status = "ok"
     if failed_count:
-        overall_status = "failed"
+        sync_status = "failed"
     elif warning_count:
+        sync_status = "warning"
+
+    summary = get_summary()
+    currency_groups = [
+        summary["total_contract_amount_by_currency"],
+        summary["total_received_amount_by_currency"],
+        summary["total_outstanding_amount_by_currency"],
+        summary["total_expense_amount_by_currency"],
+    ]
+    currency_counts = [
+        sum(1 for item in items if abs(item["amount"]) > 0) for items in currency_groups
+    ]
+    has_mixed_currency = any(count > 1 for count in currency_counts)
+
+    overall_status = sync_status
+    if overall_status == "ok" and has_mixed_currency:
         overall_status = "warning"
+
+    issues = []
+    if has_mixed_currency:
+        issues.append(
+            {
+                "id": "mixed-currency",
+                "title": "Mixed-currency aggregation",
+                "severity": "warning",
+                "count": max(currency_counts),
+                "detail": (
+                    "Amounts retain their source currencies and cannot be "
+                    "combined into one decision metric."
+                ),
+                "recommendation": (
+                    "Review currency buckets separately until a governed "
+                    "exchange-rate policy is available."
+                ),
+            }
+        )
+    issues.extend(
+        {
+            "id": f"{item.source_key}:{item.table_key}",
+            "title": item.table_name,
+            "severity": item.status,
+            "count": len(item.missing_fields or []),
+            "detail": item.message,
+            "recommendation": item.resolution_hint,
+        }
+        for item in statuses
+        if item.status in {"failed", "warning"}
+    )
 
     return {
         "overall_status": overall_status,
+        "analysis_status": (
+            "blocked"
+            if sync_status == "failed"
+            else "limited" if overall_status == "warning" else "ready"
+        ),
+        "sync_status": sync_status,
         "running_sync_count": running_sync_count,
         "failed_sync_count": failed_count,
         "warning_sync_count": warning_count,
         "currency_note": "Amounts are not normalized across currencies yet.",
-        "issues": [
-            {
-                "id": f"{item.source_key}:{item.table_key}",
-                "title": item.table_name,
-                "severity": item.status,
-                "count": len(item.missing_fields or []),
-                "detail": item.message,
-                "recommendation": item.resolution_hint,
-            }
-            for item in statuses
-            if item.status in {"failed", "warning"}
-        ],
+        "issues": issues,
     }
 
 
@@ -411,23 +443,18 @@ def get_top_customers() -> dict:
             item["customer_name"],
             normalize_currency(item["currency"]),
         )
-        sales_by_customer_currency.setdefault(key, []).append(
-            item["sales_person"]
-        )
+        sales_by_customer_currency.setdefault(key, []).append(item["sales_person"])
 
     customer_amounts = {}
-    amount_rows = (
-        income_rows.values("customer_name", "currency")
-        .annotate(
-            received_amount=Coalesce(
-                Sum("payment_received"),
-                ZERO_DECIMAL,
-            ),
-            outstanding_amount=Coalesce(
-                Sum("outstanding"),
-                ZERO_DECIMAL,
-            ),
-        )
+    amount_rows = income_rows.values("customer_name", "currency").annotate(
+        received_amount=Coalesce(
+            Sum("payment_received"),
+            ZERO_DECIMAL,
+        ),
+        outstanding_amount=Coalesce(
+            Sum("outstanding"),
+            ZERO_DECIMAL,
+        ),
     )
     for item in amount_rows:
         customer_name = item["customer_name"]
@@ -438,9 +465,7 @@ def get_top_customers() -> dict:
             {"received_amount": 0.0, "outstanding_amount": 0.0},
         )
         amounts["received_amount"] += _number(item["received_amount"])
-        amounts["outstanding_amount"] += _number(
-            item["outstanding_amount"]
-        )
+        amounts["outstanding_amount"] += _number(item["outstanding_amount"])
 
     customer_rows = []
     for (customer_name, currency), amounts in customer_amounts.items():
@@ -458,9 +483,7 @@ def get_top_customers() -> dict:
                 "received_amount": amounts["received_amount"],
                 "outstanding_amount": outstanding_amount,
                 "contract_count": contract_counts.get(customer_name, 0),
-                "risk_level": (
-                    "medium" if outstanding_amount > 0 else "low"
-                ),
+                "risk_level": ("medium" if outstanding_amount > 0 else "low"),
             }
         )
 
@@ -495,18 +518,15 @@ def get_top_sales() -> dict:
         .annotate(project_count=Count("id"))
     }
     amount_buckets = {}
-    amount_rows = (
-        income_rows.values("sales_person", "currency")
-        .annotate(
-            received_amount=Coalesce(
-                Sum("payment_received"),
-                ZERO_DECIMAL,
-            ),
-            outstanding_amount=Coalesce(
-                Sum("outstanding"),
-                ZERO_DECIMAL,
-            ),
-        )
+    amount_rows = income_rows.values("sales_person", "currency").annotate(
+        received_amount=Coalesce(
+            Sum("payment_received"),
+            ZERO_DECIMAL,
+        ),
+        outstanding_amount=Coalesce(
+            Sum("outstanding"),
+            ZERO_DECIMAL,
+        ),
     )
     for item in amount_rows:
         sales_person = item["sales_person"]
@@ -517,9 +537,7 @@ def get_top_sales() -> dict:
             {"received_amount": 0.0, "outstanding_amount": 0.0},
         )
         amounts["received_amount"] += _number(item["received_amount"])
-        amounts["outstanding_amount"] += _number(
-            item["outstanding_amount"]
-        )
+        amounts["outstanding_amount"] += _number(item["outstanding_amount"])
 
     sales_rows = []
     for (sales_person, currency), amounts in amount_buckets.items():
@@ -536,9 +554,7 @@ def get_top_sales() -> dict:
                     sales_person,
                     0,
                 ),
-                "risk_level": (
-                    "medium" if outstanding_amount > 0 else "low"
-                ),
+                "risk_level": ("medium" if outstanding_amount > 0 else "low"),
             }
         )
     return {
@@ -575,8 +591,7 @@ def get_risks() -> dict:
             ),
             "risk_level": (
                 "high"
-                if item.expected_payment_date
-                and item.expected_payment_date < today
+                if item.expected_payment_date and item.expected_payment_date < today
                 else "medium"
             ),
         }
@@ -611,9 +626,7 @@ def get_opportunities() -> dict:
     return {
         "summary": {
             "high_potential_count": summary["count"],
-            "high_potential_total_amount": _number(
-                summary["total_amount"]
-            ),
+            "high_potential_total_amount": _number(summary["total_amount"]),
         },
         "items": items,
     }
@@ -679,9 +692,7 @@ def get_project_init_kanban() -> dict:
             "domestic_international": item.domestic_international,
             "customer_full_name": item.customer_full_name,
             "oa_initiation_date": (
-                item.oa_initiation_date.isoformat()
-                if item.oa_initiation_date
-                else None
+                item.oa_initiation_date.isoformat() if item.oa_initiation_date else None
             ),
             "project_name": item.project_name,
             "sales_person": item.sales_person,
@@ -716,9 +727,7 @@ def get_oversea_project_kanban() -> dict:
             "country": item.country,
             "stat_amount_usd": _number(item.stat_amount_usd),
             "license_expiry": (
-                item.license_expiry.isoformat()
-                if item.license_expiry
-                else None
+                item.license_expiry.isoformat() if item.license_expiry else None
             ),
             "project_owner": item.project_owner,
             "order_type": item.order_type,
@@ -863,9 +872,7 @@ def _rank_amounts(queryset, name_field: str, amount_field: str) -> list:
             item[name_field] or "-",
             normalize_currency(item["currency"]),
         )
-        amount_buckets[key] = amount_buckets.get(key, 0.0) + _number(
-            item["amount"]
-        )
+        amount_buckets[key] = amount_buckets.get(key, 0.0) + _number(item["amount"])
 
     ranked = []
     counts = {}
@@ -973,9 +980,7 @@ def _opportunity_items(*, limit: int) -> list:
             "domestic_international": item.domestic_international,
             "estimated_amount": _number(item.estimated_amount),
             "oa_initiation_date": (
-                item.oa_initiation_date.isoformat()
-                if item.oa_initiation_date
-                else None
+                item.oa_initiation_date.isoformat() if item.oa_initiation_date else None
             ),
             "risk_level": "low",
         }
@@ -1021,9 +1026,7 @@ def _filter_options(
     for field in fields:
         values = queryset.values_list(field, flat=True).distinct()
         if field == "currency":
-            payload[field] = sorted(
-                {normalize_currency(value) for value in values}
-            )
+            payload[field] = sorted({normalize_currency(value) for value in values})
         else:
             payload[field] = sorted(value for value in values if value)
     return payload
@@ -1062,9 +1065,7 @@ def _domestic_ledger_groups(queryset) -> list[dict]:
             },
         )
         bucket["record_count"] += item["record_count"]
-        bucket["total_contract_amount"] += _number(
-            item["total_contract_amount"]
-        )
+        bucket["total_contract_amount"] += _number(item["total_contract_amount"])
         bucket["payment_received"] += _number(item["payment_received"])
         bucket["outstanding"] += _number(item["outstanding"])
     return [buckets[key] for key in sorted(buckets)]

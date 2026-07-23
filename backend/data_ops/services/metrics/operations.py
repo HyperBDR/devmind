@@ -4,11 +4,6 @@ from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Count, Q, Sum
-from django.db.models.functions import Coalesce, TruncMonth
-from django.http import Http404
-from django.utils import timezone
-
 from data_ops.models import (
     Contract,
     ContractHistory,
@@ -21,10 +16,11 @@ from data_ops.models import (
     SalesRecord,
 )
 from data_ops.services.metrics.currency import normalize_currency
-from data_ops.services.metrics.owner_identities import (
-    owner_payload_from_record,
-)
-
+from data_ops.services.metrics.owner_identities import owner_payload_from_record
+from django.db.models import Count, Q, Sum
+from django.db.models.functions import Coalesce, TruncMonth
+from django.http import Http404
+from django.utils import timezone
 
 ZERO_DECIMAL = Decimal("0")
 
@@ -317,9 +313,7 @@ def _project_display_amount_currency(project: Project) -> tuple[float, str]:
         value = _number(amount)
         if value:
             return value, normalize_currency(currency)
-    return 0.0, normalize_currency(
-        project.currency or project.payment_currency
-    )
+    return 0.0, normalize_currency(project.currency or project.payment_currency)
 
 
 def _project_amounts_by_currency(queryset) -> list[dict]:
@@ -334,6 +328,15 @@ def _project_amounts_by_currency(queryset) -> list[dict]:
         {"currency": currency, "amount": amount}
         for currency, amount in sorted(buckets.items())
     ]
+
+
+def _project_business_scope(project: Project) -> str:
+    value = str(project.domestic_type or "").strip().lower()
+    if "海外" in value or "oversea" in value:
+        return ProjectScope.OVERSEAS
+    if "国内" in value or "domestic" in value:
+        return ProjectScope.DOMESTIC
+    return project.project_scope
 
 
 def get_pipeline_projects_data(
@@ -380,37 +383,47 @@ def get_pipeline_ledgers_data() -> dict:
 def get_pipeline_summary_data() -> dict:
     today = timezone.localdate()
     deadline_30 = today + timedelta(days=30)
-    domestic_rows = Project.objects.filter(project_scope=ProjectScope.DOMESTIC)
-    overseas_rows = Project.objects.filter(project_scope=ProjectScope.OVERSEAS)
+    projects = list(Project.objects.all())
+    domestic_rows = [
+        item
+        for item in projects
+        if _project_business_scope(item) == ProjectScope.DOMESTIC
+    ]
+    overseas_rows = [
+        item
+        for item in projects
+        if _project_business_scope(item) == ProjectScope.OVERSEAS
+    ]
     domestic_amounts = _project_amounts_by_currency(domestic_rows)
     overseas_amounts = _project_amounts_by_currency(overseas_rows)
-    at_risk = Contract.objects.filter(
-        service_end__isnull=False,
-        service_end__lte=deadline_30,
-    ).exclude(status__in=["已终止", "已归档"]).count()
-    at_risk += overseas_rows.filter(
-        license_expiry__isnull=False,
-        license_expiry__lte=deadline_30,
-    ).count()
+    at_risk = (
+        Contract.objects.filter(
+            service_end__isnull=False,
+            service_end__lte=deadline_30,
+        )
+        .exclude(status__in=["已终止", "已归档"])
+        .count()
+    )
+    at_risk += sum(
+        1
+        for item in overseas_rows
+        if item.license_expiry and item.license_expiry <= deadline_30
+    )
     at_risk += DomesticLedger.objects.filter(
         ledger_type="收入",
         outstanding__gt=0,
         expected_payment_date__lt=today,
     ).count()
     return {
-        "total_projects": domestic_rows.count() + overseas_rows.count(),
-        "domestic_projects": domestic_rows.count(),
-        "oversea_projects": overseas_rows.count(),
-        "domestic_amount": _number(
-            domestic_rows.aggregate(
-                value=Coalesce(Sum("estimated_amount"), ZERO_DECIMAL),
-            )["value"],
+        "total_projects": len(projects),
+        "domestic_projects": len(domestic_rows),
+        "oversea_projects": len(overseas_rows),
+        "domestic_amount": sum(
+            _number(item.estimated_amount) for item in domestic_rows
         ),
         "domestic_amount_by_currency": domestic_amounts,
-        "oversea_amount_usd": _number(
-            overseas_rows.aggregate(
-                value=Coalesce(Sum("stat_amount_usd"), ZERO_DECIMAL),
-            )["value"],
+        "oversea_amount_usd": sum(
+            _number(item.stat_amount_usd) for item in overseas_rows
         ),
         "oversea_amount_by_currency": overseas_amounts,
         "high_potential": Project.objects.filter(
@@ -440,6 +453,7 @@ def get_pipeline_insights_data() -> dict:
 
 def get_insights_data() -> dict:
     return {
+        "risk_horizon_days": 30,
         "monthly_signings": _monthly_amounts(
             Contract.objects.exclude(signing_date__isnull=True),
             "signing_date",
@@ -459,7 +473,7 @@ def get_insights_data() -> dict:
             "region",
             10,
         ),
-        "upcoming_renewals": _upcoming_renewals(timezone.localdate(), 90),
+        "upcoming_renewals": _upcoming_renewals(timezone.localdate(), 30),
         "contract_status_distribution": _count_distribution(
             Contract,
             "status",
@@ -736,11 +750,15 @@ def _overdue_days(value) -> int:
 
 def _upcoming_renewals(today, days: int) -> list[dict]:
     deadline = today + timedelta(days=days)
-    rows = Contract.objects.filter(
-        service_end__isnull=False,
-        service_end__gte=today,
-        service_end__lte=deadline,
-    ).exclude(status__in=["已终止", "已归档"]).order_by("service_end")
+    rows = (
+        Contract.objects.filter(
+            service_end__isnull=False,
+            service_end__gte=today,
+            service_end__lte=deadline,
+        )
+        .exclude(status__in=["已终止", "已归档"])
+        .order_by("service_end")
+    )
     return [
         {
             "customer_name": item.customer_name or "-",
@@ -767,9 +785,11 @@ def _license_alerts(today, days: int) -> list[dict]:
             "project_name": item.project_name,
             "country": item.country,
             "license_expiry": _date(item.license_expiry),
-            "days_left": item.license_days_left
-            if item.license_days_left is not None
-            else (item.license_expiry - today).days,
+            "days_left": (
+                item.license_days_left
+                if item.license_days_left is not None
+                else (item.license_expiry - today).days
+            ),
             "project_owner": item.project_owner,
             **owner_payload_from_record(item, "project_owner"),
         }
@@ -918,10 +938,7 @@ def _top_amounts(
 def _monthly_payment_trend() -> list[dict]:
     rows = (
         DomesticLedger.objects.filter(ledger_type="收入")
-        .filter(
-            Q(receipt_time__isnull=False)
-            | Q(expected_payment_date__isnull=False)
-        )
+        .filter(Q(receipt_time__isnull=False) | Q(expected_payment_date__isnull=False))
         .annotate(
             month=TruncMonth(
                 Coalesce("receipt_time", "expected_payment_date"),

@@ -3,15 +3,15 @@ import io
 from datetime import timedelta
 
 import pytest
-from django.utils import timezone
-
 from data_ops.models import Contract
 from data_ops.services.metrics.operations import (
     _safe_int,
     _upcoming_renewals,
+    get_insights_data,
     list_contracts_data,
 )
 from data_ops.views import _csv_response
+from django.utils import timezone
 
 
 def test_safe_int_uses_default_for_invalid_values():
@@ -74,6 +74,32 @@ def test_upcoming_renewals_uses_customer_name_contract():
     rows = _upcoming_renewals(today, 90)
 
     assert rows[0]["customer_name"] == "Example Customer"
+
+
+@pytest.mark.django_db
+def test_executive_insights_use_same_renewal_window_as_observations():
+    today = timezone.localdate()
+    Contract.all_objects.create(
+        source_app_token="app",
+        source_table_id="contracts",
+        source_record_id="inside-window",
+        contract_number="INSIDE",
+        service_end=today + timedelta(days=30),
+    )
+    Contract.all_objects.create(
+        source_app_token="app",
+        source_table_id="contracts",
+        source_record_id="outside-window",
+        contract_number="OUTSIDE",
+        service_end=today + timedelta(days=31),
+    )
+
+    result = get_insights_data()
+
+    assert result["risk_horizon_days"] == 30
+    assert [item["contract_number"] for item in result["upcoming_renewals"]] == [
+        "INSIDE",
+    ]
 
 
 def test_csv_response_uses_stable_columns_and_escapes_formulas():

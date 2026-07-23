@@ -2,13 +2,12 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from django.urls import reverse
-from django.utils import timezone
-
 from data_ops.models import Contract, DomesticLedger, Observation
 from data_ops.services.knowledge.contract_renewal import (
     produce_contract_renewal_observations,
 )
+from django.urls import reverse
+from django.utils import timezone
 
 
 def _create_expiring_contract(*, as_of, days_until_expiry=10):
@@ -52,6 +51,32 @@ def test_observation_list_is_paginated_and_filterable(
     assert response.data["count"] == 1
     assert len(response.data["results"]) == 1
     assert response.data["results"][0]["subject_type"] == "contract"
+    latest_run = response.data["production"]["latest_runs"]
+    assert latest_run["contract-renewal-risk"]["status"] == "succeeded"
+
+
+@pytest.mark.django_db
+def test_observation_list_explains_when_production_has_not_run(
+    api_client,
+    data_ops_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "accounts.permissions.get_effective_feature_keys",
+        lambda user: ["data_ops"],
+    )
+    api_client.force_authenticate(user=data_ops_user)
+
+    response = api_client.get(reverse("data-ops-observations"))
+
+    assert response.status_code == 200
+    assert response.data["count"] == 0
+    assert response.data["production"] == {
+        "latest_runs": {
+            "contract-renewal-risk": None,
+            "receivable-overdue-risk": None,
+        }
+    }
 
 
 @pytest.mark.django_db

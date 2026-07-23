@@ -58,6 +58,9 @@
     "notSet": "未设置",
     "enabled": "已启用",
     "disabled": "未启用",
+    "active": "生效中",
+    "expired": "已到期",
+    "pending": "待生效",
     "manual": "手动",
     "hourly": "每小时",
     "daily": "每天",
@@ -70,7 +73,7 @@
     "lastPage": "末页"
   },
   "observations": {
-    "title": "Observation Explorer",
+    "title": "风险观察与证据",
     "description": "从业务风险事实追溯到生产规则和源数据证据；金额始终保留原始币种。",
     "producer": "生产规则",
     "runNow": "立即生产",
@@ -84,7 +87,9 @@
     "allStatuses": "全部状态",
     "severityLabel": "严重度",
     "allSeverities": "全部严重度",
-    "empty": "当前筛选条件下没有风险观察",
+    "empty": "暂无风险观察",
+    "notProducedYet": "风险规则尚未运行，当前没有可展示的观察结果",
+    "noFilterResults": "风险规则已运行，当前筛选条件下没有匹配结果",
     "detailTitle": "观察与证据",
     "detailDescription": "审核业务事实、计算结果和当前源数据快照",
     "loadingDetail": "正在加载证据…",
@@ -270,6 +275,8 @@
   },
   "config": {
     "collectionTitle": "飞书多维表格采集配置",
+    "showTechnicalIds": "显示技术标识",
+    "hideTechnicalIds": "隐藏技术标识",
     "enabled": "启用",
     "source": "数据源",
     "table": "飞书表",
@@ -286,7 +293,15 @@
     "secretPlaceholder": "留空保持不变",
     "timezone": "日期时区",
     "timeout": "任务超时(小时)",
-    "save": "保存全局配置"
+    "save": "保存全局配置",
+    "syncStatuses": {
+      "ok": "同步正常",
+      "warning": "需要关注",
+      "failed": "同步失败",
+      "pending": "等待同步",
+      "running": "同步中",
+      "unknown": "状态未知"
+    }
   },
   "filters": {
     "customer": "客户名称",
@@ -398,6 +413,18 @@
   },
   "executive": {
     "conclusion": "{month} 经营结论",
+    "dataMonthLabel": "数据月份 {month}",
+    "lastSync": "最近同步 {time}",
+    "lastSyncUnknown": "尚无成功同步记录",
+    "analysisReady": "分析口径可用",
+    "analysisLimited": "分析口径受限：请按币种分别判断",
+    "analysisBlocked": "数据同步异常：暂不建议决策",
+    "riskSummary": "风险类别摘要",
+    "renewalCategory": "合同续约",
+    "receivableCategory": "待回款",
+    "riskHorizon": "未来 {days} 天",
+    "needsFollowUp": "需要跟进",
+    "highPotentialLabel": "高潜",
     "todayPriority": "今日优先处理",
     "items": "{count} 项",
     "noPriority": "暂无需要优先处理的事项",

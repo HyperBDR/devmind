@@ -7,39 +7,35 @@
         T
       </div>
       <div>
-        <h1 class="text-sm font-bold">Tower</h1>
+        <div class="text-sm font-bold">Tower</div>
         <p class="text-[10px] text-slate-400">
           {{ t('dataOps.brand.subtitle') }}
         </p>
       </div>
     </div>
-    <nav
-      class="flex gap-4 overflow-x-auto px-3 pb-3"
-      :aria-label="t('dataOps.nav.mobileLabel')"
-    >
-      <div
-        v-for="group in resolvedNavGroups"
-        :key="group.key"
-        class="flex shrink-0 items-center gap-2"
+    <nav class="px-4 pb-4" :aria-label="t('dataOps.nav.mobileLabel')">
+      <label
+        class="block text-xs font-semibold text-slate-300"
+        for="data-ops-mobile-section"
       >
-        <span class="text-[10px] font-semibold text-slate-500">
-          {{ group.label }}
-        </span>
-        <button
-          v-for="item in group.items"
-          :key="item.key"
-          type="button"
-          class="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold"
-          :class="
-            activeSection === item.key
-              ? 'bg-indigo-600 text-white'
-              : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-          "
-          @click="$emit('select', item.key)"
+        {{ t('dataOps.nav.mobileLabel') }}
+      </label>
+      <select
+        id="data-ops-mobile-section"
+        class="mt-1 h-11 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 text-sm font-semibold text-white outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-400/30"
+        :value="activeSection"
+        @change="emit('select', $event.target.value)"
+      >
+        <optgroup
+          v-for="group in resolvedNavGroups"
+          :key="group.key"
+          :label="group.label"
         >
-          {{ item.label }}
-        </button>
-      </div>
+          <option v-for="item in group.items" :key="item.key" :value="item.key">
+            {{ item.label }}
+          </option>
+        </optgroup>
+      </select>
     </nav>
   </div>
 
@@ -54,7 +50,7 @@
           T
         </div>
         <div>
-          <h1 class="text-sm font-bold">Tower</h1>
+          <div class="text-sm font-bold">Tower</div>
           <p class="text-[10px] text-slate-400">
             {{ t('dataOps.brand.subtitle') }}
           </p>
@@ -125,7 +121,7 @@ const props = defineProps({
   navItems: { type: Array, required: true }
 })
 
-defineEmits(['select'])
+const emit = defineEmits(['select'])
 
 const resolvedNavGroups = computed(() => {
   if (props.navGroups.length) {
