@@ -33,3 +33,17 @@ class QuotationSettingsTests(SimpleTestCase):
             settings.QUOTATION_MAX_PDF_HTML_BYTES,
             5 * 1024 * 1024,
         )
+        self.assertEqual(
+            settings.QUOTATION_MAX_PDF_XLSX_BYTES,
+            6 * 1024 * 1024,
+        )
+        self.assertEqual(
+            settings.QUOTATION_MAX_XLSX_EXPANDED_BYTES,
+            50 * 1024 * 1024,
+        )
+        self.assertEqual(
+            settings.QUOTATION_MAX_PDF_BYTES,
+            20 * 1024 * 1024,
+        )
+        self.assertEqual(settings.GOTENBERG_URL, "http://gotenberg:3000")
+        self.assertEqual(settings.GOTENBERG_TIMEOUT_SECONDS, 30)

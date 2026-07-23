@@ -1,4 +1,5 @@
 import type { Quotation } from '../types';
+import { buildQuotationExcelBlob } from './excelGenerator';
 import { buildQuotationExportBaseName, buildQuotationExportFileName } from './quotationFileName';
 import { buildQuotationPreviewModel } from './quotationPreviewModel';
 import type { PreviewLineItem, PreviewUser } from './quotationPreviewModel';
@@ -483,6 +484,17 @@ export async function downloadQuotationPdf(
   }
 
   try {
+    const blob = await buildQuotationPdfBlob(quote, currentUser);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = buildQuotationExportFileName(quote, 'pdf');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
+    return true;
+  } catch {
     const logoUrl = await toEmbeddedAssetUrl(oneProLogoUrl);
     const downloadBaseName = buildQuotationExportBaseName(quote);
     const html = buildPrintableQuotationHtml(quote, currentUser, {
@@ -490,28 +502,27 @@ export async function downloadQuotationPdf(
     });
     const printed = await printHtmlViaOffscreenFrame(html, downloadBaseName);
     if (printed) return true;
-    alert('无法打开打印预览，请允许弹窗后重试，或稍后再试。');
-    return false;
-  } catch {
     alert('导出 PDF 失败，请稍后重试。');
     return false;
   }
 }
 
-/** HTML print draft for Feishu upload (browser "Save as PDF" equivalent content). */
+/** Keep printable HTML as the local fallback when conversion is unavailable. */
 export function buildQuotationPrintHtmlBlob(quote: Quotation, currentUser?: PreviewUser): Blob {
   const html = buildPrintableQuotationHtml(quote, currentUser);
   return new Blob([html], { type: 'text/html;charset=utf-8' });
 }
 
-/** Build printable HTML with embedded assets, then render a real PDF via backend Playwright. */
+/** Build Excel once, then convert the workbook through Gotenberg LibreOffice. */
 export async function buildQuotationPdfBlob(
   quote: Quotation,
   currentUser?: PreviewUser,
 ): Promise<Blob> {
-  const { renderHtmlToPdfBlob } = await import('../api/pdf');
-  const logoUrl = await toEmbeddedAssetUrl(oneProLogoUrl);
-  const html = buildPrintableQuotationHtml(quote, currentUser, { logoUrl });
-  const fileName = buildQuotationExportFileName(quote, 'pdf');
-  return renderHtmlToPdfBlob(html, fileName);
+  const { renderExcelToPdfBlob } = await import('../api/pdf');
+  const excelBlob = await buildQuotationExcelBlob(quote, currentUser);
+  if (!excelBlob) {
+    throw new Error('Excel quotation generation failed');
+  }
+  const fileName = buildQuotationExportFileName(quote, 'xlsx');
+  return renderExcelToPdfBlob(excelBlob, fileName);
 }

@@ -299,6 +299,14 @@ class PreviewExcelBuilder {
         fitToWidth: 1,
         fitToHeight: 0,
         horizontalCentered: true,
+        margins: {
+          left: 0.47,
+          right: 0.47,
+          top: 0.47,
+          bottom: 0.47,
+          header: 0,
+          footer: 0,
+        },
       },
     });
     this.sheet.columns = [
@@ -818,6 +826,7 @@ class PreviewExcelBuilder {
     this.addTotals(model);
     this.addNotes(model);
     await this.addSignatures(model);
+    this.sheet.pageSetup.printArea = `A1:G${this.row - 1}`;
     return this.workbook;
   }
 }

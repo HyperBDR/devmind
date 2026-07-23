@@ -219,7 +219,7 @@
         "toastTemplateRequired": "Set up an Excel template in Catalog before downloading",
         "toastExcelDownloadStarted": "Downloading Excel for {quoteNo}",
         "toastExcelDownloadFailed": "Excel download failed. Check the template in Catalog",
-        "toastPdfDownloadStarted": "Print dialog opened for {quoteNo} — choose Save as PDF",
+        "toastPdfDownloadStarted": "PDF export started for {quoteNo}",
         "toastPdfDownloadFailed": "Could not open PDF print preview",
         "toastTemplateRequiredUpload": "Set up an Excel template in Catalog before uploading to Feishu",
         "toastUploadFailed": "Upload to Feishu failed. Check the archive folder configuration",

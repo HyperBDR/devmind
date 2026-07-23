@@ -27,6 +27,11 @@ x-backend-api-common: &backend-api-common
       USE_MIRROR: ${USE_MIRROR:-true}
       DEV_MODE: "0"
   command: gunicorn
+  depends_on:
+    gotenberg:
+      condition: service_healthy
+    postgresql:
+      condition: service_healthy
   healthcheck:
     test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
     interval: 30s
@@ -60,6 +65,31 @@ x-frontend-common: &frontend-common
     start_period: 60s
 
 services:
+  gotenberg:
+    image: gotenberg/gotenberg:8.34.0-libreoffice@sha256:3c23aeb3a027a63d7c71745fc9d83724bd58cf9dfa470396ac82c0896028db2a
+    container_name: gotenberg
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-timeout=30s
+      - --api-body-limit=8MB
+      - --api-disable-download-from=true
+      - --libreoffice-auto-start=true
+      - --libreoffice-deny-private-ips=true
+      - --libreoffice-deny-public-ips=true
+      - --libreoffice-max-queue-size=20
+      - --webhook-disable=true
+    cpus: ${GOTENBERG_CPU_LIMIT:-2.0}
+    mem_limit: ${GOTENBERG_MEMORY_LIMIT:-2g}
+    networks:
+      - backend_network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   backend-init:
     <<: *backend-service-common
     container_name: backend-init

@@ -474,9 +474,9 @@ const filteredQuotations = computed(() => {
       id="filter-panel"
       data-filter-toolbar
       aria-label="Quote filters"
-      class="rounded-xl border border-dm-border-light bg-white p-3 shadow-xs"
+      class="rounded-xl border border-dm-border-light bg-white p-2.5 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 2xl:grid-cols-[minmax(280px,1.35fr)_minmax(145px,0.6fr)_minmax(165px,0.7fr)_minmax(290px,1fr)_auto]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.35fr)_minmax(110px,0.6fr)_minmax(125px,0.7fr)_minmax(220px,1fr)_auto]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -534,13 +534,13 @@ const filteredQuotations = computed(() => {
             </div>
           </div>
 
-          <div class="flex min-w-[230px] items-end gap-2 md:col-span-2 2xl:col-span-1">
-            <div class="flex h-10 min-w-24 items-center justify-center rounded-lg bg-slate-50 px-3 text-xs font-semibold text-dm-text-tertiary">
+          <div class="flex items-center gap-1 md:col-span-2 xl:col-span-1">
+            <div class="flex h-10 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
               {{ t('quotation.pages.list.filterResultsCount', { count: filteredQuotations.length }) }}
             </div>
             <button
               type="button"
-              :class="`inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition cursor-pointer ${
+              :class="`inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition cursor-pointer ${
                 hasActiveFilters
                   ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
                   : 'text-dm-text-tertiary hover:bg-slate-50 hover:text-dm-text-secondary'

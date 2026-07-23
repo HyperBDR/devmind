@@ -488,6 +488,7 @@ async function confirmDelete() {
   <div :class="rootClass">
     <div
       id="import-filter-panel"
+      v-show="false"
       data-filter-toolbar
       aria-label="Imported file filters"
       class="rounded-xl border border-dm-border-light bg-white p-3 shadow-xs"
@@ -548,6 +549,7 @@ async function confirmDelete() {
 
     <div
       id="import-table-panel"
+      v-show="false"
       :class="[
         'overflow-hidden rounded-xl border border-dm-border-light bg-white shadow-xs',
         props.embedded ? '' : 'min-h-0 flex-1',

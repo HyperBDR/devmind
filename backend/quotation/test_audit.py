@@ -236,6 +236,9 @@ class QuotationAuditEventTests(TestCase):
         self.assertIsNone(
             _classify("POST", "/api/v1/quotation/pdf/from-html")
         )
+        self.assertIsNone(
+            _classify("POST", "/api/v1/quotation/pdf/from-excel")
+        )
 
     def test_quote_updates_defer_field_diffs_to_version_history(self):
         fields = ["project_name", "status", "items"]

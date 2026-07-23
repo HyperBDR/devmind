@@ -219,7 +219,7 @@
         "toastTemplateRequired": "请先配置报价 Excel 模板后再下载",
         "toastExcelDownloadStarted": "报价 {quoteNo} Excel 已开始下载",
         "toastExcelDownloadFailed": "Excel 下载失败，请检查模板配置",
-        "toastPdfDownloadStarted": "已打开报价 {quoteNo} 的打印预览，请选择「另存为 PDF」",
+        "toastPdfDownloadStarted": "报价 {quoteNo} 的 PDF 导出已开始",
         "toastPdfDownloadFailed": "无法打开 PDF 打印预览",
         "toastTemplateRequiredUpload": "请先配置报价 Excel 模板后再上传飞书",
         "toastUploadFailed": "上传飞书失败，请检查系统归档文件夹配置",

@@ -574,6 +574,18 @@ const recentQuotes = computed(() =>
     .slice(0, 5),
 )
 
+function formatRecentQuoteTime(value: string): string {
+  const match = String(value || '').match(
+    /^\d{4}-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/,
+  )
+  if (!match) return String(value || '').replace('T', ' ')
+  const [, month, day, hour, minute] = match
+  if (String(locale.value || '').startsWith('zh')) {
+    return `${month}月${day}日 ${hour}:${minute}`
+  }
+  return `${month}/${day} ${hour}:${minute}`
+}
+
 function setTrendGrain(grain: TrendGrain) {
   trendGrain.value = grain
 }
@@ -843,36 +855,54 @@ function setTrendGrain(grain: TrendGrain) {
           <div
             v-for="quote in recentQuotes"
             :key="quote.id"
-            class="flex cursor-pointer items-center justify-between rounded-lg px-2 py-3 transition duration-150 hover:bg-[#fafafa]"
+            class="group grid cursor-pointer gap-3 rounded-lg px-3 py-3.5 transition duration-150 hover:bg-slate-50/80 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
             @click="emit('viewQuote', quote.id)"
           >
-            <div class="min-w-0 space-y-1">
-              <div class="flex items-center gap-2">
-                <span class="font-mono text-sm font-medium text-dm-primary">{{ quote.quoteNo }}</span>
-                <span class="text-sm text-dm-text-tertiary">|</span>
+            <div class="min-w-0">
+              <div class="flex min-w-0 items-center gap-2.5">
                 <span
-                  class="max-w-[200px] truncate text-sm font-semibold text-dm-text-secondary sm:max-w-sm"
+                  class="shrink-0 rounded-md bg-blue-50 px-2 py-1 font-mono text-xs font-semibold text-blue-600 ring-1 ring-inset ring-blue-100"
+                >
+                  {{ quote.quoteNo }}
+                </span>
+                <span
+                  class="min-w-0 truncate text-sm font-semibold text-dm-text"
+                  :title="quote.projectName"
                 >
                   {{ quote.projectName }}
                 </span>
               </div>
-              <div class="flex items-center gap-3 text-xs text-dm-text-tertiary">
-                <span>
-                  {{ t('quotation.pages.dashboard.recentQuoteCompany', { company: quote.clientCompany }) }}
+              <div
+                class="mt-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-dm-text-tertiary"
+              >
+                <span
+                  class="flex min-w-0 max-w-[18rem] items-center gap-1.5"
+                  :title="t('quotation.pages.dashboard.recentQuoteCompany', { company: quote.clientCompany })"
+                >
+                  <Building class="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <span class="truncate">{{ quote.clientCompany }}</span>
                 </span>
-                <span>{{ t('quotation.common.separator') }}</span>
-                <span>
-                  {{ t('quotation.pages.dashboard.recentQuoteSales', { salesperson: quote.salesperson }) }}
+                <span
+                  class="flex min-w-0 max-w-[12rem] items-center gap-1.5"
+                  :title="t('quotation.pages.dashboard.recentQuoteSales', { salesperson: quote.salesperson })"
+                >
+                  <Users class="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                  <span class="truncate">{{ quote.salesperson }}</span>
                 </span>
-                <span>{{ t('quotation.common.separator') }}</span>
-                <span>
-                  {{ t('quotation.pages.dashboard.recentQuoteTime', { time: quote.createdAt.substring(5, 16) }) }}
+                <span
+                  class="flex shrink-0 items-center gap-1.5"
+                  :title="t('quotation.pages.dashboard.recentQuoteTime', { time: formatRecentQuoteTime(quote.createdAt) })"
+                >
+                  <Clock class="h-3.5 w-3.5 text-slate-400" />
+                  {{ formatRecentQuoteTime(quote.createdAt) }}
                 </span>
               </div>
             </div>
 
-            <div class="grid shrink-0 grid-cols-[8.5rem_5.5rem] items-center gap-3">
-              <div class="min-w-0 text-right">
+            <div
+              class="flex items-center justify-between gap-4 sm:grid sm:shrink-0 sm:grid-cols-[8.5rem_5.5rem]"
+            >
+              <div class="min-w-0 text-left sm:text-right">
                 <div class="font-mono text-sm font-bold text-dm-text">
                   {{ currencySymbol(quote.currency) }}{{ quote.grandTotal.toLocaleString() }}
                 </div>

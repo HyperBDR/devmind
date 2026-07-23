@@ -34,7 +34,6 @@ dependencies = [
     "gunicorn==21.2.0",
     "requests>=2.31.0",
     "httpx>=0.27.0",
-    "playwright==1.48.0",
     "cryptography>=44.0.0",
     "pydantic>=2.7.0",
     "langchain-openai>=1.0.0,<2.0.0",

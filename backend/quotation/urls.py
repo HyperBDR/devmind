@@ -34,7 +34,11 @@ from quotation.views.feishu import (
     FeishuUploadView,
 )
 from quotation.views.health import StorageMetricsView
-from quotation.views.pdf import PdfFromHtmlView, PdfHealthView
+from quotation.views.pdf import (
+    PdfFromExcelView,
+    PdfFromHtmlView,
+    PdfHealthView,
+)
 from quotation.views.quotations import (
     QuotationDetailView,
     QuotationGenerateView,
@@ -89,5 +93,6 @@ urlpatterns = [
     path("feishu/upload", FeishuUploadView.as_view()),
     path("feishu/health", FeishuHealthView.as_view()),
     path("pdf/health", PdfHealthView.as_view()),
+    path("pdf/from-excel", PdfFromExcelView.as_view()),
     path("pdf/from-html", PdfFromHtmlView.as_view()),
 ]

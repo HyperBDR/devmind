@@ -76,7 +76,7 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed'
 const toggleSidebarCollapse = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
   if (typeof window !== 'undefined') {
-    localStorage.setItem(
+    sessionStorage.setItem(
       SIDEBAR_COLLAPSED_STORAGE_KEY,
       JSON.stringify(sidebarCollapsed.value)
     )
@@ -85,7 +85,7 @@ const toggleSidebarCollapse = () => {
 
 onMounted(() => {
   if (typeof window === 'undefined') return
-  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
+  const saved = sessionStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
   if (saved !== null) {
     try {
       sidebarCollapsed.value = JSON.parse(saved)
