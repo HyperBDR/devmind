@@ -57,11 +57,13 @@ class UserQuotationCatalogApiTests(TestCase):
         self.assertEqual(response.data["services"], [])
 
     def test_put_persists_complete_catalog_for_current_user(self):
+        payload = catalog_payload()
+        payload["products"][0]["currency"] = "CNY"
         self.api.force_authenticate(self.alice)
 
         response = self.api.put(
             "/api/v1/quotation/catalog",
-            catalog_payload(),
+            payload,
             format="json",
         )
 
@@ -70,6 +72,7 @@ class UserQuotationCatalogApiTests(TestCase):
         self.assertEqual(response.data["products"][0]["name"], "Product A")
         catalog = UserQuotationCatalog.objects.get(user=self.alice)
         self.assertEqual(catalog.products[0]["name"], "Product A")
+        self.assertEqual(catalog.products[0]["currency"], "CNY")
 
     def test_catalog_data_is_isolated_per_user(self):
         UserQuotationCatalog.objects.create(

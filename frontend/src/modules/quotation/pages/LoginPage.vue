@@ -46,7 +46,7 @@ async function handleSubmit() {
       >
         <div class="space-y-4">
           <div>
-            <label class="mb-1.5 block text-xs font-semibold text-slate-600">邮箱</label>
+            <label class="mb-1.5 block text-sm font-semibold text-slate-600">邮箱</label>
             <input
               v-model="email"
               type="email"
@@ -57,7 +57,7 @@ async function handleSubmit() {
             />
           </div>
           <div>
-            <label class="mb-1.5 block text-xs font-semibold text-slate-600">密码</label>
+            <label class="mb-1.5 block text-sm font-semibold text-slate-600">密码</label>
             <input
               v-model="password"
               type="password"
@@ -71,7 +71,7 @@ async function handleSubmit() {
 
         <p
           v-if="error"
-          class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600"
+          class="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-600"
         >
           {{ error }}
         </p>
@@ -84,7 +84,7 @@ async function handleSubmit() {
           {{ loading ? '登录中…' : '登录' }}
         </button>
 
-        <div class="mt-5 rounded-xl bg-slate-50 px-3 py-3 text-[11px] leading-relaxed text-slate-500">
+        <div class="mt-5 rounded-xl bg-slate-50 px-3 py-3 text-xs leading-relaxed text-slate-500">
           <p class="font-semibold text-slate-600">演示账号</p>
           <p class="mt-1">alice.chen@oneprocloud.com</p>
           <p>默认密码：请通过环境变量配置</p>

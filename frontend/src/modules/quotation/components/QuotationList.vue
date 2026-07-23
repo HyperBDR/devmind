@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
-  Cloud,
   Download,
   ExternalLink,
   FileSpreadsheet,
   FileText,
-  Filter,
   Pencil,
   RotateCcw,
   Search,
@@ -19,16 +17,16 @@ import {
   checkFeishuFileAccess,
   uploadBlobToFeishu,
 } from '../api/feishu'
+import { downloadRemoteDocument } from '../api/documents'
 import type { FeishuUploadConflict, FeishuUploadConflictAction } from '../api/feishu'
 import type { Quotation, QuoteStatus } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { buildQuotationExcelBlob, downloadQuotationExcel } from '../utils/excelGenerator'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
-import { buildFeishuOpenUrl, normalizeFeishuOpenUrl } from '../utils/feishuLinks'
 import { buildQuotationPdfBlob, downloadQuotationPdf } from '../utils/pdfExporter'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
 import { loadProductLineOptions } from '../utils/quotationNumbering'
-import FeishuDriveModal from './FeishuDriveModal.vue'
+import FeishuFolderPickerModal from './FeishuFolderPickerModal.vue'
 import FormSelect from './FormSelect.vue'
 import StatusBadge from './StatusBadge.vue'
 import StatusSelect from './StatusSelect.vue'
@@ -85,17 +83,16 @@ const selectedProductLine = ref('ALL')
 const createdFrom = ref('')
 const createdTo = ref('')
 const deleteConfirmId = ref<string | null>(null)
-const feishuOpen = ref(false)
-const feishuMode = ref<'default' | 'pickUploadFolder'>('pickUploadFolder')
-const feishuPickIntent = ref<'upload' | 'setFolder'>('setFolder')
-const pendingUploadQuote = ref<Quotation | null>(null)
-const pendingUploadFormat = ref<FeishuUploadFormat>('excel')
 const uploadingQuoteId = ref<string | null>(null)
 const uploadConflict = ref<{
   quote: Quotation
-  folder?: { token: string; name: string }
   format: FeishuUploadFormat
   conflict: FeishuUploadConflict
+  folderToken?: string
+} | null>(null)
+const uploadFolderPicker = ref<{
+  quote: Quotation
+  format: FeishuUploadFormat
 } | null>(null)
 const actionMenu = ref<{
   quoteId: string
@@ -106,7 +103,7 @@ const actionMenu = ref<{
 const pendingFeishuOpen = ref<{
   quoteId: string
   format: FeishuUploadFormat
-  token: string
+  documentId: string
 } | null>(null)
 let reconcileTimer: number | undefined
 
@@ -121,10 +118,7 @@ async function verifyPendingFeishuOpen() {
   const pending = pendingFeishuOpen.value
   if (!pending) return
   try {
-    const result = await checkFeishuFileAccess(pending.token, {
-      quotationId: pending.quoteId,
-      docType: pending.format,
-    })
+    const result = await checkFeishuFileAccess(pending.documentId)
     if (!result.exists) {
       pendingFeishuOpen.value = null
       emit('updateQuoteStatus', pending.quoteId, clearedFeishuFields(pending.format))
@@ -229,67 +223,27 @@ function formatNow(): string {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} ${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}:${String(today.getSeconds()).padStart(2, '0')}`
 }
 
-function closeFeishuModal() {
-  feishuOpen.value = false
-  feishuMode.value = 'pickUploadFolder'
-  feishuPickIntent.value = 'setFolder'
-  pendingUploadQuote.value = null
-  pendingUploadFormat.value = 'excel'
-}
-
-function openFeishuBrowse() {
-  feishuMode.value = 'pickUploadFolder'
-  feishuPickIntent.value = 'setFolder'
-  pendingUploadQuote.value = null
-  pendingUploadFormat.value = 'excel'
-  feishuOpen.value = true
-}
-
 function openFeishuUploadPicker(quote: Quotation, format: FeishuUploadFormat) {
   if (quote.status === 'Cancelled') return
-  pendingUploadQuote.value = quote
-  pendingUploadFormat.value = format
-  feishuMode.value = 'pickUploadFolder'
-  feishuPickIntent.value = 'upload'
-  feishuOpen.value = true
   closeActionMenu()
+  uploadFolderPicker.value = { quote, format }
 }
 
-function buildFeishuExcelOpenUrl(quote: Quotation): string {
-  // Scheme A: only when this format was uploaded (no legacy feishuUrl fallback).
-  return buildFeishuOpenUrl({
-    feishuUrl: quote.feishuExcelUrl,
-    feishuFileToken: quote.feishuExcelFileToken,
-  } as Quotation)
-}
-
-function buildFeishuPdfOpenUrl(quote: Quotation): string {
-  return buildFeishuOpenUrl({
-    feishuUrl: quote.feishuPdfUrl,
-    feishuFileToken: quote.feishuPdfFileToken,
-  } as Quotation)
-}
-
-function openFeishuUrl(url: string) {
-  if (!url) return
-  closeActionMenu()
-  window.open(url, '_blank', 'noopener,noreferrer')
+function feishuDocumentId(
+  quote: Quotation,
+  format: FeishuUploadFormat,
+): string | undefined {
+  return format === 'excel'
+    ? quote.feishuExcelDocumentId
+    : quote.feishuPdfDocumentId
 }
 
 async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
-  const token =
-    format === 'excel' ? quote.feishuExcelFileToken : quote.feishuPdfFileToken
-  const fallbackUrl =
-    format === 'excel'
-      ? buildFeishuExcelOpenUrl(quote)
-      : buildFeishuPdfOpenUrl(quote)
-  if (!token || !fallbackUrl) return
+  const documentId = feishuDocumentId(quote, format)
+  if (!documentId) return
   closeActionMenu()
   try {
-    const result = await checkFeishuFileAccess(token, {
-      quotationId: quote.id,
-      docType: format,
-    })
+    const result = await checkFeishuFileAccess(documentId)
     if (!result.exists) {
       pendingFeishuOpen.value = null
       emit('updateQuoteStatus', quote.id, clearedFeishuFields(format))
@@ -307,9 +261,17 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
     pendingFeishuOpen.value = {
       quoteId: quote.id,
       format,
-      token,
+      documentId,
     }
-    openFeishuUrl(result.url || fallbackUrl)
+    const fallbackName = buildQuotationExportFileName(
+      quote,
+      format === 'excel' ? 'xlsx' : 'pdf',
+    )
+    const fileName =
+      format === 'excel'
+        ? quote.feishuExcelPath || fallbackName
+        : quote.feishuPdfPath || fallbackName
+    await downloadRemoteDocument(documentId, fileName)
   } catch (err: unknown) {
     emit(
       'toast',
@@ -357,17 +319,17 @@ async function handleDownloadLocal(quote: Quotation, format: FeishuUploadFormat)
 
 async function handleUploadToFeishu(
   quote: Quotation,
-  folder?: { token: string; name: string },
-  format: FeishuUploadFormat = pendingUploadFormat.value,
+  format: FeishuUploadFormat = 'excel',
   conflictAction?: FeishuUploadConflictAction,
+  folderToken?: string,
 ) {
   if (quote.status === 'Cancelled') return
   uploadingQuoteId.value = quote.id
   try {
     const uploadOpts = {
       quotationId: quote.id,
-      folder: folder?.token,
       conflictAction,
+      folderToken,
     }
 
     if (format === 'excel') {
@@ -417,15 +379,11 @@ async function handleUploadToFeishu(
     uploadConflict.value = null
   } catch (err: unknown) {
     if (err instanceof FeishuUploadConflictError) {
-      feishuOpen.value = false
-      feishuMode.value = 'pickUploadFolder'
-      feishuPickIntent.value = 'upload'
-      pendingUploadQuote.value = null
       uploadConflict.value = {
         quote,
-        folder,
         format,
         conflict: err.conflict,
+        folderToken,
       }
       return
     }
@@ -441,8 +399,19 @@ async function handleUploadToFeishu(
 
 async function resolveUploadConflict(action: FeishuUploadConflictAction) {
   if (!uploadConflict.value) return
-  const { quote, folder, format } = uploadConflict.value
-  await handleUploadToFeishu(quote, folder, format, action)
+  const { quote, format, folderToken } = uploadConflict.value
+  await handleUploadToFeishu(quote, format, action, folderToken)
+}
+
+async function handleUploadFolderSelected(folder: { token: string; name: string }) {
+  const pending = uploadFolderPicker.value
+  uploadFolderPicker.value = null
+  if (!pending) return
+  await handleUploadToFeishu(pending.quote, pending.format, undefined, folder.token)
+}
+
+function handleUploadFolderPickerOpen(open: boolean) {
+  if (!open) uploadFolderPicker.value = null
 }
 
 function handleResetFilters() {
@@ -494,66 +463,22 @@ const filteredQuotations = computed(() => {
 
 <template>
   <div id="quote-list-root" class="space-y-6">
-    <div v-if="loading" class="text-xs text-dm-text-tertiary">
+    <div v-if="loading" class="text-sm text-dm-text-tertiary">
       {{ t('quotation.pages.list.syncing') }}
     </div>
-    <p v-if="currentUser" class="text-xs text-dm-text-tertiary">
+    <p v-if="currentUser" class="text-sm text-dm-text-tertiary">
       {{ t('quotation.pages.list.userHint', { name: currentUser.name }) }}
     </p>
 
-    <div id="filter-panel" class="bg-white rounded-xl border border-dm-border-light p-5 shadow-xs">
-      <div
-        class="mb-4 flex flex-col gap-3 border-b border-dm-border-light pb-4 lg:flex-row lg:items-center lg:justify-between"
-      >
-        <div class="flex items-center gap-2">
-          <div
-            class="flex h-8 w-8 items-center justify-center rounded-lg bg-[#fafafa] text-dm-text-tertiary ring-1 ring-slate-100"
-          >
-            <Filter class="w-4 h-4" />
-          </div>
-          <div>
-            <h3 class="text-sm font-semibold text-dm-text">
-              {{ t('quotation.pages.list.filterTitle') }}
-            </h3>
-            <p class="mt-0.5 text-[11px] font-medium text-dm-text-tertiary">
-              {{ t('quotation.pages.list.filterSubtitle') }}
-            </p>
-          </div>
-        </div>
-
-        <div class="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end lg:w-auto">
-          <button
-            type="button"
-            class="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 bg-dm-primary-bg px-3 py-2 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
-            @click="openFeishuBrowse"
-          >
-            <Cloud class="h-3.5 w-3.5" />
-            {{ t('quotation.actions.openFeishuDrive') }}
-          </button>
-          <div
-            class="flex w-full items-center justify-between gap-3 rounded-lg border border-dm-border-light bg-[#fafafa] px-3 py-2 lg:w-auto lg:min-w-[168px]"
-          >
-            <span class="text-[11px] font-semibold text-dm-text-tertiary">
-              {{ t('quotation.pages.list.filterResults') }}
-            </span>
-            <span class="flex items-baseline gap-1 whitespace-nowrap font-mono text-dm-text">
-              <strong class="text-lg leading-none text-dm-primary">{{ filteredQuotations.length }}</strong>
-              <span class="text-[11px] font-semibold text-dm-text-tertiary">
-                {{ t('quotation.pages.list.filterResultsCount', { count: filteredQuotations.length }) }}
-              </span>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div
-        data-filter-toolbar
-        aria-label="Quote filters"
-        class="rounded-xl border border-dm-border-light bg-[#fbfcfe] px-3 py-3"
-      >
-        <div class="grid grid-cols-1 items-end gap-2 lg:grid-cols-[minmax(320px,1.5fr)_minmax(150px,0.65fr)_minmax(170px,0.75fr)_minmax(300px,1fr)_auto]">
+    <div
+      id="filter-panel"
+      data-filter-toolbar
+      aria-label="Quote filters"
+      class="rounded-xl border border-dm-border-light bg-white p-3 shadow-xs"
+    >
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 2xl:grid-cols-[minmax(280px,1.35fr)_minmax(145px,0.6fr)_minmax(165px,0.7fr)_minmax(290px,1fr)_auto]">
           <div class="min-w-0">
-            <label class="mb-1 block truncate text-[11px] font-medium text-dm-text-tertiary">
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
             </label>
             <div class="relative">
@@ -561,61 +486,64 @@ const filteredQuotations = computed(() => {
                 v-model="searchText"
                 type="text"
                 :placeholder="t('quotation.pages.list.keywordPlaceholder')"
-                class="h-10 w-full min-w-0 rounded-lg border border-transparent bg-white py-2 pl-9 pr-3 text-xs text-dm-text shadow-xs ring-1 ring-dm-border-light transition duration-150 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-400"
+                class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-slate-50/70 py-2 pl-9 pr-3 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dm-text-tertiary" />
             </div>
           </div>
 
           <div class="min-w-0">
-            <label class="mb-1 block truncate text-[11px] font-medium text-dm-text-tertiary">
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.statusLabel') }}
             </label>
             <FormSelect
               v-model="selectedStatus"
               class-name="w-full"
-              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-transparent bg-white shadow-xs ring-1 ring-dm-border-light focus:ring-1 focus:ring-blue-400`"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
               :options="statusFilterOptions"
             />
           </div>
 
           <div class="min-w-0">
-            <label class="mb-1 block truncate text-[11px] font-medium text-dm-text-tertiary">
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.productLineLabel') }}
             </label>
             <FormSelect
               v-model="selectedProductLine"
               class-name="w-full"
-              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-transparent bg-white shadow-xs ring-1 ring-dm-border-light focus:ring-1 focus:ring-blue-400`"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
               :options="productLineFilterOptions"
             />
           </div>
 
           <div data-filter-date-range class="min-w-0">
-            <label class="mb-1 block truncate text-[11px] font-medium text-dm-text-tertiary">
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.createdFromLabel') }} / {{ t('quotation.pages.list.createdToLabel') }}
             </label>
             <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
               <BaseDatePicker
                 v-model="createdFrom"
                 :placeholder="t('quotation.pages.list.createdFromLabel')"
-                input-class="h-10 w-full min-w-0 rounded-lg border border-transparent bg-white px-3 py-2 text-xs text-dm-text shadow-xs ring-1 ring-dm-border-light transition duration-150 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-400"
+                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <BaseDatePicker
                 v-model="createdTo"
                 :placeholder="t('quotation.pages.list.createdToLabel')"
-                input-class="h-10 w-full min-w-0 rounded-lg border border-transparent bg-white px-3 py-2 text-xs text-dm-text shadow-xs ring-1 ring-dm-border-light transition duration-150 placeholder:text-slate-400 focus:outline-hidden focus:ring-1 focus:ring-blue-400"
+                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
             </div>
           </div>
 
-          <div class="flex min-w-[120px] items-end">
+          <div class="flex min-w-[230px] items-end gap-2 md:col-span-2 2xl:col-span-1">
+            <div class="flex h-10 min-w-24 items-center justify-center rounded-lg bg-slate-50 px-3 text-xs font-semibold text-dm-text-tertiary">
+              {{ t('quotation.pages.list.filterResultsCount', { count: filteredQuotations.length }) }}
+            </div>
             <button
               type="button"
-              :class="`inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition duration-150 cursor-pointer ${
+              :class="`inline-flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition cursor-pointer ${
                 hasActiveFilters
-                  ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
-                  : 'border-transparent bg-transparent text-dm-text-tertiary hover:border-dm-border-light hover:bg-white hover:text-dm-text-secondary'
+                  ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                  : 'text-dm-text-tertiary hover:bg-slate-50 hover:text-dm-text-secondary'
               }`"
               @click="handleResetFilters"
             >
@@ -623,28 +551,27 @@ const filteredQuotations = computed(() => {
               {{ t('quotation.actions.resetFilters') }}
             </button>
           </div>
-        </div>
       </div>
     </div>
 
     <div id="table-panel" class="bg-white rounded-xl border border-dm-border-light shadow-xs overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
+        <table class="w-full min-w-[960px] text-left border-collapse">
           <thead>
             <tr
-              class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-[11px] font-bold tracking-wider"
+              class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-bold tracking-wider"
             >
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableQuoteNo') }}</th>
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableProjectName') }}</th>
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableCustomer') }}</th>
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableContact') }}</th>
-              <th class="py-3 px-4">{{ t('quotation.pages.list.tableCreatedAt') }}</th>
+              <th class="whitespace-nowrap py-3 px-4">{{ t('quotation.pages.list.tableCreatedAt') }}</th>
               <th class="py-3 px-4 text-right">{{ t('quotation.pages.list.tableTotal') }}</th>
-              <th class="py-3 px-4 text-center">{{ t('quotation.pages.list.tableStatus') }}</th>
+              <th class="min-w-[104px] whitespace-nowrap py-3 px-4 text-center">{{ t('quotation.pages.list.tableStatus') }}</th>
               <th class="min-w-[220px] py-3 px-4 text-center">{{ t('quotation.pages.list.tableActions') }}</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-100 text-xs">
+          <tbody class="divide-y divide-slate-100 text-sm">
             <tr v-if="filteredQuotations.length === 0">
               <td colspan="8" class="py-12 text-center text-dm-text-tertiary">
                 {{ t('quotation.pages.list.emptyResults') }}
@@ -660,7 +587,7 @@ const filteredQuotations = computed(() => {
               <td class="py-3.5 px-4">
                 <div class="max-w-[180px] sm:max-w-xs truncate">
                   <p class="font-semibold text-dm-text">{{ quote.projectName }}</p>
-                  <p class="text-[10px] text-dm-text-tertiary font-mono mt-0.5">
+                  <p class="text-xs text-dm-text-tertiary font-mono mt-0.5">
                     {{ t('quotation.common.lineItemCount', { count: quote.items.length }) }}
                   </p>
                 </div>
@@ -671,13 +598,13 @@ const filteredQuotations = computed(() => {
                 </div>
               </td>
               <td class="py-3.5 px-4 text-dm-text-secondary font-medium">{{ quote.contactPerson }}</td>
-              <td class="py-3.5 px-4 text-dm-text-tertiary font-mono">
+              <td class="whitespace-nowrap py-3.5 px-4 text-dm-text-tertiary font-mono">
                 {{ quote.createdAt.substring(0, 10) }}
               </td>
               <td class="py-3.5 px-4 text-right font-bold text-dm-text font-mono">
                 {{ currencySymbol(quote.currency) }}{{ quote.grandTotal.toLocaleString() }}
               </td>
-              <td class="py-3.5 px-4 text-center">
+              <td class="min-w-[104px] py-3.5 px-4 text-center">
                 <div class="flex justify-center">
                   <StatusBadge v-if="quote.status === 'Cancelled'" :status="quote.status" />
                   <StatusSelect
@@ -764,7 +691,7 @@ const filteredQuotations = computed(() => {
                   </div>
 
                   <button
-                    v-if="buildFeishuExcelOpenUrl(quote)"
+                    v-if="feishuDocumentId(quote, 'excel')"
                     :title="t('quotation.actions.openFeishuExcel')"
                     class="p-1 rounded-sm transition duration-100 text-dm-text-tertiary hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer"
                     @click="void openFeishuFile(quote, 'excel')"
@@ -773,7 +700,7 @@ const filteredQuotations = computed(() => {
                   </button>
 
                   <button
-                    v-if="buildFeishuPdfOpenUrl(quote)"
+                    v-if="feishuDocumentId(quote, 'pdf')"
                     :title="t('quotation.actions.openFeishuPdf')"
                     class="p-1 rounded-sm transition duration-100 text-dm-text-tertiary hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer"
                     @click="void openFeishuFile(quote, 'pdf')"
@@ -810,14 +737,14 @@ const filteredQuotations = computed(() => {
             <h3 class="text-sm font-bold text-dm-text">
               {{ t('quotation.pages.list.deleteModalTitle') }}
             </h3>
-            <p class="text-xs text-dm-text-tertiary leading-relaxed">
+            <p class="text-sm text-dm-text-tertiary leading-relaxed">
               {{ t('quotation.pages.list.deleteModalDesc') }}
             </p>
           </div>
         </div>
 
         <div
-          class="bg-[#fafafa] p-3.5 rounded-lg border border-dm-border-light text-xs text-dm-text-secondary space-y-2 font-medium"
+          class="bg-[#fafafa] p-3.5 rounded-lg border border-dm-border-light text-sm text-dm-text-secondary space-y-2 font-medium"
         >
           <div class="flex justify-between">
             <span class="text-dm-text-tertiary">{{ t('quotation.pages.list.deleteModalQuoteNo') }}</span>
@@ -841,14 +768,14 @@ const filteredQuotations = computed(() => {
         <div class="flex items-center justify-end gap-2.5 pt-2">
           <button
             type="button"
-            class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-dm-text text-xs font-semibold rounded-lg border border-dm-border transition duration-150 cursor-pointer"
+            class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-dm-text text-sm font-semibold rounded-lg border border-dm-border transition duration-150 cursor-pointer"
             @click="deleteConfirmId = null"
           >
             {{ t('quotation.common.cancel') }}
           </button>
           <button
             type="button"
-            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg shadow-sm transition duration-150 cursor-pointer"
+            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg shadow-sm transition duration-150 cursor-pointer"
             @click="
               emit('deleteQuote', quoteToDelete.id);
               deleteConfirmId = null
@@ -860,6 +787,14 @@ const filteredQuotations = computed(() => {
       </div>
     </div>
 
+
+    <FeishuFolderPickerModal
+      :open="Boolean(uploadFolderPicker)"
+      intent="upload"
+      @update:open="handleUploadFolderPickerOpen"
+      @select="handleUploadFolderSelected"
+      @toast="(message, type) => emit('toast', message, type)"
+    />
 
     <div
       v-if="uploadConflict"
@@ -877,7 +812,7 @@ const filteredQuotations = computed(() => {
               <h3 class="text-[15px] font-semibold text-slate-900">
                 {{ t('quotation.pages.list.conflictTitle') }}
               </h3>
-              <p class="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+              <p class="mt-0.5 text-xs leading-relaxed text-slate-500">
                 {{
                   t('quotation.pages.list.conflictDesc', {
                     fileName: uploadConflict.conflict.file_name,
@@ -897,7 +832,7 @@ const filteredQuotations = computed(() => {
         </div>
 
         <div class="bg-slate-50/40 px-5 py-4">
-          <div class="space-y-2 rounded-lg border border-slate-200 bg-white p-3.5 text-xs shadow-sm">
+          <div class="space-y-2 rounded-lg border border-slate-200 bg-white p-3.5 text-sm shadow-sm">
             <div class="flex items-start justify-between gap-4">
               <span class="shrink-0 text-slate-500">
                 {{ t('quotation.pages.list.conflictExistingFile') }}
@@ -917,10 +852,10 @@ const filteredQuotations = computed(() => {
           </div>
 
           <div class="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3.5 py-3">
-            <p class="text-xs font-semibold text-blue-800">
+            <p class="text-sm font-semibold text-blue-800">
               {{ t('quotation.actions.reuseExistingFile') }}
             </p>
-            <p class="mt-0.5 text-[11px] leading-relaxed text-blue-600">
+            <p class="mt-0.5 text-xs leading-relaxed text-blue-600">
               {{ t('quotation.pages.list.conflictReuseDesc') }}
             </p>
           </div>
@@ -929,21 +864,21 @@ const filteredQuotations = computed(() => {
         <div class="flex items-center justify-end gap-2 border-t border-slate-100 bg-white px-5 py-4">
           <button
             type="button"
-            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-3.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
             @click="uploadConflict = null"
           >
             {{ t('quotation.actions.cancelUpload') }}
           </button>
           <button
             type="button"
-            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-600"
+            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-600"
             @click="resolveUploadConflict('reuse')"
           >
             {{ t('quotation.actions.reuseExistingFile') }}
           </button>
           <button
             type="button"
-            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md bg-blue-600 px-3.5 text-xs font-semibold text-white hover:bg-blue-700"
+            class="dm-btn-primary h-9 whitespace-nowrap px-3.5 text-sm font-semibold"
             @click="resolveUploadConflict('rename')"
           >
             {{ t('quotation.actions.renameAndUpload') }}
@@ -965,7 +900,7 @@ const filteredQuotations = computed(() => {
         <template v-if="actionMenu.type === 'upload'">
           <button
             type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-dm-text hover:bg-indigo-50 hover:text-indigo-700"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-indigo-50 hover:text-indigo-700"
             @click="openFeishuUploadPicker(actionMenuQuote, 'excel')"
           >
             <FileSpreadsheet class="h-3.5 w-3.5" />
@@ -973,7 +908,7 @@ const filteredQuotations = computed(() => {
           </button>
           <button
             type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-dm-text hover:bg-indigo-50 hover:text-indigo-700"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-indigo-50 hover:text-indigo-700"
             @click="openFeishuUploadPicker(actionMenuQuote, 'pdf')"
           >
             <ExternalLink class="h-3.5 w-3.5" />
@@ -983,7 +918,7 @@ const filteredQuotations = computed(() => {
         <template v-else>
           <button
             type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
             @click="handleDownloadLocal(actionMenuQuote, 'excel')"
           >
             <FileSpreadsheet class="h-3.5 w-3.5" />
@@ -991,7 +926,7 @@ const filteredQuotations = computed(() => {
           </button>
           <button
             type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
+            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
             @click="handleDownloadLocal(actionMenuQuote, 'pdf')"
           >
             <ExternalLink class="h-3.5 w-3.5" />
@@ -1001,22 +936,5 @@ const filteredQuotations = computed(() => {
       </div>
     </Teleport>
 
-    <FeishuDriveModal
-      v-model:open="feishuOpen"
-      :mode="feishuMode"
-      :pick-intent="feishuPickIntent"
-      @close="closeFeishuModal"
-      @folder-pick="
-        (folder) => {
-          if (pendingUploadQuote) {
-            void handleUploadToFeishu(pendingUploadQuote, folder, pendingUploadFormat)
-          }
-          pendingUploadQuote = null
-          pendingUploadFormat = 'excel'
-          feishuPickIntent = 'setFolder'
-        }
-      "
-      @toast="(msg, type) => emit('toast', msg, type)"
-    />
   </div>
 </template>

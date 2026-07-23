@@ -741,15 +741,15 @@
     "taskManagementConsole": "任务控制台",
     "notificationConsole": "通知控制台",
     "salesWorkOrders": "售后工单仪表盘",
-    "quotationManagement": "报价台"
+    "quotationManagement": "报价工作台"
   },
   "quotation": {
-    "menuTitle": "报价管理",
+    "menuTitle": "报价工作台",
     "dashboard": "报价看板",
     "list": "报价查询中心",
     "create": "在线创建报价单",
-    "imports": "资料导入",
-    "catalog": "目录配置"
+    "catalog": "目录配置",
+    "audit": "操作审计"
   },
   "operations": {
     "menuTitle": "运营看板",

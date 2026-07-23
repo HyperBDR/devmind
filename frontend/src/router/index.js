@@ -116,13 +116,19 @@ const routes = [
   },
   {
     path: '/quotation/imports',
-    name: 'QuotationImports',
-    component: () => import('@/pages/Quotation.vue'),
-    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+    redirect: {
+      path: '/quotation/list'
+    }
   },
   {
     path: '/quotation/catalog',
     name: 'QuotationCatalog',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
+    path: '/quotation/audit',
+    name: 'QuotationAudit',
     component: () => import('@/pages/Quotation.vue'),
     meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
   },

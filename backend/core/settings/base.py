@@ -191,11 +191,13 @@ MIDDLEWARE = [
     # middleware stack, especially before any middleware that can
     # generate responses such as CommonMiddleware or WhiteNoiseMiddleware.
     'corsheaders.middleware.CorsMiddleware',
+    'quotation.middleware.RequestIdMiddleware',
 
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'quotation.middleware.QuotationAuditMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 

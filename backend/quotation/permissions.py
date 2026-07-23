@@ -31,7 +31,35 @@ def user_role(user: User) -> str:
 
 
 def can_view_all_quotations(user: User) -> bool:
-    return user_role(user) in {"admin", "sales_director", "presales"}
+    if getattr(user, "is_superuser", False) or getattr(
+        user, "is_staff", False
+    ):
+        return True
+    profile = getattr(user, "profile", None)
+    legacy_role = str(getattr(profile, "role", "") or "").lower()
+    if legacy_role in {"admin", "sales_director", "presales"}:
+        return True
+    role_names = {
+        role.name.strip().lower().replace(" ", "_")
+        for role in get_effective_roles(user)
+    }
+    return bool(role_names & {"admin", "sales_director", "presales"})
+
+
+def can_delete_any_quotation_document(user: User) -> bool:
+    if getattr(user, "is_superuser", False) or getattr(
+        user, "is_staff", False
+    ):
+        return True
+    profile = getattr(user, "profile", None)
+    legacy_role = str(getattr(profile, "role", "") or "").lower()
+    if legacy_role in {"admin", "sales_director"}:
+        return True
+    role_names = {
+        role.name.strip().lower().replace(" ", "_")
+        for role in get_effective_roles(user)
+    }
+    return bool(role_names & {"admin", "sales_director"})
 
 
 def user_display_email(user: User) -> str:

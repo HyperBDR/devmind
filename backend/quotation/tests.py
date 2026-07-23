@@ -343,6 +343,29 @@ class FeishuImportMetadataTests(TestCase):
         )
 
         class FakeFeishuClient:
+            def list_folder_files(
+                self,
+                access_token,
+                folder_token,
+                *,
+                page_size=50,
+                page_token=None,
+            ):
+                return {
+                    "files": [
+                        {
+                            "token": "file_v3_imported",
+                            "name": "Quote-Imported.pdf",
+                            "type": "file",
+                            "url": (
+                                "https://oneprocloud.feishu.cn/file/"
+                                "file_v3_imported"
+                            ),
+                        }
+                    ],
+                    "has_more": False,
+                }
+
             def download_drive_item(
                 self,
                 access_token,
@@ -484,7 +507,6 @@ class FeishuUploadReuseTests(TestCase):
                 "/api/v1/quotation/feishu/upload",
                 {
                     "file": upload,
-                    "folder": "fldabcdefghij",
                     "quotation_id": quotation.id,
                 },
                 format="multipart",
@@ -512,7 +534,6 @@ class FeishuUploadReuseTests(TestCase):
                 "/api/v1/quotation/feishu/upload",
                 {
                     "file": reuse_upload,
-                    "folder": "fldabcdefghij",
                     "quotation_id": quotation.id,
                     "conflict_action": "reuse",
                 },
@@ -623,7 +644,6 @@ class FeishuUploadReuseTests(TestCase):
                 "/api/v1/quotation/feishu/upload",
                 {
                     "file": upload,
-                    "folder": "fldabcdefghij",
                     "quotation_id": quotation.id,
                     "conflict_action": "rename",
                 },
@@ -719,7 +739,6 @@ class FeishuUploadReuseTests(TestCase):
                 "/api/v1/quotation/feishu/upload",
                 {
                     "file": upload,
-                    "folder": "fldabcdefghij",
                     "quotation_id": quotation.id,
                 },
                 format="multipart",
@@ -812,16 +831,9 @@ class FeishuDriveTreeTests(TestCase):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
         assert response.status_code == 200
-        assert response.data["my_folders"] == [
-            {"token": "my_folder", "name": "test", "type": "folder"}
-        ]
-        assert response.data["shared_folders"] == [
-            {
-                "token": "shared_nested",
-                "name": "**From Evelyn",
-                "type": "folder",
-            }
-        ]
+        assert response.data["my_folders"] == []
+        assert response.data["shared_folders"] == []
+        assert response.data["can_discover_shared"] is False
 
     def test_drive_tree_collapses_discovered_shared_children_under_parent(
         self,
@@ -904,9 +916,8 @@ class FeishuDriveTreeTests(TestCase):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
         assert response.status_code == 200
-        assert response.data["shared_folders"] == [
-            {"token": "tower", "name": "Tower", "type": "folder"}
-        ]
+        assert response.data["shared_folders"] == []
+        assert response.data["can_discover_shared"] is False
 
     def test_drive_tree_does_not_prune_accessible_bookmarked_shared_folder(
         self,
@@ -963,17 +974,17 @@ class FeishuDriveTreeTests(TestCase):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
         assert response.status_code == 200
-        assert response.data["shared_folders"] == [
-            {
-                "token": "bookmarked_nested",
-                "name": "Pinned Shared Folder",
-                "type": "folder",
-            }
-        ]
+        assert response.data["shared_folders"] == []
         connection.refresh_from_db()
         assert (
             connection.shared_folder_bookmarks
-            == response.data["shared_folders"]
+            == [
+                {
+                    "token": "bookmarked_nested",
+                    "name": "Pinned Shared Folder",
+                    "type": "folder",
+                }
+            ]
         )
 
     def test_drive_tree_does_not_auto_append_discovered_roots_when_bookmarks_exist(
@@ -1042,9 +1053,7 @@ class FeishuDriveTreeTests(TestCase):
             response = api.get("/api/v1/quotation/feishu/drive-tree")
 
         assert response.status_code == 200
-        assert response.data["shared_folders"] == [
-            {"token": "tower", "name": "Tower", "type": "folder"}
-        ]
+        assert response.data["shared_folders"] == []
         connection.refresh_from_db()
         assert connection.shared_folder_bookmarks == [
             {"token": "tower", "name": "Tower", "type": "folder"}
@@ -1111,8 +1120,7 @@ class FeishuFileAccessTests(TestCase):
             "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
-                "/api/v1/quotation/feishu/files/file_v3_missing/access"
-                f"?quotation_id={quotation.id}&doc_type=excel",
+                f"/api/v1/quotation/feishu/documents/{asset.id}/access",
             )
 
         assert response.status_code == 200
@@ -1168,15 +1176,14 @@ class FeishuFileAccessTests(TestCase):
             "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
-                "/api/v1/quotation/feishu/files/file_v3_orphan/access"
+                f"/api/v1/quotation/feishu/documents/{asset.id}/access"
             )
 
         assert response.status_code == 200
-        assert response.data["exists"] is False
-        assert response.data["cleared"] is True
+        assert response.data["exists"] is True
+        assert response.data["direct_access_allowed"] is True
         asset.refresh_from_db()
-        assert asset.feishu_file_token is None
-        assert asset.feishu_url is None
+        assert asset.feishu_file_token == "file_v3_orphan"
 
     def test_access_returns_url_when_file_exists(self):
         user = User.objects.create_user(
@@ -1189,6 +1196,19 @@ class FeishuFileAccessTests(TestCase):
             user_email=user.email,
             access_token="user_access_token",
             expires_at=timezone.now() + timedelta(hours=1),
+        )
+        asset = DocumentAsset.objects.create(
+            doc_type=DocumentType.PDF,
+            file_name="alive.pdf",
+            mime_type="application/pdf",
+            storage_key="imports/alive.pdf",
+            size_bytes=12,
+            source="feishu",
+            feishu_file_token="file_v3_alive",
+            feishu_url=(
+                "https://oneprocloud.feishu.cn/file/file_v3_alive"
+            ),
+            created_by_email="carol@oneprocloud.com",
         )
 
         class FakeFeishuClient:
@@ -1216,12 +1236,11 @@ class FeishuFileAccessTests(TestCase):
             "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
-                "/api/v1/quotation/feishu/files/file_v3_alive/access"
+                f"/api/v1/quotation/feishu/documents/{asset.id}/access"
             )
 
         assert response.status_code == 200
         assert response.data["exists"] is True
-        assert response.data["file_token"] == "file_v3_alive"
         assert "file_v3_alive" in response.data["url"]
 
     def test_access_clears_link_when_meta_exists_but_download_is_gone(self):
@@ -1288,8 +1307,7 @@ class FeishuFileAccessTests(TestCase):
             "quotation.views.feishu.common._client", return_value=FakeFeishuClient()
         ):
             response = api.get(
-                "/api/v1/quotation/feishu/files/file_v3_download_gone/access"
-                f"?quotation_id={quotation.id}&doc_type=pdf",
+                f"/api/v1/quotation/feishu/documents/{asset.id}/access",
             )
 
         assert response.status_code == 200
@@ -1383,14 +1401,10 @@ class FeishuFileAccessTests(TestCase):
                 {
                     "items": [
                         {
-                            "file_token": "file_v3_batch_pdf",
-                            "quotation_id": quotation.id,
-                            "doc_type": "pdf",
+                            "document_id": pdf_asset.id,
                         },
                         {
-                            "file_token": "file_v3_batch_excel",
-                            "quotation_id": quotation.id,
-                            "doc_type": "excel",
+                            "document_id": excel_asset.id,
                         },
                     ]
                 },
@@ -1399,10 +1413,10 @@ class FeishuFileAccessTests(TestCase):
 
         assert response.status_code == 200
         results = {
-            item["file_token"]: item for item in response.data["results"]
+            item["document_id"]: item for item in response.data["results"]
         }
-        assert results["file_v3_batch_pdf"]["exists"] is False
-        assert results["file_v3_batch_excel"]["exists"] is True
+        assert results[pdf_asset.id]["exists"] is False
+        assert results[excel_asset.id]["exists"] is True
         pdf_asset.refresh_from_db()
         excel_asset.refresh_from_db()
         assert pdf_asset.feishu_file_token is None
@@ -1483,9 +1497,7 @@ class FeishuFileAccessTests(TestCase):
                 {
                     "items": [
                         {
-                            "file_token": "file_v3_batch_download_gone",
-                            "quotation_id": quotation.id,
-                            "doc_type": "excel",
+                            "document_id": asset.id,
                         }
                     ]
                 },
@@ -1546,9 +1558,7 @@ class FeishuFileAccessTests(TestCase):
                 {
                     "items": [
                         {
-                            "file_token": "file_v3_ghost",
                             "document_id": asset.id,
-                            "doc_type": "pdf",
                         }
                     ]
                 },

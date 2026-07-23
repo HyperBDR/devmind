@@ -8,7 +8,7 @@ import {
   Search,
   CheckCircle,
   LogOut,
-  FolderInput,
+  ScrollText,
 } from 'lucide-vue-next'
 import type {
   DiscountOption,
@@ -30,6 +30,7 @@ import QuotationList from './components/QuotationList.vue'
 import QuotationCreate from './components/QuotationCreate.vue'
 import QuotationDetails from './components/QuotationDetails.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
+import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
 import { downloadQuotationExcel } from './utils/excelGenerator'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from './utils/feishuLinkState'
@@ -52,6 +53,7 @@ import {
   createQuotation as createQuotationApi,
   deleteQuotation as deleteQuotationApi,
   generateQuotation as generateQuotationApi,
+  getQuotation as getQuotationApi,
   listQuotations,
   updateQuotation as updateQuotationApi,
 } from './api/quotations'
@@ -67,16 +69,17 @@ const TAB_ROUTES: Record<string, string> = {
   dashboard: '/quotation/dashboard',
   list: '/quotation/list',
   create: '/quotation/create',
-  imports: '/quotation/imports',
   catalog: '/quotation/catalog',
+  audit: '/quotation/audit',
 }
 
 function tabFromRoutePath(path: string): string {
   if (path.startsWith('/quotation/details/')) return 'details'
   if (path.startsWith('/quotation/list')) return 'list'
   if (path.startsWith('/quotation/create')) return 'create'
-  if (path.startsWith('/quotation/imports')) return 'imports'
+  if (path.startsWith('/quotation/imports')) return 'list'
   if (path.startsWith('/quotation/catalog')) return 'catalog'
+  if (path.startsWith('/quotation/audit')) return 'audit'
   return 'dashboard'
 }
 
@@ -381,7 +384,15 @@ async function handleDeleteQuote(id: string) {
   }
 }
 
-function handleViewQuoteDetails(id: string) {
+async function handleViewQuoteDetails(id: string) {
+  try {
+    const latest = await getQuotationApi(id)
+    quotations.value = quotations.value.map((quote) =>
+      quote.id === id ? latest : quote,
+    )
+  } catch (error) {
+    console.error('Unable to load quotation details', error)
+  }
   if (auth.embeddedAuth) {
     currentTab.value = 'details'
     selectedQuotationId.value = id
@@ -418,6 +429,7 @@ async function handleSaveQuotation(newQuote: Quotation) {
       productLineOptions.value.find(
         (option) => option.value === ownedQuote.productLine,
       )?.label || ownedQuote.productLine || 'HyperBDR',
+      ownedQuote.currency,
     )
     if (catalogSync.added > 0) {
       products.value = catalogSync.products
@@ -665,12 +677,12 @@ function reloadPage() {
       class="flex min-h-screen flex-col items-center justify-center gap-3 bg-dm-page px-4 text-center"
     >
       <p class="text-sm font-medium text-dm-text">{{ t('quotation.app.authFailedTitle') }}</p>
-      <p class="max-w-md text-xs text-dm-text-tertiary">
+      <p class="max-w-md text-sm text-dm-text-tertiary">
         {{ auth.authError || t('quotation.app.authFailedHint') }}
       </p>
       <button
         type="button"
-        class="mt-2 dm-btn-default px-3 py-1.5 text-xs"
+        class="mt-2 dm-btn-default px-3 py-1.5 text-sm"
         @click="reloadPage"
       >
         {{ t('quotation.app.retry') }}
@@ -713,9 +725,11 @@ function reloadPage() {
           Q
         </div>
         <div>
-          <h1 class="text-sm font-semibold tracking-tight text-dm-text">Quote Desk</h1>
-          <span class="text-[10px] font-medium uppercase tracking-wider text-dm-text-tertiary"
-            >Quotation</span
+          <h1 class="text-sm font-semibold tracking-tight text-dm-text">
+            {{ t('quotation.app.title') }}
+          </h1>
+          <span class="text-xs font-medium uppercase tracking-wider text-dm-text-tertiary"
+            >{{ t('quotation.app.subtitle') }}</span
           >
         </div>
       </div>
@@ -752,16 +766,6 @@ function reloadPage() {
         </button>
 
         <button
-          id="nav-tab-imports"
-          type="button"
-          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('imports')}`"
-          @click="goTab('imports')"
-        >
-          <FolderInput class="h-4 w-4 shrink-0" />
-          <span>导入资料 / 待分析</span>
-        </button>
-
-        <button
           id="nav-tab-catalog"
           type="button"
           :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('catalog')}`"
@@ -770,17 +774,27 @@ function reloadPage() {
           <Settings class="h-4 w-4 shrink-0" />
           <span>业务目录要素配置</span>
         </button>
+
+        <button
+          id="nav-tab-audit"
+          type="button"
+          :class="`flex w-full cursor-pointer items-center gap-3 rounded-dm py-2.5 pr-3 text-left transition-colors ${navClass('audit')}`"
+          @click="goTab('audit')"
+        >
+          <ScrollText class="h-4 w-4 shrink-0" />
+          <span>{{ t('quotation.pages.audit.menuLabel') }}</span>
+        </button>
       </nav>
 
       <div class="flex items-center gap-3 border-t border-dm-border-light px-4 py-3">
         <div
-          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#ff4d4f] text-xs font-semibold text-white"
+          class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#ff4d4f] text-sm font-semibold text-white"
         >
           {{ userInitials }}
         </div>
         <div class="min-w-0 flex-1">
           <p class="truncate text-sm font-medium text-dm-text">{{ auth.currentUser.name }}</p>
-          <p class="truncate text-xs text-dm-text-tertiary">{{ auth.currentUser.title }}</p>
+          <p class="truncate text-sm text-dm-text-tertiary">{{ auth.currentUser.title }}</p>
         </div>
       </div>
     </aside>
@@ -798,8 +812,8 @@ function reloadPage() {
             <template v-else-if="currentTab === 'list'">报价查询及管理中心</template>
             <template v-else-if="currentTab === 'create'">拟定报价方案方案</template>
             <template v-else-if="currentTab === 'details'">报价方案单据详情预览</template>
-            <template v-else-if="currentTab === 'imports'">导入资料 / 待分析</template>
             <template v-else-if="currentTab === 'catalog'">商务目录要素及政策配置</template>
+            <template v-else-if="currentTab === 'audit'">{{ t('quotation.pages.audit.title') }}</template>
           </span>
         </div>
 
@@ -808,7 +822,7 @@ function reloadPage() {
             class="hidden items-center gap-1.5 rounded-dm border border-[#b7eb8f] bg-dm-success-bg px-2.5 py-1 md:flex"
           >
             <span class="h-1.5 w-1.5 rounded-full bg-dm-success" />
-            <span class="text-xs text-[#389e0d]">报价模板与本地生成引擎就绪</span>
+            <span class="text-sm text-[#389e0d]">报价模板与本地生成引擎就绪</span>
           </div>
 
           <div class="hidden h-4 w-px bg-dm-border md:block" />
@@ -818,11 +832,11 @@ function reloadPage() {
               <div class="flex items-center justify-end gap-1.5">
                 <span class="text-sm font-medium text-dm-text">{{ auth.currentUser.name }}</span>
                 <span
-                  class="rounded border border-[#91caff] bg-dm-primary-bg px-1.5 py-0.5 text-[10px] font-medium text-dm-primary"
+                  class="rounded border border-[#91caff] bg-dm-primary-bg px-1.5 py-0.5 text-xs font-medium text-dm-primary"
                   >{{ auth.currentUser.role }}</span
                 >
               </div>
-              <div class="mt-0.5 text-xs text-dm-text-tertiary">
+              <div class="mt-0.5 text-sm text-dm-text-tertiary">
                 {{ auth.currentUser.title }} •
                 <span class="font-mono">{{ auth.currentUser.email }}</span>
               </div>
@@ -852,18 +866,27 @@ function reloadPage() {
           @navigate-to-tab="handleNavigateToTab"
         />
 
-        <QuotationList
+        <div
           v-if="currentTab === 'list'"
-          :quotations="quotations"
-          :current-user="auth.currentUser"
-          @view-quote="handleViewQuoteDetails"
-          @delete-quote="handleDeleteQuote"
-          @update-quote-status="handleUpdateQuote"
-          @feishu-upload-done="handleFeishuUploadDone"
-          @reconcile-feishu-links="handleReconcileFeishuLinks"
-          @edit-quote="handleEditQuote"
-          @toast="triggerToast"
-        />
+          class="space-y-5"
+        >
+          <QuotationList
+            :quotations="quotations"
+            :current-user="auth.currentUser"
+            @view-quote="handleViewQuoteDetails"
+            @delete-quote="handleDeleteQuote"
+            @update-quote-status="handleUpdateQuote"
+            @feishu-upload-done="handleFeishuUploadDone"
+            @reconcile-feishu-links="handleReconcileFeishuLinks"
+            @edit-quote="handleEditQuote"
+            @toast="triggerToast"
+          />
+
+          <ImportedDocumentsPage
+            embedded
+            @toast="triggerToast"
+          />
+        </div>
 
         <QuotationCreate
           v-if="currentTab === 'create'"
@@ -890,11 +913,6 @@ function reloadPage() {
           @edit-quote="handleEditQuote"
         />
 
-        <ImportedDocumentsPage
-          v-if="currentTab === 'imports'"
-          @toast="triggerToast"
-        />
-
         <ProductServiceManager
           v-if="currentTab === 'catalog'"
           :products="products"
@@ -908,6 +926,8 @@ function reloadPage() {
           @add-discount="handleAddDiscount"
           @delete-discount="handleDeleteDiscount"
         />
+
+        <AuditLogPage v-if="currentTab === 'audit'" />
       </main>
     </div>
   </div>

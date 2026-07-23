@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { listQuotations, updateQuotation, deleteQuotation } from '../api/quotations'
+import ImportedDocumentsPage from '../components/ImportedDocumentsPage.vue'
 import QuotationList from '../components/QuotationList.vue'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from '../utils/feishuLinkState'
 import { useAuthStore } from '../stores/auth'
@@ -177,21 +178,28 @@ function handleUpdateQuoteStatus(
       {{ toast.message }}
     </div>
 
-    <div v-if="loading && !quotations.length" class="py-16 text-center text-sm text-slate-400">
-      正在加载报价单…
-    </div>
+    <div class="space-y-5">
+      <div v-if="loading && !quotations.length" class="py-16 text-center text-sm text-slate-400">
+        正在加载报价单…
+      </div>
 
-    <QuotationList
-      v-else
-      :quotations="quotations"
-      :current-user="currentUser"
-      @view-quote="handleViewQuote"
-      @delete-quote="handleDeleteQuote"
-      @update-quote-status="handleUpdateQuoteStatus"
-      @feishu-upload-done="handleFeishuUploadDone"
-      @reconcile-feishu-links="handleReconcileFeishuLinks"
-      @edit-quote="handleEditQuote"
-      @toast="showToast"
-    />
+      <QuotationList
+        v-else
+        :quotations="quotations"
+        :current-user="currentUser"
+        @view-quote="handleViewQuote"
+        @delete-quote="handleDeleteQuote"
+        @update-quote-status="handleUpdateQuoteStatus"
+        @feishu-upload-done="handleFeishuUploadDone"
+        @reconcile-feishu-links="handleReconcileFeishuLinks"
+        @edit-quote="handleEditQuote"
+        @toast="showToast"
+      />
+
+      <ImportedDocumentsPage
+        embedded
+        @toast="showToast"
+      />
+    </div>
   </div>
 </template>

@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
     <button
       ref="triggerRef"
       type="button"
-      :class="`inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-full border shadow-2xs transition-all duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${getStatusStyle(modelValue)}`"
+      :class="`inline-flex items-center gap-1 whitespace-nowrap px-2.5 py-0.5 text-xs font-semibold rounded-full border shadow-2xs transition-all duration-150 cursor-pointer focus:outline-hidden focus:ring-1 focus:ring-blue-500 focus:border-blue-500 ${getStatusStyle(modelValue)}`"
       @click="toggleOpen"
     >
       <span>{{ quoteStatusLabel(modelValue) }}</span>

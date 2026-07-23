@@ -95,6 +95,13 @@ class Command(BaseCommand):
                 )
             )
 
+        with self._timed_step("Preparing quotation storage control plane"):
+            call_command(
+                "migrate_feishu_control_plane",
+                "--apply",
+                verbosity=verbosity,
+            )
+
         should_collect_static = _env_enabled(
             "BACKEND_INIT_COLLECTSTATIC",
             default=True,

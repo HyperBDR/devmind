@@ -58,7 +58,7 @@
     "taskManagementConsole": "任务控制台",
     "notificationConsole": "通知控制台",
     "hyperbdrDashboard": "HyperMotion / HyperBDR数据仪表盘",
-    "quotationManagement": "报价台"
+    "quotationManagement": "报价工作台"
   },
   "llm": {
     "menuTitle": "大模型管理",

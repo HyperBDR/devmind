@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   Ban,
@@ -15,6 +15,7 @@ import {
   XCircle,
 } from 'lucide-vue-next'
 import type { Quotation, QuoteStatus, QuoteVersion } from '../types'
+import { listAuditEvents, type AuditEvent } from '../api/audit'
 import { downloadQuotationExcel } from '../utils/excelGenerator'
 import { downloadQuotationPdf } from '../utils/pdfExporter'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
@@ -44,6 +45,35 @@ const emit = defineEmits<{
 }>()
 
 const selectedVersionForModal = ref<QuoteVersion | null>(null)
+const activityEvents = ref<AuditEvent[]>([])
+
+async function loadActivity() {
+  const response = await listAuditEvents({
+    quotationId: props.quote.id,
+    pageSize: 8,
+  })
+  activityEvents.value = response.items.filter(
+    (event) => event.event_name !== 'audit.viewed',
+  )
+}
+
+function activityActor(event: AuditEvent) {
+  return event.actor_name || event.actor_email || t('quotation.pages.audit.system')
+}
+
+function activityTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+watch(() => props.quote.id, () => void loadActivity())
+onMounted(() => void loadActivity())
 
 const currencySymbol = computed(() => getCurrencySymbol(props.quote.currency))
 
@@ -256,7 +286,7 @@ function setStatus(status: QuoteStatus) {
   <div id="quote-details-root" class="mx-auto max-w-[1400px] space-y-6">
     <div
       v-if="quote.status === 'Cancelled'"
-      class="flex gap-3 rounded-xl border border-rose-200 bg-rose-50 p-5 text-xs text-rose-800"
+      class="flex gap-3 rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800"
     >
       <Ban class="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
       <div class="flex-1 space-y-1.5">
@@ -279,7 +309,7 @@ function setStatus(status: QuoteStatus) {
     >
       <button
         type="button"
-        class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dm-border px-3 py-1.5 text-xs font-semibold text-dm-text-secondary transition duration-150 hover:bg-[#fafafa]"
+        class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dm-border px-3 py-1.5 text-sm font-semibold text-dm-text-secondary transition duration-150 hover:bg-[#fafafa]"
         @click="emit('back')"
       >
         <ArrowLeft class="h-4 w-4" />
@@ -290,7 +320,7 @@ function setStatus(status: QuoteStatus) {
         <button
           v-if="quote.status !== 'Cancelled'"
           type="button"
-          class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dm-border bg-white px-3.5 py-2 text-xs font-semibold text-dm-text shadow-xs transition duration-150 hover:bg-[#fafafa]"
+          class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dm-border bg-white px-3.5 py-2 text-sm font-semibold text-dm-text shadow-xs transition duration-150 hover:bg-[#fafafa]"
           @click="emit('editQuote', quote.id)"
         >
           <Pencil class="h-4 w-4 text-dm-text-tertiary" />
@@ -300,7 +330,7 @@ function setStatus(status: QuoteStatus) {
         <button
           v-if="quote.status === 'Draft'"
           type="button"
-          class="flex cursor-pointer items-center gap-1.5 rounded-lg bg-dm-primary px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition duration-150 hover:bg-dm-primary-hover active:bg-blue-700"
+          class="dm-btn-primary cursor-pointer px-3.5 py-2 text-sm font-semibold"
           @click="handleGenerateExcel"
         >
           <FileSpreadsheet class="h-4 w-4" />
@@ -309,7 +339,7 @@ function setStatus(status: QuoteStatus) {
 
         <button
           type="button"
-          class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold shadow-xs transition duration-150"
+          class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold shadow-xs transition duration-150"
           :class="
             quote.status === 'Cancelled'
               ? 'cursor-not-allowed border border-dm-border bg-slate-100 text-dm-text-tertiary'
@@ -324,7 +354,7 @@ function setStatus(status: QuoteStatus) {
         <button
           type="button"
           :disabled="quote.status === 'Cancelled'"
-          class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-xs font-semibold shadow-xs transition duration-150"
+          class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold shadow-xs transition duration-150"
           :class="
             quote.status === 'Cancelled'
               ? 'cursor-not-allowed border border-dm-border bg-slate-100 text-dm-text-tertiary'
@@ -358,9 +388,9 @@ function setStatus(status: QuoteStatus) {
             <FileSpreadsheet class="h-4 w-4 text-emerald-500" />
             <h3 class="text-sm font-semibold text-dm-text">{{ t('quotation.pages.details.excelPropsTitle') }}</h3>
           </div>
-          <div class="space-y-3 text-xs font-medium text-dm-text-secondary">
+          <div class="space-y-3 text-sm font-medium text-dm-text-secondary">
             <div>
-              <span class="block text-[10px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+              <span class="block text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
                 {{ t('quotation.pages.details.excelFileName') }}
               </span>
               <span
@@ -370,23 +400,40 @@ function setStatus(status: QuoteStatus) {
               </span>
             </div>
             <div>
-              <span class="block text-[10px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+              <span class="block text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
                 {{ t('quotation.pages.details.excelGeneratedAt') }}
               </span>
-              <span class="mt-1 block font-mono text-[11px] text-dm-text">
+              <span class="mt-1 block font-mono text-xs text-dm-text">
                 {{ quote.excelGeneratedAt || quote.createdAt || t('quotation.pages.details.autoGenerated') }}
               </span>
             </div>
             <div>
-              <span class="block text-[10px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+              <span class="block text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
                 {{ t('quotation.pages.details.excelTemplateStatus') }}
               </span>
-              <div class="mt-1.5 flex items-center gap-1.5 text-[11px] font-bold text-emerald-600">
+              <div class="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-emerald-600">
                 <CheckCircle class="h-3.5 w-3.5" />
                 <span>{{ t('quotation.pages.details.excelTemplateReady') }}</span>
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="space-y-4 dm-card p-5 shadow-xs">
+          <div class="flex items-center justify-between border-b border-slate-50 pb-2">
+            <div class="flex items-center gap-2">
+              <Clock class="h-4 w-4 text-dm-text-tertiary" />
+              <h3 class="text-sm font-semibold text-dm-text">{{ t('quotation.pages.details.activityTitle') }}</h3>
+            </div>
+          </div>
+          <ol class="max-h-64 space-y-3 overflow-y-auto pr-1">
+            <li v-for="event in activityEvents" :key="event.id" class="border-l-2 border-blue-200 pl-3">
+              <p class="text-xs font-semibold text-dm-text">{{ t(`quotation.pages.audit.actions.${event.action}`) }}</p>
+              <p class="mt-0.5 text-[11px] text-dm-text-tertiary">{{ activityActor(event) }} · {{ activityTime(event.created_at) }}</p>
+              <p class="mt-0.5 truncate font-mono text-[10px] text-dm-text-tertiary" :title="event.request_id">{{ event.request_id }}</p>
+            </li>
+            <li v-if="!activityEvents.length" class="py-3 text-center text-xs text-dm-text-tertiary">{{ t('quotation.pages.details.noActivity') }}</li>
+          </ol>
         </div>
 
         <div class="space-y-4 dm-card p-5 shadow-xs">
@@ -399,12 +446,12 @@ function setStatus(status: QuoteStatus) {
             <div
               class="flex items-center justify-between rounded-lg border border-dm-border-light bg-[#fafafa] p-2.5"
             >
-              <span class="text-xs font-medium text-dm-text-tertiary">{{ t('quotation.pages.details.currentStatus') }}</span>
+              <span class="text-sm font-medium text-dm-text-tertiary">{{ t('quotation.pages.details.currentStatus') }}</span>
               <StatusBadge :status="quote.status" />
             </div>
 
-            <div class="space-y-2 text-xs">
-              <span class="mb-1 block text-[10px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+            <div class="space-y-2 text-sm">
+              <span class="mb-1 block text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
                 {{ t('quotation.pages.details.quickStatusChange') }}
               </span>
 
@@ -413,7 +460,7 @@ function setStatus(status: QuoteStatus) {
                 class="select-none space-y-1 rounded-lg border border-dashed border-dm-border bg-[#fafafa] p-3.5 text-center font-medium text-dm-text-tertiary"
               >
                 <p>{{ t('quotation.pages.details.statusFrozenTitle') }}</p>
-                <p class="text-[10px] text-dm-text-tertiary">{{ t('quotation.pages.details.statusFrozenHint') }}</p>
+                <p class="text-xs text-dm-text-tertiary">{{ t('quotation.pages.details.statusFrozenHint') }}</p>
               </div>
 
               <div v-else class="grid grid-cols-1 gap-2">
@@ -434,7 +481,7 @@ function setStatus(status: QuoteStatus) {
                   </div>
                   <span
                     v-if="quote.status === 'Sent'"
-                    class="rounded-md bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium"
+                    class="rounded-md bg-purple-100 px-1.5 py-0.5 text-xs font-medium"
                   >
                     {{ t('quotation.pages.details.currentBadge') }}
                   </span>
@@ -457,7 +504,7 @@ function setStatus(status: QuoteStatus) {
                   </div>
                   <span
                     v-if="quote.status === 'Accepted'"
-                    class="rounded-md bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700"
+                    class="rounded-md bg-emerald-100 px-1.5 py-0.5 text-xs font-medium text-emerald-700"
                   >
                     {{ t('quotation.pages.details.currentBadge') }}
                   </span>
@@ -480,7 +527,7 @@ function setStatus(status: QuoteStatus) {
                   </div>
                   <span
                     v-if="quote.status === 'Rejected'"
-                    class="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-medium"
+                    class="rounded-md bg-red-100 px-1.5 py-0.5 text-xs font-medium"
                   >
                     {{ t('quotation.pages.details.currentBadge') }}
                   </span>
@@ -503,7 +550,7 @@ function setStatus(status: QuoteStatus) {
                   </div>
                   <span
                     v-if="quote.status === 'Expired'"
-                    class="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700"
+                    class="rounded-md bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700"
                   >
                     {{ t('quotation.pages.details.currentBadge') }}
                   </span>
@@ -519,7 +566,7 @@ function setStatus(status: QuoteStatus) {
               <Clock class="h-4 w-4 text-dm-text-tertiary" />
               <h3 class="text-sm font-semibold text-dm-text">{{ t('quotation.pages.details.versionHistoryTitle') }}</h3>
             </div>
-            <span class="rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-dm-text-secondary">
+            <span class="rounded-full bg-slate-100 px-1.5 py-0.5 font-mono text-xs font-bold text-dm-text-secondary">
               {{ t('quotation.pages.details.versionCount', { count: quote.versions?.length || 0 }) }}
             </span>
           </div>
@@ -528,13 +575,13 @@ function setStatus(status: QuoteStatus) {
             <div
               v-for="ver in reversedVersions"
               :key="ver.id"
-              class="space-y-2.5 rounded-lg border border-dm-border-light bg-[#fafafa] p-3 text-xs font-medium transition duration-150 hover:bg-[#fafafa]"
+              class="space-y-2.5 rounded-lg border border-dm-border-light bg-[#fafafa] p-3 text-sm font-medium transition duration-150 hover:bg-[#fafafa]"
             >
               <div class="flex items-center justify-between font-bold">
-                <span class="rounded-md bg-dm-primary-bg px-2 py-0.5 font-mono text-xs text-dm-primary">
+                <span class="rounded-md bg-dm-primary-bg px-2 py-0.5 font-mono text-sm text-dm-primary">
                   {{ ver.versionNo }}
                 </span>
-                <span class="font-mono text-[10px] text-dm-text-tertiary">{{ ver.updateTime ? ver.updateTime.substring(5, 16) : '' }}</span>
+                <span class="font-mono text-xs text-dm-text-tertiary">{{ ver.updateTime ? ver.updateTime.substring(5, 16) : '' }}</span>
               </div>
               <div class="space-y-1 text-dm-text-secondary">
                 <div class="flex justify-between font-medium">
@@ -552,21 +599,21 @@ function setStatus(status: QuoteStatus) {
                   </span>
                 </div>
                 <p
-                  class="mt-1 line-clamp-2 border-l-2 border-dm-border pl-1.5 text-[11px] font-medium italic text-dm-text-tertiary"
+                  class="mt-1 line-clamp-2 border-l-2 border-dm-border pl-1.5 text-xs font-medium italic text-dm-text-tertiary"
                   :title="ver.notes"
                 >
                   {{ ver.notes || t('quotation.pages.details.noNotes') }}
                 </p>
                 <p
                   v-if="versionDiffChips.get(ver.id)"
-                  class="mt-1 rounded-md bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600"
+                  class="mt-1 rounded-md bg-rose-50 px-1.5 py-0.5 text-xs font-bold text-rose-600"
                 >
                   {{ versionDiffChips.get(ver.id) }}
                 </p>
               </div>
               <button
                 type="button"
-                class="mt-1.5 flex w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-dm-border py-1.5 text-[11px] font-extrabold text-dm-text transition duration-150 hover:bg-slate-100"
+                class="mt-1.5 flex w-full cursor-pointer items-center justify-center gap-1 rounded-md border border-dm-border py-1.5 text-xs font-extrabold text-dm-text transition duration-150 hover:bg-slate-100"
                 @click="selectedVersionForModal = ver"
               >
                 <FileText class="h-3.5 w-3.5 text-dm-text-tertiary" />
@@ -591,13 +638,13 @@ function setStatus(status: QuoteStatus) {
         <div class="flex items-start justify-between border-b border-dm-border-light pb-4">
           <div class="space-y-1">
             <div class="flex items-center gap-2">
-              <span class="rounded-md bg-dm-primary-bg px-2 py-0.5 font-mono text-xs font-extrabold text-dm-primary">
+              <span class="rounded-md bg-dm-primary-bg px-2 py-0.5 font-mono text-sm font-extrabold text-dm-primary">
                 {{ displayVersion.versionNo }}
               </span>
               <h3 class="text-sm font-extrabold text-dm-text">{{ t('quotation.pages.details.snapshotTitle') }}</h3>
               <StatusBadge :status="displayVersion.status" />
             </div>
-            <p class="text-xs font-medium text-dm-text-tertiary">
+            <p class="text-sm font-medium text-dm-text-tertiary">
               {{
                 t('quotation.pages.details.snapshotMeta', {
                   time: displayVersion.updateTime,
@@ -605,7 +652,7 @@ function setStatus(status: QuoteStatus) {
                 })
               }}
             </p>
-            <p class="text-xs font-medium text-rose-600">
+            <p class="text-sm font-medium text-rose-600">
               {{ t('quotation.pages.details.versionChangeNote') }}
               <span class="font-bold italic">
                 “ {{ displayVersion.notes || t('quotation.pages.details.noVersionNote') }} ”
@@ -613,21 +660,21 @@ function setStatus(status: QuoteStatus) {
             </p>
             <p
               v-if="activeVersionDiff?.hasChanges"
-              class="mt-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] font-semibold text-rose-700"
+              class="mt-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1.5 text-xs font-semibold text-rose-700"
             >
               {{ t('quotation.pages.details.diffVsCurrentBanner') }}
               <span class="font-bold">{{ activeDiffSummaryLabels.join(' · ') }}</span>
             </p>
             <p
               v-else
-              class="mt-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] font-semibold text-emerald-700"
+              class="mt-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs font-semibold text-emerald-700"
             >
               {{ t('quotation.pages.details.diffVsCurrentSame') }}
             </p>
           </div>
           <button
             type="button"
-            class="animate-none cursor-pointer rounded-lg px-2.5 py-1 text-xs font-semibold text-dm-text-tertiary transition duration-150 hover:bg-slate-100 hover:text-dm-text"
+            class="animate-none cursor-pointer rounded-lg px-2.5 py-1 text-sm font-semibold text-dm-text-tertiary transition duration-150 hover:bg-slate-100 hover:text-dm-text"
             @click="selectedVersionForModal = null"
           >
             {{ t('quotation.pages.details.closeModal') }}
@@ -635,10 +682,10 @@ function setStatus(status: QuoteStatus) {
         </div>
 
         <div
-          class="grid grid-cols-1 gap-4 rounded-xl border border-dm-border-light bg-[#fafafa] p-4 text-xs font-medium md:grid-cols-2"
+          class="grid grid-cols-1 gap-4 rounded-xl border border-dm-border-light bg-[#fafafa] p-4 text-sm font-medium md:grid-cols-2"
         >
           <div class="space-y-1.5 font-medium">
-            <p class="text-[10px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+            <p class="text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
               {{ t('quotation.pages.details.propertiesTitle') }}
             </p>
             <div>
@@ -648,7 +695,7 @@ function setStatus(status: QuoteStatus) {
               </span>
               <span
                 v-if="isFieldChanged(activeVersionDiff, 'projectName')"
-                class="ml-1 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600"
+                class="ml-1 rounded bg-rose-100 px-1 text-xs font-bold text-rose-600"
               >
                 {{ t('quotation.pages.details.diffBadge') }}
               </span>
@@ -660,7 +707,7 @@ function setStatus(status: QuoteStatus) {
               </span>
               <span
                 v-if="isFieldChanged(activeVersionDiff, 'clientCompany')"
-                class="ml-1 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600"
+                class="ml-1 rounded bg-rose-100 px-1 text-xs font-bold text-rose-600"
               >
                 {{ t('quotation.pages.details.diffBadge') }}
               </span>
@@ -682,14 +729,14 @@ function setStatus(status: QuoteStatus) {
                   isFieldChanged(activeVersionDiff, 'contactPerson') ||
                   isFieldChanged(activeVersionDiff, 'email')
                 "
-                class="ml-1 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600"
+                class="ml-1 rounded bg-rose-100 px-1 text-xs font-bold text-rose-600"
               >
                 {{ t('quotation.pages.details.diffBadge') }}
               </span>
             </div>
           </div>
           <div class="space-y-1.5 font-medium md:border-l md:border-dm-border md:pl-4">
-            <p class="text-[10px] font-bold uppercase tracking-wider text-dm-text-tertiary">
+            <p class="text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
               {{ t('quotation.pages.details.notesTitle') }}
             </p>
             <div>
@@ -705,7 +752,7 @@ function setStatus(status: QuoteStatus) {
               </span>
               <span
                 v-if="isFieldChanged(activeVersionDiff, 'currency')"
-                class="ml-1 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600"
+                class="ml-1 rounded bg-rose-100 px-1 text-xs font-bold text-rose-600"
               >
                 {{ t('quotation.pages.details.diffBadge') }}
               </span>
@@ -723,7 +770,7 @@ function setStatus(status: QuoteStatus) {
               </span>
               <span
                 v-if="isFieldChanged(activeVersionDiff, 'paymentTerms')"
-                class="ml-1 rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600"
+                class="ml-1 rounded bg-rose-100 px-1 text-xs font-bold text-rose-600"
               >
                 {{ t('quotation.pages.details.diffBadge') }}
               </span>
@@ -742,7 +789,7 @@ function setStatus(status: QuoteStatus) {
                 </span>
                 <span
                   v-if="isFieldChanged(activeVersionDiff, 'grandTotal')"
-                  class="rounded bg-rose-100 px-1 text-[9px] font-bold text-rose-600"
+                  class="rounded bg-rose-100 px-1 text-xs font-bold text-rose-600"
                 >
                   {{ t('quotation.pages.details.diffBadge') }}
                 </span>
@@ -764,7 +811,7 @@ function setStatus(status: QuoteStatus) {
         <div class="flex items-center justify-end gap-2 border-t border-dm-border-light pt-2">
           <button
             type="button"
-            class="cursor-pointer rounded-lg border border-dm-border bg-slate-100 px-4 py-2 text-xs font-semibold text-dm-text transition duration-150 hover:bg-slate-200"
+            class="cursor-pointer rounded-lg border border-dm-border bg-slate-100 px-4 py-2 text-sm font-semibold text-dm-text transition duration-150 hover:bg-slate-200"
             @click="selectedVersionForModal = null"
           >
             {{ t('quotation.pages.details.closeSnapshot') }}

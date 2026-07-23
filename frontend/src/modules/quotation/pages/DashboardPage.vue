@@ -36,7 +36,7 @@ onMounted(async () => {
 
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <div class="rounded-xl border border-slate-200 bg-white p-5">
-        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">报价单</div>
+        <div class="text-sm font-semibold uppercase tracking-wide text-slate-400">报价单</div>
         <div class="mt-2 text-3xl font-semibold text-slate-900">
           {{ loading ? '…' : quoteCount }}
         </div>
@@ -49,12 +49,12 @@ onMounted(async () => {
       </div>
 
       <div class="rounded-xl border border-slate-200 bg-white p-5">
-        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">导入资料</div>
+        <div class="text-sm font-semibold uppercase tracking-wide text-slate-400">导入文件</div>
         <div class="mt-2 text-3xl font-semibold text-slate-900">
           {{ loading ? '…' : importCount }}
         </div>
         <RouterLink
-          to="/imports"
+          :to="{ path: '/quotation/list', query: { tab: 'imports' } }"
           class="mt-3 inline-block text-sm font-medium text-blue-600 hover:text-blue-700"
         >
           管理导入 →
@@ -62,10 +62,10 @@ onMounted(async () => {
       </div>
 
       <div class="rounded-xl border border-slate-200 bg-white p-5">
-        <div class="text-xs font-semibold uppercase tracking-wide text-slate-400">快捷操作</div>
+        <div class="text-sm font-semibold uppercase tracking-wide text-slate-400">快捷操作</div>
         <RouterLink
           to="/quotations/new"
-          class="mt-4 inline-flex rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+          class="dm-btn-primary mt-4 px-3 py-2 text-sm font-semibold"
         >
           创建报价
         </RouterLink>

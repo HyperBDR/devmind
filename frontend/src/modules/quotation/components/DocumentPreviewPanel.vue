@@ -98,7 +98,7 @@ async function handleDownload() {
   >
     <FileText class="h-8 w-8 text-slate-300" />
     <p class="mt-3 text-sm font-semibold text-slate-700">选择左侧文件</p>
-    <p class="mt-1 text-[11px] text-slate-400">PDF 可在右侧全高预览；Excel 请下载后查看。</p>
+    <p class="mt-1 text-xs text-slate-400">PDF 可在右侧全高预览；Excel 请下载后查看。</p>
   </div>
 
   <div
@@ -108,19 +108,19 @@ async function handleDownload() {
     <div class="shrink-0 border-b border-slate-100 px-4 py-3">
       <div class="flex items-center gap-2">
         <FileSpreadsheet class="h-4 w-4 shrink-0 text-emerald-600" />
-        <h3 class="truncate text-xs font-bold text-slate-800" :title="doc.file_name">
+        <h3 class="truncate text-sm font-bold text-slate-800" :title="doc.file_name">
           {{ doc.file_name }}
         </h3>
       </div>
-      <p class="mt-0.5 text-[10px] text-slate-400">Excel 不支持在线预览</p>
+      <p class="mt-0.5 text-xs text-slate-400">Excel 不支持在线预览</p>
     </div>
     <div class="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
       <FileSpreadsheet class="h-10 w-10 text-slate-300" />
       <p class="text-sm font-semibold text-slate-700">请下载后用 Excel / WPS 打开</p>
-      <p class="max-w-sm text-[11px] text-slate-400">Excel 仅提供下载，不在页面内预览。</p>
+      <p class="max-w-sm text-xs text-slate-400">Excel 仅提供下载，不在页面内预览。</p>
       <button
         type="button"
-        class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+        class="dm-btn-primary mt-2 px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
         :disabled="downloading"
         @click="handleDownload"
       >
@@ -138,7 +138,7 @@ async function handleDownload() {
     <p class="text-sm font-semibold text-slate-700">暂不支持该类型预览</p>
     <button
       type="button"
-      class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+      class="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
       @click="handleDownload"
     >
       <Download class="h-3.5 w-3.5" />
@@ -154,15 +154,15 @@ async function handleDownload() {
       <div class="min-w-0">
         <div class="flex items-center gap-2">
           <FileText class="h-4 w-4 shrink-0 text-rose-500" />
-          <h3 class="truncate text-xs font-bold text-slate-800" :title="doc.file_name">
+          <h3 class="truncate text-sm font-bold text-slate-800" :title="doc.file_name">
             {{ doc.file_name }}
           </h3>
         </div>
-        <p class="mt-0.5 text-[10px] text-slate-400">PDF 全高预览 · 只读</p>
+        <p class="mt-0.5 text-xs text-slate-400">PDF 全高预览 · 只读</p>
       </div>
       <button
         type="button"
-        class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        class="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         :disabled="downloading"
         @click="handleDownload"
       >
@@ -182,7 +182,7 @@ async function handleDownload() {
       </div>
       <div
         v-else-if="error"
-        class="m-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-[11px] text-red-600"
+        class="m-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600"
       >
         {{ error }}
       </div>
@@ -194,7 +194,7 @@ async function handleDownload() {
       />
       <div
         v-else
-        class="absolute inset-0 flex items-center justify-center text-[11px] text-slate-400"
+        class="absolute inset-0 flex items-center justify-center text-xs text-slate-400"
       >
         暂无预览内容
       </div>

@@ -738,8 +738,8 @@
     "dashboard": "Overview",
     "list": "Quotes",
     "create": "New Quote",
-    "imports": "Import Queue",
-    "catalog": "Catalog"
+    "catalog": "Catalog",
+    "audit": "Audit Log"
   },
   "operations": {
     "menuTitle": "Operations Dashboard",

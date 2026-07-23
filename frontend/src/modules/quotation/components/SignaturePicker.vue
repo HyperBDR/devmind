@@ -291,7 +291,7 @@ function handleRemoveFromGallery(dataUrl: string) {
     <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
       <button
         type="button"
-        :class="`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[10px] font-semibold cursor-pointer ${
+        :class="`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold cursor-pointer ${
           mode === 'draw' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-800'
         }`"
         @click="mode = 'draw'"
@@ -301,7 +301,7 @@ function handleRemoveFromGallery(dataUrl: string) {
       </button>
       <button
         type="button"
-        :class="`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-[10px] font-semibold cursor-pointer ${
+        :class="`inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold cursor-pointer ${
           mode === 'upload' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-800'
         }`"
         @click="mode = 'upload'"
@@ -324,12 +324,12 @@ function handleRemoveFromGallery(dataUrl: string) {
         />
       </div>
       <div class="mt-2 flex items-center justify-between gap-2">
-        <p class="text-[10px] font-medium text-slate-400">
+        <p class="text-xs font-medium text-slate-400">
           {{ t('quotation.components.signature.drawHint') }}
         </p>
         <button
           type="button"
-          class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+          class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"
           @click="handleClear"
         >
           <Eraser class="h-3.5 w-3.5" />
@@ -351,7 +351,7 @@ function handleRemoveFromGallery(dataUrl: string) {
           />
           <button
             type="button"
-            class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+            class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             @click="fileInputRef?.click()"
           >
             <Upload class="h-3.5 w-3.5" />
@@ -360,10 +360,10 @@ function handleRemoveFromGallery(dataUrl: string) {
         </div>
         <div v-else class="flex flex-col items-center gap-2 text-slate-400">
           <ImagePlus class="h-8 w-8" />
-          <p class="text-[11px] font-medium">{{ t('quotation.components.signature.uploadPrompt') }}</p>
+          <p class="text-xs font-medium">{{ t('quotation.components.signature.uploadPrompt') }}</p>
           <button
             type="button"
-            class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50"
+            class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             @click="fileInputRef?.click()"
           >
             <Upload class="h-3.5 w-3.5" />
@@ -376,7 +376,7 @@ function handleRemoveFromGallery(dataUrl: string) {
         <button
           v-if="currentSignature()"
           type="button"
-          class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1.5 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+          class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
           @click="handleClear"
         >
           <X class="h-3.5 w-3.5" />
@@ -391,10 +391,10 @@ function handleRemoveFromGallery(dataUrl: string) {
         />
       </div>
 
-      <p v-if="error" class="mt-2 text-[10px] text-red-500">{{ error }}</p>
+      <p v-if="error" class="mt-2 text-xs text-red-500">{{ error }}</p>
 
       <div v-if="gallery.length > 0" class="mt-3 space-y-2">
-        <p class="text-[10px] font-semibold text-slate-500">{{ t('quotation.components.signature.galleryTitle') }}</p>
+        <p class="text-xs font-semibold text-slate-500">{{ t('quotation.components.signature.galleryTitle') }}</p>
         <div class="flex flex-wrap gap-2">
           <div
             v-for="(item, index) in gallery"
@@ -426,7 +426,7 @@ function handleRemoveFromGallery(dataUrl: string) {
         </div>
       </div>
 
-      <p class="mt-2 text-[10px] font-medium text-slate-400">
+      <p class="mt-2 text-xs font-medium text-slate-400">
         {{ t('quotation.components.signature.uploadHint') }}
       </p>
     </div>

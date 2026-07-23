@@ -10,6 +10,7 @@ from .files import (
     FeishuFileAccessBatchView,
     FeishuFileAccessView,
     FeishuFileContentView,
+    FeishuFolderSyncView,
     FeishuImportView,
 )
 from .folders import (
@@ -26,6 +27,7 @@ __all__ = [
     "FeishuFileAccessBatchView",
     "FeishuFileAccessView",
     "FeishuFileContentView",
+    "FeishuFolderSyncView",
     "FeishuFolderView",
     "FeishuHealthView",
     "FeishuImportView",

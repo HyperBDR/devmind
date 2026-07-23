@@ -155,6 +155,12 @@ class QuotationBoundaryTests(TestCase):
 
 class QuotationRollbackTests(TestCase):
     def setUp(self):
+        self.settings_override = self.settings(
+            FEISHU_APP_ID="cli_test",
+            FEISHU_APP_SECRET="secret_test",
+            QUOTATION_FEISHU_ARCHIVE_FOLDER_TOKEN="folder_token",
+        )
+        self.settings_override.enable()
         self.user = User.objects.create_user(
             username="qa-rollback",
             email="admin@example.com",
@@ -170,6 +176,9 @@ class QuotationRollbackTests(TestCase):
         )
         assert created.status_code == 201
         self.quote_id = created.data["id"]
+
+    def tearDown(self):
+        self.settings_override.disable()
 
     def test_update_rolls_back_quote_and_items_when_snapshot_fails(self):
         payload = quote_payload("QA-ROLLBACK-001")
@@ -219,10 +228,24 @@ class QuotationRollbackTests(TestCase):
         class FakeFeishuClient:
             deleted_tokens = []
 
+            def get_tenant_access_token(self):
+                return "tenant-token"
+
             def get_folder_meta(self, access_token, folder_token):
                 return {"token": folder_token, "name": "test"}
 
             def list_folder_files(self, access_token, folder_token, **kwargs):
+                if folder_token == "folder_token":
+                    return {
+                        "files": [
+                            {
+                                "token": "fld_test_folder",
+                                "name": "Test folder",
+                                "type": "folder",
+                            }
+                        ],
+                        "has_more": False,
+                    }
                 return {"files": [], "has_more": False}
 
             def upload_file(self, access_token, **kwargs):

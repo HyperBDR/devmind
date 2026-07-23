@@ -61,12 +61,15 @@ interface ApiQuotation {
   feishu_url?: string | null;
   feishu_path?: string | null;
   feishu_uploaded_at?: string | null;
+  feishu_document_id?: string | null;
   feishu_excel_file_token?: string | null;
   feishu_excel_url?: string | null;
+  feishu_excel_document_id?: string | null;
   feishu_excel_path?: string | null;
   feishu_excel_uploaded_at?: string | null;
   feishu_pdf_file_token?: string | null;
   feishu_pdf_url?: string | null;
+  feishu_pdf_document_id?: string | null;
   feishu_pdf_path?: string | null;
   feishu_pdf_uploaded_at?: string | null;
   created_at: string;
@@ -318,12 +321,15 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     feishuUrl: api.feishu_url || undefined,
     feishuPath: api.feishu_path || undefined,
     feishuUploadedAt: api.feishu_uploaded_at || undefined,
+    feishuDocumentId: api.feishu_document_id || undefined,
     feishuExcelFileToken: api.feishu_excel_file_token || undefined,
     feishuExcelUrl: api.feishu_excel_url || undefined,
+    feishuExcelDocumentId: api.feishu_excel_document_id || undefined,
     feishuExcelPath: api.feishu_excel_path || undefined,
     feishuExcelUploadedAt: api.feishu_excel_uploaded_at || undefined,
     feishuPdfFileToken: api.feishu_pdf_file_token || undefined,
     feishuPdfUrl: api.feishu_pdf_url || undefined,
+    feishuPdfDocumentId: api.feishu_pdf_document_id || undefined,
     feishuPdfPath: api.feishu_pdf_path || undefined,
     feishuPdfUploadedAt: api.feishu_pdf_uploaded_at || undefined,
     versions: (api.versions || []).map(mapApiVersion),
@@ -374,6 +380,11 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
 export async function listQuotations(): Promise<Quotation[]> {
   const data = await apiRequest<{ items: ApiQuotation[]; total: number }>('/quotations?page=1&page_size=200');
   return data.items.map(mapApiQuotation);
+}
+
+export async function getQuotation(quoteId: string): Promise<Quotation> {
+  const data = await apiRequest<ApiQuotation>(`/quotations/${quoteId}`)
+  return mapApiQuotation(data)
 }
 
 export async function createQuotation(quote: Quotation): Promise<Quotation> {

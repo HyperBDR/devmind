@@ -81,7 +81,7 @@ async function handleSubmit() {
 
         <p
           v-if="error"
-          class="mt-4 rounded-dm border border-[#ffccc7] bg-dm-error-bg px-3 py-2 text-xs text-dm-error"
+          class="mt-4 rounded-dm border border-[#ffccc7] bg-dm-error-bg px-3 py-2 text-sm text-dm-error"
         >
           {{ error }}
         </p>
@@ -94,7 +94,7 @@ async function handleSubmit() {
           {{ loading ? '登录中…' : '登录' }}
         </button>
 
-        <div class="mt-5 rounded-dm border border-dm-border-light bg-[#fafafa] px-3 py-3 text-xs leading-relaxed text-dm-text-tertiary">
+        <div class="mt-5 rounded-dm border border-dm-border-light bg-[#fafafa] px-3 py-3 text-sm leading-relaxed text-dm-text-tertiary">
           <p class="font-medium text-dm-text-secondary">演示账号</p>
           <p class="mt-1">alice.chen@oneprocloud.com</p>
           <p>默认密码：请通过环境变量配置</p>

@@ -172,7 +172,7 @@ function toggleChevron() {
       </li>
     </DropdownPanel>
 
-    <p v-if="error" class="mt-1 text-[10px] text-red-500">{{ error }}</p>
-    <p v-if="helperText" class="mt-1 text-[10px] font-medium text-slate-400">{{ helperText }}</p>
+    <p v-if="error" class="mt-1 text-xs text-red-500">{{ error }}</p>
+    <p v-if="helperText" class="mt-1 text-xs font-medium text-slate-400">{{ helperText }}</p>
   </div>
 </template>

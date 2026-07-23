@@ -58,7 +58,7 @@ export function isWonQuoteStatus(status: QuoteStatus): boolean {
 
 export function quoteStatusBadgeClass(status: QuoteStatus): string {
   const base =
-    'inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-xs'
+    'inline-flex items-center gap-1 whitespace-nowrap rounded border px-2 py-0.5 text-sm'
   switch (status) {
     case 'Draft':
       return `${base} border-dm-border bg-[#fafafa] text-dm-text-secondary`

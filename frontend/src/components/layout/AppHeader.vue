@@ -283,7 +283,6 @@ const pageTitle = computed(() => {
     QuotationDashboard: t('quotation.dashboard'),
     QuotationList: t('quotation.list'),
     QuotationCreate: t('quotation.create'),
-    QuotationImports: t('quotation.imports'),
     QuotationCatalog: t('quotation.catalog'),
     QuotationDetails: t('quotation.list')
   }
