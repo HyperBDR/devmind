@@ -19,7 +19,11 @@ from quotation.access import (
     get_accessible_quotation,
 )
 from quotation.audit import set_request_audit_target
-from quotation.models import DocumentAsset, QuoteStatus
+from quotation.models import (
+    DocumentAsset,
+    QuotationSourceType,
+    QuoteStatus,
+)
 from quotation.permissions import user_display_email
 from quotation.serializers import build_feishu_file_url
 from quotation.services.feishu_client import FeishuAPIError
@@ -77,6 +81,15 @@ class FeishuUploadView(APIView):
             )
             if denied:
                 return denied
+            if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
+                return Response(
+                    {
+                        "detail": (
+                            "document-imported quotations cannot be uploaded"
+                        )
+                    },
+                    status=409,
+                )
             set_request_audit_target(
                 request,
                 target_label=quotation.quote_no,

@@ -23,6 +23,11 @@ class QuoteStatus(models.TextChoices):
     CANCELLED = "cancelled", "cancelled"
 
 
+class QuotationSourceType(models.TextChoices):
+    MANUAL = "manual", "Manual"
+    DOCUMENT_IMPORT = "document_import", "Document import"
+
+
 class ItemType(models.TextChoices):
     SOFTWARE = "Software", "Software"
     SERVICE = "Service", "Service"
@@ -39,13 +44,27 @@ class SyncJobType(models.TextChoices):
     UPLOAD = "upload", "upload"
     PULL = "pull", "pull"
     PARSE = "parse", "parse"
+    OCR = "ocr", "ocr"
 
 
 class SyncJobStatus(models.TextChoices):
     PENDING = "pending", "pending"
+    QUEUED = "queued", "queued"
     RUNNING = "running", "running"
+    RETRYING = "retrying", "retrying"
     SUCCESS = "success", "success"
     FAILED = "failed", "failed"
+
+
+class DocumentParseStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    READY = "ready", "Ready"
+    REVIEW_REQUIRED = "review_required", "Review required"
+    CONFIRMED = "confirmed", "Confirmed"
+    NOT_QUOTATION = "not_quotation", "Not quotation"
+    FAILED = "failed", "Failed"
+    SUPERSEDED = "superseded", "Superseded"
 
 
 class StorageConnectionStatus(models.TextChoices):
@@ -85,6 +104,12 @@ class Quotation(TimeStampedModel):
         primary_key=True, max_length=36, default=_uuid, editable=False
     )
     quote_no = models.CharField(max_length=120, unique=True, db_index=True)
+    source_quote_no = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+    )
     status = models.CharField(
         max_length=20,
         choices=QuoteStatus.choices,
@@ -92,6 +117,12 @@ class Quotation(TimeStampedModel):
         db_index=True,
     )
     version_current = models.IntegerField(default=0)
+    source_type = models.CharField(
+        max_length=30,
+        choices=QuotationSourceType.choices,
+        default=QuotationSourceType.MANUAL,
+        db_index=True,
+    )
 
     product_line = models.CharField(max_length=40, default="BDR")
     project_name = models.CharField(max_length=255)
@@ -233,6 +264,17 @@ class DocumentAsset(models.Model):
     class Meta:
         db_table = "document_assets"
         ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source", "feishu_file_token"],
+                condition=(
+                    models.Q(source="feishu")
+                    & models.Q(feishu_file_token__isnull=False)
+                    & ~models.Q(feishu_file_token="")
+                ),
+                name="quotation_feishu_asset_token_unique",
+            )
+        ]
 
 
 class StorageConnection(TimeStampedModel):
@@ -499,6 +541,14 @@ class SyncJob(TimeStampedModel):
     payload_json = models.JSONField(null=True, blank=True)
     result_json = models.JSONField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
+    stage = models.CharField(max_length=40, blank=True, default="")
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+    max_attempts = models.PositiveSmallIntegerField(default=3)
+    heartbeat_at = models.DateTimeField(blank=True, null=True)
+    started_at = models.DateTimeField(blank=True, null=True)
+    finished_at = models.DateTimeField(blank=True, null=True)
+    duration_ms = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         db_table = "sync_jobs"
@@ -764,21 +814,61 @@ class SecurityAlert(models.Model):
         ]
 
 
-class DocumentParseResult(models.Model):
+class DocumentParseResult(TimeStampedModel):
+    """Versioned, reviewable extraction result for one document asset."""
+
     id = models.CharField(
         primary_key=True, max_length=36, default=_uuid, editable=False
     )
-    asset = models.OneToOneField(
-        DocumentAsset, on_delete=models.CASCADE, related_name="parse_result"
+    asset = models.ForeignKey(
+        DocumentAsset,
+        on_delete=models.CASCADE,
+        related_name="parse_results",
     )
-    parser_type = models.CharField(max_length=40)
-    parse_status = models.CharField(max_length=20, default="success")
-    parsed_json = models.JSONField()
+    sync_job = models.OneToOneField(
+        SyncJob,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="parse_result",
+    )
+    quotation = models.ForeignKey(
+        Quotation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="document_parse_results",
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=DocumentParseStatus.choices,
+        default=DocumentParseStatus.PENDING,
+        db_index=True,
+    )
+    parser_name = models.CharField(max_length=100)
+    parser_version = models.CharField(max_length=40)
+    content_hash = models.CharField(max_length=64, db_index=True)
+    normalized_json = models.JSONField(blank=True, default=dict)
+    source_totals_json = models.JSONField(blank=True, default=dict)
+    field_confidence_json = models.JSONField(blank=True, default=dict)
+    validation_errors_json = models.JSONField(blank=True, default=list)
+    validation_warnings_json = models.JSONField(blank=True, default=list)
+    confidence = models.DecimalField(max_digits=5, decimal_places=4, default=0)
+    created_by_email = models.CharField(
+        max_length=255, blank=True, default="", db_index=True
+    )
     error_message = models.TextField(blank=True, null=True)
-    parsed_at = models.DateTimeField(auto_now_add=True)
+    confirmed_at = models.DateTimeField(blank=True, null=True)
 
     class Meta:
         db_table = "document_parse_results"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["asset", "content_hash", "parser_version"],
+                name="quotation_document_parse_result_unique",
+            )
+        ]
 
 
 class FeishuConnection(TimeStampedModel):

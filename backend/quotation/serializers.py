@@ -11,6 +11,7 @@ from rest_framework import serializers
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
+    DocumentParseResult,
     Quotation,
     QuotationItem,
     QuotationVersion,
@@ -187,6 +188,7 @@ class QuotationVersionSerializer(serializers.ModelSerializer):
 
 
 class QuotationSerializer(serializers.ModelSerializer):
+    display_quote_no = serializers.SerializerMethodField()
     items = QuotationItemSerializer(many=True, read_only=True)
     versions = QuotationVersionSerializer(many=True, read_only=True)
     issuer_signature = serializers.CharField(allow_blank=True, required=False)
@@ -208,6 +210,40 @@ class QuotationSerializer(serializers.ModelSerializer):
     feishu_document_id = serializers.SerializerMethodField()
     feishu_excel_document_id = serializers.SerializerMethodField()
     feishu_pdf_document_id = serializers.SerializerMethodField()
+    source_document_type = serializers.SerializerMethodField()
+
+    def get_display_quote_no(self, obj: Quotation) -> str:
+        return obj.source_quote_no or obj.quote_no
+
+    def get_source_document_type(self, obj: Quotation) -> str | None:
+        if obj.source_type != "document_import":
+            return None
+
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "documents"
+        )
+        if prefetched is not None:
+            imported = [
+                document
+                for document in prefetched
+                if document.source == "feishu"
+                and document.doc_type in {"excel", "pdf"}
+            ]
+            latest = max(
+                imported,
+                key=lambda document: document.created_at,
+                default=None,
+            )
+        else:
+            latest = (
+                obj.documents.filter(
+                    source="feishu",
+                    doc_type__in=["excel", "pdf"],
+                )
+                .order_by("-created_at")
+                .first()
+            )
+        return latest.doc_type if latest else None
 
     def _latest_feishu_upload(
         self, obj: Quotation, doc_type: str | None = None
@@ -223,7 +259,7 @@ class QuotationSerializer(serializers.ModelSerializer):
             uploads = [
                 document
                 for document in prefetched
-                if document.source == "feishu_upload"
+                if document.source in {"feishu", "feishu_upload"}
                 and remote_document_reference(document).token
             ]
             if doc_type:
@@ -236,7 +272,7 @@ class QuotationSerializer(serializers.ModelSerializer):
                 uploads, key=lambda document: document.created_at, default=None
             )
         else:
-            qs = obj.documents.filter(source="feishu_upload")
+            qs = obj.documents.filter(source__in=["feishu", "feishu_upload"])
             if doc_type:
                 qs = qs.filter(doc_type=doc_type)
             remote_reference_filter = (
@@ -332,8 +368,12 @@ class QuotationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "quote_no",
+            "display_quote_no",
+            "source_quote_no",
             "status",
             "version_current",
+            "source_type",
+            "source_document_type",
             "product_line",
             "project_name",
             "currency",
@@ -416,8 +456,8 @@ class QuotationCreateSerializer(serializers.Serializer):
         required=False, allow_blank=True, default=""
     )
     client_company = serializers.CharField()
-    contact_person = serializers.CharField()
-    email = serializers.CharField()
+    contact_person = serializers.CharField(allow_blank=True)
+    email = serializers.CharField(allow_blank=True)
     billing_company = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
@@ -431,6 +471,12 @@ class QuotationCreateSerializer(serializers.Serializer):
     items = QuotationItemWriteSerializer(many=True, required=False)
 
     def validate(self, attrs):
+        if not self.context.get("document_import"):
+            for field in ("contact_person", "email"):
+                if not attrs.get(field, "").strip():
+                    raise serializers.ValidationError(
+                        {field: "This field may not be blank."}
+                    )
         if attrs["expire_date"] < attrs["quote_date"]:
             raise serializers.ValidationError(
                 {"expire_date": "Expiry date cannot be before quote date."}
@@ -776,6 +822,30 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
     feishu_file_token = serializers.SerializerMethodField()
     feishu_url = serializers.SerializerMethodField()
     remote_access_available = serializers.SerializerMethodField()
+    parse_result_id = serializers.SerializerMethodField()
+    parse_status = serializers.SerializerMethodField()
+    parse_confidence = serializers.SerializerMethodField()
+    parsed_quotation_id = serializers.SerializerMethodField()
+    parsed_quote_no = serializers.SerializerMethodField()
+
+    def _latest_parse_result(
+        self, obj: DocumentAsset
+    ) -> DocumentParseResult | None:
+        if hasattr(obj, "_latest_parse_result_for_serializer"):
+            return obj._latest_parse_result_for_serializer
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "parse_results"
+        )
+        if prefetched is not None:
+            result = max(
+                prefetched,
+                key=lambda item: (item.created_at, item.id),
+                default=None,
+            )
+        else:
+            result = obj.parse_results.order_by("-created_at", "-id").first()
+        obj._latest_parse_result_for_serializer = result
+        return result
 
     def get_feishu_file_token(self, obj: DocumentAsset) -> None:
         return None
@@ -789,6 +859,35 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
         if obj.source != "feishu":
             return bool(remote_document_reference(obj).token)
         return trusted_feishu_file_url(obj) is not None
+
+    def get_parse_result_id(self, obj: DocumentAsset) -> str | None:
+        result = self._latest_parse_result(obj)
+        return result.id if result else None
+
+    def get_parse_status(self, obj: DocumentAsset) -> str:
+        result = self._latest_parse_result(obj)
+        return result.status if result else "unparsed"
+
+    def get_parse_confidence(self, obj: DocumentAsset):
+        result = self._latest_parse_result(obj)
+        return result.confidence if result else None
+
+    def get_parsed_quotation_id(self, obj: DocumentAsset) -> str | None:
+        result = self._latest_parse_result(obj)
+        return result.quotation_id if result else None
+
+    def get_parsed_quote_no(self, obj: DocumentAsset) -> str | None:
+        result = self._latest_parse_result(obj)
+        if result:
+            quote_no = str(
+                result.normalized_json.get("quote_no") or ""
+            ).strip()
+            if quote_no:
+                return quote_no
+        quotation = obj.quotation
+        if quotation is None:
+            return None
+        return quotation.source_quote_no or quotation.quote_no
 
     class Meta:
         model = DocumentAsset
@@ -804,6 +903,37 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
             "feishu_url",
             "feishu_folder_path",
             "remote_access_available",
+            "parse_result_id",
+            "parse_status",
+            "parse_confidence",
+            "parsed_quotation_id",
+            "parsed_quote_no",
             "created_by_email",
             "created_at",
         ]
+
+
+class DocumentParseResultSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DocumentParseResult
+        fields = [
+            "id",
+            "asset_id",
+            "sync_job_id",
+            "quotation_id",
+            "status",
+            "parser_name",
+            "parser_version",
+            "content_hash",
+            "normalized_json",
+            "source_totals_json",
+            "field_confidence_json",
+            "validation_errors_json",
+            "validation_warnings_json",
+            "confidence",
+            "created_by_email",
+            "confirmed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

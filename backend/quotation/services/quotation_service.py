@@ -101,7 +101,9 @@ def build_quotation_snapshot(
     return {
         "id": quotation.id,
         "quote_no": quotation.quote_no,
+        "source_quote_no": quotation.source_quote_no,
         "status": quotation.status,
+        "source_type": quotation.source_type,
         "product_line": quotation.product_line,
         "project_name": quotation.project_name,
         "currency": quotation.currency,
@@ -157,6 +159,7 @@ def build_quotation(
     )
     quotation = Quotation(
         quote_no=data["quote_no"],
+        source_quote_no=data.get("source_quote_no") or "",
         status=QuoteStatus.DRAFT,
         product_line=data.get("product_line") or "BDR",
         project_name=data["project_name"],
@@ -181,6 +184,7 @@ def build_quotation(
         billing_contact=data.get("billing_contact") or data["contact_person"],
         billing_email=data.get("billing_email") or data["email"],
         created_by_email=data.get("created_by_email"),
+        source_type=data.get("source_type") or "manual",
         version_current=0,
         **totals,
     )

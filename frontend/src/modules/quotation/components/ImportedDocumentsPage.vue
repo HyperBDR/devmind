@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   ChevronDown,
   ChevronRight,
   Download,
   ExternalLink,
   FileSpreadsheet,
+  FileSearch,
   FileText,
   Folder,
   FolderInput,
@@ -13,16 +14,19 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  Trash2,
+  CheckCircle2,
+  X,
 } from 'lucide-vue-next'
 import {
-  deleteImportedDocuments,
   downloadImportedDocument,
   listImportedFeishuDocuments,
+  parseImportedDocument,
+  type DocumentParseResult,
   type ImportedDocument,
 } from '../api/documents'
 import {
   checkFeishuFileAccess,
+  getFeishuSyncJob,
   syncFeishuArchiveFolder,
   type FeishuArchiveFolder,
 } from '../api/feishu'
@@ -32,6 +36,7 @@ import { useQuotationI18n } from '../composables/useQuotationI18n'
 
 const emit = defineEmits<{
   toast: [message: string, type?: 'success' | 'info' | 'error']
+  quotationCreated: [quotationId: string]
 }>()
 
 const props = defineProps<{
@@ -48,11 +53,25 @@ const loading = ref(false)
 const search = ref('')
 const typeFilter = ref('ALL')
 const downloadingId = ref<string | null>(null)
-const deleting = ref(false)
-const selectedIds = ref<Set<string>>(new Set())
-const deleteConfirmIds = ref<string[]>([])
-const selectAllCheckbox = ref<HTMLInputElement | null>(null)
+const parsingIds = ref<Set<string>>(new Set())
 let reconcileTimer: number | undefined
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+async function waitForSyncJob(jobId: string) {
+  const deadline = Date.now() + 10 * 60 * 1000
+  while (Date.now() < deadline) {
+    const job = await getFeishuSyncJob(jobId)
+    if (job.status === 'success') return job.result
+    if (job.status === 'failed') {
+      throw new Error(job.error_message || t('quotation.pages.imports.syncFailed'))
+    }
+    await wait(1000)
+  }
+  throw new Error(t('quotation.pages.imports.syncFailed'))
+}
 
 function scheduleFeishuDocReconcile() {
   window.clearTimeout(reconcileTimer)
@@ -127,11 +146,41 @@ async function refresh(options: {
 } = {}) {
   loading.value = true
   try {
+    let createdQuotationIds: string[] = []
     if (options.syncRemote) {
+      const cachedItems = await listImportedFeishuDocuments().catch(
+        () => null,
+      )
+      if (cachedItems) {
+        docs.value = cachedItems
+        rebuildArchiveTree(cachedItems)
+      }
       try {
-        await syncFeishuArchiveFolder({
+        let syncResult = await syncFeishuArchiveFolder({
           source: options.syncSource || 'user',
         })
+        if (syncResult.sync_job_id && syncResult.sync_status !== 'success') {
+          const completed = await waitForSyncJob(syncResult.sync_job_id)
+          syncResult = {
+            ...syncResult,
+            ...(completed as Partial<typeof syncResult>),
+          }
+        }
+        createdQuotationIds = [
+          ...(syncResult.created_quotation_ids || []),
+          ...(syncResult.updated_quotation_ids || []),
+        ]
+        if (
+          options.syncSource !== 'automatic'
+          && (syncResult.created_quotation_count || 0) > 0
+        ) {
+          notify(
+            t('quotation.pages.imports.autoImportComplete', {
+              count: syncResult.created_quotation_count || 0,
+            }),
+            'success',
+          )
+        }
       } catch (err: unknown) {
         if (options.syncSource !== 'automatic') {
           notify(
@@ -144,6 +193,9 @@ async function refresh(options: {
     const items = await listImportedFeishuDocuments()
     docs.value = items
     rebuildArchiveTree(items)
+    if (createdQuotationIds.length) {
+      emit('quotationCreated', createdQuotationIds[0])
+    }
   } catch (err: unknown) {
     notify(
       err instanceof Error ? err.message : t('quotation.pages.imports.loadFailed'),
@@ -153,6 +205,88 @@ async function refresh(options: {
   } finally {
     loading.value = false
   }
+}
+
+function applyParseResult(documentId: string, result: DocumentParseResult) {
+  docs.value = docs.value.map((item) =>
+    item.id === documentId
+      ? {
+          ...item,
+          parse_result_id: result.id,
+          parse_status: result.status,
+          parse_confidence: result.confidence,
+          parsed_quotation_id: result.quotation_id || null,
+        }
+      : item,
+  )
+}
+
+async function handleParse(doc: ImportedDocument, event?: Event) {
+  event?.stopPropagation()
+  parsingIds.value = new Set(parsingIds.value).add(doc.id)
+  try {
+    const result = await parseImportedDocument(doc.id)
+    applyParseResult(doc.id, result)
+    if (result.quotation_id) {
+      notify(t('quotation.pages.imports.parseCreated'), 'success')
+      emit('quotationCreated', result.quotation_id)
+    } else {
+      notify(t('quotation.pages.imports.parseNeedsAttention'), 'info')
+    }
+  } catch (err: unknown) {
+    notify(err instanceof Error ? err.message : t('quotation.pages.imports.parseFailed'), 'error')
+    const items = await listImportedFeishuDocuments().catch(() => null)
+    if (items) {
+      docs.value = items
+      rebuildArchiveTree(items)
+    }
+  } finally {
+    const next = new Set(parsingIds.value)
+    next.delete(doc.id)
+    parsingIds.value = next
+  }
+}
+
+async function handleReviewParse(doc: ImportedDocument, event?: Event) {
+  event?.stopPropagation()
+  if (doc.parse_status === 'confirmed' && doc.parsed_quotation_id) {
+    emit('quotationCreated', doc.parsed_quotation_id)
+  }
+}
+
+function canParse(doc: ImportedDocument): boolean {
+  return !isTemporaryFile(doc)
+    && ['excel', 'pdf'].includes((doc.doc_type || '').toLowerCase())
+}
+
+function isTemporaryFile(doc: ImportedDocument): boolean {
+  return String(doc.file_name || '').toLowerCase().startsWith('~$')
+}
+
+function parseStatusLabel(doc: ImportedDocument): string {
+  if (isTemporaryFile(doc)) return t('quotation.pages.imports.statusTemporary')
+  if (!canParse(doc)) return t('quotation.pages.imports.parseUnsupported')
+  const labels: Record<string, string> = {
+    unparsed: t('quotation.pages.imports.statusUnparsed'),
+    pending: t('quotation.pages.imports.statusParsePending'),
+    running: t('quotation.pages.imports.statusParsing'),
+    ready: t('quotation.pages.imports.statusParseReady'),
+    review_required: t('quotation.pages.imports.statusParseReview'),
+    confirmed: t('quotation.pages.imports.statusParseConfirmed'),
+    not_quotation: t('quotation.pages.imports.statusNotQuotation'),
+    failed: t('quotation.pages.imports.statusParseFailed'),
+  }
+  return labels[doc.parse_status || 'unparsed'] || labels.unparsed
+}
+
+function parseStatusClass(doc: ImportedDocument): string {
+  if (isTemporaryFile(doc)) return 'bg-violet-50 text-violet-700 ring-violet-200'
+  if (doc.parse_status === 'confirmed') return 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+  if (doc.parse_status === 'ready') return 'bg-blue-50 text-blue-700 ring-blue-200'
+  if (doc.parse_status === 'review_required') return 'bg-amber-50 text-amber-700 ring-amber-200'
+  if (doc.parse_status === 'not_quotation') return 'bg-slate-100 text-slate-600 ring-slate-300'
+  if (doc.parse_status === 'failed') return 'bg-red-50 text-red-700 ring-red-200'
+  return 'bg-slate-50 text-slate-500 ring-slate-200'
 }
 
 void refresh({ syncRemote: true, syncSource: 'automatic' })
@@ -208,7 +342,8 @@ const directFileMatches = computed(() => {
       return false
     }
     if (!q) return true
-    return doc.file_name.toLowerCase().includes(q)
+    return [doc.file_name, doc.parsed_quote_no]
+      .some((value) => String(value || '').toLowerCase().includes(q))
   })
 })
 
@@ -338,59 +473,11 @@ const treeRows = computed<ArchiveTreeRow[]>(() => {
   return rows
 })
 
-const selectedVisibleCount = computed(
-  () => filtered.value.filter((doc) => selectedIds.value.has(doc.id)).length,
-)
-
-const allVisibleSelected = computed(
-  () =>
-    filtered.value.length > 0 &&
-    selectedVisibleCount.value === filtered.value.length,
-)
-
-const someVisibleSelected = computed(
-  () => selectedVisibleCount.value > 0 && !allVisibleSelected.value,
-)
-
-const selectedCount = computed(() => selectedIds.value.size)
-
-const deleteConfirmDocs = computed(() =>
-  docs.value.filter((doc) => deleteConfirmIds.value.includes(doc.id)),
-)
-
 const rootClass = computed(() =>
   props.embedded
     ? 'space-y-6'
     : 'flex h-[calc(100vh-7.5rem)] flex-col gap-4 overflow-hidden',
 )
-
-function isSelected(docId: string): boolean {
-  return selectedIds.value.has(docId)
-}
-
-function toggleSelect(docId: string) {
-  const next = new Set(selectedIds.value)
-  if (next.has(docId)) {
-    next.delete(docId)
-  } else {
-    next.add(docId)
-  }
-  selectedIds.value = next
-}
-
-function toggleSelectAllVisible() {
-  const next = new Set(selectedIds.value)
-  if (allVisibleSelected.value) {
-    filtered.value.forEach((doc) => next.delete(doc.id))
-  } else {
-    filtered.value.forEach((doc) => next.add(doc.id))
-  }
-  selectedIds.value = next
-}
-
-function clearSelection() {
-  selectedIds.value = new Set()
-}
 
 function handleResetFilters() {
   search.value = ''
@@ -409,12 +496,6 @@ function toggleFolder(folderToken: string) {
 
 watch(search, () => {
   collapsedFolderTokens.value = new Set()
-})
-
-watchEffect(() => {
-  if (selectAllCheckbox.value) {
-    selectAllCheckbox.value.indeterminate = someVisibleSelected.value
-  }
 })
 
 function handleOpenFeishu(doc: ImportedDocument, event?: Event) {
@@ -441,47 +522,6 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
   }
 }
 
-function handleBatchDelete() {
-  if (selectedIds.value.size === 0) return
-  deleteConfirmIds.value = [...selectedIds.value]
-}
-
-async function confirmDelete() {
-  if (!deleteConfirmIds.value.length) return
-  const ids = [...deleteConfirmIds.value]
-  deleteConfirmIds.value = []
-  deleting.value = true
-  try {
-    const { deleted, failed } = await deleteImportedDocuments(ids)
-    if (deleted.length) {
-      docs.value = docs.value.filter((item) => !deleted.includes(item.id))
-      const next = new Set(selectedIds.value)
-      deleted.forEach((id) => next.delete(id))
-      selectedIds.value = next
-    }
-    if (failed.length === 0) {
-      notify(
-        t('quotation.pages.imports.batchDeleteSuccess', { count: deleted.length }),
-        'success',
-      )
-    } else if (deleted.length > 0) {
-      notify(
-        t('quotation.pages.imports.batchDeletePartial', {
-          deleted: deleted.length,
-          failed: failed.length,
-        }),
-        'error',
-      )
-    } else {
-      notify(t('quotation.pages.imports.deleteFailed'), 'error')
-    }
-  } catch (err: unknown) {
-    notify(err instanceof Error ? err.message : t('quotation.pages.imports.deleteFailed'), 'error')
-  } finally {
-    deleting.value = false
-  }
-}
-
 </script>
 
 <template>
@@ -502,9 +542,19 @@ async function confirmDelete() {
             v-model="search"
             type="text"
             :placeholder="t('quotation.pages.imports.searchPlaceholder')"
-            class="h-10 w-full rounded-lg border border-dm-border-light bg-slate-50/70 py-2 pl-9 pr-3 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+            class="h-10 w-full rounded-lg border border-dm-border-light bg-slate-50/70 py-2 pl-9 pr-9 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
           />
           <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <button
+            v-if="search"
+            type="button"
+            class="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-600 focus:outline-hidden focus:ring-2 focus:ring-blue-200"
+            :aria-label="t('quotation.pages.imports.clearSearch')"
+            :title="t('quotation.pages.imports.clearSearch')"
+            @click="search = ''"
+          >
+            <X class="h-4 w-4" />
+          </button>
         </div>
 
         <div class="grid grid-cols-2 gap-2 sm:flex sm:items-center">
@@ -582,15 +632,6 @@ async function confirmDelete() {
             <tr
               class="border-b border-dm-border-light bg-[#fafafa] text-xs font-bold tracking-wider text-dm-text-tertiary"
             >
-              <th class="w-10 px-4 py-3">
-                <input
-                  ref="selectAllCheckbox"
-                  type="checkbox"
-                  class="h-3.5 w-3.5 rounded border-dm-border text-blue-600 focus:ring-blue-400"
-                  :checked="allVisibleSelected"
-                  @change="toggleSelectAllVisible"
-                />
-              </th>
               <th class="px-4 py-3">{{ t('quotation.pages.imports.tableFileName') }}</th>
               <th class="px-4 py-3">{{ t('quotation.pages.imports.tableSize') }}</th>
               <th class="min-w-[120px] px-4 py-3 text-center">
@@ -600,7 +641,7 @@ async function confirmDelete() {
           </thead>
           <tbody class="divide-y divide-slate-100 text-sm">
             <tr v-if="treeRows.length === 0">
-              <td colspan="4" class="px-4 py-12 text-center text-dm-text-tertiary">
+              <td colspan="3" class="px-4 py-12 text-center text-dm-text-tertiary">
                 {{ t('quotation.pages.imports.emptyResults') }}
               </td>
             </tr>
@@ -610,7 +651,7 @@ async function confirmDelete() {
                 class="cursor-pointer bg-slate-50/80 transition hover:bg-blue-50/70"
                 @click="toggleFolder(row.token)"
               >
-                <td colspan="4" class="px-4 py-2.5">
+                <td colspan="3" class="px-4 py-2.5">
                   <div
                     class="flex items-center gap-2 font-semibold text-dm-text-secondary"
                     :style="{ paddingLeft: `${row.depth * 20}px` }"
@@ -628,21 +669,7 @@ async function confirmDelete() {
                   </div>
                 </td>
               </tr>
-              <tr
-                v-else
-                :class="[
-                  'transition duration-150',
-                  isSelected(row.doc.id) ? 'bg-blue-50/50' : 'hover:bg-[#fafafa]',
-                ]"
-              >
-                <td class="px-4 py-3.5">
-                  <input
-                    type="checkbox"
-                    class="h-3.5 w-3.5 rounded border-dm-border text-blue-600 focus:ring-blue-400"
-                    :checked="isSelected(row.doc.id)"
-                    @change="toggleSelect(row.doc.id)"
-                  />
-                </td>
+              <tr v-else class="transition duration-150 hover:bg-[#fafafa]">
                 <td class="px-4 py-3.5">
                   <div
                     class="flex max-w-[360px] items-center gap-2"
@@ -653,9 +680,17 @@ async function confirmDelete() {
                       class="h-4 w-4 shrink-0 text-rose-500"
                     />
                     <FileSpreadsheet v-else class="h-4 w-4 shrink-0 text-emerald-600" />
-                    <span class="truncate font-semibold text-dm-text" :title="row.doc.file_name">
-                      {{ row.doc.file_name }}
-                    </span>
+                    <div class="min-w-0">
+                      <span class="block truncate font-semibold text-dm-text" :title="row.doc.file_name">
+                        {{ row.doc.file_name }}
+                      </span>
+                      <span
+                        class="mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset"
+                        :class="parseStatusClass(row.doc)"
+                      >
+                        {{ parseStatusLabel(row.doc) }}
+                      </span>
+                    </div>
                   </div>
                 </td>
                 <td class="px-4 py-3.5 font-mono text-dm-text-tertiary">
@@ -663,6 +698,26 @@ async function confirmDelete() {
                 </td>
                 <td class="px-4 py-3.5">
                   <div class="flex items-center justify-center gap-1.5">
+                    <button
+                      v-if="canParse(row.doc) && (!row.doc.parse_result_id || row.doc.parse_status === 'failed')"
+                      type="button"
+                      class="cursor-pointer rounded-sm p-1 text-blue-600 transition duration-100 hover:bg-blue-50 hover:text-blue-800 disabled:cursor-wait disabled:opacity-50"
+                      :disabled="parsingIds.has(row.doc.id)"
+                      :title="t('quotation.pages.imports.parseAction')"
+                      @click="handleParse(row.doc, $event)"
+                    >
+                      <Loader2 v-if="parsingIds.has(row.doc.id)" class="h-4 w-4 animate-spin" />
+                      <FileSearch v-else class="h-4 w-4" />
+                    </button>
+                    <button
+                      v-else-if="canParse(row.doc) && row.doc.parse_result_id && row.doc.parse_status === 'confirmed'"
+                      type="button"
+                      class="cursor-pointer rounded-sm p-1 text-blue-600 transition duration-100 hover:bg-blue-50 hover:text-blue-800"
+                      :title="t('quotation.pages.imports.viewQuotation')"
+                      @click="handleReviewParse(row.doc, $event)"
+                    >
+                      <CheckCircle2 class="h-4 w-4 text-emerald-600" />
+                    </button>
                     <button
                       v-if="row.doc.remote_access_available && row.doc.feishu_url"
                       type="button"
@@ -690,78 +745,5 @@ async function confirmDelete() {
       </div>
     </div>
 
-    <Teleport to="body">
-      <div
-        v-if="selectedCount > 0"
-        class="fixed bottom-6 left-1/2 z-40 flex w-[min(92vw,28rem)] -translate-x-1/2 items-center justify-between gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 shadow-lg ring-1 ring-black/5"
-      >
-        <span class="text-sm font-semibold text-blue-800">
-          {{ t('quotation.pages.imports.selectedCount', { count: selectedCount }) }}
-        </span>
-        <div class="flex items-center gap-2">
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded-lg border border-dm-border bg-white px-2.5 py-1.5 text-xs font-semibold text-dm-text-secondary hover:bg-[#fafafa]"
-            @click="clearSelection"
-          >
-            {{ t('quotation.common.cancel') }}
-          </button>
-          <button
-            type="button"
-            class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
-            :disabled="deleting"
-            @click="handleBatchDelete"
-          >
-            <Loader2 v-if="deleting" class="h-3 w-3 animate-spin" />
-            <Trash2 v-else class="h-3 w-3" />
-            {{ t('quotation.pages.imports.batchDelete') }}
-          </button>
-        </div>
-      </div>
-    </Teleport>
-
-    <div
-      v-if="deleteConfirmIds.length"
-      class="fixed inset-0 z-50 flex items-center justify-center dm-modal-overlay p-4"
-    >
-      <div class="w-full max-w-md dm-card p-5 shadow-xl">
-        <h3 class="text-sm font-bold text-dm-text">
-          {{
-            deleteConfirmIds.length === 1
-              ? t('quotation.pages.imports.deleteModalTitle')
-              : t('quotation.pages.imports.batchDeleteModalTitle')
-          }}
-        </h3>
-        <p class="mt-2 text-sm text-dm-text-tertiary">
-          {{
-            deleteConfirmIds.length === 1
-              ? t('quotation.pages.imports.deleteModalDesc', {
-                  fileName: deleteConfirmDocs[0]?.file_name || '',
-                })
-              : t('quotation.pages.imports.batchDeleteModalDesc', {
-                  count: deleteConfirmIds.length,
-                })
-          }}
-        </p>
-        <div class="mt-4 flex items-center justify-end gap-2">
-          <button
-            type="button"
-            class="rounded-lg border border-dm-border px-3 py-1.5 text-sm font-semibold text-dm-text-secondary hover:bg-[#fafafa]"
-            @click="deleteConfirmIds = []"
-          >
-            {{ t('quotation.common.cancel') }}
-          </button>
-          <button
-            type="button"
-            :disabled="deleting"
-            class="inline-flex items-center gap-1 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700 disabled:opacity-40"
-            @click="confirmDelete"
-          >
-            <Loader2 v-if="deleting" class="h-3.5 w-3.5 animate-spin" />
-            {{ t('quotation.actions.confirmDelete') }}
-          </button>
-        </div>
-      </div>
-    </div>
   </div>
 </template>

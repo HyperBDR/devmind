@@ -164,8 +164,19 @@ start_celery_worker() {
     # Default concurrency: use CPU count for I/O-bound tasks
     # Can be overridden by CELERY_CONCURRENCY environment variable
     DEFAULT_CONCURRENCY=${CELERY_CONCURRENCY:-$CPU_COUNT}
+    QUEUE_ARGS=()
+    if [ -n "${CELERY_QUEUES:-}" ]; then
+        QUEUE_ARGS=("--queues=${CELERY_QUEUES}")
+    fi
+    DEFAULT_LOG_FILE=/var/log/celery/worker.log
+    case "${CELERY_QUEUES:-}" in
+        quotation_pdf) DEFAULT_LOG_FILE=/var/log/celery/pdf-worker.log ;;
+        quotation_excel) DEFAULT_LOG_FILE=/var/log/celery/excel-worker.log ;;
+        quotation_ocr) DEFAULT_LOG_FILE=/var/log/celery/ocr-worker.log ;;
+    esac
 
     log "Celery worker concurrency: $DEFAULT_CONCURRENCY (CPUs: $CPU_COUNT)"
+    log "Celery worker queues: ${CELERY_QUEUES:-all configured queues}"
     log "Graceful shutdown enabled: worker will wait for running tasks to complete (up to stop_grace_period)"
 
     # Celery worker will gracefully shutdown when receiving SIGTERM:
@@ -176,9 +187,10 @@ start_celery_worker() {
     exec celery -A core.celery:app worker \
         --loglevel=${CELERY_LOG_LEVEL:-INFO} \
         --concurrency=$DEFAULT_CONCURRENCY \
+        "${QUEUE_ARGS[@]}" \
         --max-tasks-per-child=${CELERY_MAX_TASKS_PER_CHILD:-1000} \
         --max-memory-per-child=${CELERY_MAX_MEMORY_PER_CHILD:-256000} \
-        --logfile=/var/log/celery/worker.log
+        --logfile=${CELERY_LOG_FILE:-$DEFAULT_LOG_FILE}
 }
 
 start_celery_beat() {

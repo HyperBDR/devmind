@@ -44,6 +44,8 @@ def _classify(method: str, path: str):
         return "quotation", "delete", "quotation"
     if re.fullmatch(r"quotations/[^/]+/generate", relative):
         return "quotation", "generate", "quotation"
+    if re.fullmatch(r"quotations/[^/]+/download-event", relative):
+        return "document", "download", "quotation"
     if re.fullmatch(r"quotations/[^/]+/documents", relative):
         if method == "POST":
             return "document", "upload", "document"

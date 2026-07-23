@@ -41,7 +41,25 @@ CELERY_TASK_SERIALIZER = 'json'
 # Dedicated queue for this project to avoid consuming tasks from other apps
 # that share the same broker.
 CELERY_TASK_DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "backend")
-CELERY_TASK_QUEUES = (Queue(CELERY_TASK_DEFAULT_QUEUE),)
+CELERY_TASK_QUEUES = (
+    Queue(CELERY_TASK_DEFAULT_QUEUE, routing_key=CELERY_TASK_DEFAULT_QUEUE),
+    Queue("quotation_sync", routing_key="quotation_sync"),
+    Queue("quotation_pdf", routing_key="quotation_pdf"),
+    Queue("quotation_excel", routing_key="quotation_excel"),
+    Queue("quotation_ocr", routing_key="quotation_ocr"),
+)
+CELERY_TASK_DEFAULT_ROUTING_KEY = CELERY_TASK_DEFAULT_QUEUE
+CELERY_TASK_ROUTES = {
+    "quotation.tasks.sync_feishu_folder": {
+        "queue": "quotation_sync",
+        "routing_key": "quotation_sync",
+    },
+    "quotation.tasks.ocr_document": {
+        "queue": "quotation_ocr",
+        "routing_key": "quotation_ocr",
+    },
+}
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
 
 # Prevent task loss in Redis
 CELERY_BROKER_TRANSPORT_OPTIONS = {

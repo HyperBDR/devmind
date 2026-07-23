@@ -17,9 +17,9 @@ import {
   checkFeishuFileAccess,
   uploadBlobToFeishu,
 } from '../api/feishu'
-import { downloadRemoteDocument } from '../api/documents'
 import type { FeishuUploadConflict, FeishuUploadConflictAction } from '../api/feishu'
 import type { Quotation, QuoteStatus } from '../types'
+import { recordQuotationDownload } from '../api/quotations'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { buildQuotationExcelBlob, downloadQuotationExcel } from '../utils/excelGenerator'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
@@ -66,6 +66,15 @@ const productLineFilterOptions = computed(() => [
   })),
 ])
 
+const sourceFilterOptions = computed(() => [
+  { value: 'ALL', label: t('quotation.pages.list.sourceAll') },
+  { value: 'manual', label: t('quotation.pages.list.sourceManual') },
+  {
+    value: 'document_import',
+    label: t('quotation.pages.list.sourceDocumentImport'),
+  },
+])
+
 const tableStatusValues: QuoteStatus[] = [
   'Draft',
   'Generated',
@@ -80,6 +89,7 @@ const tableStatusValues: QuoteStatus[] = [
 const searchText = ref('')
 const selectedStatus = ref('ALL')
 const selectedProductLine = ref('ALL')
+const selectedSource = ref('ALL')
 const createdFrom = ref('')
 const createdTo = ref('')
 const deleteConfirmId = ref<string | null>(null)
@@ -117,10 +127,12 @@ function scheduleFeishuLinkReconcile() {
 async function verifyPendingFeishuOpen() {
   const pending = pendingFeishuOpen.value
   if (!pending) return
+  pendingFeishuOpen.value = null
   try {
-    const result = await checkFeishuFileAccess(pending.documentId)
+    const result = await checkFeishuFileAccess(pending.documentId, {
+      auditSource: 'automatic',
+    })
     if (!result.exists) {
-      pendingFeishuOpen.value = null
       emit('updateQuoteStatus', pending.quoteId, clearedFeishuFields(pending.format))
       emit(
         'toast',
@@ -242,9 +254,12 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
   const documentId = feishuDocumentId(quote, format)
   if (!documentId) return
   closeActionMenu()
+  const popup = window.open('about:blank', '_blank')
+  if (popup) popup.opener = null
   try {
     const result = await checkFeishuFileAccess(documentId)
     if (!result.exists) {
+      popup?.close()
       pendingFeishuOpen.value = null
       emit('updateQuoteStatus', quote.id, clearedFeishuFields(format))
       scheduleFeishuLinkReconcile()
@@ -258,21 +273,23 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
       )
       return
     }
+    const directUrl = String(result.url || '').trim()
+    if (!result.direct_access_allowed || !directUrl) {
+      popup?.close()
+      throw new Error(t('quotation.pages.list.toastFeishuOpenFailed'))
+    }
     pendingFeishuOpen.value = {
       quoteId: quote.id,
       format,
       documentId,
     }
-    const fallbackName = buildQuotationExportFileName(
-      quote,
-      format === 'excel' ? 'xlsx' : 'pdf',
-    )
-    const fileName =
-      format === 'excel'
-        ? quote.feishuExcelPath || fallbackName
-        : quote.feishuPdfPath || fallbackName
-    await downloadRemoteDocument(documentId, fileName)
+    if (popup) {
+      popup.location.replace(directUrl)
+    } else {
+      window.open(directUrl, '_blank', 'noopener,noreferrer')
+    }
   } catch (err: unknown) {
+    popup?.close()
     emit(
       'toast',
       err instanceof Error
@@ -286,9 +303,16 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
 async function handleDownloadLocal(quote: Quotation, format: FeishuUploadFormat) {
   if (quote.status === 'Cancelled') return
   closeActionMenu()
+  if (
+    quote.sourceType === 'document_import' &&
+    quote.sourceDocumentType !== format
+  ) {
+    return
+  }
   if (format === 'excel') {
     const success = await downloadQuotationExcel(quote, props.currentUser || undefined)
     if (success) {
+      await recordQuotationDownload(quote.id, 'excel').catch(() => undefined)
       emit('updateQuoteStatus', quote.id, {
         status: quote.status === 'Draft' ? 'Generated' : quote.status,
         excelGeneratedAt: formatNow(),
@@ -307,6 +331,7 @@ async function handleDownloadLocal(quote: Quotation, format: FeishuUploadFormat)
 
   const success = await downloadQuotationPdf(quote, props.currentUser || undefined)
   if (success) {
+    await recordQuotationDownload(quote.id, 'pdf').catch(() => undefined)
     emit(
       'toast',
       t('quotation.pages.list.toastPdfDownloadStarted', { quoteNo: quote.quoteNo }),
@@ -418,6 +443,7 @@ function handleResetFilters() {
   searchText.value = ''
   selectedStatus.value = 'ALL'
   selectedProductLine.value = 'ALL'
+  selectedSource.value = 'ALL'
   createdFrom.value = ''
   createdTo.value = ''
 }
@@ -427,6 +453,7 @@ const hasActiveFilters = computed(
     searchText.value.trim() !== '' ||
     selectedStatus.value !== 'ALL' ||
     selectedProductLine.value !== 'ALL' ||
+    selectedSource.value !== 'ALL' ||
     createdFrom.value !== '' ||
     createdTo.value !== '',
 )
@@ -445,6 +472,9 @@ const filteredQuotations = computed(() => {
     const matchesProductLine =
       selectedProductLine.value === 'ALL' ||
       quoteProductLine === selectedProductLine.value
+    const matchesSource =
+      selectedSource.value === 'ALL' ||
+      (q.sourceType || 'manual') === selectedSource.value
     const quoteDate = q.createdAt.substring(0, 10)
     const matchesCreatedFrom = !createdFrom.value || quoteDate >= createdFrom.value
     const matchesCreatedTo = !createdTo.value || quoteDate <= createdTo.value
@@ -453,11 +483,31 @@ const filteredQuotations = computed(() => {
       matchesText &&
       matchesStatus &&
       matchesProductLine &&
+      matchesSource &&
       matchesCreatedFrom &&
       matchesCreatedTo
     )
   })
 })
+
+function displayContact(quote: Quotation): string {
+  const value = String(quote.contactPerson || '').trim()
+  if (
+    quote.sourceType === 'document_import'
+    && (!value || value === 'Not specified')
+  ) {
+    return '—'
+  }
+  return value || '—'
+}
+
+function displayTotal(quote: Quotation): string {
+  const total = Number(quote.grandTotal || 0)
+  if (quote.sourceType === 'document_import' && total === 0) {
+    return '—'
+  }
+  return `${currencySymbol(quote.currency)}${total.toLocaleString()}`
+}
 
 </script>
 
@@ -476,7 +526,7 @@ const filteredQuotations = computed(() => {
       aria-label="Quote filters"
       class="rounded-xl border border-dm-border-light bg-white p-2.5 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.35fr)_minmax(110px,0.6fr)_minmax(125px,0.7fr)_minmax(220px,1fr)_auto]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.35fr)_minmax(110px,0.55fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(220px,1fr)_auto]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -486,9 +536,19 @@ const filteredQuotations = computed(() => {
                 v-model="searchText"
                 type="text"
                 :placeholder="t('quotation.pages.list.keywordPlaceholder')"
-                class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-slate-50/70 py-2 pl-9 pr-3 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-slate-50/70 py-2 pl-9 pr-9 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dm-text-tertiary" />
+              <button
+                v-if="searchText"
+                type="button"
+                class="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-200 hover:text-slate-600 focus:outline-hidden focus:ring-2 focus:ring-blue-200"
+                :aria-label="t('quotation.pages.list.clearSearch')"
+                :title="t('quotation.pages.list.clearSearch')"
+                @click="searchText = ''"
+              >
+                <X class="h-4 w-4" />
+              </button>
             </div>
           </div>
 
@@ -513,6 +573,18 @@ const filteredQuotations = computed(() => {
               class-name="w-full"
               :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
               :options="productLineFilterOptions"
+            />
+          </div>
+
+          <div class="min-w-0">
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
+              {{ t('quotation.pages.list.sourceLabel') }}
+            </label>
+            <FormSelect
+              v-model="selectedSource"
+              class-name="w-full"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
+              :options="sourceFilterOptions"
             />
           </div>
 
@@ -556,19 +628,25 @@ const filteredQuotations = computed(() => {
 
     <div id="table-panel" class="bg-white rounded-xl border border-dm-border-light shadow-xs overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full min-w-[960px] text-left border-collapse">
+        <table class="w-full min-w-[1180px] text-left border-collapse">
           <thead>
             <tr
               class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-bold tracking-wider"
             >
-              <th class="py-3 px-4">{{ t('quotation.pages.list.tableQuoteNo') }}</th>
+              <th class="w-[220px] py-3 px-4">
+                {{ t('quotation.pages.list.tableQuoteNo') }}
+              </th>
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableProjectName') }}</th>
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableCustomer') }}</th>
               <th class="py-3 px-4">{{ t('quotation.pages.list.tableContact') }}</th>
               <th class="whitespace-nowrap py-3 px-4">{{ t('quotation.pages.list.tableCreatedAt') }}</th>
               <th class="py-3 px-4 text-right">{{ t('quotation.pages.list.tableTotal') }}</th>
-              <th class="min-w-[104px] whitespace-nowrap py-3 px-4 text-center">{{ t('quotation.pages.list.tableStatus') }}</th>
-              <th class="min-w-[220px] py-3 px-4 text-center">{{ t('quotation.pages.list.tableActions') }}</th>
+              <th class="w-[136px] whitespace-nowrap py-3 px-4 text-center">
+                {{ t('quotation.pages.list.tableStatusSource') }}
+              </th>
+              <th class="w-[200px] py-3 px-4 text-center">
+                {{ t('quotation.pages.list.tableActions') }}
+              </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 text-sm">
@@ -583,10 +661,19 @@ const filteredQuotations = computed(() => {
               :key="quote.id"
               class="hover:bg-[#fafafa] transition duration-150"
             >
-              <td class="py-3.5 px-4 font-mono font-medium text-dm-primary">{{ quote.quoteNo }}</td>
+              <td class="w-[220px] max-w-[220px] py-3.5 px-4">
+                <p
+                  class="block truncate whitespace-nowrap font-mono font-medium text-dm-primary"
+                  :title="quote.quoteNo"
+                >
+                  {{ quote.quoteNo }}
+                </p>
+              </td>
               <td class="py-3.5 px-4">
                 <div class="max-w-[180px] sm:max-w-xs truncate">
-                  <p class="font-semibold text-dm-text">{{ quote.projectName }}</p>
+                  <p class="font-semibold text-dm-text" :title="quote.projectName">
+                    {{ quote.projectName }}
+                  </p>
                   <p class="text-xs text-dm-text-tertiary font-mono mt-0.5">
                     {{ t('quotation.common.lineItemCount', { count: quote.items.length }) }}
                   </p>
@@ -594,32 +681,46 @@ const filteredQuotations = computed(() => {
               </td>
               <td class="py-3.5 px-4">
                 <div class="max-w-[160px] truncate">
-                  <p class="text-dm-text font-medium">{{ quote.clientCompany }}</p>
+                  <p class="text-dm-text font-medium" :title="quote.clientCompany">
+                    {{ quote.clientCompany }}
+                  </p>
                 </div>
               </td>
-              <td class="py-3.5 px-4 text-dm-text-secondary font-medium">{{ quote.contactPerson }}</td>
+              <td
+                class="py-3.5 px-4 text-dm-text-secondary font-medium"
+                :title="displayContact(quote) === '—' ? undefined : displayContact(quote)"
+              >
+                {{ displayContact(quote) }}
+              </td>
               <td class="whitespace-nowrap py-3.5 px-4 text-dm-text-tertiary font-mono">
                 {{ quote.createdAt.substring(0, 10) }}
               </td>
               <td class="py-3.5 px-4 text-right font-bold text-dm-text font-mono">
-                {{ currencySymbol(quote.currency) }}{{ quote.grandTotal.toLocaleString() }}
+                {{ displayTotal(quote) }}
               </td>
-              <td class="min-w-[104px] py-3.5 px-4 text-center">
-                <div class="flex justify-center">
-                  <StatusBadge v-if="quote.status === 'Cancelled'" :status="quote.status" />
-                  <StatusSelect
-                    v-else
-                    :model-value="quote.status"
-                    :options="tableStatusValues"
-                    @change="
-                      emit('updateQuoteStatus', quote.id, {
-                        status: $event,
-                      })
-                    "
-                  />
-                </div>
+              <td class="w-[136px] py-3.5 px-4 text-center">
+                <span
+                  v-if="quote.sourceType === 'document_import'"
+                  class="inline-flex whitespace-nowrap rounded-full bg-fuchsia-100 px-2.5 py-1 text-xs font-semibold text-fuchsia-800 ring-1 ring-inset ring-fuchsia-300"
+                >
+                  {{ t('quotation.pages.list.sourceDocumentImport') }}
+                </span>
+                <StatusBadge
+                  v-else-if="quote.status === 'Cancelled'"
+                  :status="quote.status"
+                />
+                <StatusSelect
+                  v-else
+                  :model-value="quote.status"
+                  :options="tableStatusValues"
+                  @change="
+                    emit('updateQuoteStatus', quote.id, {
+                      status: $event,
+                    })
+                  "
+                />
               </td>
-              <td class="min-w-[220px] py-3.5 px-4">
+              <td class="w-[200px] py-3.5 px-4">
                 <div class="flex items-center justify-center gap-1.5">
                   <button
                     :title="t('quotation.pages.list.viewDetails')"
@@ -630,6 +731,7 @@ const filteredQuotations = computed(() => {
                   </button>
 
                   <button
+                    v-if="quote.sourceType !== 'document_import'"
                     :title="
                       quote.status === 'Cancelled'
                         ? t('quotation.pages.list.editDisabled')
@@ -646,7 +748,11 @@ const filteredQuotations = computed(() => {
                     <Pencil class="w-4 h-4" />
                   </button>
 
-                  <div class="relative" data-action-menu>
+                  <div
+                    v-if="quote.sourceType !== 'document_import'"
+                    class="relative"
+                    data-action-menu
+                  >
                     <button
                       :title="
                         quote.status === 'Cancelled'
@@ -709,6 +815,7 @@ const filteredQuotations = computed(() => {
                   </button>
 
                   <button
+                    v-if="quote.sourceType !== 'document_import'"
                     :title="t('quotation.pages.list.deleteQuote')"
                     class="p-1 text-dm-text-tertiary hover:text-red-500 hover:bg-red-50 rounded-sm transition duration-100 cursor-pointer"
                     @click="deleteConfirmId = quote.id"
@@ -917,6 +1024,10 @@ const filteredQuotations = computed(() => {
         </template>
         <template v-else>
           <button
+            v-if="
+              actionMenuQuote.sourceType !== 'document_import' ||
+              actionMenuQuote.sourceDocumentType === 'excel'
+            "
             type="button"
             class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
             @click="handleDownloadLocal(actionMenuQuote, 'excel')"
@@ -925,6 +1036,10 @@ const filteredQuotations = computed(() => {
             {{ t('quotation.actions.downloadExcel') }}
           </button>
           <button
+            v-if="
+              actionMenuQuote.sourceType !== 'document_import' ||
+              actionMenuQuote.sourceDocumentType === 'pdf'
+            "
             type="button"
             class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
             @click="handleDownloadLocal(actionMenuQuote, 'pdf')"

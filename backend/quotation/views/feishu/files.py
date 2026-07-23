@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import IntegrityError
 from django.http import HttpResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -20,6 +21,7 @@ from quotation.access import (
 from quotation.audit import set_request_audit_target
 from quotation.models import (
     DocumentAsset,
+    DocumentParseStatus,
     DocumentType,
     SyncJob,
     SyncJobStatus,
@@ -32,6 +34,17 @@ from quotation.serializers import (
 )
 from quotation.services.feishu_client import FeishuAPIError
 from quotation.services.feishu_service import folder_token_for_item
+from quotation.services.document_parsing.excel_parser import (
+    QuotationExcelParseError,
+)
+from quotation.services.document_parsing.pdf_parser import (
+    QuotationPdfParseError,
+)
+from quotation.services.document_parsing.service import (
+    QuotationDocumentParseError,
+    parse_and_create_quotation,
+    parser_version_for_asset,
+)
 from quotation.services.storage import (
     delete_document,
     document_storage_key,
@@ -54,6 +67,35 @@ def _drive_context_for_reference(
         return provider.client, provider.access_token()
     client, access_token, _ = common._system_drive_context()
     return client, access_token
+
+
+def _latest_parse_result(asset: DocumentAsset):
+    prefetched = getattr(asset, "_prefetched_objects_cache", {}).get(
+        "parse_results"
+    )
+    if prefetched is not None:
+        return max(
+            prefetched,
+            key=lambda item: (item.created_at, item.id),
+            default=None,
+        )
+    return asset.parse_results.order_by("-created_at", "-id").first()
+
+
+def _existing_asset_priority(asset: DocumentAsset):
+    result = _latest_parse_result(asset)
+    status = result.status if result else ""
+    status_rank = {
+        "not_quotation": 6,
+        "confirmed": 5,
+        "ready": 4,
+        "review_required": 3,
+        "running": 2,
+        "failed": 1,
+    }.get(status, 0)
+    if asset.quotation_id:
+        status_rank = max(status_rank, 5)
+    return (status_rank, asset.created_at, asset.id)
 
 
 class FeishuImportView(APIView):
@@ -102,6 +144,36 @@ class FeishuImportView(APIView):
                     {"detail": "Feishu shortcuts cannot be imported"},
                     status=400,
                 )
+            existing_asset = DocumentAsset.objects.filter(
+                source="feishu",
+                feishu_file_token=file_token,
+            ).first()
+            if existing_asset is not None:
+                if (
+                    quotation_id
+                    and existing_asset.quotation_id
+                    and existing_asset.quotation_id != quotation_id
+                ):
+                    return Response(
+                        {"detail": "Feishu file was already imported"},
+                        status=409,
+                    )
+                if quotation_id and not existing_asset.quotation_id:
+                    existing_asset.quotation_id = quotation_id
+                    existing_asset.save(update_fields=["quotation"])
+                return Response(
+                    {
+                        "file_name": existing_asset.file_name,
+                        "mime_type": existing_asset.mime_type,
+                        "size_bytes": existing_asset.size_bytes,
+                        "storage_key": existing_asset.storage_key,
+                        "document_id": existing_asset.id,
+                        "doc_type": existing_asset.doc_type,
+                        "url": existing_asset.feishu_url,
+                        "direct_access_allowed": True,
+                        "reused": True,
+                    }
+                )
             content, mime_type, resolved_name = client.download_drive_item(
                 access_token,
                 file_token=file_token,
@@ -129,6 +201,11 @@ class FeishuImportView(APIView):
 
         if not content:
             return Response({"detail": "Downloaded empty file"}, status=400)
+        if len(content) > settings.QUOTATION_MAX_UPLOAD_BYTES:
+            return Response(
+                {"detail": "Downloaded file exceeds quotation size limit"},
+                status=413,
+            )
 
         safe_name = (
             resolved_name
@@ -176,7 +253,7 @@ class FeishuFolderSyncView(APIView):
 
     def post(self, request):
         lock_key = "quotation:feishu:archive-folder-sync"
-        if not cache.add(lock_key, True, timeout=300):
+        if not cache.add(lock_key, True, timeout=900):
             return Response(
                 {"detail": "archive folder sync already running"},
                 status=409,
@@ -189,7 +266,7 @@ class FeishuFolderSyncView(APIView):
                 pass
         job = SyncJob.objects.create(
             job_type=SyncJobType.PULL,
-            status=SyncJobStatus.RUNNING,
+            status=SyncJobStatus.PENDING,
             actor=request.user,
             storage_connection=connection,
             request_id=getattr(request, "audit_request_id", ""),
@@ -199,6 +276,63 @@ class FeishuFolderSyncView(APIView):
                 "operator_email": user_display_email(request.user),
             },
         )
+        if bool(request.data.get("async")):
+            from quotation.tasks import sync_feishu_folder_task
+
+            try:
+                task = sync_feishu_folder_task.apply_async(
+                    args=[job.id, request.user.id],
+                    queue="quotation_sync",
+                )
+            except Exception as exc:
+                cache.delete(lock_key)
+                job.status = SyncJobStatus.FAILED
+                job.error_code = "enqueue_failed"
+                job.error_message = type(exc).__name__
+                job.save(
+                    update_fields=[
+                        "status",
+                        "error_code",
+                        "error_message",
+                        "updated_at",
+                    ]
+                )
+                raise
+            job.status = SyncJobStatus.QUEUED
+            job.stage = "queued"
+            job.celery_task_id = task.id
+            job.save(
+                update_fields=[
+                    "status",
+                    "stage",
+                    "celery_task_id",
+                    "updated_at",
+                ]
+            )
+            return Response(
+                {
+                    "created_count": 0,
+                    "skipped_count": 0,
+                    "parsed_count": 0,
+                    "created_quotation_count": 0,
+                    "updated_quotation_count": 0,
+                    "queued_parse_count": 0,
+                    "errors": [],
+                    "folders": [],
+                    "file_locations": [],
+                    "created_document_ids": [],
+                    "parsed_document_ids": [],
+                    "created_quotation_ids": [],
+                    "updated_quotation_ids": [],
+                    "sync_job_id": job.id,
+                    "sync_status": job.status,
+                    "storage_connection_id": job.storage_connection_id,
+                },
+                status=202,
+            )
+        job.status = SyncJobStatus.RUNNING
+        job.stage = "discovering"
+        job.save(update_fields=["status", "stage", "updated_at"])
         try:
             response = self._sync(request)
             succeeded = response.status_code < 400
@@ -209,6 +343,13 @@ class FeishuFolderSyncView(APIView):
                 job.result_json = {
                     "created_count": response.data.get("created_count", 0),
                     "skipped_count": response.data.get("skipped_count", 0),
+                    "parsed_count": response.data.get("parsed_count", 0),
+                    "created_quotation_count": response.data.get(
+                        "created_quotation_count", 0
+                    ),
+                    "updated_quotation_count": response.data.get(
+                        "updated_quotation_count", 0
+                    ),
                     "error_count": len(response.data.get("errors") or []),
                 }
             else:
@@ -247,7 +388,7 @@ class FeishuFolderSyncView(APIView):
         finally:
             cache.delete(lock_key)
 
-    def _sync(self, request):
+    def _sync(self, request, *, enqueue_parsing: bool = False):
         try:
             client, access_token, root_folder_token = (
                 common._system_drive_context()
@@ -271,8 +412,16 @@ class FeishuFolderSyncView(APIView):
 
         created = 0
         skipped = 0
+        parsed = 0
+        created_quotations = 0
+        updated_quotations = 0
+        queued_parses = 0
         errors: list[dict] = []
         file_locations: list[dict[str, str]] = []
+        created_document_ids: list[str] = []
+        parsed_document_ids: list[str] = []
+        created_quotation_ids: list[str] = []
+        updated_quotation_ids: list[str] = []
         email = user_display_email(request.user)
         pending_folders = deque([root_folder_token])
         visited_folders: set[str] = set()
@@ -288,6 +437,87 @@ class FeishuFolderSyncView(APIView):
                 {"token": root_folder_token, "name": root_folder_name}
             ]
         }
+
+        def auto_parse_asset(asset: DocumentAsset) -> None:
+            nonlocal parsed, created_quotations, queued_parses
+            nonlocal updated_quotations
+            if asset.doc_type not in {DocumentType.EXCEL, DocumentType.PDF}:
+                return
+            if asset.file_name.lower().startswith("~$"):
+                return
+            if enqueue_parsing:
+                latest = _latest_parse_result(asset)
+                if (
+                    latest is not None
+                    and latest.parser_version
+                    == parser_version_for_asset(asset)
+                    and (
+                        latest.status == DocumentParseStatus.NOT_QUOTATION
+                        or (
+                            asset.quotation_id
+                            and latest.status
+                            == DocumentParseStatus.CONFIRMED
+                        )
+                    )
+                ):
+                    if latest.status == DocumentParseStatus.CONFIRMED:
+                        parsed += 1
+                        parsed_document_ids.append(asset.id)
+                    return
+                from quotation.tasks import parse_document_task
+
+                queue = f"quotation_{asset.doc_type}"
+                parse_document_task.apply_async(
+                    args=[asset.id, request.user.id],
+                    queue=queue,
+                )
+                queued_parses += 1
+                return
+            try:
+                result, reused = parse_and_create_quotation(
+                    asset,
+                    actor=request.user,
+                )
+            except IntegrityError:
+                errors.append(
+                    {
+                        "file": asset.file_name,
+                        "detail": "quote_no already exists",
+                    }
+                )
+                return
+            except (
+                QuotationDocumentParseError,
+                QuotationExcelParseError,
+                QuotationPdfParseError,
+                ValueError,
+            ) as exc:
+                errors.append(
+                    {
+                        "file": asset.file_name,
+                        "detail": str(exc)[:500] or "parse failed",
+                    }
+                )
+                return
+            if result.status == DocumentParseStatus.NOT_QUOTATION:
+                return
+            if not result.quotation_id:
+                errors.append(
+                    {
+                        "file": asset.file_name,
+                        "detail": result.error_message
+                        or "automatic parse validation failed",
+                    }
+                )
+                return
+            parsed += 1
+            parsed_document_ids.append(asset.id)
+            if not reused:
+                created_quotations += 1
+                created_quotation_ids.append(result.quotation_id)
+            elif getattr(result, "_quotation_version_created", False):
+                updated_quotations += 1
+                updated_quotation_ids.append(result.quotation_id)
 
         while pending_folders:
             current_folder = pending_folders.popleft()
@@ -356,6 +586,15 @@ class FeishuFolderSyncView(APIView):
                         skipped += 1
                         continue
                     current_path = folder_paths.get(current_folder, [])
+                    remote_size = int(item.get("size") or 0)
+                    if remote_size > settings.QUOTATION_MAX_UPLOAD_BYTES:
+                        errors.append(
+                            {
+                                "file": file_name,
+                                "detail": "file exceeds quotation size limit",
+                            }
+                        )
+                        continue
                     remote_assets = DocumentAsset.objects.filter(
                         source="feishu",
                         feishu_file_token=file_token,
@@ -364,11 +603,16 @@ class FeishuFolderSyncView(APIView):
                         feishu_folder_token=current_folder,
                         feishu_folder_path=current_path,
                     )
-                    existing_assets = remote_assets.filter(
-                        created_by_email__iexact=email,
-                    ).order_by("created_at", "id")
-                    existing_asset = existing_assets.first()
+                    existing_assets = list(
+                        remote_assets.prefetch_related("parse_results")
+                    )
+                    existing_asset = max(
+                        existing_assets,
+                        key=_existing_asset_priority,
+                        default=None,
+                    )
                     if existing_asset:
+                        auto_parse_asset(existing_asset)
                         file_locations.append(
                             {
                                 "document_id": existing_asset.id,
@@ -400,11 +644,20 @@ class FeishuFolderSyncView(APIView):
                             {"file": file_name, "detail": "empty file"}
                         )
                         continue
+                    if len(content) > settings.QUOTATION_MAX_UPLOAD_BYTES:
+                        errors.append(
+                            {
+                                "file": file_name,
+                                "detail": "file exceeds quotation size limit",
+                            }
+                        )
+                        continue
 
                     safe_name = resolved_name or file_name
                     asset_id = str(uuid4())
                     storage_key = document_storage_key(asset_id, None)
                     write_document(content, storage_key)
+                    created_asset = True
                     try:
                         asset = DocumentAsset.objects.create(
                             id=asset_id,
@@ -423,6 +676,19 @@ class FeishuFolderSyncView(APIView):
                             feishu_folder_path=current_path,
                             created_by_email=email,
                         )
+                    except IntegrityError:
+                        delete_document(storage_key)
+                        asset = (
+                            DocumentAsset.objects.filter(
+                                source="feishu",
+                                feishu_file_token=file_token,
+                            )
+                            .prefetch_related("parse_results")
+                            .first()
+                        )
+                        if asset is None:
+                            raise
+                        created_asset = False
                     except Exception:
                         delete_document(storage_key)
                         raise
@@ -432,7 +698,12 @@ class FeishuFolderSyncView(APIView):
                             "folder_token": current_folder,
                         }
                     )
-                    created += 1
+                    if created_asset:
+                        created_document_ids.append(asset.id)
+                        created += 1
+                    else:
+                        skipped += 1
+                    auto_parse_asset(asset)
 
                 if not data.get("has_more"):
                     break
@@ -448,6 +719,41 @@ class FeishuFolderSyncView(APIView):
                 "errors": errors[:20],
                 "folders": list(folders.values()),
                 "file_locations": file_locations,
+                "created_document_ids": created_document_ids,
+                "parsed_count": parsed,
+                "created_quotation_count": created_quotations,
+                "updated_quotation_count": updated_quotations,
+                "queued_parse_count": queued_parses,
+                "parsed_document_ids": parsed_document_ids,
+                "created_quotation_ids": created_quotation_ids,
+                "updated_quotation_ids": updated_quotation_ids,
+            }
+        )
+
+
+class FeishuSyncJobDetailView(APIView):
+    """Return one caller-owned synchronization job."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, job_id: str):
+        job = SyncJob.objects.filter(pk=job_id, actor=request.user).first()
+        if job is None:
+            return Response({"detail": "sync job not found"}, status=404)
+        return Response(
+            {
+                "id": job.id,
+                "status": job.status,
+                "stage": job.stage,
+                "attempt_count": job.attempt_count,
+                "max_attempts": job.max_attempts,
+                "duration_ms": job.duration_ms,
+                "result": job.result_json or {},
+                "error_code": job.error_code,
+                "error_message": job.error_message or "",
+                "created_at": job.created_at,
+                "updated_at": job.updated_at,
+                "finished_at": job.finished_at,
             }
         )
 

@@ -12,9 +12,10 @@ from quotation.views.catalog import (
     UserQuotationCatalogView,
 )
 from quotation.views.documents import (
-    DocumentDetailView,
     DocumentDownloadView,
     DocumentListView,
+    DocumentParseConfirmView,
+    DocumentParseView,
     QuotationDocumentListCreateView,
 )
 from quotation.views.feishu import (
@@ -31,6 +32,7 @@ from quotation.views.feishu import (
     FeishuPreferredFolderView,
     FeishuSearchView,
     FeishuStatusView,
+    FeishuSyncJobDetailView,
     FeishuUploadView,
 )
 from quotation.views.health import StorageMetricsView
@@ -41,6 +43,7 @@ from quotation.views.pdf import (
 )
 from quotation.views.quotations import (
     QuotationDetailView,
+    QuotationDownloadEventView,
     QuotationGenerateView,
     QuotationListCreateView,
 )
@@ -64,6 +67,10 @@ urlpatterns = [
         QuotationGenerateView.as_view(),
     ),
     path(
+        "quotations/<str:quotation_id>/download-event",
+        QuotationDownloadEventView.as_view(),
+    ),
+    path(
         "quotations/<str:quotation_id>/documents",
         QuotationDocumentListCreateView.as_view(),
     ),
@@ -71,7 +78,14 @@ urlpatterns = [
     path(
         "documents/<str:document_id>/download", DocumentDownloadView.as_view()
     ),
-    path("documents/<str:document_id>", DocumentDetailView.as_view()),
+    path(
+        "documents/<str:document_id>/parse",
+        DocumentParseView.as_view(),
+    ),
+    path(
+        "document-parse-results/<str:parse_result_id>/confirm",
+        DocumentParseConfirmView.as_view(),
+    ),
     path("feishu/status", FeishuStatusView.as_view()),
     path("feishu/oauth/start", FeishuOAuthStartView.as_view()),
     path("feishu/oauth/callback", FeishuOAuthCallbackView.as_view()),
@@ -80,6 +94,10 @@ urlpatterns = [
     path("feishu/drive-tree", FeishuDriveTreeView.as_view()),
     path("feishu/search", FeishuSearchView.as_view()),
     path("feishu/sync-folder", FeishuFolderSyncView.as_view()),
+    path(
+        "feishu/sync-jobs/<str:job_id>",
+        FeishuSyncJobDetailView.as_view(),
+    ),
     path("feishu/import/<str:file_token>", FeishuImportView.as_view()),
     path("feishu/files/access/batch", FeishuFileAccessBatchView.as_view()),
     path(

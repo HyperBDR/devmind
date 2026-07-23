@@ -67,7 +67,7 @@ test('Imported files browser stays mounted while its visible panels are hidden',
   assert.match(importsPage, /listImportedFeishuDocuments\(\)/)
   assert.match(importsPage, /syncFeishuArchiveFolder\(/)
   assert.match(importsPage, /downloadImportedDocument\(doc\.id, doc\.file_name\)/)
-  assert.match(importsPage, /deleteImportedDocuments\(ids\)/)
+  assert.doesNotMatch(importsPage, /deleteImportedDocuments/)
 })
 
 test('imported Feishu files live under the Quotes page', () => {

@@ -12,6 +12,7 @@ from .files import (
     FeishuFileContentView,
     FeishuFolderSyncView,
     FeishuImportView,
+    FeishuSyncJobDetailView,
 )
 from .folders import (
     FeishuDriveTreeView,
@@ -36,6 +37,7 @@ __all__ = [
     "FeishuPreferredFolderView",
     "FeishuSearchView",
     "FeishuStatusView",
+    "FeishuSyncJobDetailView",
     "FeishuUploadView",
     "common",
     "_client",
