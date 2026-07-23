@@ -24,7 +24,7 @@ async function setLanguage(page, language) {
 
 async function collapseSidebar(page) {
   await page.evaluate(() => {
-    localStorage.setItem('app_sidebar_collapsed', 'true')
+    sessionStorage.setItem('app_sidebar_collapsed', 'true')
   })
   await page.reload({ waitUntil: 'domcontentloaded' })
 }

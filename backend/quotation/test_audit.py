@@ -222,6 +222,11 @@ class QuotationAuditEventTests(TestCase):
                 "/api/v1/quotation/feishu/sync-folder",
                 ("feishu", "sync", "folder"),
             ),
+            (
+                "POST",
+                "/api/v1/quotation/quotations/quote-id/download-event",
+                ("document", "download", "quotation"),
+            ),
         ]
         for method, path, expected in cases:
             with self.subTest(method=method, path=path):
@@ -236,6 +241,40 @@ class QuotationAuditEventTests(TestCase):
         self.assertIsNone(
             _classify("POST", "/api/v1/quotation/pdf/from-html")
         )
+        self.assertIsNone(
+            _classify("POST", "/api/v1/quotation/pdf/from-excel")
+        )
+
+    def test_browser_generated_download_is_audited(self):
+        quotation = Quotation.objects.create(
+            quote_no="Q-AUDIT-DOWNLOAD-001",
+            project_name="Browser generated download",
+            payment_terms="CIA",
+            quote_date="2026-07-23",
+            expire_date="2026-08-23",
+            issuer_contact_name="Audit User",
+            issuer_contact_email=self.user.email,
+            client_company="Example",
+            contact_person="Customer",
+            email="customer@example.com",
+            created_by_email=self.user.email,
+        )
+
+        response = self.api.post(
+            f"/api/v1/quotation/quotations/{quotation.id}/download-event",
+            {"format": "excel"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = AuditEvent.objects.get(
+            module="document",
+            action="download",
+        )
+        self.assertEqual(event.target_type, "quotation")
+        self.assertEqual(event.target_id, quotation.id)
+        self.assertEqual(event.target_label, quotation.quote_no)
+        self.assertEqual(event.quotation_id_snapshot, quotation.id)
 
     def test_quote_updates_defer_field_diffs_to_version_history(self):
         fields = ["project_name", "status", "items"]

@@ -20,16 +20,19 @@
 
       <!-- Main content - scrollable -->
       <main
-        class="flex-1 min-w-0 overflow-y-auto bg-gray-50"
+        class="flex-1 min-w-0 bg-gray-50"
         :class="
-          fullBleed
-            ? 'p-0'
-            : resolvedShowSidebar
-              ? 'py-3 px-4'
-              : 'px-6 py-6 sm:px-8 lg:px-10'
+          [
+            contentScrollable ? 'overflow-y-auto' : 'overflow-hidden',
+            fullBleed
+              ? 'p-0'
+              : resolvedShowSidebar
+                ? 'py-3 px-4'
+                : 'px-6 py-6 sm:px-8 lg:px-10'
+          ]
         "
       >
-        <div :key="route.path" :class="fullBleed ? 'h-full' : ''">
+        <div :key="contentKey" :class="fullBleed ? 'h-full' : ''">
           <slot />
         </div>
       </main>
@@ -55,12 +58,19 @@ const props = defineProps({
   showHeader: {
     type: Boolean,
     default: true
+  },
+  contentScrollable: {
+    type: Boolean,
+    default: true
   }
 })
 
 const showMobileMenu = ref(false)
 const sidebarCollapsed = ref(false)
 const route = useRoute()
+const contentKey = computed(() =>
+  route.path.startsWith('/quotation') ? 'quotation' : route.path
+)
 const resolvedShowSidebar = computed(() => {
   if (
     route.path.startsWith('/settings') &&
@@ -76,7 +86,7 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = 'app_sidebar_collapsed'
 const toggleSidebarCollapse = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
   if (typeof window !== 'undefined') {
-    localStorage.setItem(
+    sessionStorage.setItem(
       SIDEBAR_COLLAPSED_STORAGE_KEY,
       JSON.stringify(sidebarCollapsed.value)
     )
@@ -85,7 +95,7 @@ const toggleSidebarCollapse = () => {
 
 onMounted(() => {
   if (typeof window === 'undefined') return
-  const saved = localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
+  const saved = sessionStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY)
   if (saved !== null) {
     try {
       sidebarCollapsed.value = JSON.parse(saved)

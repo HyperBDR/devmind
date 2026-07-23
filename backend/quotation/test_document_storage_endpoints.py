@@ -115,9 +115,9 @@ class DocumentStorageEndpointTests(TestCase):
         )
 
         delete = self.api.delete(f"/api/v1/quotation/documents/{asset.id}")
-        self.assertEqual(delete.status_code, 204)
-        self.assertFalse((self.storage / asset.storage_key).exists())
-        self.assertFalse(DocumentAsset.objects.filter(pk=asset.id).exists())
+        self.assertEqual(delete.status_code, 404)
+        self.assertTrue((self.storage / asset.storage_key).exists())
+        self.assertTrue(DocumentAsset.objects.filter(pk=asset.id).exists())
 
     def test_feishu_import_uses_uuid_storage_and_keeps_original_name(self):
         class FakeClient:
@@ -236,6 +236,59 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(Path(asset.storage_key).parts[1], asset.id)
         self.assert_uuid_storage(asset, b"%PDF-synced")
 
+    def test_feishu_folder_sync_reuses_asset_created_by_other_user(self):
+        other_user = User.objects.create_user(
+            username="other-storage-user",
+            email="other-storage@example.com",
+            password="password",
+        )
+        existing = DocumentAsset.objects.create(
+            doc_type=DocumentType.SIGNATURE,
+            file_name="Shared Quote.pdf",
+            mime_type="application/pdf",
+            storage_key="documents/shared/asset",
+            size_bytes=12,
+            source="feishu",
+            feishu_file_token="shared_token",
+            feishu_url="https://example.feishu.cn/file/shared_token",
+            created_by_email=other_user.email,
+        )
+
+        class FakeClient:
+            def get_tenant_access_token(self):
+                return "tenant-token"
+
+            def list_folder_files(self, access_token, folder_token, **kwargs):
+                return {
+                    "files": [
+                        {
+                            "token": "shared_token",
+                            "name": "Shared Quote.pdf",
+                            "type": "file",
+                        }
+                    ],
+                    "has_more": False,
+                }
+
+            def download_drive_item(self, access_token, **kwargs):
+                raise AssertionError("existing file was downloaded again")
+
+        with patch(
+            "quotation.views.feishu.common._client",
+            return_value=FakeClient(),
+        ):
+            response = self.api.post(
+                "/api/v1/quotation/feishu/sync-folder"
+            )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["created_count"], 0)
+        self.assertEqual(DocumentAsset.objects.count(), 1)
+        self.assertEqual(
+            response.data["file_locations"][0]["document_id"],
+            existing.id,
+        )
+
     def test_feishu_folder_sync_imports_files_from_child_folders(self):
         downloaded_tokens = []
 
@@ -332,24 +385,23 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(Path(asset.storage_key).parts[1], asset.id)
         self.assert_uuid_storage(asset, b"PK\x03\x04nested")
 
-    def test_feishu_document_list_deduplicates_tokens_and_keeps_paths(self):
+    def test_feishu_document_list_keeps_unique_token_path(self):
         path = [
             {"token": "folder_token", "name": "Tower"},
             {"token": "child_folder", "name": "Child folder"},
         ]
-        for index in range(2):
-            DocumentAsset.objects.create(
-                doc_type=DocumentType.PDF,
-                file_name=f"Duplicate {index}.pdf",
-                mime_type="application/pdf",
-                storage_key=f"documents/duplicate/{index}",
-                size_bytes=10,
-                source="feishu",
-                feishu_file_token="duplicate_remote_token",
-                feishu_folder_token="child_folder",
-                feishu_folder_path=path,
-                created_by_email=self.user.email,
-            )
+        DocumentAsset.objects.create(
+            doc_type=DocumentType.PDF,
+            file_name="Unique remote file.pdf",
+            mime_type="application/pdf",
+            storage_key="documents/unique/file",
+            size_bytes=10,
+            source="feishu",
+            feishu_file_token="unique_remote_token",
+            feishu_folder_token="child_folder",
+            feishu_folder_path=path,
+            created_by_email=self.user.email,
+        )
         DocumentAsset.objects.create(
             doc_type=DocumentType.EXCEL,
             file_name="~$Temporary.xlsx",
@@ -360,7 +412,7 @@ class DocumentStorageEndpointTests(TestCase):
             feishu_file_token="temporary_remote_token",
             feishu_folder_token="child_folder",
             feishu_folder_path=path,
-            created_by_email=self.user.email,
+            created_by_email="another-user@example.com",
         )
 
         response = self.api.get(
@@ -371,13 +423,13 @@ class DocumentStorageEndpointTests(TestCase):
         matches = [
             item
             for item in response.data
-            if item["file_name"].startswith("Duplicate")
+            if item["file_name"] == "Unique remote file.pdf"
         ]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["feishu_folder_path"], path)
         self.assertEqual(
             matches[0]["feishu_url"],
-            "https://tenant.feishu.cn/file/duplicate_remote_token",
+            "https://tenant.feishu.cn/file/unique_remote_token",
         )
         self.assertTrue(matches[0]["remote_access_available"])
         self.assertIsNone(matches[0]["feishu_file_token"])
@@ -631,7 +683,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(download.status_code, 403)
 
         delete = other_api.delete(f"/api/v1/quotation/documents/{asset.id}")
-        self.assertEqual(delete.status_code, 403)
+        self.assertEqual(delete.status_code, 404)
         self.assertTrue(DocumentAsset.objects.filter(pk=asset.id).exists())
 
     def test_feishu_upload_rejects_inaccessible_quotation_before_remote_call(

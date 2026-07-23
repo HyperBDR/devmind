@@ -4,6 +4,7 @@ from quotation.audit import record_audit_event
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
+    DocumentParseResult,
     DocumentReplica,
     FeishuConnection,
     Quotation,
@@ -26,6 +27,7 @@ admin.site.register(Quotation)
 admin.site.register(QuotationItem)
 admin.site.register(QuotationVersion)
 admin.site.register(DocumentAsset)
+admin.site.register(DocumentParseResult)
 admin.site.register(FeishuConnection)
 admin.site.register(UserQuotationCatalog)
 

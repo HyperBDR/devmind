@@ -28,8 +28,12 @@ interface ApiQuotationVersion {
 interface ApiQuotation {
   id: string;
   quote_no: string;
+  display_quote_no?: string;
+  source_quote_no?: string;
   status: string;
   version_current: number;
+  source_type: 'manual' | 'document_import';
+  source_document_type?: 'excel' | 'pdf' | null;
   product_line: string;
   project_name: string;
   currency: string;
@@ -110,6 +114,19 @@ function mapStatus(status: string): Quotation['status'] {
 
 function mapStatusToApi(status: Quotation['status']): string {
   return STATUS_TO_API[status] || 'draft';
+}
+
+export function recordQuotationDownload(
+  quotationId: string,
+  format: 'excel' | 'pdf',
+): Promise<void> {
+  return apiRequest<void>(
+    `/quotations/${encodeURIComponent(quotationId)}/download-event`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ format }),
+    },
+  );
 }
 
 function formatVersionTime(value?: string | null): string {
@@ -282,7 +299,10 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
 export function mapApiQuotation(api: ApiQuotation): Quotation {
   return {
     id: api.id,
-    quoteNo: api.quote_no,
+    quoteNo: api.display_quote_no || api.source_quote_no || api.quote_no,
+    sourceType: api.source_type || 'manual',
+    sourceDocumentType: api.source_document_type || undefined,
+    versionCurrent: api.version_current || 0,
     projectName: api.project_name,
     clientCompany: api.client_company,
     contactPerson: api.contact_person,

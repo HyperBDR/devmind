@@ -14,7 +14,7 @@ from quotation.access import (
     forbidden_response,
 )
 from quotation.audit import set_request_audit_target
-from quotation.models import Quotation, QuoteStatus
+from quotation.models import Quotation, QuotationSourceType, QuoteStatus
 from quotation.permissions import user_display_email
 from quotation.serializers import (
     QuotationCreateSerializer,
@@ -112,6 +112,11 @@ class QuotationDetailView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
+        if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
+            return Response(
+                {"detail": "document-imported quotations are read-only"},
+                status=409,
+            )
         set_request_audit_target(request, target_label=quotation.quote_no)
         ser = QuotationUpdateSerializer(
             data=request.data,
@@ -204,6 +209,11 @@ class QuotationDetailView(APIView):
         denied = _ensure_access(request.user, quotation)
         if denied:
             return denied
+        if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
+            return Response(
+                {"detail": "document-imported quotations cannot be deleted"},
+                status=409,
+            )
         set_request_audit_target(request, target_label=quotation.quote_no)
         storage_keys = list(
             quotation.documents.exclude(storage_key="").values_list(
@@ -248,3 +258,28 @@ class QuotationGenerateView(APIView):
             "items", "documents", "versions"
         ).get(pk=quotation_id)
         return Response(QuotationSerializer(quotation).data)
+
+
+class QuotationDownloadEventView(APIView):
+    """Record a successful browser-generated quotation download."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, quotation_id: str):
+        quotation = Quotation.objects.filter(pk=quotation_id).first()
+        if not quotation:
+            return Response({"detail": "quotation not found"}, status=404)
+        denied = _ensure_access(request.user, quotation)
+        if denied:
+            return denied
+        export_format = str(request.data.get("format") or "").lower()
+        if export_format not in {"excel", "pdf"}:
+            return Response({"detail": "invalid export format"}, status=400)
+        set_request_audit_target(request, target_label=quotation.quote_no)
+        return Response(
+            {
+                "quotation_id": quotation.id,
+                "quote_no": quotation.quote_no,
+                "format": export_format,
+            }
+        )

@@ -13,6 +13,32 @@ const auditApi = readFileSync(
   new URL('../src/modules/quotation/api/audit.ts', import.meta.url),
   'utf8',
 )
+const feishuApi = readFileSync(
+  new URL('../src/modules/quotation/api/feishu.ts', import.meta.url),
+  'utf8',
+)
+const quotationList = readFileSync(
+  new URL(
+    '../src/modules/quotation/components/QuotationList.vue',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const quotationDetails = readFileSync(
+  new URL(
+    '../src/modules/quotation/components/QuotationDetails.vue',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const quotationApp = readFileSync(
+  new URL('../src/modules/quotation/App.vue', import.meta.url),
+  'utf8',
+)
+const quotationsApi = readFileSync(
+  new URL('../src/modules/quotation/api/quotations.ts', import.meta.url),
+  'utf8',
+)
 const securityPanel = readFileSync(
   new URL(
     '../src/modules/quotation/components/SecurityAlertsPanel.vue',
@@ -42,6 +68,39 @@ test('Audit Log is visible to Quote Desk users and remains read-only', () => {
   assert.match(auditPage, /riskFilter/)
   assert.match(auditPage, /selected\.trace_id/)
   assert.doesNotMatch(auditPage, /<select/)
+})
+
+test('background Feishu return checks do not duplicate open audits', () => {
+  assert.match(feishuApi, /auditSource\?: 'automatic' \| 'user'/)
+  assert.match(feishuApi, /X-Quotation-Audit-Source/)
+  assert.match(
+    quotationList,
+    /checkFeishuFileAccess\(pending\.documentId, \{[\s\S]*auditSource: 'automatic'/,
+  )
+  const consumePending = quotationList.indexOf(
+    'pendingFeishuOpen.value = null',
+  )
+  const backgroundCheck = quotationList.indexOf(
+    'checkFeishuFileAccess(pending.documentId',
+  )
+  assert.ok(consumePending >= 0)
+  assert.ok(backgroundCheck > consumePending)
+})
+
+test('browser-generated quotation downloads are reported to audit', () => {
+  assert.match(quotationsApi, /recordQuotationDownload/)
+  assert.match(quotationsApi, /\/download-event/)
+  assert.match(quotationList, /recordQuotationDownload\(quote\.id, 'excel'\)/)
+  assert.match(quotationList, /recordQuotationDownload\(quote\.id, 'pdf'\)/)
+  assert.match(
+    quotationDetails,
+    /recordQuotationDownload\(props\.quote\.id, 'excel'\)/,
+  )
+  assert.match(
+    quotationDetails,
+    /recordQuotationDownload\(props\.quote\.id, 'pdf'\)/,
+  )
+  assert.match(quotationApp, /recordQuotationDownload\(saved\.id, 'excel'\)/)
 })
 
 test('Security Alerts follows the reviewed three-step workflow', () => {

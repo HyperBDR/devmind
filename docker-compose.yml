@@ -27,6 +27,11 @@ x-backend-api-common: &backend-api-common
       USE_MIRROR: ${USE_MIRROR:-true}
       DEV_MODE: "0"
   command: gunicorn
+  depends_on:
+    gotenberg:
+      condition: service_healthy
+    postgresql:
+      condition: service_healthy
   healthcheck:
     test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health"]
     interval: 30s
@@ -60,6 +65,31 @@ x-frontend-common: &frontend-common
     start_period: 60s
 
 services:
+  gotenberg:
+    image: gotenberg/gotenberg:8.34.0-libreoffice@sha256:3c23aeb3a027a63d7c71745fc9d83724bd58cf9dfa470396ac82c0896028db2a
+    container_name: gotenberg
+    restart: unless-stopped
+    command:
+      - gotenberg
+      - --api-timeout=30s
+      - --api-body-limit=8MB
+      - --api-disable-download-from=true
+      - --libreoffice-auto-start=true
+      - --libreoffice-deny-private-ips=true
+      - --libreoffice-deny-public-ips=true
+      - --libreoffice-max-queue-size=20
+      - --webhook-disable=true
+    cpus: ${GOTENBERG_CPU_LIMIT:-2.0}
+    mem_limit: ${GOTENBERG_MEMORY_LIMIT:-2g}
+    networks:
+      - backend_network
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:3000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
   backend-init:
     <<: *backend-service-common
     container_name: backend-init
@@ -98,16 +128,102 @@ services:
     profiles: ["green"]
 
   backend-worker:
-    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend:${APP_VERSION:?APP_VERSION is required}
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-parser:${APP_VERSION:?APP_VERSION is required}
     container_name: backend-worker
     restart: unless-stopped
     stop_grace_period: 120s
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-parser
+      args:
+        USE_MIRROR: ${USE_MIRROR:-true}
+        DEV_MODE: "0"
     env_file:
       - ./.env
+    environment:
+      CELERY_QUEUES: backend,quotation_sync
+      CELERY_LOG_FILE: /var/log/celery/worker.log
     volumes:
       - ./data/logs/worker:/var/log/celery
       - ./data/storage:/opt/storage
       - ./cache:/opt/cache
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery
+
+  quotation-pdf-worker:
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-parser:${APP_VERSION:?APP_VERSION is required}
+    container_name: quotation-pdf-worker
+    restart: unless-stopped
+    stop_grace_period: 150s
+    env_file:
+      - ./.env
+    environment:
+      CELERY_CONCURRENCY: "2"
+      CELERY_QUEUES: quotation_pdf
+      CELERY_MAX_TASKS_PER_CHILD: "100"
+      CELERY_MAX_MEMORY_PER_CHILD: "384000"
+      CELERY_LOG_FILE: /var/log/celery/pdf-worker.log
+    volumes:
+      - ./data/logs/worker:/var/log/celery
+      - ./data/storage:/opt/storage
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery
+
+  quotation-excel-worker:
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-parser:${APP_VERSION:?APP_VERSION is required}
+    container_name: quotation-excel-worker
+    restart: unless-stopped
+    stop_grace_period: 120s
+    env_file:
+      - ./.env
+    environment:
+      CELERY_CONCURRENCY: "2"
+      CELERY_QUEUES: quotation_excel
+      CELERY_MAX_TASKS_PER_CHILD: "200"
+      CELERY_MAX_MEMORY_PER_CHILD: "256000"
+      CELERY_LOG_FILE: /var/log/celery/excel-worker.log
+    volumes:
+      - ./data/logs/worker:/var/log/celery
+      - ./data/storage:/opt/storage
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery
+
+  quotation-ocr-worker:
+    profiles: ["ocr"]
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-ocr:${APP_VERSION:?APP_VERSION is required}
+    container_name: quotation-ocr-worker
+    restart: unless-stopped
+    stop_grace_period: 240s
+    env_file:
+      - ./.env
+    environment:
+      CELERY_CONCURRENCY: "1"
+      CELERY_QUEUES: quotation_ocr
+      CELERY_MAX_TASKS_PER_CHILD: "20"
+      CELERY_MAX_MEMORY_PER_CHILD: "512000"
+      CELERY_LOG_FILE: /var/log/celery/ocr-worker.log
+    volumes:
+      - ./data/logs/worker:/var/log/celery
+      - ./data/storage:/opt/storage
     networks:
       - backend_network
     depends_on:

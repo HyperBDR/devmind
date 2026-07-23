@@ -54,6 +54,10 @@ async function handleFeishuUploadDone(_id: string) {
   await load()
 }
 
+async function handleImportedQuotationCreated(_id: string) {
+  await load()
+}
+
 onMounted(() => {
   void load()
 
@@ -196,10 +200,13 @@ function handleUpdateQuoteStatus(
         @toast="showToast"
       />
 
-      <ImportedDocumentsPage
-        embedded
-        @toast="showToast"
-      />
+      <div class="hidden" aria-hidden="true">
+        <ImportedDocumentsPage
+          embedded
+          @toast="showToast"
+          @quotation-created="handleImportedQuotationCreated"
+        />
+      </div>
     </div>
   </div>
 </template>

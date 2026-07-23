@@ -18,6 +18,7 @@ import type { Quotation, QuoteStatus, QuoteVersion } from '../types'
 import { listAuditEvents, type AuditEvent } from '../api/audit'
 import { downloadQuotationExcel } from '../utils/excelGenerator'
 import { downloadQuotationPdf } from '../utils/pdfExporter'
+import { recordQuotationDownload } from '../api/quotations'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
 import type { PreviewUser } from '../utils/quotationPreviewModel'
 import { getCurrencySymbol } from '../utils/quotationPreviewModel'
@@ -240,6 +241,7 @@ function formatNow() {
 async function handleGenerateExcel() {
   const success = await downloadQuotationExcel(props.quote, props.currentUser)
   if (success) {
+    await recordQuotationDownload(props.quote.id, 'excel').catch(() => undefined)
     emit('updateQuoteStatus', props.quote.id, {
       status: 'Generated',
       excelGeneratedAt: formatNow(),
@@ -255,6 +257,7 @@ async function handleDownloadExcel() {
   }
   const success = await downloadQuotationExcel(props.quote, props.currentUser)
   if (success) {
+    await recordQuotationDownload(props.quote.id, 'excel').catch(() => undefined)
     const formattedDate = formatNow()
     const fileName = buildQuotationExportFileName(props.quote, 'xlsx')
     if (props.quote.status === 'Draft') {
@@ -274,7 +277,10 @@ async function handleDownloadExcel() {
 
 async function handleExportPdf() {
   if (props.quote.status === 'Cancelled') return
-  await downloadQuotationPdf(props.quote, props.currentUser)
+  const success = await downloadQuotationPdf(props.quote, props.currentUser)
+  if (success) {
+    await recordQuotationDownload(props.quote.id, 'pdf').catch(() => undefined)
+  }
 }
 
 function setStatus(status: QuoteStatus) {
@@ -318,7 +324,10 @@ function setStatus(status: QuoteStatus) {
 
       <div class="flex flex-wrap items-center gap-2">
         <button
-          v-if="quote.status !== 'Cancelled'"
+          v-if="
+            quote.status !== 'Cancelled' &&
+            quote.sourceType !== 'document_import'
+          "
           type="button"
           class="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dm-border bg-white px-3.5 py-2 text-sm font-semibold text-dm-text shadow-xs transition duration-150 hover:bg-[#fafafa]"
           @click="emit('editQuote', quote.id)"
@@ -450,7 +459,10 @@ function setStatus(status: QuoteStatus) {
               <StatusBadge :status="quote.status" />
             </div>
 
-            <div class="space-y-2 text-sm">
+            <div
+              v-if="quote.sourceType !== 'document_import'"
+              class="space-y-2 text-sm"
+            >
               <span class="mb-1 block text-xs font-bold uppercase tracking-wider text-dm-text-tertiary">
                 {{ t('quotation.pages.details.quickStatusChange') }}
               </span>

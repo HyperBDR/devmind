@@ -33,6 +33,7 @@ import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
 import { downloadQuotationExcel } from './utils/excelGenerator'
+import { recordQuotationDownload } from './api/quotations'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from './utils/feishuLinkState'
 import {
   loadProductLineOptions,
@@ -448,7 +449,7 @@ async function handleSaveQuotation(newQuote: Quotation) {
 
     if (willGenerate) {
       saved = await generateQuotationApi(saved.id, auth.currentUser.email)
-      downloadQuotationExcel(
+      const downloaded = await downloadQuotationExcel(
         {
           ...ownedQuote,
           ...saved,
@@ -465,6 +466,9 @@ async function handleSaveQuotation(newQuote: Quotation) {
             }
           : undefined,
       )
+      if (downloaded) {
+        await recordQuotationDownload(saved.id, 'excel').catch(() => undefined)
+      }
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id
       if (auth.embeddedAuth) {
@@ -492,6 +496,11 @@ async function handleSaveQuotation(newQuote: Quotation) {
 
 async function handleFeishuUploadDone(_id: string) {
   await refreshQuotations()
+}
+
+async function handleImportedQuotationCreated(id: string) {
+  await refreshQuotations()
+  selectedQuotationId.value = id
 }
 
 async function handleReconcileFeishuLinks() {
@@ -885,6 +894,7 @@ function reloadPage() {
           <ImportedDocumentsPage
             embedded
             @toast="triggerToast"
+            @quotation-created="handleImportedQuotationCreated"
           />
         </div>
 

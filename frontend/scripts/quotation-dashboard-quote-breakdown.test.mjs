@@ -105,13 +105,17 @@ test('dashboard pie labels use balanced reference-style leader lines', () => {
   assert.match(dashboardSource, /:plugins="\[quotePieLeaderLabelPlugin\]"/)
 })
 
-test('dashboard recent quotes align totals and center status badges', () => {
+test('dashboard recent quotes use a responsive, low-noise hierarchy', () => {
   assert.match(dashboardSource, /id="dashboard-recent-quotes"/)
   assert.match(
     dashboardSource,
-    /grid shrink-0 grid-cols-\[8\.5rem_5\.5rem\] items-center gap-3/,
+    /sm:grid-cols-\[minmax\(0,1fr\)_auto\]/,
   )
-  assert.match(dashboardSource, /class="min-w-0 text-right"/)
+  assert.match(dashboardSource, /formatRecentQuoteTime/)
+  assert.match(dashboardSource, /flex min-w-0 flex-wrap items-center/)
+  assert.match(dashboardSource, /bg-blue-50 px-2 py-1 font-mono text-xs/)
+  assert.doesNotMatch(dashboardSource, /quote\.createdAt\.substring\(5, 16\)/)
+  assert.doesNotMatch(dashboardSource, /quotation\.common\.separator/)
   assert.match(
     dashboardSource,
     /class="flex justify-center"[\s\S]*<StatusBadge :status="quote\.status" \/>/,

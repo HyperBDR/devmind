@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+from django.db import IntegrityError
 from django.http import FileResponse
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -9,16 +10,30 @@ from rest_framework.views import APIView
 
 from quotation.access import (
     DocumentAction,
-    can_delete_document,
     filter_accessible_documents,
-    forbidden_response,
     get_accessible_document,
     get_accessible_quotation,
 )
 from quotation.audit import set_request_audit_target
-from quotation.models import DocumentAsset, DocumentType
+from quotation.models import DocumentAsset, DocumentParseResult, DocumentType
 from quotation.permissions import user_display_email
-from quotation.serializers import DocumentAssetSerializer
+from quotation.serializers import (
+    DocumentAssetSerializer,
+    DocumentParseResultSerializer,
+    QuotationCreateSerializer,
+    QuotationSerializer,
+)
+from quotation.services.document_parsing.excel_parser import (
+    QuotationExcelParseError,
+)
+from quotation.services.document_parsing.pdf_parser import (
+    QuotationPdfParseError,
+)
+from quotation.services.document_parsing.service import (
+    QuotationDocumentParseError,
+    confirm_document_parse_result,
+    parse_and_create_quotation,
+)
 from quotation.services.storage import (
     delete_document,
     document_storage_key,
@@ -34,11 +49,14 @@ class DocumentListView(APIView):
     def get(self, request):
         source = request.query_params.get("source")
         if source == "feishu":
+            qs = filter_accessible_documents(
+                request.user,
+                DocumentAsset.objects.filter(source="feishu"),
+            )
             qs = (
-                DocumentAsset.objects.filter(
-                    source="feishu",
-                    created_by_email__iexact=user_display_email(request.user),
-                )
+                qs
+                .select_related("quotation")
+                .prefetch_related("parse_results")
                 .order_by("-created_at")[:1000]
             )
             documents = []
@@ -56,7 +74,10 @@ class DocumentListView(APIView):
             )
 
         qs = filter_accessible_documents(
-            request.user, DocumentAsset.objects.select_related("quotation")
+            request.user,
+            DocumentAsset.objects.select_related("quotation").prefetch_related(
+                "parse_results"
+            ),
         )
         if source == "feishu_upload":
             qs = qs.filter(source=source)
@@ -156,32 +177,112 @@ class DocumentDownloadView(APIView):
         )
 
 
-class DocumentDetailView(APIView):
+class DocumentParseView(APIView):
+    """Create or retrieve the latest reviewable parse result."""
+
     permission_classes = [IsAuthenticated]
 
-    def delete(self, request, document_id: str):
-        asset, denied = get_accessible_document(
-            request.user, document_id, DocumentAction.DELETE
+    def get_asset(self, request, document_id: str):
+        return get_accessible_document(
+            request.user,
+            document_id,
+            DocumentAction.PARSE,
+        )
+
+    def get(self, request, document_id: str):
+        asset, denied = self.get_asset(request, document_id)
+        if denied:
+            return denied
+        result = asset.parse_results.order_by("-created_at", "-id").first()
+        if result is None:
+            return Response({"detail": "parse result not found"}, status=404)
+        set_request_audit_target(request, target_label=asset.file_name)
+        return Response(DocumentParseResultSerializer(result).data)
+
+    def post(self, request, document_id: str):
+        asset, denied = self.get_asset(request, document_id)
+        if denied:
+            return denied
+        set_request_audit_target(request, target_label=asset.file_name)
+        try:
+            result, reused = parse_and_create_quotation(
+                asset,
+                actor=request.user,
+            )
+        except (
+            QuotationDocumentParseError,
+            QuotationExcelParseError,
+            QuotationPdfParseError,
+        ) as exc:
+            return Response({"detail": str(exc)}, status=422)
+        data = DocumentParseResultSerializer(result).data
+        data["reused"] = reused
+        data["version_created"] = bool(
+            getattr(result, "_quotation_version_created", False)
+        )
+        return Response(data, status=200 if reused else 201)
+
+
+class DocumentParseConfirmView(APIView):
+    """Confirm a reviewed parse result and create a generated quotation."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, parse_result_id: str):
+        result = (
+            DocumentParseResult.objects.select_related(
+                "asset",
+                "quotation",
+            )
+            .filter(pk=parse_result_id)
+            .first()
+        )
+        if result is None:
+            return Response({"detail": "parse result not found"}, status=404)
+        _, denied = get_accessible_document(
+            request.user,
+            result.asset_id,
+            DocumentAction.PARSE,
         )
         if denied:
             return denied
-        if not can_delete_document(request.user, asset):
-            return forbidden_response()
-        set_request_audit_target(
-            request,
-            target_label=(
-                asset.quotation.quote_no
-                if asset.quotation_id
-                else asset.file_name
-            ),
-        )
-
-        try:
-            delete_document(asset.storage_key)
-        except OSError as exc:
-            return Response(
-                {"detail": f"failed to delete file: {exc}"}, status=500
+        set_request_audit_target(request, target_label=result.asset.file_name)
+        if result.quotation_id:
+            quotation = result.quotation
+            reused = True
+        else:
+            candidate = request.data.get("quotation")
+            if candidate is None:
+                candidate = result.normalized_json
+            serializer = QuotationCreateSerializer(
+                data=candidate,
+                context={"document_import": True},
             )
-
-        asset.delete()
-        return Response(status=204)
+            serializer.is_valid(raise_exception=True)
+            try:
+                quotation, reused = confirm_document_parse_result(
+                    result,
+                    validated_data=serializer.validated_data,
+                    actor=request.user,
+                )
+            except IntegrityError:
+                return Response(
+                    {"detail": "quote_no already exists"},
+                    status=409,
+                )
+            except ValueError as exc:
+                return Response({"detail": str(exc)}, status=409)
+        quotation = quotation.__class__.objects.prefetch_related(
+            "items",
+            "documents",
+            "versions",
+        ).get(pk=quotation.pk)
+        result.refresh_from_db()
+        return Response(
+            {
+                "quotation": QuotationSerializer(quotation).data,
+                "parse_result": DocumentParseResultSerializer(result).data,
+                "reused": reused,
+            },
+            status=200 if reused else 201,
+        )

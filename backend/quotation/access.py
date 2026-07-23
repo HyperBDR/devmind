@@ -22,6 +22,7 @@ class DocumentAction:
     DELETE = "delete"
     SHARE = "share"
     CHECK_REMOTE = "check_remote"
+    PARSE = "parse"
 
 
 def forbidden_response() -> Response:

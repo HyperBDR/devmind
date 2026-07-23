@@ -75,8 +75,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 
 WORKDIR /opt/backend
 
-# Copy project files.
-COPY backend /opt/backend
+# Install third-party dependencies before copying frequently changing code.
 COPY pyproject.toml /opt/backend/
 
 # Install project dependencies with mirror selection.
@@ -92,6 +91,9 @@ RUN set -eux; \
         uv pip compile pyproject.toml -o requirements.txt; \
         uv pip install --python /opt/venv/bin/python -r requirements.txt; \
     fi
+
+# Application changes no longer invalidate the dependency installation layer.
+COPY backend /opt/backend
 
 # Dev mode overlays local agentcore packages after unified dependencies.
 # Without DEV_MODE=1, agentcore packages come from GitHub in pyproject.toml.
@@ -118,14 +120,11 @@ RUN rm -rf /root/.cache /tmp/* \
 # Backend runtime image
 # -----------------------------------------------------------------------------
 
-FROM python:3.12-slim-bookworm AS backend
+FROM python:3.12-slim-bookworm AS backend-runtime
 
 ARG USE_MIRROR=false
-ARG INSTALL_PLAYWRIGHT_CHROMIUM=true
-
 ENV DEBIAN_FRONTEND=noninteractive \
     PATH="/opt/venv/bin:$PATH" \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -163,15 +162,6 @@ WORKDIR /opt/backend
 COPY --from=backend-builder /opt/venv /opt/venv
 COPY --from=backend-builder /opt/backend /opt/backend
 
-# Quotation PDF rendering uses Playwright. Keep Chromium enabled by default,
-# but allow smaller deployments to opt out when that endpoint is unused.
-RUN if [ "$INSTALL_PLAYWRIGHT_CHROMIUM" = "true" ]; then \
-        python -m playwright install --with-deps chromium; \
-    else \
-        echo "Skipping Playwright Chromium install"; \
-    fi \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
-
 # Create necessary directories.
 RUN mkdir -p /var/log/gunicorn /var/log/celery /var/cache/backend
 
@@ -180,6 +170,20 @@ COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
+
+# Parser workers do not carry Chromium or OCR system packages.
+FROM backend-runtime AS backend-parser
+
+# The API delegates PDF conversion to the isolated Gotenberg service.
+FROM backend-runtime AS backend
+
+# OCR is intentionally isolated so Tesseract does not increase API and
+# standard parser image sizes.
+FROM backend-parser AS backend-ocr
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
 
 # -----------------------------------------------------------------------------
 # Frontend image

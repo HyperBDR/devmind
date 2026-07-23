@@ -82,6 +82,21 @@ export interface FeishuArchiveFileLocation {
   folder_token: string;
 }
 
+export interface FeishuSyncJob {
+  id: string;
+  status: 'pending' | 'queued' | 'running' | 'retrying' | 'success' | 'failed';
+  stage: string;
+  attempt_count: number;
+  max_attempts: number;
+  duration_ms: number;
+  result: Record<string, unknown>;
+  error_code: string;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+  finished_at?: string | null;
+}
+
 export class FeishuUploadConflictError extends Error {
   conflict: FeishuUploadConflict;
 
@@ -103,7 +118,16 @@ export function syncFeishuArchiveFolder(options: {
   errors?: Array<{ file?: string; detail?: string }>;
   folders: FeishuArchiveFolder[];
   file_locations: FeishuArchiveFileLocation[];
+  created_document_ids?: string[];
+  parsed_count?: number;
+  created_quotation_count?: number;
+  updated_quotation_count?: number;
+  parsed_document_ids?: string[];
+  created_quotation_ids?: string[];
+  updated_quotation_ids?: string[];
   sync_job_id?: string;
+  sync_status?: string;
+  queued_parse_count?: number;
   storage_connection_id?: string | null;
 }> {
   return apiRequest<{
@@ -112,15 +136,30 @@ export function syncFeishuArchiveFolder(options: {
     errors?: Array<{ file?: string; detail?: string }>;
     folders: FeishuArchiveFolder[];
     file_locations: FeishuArchiveFileLocation[];
+    created_document_ids?: string[];
+    parsed_count?: number;
+    created_quotation_count?: number;
+    updated_quotation_count?: number;
+    parsed_document_ids?: string[];
+    created_quotation_ids?: string[];
+    updated_quotation_ids?: string[];
     sync_job_id?: string;
+    sync_status?: string;
+    queued_parse_count?: number;
     storage_connection_id?: string | null;
   }>('/feishu/sync-folder', {
     method: 'POST',
     headers: {
       'X-Quotation-Audit-Source': options.source || 'user',
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ async: true }),
   });
+}
+
+export function getFeishuSyncJob(jobId: string): Promise<FeishuSyncJob> {
+  return apiRequest<FeishuSyncJob>(
+    `/feishu/sync-jobs/${encodeURIComponent(jobId)}`,
+  );
 }
 
 export function listFeishuFolder(folderToken?: string): Promise<FeishuFolderListing> {
@@ -153,9 +192,15 @@ export interface FeishuFileAccessResult {
 
 export function checkFeishuFileAccess(
   documentId: string,
+  options: { auditSource?: 'automatic' | 'user' } = {},
 ): Promise<FeishuFileAccessResult> {
   return apiRequest<FeishuFileAccessResult>(
     `/feishu/documents/${encodeURIComponent(documentId)}/access`,
+    {
+      headers: {
+        'X-Quotation-Audit-Source': options.auditSource || 'user',
+      },
+    },
   );
 }
 
