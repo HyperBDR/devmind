@@ -1,61 +1,75 @@
 <template>
   <section class="space-y-5">
     <Toolbar>
-      <input
-        :value="filters.customer_name"
-        class="field-sm"
-        :placeholder="t('dataOps.filters.customer')"
-        @input="$emit('update-filter', 'customer_name', $event.target.value)"
-        @keyup.enter="$emit('load')"
-      />
-      <select
-        :value="filters.signing_entity"
-        class="field-sm"
-        @change="$emit('update-filter', 'signing_entity', $event.target.value)"
-      >
-        <option value="">{{ t('dataOps.filters.allEntities') }}</option>
-        <option
-          v-for="entity in filterOptions.signing_entity || []"
-          :key="entity"
-          :value="entity"
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.filters.customer') }}</span>
+        <input
+          :value="filters.customer_name"
+          class="field-sm block"
+          :placeholder="t('dataOps.filters.customer')"
+          @input="$emit('update-filter', 'customer_name', $event.target.value)"
+          @keyup.enter="$emit('load')"
+        />
+      </label>
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.columns.signingEntity') }}</span>
+        <select
+          :value="filters.signing_entity"
+          class="field-sm block"
+          @change="
+            $emit('update-filter', 'signing_entity', $event.target.value)
+          "
         >
-          {{ entity }}
-        </option>
-      </select>
-      <select
-        :value="filters.sales_person"
-        class="field-sm"
-        @change="$emit('update-filter', 'sales_person', $event.target.value)"
-      >
-        <option value="">{{ t('dataOps.filters.allOwners') }}</option>
-        <option
-          v-for="name in filterOptions.sales_person || []"
-          :key="name"
-          :value="name"
+          <option value="">{{ t('dataOps.filters.allEntities') }}</option>
+          <option
+            v-for="entity in filterOptions.signing_entity || []"
+            :key="entity"
+            :value="entity"
+          >
+            {{ entity }}
+          </option>
+        </select>
+      </label>
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.columns.owner') }}</span>
+        <select
+          :value="filters.sales_person"
+          class="field-sm block"
+          @change="$emit('update-filter', 'sales_person', $event.target.value)"
         >
-          {{ name }}
-        </option>
-      </select>
-      <select
-        :value="filters.status"
-        class="field-sm"
-        @change="$emit('update-filter', 'status', $event.target.value)"
-      >
-        <option value="">{{ t('dataOps.filters.allStatuses') }}</option>
-        <option
-          v-for="status in filterOptions.status || []"
-          :key="status"
-          :value="status"
+          <option value="">{{ t('dataOps.filters.allOwners') }}</option>
+          <option
+            v-for="name in filterOptions.sales_person || []"
+            :key="name"
+            :value="name"
+          >
+            {{ name }}
+          </option>
+        </select>
+      </label>
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.common.status') }}</span>
+        <select
+          :value="filters.status"
+          class="field-sm block"
+          @change="$emit('update-filter', 'status', $event.target.value)"
         >
-          {{ status }}
-        </option>
-      </select>
-      <button class="btn-secondary" type="button" @click="$emit('load')">
+          <option value="">{{ t('dataOps.filters.allStatuses') }}</option>
+          <option
+            v-for="status in filterOptions.status || []"
+            :key="status"
+            :value="status"
+          >
+            {{ status }}
+          </option>
+        </select>
+      </label>
+      <button class="btn-secondary h-11" type="button" @click="$emit('load')">
         {{ t('dataOps.common.query') }}
       </button>
       <button
         v-if="canExport"
-        class="btn-secondary"
+        class="btn-secondary h-11"
         type="button"
         @click="$emit('download')"
       >
@@ -91,7 +105,7 @@ defineProps({
   filters: { type: Object, required: true },
   page: { type: Number, required: true },
   pageSize: { type: Number, required: true },
-  total: { type: Number, required: true },
+  total: { type: Number, required: true }
 })
 
 defineEmits(['download', 'load', 'page-change', 'update-filter'])

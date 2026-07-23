@@ -1,34 +1,43 @@
 <template>
   <section class="space-y-5">
     <Toolbar>
-      <select
-        :value="filters.status"
-        class="field-sm"
-        @change="$emit('update-filter', 'status', $event.target.value)"
-      >
-        <option value="">{{ t('dataOps.filters.allStatuses') }}</option>
-        <option value="active">active</option>
-        <option value="expired">expired</option>
-        <option value="pending">pending</option>
-      </select>
-      <input
-        :value="filters.region"
-        class="field-sm"
-        :placeholder="t('dataOps.filters.region')"
-        @input="$emit('update-filter', 'region', $event.target.value)"
-      />
-      <input
-        :value="filters.product_type"
-        class="field-sm"
-        :placeholder="t('dataOps.filters.productType')"
-        @input="$emit('update-filter', 'product_type', $event.target.value)"
-      />
-      <button class="btn-secondary" type="button" @click="$emit('load')">
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.common.status') }}</span>
+        <select
+          :value="filters.status"
+          class="field-sm block"
+          @change="$emit('update-filter', 'status', $event.target.value)"
+        >
+          <option value="">{{ t('dataOps.filters.allStatuses') }}</option>
+          <option value="active">{{ t('dataOps.common.active') }}</option>
+          <option value="expired">{{ t('dataOps.common.expired') }}</option>
+          <option value="pending">{{ t('dataOps.common.pending') }}</option>
+        </select>
+      </label>
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.filters.region') }}</span>
+        <input
+          :value="filters.region"
+          class="field-sm block"
+          :placeholder="t('dataOps.filters.region')"
+          @input="$emit('update-filter', 'region', $event.target.value)"
+        />
+      </label>
+      <label class="space-y-1 text-xs font-semibold text-slate-600">
+        <span>{{ t('dataOps.filters.productType') }}</span>
+        <input
+          :value="filters.product_type"
+          class="field-sm block"
+          :placeholder="t('dataOps.filters.productType')"
+          @input="$emit('update-filter', 'product_type', $event.target.value)"
+        />
+      </label>
+      <button class="btn-secondary h-11" type="button" @click="$emit('load')">
         {{ t('dataOps.common.query') }}
       </button>
       <button
         v-if="canExport"
-        class="btn-secondary"
+        class="btn-secondary h-11"
         type="button"
         @click="$emit('download')"
       >
@@ -63,7 +72,7 @@ defineProps({
   page: { type: Number, required: true },
   pageSize: { type: Number, required: true },
   records: { type: Array, default: () => [] },
-  total: { type: Number, required: true },
+  total: { type: Number, required: true }
 })
 
 defineEmits(['download', 'load', 'page-change', 'update-filter'])

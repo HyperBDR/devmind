@@ -59,6 +59,7 @@ export function useDataOpsConsole() {
   const observationRunLoading = ref(false)
   const observationFeedback = ref('')
   const observationError = ref('')
+  const observationProduction = ref({ latest_runs: {} })
   const syncStatus = ref(null)
   const globalConfig = ref(defaultGlobalConfig())
   const collectionConfigs = ref([])
@@ -281,6 +282,7 @@ export function useDataOpsConsole() {
       const data = extractData(response) || {}
       observations.value = data.results || []
       observationTotal.value = Number(data.count || 0)
+      observationProduction.value = data.production || { latest_runs: {} }
       const selectedId = selectedObservation.value?.id
       if (
         selectedId &&
@@ -827,6 +829,7 @@ export function useDataOpsConsole() {
     observationFeedback,
     observationFilters,
     observationPage,
+    observationProduction,
     observationRunLoading,
     observations,
     observationTotal,

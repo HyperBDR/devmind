@@ -16,6 +16,8 @@
         :observations="observations"
         :page="page"
         :page-size="pageSize"
+        :production="production"
+        :filters="filters"
         :selected-id="selectedObservation?.id || ''"
         :total="total"
         @page-change="$emit('page-change', $event)"
@@ -43,6 +45,7 @@ defineProps({
   observations: { type: Array, default: () => [] },
   page: { type: Number, required: true },
   pageSize: { type: Number, required: true },
+  production: { type: Object, default: () => ({ latest_runs: {} }) },
   runLoading: { type: Boolean, default: false },
   selectedObservation: { type: Object, default: null },
   total: { type: Number, required: true }

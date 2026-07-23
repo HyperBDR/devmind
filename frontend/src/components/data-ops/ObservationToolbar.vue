@@ -33,7 +33,7 @@
           </select>
         </label>
         <button
-          class="btn-secondary"
+          class="btn-secondary min-h-11"
           type="button"
           :disabled="runLoading"
           @click="$emit('run', producerKey)"
@@ -115,7 +115,11 @@
           </option>
         </select>
       </label>
-      <button class="btn-secondary" type="button" @click="$emit('load')">
+      <button
+        class="btn-secondary min-h-11"
+        type="button"
+        @click="$emit('load')"
+      >
         {{ t('dataOps.common.query') }}
       </button>
     </div>

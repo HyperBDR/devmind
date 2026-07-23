@@ -66,7 +66,11 @@
     </div>
 
     <div class="mt-4 flex justify-end">
-      <button class="btn-primary h-9 text-sm" type="button" @click="$emit('save')">
+      <button
+        class="btn-primary min-h-11 text-sm"
+        type="button"
+        @click="$emit('save')"
+      >
         {{ t('dataOps.config.save') }}
       </button>
     </div>
@@ -81,7 +85,7 @@ import { Panel } from './DataOpsPrimitives'
 const { t } = useI18n()
 
 defineProps({
-  config: { type: Object, required: true },
+  config: { type: Object, required: true }
 })
 
 defineEmits(['save', 'update-field'])

@@ -3,6 +3,7 @@ import io
 import json
 from datetime import timedelta
 
+from accounts.permissions import HasRequiredFeature
 from django.http import HttpResponse, StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -11,10 +12,9 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.permissions import HasRequiredFeature
-
 from .models import (
     DataOpsGlobalConfig,
+    KnowledgeProductionRun,
     Observation,
     SyncCursor,
     SyncJob,
@@ -39,10 +39,7 @@ from .services.ai import (
     get_ai_context_metrics,
     stream_chat_with_data_ops_assistant,
 )
-from .services.feishu.client import (
-    FeishuBitableClient,
-    run_bitable_access_check,
-)
+from .services.feishu.client import FeishuBitableClient, run_bitable_access_check
 from .services.feishu.config import (
     discover_bitable_table_ids,
     get_bitable_collection_config,
@@ -52,9 +49,7 @@ from .services.feishu.config import (
 )
 from .services.feishu.global_config import get_active_sync_job_timeout_hours
 from .services.feishu.mappings import ACTIVE_SOURCE_KEYS
-from .services.knowledge.contract_renewal import (
-    produce_contract_renewal_observations,
-)
+from .services.knowledge.contract_renewal import produce_contract_renewal_observations
 from .services.knowledge.receivable_overdue import (
     produce_receivable_overdue_observations,
 )
@@ -146,7 +141,21 @@ class ObservationListAPIView(DataOpsPermissionMixin, APIView):
         paginator = ObservationPagination()
         page = paginator.paginate_queryset(queryset, request, view=self)
         serializer = ObservationSerializer(page, many=True)
-        return paginator.get_paginated_response(serializer.data)
+        response = paginator.get_paginated_response(serializer.data)
+        latest_runs = {}
+        for producer_key in OBSERVATION_PRODUCERS:
+            run = (
+                KnowledgeProductionRun.objects.filter(
+                    producer_key=producer_key,
+                )
+                .order_by("-started_at")
+                .first()
+            )
+            latest_runs[producer_key] = (
+                KnowledgeProductionRunSerializer(run).data if run else None
+            )
+        response.data["production"] = {"latest_runs": latest_runs}
+        return response
 
 
 class ObservationDetailAPIView(DataOpsPermissionMixin, APIView):
@@ -471,9 +480,7 @@ class DomesticLedgerKanbanAPIView(DataOpsPermissionMixin, APIView):
 
 class OverseaSettlementKanbanAPIView(DataOpsPermissionMixin, APIView):
     def get(self, request):
-        return Response(
-            get_oversea_settlement_kanban_data(request.query_params)
-        )
+        return Response(get_oversea_settlement_kanban_data(request.query_params))
 
 
 class ContractListAPIView(DataOpsPermissionMixin, APIView):
@@ -659,12 +666,9 @@ class LLMQueryAPIView(DataOpsPermissionMixin, APIView):
 def _csv_response(rows: list[dict], filename: str) -> HttpResponse:
     output = io.StringIO()
     if rows:
-        fieldnames = list(
-            dict.fromkeys(key for row in rows for key in row.keys())
-        )
+        fieldnames = list(dict.fromkeys(key for row in rows for key in row.keys()))
         safe_rows = [
-            {key: _escape_csv_cell(value) for key, value in row.items()}
-            for row in rows
+            {key: _escape_csv_cell(value) for key, value in row.items()} for row in rows
         ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()

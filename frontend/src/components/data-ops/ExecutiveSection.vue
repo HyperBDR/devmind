@@ -24,53 +24,58 @@
         <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
           {{ executiveSummary }}
         </p>
+        <div class="mt-4 flex flex-wrap gap-2 text-xs font-medium">
+          <span class="rounded-full bg-white/80 px-2.5 py-1 text-slate-600">
+            {{ t('dataOps.executive.dataMonthLabel', { month: currentMonth }) }}
+          </span>
+          <span class="rounded-full bg-white/80 px-2.5 py-1 text-slate-600">
+            {{ latestSyncLabel }}
+          </span>
+          <span class="rounded-full px-2.5 py-1" :class="analysisStatusClass">
+            {{ analysisStatusLabel }}
+          </span>
+        </div>
       </article>
 
       <aside class="rounded-lg border border-slate-200 bg-white p-4">
         <div class="flex items-center justify-between gap-3">
           <h3 class="text-base font-bold text-slate-950">
-            {{ t('dataOps.executive.todayPriority') }}
+            {{ t('dataOps.executive.riskSummary') }}
           </h3>
           <span class="text-xs font-semibold text-slate-400">
             {{
               t('dataOps.executive.items', {
-                count: priorityActionItems.length
+                count:
+                  effectiveRenewalItems.length + highOutstandingItems.length
               })
             }}
           </span>
         </div>
-        <div class="mt-3 space-y-3">
-          <button
-            v-for="item in priorityActionItems"
-            :key="item.key"
-            type="button"
-            class="block w-full rounded-lg bg-slate-50 p-3 text-left transition-colors hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
-            @click="openAction(item, $event)"
-          >
-            <div class="flex items-center gap-2">
-              <span
-                class="rounded-full px-2 py-0.5 text-xs font-bold"
-                :class="item.priorityClass"
-              >
-                {{ item.type }}
-              </span>
-              <span class="truncate text-xs font-medium text-slate-400">
-                {{ item.owner }}
-              </span>
-            </div>
-            <p class="mt-2 truncate text-sm font-semibold text-slate-900">
-              {{ item.title }}
+        <div class="mt-3 grid grid-cols-2 gap-3">
+          <div class="rounded-lg bg-amber-50 p-3">
+            <p class="text-xs font-semibold text-amber-700">
+              {{ t('dataOps.executive.renewalCategory') }}
             </p>
-            <p class="mt-1 truncate text-xs text-slate-500">
-              {{ item.detail }}
+            <p class="mt-2 text-2xl font-bold text-amber-800">
+              {{ effectiveRenewalItems.length }}
             </p>
-          </button>
-          <p
-            v-if="!priorityActionItems.length"
-            class="rounded-lg bg-slate-50 p-4 text-sm text-slate-400"
-          >
-            {{ t('dataOps.executive.noPriority') }}
-          </p>
+            <p class="mt-1 text-xs text-amber-700">
+              {{
+                t('dataOps.executive.riskHorizon', { days: renewalHorizonDays })
+              }}
+            </p>
+          </div>
+          <div class="rounded-lg bg-rose-50 p-3">
+            <p class="text-xs font-semibold text-rose-700">
+              {{ t('dataOps.executive.receivableCategory') }}
+            </p>
+            <p class="mt-2 text-2xl font-bold text-rose-800">
+              {{ highOutstandingItems.length }}
+            </p>
+            <p class="mt-1 text-xs text-rose-700">
+              {{ t('dataOps.executive.needsFollowUp') }}
+            </p>
+          </div>
         </div>
       </aside>
     </section>
@@ -138,69 +143,69 @@
       </div>
     </nav>
 
-    <main class="space-y-6">
+    <div class="space-y-6">
       <template v-if="activeTab === 'overview'">
-      <section
-        class="overflow-hidden rounded-lg border border-slate-200 bg-white"
-      >
-        <div class="border-b border-slate-200 px-5 py-4">
-          <h3 class="text-lg font-bold text-slate-950">
-            {{ t('dataOps.executive.actionList') }}
-          </h3>
-          <p class="mt-1 text-sm text-slate-500">
-            {{ t('dataOps.executive.actionListDescription') }}
-          </p>
-        </div>
-        <div class="divide-y divide-slate-100">
-          <button
-            v-for="item in actionItems"
-            :key="item.key"
-            type="button"
-            class="grid w-full gap-4 px-5 py-4 text-left transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-400 lg:grid-cols-[minmax(0,1fr)_160px_180px]"
-            @click="openAction(item, $event)"
-          >
-            <div class="min-w-0">
-              <div class="mb-2 flex flex-wrap items-center gap-2">
-                <span
-                  class="rounded-full px-2 py-0.5 text-xs font-bold"
-                  :class="item.priorityClass"
-                >
-                  {{ item.priority }}
-                </span>
-                <span class="text-xs font-semibold text-slate-400">
-                  {{ item.type }}
-                </span>
-              </div>
-              <h4 class="truncate text-base font-bold text-slate-950">
-                {{ item.title }}
-              </h4>
-              <p class="mt-1 text-sm text-slate-500">{{ item.detail }}</p>
-            </div>
-            <div>
-              <p class="text-xs font-semibold text-slate-400">
-                {{ t('dataOps.executive.owner') }}
-              </p>
-              <p class="mt-1 text-sm font-semibold text-slate-700">
-                {{ item.owner }}
-              </p>
-            </div>
-            <div>
-              <p class="text-xs font-semibold text-slate-400">
-                {{ t('dataOps.executive.timeBasis') }}
-              </p>
-              <p class="mt-1 text-sm font-semibold text-slate-700">
-                {{ item.date }}
-              </p>
-            </div>
-          </button>
-          <div
-            v-if="!actionItems.length"
-            class="px-5 py-10 text-center text-sm text-slate-400"
-          >
-            {{ t('dataOps.executive.noActions') }}
+        <section
+          class="overflow-hidden rounded-lg border border-slate-200 bg-white"
+        >
+          <div class="border-b border-slate-200 px-5 py-4">
+            <h3 class="text-lg font-bold text-slate-950">
+              {{ t('dataOps.executive.actionList') }}
+            </h3>
+            <p class="mt-1 text-sm text-slate-500">
+              {{ t('dataOps.executive.actionListDescription') }}
+            </p>
           </div>
-        </div>
-      </section>
+          <div class="divide-y divide-slate-100">
+            <button
+              v-for="item in actionItems"
+              :key="item.key"
+              type="button"
+              class="grid w-full gap-4 px-5 py-4 text-left transition-colors hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-400 lg:grid-cols-[minmax(0,1fr)_160px_180px]"
+              @click="openAction(item, $event)"
+            >
+              <div class="min-w-0">
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-bold"
+                    :class="item.priorityClass"
+                  >
+                    {{ item.priority }}
+                  </span>
+                  <span class="text-xs font-semibold text-slate-400">
+                    {{ item.type }}
+                  </span>
+                </div>
+                <h4 class="truncate text-base font-bold text-slate-950">
+                  {{ item.title }}
+                </h4>
+                <p class="mt-1 text-sm text-slate-500">{{ item.detail }}</p>
+              </div>
+              <div>
+                <p class="text-xs font-semibold text-slate-400">
+                  {{ t('dataOps.executive.owner') }}
+                </p>
+                <p class="mt-1 text-sm font-semibold text-slate-700">
+                  {{ item.owner }}
+                </p>
+              </div>
+              <div>
+                <p class="text-xs font-semibold text-slate-400">
+                  {{ t('dataOps.executive.timeBasis') }}
+                </p>
+                <p class="mt-1 text-sm font-semibold text-slate-700">
+                  {{ item.date }}
+                </p>
+              </div>
+            </button>
+            <div
+              v-if="!actionItems.length"
+              class="px-5 py-10 text-center text-sm text-slate-400"
+            >
+              {{ t('dataOps.executive.noActions') }}
+            </div>
+          </div>
+        </section>
       </template>
 
       <section
@@ -238,7 +243,9 @@
                 {{ currency }}
               </button>
             </div>
-            <div class="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+            <div
+              class="inline-flex rounded-lg border border-slate-200 bg-white p-1"
+            >
               <button
                 v-for="item in trendPeriodOptions"
                 :key="item.key"
@@ -327,7 +334,9 @@
         v-else-if="activeTab === 'risk'"
         class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
       >
-        <div class="flex flex-col gap-4 border-b border-slate-100 pb-4 lg:flex-row lg:items-center lg:justify-between">
+        <div
+          class="flex flex-col gap-4 border-b border-slate-100 pb-4 lg:flex-row lg:items-center lg:justify-between"
+        >
           <div>
             <h3 class="text-lg font-bold text-slate-950">
               {{ t('dataOps.executive.riskTitle') }}
@@ -337,14 +346,18 @@
             </p>
           </div>
           <div class="flex gap-3">
-            <strong class="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            <strong
+              class="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700"
+            >
               {{
                 t('dataOps.executive.renewalAlerts', {
                   count: effectiveRenewalItems.length
                 })
               }}
             </strong>
-            <strong class="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            <strong
+              class="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700"
+            >
               {{
                 t('dataOps.executive.largeOutstanding', {
                   count: highOutstandingItems.length
@@ -396,19 +409,21 @@
               </h4>
               <p class="mt-1 truncate text-sm text-slate-500">
                 {{ item.customer_full_name || '-' }} ·
-                {{ ownerLabel(item) || t('dataOps.executive.unassignedOwner') }} ·
+                {{ ownerLabel(item) || t('dataOps.executive.unassignedOwner') }}
+                ·
                 {{ item.domestic_international || '-' }}
               </p>
             </div>
             <strong class="text-sm text-slate-900">
               {{ formatPlainAmount(item.estimated_amount) }}
             </strong>
-            <span class="text-sm font-semibold text-amber-600">high</span>
+            <span class="text-sm font-semibold text-amber-600">
+              {{ t('dataOps.executive.highPotentialLabel') }}
+            </span>
           </article>
         </div>
       </section>
-
-    </main>
+    </div>
 
     <Teleport to="body">
       <div
@@ -477,7 +492,9 @@
                 <dt class="text-xs font-semibold text-slate-400">
                   {{ row.label }}
                 </dt>
-                <dd class="mt-1 break-words text-sm font-semibold text-slate-800">
+                <dd
+                  class="mt-1 break-words text-sm font-semibold text-slate-800"
+                >
                   {{ row.value || '—' }}
                 </dd>
               </div>
@@ -509,19 +526,19 @@ import {
   LinearScale,
   LineElement,
   PointElement,
-  Tooltip,
+  Tooltip
 } from 'chart.js'
 
 import {
   formatAmountByCurrency,
   hasMixedCurrencies,
   hasNonZeroAmount,
-  topAmountsByCurrency,
+  topAmountsByCurrency
 } from '@/utils/currency'
 import {
   availableTrendCurrencies,
   buildAmountTrendRows,
-  buildCashTrendRows,
+  buildCashTrendRows
 } from '@/utils/dataOpsTrends'
 
 const { locale, t } = useI18n()
@@ -537,15 +554,17 @@ ChartJS.register(
 )
 
 const props = defineProps({
+  dataQuality: { type: Object, default: null },
   insights: { type: Object, default: null },
   kpiCards: { type: Array, default: () => [] },
   opportunities: { type: Object, default: null },
   overview: { type: Object, default: null },
+  recentJobs: { type: Array, default: () => [] },
   risks: { type: Object, default: null },
   summary: { type: Object, default: null },
   topCustomers: { type: Object, default: null },
   topSales: { type: Object, default: null },
-  trends: { type: Object, default: null },
+  trends: { type: Object, default: null }
 })
 
 const activeTab = ref('overview')
@@ -562,7 +581,7 @@ const towerChartColors = {
   grid: '#f1f5f9',
   purple: '#8a4cfc',
   rose: '#e11d48',
-  tick: '#94a3b8',
+  tick: '#94a3b8'
 }
 
 const trendPeriodOptions = computed(() => [
@@ -588,37 +607,36 @@ const cockpitTabs = computed(() => [
     key: 'overview',
     label: t('dataOps.executive.tabs.overview'),
     iconPath: 'M4 6h16v12H4z M8 10h8 M8 14h5',
-    active: true,
+    active: true
   },
   {
     key: 'trend',
     label: t('dataOps.executive.tabs.trend'),
     iconPath: 'M5 17l4-5 4 3 6-8 M5 7v10h14',
-    active: false,
+    active: false
   },
   {
     key: 'customer',
     label: t('dataOps.executive.tabs.customer'),
-    iconPath: 'M7 19v-1a4 4 0 014-4h2a4 4 0 014 4v1 M12 11a4 4 0 100-8 4 4 0 000 8z',
-    active: false,
+    iconPath:
+      'M7 19v-1a4 4 0 014-4h2a4 4 0 014 4v1 M12 11a4 4 0 100-8 4 4 0 000 8z',
+    active: false
   },
   {
     key: 'risk',
     label: t('dataOps.executive.tabs.risk'),
     iconPath: 'M12 3l7 4v5c0 5-3 8-7 9-4-1-7-4-7-9V7l7-4z M12 9v4 M12 16h.01',
-    active: false,
+    active: false
   },
   {
     key: 'opportunity',
     label: t('dataOps.executive.tabs.opportunity'),
     iconPath: 'M4 16l5-5 4 4 7-8 M4 20h16',
-    active: false,
-  },
+    active: false
+  }
 ])
 
-const currentMonth = computed(
-  () => props.overview?.meta?.current_month || new Date().toISOString().slice(0, 7)
-)
+const currentMonth = computed(() => props.overview?.meta?.current_month || '—')
 
 const trendCurrencies = computed(() =>
   availableTrendCurrencies(
@@ -633,7 +651,7 @@ const trendQueryOptions = computed(() => ({
   currency: selectedTrendCurrency.value,
   currentMonth: currentMonth.value,
   period: selectedTrendPeriod.value,
-  range: selectedTrendRange.value,
+  range: selectedTrendRange.value
 }))
 
 watchEffect(() => {
@@ -655,17 +673,52 @@ const highOutstandingItems = computed(
 const renewalAlerts = computed(() => props.risks?.renewal_alerts || [])
 const opportunityItems = computed(() => props.opportunities?.items || [])
 const opportunitySummary = computed(() => props.opportunities?.summary || {})
+const renewalHorizonDays = computed(() =>
+  Number(props.insights?.risk_horizon_days || 30)
+)
 const renewalWindowItems = computed(() =>
   (props.insights?.upcoming_renewals || [])
-    .filter((item) => item.days_left >= 0 && item.days_left <= 90)
+    .filter(
+      (item) =>
+        item.days_left >= 0 && item.days_left <= renewalHorizonDays.value
+    )
     .sort((left, right) => left.days_left - right.days_left)
 )
 const effectiveRenewalItems = computed(() =>
-  renewalWindowItems.value.length ? renewalWindowItems.value : renewalAlerts.value
+  renewalWindowItems.value.length
+    ? renewalWindowItems.value
+    : renewalAlerts.value
 )
-const renewalHorizonDays = computed(() =>
-  renewalWindowItems.value.length ? 90 : 30
+const latestSuccessfulJob = computed(() =>
+  props.recentJobs.find(
+    (job) => ['ok', 'warning'].includes(job.status) && job.finished_at
+  )
 )
+const latestSyncLabel = computed(() =>
+  latestSuccessfulJob.value
+    ? t('dataOps.executive.lastSync', {
+        time: new Intl.DateTimeFormat(locale.value, {
+          dateStyle: 'medium',
+          timeStyle: 'short'
+        }).format(new Date(latestSuccessfulJob.value.finished_at))
+      })
+    : t('dataOps.executive.lastSyncUnknown')
+)
+const analysisStatusLabel = computed(() =>
+  props.dataQuality?.analysis_status === 'limited'
+    ? t('dataOps.executive.analysisLimited')
+    : props.dataQuality?.analysis_status === 'blocked'
+      ? t('dataOps.executive.analysisBlocked')
+      : t('dataOps.executive.analysisReady')
+)
+const analysisStatusClass = computed(() => ({
+  'bg-amber-100 text-amber-800':
+    props.dataQuality?.analysis_status === 'limited',
+  'bg-rose-100 text-rose-800': props.dataQuality?.analysis_status === 'blocked',
+  'bg-emerald-100 text-emerald-800': !['limited', 'blocked'].includes(
+    props.dataQuality?.analysis_status
+  )
+}))
 const signedMoM = computed(() =>
   buildMonthOverMonth(
     props.insights?.monthly_signings || [],
@@ -712,7 +765,7 @@ const coreMetricCards = computed(() => [
     delta: signedMoM.value,
     caption: signedMoM.value.badge
       ? signedMoM.value.text
-      : t('dataOps.executive.metrics.noComparison'),
+      : t('dataOps.executive.metrics.noComparison')
   },
   {
     label: t('dataOps.executive.metrics.monthlyReceived'),
@@ -720,17 +773,31 @@ const coreMetricCards = computed(() => [
     delta: receivedMoM.value,
     caption: receivedMoM.value.badge
       ? receivedMoM.value.text
-      : t('dataOps.executive.metrics.noComparison'),
+      : t('dataOps.executive.metrics.noComparison')
   },
   {
     label: t('dataOps.executive.metrics.outstandingBalance'),
     value: outstandingMetric.value.value,
     delta: neutralDelta(),
-    caption: t('dataOps.executive.metrics.fullBalance'),
-  },
+    caption: t('dataOps.executive.metrics.fullBalance')
+  }
 ])
 
 const executiveSeverity = computed(() => {
+  if (props.dataQuality?.analysis_status === 'blocked') {
+    return {
+      label: t('dataOps.executive.severity.high'),
+      panelClass: 'border-rose-200 bg-rose-50',
+      badgeClass: 'bg-rose-100 text-rose-700'
+    }
+  }
+  if (props.dataQuality?.analysis_status === 'limited') {
+    return {
+      label: t('dataOps.executive.severity.attention'),
+      panelClass: 'border-amber-200 bg-amber-50',
+      badgeClass: 'bg-amber-100 text-amber-700'
+    }
+  }
   const hasReceived = hasNonZeroAmount(
     overviewKpis.value.monthly_received_amount,
     overviewKpis.value.monthly_received_amount_by_currency
@@ -743,20 +810,20 @@ const executiveSeverity = computed(() => {
     return {
       label: t('dataOps.executive.severity.high'),
       panelClass: 'border-rose-200 bg-rose-50',
-      badgeClass: 'bg-rose-100 text-rose-700',
+      badgeClass: 'bg-rose-100 text-rose-700'
     }
   }
   if (highOutstandingItems.value.length || effectiveRenewalItems.value.length) {
     return {
       label: t('dataOps.executive.severity.attention'),
       panelClass: 'border-amber-200 bg-amber-50',
-      badgeClass: 'bg-amber-100 text-amber-700',
+      badgeClass: 'bg-amber-100 text-amber-700'
     }
   }
   return {
     label: t('dataOps.executive.severity.normal'),
     panelClass: 'border-emerald-200 bg-emerald-50',
-    badgeClass: 'bg-emerald-100 text-emerald-700',
+    badgeClass: 'bg-emerald-100 text-emerald-700'
   }
 })
 
@@ -791,7 +858,7 @@ const executiveSummary = computed(() => {
     }),
     t('dataOps.executive.summary.outstanding', {
       value: outstandingMetric.value.shortValue
-    }),
+    })
   ]
   const actionHints = []
   if (highOutstandingItems.value.length) {
@@ -844,10 +911,7 @@ const cashTrendRows = computed(() =>
 )
 
 const netTrendRows = computed(() =>
-  buildAmountTrendRows(
-    props.trends?.monthly_net || [],
-    trendQueryOptions.value
-  )
+  buildAmountTrendRows(props.trends?.monthly_net || [], trendQueryOptions.value)
 )
 
 const trendSummaries = computed(() => [
@@ -859,10 +923,7 @@ const trendSummaries = computed(() => [
     t('dataOps.executive.trend.latestReceived'),
     receivedTrendRows.value
   ),
-  latestTrendSummary(
-    t('dataOps.executive.trend.latestNet'),
-    netTrendRows.value
-  ),
+  latestTrendSummary(t('dataOps.executive.trend.latestNet'), netTrendRows.value)
 ])
 
 const trendPanelConfigs = computed(() => [
@@ -874,13 +935,13 @@ const trendPanelConfigs = computed(() => [
       trendDatasetLabel(t('dataOps.executive.trend.signedAmount')),
       towerChartColors.purple
     ),
-    chartOptions: buildTrendChartOptions(),
+    chartOptions: buildTrendChartOptions()
   },
   {
     title: t('dataOps.executive.trend.cashTitle'),
     description: t('dataOps.executive.trend.cashDescription'),
     chartData: buildCashTrendChartData(cashTrendRows.value),
-    chartOptions: buildTrendChartOptions(false),
+    chartOptions: buildTrendChartOptions(false)
   },
   {
     title: t('dataOps.executive.trend.netTitle'),
@@ -890,8 +951,8 @@ const trendPanelConfigs = computed(() => [
       trendDatasetLabel(t('dataOps.executive.trend.netAmount')),
       towerChartColors.amber
     ),
-    chartOptions: buildTrendChartOptions(),
-  },
+    chartOptions: buildTrendChartOptions()
+  }
 ])
 
 const customerRankItems = computed(() =>
@@ -901,28 +962,27 @@ const customerRankItems = computed(() =>
     ),
     'received_amount',
     10
-  )
-    .map((item) => ({
-      title: `${
-        item.customer_name || t('dataOps.executive.unknownCustomer')
-      } · ${ownerLabel(item) || t('dataOps.executive.unassignedOwner')}`,
-      meta: t('dataOps.executive.customerMeta', {
-        contracts: item.contract_count || 0,
-        outstanding: formatAmountByCurrency(
-          null,
-          [{ amount: item.outstanding_amount, currency: item.currency }],
-          { locale: locale.value }
-        )
-      }),
-      value: formatAmountByCurrency(
+  ).map((item) => ({
+    title: `${
+      item.customer_name || t('dataOps.executive.unknownCustomer')
+    } · ${ownerLabel(item) || t('dataOps.executive.unassignedOwner')}`,
+    meta: t('dataOps.executive.customerMeta', {
+      contracts: item.contract_count || 0,
+      outstanding: formatAmountByCurrency(
         null,
-        [{ amount: item.received_amount, currency: item.currency }],
+        [{ amount: item.outstanding_amount, currency: item.currency }],
         { locale: locale.value }
-      ),
-      status: t('dataOps.executive.riskLevel', {
-        level: item.risk_level || 'low'
-      }),
-    }))
+      )
+    }),
+    value: formatAmountByCurrency(
+      null,
+      [{ amount: item.received_amount, currency: item.currency }],
+      { locale: locale.value }
+    ),
+    status: t('dataOps.executive.riskLevel', {
+      level: item.risk_level || 'low'
+    })
+  }))
 )
 
 const salesRankItems = computed(() =>
@@ -932,33 +992,32 @@ const salesRankItems = computed(() =>
     ),
     'received_amount',
     10
-  )
-    .map((item) => ({
-      title: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
-      meta: t('dataOps.executive.salesMeta', {
-        customers: item.customer_count || 0,
-        opportunities: item.high_potential_count || 0
-      }),
-      value: formatAmountByCurrency(
+  ).map((item) => ({
+    title: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
+    meta: t('dataOps.executive.salesMeta', {
+      customers: item.customer_count || 0,
+      opportunities: item.high_potential_count || 0
+    }),
+    value: formatAmountByCurrency(
+      null,
+      [{ amount: item.received_amount, currency: item.currency }],
+      { locale: locale.value }
+    ),
+    status: t('dataOps.executive.salesOutstanding', {
+      amount: formatAmountByCurrency(
         null,
-        [{ amount: item.received_amount, currency: item.currency }],
+        [{ amount: item.outstanding_amount, currency: item.currency }],
         { locale: locale.value }
-      ),
-      status: t('dataOps.executive.salesOutstanding', {
-        amount: formatAmountByCurrency(
-          null,
-          [{ amount: item.outstanding_amount, currency: item.currency }],
-          { locale: locale.value }
-        )
-      }),
-    }))
+      )
+    })
+  }))
 )
 
 const renewalRiskList = computed(() =>
   effectiveRenewalItems.value.slice(0, 8).map((item) => ({
     title: item.customer_name || t('dataOps.executive.unknownCustomer'),
     value: t('dataOps.executive.days', { count: item.days_left }),
-    meta: item.contract_number || item.service_end || '-',
+    meta: item.contract_number || item.service_end || '-'
   }))
 )
 
@@ -969,7 +1028,7 @@ const outstandingRiskList = computed(() =>
       item.project_name ||
       t('dataOps.executive.unknownCustomer'),
     value: formatPlainAmount(item.outstanding_amount),
-    meta: item.project_name || ownerLabel(item) || '-',
+    meta: item.project_name || ownerLabel(item) || '-'
   }))
 )
 
@@ -999,8 +1058,7 @@ const actionItems = computed(() => [
     }),
     owner: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
     date:
-      item.expected_payment_date ||
-      t('dataOps.executive.confirmPaymentDate'),
+      item.expected_payment_date || t('dataOps.executive.confirmPaymentDate'),
     details: [
       {
         label: t('dataOps.executive.fields.customer'),
@@ -1012,20 +1070,20 @@ const actionItems = computed(() => [
       },
       {
         label: t('dataOps.executive.fields.outstanding'),
-        value: formatCompact(item.outstanding_amount),
+        value: formatCompact(item.outstanding_amount)
       },
       {
         label: t('dataOps.executive.owner'),
-        value: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
+        value: ownerLabel(item) || t('dataOps.executive.unassignedOwner')
       },
       {
         label: t('dataOps.executive.fields.expectedPayment'),
         value:
           item.expected_payment_date ||
-          t('dataOps.executive.pendingConfirmation'),
-      },
+          t('dataOps.executive.pendingConfirmation')
+      }
     ],
-    nextAction: t('dataOps.executive.actions.cashNext'),
+    nextAction: t('dataOps.executive.actions.cashNext')
   })),
   ...renewalAlerts.value.slice(0, 2).map((item, index) => ({
     key: `renewal-${index}-${item.contract_number}`,
@@ -1056,14 +1114,14 @@ const actionItems = computed(() => [
       },
       {
         label: t('dataOps.executive.owner'),
-        value: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
+        value: ownerLabel(item) || t('dataOps.executive.unassignedOwner')
       },
       {
         label: t('dataOps.executive.fields.serviceEnd'),
         value: item.service_end || t('dataOps.executive.pendingConfirmation')
-      },
+      }
     ],
-    nextAction: t('dataOps.executive.actions.renewalNext'),
+    nextAction: t('dataOps.executive.actions.renewalNext')
   })),
   ...opportunityItems.value.slice(0, 1).map((item, index) => ({
     key: `opportunity-${index}-${item.id}`,
@@ -1089,24 +1147,21 @@ const actionItems = computed(() => [
       },
       {
         label: t('dataOps.executive.fields.estimatedAmount'),
-        value: formatCompact(item.estimated_amount),
+        value: formatCompact(item.estimated_amount)
       },
       {
         label: t('dataOps.executive.owner'),
-        value: ownerLabel(item) || t('dataOps.executive.unassignedOwner'),
+        value: ownerLabel(item) || t('dataOps.executive.unassignedOwner')
       },
       {
         label: t('dataOps.executive.fields.initiationDate'),
         value:
-          item.oa_initiation_date ||
-          t('dataOps.executive.pendingConfirmation'),
-      },
+          item.oa_initiation_date || t('dataOps.executive.pendingConfirmation')
+      }
     ],
-    nextAction: t('dataOps.executive.actions.growthNext'),
-  })),
+    nextAction: t('dataOps.executive.actions.growthNext')
+  }))
 ])
-
-const priorityActionItems = computed(() => actionItems.value.slice(0, 3))
 
 function openAction(item, event) {
   actionTrigger = event?.currentTarget || null
@@ -1120,30 +1175,24 @@ function closeActionDetail() {
 }
 
 function metricFromCurrency(value, items, options = {}) {
-  const fallbackValue =
-    value ?? (options.fallbackZero ? 0 : null)
+  const fallbackValue = value ?? (options.fallbackZero ? 0 : null)
   if (!items?.length && fallbackValue === null) {
     return { value: '—', shortValue: '—' }
   }
   const displayValue = formatAmountByCurrency(fallbackValue, items, {
     compact: true,
     fallbackCurrency: 'CNY',
-    locale: locale.value,
+    locale: locale.value
   })
   return {
     value: displayValue,
-    shortValue: displayValue,
+    shortValue: displayValue
   }
 }
 
 function ownerLabel(item) {
   if (!item) return ''
-  return (
-    item.owner_display ||
-    item.owner_canonical ||
-    item.sales_person ||
-    ''
-  )
+  return item.owner_display || item.owner_canonical || item.sales_person || ''
 }
 function formatCompact(value) {
   const amount = Number(value || 0)
@@ -1167,7 +1216,7 @@ function formatScaled(value) {
 
 function trimNumber(value) {
   return new Intl.NumberFormat(locale.value, {
-    maximumFractionDigits: 1,
+    maximumFractionDigits: 1
   }).format(value)
 }
 
@@ -1188,14 +1237,14 @@ function buildMonthOverMonth(items, valueKey, month) {
     return {
       text: t('dataOps.executive.trend.down', { value: deltaText }),
       badge: true,
-      className: 'text-rose-600 bg-rose-50',
+      className: 'text-rose-600 bg-rose-50'
     }
   }
   if (ratio > 0) {
     return {
       text: t('dataOps.executive.trend.up', { value: deltaText }),
       badge: true,
-      className: 'text-emerald-600 bg-emerald-50',
+      className: 'text-emerald-600 bg-emerald-50'
     }
   }
   return neutralDelta()
@@ -1232,7 +1281,7 @@ function latestTrendSummary(label, rows) {
     deltaLabel:
       selectedTrendPeriod.value === 'year'
         ? t('dataOps.executive.trend.yoy')
-        : t('dataOps.executive.trend.mom'),
+        : t('dataOps.executive.trend.mom')
   }
 }
 
@@ -1257,7 +1306,7 @@ function buildTrendChartData(rows, barLabel, barColor) {
         pointBorderWidth: 2,
         pointRadius: 3,
         tension: 0.3,
-        yAxisID: 'y1',
+        yAxisID: 'y1'
       },
       {
         type: 'bar',
@@ -1268,9 +1317,9 @@ function buildTrendChartData(rows, barLabel, barColor) {
         borderSkipped: false,
         barPercentage: 0.6,
         categoryPercentage: 0.8,
-        yAxisID: 'y',
-      },
-    ],
+        yAxisID: 'y'
+      }
+    ]
   }
 }
 
@@ -1290,31 +1339,27 @@ function buildCashTrendChartData(rows) {
         pointBorderWidth: 2,
         pointRadius: 3,
         tension: 0.3,
-        yAxisID: 'y',
+        yAxisID: 'y'
       },
       {
         type: 'bar',
-        label: trendDatasetLabel(
-          t('dataOps.executive.trend.receivedAmount')
-        ),
+        label: trendDatasetLabel(t('dataOps.executive.trend.receivedAmount')),
         data: rows.map((item) => item.received),
         backgroundColor: towerChartColors.blue,
         borderRadius: 4,
         borderSkipped: false,
-        yAxisID: 'y',
+        yAxisID: 'y'
       },
       {
         type: 'bar',
-        label: trendDatasetLabel(
-          t('dataOps.executive.trend.expenseAmount')
-        ),
+        label: trendDatasetLabel(t('dataOps.executive.trend.expenseAmount')),
         data: rows.map((item) => item.expense),
         backgroundColor: towerChartColors.rose,
         borderRadius: 4,
         borderSkipped: false,
-        yAxisID: 'y',
-      },
-    ],
+        yAxisID: 'y'
+      }
+    ]
   }
 }
 
@@ -1324,7 +1369,7 @@ function buildTrendChartOptions(showPercentageAxis = true) {
     responsive: true,
     interaction: {
       intersect: false,
-      mode: 'index',
+      mode: 'index'
     },
     plugins: {
       legend: {
@@ -1333,11 +1378,11 @@ function buildTrendChartOptions(showPercentageAxis = true) {
           color: '#64748b',
           font: {
             size: 11,
-            weight: 600,
+            weight: 600
           },
-          usePointStyle: true,
+          usePointStyle: true
         },
-        position: 'bottom',
+        position: 'bottom'
       },
       tooltip: {
         backgroundColor: 'white',
@@ -1348,60 +1393,60 @@ function buildTrendChartOptions(showPercentageAxis = true) {
         padding: 10,
         titleColor: '#0f172a',
         titleFont: {
-          weight: 600,
-        },
-      },
+          weight: 600
+        }
+      }
     },
     scales: {
       x: {
         border: {
-          display: false,
+          display: false
         },
         grid: {
-          display: false,
+          display: false
         },
         ticks: {
           color: towerChartColors.tick,
           font: {
             size: 10,
-            weight: 600,
+            weight: 600
           },
-          maxRotation: 0,
-        },
+          maxRotation: 0
+        }
       },
       y: {
         border: {
-          display: false,
+          display: false
         },
         grid: {
-          color: towerChartColors.grid,
+          color: towerChartColors.grid
         },
         ticks: {
           callback: (value) => formatCompact(value),
           color: towerChartColors.tick,
           font: {
-            size: 10,
-          },
-        },
+            size: 10
+          }
+        }
       },
       y1: {
         display: showPercentageAxis,
         border: {
-          display: false,
+          display: false
         },
         grid: {
-          display: false,
+          display: false
         },
         position: 'right',
         ticks: {
           callback: (value) => `${trimNumber(value)}%`,
           color: towerChartColors.tick,
           font: {
-            size: 10,
-          },
-        },
-      },
-    },
+            size: 10
+          }
+        }
+      }
+    }
   }
 }
 
@@ -1422,7 +1467,7 @@ function trendDeltaClass(value) {
 function formatPlainAmount(value) {
   const amount = Number(value || 0)
   return new Intl.NumberFormat(locale.value, {
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 2
   }).format(amount)
 }
 
@@ -1432,13 +1477,21 @@ const TrendPanel = {
     chartOptions: { type: Object, required: true },
     description: { type: String, required: true },
     empty: { type: Boolean, default: false },
-    title: { type: String, required: true },
+    title: { type: String, required: true }
   },
   setup(panelProps) {
     return () =>
       h('section', { class: 'rounded-xl bg-slate-50 p-4' }, [
-        h('h4', { class: 'mb-1 text-sm font-medium text-slate-700' }, panelProps.title),
-        h('p', { class: 'mb-3 text-xs text-slate-500' }, panelProps.description),
+        h(
+          'h4',
+          { class: 'mb-1 text-sm font-medium text-slate-700' },
+          panelProps.title
+        ),
+        h(
+          'p',
+          { class: 'mb-3 text-xs text-slate-500' },
+          panelProps.description
+        ),
         h(
           'div',
           {
@@ -1446,9 +1499,9 @@ const TrendPanel = {
               'h-[300px]',
               panelProps.empty
                 ? 'flex items-center justify-center text-sm text-slate-400'
-                : '',
+                : ''
             ],
-            role: panelProps.empty ? 'status' : undefined,
+            role: panelProps.empty ? 'status' : undefined
           },
           panelProps.empty
             ? t('dataOps.executive.trend.noData')
@@ -1456,47 +1509,79 @@ const TrendPanel = {
                 h(Chart, {
                   data: panelProps.chartData,
                   options: panelProps.chartOptions,
-                  type: 'bar',
-                }),
+                  type: 'bar'
+                })
               ]
-        ),
+        )
       ])
-  },
+  }
 }
 
 const RankPanel = {
   props: {
     description: { type: String, required: true },
     items: { type: Array, default: () => [] },
-    title: { type: String, required: true },
+    title: { type: String, required: true }
   },
   setup(panelProps) {
     return () =>
-      h('section', { class: 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm' }, [
-        h('h3', { class: 'text-lg font-bold text-slate-950' }, panelProps.title),
-        h('p', { class: 'mt-1 text-sm text-slate-500' }, panelProps.description),
-        h(
-          'div',
-          { class: 'mt-4 divide-y divide-slate-100' },
-          panelProps.items.map((item) =>
-            h('article', { class: 'grid grid-cols-[minmax(0,1fr)_9rem] gap-4 py-3' }, [
-              h('div', { class: 'min-w-0' }, [
-                h('h4', { class: 'truncate text-sm font-bold text-slate-950' }, item.title),
-                h('p', { class: 'mt-1 truncate text-xs text-slate-500' }, item.meta),
-                h('p', { class: 'mt-1 text-xs text-slate-400' }, item.status),
-              ]),
-              h('strong', { class: 'text-right text-sm text-slate-900' }, item.value),
-            ])
+      h(
+        'section',
+        { class: 'rounded-2xl border border-slate-200 bg-white p-4 shadow-sm' },
+        [
+          h(
+            'h3',
+            { class: 'text-lg font-bold text-slate-950' },
+            panelProps.title
+          ),
+          h(
+            'p',
+            { class: 'mt-1 text-sm text-slate-500' },
+            panelProps.description
+          ),
+          h(
+            'div',
+            { class: 'mt-4 divide-y divide-slate-100' },
+            panelProps.items.map((item) =>
+              h(
+                'article',
+                { class: 'grid grid-cols-[minmax(0,1fr)_9rem] gap-4 py-3' },
+                [
+                  h('div', { class: 'min-w-0' }, [
+                    h(
+                      'h4',
+                      { class: 'truncate text-sm font-bold text-slate-950' },
+                      item.title
+                    ),
+                    h(
+                      'p',
+                      { class: 'mt-1 truncate text-xs text-slate-500' },
+                      item.meta
+                    ),
+                    h(
+                      'p',
+                      { class: 'mt-1 text-xs text-slate-400' },
+                      item.status
+                    )
+                  ]),
+                  h(
+                    'strong',
+                    { class: 'text-right text-sm text-slate-900' },
+                    item.value
+                  )
+                ]
+              )
+            )
           )
-        ),
-      ])
-  },
+        ]
+      )
+  }
 }
 
 const SimpleList = {
   props: {
     items: { type: Array, default: () => [] },
-    title: { type: String, required: true },
+    title: { type: String, required: true }
   },
   setup(listProps) {
     return () =>
@@ -1506,17 +1591,28 @@ const SimpleList = {
           'div',
           { class: 'mt-4 space-y-3' },
           listProps.items.map((item) =>
-            h('div', { class: 'flex items-start justify-between gap-4 text-sm' }, [
-              h('div', { class: 'min-w-0' }, [
-                h('p', { class: 'truncate font-semibold text-slate-900' }, item.title),
-                h('p', { class: 'mt-1 truncate text-xs text-slate-500' }, item.meta),
-              ]),
-              h('strong', { class: 'shrink-0 text-slate-700' }, item.value),
-            ])
+            h(
+              'div',
+              { class: 'flex items-start justify-between gap-4 text-sm' },
+              [
+                h('div', { class: 'min-w-0' }, [
+                  h(
+                    'p',
+                    { class: 'truncate font-semibold text-slate-900' },
+                    item.title
+                  ),
+                  h(
+                    'p',
+                    { class: 'mt-1 truncate text-xs text-slate-500' },
+                    item.meta
+                  )
+                ]),
+                h('strong', { class: 'shrink-0 text-slate-700' }, item.value)
+              ]
+            )
           )
-        ),
+        )
       ])
-  },
+  }
 }
-
 </script>

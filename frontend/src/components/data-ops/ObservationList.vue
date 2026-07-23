@@ -41,7 +41,7 @@
       v-else
       class="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-16 text-center text-sm text-slate-400"
     >
-      {{ t('dataOps.observations.empty') }}
+      {{ emptyText }}
     </div>
     <Pager
       :page="page"
@@ -53,22 +53,39 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { formatDateTime } from '@/composables/useDataOpsConsole'
 
 import { Pager } from './DataOpsPrimitives'
 
-defineProps({
+const props = defineProps({
+  filters: { type: Object, required: true },
   observations: { type: Array, default: () => [] },
   page: { type: Number, required: true },
   pageSize: { type: Number, required: true },
+  production: { type: Object, default: () => ({ latest_runs: {} }) },
   selectedId: { type: String, default: '' },
   total: { type: Number, required: true }
 })
 
 defineEmits(['page-change', 'select'])
 const { locale, t } = useI18n()
+
+const emptyText = computed(() => {
+  const latestRuns = props.production?.latest_runs || {}
+  const producerKey = {
+    contract_renewal_risk: 'contract-renewal-risk',
+    receivable_overdue_risk: 'receivable-overdue-risk'
+  }[props.filters.observation_type]
+  const hasRun = producerKey
+    ? Boolean(latestRuns[producerKey])
+    : Object.values(latestRuns).some(Boolean)
+  return hasRun
+    ? t('dataOps.observations.noFilterResults')
+    : t('dataOps.observations.notProducedYet')
+})
 
 function typeLabel(value) {
   const key =

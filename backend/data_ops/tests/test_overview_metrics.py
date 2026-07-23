@@ -4,8 +4,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
-from django.utils import timezone
-
 from data_ops.models import (
     Contract,
     DomesticLedger,
@@ -15,10 +13,11 @@ from data_ops.models import (
     ProjectScope,
 )
 from data_ops.services.metrics.overview import (
+    get_data_quality,
     get_domestic_ledger_kanban,
     get_executive_overview,
-    get_oversea_project_kanban,
     get_opportunities,
+    get_oversea_project_kanban,
     get_project_init_kanban,
     get_risks,
     get_summary,
@@ -26,7 +25,7 @@ from data_ops.services.metrics.overview import (
     get_top_sales,
     get_trends,
 )
-
+from django.utils import timezone
 
 pytestmark = pytest.mark.django_db
 
@@ -156,6 +155,26 @@ def test_blank_currency_defaults_to_cny_and_merges_with_explicit_cny():
     assert customers["top_received"][0]["received_amount"] == 150.0
 
 
+def test_data_quality_marks_mixed_currencies_as_limited():
+    Contract.objects.create(
+        **_source_fields("contract-cny"),
+        currency="CNY",
+        total_amount=Decimal("100"),
+    )
+    Contract.objects.create(
+        **_source_fields("contract-usd"),
+        currency="USD",
+        total_amount=Decimal("10"),
+    )
+
+    result = get_data_quality()
+
+    assert result["overall_status"] == "warning"
+    assert result["analysis_status"] == "limited"
+    assert result["sync_status"] == "ok"
+    assert result["issues"][0]["id"] == "mixed-currency"
+
+
 def test_executive_overview_calculates_ratios_and_month_over_month():
     today = timezone.localdate()
     current_month = today.replace(day=1)
@@ -212,9 +231,7 @@ def test_executive_overview_calculates_ratios_and_month_over_month():
     assert result["mom"]["monthly_expense_amount"] == 100.0
     assert result["mom"]["expense_received_ratio"] == 0.0
     assert result["mom"]["monthly_outstanding_amount"] is None
-    assert result["meta"]["previous_month"] == previous_month.strftime(
-        "%Y-%m"
-    )
+    assert result["meta"]["previous_month"] == previous_month.strftime("%Y-%m")
 
 
 def test_trends_calculate_net_quarterly_and_yearly_amounts():
@@ -334,16 +351,15 @@ def test_risks_use_due_dates_and_include_key_customer_risks():
     result = get_risks()
 
     by_customer = {
-        item["customer_name"]: item
-        for item in result["high_outstanding_items"]
+        item["customer_name"]: item for item in result["high_outstanding_items"]
     }
     assert by_customer["Acme"]["risk_level"] == "high"
     assert by_customer["Beta"]["risk_level"] == "medium"
     assert result["summary"]["key_customer_risk_count"] == 2
-    assert {
-        item["customer_name"]
-        for item in result["key_customer_risks"]
-    } == {"Acme", "Beta"}
+    assert {item["customer_name"] for item in result["key_customer_risks"]} == {
+        "Acme",
+        "Beta",
+    }
 
 
 def test_legacy_kanban_endpoints_return_real_groups_and_filters():
@@ -457,8 +473,6 @@ def test_summary_counts_are_not_capped_by_display_limits():
     assert len(risks["high_outstanding_items"]) == 20
     assert opportunities["summary"]["high_potential_count"] == 105
     assert len(opportunities["items"]) == 100
-    assert opportunities["summary"]["high_potential_total_amount"] == (
-        63_000_000.0
-    )
+    assert opportunities["summary"]["high_potential_total_amount"] == (63_000_000.0)
     assert kanban["total"] == 505
     assert len(kanban["cards"]) == 500

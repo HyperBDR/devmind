@@ -2,8 +2,6 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
-from django.utils import timezone
-
 from data_ops.models import (
     Contract,
     DomesticLedger,
@@ -19,6 +17,7 @@ from data_ops.services.metrics.operations import (
     get_pipeline_summary_data,
 )
 from data_ops.services.metrics.overview import get_summary, get_trends
+from django.utils import timezone
 
 
 @pytest.mark.django_db
@@ -275,3 +274,39 @@ def test_pipeline_uses_source_display_amount_before_usd_stat_amount():
         {"currency": "HKD", "amount": 8000.0},
         {"currency": "USD", "amount": 1000.0},
     ]
+
+
+@pytest.mark.django_db
+def test_pipeline_uses_business_scope_for_counts_and_amounts():
+    today = timezone.localdate()
+    Project.all_objects.create(
+        source_app_token="app",
+        source_table_id="projects",
+        source_record_id="project-pure-overseas",
+        project_scope=ProjectScope.DOMESTIC,
+        domestic_type="纯海外项目",
+        estimated_amount=Decimal("100"),
+        currency="USD",
+        license_expiry=today + timedelta(days=10),
+    )
+    Project.all_objects.create(
+        source_app_token="app",
+        source_table_id="projects",
+        source_record_id="project-pure-domestic",
+        project_scope=ProjectScope.DOMESTIC,
+        domestic_type="纯国内项目",
+        estimated_amount=Decimal("500"),
+        currency="CNY",
+    )
+
+    summary = get_pipeline_summary_data()
+
+    assert summary["domestic_projects"] == 1
+    assert summary["oversea_projects"] == 1
+    assert summary["domestic_amount_by_currency"] == [
+        {"currency": "CNY", "amount": 500.0},
+    ]
+    assert summary["oversea_amount_by_currency"] == [
+        {"currency": "USD", "amount": 100.0},
+    ]
+    assert summary["at_risk"] == 1
