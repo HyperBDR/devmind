@@ -197,6 +197,7 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   open: {
@@ -310,12 +311,7 @@ async function savePriceSourceEndpoint() {
 }
 
 function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
+  return userFacingApiError(error, fallback)
 }
 </script>
 

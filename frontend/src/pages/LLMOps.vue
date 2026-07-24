@@ -25,6 +25,7 @@
             v-model:selected-resale-platform-id="selectedResalePlatformId"
             :active-nav="activeNav"
             :agione-platform="agionePlatform"
+            :actions-disabled="Boolean(pageError) || loading"
             :exchange-rate-label="exchangeRateLabel"
             :loading="loading"
             :nav-groups="navGroups"
@@ -34,6 +35,12 @@
           />
 
           <BaseLoading v-if="loading" class="py-20" />
+          <LLMOpsErrorState
+            v-else-if="pageError"
+            class="my-6"
+            :message="pageError"
+            @retry="handleRefreshAll"
+          />
           <div
             v-else
             :class="[
@@ -139,7 +146,7 @@
                 :display-currency="summaryDisplayCurrency"
                 :exchange-rate="exchangeRate"
                 :focus-model-id="resaleWorkspaceFocusModelId"
-                @refresh="refreshLight"
+                @refresh="handleRefreshAll"
                 @listings-updated="mergeResaleListings"
                 @action="openListingActionDrawer"
                 @open-workspace="openResalePublishingWorkspace"
@@ -193,14 +200,14 @@
             <GlobalConfigPanel
               v-else-if="activeSection === 'globalConfig'"
               :sources="providerCollectionSources"
-              @saved="refreshLight"
+              @saved="handleRefreshAll"
             />
 
             <CollectionRunLogPanel
               v-else-if="activeSection === 'taskLogs'"
               :runs="collectionRuns"
               :sources="sources"
-              @refresh="refreshCollectionRuns"
+              @refresh="handleRefreshAll"
             />
 
             <ProviderManagement
@@ -248,7 +255,7 @@
               :channels="channels"
               :models="models"
               :records="records"
-              @refresh="refreshLight"
+              @refresh="handleRefreshAll"
             />
 
             <AuditLogPanel
@@ -308,6 +315,7 @@ import CollectionHealthPanel from '@/components/llm-ops/CollectionHealthPanel.vu
 import CollectionRunLogPanel from '@/components/llm-ops/CollectionRunLogPanel.vue'
 import GlobalConfigPanel from '@/components/llm-ops/GlobalConfigPanel.vue'
 import ListingRiskPanel from '@/components/llm-ops/ListingRiskPanel.vue'
+import LLMOpsErrorState from '@/components/llm-ops/LLMOpsErrorState.vue'
 import LLMOpsHeader from '@/components/llm-ops/LLMOpsHeader.vue'
 import LLMOpsMonitorDashboard from '@/components/llm-ops/LLMOpsMonitorDashboard.vue'
 import LLMOpsSidebar from '@/components/llm-ops/LLMOpsSidebar.vue'
@@ -320,20 +328,15 @@ import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
 import ResalePublishingDrawer from '@/components/llm-ops/ResalePublishingDrawer.vue'
 import ResalePublishingWorkspace from '@/components/llm-ops/ResalePublishingWorkspace.vue'
 import ResaleWorkflowConfigPanel from '@/components/llm-ops/ResaleWorkflowConfigPanel.vue'
-import { useToast } from '@/composables/useToast'
 import { useLLMOpsData } from '@/composables/useLLMOpsData'
 import { useLLMOpsMonitor } from '@/composables/useLLMOpsMonitor'
 import {
-  DATA_HEAVY_SECTIONS,
-  LIGHT_CORE_SECTIONS,
   SECTION_KEYS,
   useLLMOpsNavigation
 } from '@/composables/useLLMOpsNavigation'
 import { useLLMOpsResalePublishing } from '@/composables/useLLMOpsResalePublishing'
-import { errorMessage } from '@/utils/llmOpsPagination'
 import { parseLLMOpsOperationTarget } from '@/utils/llmOpsOperationEntry'
 
-const { showError } = useToast()
 const { t } = useI18n()
 
 const {
@@ -357,6 +360,7 @@ const {
   displayCurrency,
   exchangeRate,
   exchangeRateLabel,
+  invalidateSectionCache,
   listingPriceHistory,
   listings,
   loadResaleWorkflowConfig,
@@ -365,6 +369,7 @@ const {
   modelPriceItems,
   models,
   normalizeDisplayCurrency,
+  pageError,
   pointConversion,
   preloadResalePublishingData,
   procurementRows,
@@ -374,17 +379,14 @@ const {
   refreshAll,
   refreshChannelPricingData,
   refreshChannelManagementData,
-  refreshCollectionRuns,
-  refreshCoreData,
   refreshLight,
   refreshMetaModelManagementData,
   refreshPlatformData,
   refreshProviderManagementData,
-  refreshSectionData,
+  refreshResalePlatformSelection,
   refreshSummary,
   resalePlatforms,
   resaleWorkflowConfig,
-  secondaryDataLoaded,
   selectedResalePlatformId,
   sources,
   summary,
@@ -426,6 +428,7 @@ const {
   refreshLight,
   refreshPlatformData,
   refreshProviderManagementData,
+  refreshResalePlatformSelection,
   refreshSummary,
   resalePlatforms,
   resaleWorkflowConfig,
@@ -534,7 +537,8 @@ async function handleInlinePublish() {
 
 function handleRefreshAll() {
   return refreshAll(activeSection.value, {
-    modelId: operationTargetModelId.value
+    modelId: operationTargetModelId.value,
+    force: true
   })
 }
 
@@ -546,11 +550,8 @@ watch(displayCurrency, (currency) => {
   }
   localStorage.setItem('llm_ops_display_currency', normalized)
   if (!loading.value) {
-    if (activeSection.value === 'monitor') {
-      refreshSummary('monitor')
-    } else {
-      refreshLight()
-    }
+    invalidateSectionCache()
+    handleRefreshAll()
   }
 })
 
@@ -559,29 +560,13 @@ watch(activeSection, (section) => {
   if (section !== operationTargetSection.value) {
     operationTargetModelId.value = null
   }
-  if (
-    DATA_HEAVY_SECTIONS.has(section) &&
-    !secondaryDataLoaded.value &&
-    !loading.value
-  ) {
-    refreshSectionData(section, {
-      modelId:
-        section === operationTargetSection.value
-          ? operationTargetModelId.value
-          : null
-    }).catch((error) => {
-      showError(errorMessage(error, t('llmOps.dataErrors.loadSection')))
-    })
-  }
-  if (
-    !LIGHT_CORE_SECTIONS.has(section) &&
-    !models.value.length &&
-    !loading.value
-  ) {
-    refreshCoreData(section).catch((error) => {
-      showError(errorMessage(error, t('llmOps.dataErrors.loadCoreModels')))
-    })
-  }
+  refreshAll(section, {
+    force: false,
+    modelId:
+      section === operationTargetSection.value
+        ? operationTargetModelId.value
+        : null
+  })
 })
 
 onMounted(() => {
@@ -612,8 +597,8 @@ onMounted(() => {
   ) {
     operationTargetSourceId.value = operationTarget.sourceId
   }
-  handleRefreshAll().then(() => {
-    if (!operationTarget.openPlatformConfig) return
+  handleRefreshAll().then((loaded) => {
+    if (!loaded || !operationTarget.openPlatformConfig) return
     const platform = resalePlatforms.value.find(
       (item) => String(item.id) === String(operationTarget.platformId)
     )

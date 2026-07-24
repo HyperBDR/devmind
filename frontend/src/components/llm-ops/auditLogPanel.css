@@ -80,7 +80,9 @@
   padding: 0 0.75rem;
 }
 
-.audit-log-panel .audit-filter-select .compact-select-trigger:hover:not(:disabled) {
+.audit-log-panel
+  .audit-filter-select
+  .compact-select-trigger:hover:not(:disabled) {
   border-color: #cbd5e1;
   background: #ffffff;
 }
@@ -192,11 +194,25 @@
 }
 
 .audit-log-panel .audit-error {
+  align-items: center;
   border-bottom: 1px solid #fecdd3;
   background: #fff1f2;
   color: #be123c;
+  display: flex;
   font-size: 13px;
+  gap: 0.75rem;
+  justify-content: space-between;
   padding: 0.75rem 1rem;
+}
+
+.audit-log-panel .audit-error button {
+  background: #fff;
+  border: 1px solid #fda4af;
+  border-radius: 0.375rem;
+  color: #9f1239;
+  flex: 0 0 auto;
+  font-weight: 700;
+  padding: 0.375rem 0.625rem;
 }
 
 .audit-log-panel .audit-table-panel {

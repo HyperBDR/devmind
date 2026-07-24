@@ -160,7 +160,17 @@
           :disabled="!canCreateRecord"
           :title="createDisabledReason"
         >
-          <span class="icon-mark" />
+          <svg
+            class="h-4 w-4"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
           {{ t('llmOps.reconciliationPanel.actions.create') }}
         </button>
       </div>
@@ -490,10 +500,6 @@ function modalityLabel(modality) {
 
 .field {
   @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-50;
-}
-
-.icon-mark {
-  @apply inline-block h-3.5 w-3.5 shrink-0 rounded-sm bg-current;
 }
 
 .data-table {
