@@ -6,7 +6,9 @@ the original file name and content type stay in the database.
 """
 
 import logging
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from uuid import UUID
 
 from django.conf import settings
@@ -19,17 +21,17 @@ def _uuid(value: str) -> str:
     try:
         return str(UUID(str(value)))
     except (TypeError, ValueError, AttributeError) as exc:
-        raise ValueError(
-            "document storage path segments must be UUIDs"
-        ) from exc
+        raise ValueError("document storage path segments must be UUIDs") from exc
 
 
-def document_storage_key(
-    document_id: str, quotation_id: str | None = None
-) -> str:
+def document_storage_key(document_id: str, quotation_id: str | None = None) -> str:
     document_uuid = _uuid(document_id)
     record_uuid = _uuid(quotation_id) if quotation_id else document_uuid
     return f"documents/{record_uuid}/{document_uuid}"
+
+
+def template_storage_key(template_id: str) -> str:
+    return f"templates/{_uuid(template_id)}.xlsx"
 
 
 def storage_root() -> Path:
@@ -48,6 +50,24 @@ def write_document(content: bytes, storage_key: str) -> Path:
     path = resolve_document_path(storage_key)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
+    return path
+
+
+def write_document_atomic(content: bytes, storage_key: str) -> Path:
+    """Replace one storage object atomically on the local filesystem."""
+    path = resolve_document_path(storage_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    try:
+        with NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
     return path
 
 

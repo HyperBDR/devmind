@@ -1,8 +1,7 @@
+from quotation.metrics import export_metrics_snapshot, storage_metrics_snapshot
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from quotation.metrics import storage_metrics_snapshot
 
 
 class HealthView(APIView):
@@ -20,3 +19,12 @@ class StorageMetricsView(APIView):
 
     def get(self, request):
         return Response(storage_metrics_snapshot())
+
+
+class ExportMetricsView(APIView):
+    """Return low-cardinality quotation export stage metrics."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(export_metrics_snapshot())

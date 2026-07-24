@@ -47,7 +47,18 @@
       "unitWan": "",
       "unitCount": "{count} quotes",
       "lineItemCount": "{count} line items",
-      "separator": "•"
+      "separator": "•",
+      "exportStatuses": {
+        "queued": "Export queued",
+        "rendering_excel": "Rendering Excel",
+        "converting_pdf": "Converting PDF",
+        "rendered": "Files rendered",
+        "upload_queued": "Feishu upload queued",
+        "uploading": "Uploading to Feishu",
+        "completed": "Export completed",
+        "render_failed": "Export failed",
+        "upload_failed": "Files ready; Feishu upload failed"
+      }
     },
     "components": {
       "signature": {
@@ -229,6 +240,8 @@
         "toastPdfDownloadFailed": "Could not open PDF print preview",
         "toastTemplateRequiredUpload": "Set up an Excel template in Catalog before uploading to Feishu",
         "toastUploadFailed": "Upload to Feishu failed. Check the archive folder configuration",
+        "retryUpload": "Retry Feishu upload",
+        "toastUploadRetrySucceeded": "Feishu upload retried successfully for {quoteNo}",
         "toastExcelReused": "Linked existing Feishu Excel for {quoteNo}",
         "toastExcelRenamed": "Uploaded as {fileName} for {quoteNo}",
         "toastExcelUploaded": "Excel uploaded to Feishu for {quoteNo}",

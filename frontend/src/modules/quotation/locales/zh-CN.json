@@ -47,7 +47,18 @@
       "unitWan": "万元",
       "unitCount": "{count} 笔",
       "lineItemCount": "{count} 个报价明细行",
-      "separator": "•"
+      "separator": "•",
+      "exportStatuses": {
+        "queued": "导出任务已排队",
+        "rendering_excel": "正在生成 Excel",
+        "converting_pdf": "正在转换 PDF",
+        "rendered": "文件已生成",
+        "upload_queued": "飞书归档已排队",
+        "uploading": "正在归档到飞书",
+        "completed": "导出已完成",
+        "render_failed": "文件生成失败",
+        "upload_failed": "文件可下载，飞书归档失败"
+      }
     },
     "components": {
       "signature": {
@@ -229,6 +240,8 @@
         "toastPdfDownloadFailed": "无法打开 PDF 打印预览",
         "toastTemplateRequiredUpload": "请先配置报价 Excel 模板后再上传飞书",
         "toastUploadFailed": "上传飞书失败，请检查系统归档文件夹配置",
+        "retryUpload": "仅重试飞书上传",
+        "toastUploadRetrySucceeded": "报价 {quoteNo} 已成功重试上传飞书",
         "toastExcelReused": "报价 {quoteNo} 已复用飞书中同名 Excel 文件",
         "toastExcelRenamed": "报价 {quoteNo} 已重命名为 {fileName} 并上传",
         "toastExcelUploaded": "报价 {quoteNo} 已上传 Excel 到飞书",

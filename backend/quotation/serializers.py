@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import quote, urlparse
 
 from django.conf import settings
 from django.db.models import Q
-from rest_framework import serializers
-
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
@@ -21,6 +19,7 @@ from quotation.models import (
 )
 from quotation.security_alerts import can_manage_security_alerts
 from quotation.services.storage_control import remote_document_reference
+from rest_framework import serializers
 
 
 class CatalogObjectListField(serializers.ListField):
@@ -79,17 +78,10 @@ def trusted_feishu_file_url(asset: DocumentAsset) -> str | None:
         parsed = urlparse(candidate)
         hostname = (parsed.hostname or "").lower().rstrip(".")
         trusted_host = hostname in {"feishu.cn", "larksuite.com"} or any(
-            hostname.endswith(suffix)
-            for suffix in (".feishu.cn", ".larksuite.com")
+            hostname.endswith(suffix) for suffix in (".feishu.cn", ".larksuite.com")
         )
-        path_segments = {
-            segment for segment in parsed.path.split("/") if segment
-        }
-        if (
-            parsed.scheme == "https"
-            and trusted_host
-            and token in path_segments
-        ):
+        path_segments = {segment for segment in parsed.path.split("/") if segment}
+        if parsed.scheme == "https" and trusted_host and token in path_segments:
             return candidate
     return build_feishu_file_url(token)
 
@@ -116,12 +108,8 @@ class QuotationItemSerializer(serializers.ModelSerializer):
 class QuotationItemWriteSerializer(serializers.Serializer):
     line_no = serializers.IntegerField(min_value=1)
     type = serializers.CharField()
-    item_id = serializers.CharField(
-        required=False, allow_null=True, allow_blank=True
-    )
-    name = serializers.CharField(
-        required=False, allow_null=True, allow_blank=True
-    )
+    item_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
     description = serializers.CharField(
         required=False, allow_null=True, allow_blank=True
     )
@@ -192,9 +180,7 @@ class QuotationSerializer(serializers.ModelSerializer):
     items = QuotationItemSerializer(many=True, read_only=True)
     versions = QuotationVersionSerializer(many=True, read_only=True)
     issuer_signature = serializers.CharField(allow_blank=True, required=False)
-    remarks_disclaimer = serializers.CharField(
-        allow_blank=True, required=False
-    )
+    remarks_disclaimer = serializers.CharField(allow_blank=True, required=False)
     feishu_file_token = serializers.SerializerMethodField()
     feishu_url = serializers.SerializerMethodField()
     feishu_path = serializers.SerializerMethodField()
@@ -219,15 +205,12 @@ class QuotationSerializer(serializers.ModelSerializer):
         if obj.source_type != "document_import":
             return None
 
-        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
-            "documents"
-        )
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("documents")
         if prefetched is not None:
             imported = [
                 document
                 for document in prefetched
-                if document.source == "feishu"
-                and document.doc_type in {"excel", "pdf"}
+                if document.source == "feishu" and document.doc_type in {"excel", "pdf"}
             ]
             latest = max(
                 imported,
@@ -252,32 +235,26 @@ class QuotationSerializer(serializers.ModelSerializer):
         if hasattr(obj, cache_key):
             return getattr(obj, cache_key)
 
-        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
-            "documents"
-        )
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("documents")
         if prefetched is not None:
             uploads = [
                 document
                 for document in prefetched
-                if document.source in {"feishu", "feishu_upload"}
-                and remote_document_reference(document).token
+                if remote_document_reference(document).token
             ]
             if doc_type:
                 uploads = [
-                    document
-                    for document in uploads
-                    if document.doc_type == doc_type
+                    document for document in uploads if document.doc_type == doc_type
                 ]
             latest = max(
                 uploads, key=lambda document: document.created_at, default=None
             )
         else:
-            qs = obj.documents.filter(source__in=["feishu", "feishu_upload"])
+            qs = obj.documents.all()
             if doc_type:
                 qs = qs.filter(doc_type=doc_type)
             remote_reference_filter = (
-                Q(feishu_file_token__isnull=False)
-                & ~Q(feishu_file_token="")
+                Q(feishu_file_token__isnull=False) & ~Q(feishu_file_token="")
             ) | (
                 Q(replicas__sync_status=ReplicaSyncStatus.SYNCED)
                 & Q(replicas__revoked_at__isnull=True)
@@ -464,9 +441,7 @@ class QuotationCreateSerializer(serializers.Serializer):
     billing_contact = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
-    billing_email = serializers.CharField(
-        required=False, allow_blank=True, default=""
-    )
+    billing_email = serializers.CharField(required=False, allow_blank=True, default="")
     created_by_email = serializers.CharField(required=False, allow_null=True)
     items = QuotationItemWriteSerializer(many=True, required=False)
 
@@ -501,15 +476,11 @@ class QuotationUpdateSerializer(serializers.Serializer):
         max_value=Decimal("100"),
         required=False,
     )
-    remarks_disclaimer = serializers.CharField(
-        required=False, allow_blank=True
-    )
+    remarks_disclaimer = serializers.CharField(required=False, allow_blank=True)
     issuer_company_name = serializers.CharField(required=False)
     issuer_contact_name = serializers.CharField(required=False)
     issuer_contact_email = serializers.CharField(required=False)
-    issuer_contact_title = serializers.CharField(
-        required=False, allow_blank=True
-    )
+    issuer_contact_title = serializers.CharField(required=False, allow_blank=True)
     issuer_signature = serializers.CharField(required=False, allow_blank=True)
     client_company = serializers.CharField(required=False)
     contact_person = serializers.CharField(required=False)
@@ -536,12 +507,8 @@ class QuotationUpdateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         quotation = self.context.get("quotation")
-        quote_date = attrs.get(
-            "quote_date", getattr(quotation, "quote_date", None)
-        )
-        expire_date = attrs.get(
-            "expire_date", getattr(quotation, "expire_date", None)
-        )
+        quote_date = attrs.get("quote_date", getattr(quotation, "quote_date", None))
+        expire_date = attrs.get("expire_date", getattr(quotation, "expire_date", None))
         if quote_date and expire_date and expire_date < quote_date:
             raise serializers.ValidationError(
                 {"expire_date": "Expiry date cannot be before quote date."}
@@ -551,9 +518,7 @@ class QuotationUpdateSerializer(serializers.Serializer):
 
 class QuotationGenerateSerializer(serializers.Serializer):
     operator_email = serializers.CharField(required=False, allow_null=True)
-    notes = serializers.CharField(
-        required=False, default="Generated quotation"
-    )
+    notes = serializers.CharField(required=False, default="Generated quotation")
 
 
 class AuditEventSerializer(serializers.ModelSerializer):
@@ -734,9 +699,7 @@ class SecurityAlertSerializer(serializers.ModelSerializer):
 
     def get_device(self, obj: SecurityAlert) -> str:
         request = self.context.get("request")
-        if not _can_view_sensitive_evidence(
-            getattr(request, "user", None)
-        ):
+        if not _can_view_sensitive_evidence(getattr(request, "user", None)):
             return ""
         return _device_label(obj.subject_user_agent)
 
@@ -808,9 +771,7 @@ class SecurityAlertResolutionSerializer(serializers.Serializer):
         if attrs["action"] != "resolve":
             return attrs
         if not attrs.get("resolution"):
-            raise serializers.ValidationError(
-                {"resolution": "Select a resolution."}
-            )
+            raise serializers.ValidationError({"resolution": "Select a resolution."})
         if not attrs.get("resolution_note", "").strip():
             raise serializers.ValidationError(
                 {"resolution_note": "Add a resolution note."}
@@ -828,14 +789,10 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
     parsed_quotation_id = serializers.SerializerMethodField()
     parsed_quote_no = serializers.SerializerMethodField()
 
-    def _latest_parse_result(
-        self, obj: DocumentAsset
-    ) -> DocumentParseResult | None:
+    def _latest_parse_result(self, obj: DocumentAsset) -> DocumentParseResult | None:
         if hasattr(obj, "_latest_parse_result_for_serializer"):
             return obj._latest_parse_result_for_serializer
-        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
-            "parse_results"
-        )
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("parse_results")
         if prefetched is not None:
             result = max(
                 prefetched,
@@ -879,9 +836,7 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
     def get_parsed_quote_no(self, obj: DocumentAsset) -> str | None:
         result = self._latest_parse_result(obj)
         if result:
-            quote_no = str(
-                result.normalized_json.get("quote_no") or ""
-            ).strip()
+            quote_no = str(result.normalized_json.get("quote_no") or "").strip()
             if quote_no:
                 return quote_no
         quotation = obj.quotation

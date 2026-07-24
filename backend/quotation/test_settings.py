@@ -30,20 +30,20 @@ class QuotationSettingsTests(SimpleTestCase):
             (".xlsx", ".pdf"),
         )
         self.assertEqual(
-            settings.QUOTATION_MAX_PDF_HTML_BYTES,
-            5 * 1024 * 1024,
-        )
-        self.assertEqual(
-            settings.QUOTATION_MAX_PDF_XLSX_BYTES,
+            settings.QUOTATION_MAX_TEMPLATE_BYTES,
             6 * 1024 * 1024,
-        )
-        self.assertEqual(
-            settings.QUOTATION_MAX_XLSX_EXPANDED_BYTES,
-            50 * 1024 * 1024,
         )
         self.assertEqual(
             settings.QUOTATION_MAX_PDF_BYTES,
             20 * 1024 * 1024,
         )
-        self.assertEqual(settings.GOTENBERG_URL, "http://gotenberg:3000")
-        self.assertEqual(settings.GOTENBERG_TIMEOUT_SECONDS, 30)
+        self.assertEqual(
+            settings.QUOTATION_MAX_SIGNATURE_BYTES,
+            2 * 1024 * 1024,
+        )
+        self.assertEqual(
+            settings.QUOTATION_RENDERER_VERSION,
+            "openpyxl-libreoffice-v1",
+        )
+        self.assertEqual(settings.QUOTATION_SOFFICE_BINARY, "soffice")
+        self.assertEqual(settings.QUOTATION_RENDER_TIMEOUT_SECONDS, 120)

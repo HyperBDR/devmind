@@ -12,21 +12,19 @@ import {
   UploadCloud,
   X,
 } from 'lucide-vue-next'
+import { checkFeishuFileAccess } from '../api/feishu'
 import {
-  FeishuUploadConflictError,
-  checkFeishuFileAccess,
-  uploadBlobToFeishu,
-} from '../api/feishu'
-import type { FeishuUploadConflict, FeishuUploadConflictAction } from '../api/feishu'
+  archiveQuotationFile,
+  exportQuotationFile,
+  retryQuotationUpload,
+  waitForQuotationExport,
+  type QuotationExportStatus,
+} from '../api/exports'
 import type { Quotation, QuoteStatus } from '../types'
-import { recordQuotationDownload } from '../api/quotations'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
-import { buildQuotationExcelBlob, downloadQuotationExcel } from '../utils/excelGenerator'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
-import { buildQuotationPdfBlob, downloadQuotationPdf } from '../utils/pdfExporter'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
 import { loadProductLineOptions } from '../utils/quotationNumbering'
-import FeishuFolderPickerModal from './FeishuFolderPickerModal.vue'
 import FormSelect from './FormSelect.vue'
 import StatusBadge from './StatusBadge.vue'
 import StatusSelect from './StatusSelect.vue'
@@ -94,16 +92,10 @@ const createdFrom = ref('')
 const createdTo = ref('')
 const deleteConfirmId = ref<string | null>(null)
 const uploadingQuoteId = ref<string | null>(null)
-const uploadConflict = ref<{
-  quote: Quotation
-  format: FeishuUploadFormat
-  conflict: FeishuUploadConflict
-  folderToken?: string
-} | null>(null)
-const uploadFolderPicker = ref<{
-  quote: Quotation
-  format: FeishuUploadFormat
-} | null>(null)
+const exportProgressByQuote = ref<Record<string, QuotationExportStatus>>({})
+const failedUploadByQuote = ref<
+  Record<string, { jobId: string; format: FeishuUploadFormat }>
+>({})
 const actionMenu = ref<{
   quoteId: string
   type: 'upload' | 'download'
@@ -235,10 +227,24 @@ function formatNow(): string {
   return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')} ${String(today.getHours()).padStart(2, '0')}:${String(today.getMinutes()).padStart(2, '0')}:${String(today.getSeconds()).padStart(2, '0')}`
 }
 
+function updateExportProgress(
+  quoteId: string,
+  status: QuotationExportStatus,
+) {
+  exportProgressByQuote.value[quoteId] = status
+}
+
+function exportProgressLabel(quoteId: string): string {
+  const status = exportProgressByQuote.value[quoteId]
+  return status
+    ? t(`quotation.common.exportStatuses.${status}`)
+    : ''
+}
+
 function openFeishuUploadPicker(quote: Quotation, format: FeishuUploadFormat) {
   if (quote.status === 'Cancelled') return
   closeActionMenu()
-  uploadFolderPicker.value = { quote, format }
+  void handleUploadToFeishu(quote, format)
 }
 
 function feishuDocumentId(
@@ -309,10 +315,12 @@ async function handleDownloadLocal(quote: Quotation, format: FeishuUploadFormat)
   ) {
     return
   }
-  if (format === 'excel') {
-    const success = await downloadQuotationExcel(quote, props.currentUser || undefined)
-    if (success) {
-      await recordQuotationDownload(quote.id, 'excel').catch(() => undefined)
+  try {
+    const exportFormat = format === 'excel' ? 'xlsx' : 'pdf'
+    await exportQuotationFile(quote.id, exportFormat, {
+      onProgress: (job) => updateExportProgress(quote.id, job.status),
+    })
+    if (format === 'excel') {
       emit('updateQuoteStatus', quote.id, {
         status: quote.status === 'Draft' ? 'Generated' : quote.status,
         excelGeneratedAt: formatNow(),
@@ -323,95 +331,63 @@ async function handleDownloadLocal(quote: Quotation, format: FeishuUploadFormat)
         t('quotation.pages.list.toastExcelDownloadStarted', { quoteNo: quote.quoteNo }),
         'success',
       )
-    } else {
-      emit('toast', t('quotation.pages.list.toastExcelDownloadFailed'), 'error')
+      return
     }
-    return
-  }
-
-  const success = await downloadQuotationPdf(quote, props.currentUser || undefined)
-  if (success) {
-    await recordQuotationDownload(quote.id, 'pdf').catch(() => undefined)
     emit(
       'toast',
       t('quotation.pages.list.toastPdfDownloadStarted', { quoteNo: quote.quoteNo }),
       'success',
     )
-  } else {
-    emit('toast', t('quotation.pages.list.toastPdfDownloadFailed'), 'error')
+  } catch (error) {
+    emit(
+      'toast',
+      error instanceof Error
+        ? error.message
+        : t('quotation.pages.list.toastExcelDownloadFailed'),
+      'error',
+    )
   }
 }
 
 async function handleUploadToFeishu(
   quote: Quotation,
   format: FeishuUploadFormat = 'excel',
-  conflictAction?: FeishuUploadConflictAction,
-  folderToken?: string,
 ) {
   if (quote.status === 'Cancelled') return
   uploadingQuoteId.value = quote.id
   try {
-    const uploadOpts = {
-      quotationId: quote.id,
-      conflictAction,
-      folderToken,
-    }
-
-    if (format === 'excel') {
-      const excelBlob = await buildQuotationExcelBlob(
-        quote,
-        props.currentUser || undefined,
-      )
-      if (!excelBlob) {
-        emit('toast', t('quotation.pages.list.toastExcelDownloadFailed'), 'error')
-        return
+    const exportFormat = format === 'excel' ? 'xlsx' : 'pdf'
+    const job = await archiveQuotationFile(quote.id, exportFormat, {
+      onProgress: (progressJob) => {
+        updateExportProgress(quote.id, progressJob.status)
+      },
+    })
+    if (job.status === 'upload_failed') {
+      failedUploadByQuote.value[quote.id] = {
+        jobId: job.job_id,
+        format,
       }
-      const excelName = buildQuotationExportFileName(quote, 'xlsx')
-      const excelUploadResult = await uploadBlobToFeishu(excelBlob, excelName, uploadOpts)
-      emit('feishuUploadDone', quote.id)
       emit(
         'toast',
-        excelUploadResult.reused_existing
-          ? t('quotation.pages.list.toastExcelReused', { quoteNo: quote.quoteNo })
-          : excelUploadResult.renamed_from
-            ? t('quotation.pages.list.toastExcelRenamed', {
-                quoteNo: quote.quoteNo,
-                fileName: excelUploadResult.file_name,
-              })
-            : t('quotation.pages.list.toastExcelUploaded', { quoteNo: quote.quoteNo }),
-        'success',
+        job.error_message || t('quotation.pages.list.toastUploadFailed'),
+        'error',
       )
-      uploadConflict.value = null
       return
     }
-
-    const pdfBlob = await buildQuotationPdfBlob(quote, props.currentUser || undefined)
-    const pdfName = buildQuotationExportFileName(quote, 'pdf')
-    const pdfUploadResult = await uploadBlobToFeishu(pdfBlob, pdfName, uploadOpts)
+    delete failedUploadByQuote.value[quote.id]
     emit('feishuUploadDone', quote.id)
     emit(
       'toast',
-      pdfUploadResult.reused_existing
-        ? t('quotation.pages.list.toastPdfReused', { quoteNo: quote.quoteNo })
-        : pdfUploadResult.renamed_from
-          ? t('quotation.pages.list.toastPdfRenamed', {
-              quoteNo: quote.quoteNo,
-              fileName: pdfUploadResult.file_name,
-            })
-          : t('quotation.pages.list.toastPdfUploaded', { quoteNo: quote.quoteNo }),
+      format === 'excel'
+        ? t('quotation.pages.list.toastExcelUploaded', {
+            quoteNo: quote.quoteNo,
+          })
+        : t('quotation.pages.list.toastPdfUploaded', {
+            quoteNo: quote.quoteNo,
+          }),
       'success',
     )
-    uploadConflict.value = null
   } catch (err: unknown) {
-    if (err instanceof FeishuUploadConflictError) {
-      uploadConflict.value = {
-        quote,
-        format,
-        conflict: err.conflict,
-        folderToken,
-      }
-      return
-    }
     emit(
       'toast',
       err instanceof Error ? err.message : t('quotation.pages.list.toastUploadFailed'),
@@ -422,21 +398,45 @@ async function handleUploadToFeishu(
   }
 }
 
-async function resolveUploadConflict(action: FeishuUploadConflictAction) {
-  if (!uploadConflict.value) return
-  const { quote, format, folderToken } = uploadConflict.value
-  await handleUploadToFeishu(quote, format, action, folderToken)
-}
-
-async function handleUploadFolderSelected(folder: { token: string; name: string }) {
-  const pending = uploadFolderPicker.value
-  uploadFolderPicker.value = null
-  if (!pending) return
-  await handleUploadToFeishu(pending.quote, pending.format, undefined, folder.token)
-}
-
-function handleUploadFolderPickerOpen(open: boolean) {
-  if (!open) uploadFolderPicker.value = null
+async function retryFailedUpload(quote: Quotation) {
+  const failedUpload = failedUploadByQuote.value[quote.id]
+  if (!failedUpload) return
+  uploadingQuoteId.value = quote.id
+  try {
+    const created = await retryQuotationUpload(failedUpload.jobId)
+    const job = await waitForQuotationExport(created.job_id, {
+      onProgress: (progressJob) => {
+        updateExportProgress(quote.id, progressJob.status)
+      },
+    })
+    if (job.status === 'upload_failed') {
+      emit(
+        'toast',
+        job.error_message || t('quotation.pages.list.toastUploadFailed'),
+        'error',
+      )
+      return
+    }
+    delete failedUploadByQuote.value[quote.id]
+    emit('feishuUploadDone', quote.id)
+    emit(
+      'toast',
+      t('quotation.pages.list.toastUploadRetrySucceeded', {
+        quoteNo: quote.quoteNo,
+      }),
+      'success',
+    )
+  } catch (error) {
+    emit(
+      'toast',
+      error instanceof Error
+        ? error.message
+        : t('quotation.pages.list.toastUploadFailed'),
+      'error',
+    )
+  } finally {
+    uploadingQuoteId.value = null
+  }
 }
 
 function handleResetFilters() {
@@ -668,6 +668,12 @@ function displayTotal(quote: Quotation): string {
                 >
                   {{ quote.quoteNo }}
                 </p>
+                <p
+                  v-if="exportProgressByQuote[quote.id]"
+                  class="mt-1 text-xs font-medium text-indigo-600"
+                >
+                  {{ exportProgressLabel(quote.id) }}
+                </p>
               </td>
               <td class="py-3.5 px-4">
                 <div class="max-w-[180px] sm:max-w-xs truncate">
@@ -797,6 +803,17 @@ function displayTotal(quote: Quotation): string {
                   </div>
 
                   <button
+                    v-if="failedUploadByQuote[quote.id]"
+                    type="button"
+                    :title="t('quotation.pages.list.retryUpload')"
+                    :disabled="uploadingQuoteId === quote.id"
+                    class="cursor-pointer rounded-sm p-1 text-amber-600 transition duration-100 hover:bg-amber-50 hover:text-amber-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                    @click="void retryFailedUpload(quote)"
+                  >
+                    <RotateCcw class="h-4 w-4" />
+                  </button>
+
+                  <button
                     v-if="feishuDocumentId(quote, 'excel')"
                     :title="t('quotation.actions.openFeishuExcel')"
                     class="p-1 rounded-sm transition duration-100 text-dm-text-tertiary hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer"
@@ -893,107 +910,6 @@ function displayTotal(quote: Quotation): string {
         </div>
       </div>
     </div>
-
-
-    <FeishuFolderPickerModal
-      :open="Boolean(uploadFolderPicker)"
-      intent="upload"
-      @update:open="handleUploadFolderPickerOpen"
-      @select="handleUploadFolderSelected"
-      @toast="(message, type) => emit('toast', message, type)"
-    />
-
-    <div
-      v-if="uploadConflict"
-      class="fixed inset-0 z-[80] flex items-center justify-center p-4 dm-modal-overlay"
-    >
-      <div class="w-full max-w-md overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
-        <div class="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
-          <div class="flex min-w-0 items-start gap-3">
-            <div
-              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600"
-            >
-              <UploadCloud class="h-4 w-4" />
-            </div>
-            <div class="min-w-0">
-              <h3 class="text-[15px] font-semibold text-slate-900">
-                {{ t('quotation.pages.list.conflictTitle') }}
-              </h3>
-              <p class="mt-0.5 text-xs leading-relaxed text-slate-500">
-                {{
-                  t('quotation.pages.list.conflictDesc', {
-                    fileName: uploadConflict.conflict.file_name,
-                  })
-                }}
-              </p>
-            </div>
-          </div>
-          <button
-            type="button"
-            class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-700"
-            :aria-label="t('quotation.actions.cancelUpload')"
-            @click="uploadConflict = null"
-          >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-
-        <div class="bg-slate-50/40 px-5 py-4">
-          <div class="space-y-2 rounded-lg border border-slate-200 bg-white p-3.5 text-sm shadow-sm">
-            <div class="flex items-start justify-between gap-4">
-              <span class="shrink-0 text-slate-500">
-                {{ t('quotation.pages.list.conflictExistingFile') }}
-              </span>
-              <span class="break-all text-right font-medium text-slate-900">{{
-                uploadConflict.conflict.existing.file_name
-              }}</span>
-            </div>
-            <div class="flex items-start justify-between gap-4">
-              <span class="shrink-0 text-slate-500">
-                {{ t('quotation.pages.list.conflictSuggestedName') }}
-              </span>
-              <span class="break-all text-right font-medium text-blue-600">{{
-                uploadConflict.conflict.suggested_file_name
-              }}</span>
-            </div>
-          </div>
-
-          <div class="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3.5 py-3">
-            <p class="text-sm font-semibold text-blue-800">
-              {{ t('quotation.actions.reuseExistingFile') }}
-            </p>
-            <p class="mt-0.5 text-xs leading-relaxed text-blue-600">
-              {{ t('quotation.pages.list.conflictReuseDesc') }}
-            </p>
-          </div>
-        </div>
-
-        <div class="flex items-center justify-end gap-2 border-t border-slate-100 bg-white px-5 py-4">
-          <button
-            type="button"
-            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-            @click="uploadConflict = null"
-          >
-            {{ t('quotation.actions.cancelUpload') }}
-          </button>
-          <button
-            type="button"
-            class="inline-flex h-9 items-center justify-center whitespace-nowrap rounded-md border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-600"
-            @click="resolveUploadConflict('reuse')"
-          >
-            {{ t('quotation.actions.reuseExistingFile') }}
-          </button>
-          <button
-            type="button"
-            class="dm-btn-primary h-9 whitespace-nowrap px-3.5 text-sm font-semibold"
-            @click="resolveUploadConflict('rename')"
-          >
-            {{ t('quotation.actions.renameAndUpload') }}
-          </button>
-        </div>
-      </div>
-    </div>
-
     <Teleport to="body">
       <div
         v-if="actionMenu && actionMenuQuote"

@@ -9,7 +9,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
 from django.db import OperationalError
 from django.utils import timezone
-
+from quotation.metrics import record_export_operation
 from quotation.models import (
     DocumentAsset,
     DocumentParseStatus,
@@ -17,9 +17,7 @@ from quotation.models import (
     SyncJobStatus,
     SyncJobType,
 )
-from quotation.services.document_parsing.service import (
-    parse_and_create_quotation,
-)
+from quotation.services.document_parsing.service import parse_and_create_quotation
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,208 @@ FEISHU_SYNC_LOCK_KEY = "quotation:feishu:archive-folder-sync"
 
 def _duration_ms(started: float) -> int:
     return max(round((perf_counter() - started) * 1000), 0)
+
+
+def _record_export_stage(stage: str, result: str, started: float) -> None:
+    record_export_operation(
+        stage=stage,
+        result=result,
+        duration_seconds=max(perf_counter() - started, 0),
+    )
+
+
+@shared_task(
+    bind=True,
+    name="quotation.tasks.render_quotation_export",
+    acks_late=True,
+    reject_on_worker_lost=True,
+    max_retries=1,
+    soft_time_limit=240,
+    time_limit=300,
+)
+def render_quotation_export_task(self, job_id: str):
+    """Render one pinned quotation export in the dedicated worker."""
+    from quotation.services.export_pipeline import (
+        mark_render_failed,
+        render_export_job,
+        reset_render_for_retry,
+    )
+    from quotation.services.export_renderer import (
+        PdfConversionError,
+        TemplateValidationError,
+    )
+
+    started = perf_counter()
+    logger.info(
+        "quotation_export_render_started",
+        extra={
+            "export_job_id": job_id,
+            "attempt": self.request.retries + 1,
+        },
+    )
+    try:
+        result = render_export_job(job_id)
+    except TemplateValidationError as exc:
+        mark_render_failed(job_id, exc)
+        _record_export_stage("render", "failure", started)
+        logger.warning(
+            "quotation_export_render_rejected",
+            extra={
+                "export_job_id": job_id,
+                "error_code": exc.code,
+                "duration_ms": _duration_ms(started),
+            },
+        )
+        return {"job_id": job_id, "status": "render_failed"}
+    except PdfConversionError as exc:
+        if exc.retryable and self.request.retries < self.max_retries:
+            reset_render_for_retry(job_id, exc)
+            _record_export_stage("render", "retry", started)
+            raise self.retry(
+                exc=exc,
+                countdown=10 * (2**self.request.retries),
+            )
+        mark_render_failed(job_id, exc)
+        _record_export_stage("render", "failure", started)
+        return {"job_id": job_id, "status": "render_failed"}
+    except (
+        OperationalError,
+        OSError,
+        SoftTimeLimitExceeded,
+        TimeoutError,
+    ) as exc:
+        if self.request.retries < self.max_retries:
+            reset_render_for_retry(job_id, exc)
+            _record_export_stage("render", "retry", started)
+            raise self.retry(
+                exc=exc,
+                countdown=10 * (2**self.request.retries),
+            )
+        mark_render_failed(job_id, exc)
+        _record_export_stage("render", "failure", started)
+        raise
+    except Exception as exc:
+        mark_render_failed(job_id, exc)
+        _record_export_stage("render", "failure", started)
+        logger.exception(
+            "quotation_export_render_failed",
+            extra={
+                "export_job_id": job_id,
+                "duration_ms": _duration_ms(started),
+            },
+        )
+        raise
+    _record_export_stage("render", "success", started)
+    logger.info(
+        "quotation_export_render_finished",
+        extra={
+            "export_job_id": job_id,
+            "status": result["status"],
+            "duration_ms": _duration_ms(started),
+        },
+    )
+    return result
+
+
+@shared_task(
+    bind=True,
+    name="quotation.tasks.sync_document_replica",
+    acks_late=True,
+    reject_on_worker_lost=True,
+    max_retries=3,
+    soft_time_limit=180,
+    time_limit=210,
+)
+def sync_document_replica_task(
+    self,
+    export_job_id: str,
+    asset_id: str,
+):
+    """Archive one rendered asset without rerunning document rendering."""
+    import httpx
+    from quotation.services.export_archive import (
+        is_transient_feishu_error,
+        mark_upload_failed,
+        reset_upload_for_retry,
+        sync_export_asset,
+    )
+    from quotation.services.feishu_client import FeishuAPIError
+
+    started = perf_counter()
+    logger.info(
+        "quotation_export_archive_started",
+        extra={
+            "export_job_id": export_job_id,
+            "asset_id": asset_id,
+            "attempt": self.request.retries + 1,
+        },
+    )
+    try:
+        result = sync_export_asset(export_job_id, asset_id)
+    except FeishuAPIError as exc:
+        if is_transient_feishu_error(exc) and self.request.retries < self.max_retries:
+            reset_upload_for_retry(export_job_id, exc)
+            _record_export_stage("archive", "retry", started)
+            raise self.retry(
+                exc=exc,
+                countdown=15 * (2**self.request.retries),
+            )
+        error_code = mark_upload_failed(export_job_id, exc)
+        _record_export_stage("archive", "failure", started)
+        logger.warning(
+            "quotation_export_archive_failed",
+            extra={
+                "export_job_id": export_job_id,
+                "asset_id": asset_id,
+                "error_code": error_code,
+                "duration_ms": _duration_ms(started),
+            },
+        )
+        return {"job_id": export_job_id, "status": "upload_failed"}
+    except (
+        httpx.TransportError,
+        OperationalError,
+        OSError,
+        SoftTimeLimitExceeded,
+        TimeoutError,
+    ) as exc:
+        if self.request.retries < self.max_retries:
+            reset_upload_for_retry(export_job_id, exc)
+            _record_export_stage("archive", "retry", started)
+            raise self.retry(
+                exc=exc,
+                countdown=15 * (2**self.request.retries),
+            )
+        mark_upload_failed(export_job_id, exc)
+        _record_export_stage("archive", "failure", started)
+        raise
+    except (LookupError, ValueError) as exc:
+        mark_upload_failed(export_job_id, exc)
+        _record_export_stage("archive", "failure", started)
+        return {"job_id": export_job_id, "status": "upload_failed"}
+    except Exception as exc:
+        mark_upload_failed(export_job_id, exc)
+        _record_export_stage("archive", "failure", started)
+        logger.exception(
+            "quotation_export_archive_failed",
+            extra={
+                "export_job_id": export_job_id,
+                "asset_id": asset_id,
+                "duration_ms": _duration_ms(started),
+            },
+        )
+        raise
+    _record_export_stage("archive", "success", started)
+    logger.info(
+        "quotation_export_archive_finished",
+        extra={
+            "export_job_id": export_job_id,
+            "asset_id": asset_id,
+            "status": result["status"],
+            "duration_ms": _duration_ms(started),
+        },
+    )
+    return result
 
 
 @shared_task(
@@ -41,15 +241,15 @@ def _duration_ms(started: float) -> int:
 def parse_document_task(self, asset_id: str, actor_id: int | None = None):
     """Parse one document in an isolated, idempotent Celery task."""
     started = perf_counter()
-    asset = DocumentAsset.objects.select_related("quotation").get(
-        pk=asset_id
-    )
+    asset = DocumentAsset.objects.select_related("quotation").get(pk=asset_id)
     if asset.source == "feishu" and asset.feishu_file_token:
         peers = list(
             DocumentAsset.objects.filter(
                 source="feishu",
                 feishu_file_token=asset.feishu_file_token,
-            ).select_related("quotation").prefetch_related("parse_results")
+            )
+            .select_related("quotation")
+            .prefetch_related("parse_results")
         )
 
         def duplicate_priority(item):
@@ -60,8 +260,7 @@ def parse_document_task(self, asset_id: str, actor_id: int | None = None):
                 default=None,
             )
             classified = bool(
-                latest
-                and latest.status == DocumentParseStatus.NOT_QUOTATION
+                latest and latest.status == DocumentParseStatus.NOT_QUOTATION
             )
             return (
                 classified,
@@ -158,9 +357,7 @@ def parse_document_task(self, asset_id: str, actor_id: int | None = None):
                 queue="quotation_ocr",
             )
             active_ocr.celery_task_id = ocr_task.id
-            active_ocr.save(
-                update_fields=["celery_task_id", "updated_at"]
-            )
+            active_ocr.save(update_fields=["celery_task_id", "updated_at"])
         logger.info(
             "quotation_ocr_queued",
             extra={"asset_id": asset.id, "ocr_job_id": active_ocr.id},
@@ -197,12 +394,8 @@ def ocr_document_task(self, job_id: str):
     from quotation.services.document_parsing.flexible_parser import (
         complete_document_parse,
     )
-    from quotation.services.document_parsing.ocr_parser import (
-        extract_pdf_text_with_ocr,
-    )
-    from quotation.services.document_parsing.pdf_parser import (
-        parse_quotation_pdf_text,
-    )
+    from quotation.services.document_parsing.ocr_parser import extract_pdf_text_with_ocr
+    from quotation.services.document_parsing.pdf_parser import parse_quotation_pdf_text
     from quotation.services.storage import resolve_document_path
 
     started = perf_counter()
@@ -226,9 +419,7 @@ def ocr_document_task(self, job_id: str):
         ]
     )
     try:
-        text = extract_pdf_text_with_ocr(
-            resolve_document_path(asset.storage_key)
-        )
+        text = extract_pdf_text_with_ocr(resolve_document_path(asset.storage_key))
         parsed = parse_quotation_pdf_text(text)
         parsed = complete_document_parse(
             asset,

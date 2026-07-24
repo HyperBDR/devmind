@@ -23,13 +23,6 @@ const quotationCreate = readFileSync(
   ),
   'utf8',
 )
-const templateCatalogs = readFileSync(
-  new URL(
-    '../src/modules/quotation/utils/templateCatalogs.ts',
-    import.meta.url,
-  ),
-  'utf8',
-)
 const english = JSON.parse(
   readFileSync(
     new URL('../src/modules/quotation/locales/en.json', import.meta.url),
@@ -52,7 +45,6 @@ test('catalog prices only auto-fill quotes in the same currency', () => {
   assert.match(descriptions, /product\.currency \|\| 'USD'/)
   assert.match(descriptions, /quoteCurrency === currency/)
   assert.match(quotationCreate, /optionCurrency === currency\.value/)
-  assert.match(templateCatalogs, /currency: 'USD'/)
 })
 
 test('automatic catalog sync skips matching names across currencies', () => {

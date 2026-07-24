@@ -24,19 +24,8 @@ const quotationList = readFileSync(
   ),
   'utf8',
 )
-const quotationDetails = readFileSync(
-  new URL(
-    '../src/modules/quotation/components/QuotationDetails.vue',
-    import.meta.url,
-  ),
-  'utf8',
-)
-const quotationApp = readFileSync(
-  new URL('../src/modules/quotation/App.vue', import.meta.url),
-  'utf8',
-)
-const quotationsApi = readFileSync(
-  new URL('../src/modules/quotation/api/quotations.ts', import.meta.url),
+const exportsApi = readFileSync(
+  new URL('../src/modules/quotation/api/exports.ts', import.meta.url),
   'utf8',
 )
 const securityPanel = readFileSync(
@@ -87,20 +76,12 @@ test('background Feishu return checks do not duplicate open audits', () => {
   assert.ok(backgroundCheck > consumePending)
 })
 
-test('browser-generated quotation downloads are reported to audit', () => {
-  assert.match(quotationsApi, /recordQuotationDownload/)
-  assert.match(quotationsApi, /\/download-event/)
-  assert.match(quotationList, /recordQuotationDownload\(quote\.id, 'excel'\)/)
-  assert.match(quotationList, /recordQuotationDownload\(quote\.id, 'pdf'\)/)
+test('server-generated quotation assets use the audited download API', () => {
+  assert.match(exportsApi, /\/documents\/\$\{encodeURIComponent\(asset\.id\)\}\/download/)
   assert.match(
-    quotationDetails,
-    /recordQuotationDownload\(props\.quote\.id, 'excel'\)/,
+    quotationList,
+    /exportQuotationFile\(quote\.id, exportFormat, \{[\s\S]*onProgress/,
   )
-  assert.match(
-    quotationDetails,
-    /recordQuotationDownload\(props\.quote\.id, 'pdf'\)/,
-  )
-  assert.match(quotationApp, /recordQuotationDownload\(saved\.id, 'excel'\)/)
 })
 
 test('Security Alerts follows the reviewed three-step workflow', () => {
