@@ -6,9 +6,11 @@
           :active-section="activeSection"
           :collapsed="sidebarCollapsed"
           :expanded-group-keys="expandedNavGroupKeys"
+          :mobile-open="mobileNavigationOpen"
           :nav-groups="navGroups"
           :toggle-label="sidebarToggleLabel"
-          @select-item="selectNavItem"
+          @close-mobile="mobileNavigationOpen = false"
+          @select-item="selectSidebarNavItem"
           @toggle-group="toggleNavGroup"
           @toggle-sidebar="toggleSidebar"
         />
@@ -27,8 +29,9 @@
             :agione-platform="agionePlatform"
             :exchange-rate-label="exchangeRateLabel"
             :loading="loading"
-            :nav-groups="navGroups"
+            :mobile-navigation-open="mobileNavigationOpen"
             :resale-platform-options="resalePlatformOptions"
+            @open-navigation="mobileNavigationOpen = true"
             @open-platform="openPlatformModal"
             @refresh="handleRefreshAll"
           />
@@ -451,6 +454,8 @@ const resaleWorkspaceFocusAutoListing = ref(false)
 const inlineWorkspacePayload = ref(null)
 const inlineWorkspaceRef = ref(null)
 const inlineSaving = ref(false)
+const mobileNavigationOpen = ref(false)
+let desktopMediaQuery = null
 const inlineWorkspaceKey = computed(
   () => `inline-${resaleWorkspaceFocusModelId.value || 'new'}`
 )
@@ -486,6 +491,15 @@ function onNavigateToWorkspace(payload) {
   resaleWorkspaceFocusModelId.value = modelId || null
   resaleWorkspaceFocusAutoListing.value = Boolean(payload?.autoListing)
   activeSection.value = 'reseller'
+}
+
+function selectSidebarNavItem(groupKey, itemKey) {
+  selectNavItem(groupKey, itemKey)
+  mobileNavigationOpen.value = false
+}
+
+function handleDesktopViewportChange(event) {
+  if (event.matches) mobileNavigationOpen.value = false
 }
 
 function onNavigateToSection(target) {
@@ -586,6 +600,8 @@ watch(activeSection, (section) => {
 
 onMounted(() => {
   document.body.classList.add('llm-ops-theme')
+  desktopMediaQuery = window.matchMedia('(min-width: 1024px)')
+  desktopMediaQuery.addEventListener('change', handleDesktopViewportChange)
   const operationTarget = parseLLMOpsOperationTarget(window.location.search)
   if (
     operationTarget.section === 'reseller' &&
@@ -622,6 +638,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (desktopMediaQuery) {
+    const mediaQuery = desktopMediaQuery
+    mediaQuery.removeEventListener('change', handleDesktopViewportChange)
+  }
   document.body.classList.remove('llm-ops-theme')
 })
 </script>

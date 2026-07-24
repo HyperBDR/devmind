@@ -2,27 +2,28 @@
   <header class="llm-ops-header px-5 py-3 lg:px-7">
     <div class="page-hero">
       <div class="page-hero-copy">
-        <div class="space-y-3 lg:hidden">
-          <section v-for="group in navGroups" :key="group.key">
-            <p
-              class="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400"
-            >
-              {{ group.label }}
-            </p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                v-for="item in group.items"
-                :key="item.key"
-                type="button"
-                class="llm-mobile-nav-item px-3 py-2 text-xs font-semibold"
-                :class="{ 'is-active': activeSection === item.key }"
-                @click="$emit('update:activeSection', item.key)"
-              >
-                {{ item.label }}
-              </button>
-            </div>
-          </section>
-        </div>
+        <button
+          ref="mobileNavigationTrigger"
+          type="button"
+          class="llm-mobile-navigation-trigger lg:hidden"
+          :aria-expanded="mobileNavigationOpen"
+          aria-controls="llm-ops-mobile-navigation"
+          :aria-label="t('llmOps.toolbar.openNavigation')"
+          @click="$emit('open-navigation')"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+          <span>{{ t('llmOps.toolbar.navigation') }}</span>
+        </button>
         <p
           class="page-hero-eyebrow mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-agione-600 lg:mt-0"
         >
@@ -109,7 +110,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -139,9 +140,9 @@ const props = defineProps({
     type: Boolean,
     required: true
   },
-  navGroups: {
-    type: Array,
-    required: true
+  mobileNavigationOpen: {
+    type: Boolean,
+    default: false
   },
   resalePlatformOptions: {
     type: Array,
@@ -154,6 +155,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits([
+  'open-navigation',
   'open-platform',
   'refresh',
   'update:activeSection',
@@ -162,6 +164,18 @@ const emit = defineEmits([
 ])
 
 const { t } = useI18n()
+const mobileNavigationTrigger = ref(null)
+
+watch(
+  () => props.mobileNavigationOpen,
+  (isOpen, wasOpen) => {
+    if (isOpen || !wasOpen) return
+    nextTick(() => {
+      const trigger = mobileNavigationTrigger.value
+      if (trigger?.offsetParent !== null) trigger?.focus()
+    })
+  }
+)
 
 const displayCurrencyOptions = computed(() => [
   { label: t('llmOps.currency.cny'), value: 'CNY' },
