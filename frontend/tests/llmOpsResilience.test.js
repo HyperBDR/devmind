@@ -128,6 +128,13 @@ test('requests meta-model drawer rows by release date descending', () => {
   assert.match(metaModelManagementSource, /ordering:\s*'-release_date'/)
 })
 
+test('reads meta-model sync stats from the unified API payload', () => {
+  assert.match(
+    metaModelManagementSource,
+    /const stats = paginationPayload\(response\)/
+  )
+})
+
 test('sanitizes operation errors before showing them to users', () => {
   operationErrorSources.forEach((source) => {
     assert.doesNotMatch(source, /error\?\.response\?\.data\?\.detail/)

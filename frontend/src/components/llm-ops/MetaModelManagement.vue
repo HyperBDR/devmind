@@ -672,7 +672,7 @@ async function syncMetaModels() {
   syncingMetaModels.value = true
   try {
     const response = await llmOpsApi.syncMetaModels()
-    const stats = response?.data || {}
+    const stats = paginationPayload(response)
     showSuccess(
       t('llmOps.metaModelManagement.messages.synced', {
         count: stats.models || 0
