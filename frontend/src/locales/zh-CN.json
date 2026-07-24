@@ -797,7 +797,8 @@
     },
     "shell": {
       "title": "大模型运营管理",
-      "subtitle": "价格、渠道、转售与对账的独立运营视图"
+      "subtitle": "价格、渠道、转售与对账的独立运营视图",
+      "navigationLabel": "大模型运营管理导航"
     },
     "toolbar": {
       "displayCurrency": "显示货币",
@@ -805,7 +806,10 @@
       "platformConfig": "平台配置",
       "createPlatform": "新建平台",
       "collapseSidebar": "折叠侧边栏",
-      "expandSidebar": "展开侧边栏"
+      "expandSidebar": "展开侧边栏",
+      "navigation": "导航",
+      "openNavigation": "打开导航",
+      "closeNavigation": "关闭导航"
     },
     "currency": {
       "cny": "CNY",

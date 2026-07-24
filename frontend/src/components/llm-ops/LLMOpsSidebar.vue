@@ -126,9 +126,93 @@
       </section>
     </nav>
   </aside>
+
+  <Dialog
+    :open="mobileOpen"
+    class="fixed inset-0 z-50 lg:hidden"
+    :initial-focus="mobileCloseButton"
+    @close="$emit('close-mobile')"
+  >
+    <div
+      class="fixed inset-0 bg-slate-950/60"
+      data-testid="llm-ops-mobile-navigation-overlay"
+      aria-hidden="true"
+      @click="$emit('close-mobile')"
+    />
+    <div class="pointer-events-none fixed inset-0 flex justify-start">
+      <DialogPanel
+        id="llm-ops-mobile-navigation"
+        class="llm-ops-mobile-drawer pointer-events-auto"
+      >
+        <div class="llm-ops-mobile-drawer-header">
+          <div class="min-w-0">
+            <p class="llm-ops-mobile-drawer-eyebrow">LLM OPS</p>
+            <DialogTitle class="llm-ops-mobile-drawer-title">
+              {{ t('llmOps.shell.navigationLabel') }}
+            </DialogTitle>
+          </div>
+          <button
+            ref="mobileCloseButton"
+            type="button"
+            class="llm-ops-mobile-drawer-close"
+            :aria-label="t('llmOps.toolbar.closeNavigation')"
+            @click="$emit('close-mobile')"
+          >
+            <svg
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <nav
+          class="llm-ops-mobile-drawer-nav"
+          :aria-label="t('llmOps.shell.navigationLabel')"
+        >
+          <section v-for="group in navGroups" :key="group.key">
+            <h3 class="llm-ops-mobile-drawer-group">{{ group.label }}</h3>
+            <div class="mt-1 space-y-1">
+              <button
+                v-for="item in group.items"
+                :key="item.key"
+                type="button"
+                class="llm-ops-mobile-drawer-item"
+                :class="{ 'is-active': activeSection === item.key }"
+                :aria-current="activeSection === item.key ? 'page' : undefined"
+                @click="selectMobileItem(group.key, item.key)"
+              >
+                <svg
+                  class="nav-icon"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                >
+                  <path v-for="path in item.icon" :key="path" :d="path" />
+                </svg>
+                <span>{{ item.label }}</span>
+              </button>
+            </div>
+          </section>
+        </nav>
+      </DialogPanel>
+    </div>
+  </Dialog>
 </template>
 
 <script setup>
+import { Dialog, DialogPanel, DialogTitle } from '@headlessui/vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps({
@@ -148,17 +232,32 @@ const props = defineProps({
     type: Array,
     required: true
   },
+  mobileOpen: {
+    type: Boolean,
+    default: false
+  },
   toggleLabel: {
     type: String,
     required: true
   }
 })
 
-defineEmits(['select-item', 'toggle-group', 'toggle-sidebar'])
+const emit = defineEmits([
+  'close-mobile',
+  'select-item',
+  'toggle-group',
+  'toggle-sidebar'
+])
 
 const { t } = useI18n()
+const mobileCloseButton = ref(null)
 
 function isExpanded(key) {
   return props.expandedGroupKeys.includes(key)
+}
+
+function selectMobileItem(groupKey, itemKey) {
+  emit('select-item', groupKey, itemKey)
+  emit('close-mobile')
 }
 </script>
