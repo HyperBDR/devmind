@@ -105,3 +105,64 @@ class LLMOpsMetaModelsApiTests(TestCase):
                 f"non-deepseek code in deepseek filter: {row['code']}",
             )
             self.assertEqual(row["owner_code"], "deepseek")
+
+    def test_orders_owner_models_by_release_date_descending(self):
+        MetaModel.objects.create(
+            name="A Oldest Model",
+            code="sort-oldest",
+            owner_code="sorting-vendor",
+            owner_name="Sorting Vendor",
+            metadata={
+                "models_dev": {"release_date": "2023-01-10"},
+            },
+        )
+        MetaModel.objects.create(
+            name="Z Newest Model",
+            code="sort-newest",
+            owner_code="sorting-vendor",
+            owner_name="Sorting Vendor",
+            metadata={
+                "models_dev": {"release_date": "2025-06-15"},
+            },
+        )
+        MetaModel.objects.create(
+            name="M Fallback Model",
+            code="sort-fallback",
+            owner_code="sorting-vendor",
+            owner_name="Sorting Vendor",
+            metadata={
+                "models_dev": {"last_updated": "2024-09-20"},
+            },
+        )
+        MetaModel.objects.create(
+            name="Y Undated Model",
+            code="sort-undated",
+            owner_code="sorting-vendor",
+            owner_name="Sorting Vendor",
+        )
+
+        view = MetaModelViewSet()
+        view.action = "list"
+        view.kwargs = {}
+        view.request = type(
+            "R",
+            (),
+            {
+                "query_params": {
+                    "owner": "sorting-vendor",
+                    "ordering": "-release_date",
+                },
+            },
+        )()
+
+        rows = self._serialize(view.get_queryset())
+
+        self.assertEqual(
+            [row["code"] for row in rows],
+            [
+                "sort-newest",
+                "sort-fallback",
+                "sort-oldest",
+                "sort-undated",
+            ],
+        )

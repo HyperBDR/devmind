@@ -257,6 +257,7 @@ import ChannelModelDrawer from '@/components/llm-ops/ChannelModelDrawer.vue'
 import ChannelModal from '@/components/llm-ops/ChannelModal.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   focusModelId: {
@@ -404,12 +405,7 @@ function ratioLabel(value) {
 }
 
 function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
+  return userFacingApiError(error, fallback)
 }
 </script>
 

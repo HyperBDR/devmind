@@ -4,10 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import {
-  DATA_HEAVY_SECTIONS,
-  LIGHT_CORE_SECTIONS
-} from '@/composables/useLLMOpsNavigation'
-import {
   asArray,
   asObject,
   errorMessage,
@@ -15,6 +11,8 @@ import {
   fetchFirstPage,
   fetchList
 } from '@/utils/llmOpsPagination'
+import { dataGroupsForSection } from '@/utils/llmOpsSectionData'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const PRICE_HISTORY_PAGE_SIZE = 120
 const RUN_LOG_PAGE_SIZE = 120
@@ -25,9 +23,8 @@ export function useLLMOpsData() {
   const { t } = useI18n()
   const { showError } = useToast()
   const loading = ref(false)
-  const backgroundLoading = ref(false)
-  const secondaryDataLoaded = ref(false)
-  const secondaryRefreshQueued = ref(false)
+  const pageError = ref('')
+  const loadedSections = new Set()
 
   const sources = ref([])
   const collectionRuns = ref([])
@@ -74,145 +71,91 @@ export function useLLMOpsData() {
   const pointConversion = computed(() => summary.value.point_conversion || null)
 
   async function refreshAll(section, options = {}) {
+    const force = options.force !== false
+    if (!force && loadedSections.has(section)) {
+      pageError.value = ''
+      return true
+    }
+
     loading.value = true
+    pageError.value = ''
     try {
-      await refreshCoreData(section)
       await refreshSectionData(section, options)
+      loadedSections.add(section)
+      return true
+    } catch (error) {
+      loadedSections.delete(section)
+      pageError.value = userFacingApiError(
+        error,
+        t('llmOps.dataErrors.loadSection')
+      )
+      return false
     } finally {
       loading.value = false
-    }
-
-    if (DATA_HEAVY_SECTIONS.has(section)) {
-      refreshSecondaryData({ force: true, silent: true })
-    }
-  }
-
-  async function refreshCoreData(section) {
-    if (section === 'monitor') {
-      const [platformRes, summaryRes] = await Promise.all([
-        fetchList(llmOpsApi.listResalePlatforms),
-        llmOpsApi.getSummary(summaryParams('monitor'))
-      ])
-      resalePlatforms.value = asArray(extract(platformRes))
-      summary.value = normalizeSummary(extract(summaryRes))
-      return
-    }
-
-    const shouldLoadModels = !LIGHT_CORE_SECTIONS.has(section)
-    const [
-      sourceRes,
-      runRes,
-      providerRes,
-      metaModelRes,
-      modelRes,
-      channelRes,
-      platformRes,
-      summaryRes
-    ] = await Promise.all([
-      fetchList(llmOpsApi.listCollectionSources),
-      fetchRecentCollectionRuns(),
-      fetchList(llmOpsApi.listProviders),
-      fetchList(llmOpsApi.listMetaModels),
-      shouldLoadModels ? fetchList(llmOpsApi.listModels) : Promise.resolve([]),
-      fetchList(llmOpsApi.listChannels),
-      fetchList(llmOpsApi.listResalePlatforms),
-      llmOpsApi.getSummary(summaryParams())
-    ])
-    sources.value = asArray(extract(sourceRes))
-    collectionRuns.value = asArray(extract(runRes))
-    providers.value = asArray(extract(providerRes))
-    metaModels.value = asArray(extract(metaModelRes))
-    if (shouldLoadModels) {
-      models.value = asArray(extract(modelRes))
-    }
-    channels.value = asArray(extract(channelRes))
-    resalePlatforms.value = asArray(extract(platformRes))
-    summary.value = normalizeSummary(extract(summaryRes))
-    await loadResaleWorkflowConfig()
-  }
-
-  async function refreshSecondaryData({ force = false, silent = false } = {}) {
-    if (backgroundLoading.value) {
-      if (force) {
-        secondaryDataLoaded.value = false
-        secondaryRefreshQueued.value = true
-      }
-      return
-    }
-    if (force) {
-      secondaryDataLoaded.value = false
-    }
-    backgroundLoading.value = true
-    try {
-      await Promise.all([
-        refreshChannelPricingData(),
-        refreshResaleListings(),
-        refreshReconciliationRecords()
-      ])
-      secondaryDataLoaded.value = true
-    } catch (error) {
-      if (!silent) {
-        showError(errorMessage(error, t('llmOps.dataErrors.loadSecondary')))
-      }
-    } finally {
-      backgroundLoading.value = false
-      if (secondaryRefreshQueued.value) {
-        secondaryRefreshQueued.value = false
-        refreshSecondaryData({ force: true, silent: true })
-      }
     }
   }
 
   async function refreshSectionData(section, options = {}) {
-    if (!DATA_HEAVY_SECTIONS.has(section)) return
-    if (section === 'providers') {
-      await refreshProviderManagementData()
+    const groups = dataGroupsForSection(section)
+    await Promise.all(
+      groups.map((group) => loadDataGroup(group, section, options))
+    )
+  }
+
+  async function loadDataGroup(group, section, options) {
+    if (group === 'sources') {
+      sources.value = asArray(await fetchList(llmOpsApi.listCollectionSources))
       return
     }
-    if (section === 'metaModels') {
-      await refreshMetaModelManagementData()
+    if (group === 'runs') {
+      collectionRuns.value = asArray(await fetchRecentCollectionRuns())
       return
     }
-    if (section === 'channels') {
-      await Promise.all([
-        refreshChannelPricingData(),
-        refreshModelPriceItems(),
-        refreshSummary()
-      ])
+    if (group === 'providers') {
+      providers.value = asArray(await fetchList(llmOpsApi.listProviders))
       return
     }
-    if (section === 'channelMatrix') {
-      await Promise.all([refreshChannelPricingData(), refreshSummary()])
+    if (group === 'metaModels') {
+      metaModels.value = asArray(await fetchList(llmOpsApi.listMetaModels))
       return
     }
-    if (section === 'reseller' || section === 'listingRisk') {
-      await Promise.all([
-        refreshChannelPricingData(),
-        refreshModelPriceItems(),
-        refreshResaleListings(),
-        refreshSummary()
-      ])
+    if (group === 'models') {
+      models.value = asArray(await fetchList(llmOpsApi.listModels))
       return
     }
-    if (section === 'modelWorkbench') {
-      await Promise.all([
-        refreshModelPriceItems(),
-        refreshChannelPricingData(),
-        refreshResaleListings(),
-        refreshReconciliationRecords(),
-        refreshSummary()
-      ])
+    if (group === 'channels') {
+      channels.value = asArray(await fetchList(llmOpsApi.listChannels))
       return
     }
-    if (section === 'priceChanges') {
-      await Promise.all([
-        refreshModelPriceItems(),
-        refreshPriceHistoryData(options.modelId)
-      ])
+    if (group === 'platforms') {
+      resalePlatforms.value = asArray(
+        await fetchList(llmOpsApi.listResalePlatforms)
+      )
+      await loadResaleWorkflowConfig()
       return
     }
-    if (section === 'reconciler') {
+    if (group === 'channelPricing') {
+      await refreshChannelPricingData()
+      return
+    }
+    if (group === 'modelPrices') {
+      await refreshModelPriceItems()
+      return
+    }
+    if (group === 'listings') {
+      await refreshResaleListings()
+      return
+    }
+    if (group === 'records') {
       await refreshReconciliationRecords()
+      return
+    }
+    if (group === 'priceHistory') {
+      await refreshPriceHistoryData(options.modelId)
+      return
+    }
+    if (group === 'summary') {
+      await refreshSummary(section === 'monitor' ? 'monitor' : 'full')
     }
   }
 
@@ -241,6 +184,21 @@ export function useLLMOpsData() {
     listings.value = asArray(
       await fetchList(llmOpsApi.listResaleListings, params)
     )
+  }
+
+  async function refreshResalePlatformSelection(section) {
+    const platformSections = [
+      'listingRisk',
+      'modelWorkbench',
+      'monitor',
+      'reseller'
+    ]
+    platformSections.forEach((sectionKey) => loadedSections.delete(sectionKey))
+    if (section === 'monitor') {
+      await refreshSummary('monitor')
+      return
+    }
+    await Promise.all([refreshResaleListings(), refreshSummary()])
   }
 
   function preloadResalePublishingData() {
@@ -274,8 +232,7 @@ export function useLLMOpsData() {
 
   async function refreshPriceHistoryData(modelId = null) {
     const model = Number(modelId)
-    const modelFilter =
-      Number.isInteger(model) && model > 0 ? { model } : {}
+    const modelFilter = Number.isInteger(model) && model > 0 ? { model } : {}
     const [channelHistoryData, listingHistoryData] = await Promise.all([
       fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
         ...modelFilter,
@@ -432,8 +389,11 @@ export function useLLMOpsData() {
     }
   }
 
+  function invalidateSectionCache() {
+    loadedSections.clear()
+  }
+
   return {
-    backgroundLoading,
     channelPriceHistory,
     channelPriceItems,
     channelPrices,
@@ -449,7 +409,9 @@ export function useLLMOpsData() {
     metaModels,
     modelPriceItems,
     models,
+    invalidateSectionCache,
     normalizeDisplayCurrency,
+    pageError,
     pointConversion,
     preloadResalePublishingData,
     procurementRows,
@@ -460,16 +422,15 @@ export function useLLMOpsData() {
     refreshChannelPricingData,
     refreshChannelManagementData,
     refreshCollectionRuns,
-    refreshCoreData,
     refreshLight,
     refreshMetaModelManagementData,
     refreshPlatformData,
     refreshProviderManagementData,
+    refreshResalePlatformSelection,
     refreshSectionData,
     refreshSummary,
     resalePlatforms,
     resaleWorkflowConfig,
-    secondaryDataLoaded,
     selectedResalePlatformId,
     sources,
     summary,

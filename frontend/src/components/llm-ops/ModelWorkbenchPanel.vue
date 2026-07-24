@@ -27,110 +27,129 @@
       </div>
     </div>
 
-    <div v-if="selectedModel" class="grid gap-4 xl:grid-cols-4">
-      <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.metaModel') }}
-        </p>
-        <p class="mt-2 text-lg font-semibold text-slate-900">
-          {{ selectedModel.meta_model_name || '-' }}
-        </p>
-        <p class="mt-2 font-mono text-xs text-slate-500">
-          {{ selectedModel.code }}
-        </p>
-      </div>
-      <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.channelCoverage') }}
-        </p>
-        <p class="kpi-value mt-2 text-2xl font-semibold">
-          {{ selectedDiagnostic?.coverage_count || 0 }}
-        </p>
-        <p class="mt-2 text-xs text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.channelCoverageHint') }}
-        </p>
-      </div>
-      <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.listingLinks') }}
-        </p>
-        <p class="kpi-value mt-2 text-2xl font-semibold">
-          {{ modelListings.length }}
-        </p>
-        <p class="mt-2 text-xs text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.listingLinksHint') }}
-        </p>
-      </div>
-      <div class="kpi-card">
-        <p class="text-xs font-medium text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.reconciliationAnomalies') }}
-        </p>
-        <p class="kpi-value mt-2 text-2xl font-semibold">
-          {{ anomalyRecords.length }}
-        </p>
-        <p class="mt-2 text-xs text-slate-500">
-          {{ t('llmOps.modelWorkbenchPanel.kpi.reconciliationAnomaliesHint') }}
+    <div
+      v-if="!modelOptions.length"
+      class="panel flex min-h-64 items-center justify-center text-center"
+      role="status"
+    >
+      <div class="max-w-md">
+        <h3 class="text-base font-semibold text-slate-900">
+          {{ t('llmOps.modelWorkbenchPanel.emptyModelsTitle') }}
+        </h3>
+        <p class="mt-2 text-sm leading-6 text-slate-500">
+          {{ t('llmOps.modelWorkbenchPanel.emptyModelsDescription') }}
         </p>
       </div>
     </div>
 
-    <div class="grid gap-4 xl:grid-cols-2">
-      <div class="panel overflow-hidden p-0">
-        <div class="table-toolbar">
-          <h3 class="panel-title">
-            {{ t('llmOps.modelWorkbenchPanel.standardPrices') }}
-          </h3>
+    <template v-else>
+      <div v-if="selectedModel" class="grid gap-4 xl:grid-cols-4">
+        <div class="kpi-card">
+          <p class="text-xs font-medium text-slate-500">
+            {{ t('llmOps.modelWorkbenchPanel.kpi.metaModel') }}
+          </p>
+          <p class="mt-2 text-lg font-semibold text-slate-900">
+            {{ selectedModel.meta_model_name || '-' }}
+          </p>
+          <p class="mt-2 font-mono text-xs text-slate-500">
+            {{ selectedModel.code }}
+          </p>
         </div>
-        <MiniTable
-          :columns="officialColumns"
-          :rows="officialRows"
-          :empty-text="t('llmOps.modelWorkbenchPanel.emptyStandardPrices')"
-        />
+        <div class="kpi-card">
+          <p class="text-xs font-medium text-slate-500">
+            {{ t('llmOps.modelWorkbenchPanel.kpi.channelCoverage') }}
+          </p>
+          <p class="kpi-value mt-2 text-2xl font-semibold">
+            {{ selectedDiagnostic?.coverage_count || 0 }}
+          </p>
+          <p class="mt-2 text-xs text-slate-500">
+            {{ t('llmOps.modelWorkbenchPanel.kpi.channelCoverageHint') }}
+          </p>
+        </div>
+        <div class="kpi-card">
+          <p class="text-xs font-medium text-slate-500">
+            {{ t('llmOps.modelWorkbenchPanel.kpi.listingLinks') }}
+          </p>
+          <p class="kpi-value mt-2 text-2xl font-semibold">
+            {{ modelListings.length }}
+          </p>
+          <p class="mt-2 text-xs text-slate-500">
+            {{ t('llmOps.modelWorkbenchPanel.kpi.listingLinksHint') }}
+          </p>
+        </div>
+        <div class="kpi-card">
+          <p class="text-xs font-medium text-slate-500">
+            {{ t('llmOps.modelWorkbenchPanel.kpi.reconciliationAnomalies') }}
+          </p>
+          <p class="kpi-value mt-2 text-2xl font-semibold">
+            {{ anomalyRecords.length }}
+          </p>
+          <p class="mt-2 text-xs text-slate-500">
+            {{
+              t('llmOps.modelWorkbenchPanel.kpi.reconciliationAnomaliesHint')
+            }}
+          </p>
+        </div>
       </div>
 
-      <div class="panel overflow-hidden p-0">
-        <div class="table-toolbar">
-          <h3 class="panel-title">
-            {{ t('llmOps.modelWorkbenchPanel.channelPrices') }}
-          </h3>
+      <div class="grid gap-4 xl:grid-cols-2">
+        <div class="panel overflow-hidden p-0">
+          <div class="table-toolbar">
+            <h3 class="panel-title">
+              {{ t('llmOps.modelWorkbenchPanel.standardPrices') }}
+            </h3>
+          </div>
+          <MiniTable
+            :columns="officialColumns"
+            :rows="officialRows"
+            :empty-text="t('llmOps.modelWorkbenchPanel.emptyStandardPrices')"
+          />
         </div>
-        <MiniTable
-          :columns="channelColumns"
-          :rows="channelRows"
-          :empty-text="t('llmOps.modelWorkbenchPanel.emptyChannelPrices')"
-        />
-      </div>
-    </div>
 
-    <div class="grid gap-4 xl:grid-cols-2">
-      <div class="panel overflow-hidden p-0">
-        <div class="table-toolbar">
-          <h3 class="panel-title">
-            {{ t('llmOps.modelWorkbenchPanel.listingRecords') }}
-          </h3>
+        <div class="panel overflow-hidden p-0">
+          <div class="table-toolbar">
+            <h3 class="panel-title">
+              {{ t('llmOps.modelWorkbenchPanel.channelPrices') }}
+            </h3>
+          </div>
+          <MiniTable
+            :columns="channelColumns"
+            :rows="channelRows"
+            :empty-text="t('llmOps.modelWorkbenchPanel.emptyChannelPrices')"
+          />
         </div>
-        <MiniTable
-          :columns="listingColumns"
-          :rows="listingRows"
-          :empty-text="t('llmOps.modelWorkbenchPanel.emptyListingRecords')"
-        />
       </div>
 
-      <div class="panel overflow-hidden p-0">
-        <div class="table-toolbar">
-          <h3 class="panel-title">
-            {{ t('llmOps.modelWorkbenchPanel.reconciliationRecords') }}
-          </h3>
+      <div class="grid gap-4 xl:grid-cols-2">
+        <div class="panel overflow-hidden p-0">
+          <div class="table-toolbar">
+            <h3 class="panel-title">
+              {{ t('llmOps.modelWorkbenchPanel.listingRecords') }}
+            </h3>
+          </div>
+          <MiniTable
+            :columns="listingColumns"
+            :rows="listingRows"
+            :empty-text="t('llmOps.modelWorkbenchPanel.emptyListingRecords')"
+          />
         </div>
-        <MiniTable
-          :columns="reconciliationColumns"
-          :rows="reconciliationRows"
-          :empty-text="
-            t('llmOps.modelWorkbenchPanel.emptyReconciliationRecords')
-          "
-        />
+
+        <div class="panel overflow-hidden p-0">
+          <div class="table-toolbar">
+            <h3 class="panel-title">
+              {{ t('llmOps.modelWorkbenchPanel.reconciliationRecords') }}
+            </h3>
+          </div>
+          <MiniTable
+            :columns="reconciliationColumns"
+            :rows="reconciliationRows"
+            :empty-text="
+              t('llmOps.modelWorkbenchPanel.emptyReconciliationRecords')
+            "
+          />
+        </div>
       </div>
-    </div>
+    </template>
   </section>
 </template>
 

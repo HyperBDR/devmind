@@ -3,7 +3,7 @@
     <div class="global-config-toolbar">
       <div>
         <p class="global-config-eyebrow">Global Config</p>
-        <h3>{{ t('llmOps.globalConfigPanel.title') }}</h3>
+        <h3>{{ t('llmOps.globalConfigPanel.settingsTitle') }}</h3>
         <p>{{ t('llmOps.globalConfigPanel.description') }}</p>
       </div>
       <div class="global-config-actions">
@@ -18,7 +18,7 @@
         <button
           type="button"
           class="btn-secondary btn-action-cancel"
-          :disabled="loading || saving"
+          :disabled="loading || saving || !config"
           @click="resetConfig"
         >
           {{ t('llmOps.globalConfigPanel.actions.reset') }}
@@ -26,7 +26,7 @@
         <button
           type="button"
           class="btn-primary btn-action-save"
-          :disabled="loading || saving"
+          :disabled="loading || saving || !config"
           @click="saveConfig"
         >
           {{
@@ -40,7 +40,26 @@
 
     <BaseLoading v-if="loading" />
 
-    <form v-else class="global-config-stack" @submit.prevent="saveConfig">
+    <div v-else-if="configLoadError" class="config-load-error" role="alert">
+      <div>
+        <strong>{{ t('llmOps.globalConfigPanel.errors.unavailable') }}</strong>
+        <p>{{ configLoadError }}</p>
+        <small>{{ t('llmOps.globalConfigPanel.errors.loadHint') }}</small>
+      </div>
+      <button
+        type="button"
+        class="btn-secondary btn-action-refresh"
+        @click="loadConfig"
+      >
+        {{ t('llmOps.globalConfigPanel.actions.retry') }}
+      </button>
+    </div>
+
+    <form
+      v-else-if="config"
+      class="global-config-stack"
+      @submit.prevent="saveConfig"
+    >
       <section class="config-section">
         <div class="config-section-header">
           <div>
@@ -393,6 +412,7 @@ import { llmAdminApi } from '@/admin/api'
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { useToast } from '@/composables/useToast'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 import { priceSourceCollectionMethod } from '@/utils/llmOpsPriceSources'
 
 const props = defineProps({
@@ -409,6 +429,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const config = ref(null)
+const configLoadError = ref('')
 const llmConfigLoading = ref(false)
 const llmConfigs = ref([])
 const sourceMode = ref('all')
@@ -468,9 +489,7 @@ const llmConfigOptions = computed(() => {
 
 const priceSyncLLMUnavailable = computed(() => {
   const status = config.value?.price_sync_agent_status
-  return Boolean(
-    status?.price_collection_enabled && status?.llm?.ok === false
-  )
+  return Boolean(status?.price_collection_enabled && status?.llm?.ok === false)
 })
 
 onMounted(() => {
@@ -480,12 +499,15 @@ onMounted(() => {
 
 async function loadConfig() {
   loading.value = true
+  configLoadError.value = ''
   try {
     const response = await llmOpsApi.getGlobalConfig()
     applyConfig(extract(response))
   } catch (error) {
-    showError(
-      errorMessage(error, t('llmOps.globalConfigPanel.errors.loadFailed'))
+    config.value = null
+    configLoadError.value = userFacingApiError(
+      error,
+      t('llmOps.globalConfigPanel.errors.loadFailed')
     )
   } finally {
     loading.value = false
@@ -500,7 +522,10 @@ async function loadLLMConfigs() {
     llmConfigs.value = Array.isArray(payload) ? payload : []
   } catch (error) {
     showError(
-      errorMessage(error, t('llmOps.globalConfigPanel.errors.llmConfigLoad'))
+      userFacingApiError(
+        error,
+        t('llmOps.globalConfigPanel.errors.llmConfigLoad')
+      )
     )
   } finally {
     llmConfigLoading.value = false
@@ -508,6 +533,7 @@ async function loadLLMConfigs() {
 }
 
 async function saveConfig() {
+  if (!config.value) return
   const missingSelectedSource =
     sourceMode.value === 'selected' && !form.price_collection_source_ids.length
   if (missingSelectedSource) {
@@ -544,7 +570,7 @@ async function saveConfig() {
     emit('saved')
   } catch (error) {
     showError(
-      errorMessage(error, t('llmOps.globalConfigPanel.errors.saveFailed'))
+      userFacingApiError(error, t('llmOps.globalConfigPanel.errors.saveFailed'))
     )
   } finally {
     saving.value = false
@@ -552,6 +578,7 @@ async function saveConfig() {
 }
 
 async function resetConfig() {
+  if (!config.value) return
   if (!window.confirm(t('llmOps.globalConfigPanel.confirm.reset'))) return
   saving.value = true
   try {
@@ -561,7 +588,10 @@ async function resetConfig() {
     emit('saved')
   } catch (error) {
     showError(
-      errorMessage(error, t('llmOps.globalConfigPanel.errors.resetFailed'))
+      userFacingApiError(
+        error,
+        t('llmOps.globalConfigPanel.errors.resetFailed')
+      )
     )
   } finally {
     saving.value = false
@@ -834,13 +864,6 @@ function extract(response) {
   const payload = response?.data?.data ?? response?.data ?? response
   return payload?.results ?? payload
 }
-
-function errorMessage(error, fallback) {
-  const data = error?.response?.data
-  if (typeof data?.detail === 'string') return data.detail
-  if (typeof data === 'string') return data
-  return error?.message || fallback
-}
 </script>
 
 <style scoped>
@@ -984,6 +1007,39 @@ function errorMessage(error, fallback) {
 .config-warning strong {
   color: #78350f;
   font-size: 0.875rem;
+}
+
+.config-load-error {
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid #fecdd3;
+  border-radius: 0.5rem;
+  color: #475569;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 1rem;
+}
+
+.config-load-error strong {
+  color: #881337;
+  font-size: 0.875rem;
+}
+
+.config-load-error p,
+.config-load-error small {
+  display: block;
+  line-height: 1.5;
+  margin: 0.25rem 0 0;
+}
+
+.config-load-error p {
+  font-size: 0.875rem;
+}
+
+.config-load-error small {
+  color: #64748b;
+  font-size: 0.75rem;
 }
 
 .schedule-editor {

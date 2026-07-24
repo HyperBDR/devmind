@@ -229,6 +229,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
 
 const props = defineProps({
@@ -672,10 +673,7 @@ function modalityLabel(value) {
 function errorMessage(error, fallback) {
   const data = error?.response?.data
   const fieldMessage = firstErrorMessage(data)
-  if (data?.detail) return data.detail
-  if (data?.message) return data.message
-  if (fieldMessage) return fieldMessage
-  return error?.message || fallback
+  return userFacingApiError(error, fieldMessage || fallback)
 }
 
 function firstErrorMessage(value, field = '') {

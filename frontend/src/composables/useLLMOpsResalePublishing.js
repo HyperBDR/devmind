@@ -38,6 +38,7 @@ export function useLLMOpsResalePublishing({
   refreshLight,
   refreshPlatformData,
   refreshProviderManagementData,
+  refreshResalePlatformSelection,
   refreshSummary,
   resalePlatforms,
   resaleWorkflowConfig,
@@ -81,12 +82,11 @@ export function useLLMOpsResalePublishing({
       localStorage.setItem('llm_ops_resale_platform', platformId)
     }
     loadResaleWorkflowConfig(platformId)
+    if (!['monitor', 'reseller'].includes(activeSection.value)) return
     if (!loading.value) {
-      if (activeSection.value === 'monitor') {
-        refreshSummary('monitor')
-      } else {
-        refreshLight()
-      }
+      refreshResalePlatformSelection(activeSection.value).catch((error) => {
+        showError(errorMessage(error, t('llmOps.dataErrors.refreshSummary')))
+      })
     }
   })
 
@@ -292,12 +292,7 @@ export function useLLMOpsResalePublishing({
       refreshLight()
       return true
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        error?.message ||
-        ''
-      showError(message || t('llmOps.messages.submitFailed'))
+      showError(errorMessage(error, t('llmOps.messages.submitFailed')))
       return false
     }
   }
@@ -375,12 +370,7 @@ export function useLLMOpsResalePublishing({
       refreshLight()
       return true
     } catch (error) {
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        error?.message ||
-        ''
-      showError(message || t('llmOps.messages.saveFailed'))
+      showError(errorMessage(error, t('llmOps.messages.saveFailed')))
       return false
     }
   }

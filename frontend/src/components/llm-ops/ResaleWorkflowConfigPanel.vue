@@ -249,6 +249,7 @@ import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import { llmOpsApi } from '@/api/llmOps'
 import { DEFAULT_WORKFLOW_POLICIES } from '@/constants/llmOpsWorkflow'
 import { useToast } from '@/composables/useToast'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   platforms: {
@@ -535,11 +536,6 @@ function clone(value) {
 }
 
 function errorMessage(error) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    ''
-  )
+  return userFacingApiError(error, '')
 }
 </script>

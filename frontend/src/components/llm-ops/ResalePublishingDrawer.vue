@@ -110,6 +110,7 @@ import { useI18n } from 'vue-i18n'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 import ResalePublishingWorkspace from '@/components/llm-ops/ResalePublishingWorkspace.vue'
 import { useToast } from '@/composables/useToast'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   open: {
@@ -230,7 +231,9 @@ async function handleSaveDraft() {
     emit('draft', latestPayload.value)
     tryClose()
   } catch (error) {
-    showError(error?.message || t('llmOps.publishingDrawer.saveFailed'))
+    showError(
+      userFacingApiError(error, t('llmOps.publishingDrawer.saveFailed'))
+    )
   } finally {
     saving.value = false
   }
@@ -243,7 +246,9 @@ async function handlePublish() {
     emit('saved', latestPayload.value)
     tryClose()
   } catch (error) {
-    showError(error?.message || t('llmOps.publishingDrawer.submitFailed'))
+    showError(
+      userFacingApiError(error, t('llmOps.publishingDrawer.submitFailed'))
+    )
   } finally {
     saving.value = false
   }

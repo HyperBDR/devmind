@@ -197,6 +197,7 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   open: {
@@ -579,12 +580,7 @@ function sourceOwnerTypeFromLegacyCategory(value) {
 }
 
 function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
+  return userFacingApiError(error, fallback)
 }
 
 function normalizeSlugField() {

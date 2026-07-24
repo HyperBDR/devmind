@@ -642,6 +642,7 @@ async function fetchVendorMetaModels() {
       status: statusFilter.value || undefined,
       modality: modalityFilter.value || undefined,
       search: searchKeyword.value.trim() || undefined,
+      ordering: '-release_date',
       page: safeCurrentPage.value,
       page_size: Number(pageSize.value) || 10
     })
@@ -671,7 +672,7 @@ async function syncMetaModels() {
   syncingMetaModels.value = true
   try {
     const response = await llmOpsApi.syncMetaModels()
-    const stats = response?.data || {}
+    const stats = paginationPayload(response)
     showSuccess(
       t('llmOps.metaModelManagement.messages.synced', {
         count: stats.models || 0
