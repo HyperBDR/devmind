@@ -20,6 +20,10 @@ const modelWorkbenchSource = readFileSync(
   new URL('../src/components/llm-ops/ModelWorkbenchPanel.vue', import.meta.url),
   'utf8'
 )
+const metaModelManagementSource = readFileSync(
+  new URL('../src/components/llm-ops/MetaModelManagement.vue', import.meta.url),
+  'utf8'
+)
 const operationErrorSources = [
   '../src/components/llm-ops/AgioneListingStatusBoard.vue',
   '../src/components/llm-ops/ChannelManagement.vue',
@@ -118,6 +122,10 @@ test('uses a guided empty state when no workbench models exist', () => {
     modelWorkbenchSource,
     /llmOps\.modelWorkbenchPanel\.emptyModelsTitle/
   )
+})
+
+test('requests meta-model drawer rows by release date descending', () => {
+  assert.match(metaModelManagementSource, /ordering:\s*'-release_date'/)
 })
 
 test('sanitizes operation errors before showing them to users', () => {

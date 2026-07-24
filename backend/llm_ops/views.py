@@ -3,15 +3,18 @@ from decimal import Decimal
 from django.db import transaction
 from django.db.models import (
     Count,
+    F,
     IntegerField,
     Max,
     OuterRef,
     Prefetch,
     Q,
     Subquery,
+    TextField,
     Value,
 )
-from django.db.models.functions import Coalesce
+from django.db.models.fields.json import KeyTextTransform
+from django.db.models.functions import Coalesce, NullIf
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
@@ -907,6 +910,27 @@ class MetaModelViewSet(
                 | Q(family__icontains=search)
                 | Q(owner_name__icontains=search)
                 | Q(owner_code__icontains=search)
+            )
+        ordering = self.request.query_params.get("ordering")
+        if self.action == "list" and ordering == "-release_date":
+            models_dev = KeyTextTransform("models_dev", "metadata")
+            release_date = NullIf(
+                KeyTextTransform("release_date", models_dev),
+                Value("", output_field=TextField()),
+            )
+            last_updated = NullIf(
+                KeyTextTransform("last_updated", models_dev),
+                Value("", output_field=TextField()),
+            )
+            return queryset.annotate(
+                release_date_sort=Coalesce(
+                    release_date,
+                    last_updated,
+                ),
+            ).order_by(
+                F("release_date_sort").desc(nulls_last=True),
+                "name",
+                "id",
             )
         return queryset.order_by("name", "id")
 

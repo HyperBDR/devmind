@@ -642,6 +642,7 @@ async function fetchVendorMetaModels() {
       status: statusFilter.value || undefined,
       modality: modalityFilter.value || undefined,
       search: searchKeyword.value.trim() || undefined,
+      ordering: '-release_date',
       page: safeCurrentPage.value,
       page_size: Number(pageSize.value) || 10
     })
