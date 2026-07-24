@@ -1006,6 +1006,11 @@
       "refreshProviders": "Failed to refresh price source data.",
       "refreshSummary": "Failed to refresh summary data."
     },
+    "errorState": {
+      "description": "Business values are hidden until the request succeeds to avoid misleading operational decisions.",
+      "retry": "Reload current page",
+      "title": "This page could not load its data"
+    },
     "publishingDrawer": {
       "back": "Back",
       "title": "Immersive Model Publishing Workspace",
@@ -1476,6 +1481,8 @@
       },
       "emptyChannelPrices": "No channel price items yet.",
       "emptyListingRecords": "No listing records yet.",
+      "emptyModelsDescription": "Sync models in Meta Models or bind models from a price source first.",
+      "emptyModelsTitle": "No models to inspect yet",
       "emptyReconciliationRecords": "No reconciliation records yet.",
       "emptyStandardPrices": "No standard price items yet.",
       "filters": {
@@ -1778,6 +1785,7 @@
       "actions": {
         "reload": "Reload",
         "reset": "Restore defaults",
+        "retry": "Retry loading",
         "save": "Save and sync tasks",
         "saving": "Saving"
       },
@@ -1789,12 +1797,14 @@
         "noPriceSources": "No model price sources are available for automatic collection."
       },
       "errors": {
+        "loadHint": "Settings have not loaded, so restore and save actions are temporarily disabled.",
         "llmConfigLoad": "Failed to load LLM configurations",
         "loadFailed": "Failed to load global settings",
         "resetFailed": "Failed to restore default settings",
         "scheduleRequired": "Select a valid execution schedule",
         "saveFailed": "Failed to save global settings",
-        "sourceRequired": "Select at least one model price source"
+        "sourceRequired": "Select at least one model price source",
+        "unavailable": "Settings are temporarily unavailable"
       },
       "fields": {
         "approvalCode": "Approval definition code",
@@ -1834,6 +1844,7 @@
         "description": "Sync official or supplier model price data.",
         "title": "Model Price Collection"
       },
+      "settingsTitle": "Sync and Integration Settings",
       "schedule": {
         "addHour": "Add run hour",
         "custom": "Custom schedule",
@@ -2909,7 +2920,7 @@
       }
     },
     "taskLogs": {
-      "title": "Collection Task Logs",
+      "title": "Task Run History",
       "description": "Records price collection task status, write counts, errors, and metadata.",
       "deletedSource": "Deleted price source",
       "actions": {

@@ -236,6 +236,7 @@ import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   open: {
@@ -426,12 +427,7 @@ function normalizePayload(payload) {
 }
 
 function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
+  return userFacingApiError(error, fallback)
 }
 </script>
 

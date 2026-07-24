@@ -1,3 +1,5 @@
+import { userFacingApiError } from './llmOpsErrors.js'
+
 const LIST_PAGE_SIZE = 200
 
 export const LIST_PARAMS = { page_size: LIST_PAGE_SIZE }
@@ -62,10 +64,5 @@ export async function fetchFirstPage(request, params = {}) {
 }
 
 export function errorMessage(error, fallback) {
-  return (
-    error?.response?.data?.detail ||
-    error?.response?.data?.message ||
-    error?.message ||
-    fallback
-  )
+  return userFacingApiError(error, fallback)
 }

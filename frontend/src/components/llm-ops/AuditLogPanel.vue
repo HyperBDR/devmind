@@ -72,8 +72,11 @@
     </div>
 
     <div class="panel audit-table-panel">
-      <div v-if="errorMessage" class="audit-error">
-        {{ errorMessage }}
+      <div v-if="errorMessage" class="audit-error" role="alert">
+        <span>{{ errorMessage }}</span>
+        <button type="button" @click="loadAuditLogs">
+          {{ t('llmOps.errorState.retry') }}
+        </button>
       </div>
 
       <div class="audit-table-scroll">
@@ -312,6 +315,7 @@ import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   channels: {
@@ -643,11 +647,10 @@ async function loadAuditLogs() {
   } catch (error) {
     rows.value = []
     totalCount.value = 0
-    errorMessage.value =
-      error?.response?.data?.detail ||
-      error?.response?.data?.message ||
-      error?.message ||
+    errorMessage.value = userFacingApiError(
+      error,
       t('llmOps.auditLog.errors.loadFailed')
+    )
   } finally {
     loading.value = false
   }

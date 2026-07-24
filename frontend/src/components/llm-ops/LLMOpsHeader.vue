@@ -38,23 +38,31 @@
         </p>
       </div>
       <div v-if="showHeroActions" class="page-hero-actions">
-        <div v-if="showGlobalToolbar" class="page-hero-group">
-          <div class="currency-control page-toolbar-control">
+        <div v-if="toolbar.currency || toolbar.refresh" class="page-hero-group">
+          <div
+            v-if="toolbar.currency"
+            class="currency-control page-toolbar-control"
+          >
             <span>{{ t('llmOps.toolbar.displayCurrency') }}</span>
             <CompactSelect
               v-model="displayCurrencyModel"
               :options="displayCurrencyOptions"
               class-name="w-28"
+              :disabled="actionsDisabled"
               size="sm"
             />
           </div>
-          <span v-if="exchangeRateLabel" class="page-toolbar-chip">
+          <span
+            v-if="toolbar.currency && exchangeRateLabel"
+            class="page-toolbar-chip"
+          >
             {{ exchangeRateLabel }}
           </span>
           <button
+            v-if="toolbar.refresh"
             type="button"
             class="btn-secondary page-toolbar-button refresh-action-button btn-action-refresh"
-            :disabled="loading"
+            :disabled="loading || actionsDisabled"
             @click="$emit('refresh')"
           >
             <svg
@@ -82,6 +90,7 @@
               v-model="selectedResalePlatformIdModel"
               :options="resalePlatformOptions"
               class-name="w-56"
+              :disabled="actionsDisabled"
               :menu-min-width="260"
               size="sm"
             />
@@ -90,6 +99,7 @@
             <button
               type="button"
               class="btn-secondary page-toolbar-button btn-action-config"
+              :disabled="actionsDisabled"
               @click="$emit('open-platform', agionePlatform)"
             >
               {{ t('llmOps.toolbar.platformConfig') }}
@@ -97,6 +107,7 @@
             <button
               type="button"
               class="btn-primary page-toolbar-button btn-action-create"
+              :disabled="actionsDisabled"
               @click="$emit('open-platform', null)"
             >
               {{ t('llmOps.toolbar.createPlatform') }}
@@ -113,6 +124,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import { toolbarForSection } from '@/utils/llmOpsSectionData'
 
 const props = defineProps({
   activeNav: {
@@ -122,6 +134,10 @@ const props = defineProps({
   activeSection: {
     type: String,
     required: true
+  },
+  actionsDisabled: {
+    type: Boolean,
+    default: false
   },
   agionePlatform: {
     type: Object,
@@ -182,8 +198,9 @@ const showPlatformControl = computed(() =>
   ['monitor', 'reseller'].includes(props.activeSection)
 )
 const showPlatformActions = computed(() => props.activeSection === 'reseller')
-const showGlobalToolbar = computed(() => props.activeSection !== 'workflow')
+const toolbar = computed(() => toolbarForSection(props.activeSection))
 const showHeroActions = computed(
-  () => showGlobalToolbar.value || showPlatformControl.value
+  () =>
+    toolbar.value.currency || toolbar.value.refresh || showPlatformControl.value
 )
 </script>

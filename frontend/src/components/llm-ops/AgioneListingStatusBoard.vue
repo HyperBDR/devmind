@@ -364,6 +364,7 @@ import { useAgioneListingExport } from '@/composables/useAgioneListingExport'
 import { useAgioneListingSelection } from '@/composables/useAgioneListingSelection'
 import { useToast } from '@/composables/useToast'
 import { useAgioneListingRows } from '@/composables/useAgioneListingRows'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const props = defineProps({
   agionePlatform: {
@@ -610,12 +611,7 @@ async function handleDirectAction(row, kind) {
     }
     emit('refresh')
   } catch (error) {
-    const message =
-      error?.response?.data?.detail ||
-      error?.response?.data?.message ||
-      error?.message ||
-      ''
-    showError(message || actionErrorLabel(kind))
+    showError(userFacingApiError(error, actionErrorLabel(kind)))
   } finally {
     savingListings.value = false
   }
@@ -676,12 +672,7 @@ async function handleBatchAction(kind) {
     )
     emit('refresh')
   } catch (error) {
-    const message =
-      error?.response?.data?.detail ||
-      error?.response?.data?.message ||
-      error?.message ||
-      ''
-    showError(message || actionErrorLabel(kind))
+    showError(userFacingApiError(error, actionErrorLabel(kind)))
   } finally {
     savingListings.value = false
   }

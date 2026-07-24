@@ -1014,6 +1014,11 @@
       "refreshProviders": "刷新价格源数据失败。",
       "refreshSummary": "刷新汇总数据失败。"
     },
+    "errorState": {
+      "description": "当前内容未显示为零值或空数据，以避免影响运营判断。",
+      "retry": "重新加载当前页面",
+      "title": "当前页面数据加载失败"
+    },
     "publishingDrawer": {
       "back": "返回",
       "title": "模型沉浸式上架工作台",
@@ -1484,6 +1489,8 @@
       },
       "emptyChannelPrices": "暂无渠道价格项。",
       "emptyListingRecords": "暂无挂售记录。",
+      "emptyModelsDescription": "请先在元模型库同步模型，或在模型价格源中完成模型绑定。",
+      "emptyModelsTitle": "还没有可查看的模型",
       "emptyReconciliationRecords": "暂无对账记录。",
       "emptyStandardPrices": "暂无标准价格项。",
       "filters": {
@@ -1786,6 +1793,7 @@
       "actions": {
         "reload": "重新加载",
         "reset": "恢复默认",
+        "retry": "重试加载",
         "save": "保存并同步任务",
         "saving": "保存中"
       },
@@ -1797,12 +1805,14 @@
         "noPriceSources": "暂无可用于自动采集的模型价格源。"
       },
       "errors": {
+        "loadHint": "配置尚未载入，恢复默认和保存操作已暂时停用。",
         "llmConfigLoad": "加载 LLM 配置失败",
         "loadFailed": "加载全局配置失败",
         "resetFailed": "恢复默认配置失败",
         "scheduleRequired": "请选择有效的执行周期",
         "saveFailed": "保存全局配置失败",
-        "sourceRequired": "请至少选择一个模型价格源"
+        "sourceRequired": "请至少选择一个模型价格源",
+        "unavailable": "暂时无法读取配置"
       },
       "fields": {
         "approvalCode": "审批定义 Code",
@@ -1842,6 +1852,7 @@
         "description": "同步官方或供货商模型价格数据。",
         "title": "模型价格采集"
       },
+      "settingsTitle": "同步与集成设置",
       "schedule": {
         "addHour": "添加执行小时",
         "custom": "自定义周期",
@@ -2917,7 +2928,7 @@
       }
     },
     "taskLogs": {
-      "title": "采集任务日志",
+      "title": "任务运行记录",
       "description": "记录价格采集任务的运行状态、写入数量、错误和采集元数据。",
       "deletedSource": "已删除价格源",
       "actions": {
