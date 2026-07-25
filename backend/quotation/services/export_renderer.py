@@ -18,7 +18,14 @@ from django.db import IntegrityError, transaction
 from openpyxl import Workbook, load_workbook
 from openpyxl.drawing.image import Image as SpreadsheetImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import (
+    absolute_coordinate,
+    coordinate_to_tuple,
+    get_column_letter,
+    quote_sheetname,
+)
 from openpyxl.workbook.defined_name import DefinedName
+from openpyxl.worksheet.cell_range import CellRange
 from openpyxl.writer.excel import ExcelWriter
 from PIL import Image as PillowImage
 from PIL import UnidentifiedImageError
@@ -30,8 +37,10 @@ from quotation.services.storage import (
     write_document_atomic,
 )
 
-DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
-DEFAULT_TEMPLATE_VERSION = 1
+LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
+DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
+DEFAULT_TEMPLATE_VERSION = 2
+CURRENT_RENDERER_VERSION = "openpyxl-libreoffice-v2"
 DEFAULT_WORKSHEET = "Quotation"
 REQUIRED_TEMPLATE_NAMES = {
     "billing_company",
@@ -56,6 +65,7 @@ REQUIRED_TEMPLATE_NAMES = {
     "subtotal_before_vat",
     "vat_amount",
 }
+OPTIONAL_TEMPLATE_NAMES = {"tax_label", "vat_rate"}
 
 
 class TemplateValidationError(ValueError):
@@ -130,8 +140,10 @@ def _add_defined_name(
     )
 
 
-def build_default_template_bytes() -> bytes:
-    """Build the managed fallback template used on fresh deployments."""
+def _build_managed_template_bytes(*, version: int) -> bytes:
+    """Build one managed template version for creation or identification."""
+    if version not in {1, DEFAULT_TEMPLATE_VERSION}:
+        raise ValueError("unsupported managed template version")
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = DEFAULT_WORKSHEET
@@ -199,9 +211,16 @@ def build_default_template_bytes() -> bytes:
         )
 
     sheet["F12"] = "Subtotal"
-    sheet["F13"] = "Tax"
+    if version == 1:
+        sheet["F13"] = "Tax"
+    else:
+        sheet["E13"] = "Tax"
+        sheet["F13"] = "Rate"
     sheet["F14"] = "Grand Total"
     for row in range(12, 15):
+        if version >= DEFAULT_TEMPLATE_VERSION:
+            sheet.cell(row=row, column=5).font = Font(bold=True)
+            sheet.cell(row=row, column=5).border = border
         sheet.cell(row=row, column=6).font = Font(bold=True)
         sheet.cell(row=row, column=7).font = Font(bold=True)
         sheet.cell(row=row, column=6).border = border
@@ -242,6 +261,13 @@ def build_default_template_bytes() -> bytes:
         "issuer_contact_email": "E18",
         "issuer_signature": "E20",
     }
+    if version >= DEFAULT_TEMPLATE_VERSION:
+        names.update(
+            {
+                "tax_label": "E13",
+                "vat_rate": "F13",
+            }
+        )
     for name, coordinate in names.items():
         _add_defined_name(workbook, name, coordinate)
 
@@ -252,9 +278,43 @@ def build_default_template_bytes() -> bytes:
     sheet.page_setup.fitToHeight = 0
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
 
-    output = BytesIO()
-    workbook.save(output)
-    return output.getvalue()
+    stable_timestamp = datetime(2000, 1, 1)
+    workbook.properties.created = stable_timestamp
+    workbook.properties.modified = stable_timestamp
+    return _save_workbook_deterministic(workbook)
+
+
+def build_default_template_bytes() -> bytes:
+    """Build the managed fallback template used on fresh deployments."""
+    return _build_managed_template_bytes(version=DEFAULT_TEMPLATE_VERSION)
+
+
+def _template_fingerprint(content: bytes) -> str:
+    """Hash workbook semantics while ignoring generated timestamps."""
+    workbook = load_workbook(BytesIO(content), read_only=False)
+    try:
+        stable_timestamp = datetime(2000, 1, 1)
+        workbook.properties.created = stable_timestamp
+        workbook.properties.modified = stable_timestamp
+        normalized = _save_workbook_deterministic(workbook)
+    finally:
+        workbook.close()
+    return sha256(normalized).hexdigest()
+
+
+def _is_legacy_managed_template(template: QuotationTemplate) -> bool:
+    """Identify the shipped v1 template by immutable workbook content."""
+    if template.version != 1 or template.name not in {
+        LEGACY_DEFAULT_TEMPLATE_NAME,
+        DEFAULT_TEMPLATE_NAME,
+    }:
+        return False
+    try:
+        content = template_path(template).read_bytes()
+        expected = _build_managed_template_bytes(version=1)
+        return _template_fingerprint(content) == _template_fingerprint(expected)
+    except (OSError, TemplateValidationError):
+        return False
 
 
 def validate_template_bytes(content: bytes) -> None:
@@ -330,7 +390,7 @@ def ensure_default_template(*, created_by=None) -> QuotationTemplate:
         .order_by("-version", "id")
         .first()
     )
-    if active is not None:
+    if active is not None and not _is_legacy_managed_template(active):
         return active
 
     content = build_default_template_bytes()
@@ -345,7 +405,47 @@ def ensure_default_template(*, created_by=None) -> QuotationTemplate:
     template.storage_key = template_storage_key(template.id)
     write_document_atomic(content, template.storage_key)
     try:
-        template.save(force_insert=True)
+        with transaction.atomic():
+            current = (
+                QuotationTemplate.objects.select_for_update()
+                .filter(status=QuotationTemplateStatus.ACTIVE)
+                .order_by("-version", "id")
+                .first()
+            )
+            if current is not None and not _is_legacy_managed_template(current):
+                selected = current
+            else:
+                existing = (
+                    QuotationTemplate.objects.select_for_update()
+                    .filter(
+                        name=DEFAULT_TEMPLATE_NAME,
+                        version=DEFAULT_TEMPLATE_VERSION,
+                    )
+                    .first()
+                )
+                if (
+                    existing is not None
+                    and existing.content_hash != template.content_hash
+                ):
+                    raise TemplateValidationError(
+                        "Managed default template version conflicts with "
+                        "different content",
+                        code="default_template_version_conflict",
+                    )
+                if current is not None:
+                    current.status = QuotationTemplateStatus.ARCHIVED
+                    current.save(
+                        update_fields=["status", "updated_at"],
+                    )
+                if existing is not None:
+                    existing.status = QuotationTemplateStatus.ACTIVE
+                    existing.save(
+                        update_fields=["status", "updated_at"],
+                    )
+                    selected = existing
+                else:
+                    template.save(force_insert=True)
+                    selected = template
     except IntegrityError:
         delete_document(template.storage_key)
         active = (
@@ -357,27 +457,13 @@ def ensure_default_template(*, created_by=None) -> QuotationTemplate:
         )
         if active is not None:
             return active
-        template = QuotationTemplate.objects.filter(
-            name=DEFAULT_TEMPLATE_NAME,
-            version=DEFAULT_TEMPLATE_VERSION,
-        ).first()
-        if template is None:
-            raise
-        try:
-            template.status = QuotationTemplateStatus.ACTIVE
-            template.save(update_fields=["status", "updated_at"])
-        except IntegrityError:
-            active = (
-                QuotationTemplate.objects.filter(
-                    status=QuotationTemplateStatus.ACTIVE,
-                )
-                .order_by("-version", "id")
-                .first()
-            )
-            if active is None:
-                raise
-            return active
-    return template
+        raise
+    except Exception:
+        delete_document(template.storage_key)
+        raise
+    if selected.pk != template.pk:
+        delete_document(template.storage_key)
+    return selected
 
 
 def register_template_version(
@@ -450,6 +536,75 @@ def _copy_row_style(sheet, source_row: int, target_row: int) -> None:
         target.number_format = source.number_format
         target.alignment = copy(source.alignment)
         target.protection = copy(source.protection)
+    source_height = sheet.row_dimensions[source_row].height
+    sheet.row_dimensions[target_row].height = source_height
+
+
+def _insert_rows_preserving_layout(
+    workbook,
+    sheet,
+    row: int,
+    amount: int,
+) -> None:
+    """Insert template rows and move layout metadata openpyxl leaves stale."""
+    shifted_dimensions = []
+    for dimension_row, dimension in list(sheet.row_dimensions.items()):
+        if dimension_row < row:
+            continue
+        shifted = copy(dimension)
+        shifted.index = dimension_row + amount
+        shifted_dimensions.append((dimension_row, shifted))
+
+    shifted_merges = []
+    for merged_range in list(sheet.merged_cells.ranges):
+        if merged_range.max_row < row:
+            continue
+        current = CellRange(str(merged_range))
+        sheet.unmerge_cells(str(merged_range))
+        if current.min_row >= row:
+            current.shift(row_shift=amount)
+        else:
+            current.max_row += amount
+        shifted_merges.append(str(current))
+
+    sheet.insert_rows(row, amount=amount)
+    for dimension_row, _dimension in shifted_dimensions:
+        del sheet.row_dimensions[dimension_row]
+    for _dimension_row, dimension in shifted_dimensions:
+        sheet.row_dimensions[dimension.index] = dimension
+    for merged_range in shifted_merges:
+        sheet.merge_cells(merged_range)
+
+    for drawing in [*sheet._images, *sheet._charts]:
+        anchor = drawing.anchor
+        if isinstance(anchor, str):
+            anchor_row, anchor_column = coordinate_to_tuple(anchor)
+            if anchor_row >= row:
+                drawing.anchor = (
+                    f"{get_column_letter(anchor_column)}" f"{anchor_row + amount}"
+                )
+            continue
+        for marker_name in ("_from", "to"):
+            marker = getattr(anchor, marker_name, None)
+            if marker is not None and marker.row >= row - 1:
+                marker.row += amount
+
+    template_names = REQUIRED_TEMPLATE_NAMES | OPTIONAL_TEMPLATE_NAMES
+    for name in template_names:
+        definition = workbook.defined_names.get(name)
+        destinations = list(definition.destinations) if definition else []
+        if len(destinations) != 1:
+            continue
+        sheet_name, coordinate = destinations[0]
+        if sheet_name != sheet.title:
+            continue
+        target = CellRange(coordinate.replace("$", ""))
+        if target.min_row < row:
+            continue
+        target.shift(row_shift=amount)
+        sheet_reference = quote_sheetname(sheet.title)
+        cell_reference = absolute_coordinate(str(target))
+        definition.attr_text = f"{sheet_reference}!{cell_reference}"
 
 
 def _signature_image(data_url: str) -> SpreadsheetImage | None:
@@ -534,11 +689,16 @@ def render_quotation_xlsx(
         "project_name": snapshot.get("project_name", ""),
         "payment_terms": snapshot.get("payment_terms", ""),
         "currency": snapshot.get("currency", ""),
+        "tax_label": snapshot.get("tax_label", ""),
+        "vat_rate": f"{snapshot.get('vat_rate') or '0'}%",
         "remarks_disclaimer": snapshot.get("remarks_disclaimer", ""),
         "issuer_contact_name": snapshot.get("issuer_contact_name", ""),
         "issuer_contact_email": snapshot.get("issuer_contact_email", ""),
     }
     for name, value in scalar_values.items():
+        definition = workbook.defined_names.get(name)
+        if name in OPTIONAL_TEMPLATE_NAMES and definition is None:
+            continue
         sheet, coordinate = _defined_cell(workbook, name)
         sheet[coordinate] = value
 
@@ -551,7 +711,12 @@ def render_quotation_xlsx(
     render_items = items or [{}]
     extra_rows = max(len(render_items) - 1, 0)
     if extra_rows:
-        item_sheet.insert_rows(item_start_row + 1, amount=extra_rows)
+        _insert_rows_preserving_layout(
+            workbook,
+            item_sheet,
+            item_start_row + 1,
+            extra_rows,
+        )
         for offset in range(1, extra_rows + 1):
             _copy_row_style(
                 item_sheet,
@@ -566,11 +731,8 @@ def render_quotation_xlsx(
             "issuer_signature",
         )
         signature_cell = signature_sheet[signature_coordinate]
-        signature_row = signature_cell.row
-        if signature_sheet == item_sheet and signature_row > item_start_row:
-            signature_row += extra_rows
         signature.anchor = signature_sheet.cell(
-            row=signature_row,
+            row=signature_cell.row,
             column=signature_cell.column,
         ).coordinate
         signature_sheet.add_image(signature)
@@ -594,11 +756,7 @@ def render_quotation_xlsx(
     for name in ("subtotal_before_vat", "vat_amount", "grand_total"):
         sheet, coordinate = _defined_cell(workbook, name)
         original = sheet[coordinate]
-        target = sheet.cell(
-            row=original.row + extra_rows,
-            column=original.column,
-        )
-        target.value = snapshot.get(name, "0")
+        original.value = snapshot.get(name, "0")
     item_sheet.print_area = f"A1:G{item_sheet.max_row}"
 
     try:

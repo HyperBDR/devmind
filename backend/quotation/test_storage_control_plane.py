@@ -4,15 +4,17 @@ from unittest.mock import Mock
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
-
 from quotation.metrics import storage_metrics_snapshot
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
     DocumentReplica,
     DocumentType,
+    RemoteFileCleanup,
+    RemoteFileCleanupStatus,
     ReplicaSyncStatus,
     StorageAuthMode,
     StorageConnection,
@@ -25,6 +27,8 @@ from quotation.services.storage_control import (
     FeishuStorageProvider,
     StorageRoute,
     StorageRouter,
+    delete_owned_replicas_after_commit,
+    preserve_remote_file_reference,
     register_uploaded_replica,
 )
 
@@ -113,6 +117,197 @@ class StorageControlPlaneTests(TestCase):
             ).exists()
         )
 
+    def test_repeated_upload_registration_preserves_remote_ownership(self):
+        asset = DocumentAsset.objects.create(
+            doc_type=DocumentType.PDF,
+            file_name="Owned.pdf",
+            mime_type="application/pdf",
+            storage_key="documents/owned.pdf",
+        )
+        request = RequestFactory().post("/api/v1/quotation/feishu/upload")
+        request.user = self.user
+        route = StorageRoute(
+            connection=self.connection,
+            mount=self.mount,
+            provider=StorageRouter().resolve().provider,
+        )
+        values = {
+            "request": request,
+            "asset": asset,
+            "route": route,
+            "remote_file_token": "owned-file",
+            "remote_url": "https://example.feishu.cn/file/owned-file",
+            "folder_token": "folder-a",
+        }
+
+        register_uploaded_replica(
+            **values,
+            remote_file_owned=True,
+        )
+        replica = register_uploaded_replica(
+            **values,
+            remote_file_owned=False,
+        )
+
+        self.assertTrue(replica.metadata["remote_file_owned"])
+
+    def test_new_reference_cancels_pending_remote_cleanup(self):
+        cleanup = RemoteFileCleanup.objects.create(
+            connection=self.connection,
+            remote_file_token="pending-file",
+        )
+
+        preserve_remote_file_reference(
+            "pending-file",
+            connection=self.connection,
+            owned=False,
+        )
+
+        cleanup.refresh_from_db()
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.CANCELLED)
+        self.assertIsNotNone(cleanup.processed_at)
+
+    def test_reuse_rejects_already_deleted_remote_file(self):
+        RemoteFileCleanup.objects.create(
+            connection=self.connection,
+            remote_file_token="deleted-file",
+            status=RemoteFileCleanupStatus.COMPLETED,
+        )
+
+        with self.assertRaises(FeishuAPIError):
+            preserve_remote_file_reference(
+                "deleted-file",
+                connection=self.connection,
+                owned=False,
+            )
+
+    def test_first_reference_creates_remote_file_lock(self):
+        preserve_remote_file_reference(
+            "first-reference",
+            connection=self.connection,
+            owned=False,
+        )
+
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="first-reference",
+        )
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.CANCELLED)
+        self.assertEqual(cleanup.connection, self.connection)
+
+    def test_unowned_reference_does_not_replace_owner_connection(self):
+        other_connection = StorageConnection.objects.create(
+            display_name="Feishu Organization B",
+            external_tenant_id="tenant-b",
+            app_id="app-b",
+            app_secret="secret-b",
+        )
+        preserve_remote_file_reference(
+            "owner-connection-file",
+            connection=self.connection,
+            owned=True,
+        )
+
+        preserve_remote_file_reference(
+            "owner-connection-file",
+            connection=other_connection,
+            owned=False,
+        )
+
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="owner-connection-file",
+        )
+        self.assertEqual(cleanup.connection, self.connection)
+
+    def test_replica_cleanup_uses_actual_upload_connection(self):
+        other_connection = StorageConnection.objects.create(
+            display_name="Feishu Organization B",
+            external_tenant_id="tenant-b",
+            app_id="app-b",
+            app_secret="secret-b",
+        )
+        other_mount = StorageMount.objects.create(
+            connection=other_connection,
+            purpose=StorageMountPurpose.QUOTATION_ARCHIVE,
+            root_folder_token="folder-b",
+        )
+        asset = DocumentAsset.objects.create(
+            doc_type=DocumentType.PDF,
+            file_name="Cross-route.pdf",
+            mime_type="application/pdf",
+            storage_key="documents/cross-route.pdf",
+        )
+        request = RequestFactory().post("/api/v1/quotation/feishu/upload")
+        request.user = self.user
+        route = StorageRoute(
+            connection=other_connection,
+            mount=other_mount,
+            provider=FeishuStorageProvider(other_connection),
+        )
+
+        replica = register_uploaded_replica(
+            request=request,
+            asset=asset,
+            route=route,
+            remote_file_token="cross-route-file",
+            remote_url="https://example.feishu.cn/file/cross-route-file",
+            folder_token="folder-a",
+            remote_file_owned=True,
+            remote_file_owner_connection=self.connection,
+        )
+        delete_owned_replicas_after_commit([replica])
+
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="cross-route-file",
+        )
+        self.assertEqual(replica.connection, other_connection)
+        self.assertEqual(
+            replica.metadata["remote_file_owner_connection_id"],
+            self.connection.id,
+        )
+        self.assertEqual(cleanup.connection, self.connection)
+
+    def test_cancelled_cleanup_keeps_ownership_for_last_reference(self):
+        asset = DocumentAsset.objects.create(
+            doc_type=DocumentType.PDF,
+            file_name="Inherited-owner.pdf",
+            mime_type="application/pdf",
+            storage_key="documents/inherited-owner.pdf",
+        )
+        request = RequestFactory().post("/api/v1/quotation/feishu/upload")
+        request.user = self.user
+        RemoteFileCleanup.objects.create(
+            connection=self.connection,
+            remote_file_token="inherited-owner-file",
+            owned=True,
+        )
+        route = StorageRoute(
+            connection=self.connection,
+            mount=self.mount,
+            provider=FeishuStorageProvider(self.connection),
+        )
+
+        replica = register_uploaded_replica(
+            request=request,
+            asset=asset,
+            route=route,
+            remote_file_token="inherited-owner-file",
+            remote_url=("https://example.feishu.cn/file/inherited-owner-file"),
+            folder_token="folder-a",
+            remote_file_owned=False,
+        )
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="inherited-owner-file",
+        )
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.CANCELLED)
+        self.assertTrue(cleanup.owned)
+        self.assertFalse(replica.metadata["remote_file_owned"])
+
+        delete_owned_replicas_after_commit([replica])
+
+        cleanup.refresh_from_db()
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.PENDING)
+        self.assertTrue(cleanup.owned)
+
     def test_external_call_records_low_cardinality_metrics(self):
         with _external_call("GET drive.file.meta", self.connection.id):
             pass
@@ -145,15 +340,11 @@ class StorageControlPlaneTests(TestCase):
         with self.assertRaises(FeishuAPIError):
             provider.access_token()
 
-        event = AuditEvent.objects.get(
-            event_name="feishu.oauth.refresh_failed"
-        )
+        event = AuditEvent.objects.get(event_name="feishu.oauth.refresh_failed")
         self.assertEqual(event.storage_connection_id, connection.id)
         self.assertEqual(event.error_code, "feishu_10014")
         self.assertTrue(
-            event.security_alerts.filter(
-                rule="credential_refresh_failure"
-            ).exists()
+            event.security_alerts.filter(rule="credential_refresh_failure").exists()
         )
 
     @override_settings(
@@ -182,6 +373,15 @@ class StorageControlPlaneTests(TestCase):
         )
 
         self.assertTrue(DocumentReplica.objects.filter(asset=asset).exists())
+        connection = StorageConnection.objects.get(
+            external_tenant_id="legacy-default",
+        )
+        cleanup = RemoteFileCleanup.objects.create(
+            connection=connection,
+            remote_file_token="legacy-cleanup-token",
+            owned=True,
+            status=RemoteFileCleanupStatus.CANCELLED,
+        )
 
         call_command(
             "migrate_feishu_control_plane",
@@ -191,6 +391,41 @@ class StorageControlPlaneTests(TestCase):
         asset.refresh_from_db()
         self.assertFalse(DocumentReplica.objects.filter(asset=asset).exists())
         self.assertEqual(asset.feishu_file_token, "legacy-file-token")
+        self.assertFalse(RemoteFileCleanup.objects.filter(pk=cleanup.pk).exists())
+        self.assertFalse(StorageConnection.objects.filter(pk=connection.pk).exists())
+
+    def test_legacy_mapping_rollback_rejects_pending_owned_cleanup(self):
+        connection = StorageConnection.objects.create(
+            display_name="Legacy Feishu archive",
+            external_tenant_id="legacy-default",
+            metadata={"migration_marker": "legacy_file_token_v1"},
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="legacy-folder-token",
+            root_folder_name="Configured archive folder",
+            purpose=StorageMountPurpose.QUOTATION_ARCHIVE,
+            metadata={"migration_marker": "legacy_file_token_v1"},
+        )
+        cleanup = RemoteFileCleanup.objects.create(
+            connection=connection,
+            remote_file_token="pending-cleanup-token",
+            owned=True,
+            status=RemoteFileCleanupStatus.PENDING,
+        )
+
+        with self.assertRaisesMessage(
+            CommandError,
+            "owned remote file cleanups are pending",
+        ):
+            call_command(
+                "migrate_feishu_control_plane",
+                "--rollback",
+                stdout=StringIO(),
+            )
+
+        self.assertTrue(StorageMount.objects.filter(pk=mount.pk).exists())
+        self.assertTrue(RemoteFileCleanup.objects.filter(pk=cleanup.pk).exists())
 
     @override_settings(
         FEISHU_APP_ID="",

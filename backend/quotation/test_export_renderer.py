@@ -8,12 +8,18 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.test import TestCase, override_settings
 from openpyxl import load_workbook
+from openpyxl.drawing.image import Image as SpreadsheetImage
+from quotation.models import QuotationTemplate
 from quotation.services.export_renderer import (
+    DEFAULT_TEMPLATE_NAME,
+    LEGACY_DEFAULT_TEMPLATE_NAME,
     TemplateValidationError,
+    _build_managed_template_bytes,
     _signature_image,
     build_default_template_bytes,
     convert_xlsx_to_pdf,
     ensure_default_template,
+    register_template_version,
     render_quotation_xlsx,
     validate_template_bytes,
 )
@@ -54,6 +60,8 @@ class QuotationTemplateRendererTests(TestCase):
             "issuer_company_name": "OnePro Cloud Limited",
             "issuer_contact_name": "Owner",
             "issuer_contact_email": "owner@example.com",
+            "tax_label": "GST",
+            "vat_rate": "10.00",
             "subtotal_before_vat": "300.00",
             "vat_amount": "30.00",
             "grand_total": "330.00",
@@ -88,7 +96,88 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertEqual(sheet["B12"].value, "Service")
         self.assertEqual(sheet["G13"].value, "300.00")
         self.assertEqual(sheet["G15"].value, "330.00")
+        self.assertEqual(named_value(workbook, "tax_label"), "GST")
+        self.assertEqual(named_value(workbook, "vat_rate"), "10.00%")
+        self.assertEqual(
+            named_value(workbook, "remarks_disclaimer"),
+            "Immutable snapshot",
+        )
+        merged_ranges = {str(item) for item in sheet.merged_cells.ranges}
+        self.assertIn("B17:G17", merged_ranges)
+        self.assertIn("E21:G23", merged_ranges)
         self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$23")
+
+    def test_default_template_upgrades_legacy_active_version(self):
+        legacy = register_template_version(
+            name=LEGACY_DEFAULT_TEMPLATE_NAME,
+            version=1,
+            content=_build_managed_template_bytes(version=1),
+            status="active",
+        )
+
+        upgraded = ensure_default_template()
+
+        legacy.refresh_from_db()
+        self.assertEqual(legacy.status, "archived")
+        self.assertEqual(upgraded.version, 2)
+        self.assertEqual(upgraded.name, DEFAULT_TEMPLATE_NAME)
+        content = render_quotation_xlsx(
+            upgraded,
+            {"tax_label": "GST", "vat_rate": "10.00"},
+        )
+        rendered = load_workbook(io.BytesIO(content))
+        self.assertEqual(named_value(rendered, "tax_label"), "GST")
+        self.assertEqual(named_value(rendered, "vat_rate"), "10.00%")
+        rendered.close()
+
+    def test_default_template_preserves_same_name_custom_version_one(self):
+        workbook = load_workbook(io.BytesIO(_build_managed_template_bytes(version=1)))
+        workbook["Quotation"]["A1"] = "Custom Issuer"
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        custom = register_template_version(
+            name=LEGACY_DEFAULT_TEMPLATE_NAME,
+            version=1,
+            content=output.getvalue(),
+            status="active",
+        )
+
+        selected = ensure_default_template()
+
+        custom.refresh_from_db()
+        self.assertEqual(selected, custom)
+        self.assertEqual(custom.status, "active")
+        self.assertFalse(
+            QuotationTemplate.objects.filter(
+                name=DEFAULT_TEMPLATE_NAME,
+                version=2,
+            ).exists()
+        )
+
+    def test_default_template_does_not_activate_conflicting_draft(self):
+        legacy = register_template_version(
+            name=LEGACY_DEFAULT_TEMPLATE_NAME,
+            version=1,
+            content=_build_managed_template_bytes(version=1),
+            status="active",
+        )
+        register_template_version(
+            name=DEFAULT_TEMPLATE_NAME,
+            version=2,
+            content=build_default_template_bytes() + b"different",
+            status="draft",
+        )
+
+        with self.assertRaises(TemplateValidationError) as raised:
+            ensure_default_template()
+
+        legacy.refresh_from_db()
+        self.assertEqual(
+            raised.exception.code,
+            "default_template_version_conflict",
+        )
+        self.assertEqual(legacy.status, "active")
 
     def test_default_template_embeds_snapshot_signature_image(self):
         template = ensure_default_template()
@@ -109,6 +198,84 @@ class QuotationTemplateRendererTests(TestCase):
         sheet = workbook["Quotation"]
         self.assertIn("issuer_signature", workbook.defined_names)
         self.assertEqual(len(sheet._images), 1)
+
+    def test_legacy_template_without_tax_ranges_remains_renderable(self):
+        workbook = load_workbook(io.BytesIO(build_default_template_bytes()))
+        del workbook.defined_names["tax_label"]
+        del workbook.defined_names["vat_rate"]
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        template = register_template_version(
+            name="Legacy quotation",
+            version=1,
+            content=output.getvalue(),
+            status="active",
+        )
+
+        content = render_quotation_xlsx(
+            template,
+            {"tax_label": "GST", "vat_rate": "10.00"},
+        )
+
+        rendered = load_workbook(io.BytesIO(content))
+        self.assertNotIn("tax_label", rendered.defined_names)
+        self.assertNotIn("vat_rate", rendered.defined_names)
+        rendered.close()
+
+    def test_dynamic_rows_shift_row_dimensions_below_line_items(self):
+        workbook = load_workbook(io.BytesIO(build_default_template_bytes()))
+        workbook["Quotation"].row_dimensions[16].height = 44
+        workbook["Quotation"].row_dimensions[20].hidden = True
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        template = register_template_version(
+            name="Sized quotation",
+            version=1,
+            content=output.getvalue(),
+            status="active",
+        )
+
+        content = render_quotation_xlsx(
+            template,
+            {"items": [{"line_no": 1}, {"line_no": 2}]},
+        )
+
+        rendered = load_workbook(io.BytesIO(content))
+        sheet = rendered["Quotation"]
+        self.assertEqual(sheet.row_dimensions[17].height, 44)
+        self.assertTrue(sheet.row_dimensions[21].hidden)
+        rendered.close()
+
+    def test_dynamic_rows_shift_existing_images_below_line_items(self):
+        png_bytes = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC"
+            "AAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+        )
+        workbook = load_workbook(io.BytesIO(build_default_template_bytes()))
+        image = SpreadsheetImage(io.BytesIO(png_bytes))
+        image.anchor = "B16"
+        workbook["Quotation"].add_image(image)
+        output = io.BytesIO()
+        workbook.save(output)
+        workbook.close()
+        template = register_template_version(
+            name="Image quotation",
+            version=1,
+            content=output.getvalue(),
+            status="active",
+        )
+
+        content = render_quotation_xlsx(
+            template,
+            {"items": [{"line_no": 1}, {"line_no": 2}]},
+        )
+
+        rendered = load_workbook(io.BytesIO(content))
+        rendered_image = rendered["Quotation"]._images[0]
+        self.assertEqual(rendered_image.anchor._from.row, 16)
+        rendered.close()
 
     def test_same_template_and_snapshot_produce_identical_xlsx(self):
         template = ensure_default_template()

@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from time import perf_counter
 from types import SimpleNamespace
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
-from django.db import OperationalError
+from django.db import OperationalError, transaction
 from django.utils import timezone
 from quotation.metrics import record_export_operation
 from quotation.models import (
     DocumentAsset,
     DocumentParseStatus,
+    RemoteFileCleanup,
+    RemoteFileCleanupStatus,
     SyncJob,
     SyncJobStatus,
     SyncJobType,
@@ -34,6 +37,49 @@ def _record_export_stage(stage: str, result: str, started: float) -> None:
         result=result,
         duration_seconds=max(perf_counter() - started, 0),
     )
+
+
+@shared_task(
+    name="quotation.tasks.dispatch_remote_file_cleanups",
+    acks_late=True,
+)
+def dispatch_remote_file_cleanups_task():
+    """Dispatch durable pending cleanup intents to the sync queue."""
+    now = timezone.now()
+    lease_until = now + timedelta(minutes=5)
+    with transaction.atomic():
+        cleanup_ids = list(
+            RemoteFileCleanup.objects.select_for_update(skip_locked=True)
+            .filter(
+                owned=True,
+                status=RemoteFileCleanupStatus.PENDING,
+                next_dispatch_at__lte=now,
+            )
+            .order_by("next_dispatch_at", "created_at", "id")
+            .values_list("id", flat=True)[:200]
+        )
+        RemoteFileCleanup.objects.filter(id__in=cleanup_ids).update(
+            next_dispatch_at=lease_until,
+        )
+    dispatched = 0
+    for cleanup_id in cleanup_ids:
+        try:
+            delete_owned_remote_file_task.apply_async(
+                args=[cleanup_id],
+                queue="quotation_sync",
+            )
+        except Exception:
+            RemoteFileCleanup.objects.filter(
+                pk=cleanup_id,
+                status=RemoteFileCleanupStatus.PENDING,
+            ).update(next_dispatch_at=now)
+            logger.exception(
+                "quotation_remote_file_cleanup_dispatch_failed",
+                extra={"remote_file_cleanup_id": cleanup_id},
+            )
+        else:
+            dispatched += 1
+    return {"pending": len(cleanup_ids), "dispatched": dispatched}
 
 
 @shared_task(
@@ -142,14 +188,17 @@ def sync_document_replica_task(
     self,
     export_job_id: str,
     asset_id: str,
+    tracking_job_id: str | None = None,
 ):
     """Archive one rendered asset without rerunning document rendering."""
     import httpx
     from quotation.services.export_archive import (
+        begin_export_upload_tracking,
         is_transient_feishu_error,
         mark_upload_failed,
         reset_upload_for_retry,
         sync_export_asset,
+        update_export_upload_tracking,
     )
     from quotation.services.feishu_client import FeishuAPIError
 
@@ -162,17 +211,69 @@ def sync_document_replica_task(
             "attempt": self.request.retries + 1,
         },
     )
+
+    def persist_retry_state(exc: Exception) -> None:
+        try:
+            with transaction.atomic():
+                reset_upload_for_retry(export_job_id, exc)
+                update_export_upload_tracking(
+                    tracking_job_id,
+                    SyncJobStatus.RETRYING,
+                )
+        except OperationalError:
+            logger.exception(
+                "quotation_export_archive_retry_state_failed",
+                extra={
+                    "export_job_id": export_job_id,
+                    "asset_id": asset_id,
+                },
+            )
+
+    def persist_terminal_failure(exc: Exception) -> str:
+        try:
+            with transaction.atomic():
+                error_code = mark_upload_failed(export_job_id, exc)
+                update_export_upload_tracking(
+                    tracking_job_id,
+                    SyncJobStatus.FAILED,
+                    error_code=error_code,
+                )
+        except OperationalError as state_exc:
+            logger.exception(
+                "quotation_export_archive_terminal_state_failed",
+                extra={
+                    "export_job_id": export_job_id,
+                    "asset_id": asset_id,
+                },
+            )
+            if self.request.retries < self.max_retries:
+                raise self.retry(
+                    exc=state_exc,
+                    countdown=15 * (2**self.request.retries),
+                )
+            raise
+        return error_code
+
     try:
+        tracking_job_id = begin_export_upload_tracking(
+            export_job_id,
+            asset_id,
+            tracking_job_id,
+        )
         result = sync_export_asset(export_job_id, asset_id)
+        update_export_upload_tracking(
+            tracking_job_id,
+            SyncJobStatus.SUCCESS,
+        )
     except FeishuAPIError as exc:
         if is_transient_feishu_error(exc) and self.request.retries < self.max_retries:
-            reset_upload_for_retry(export_job_id, exc)
+            persist_retry_state(exc)
             _record_export_stage("archive", "retry", started)
             raise self.retry(
                 exc=exc,
                 countdown=15 * (2**self.request.retries),
             )
-        error_code = mark_upload_failed(export_job_id, exc)
+        error_code = persist_terminal_failure(exc)
         _record_export_stage("archive", "failure", started)
         logger.warning(
             "quotation_export_archive_failed",
@@ -192,21 +293,21 @@ def sync_document_replica_task(
         TimeoutError,
     ) as exc:
         if self.request.retries < self.max_retries:
-            reset_upload_for_retry(export_job_id, exc)
+            persist_retry_state(exc)
             _record_export_stage("archive", "retry", started)
             raise self.retry(
                 exc=exc,
                 countdown=15 * (2**self.request.retries),
             )
-        mark_upload_failed(export_job_id, exc)
+        persist_terminal_failure(exc)
         _record_export_stage("archive", "failure", started)
         raise
     except (LookupError, ValueError) as exc:
-        mark_upload_failed(export_job_id, exc)
+        persist_terminal_failure(exc)
         _record_export_stage("archive", "failure", started)
         return {"job_id": export_job_id, "status": "upload_failed"}
     except Exception as exc:
-        mark_upload_failed(export_job_id, exc)
+        persist_terminal_failure(exc)
         _record_export_stage("archive", "failure", started)
         logger.exception(
             "quotation_export_archive_failed",
@@ -228,6 +329,40 @@ def sync_document_replica_task(
         },
     )
     return result
+
+
+@shared_task(
+    bind=True,
+    name="quotation.tasks.delete_owned_remote_file",
+    acks_late=True,
+    reject_on_worker_lost=True,
+    max_retries=3,
+    soft_time_limit=120,
+    time_limit=150,
+)
+def delete_owned_remote_file_task(
+    self,
+    cleanup_id: str,
+):
+    """Delete an unreferenced application-owned remote file asynchronously."""
+    from quotation.services.storage_control import delete_remote_file_if_unreferenced
+
+    try:
+        status = delete_remote_file_if_unreferenced(
+            cleanup_id,
+        )
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            raise self.retry(
+                exc=exc,
+                countdown=15 * (2**self.request.retries),
+            )
+        logger.exception(
+            "quotation_remote_file_cleanup_failed",
+            extra={"remote_file_cleanup_id": cleanup_id},
+        )
+        raise
+    return {"status": status}
 
 
 @shared_task(

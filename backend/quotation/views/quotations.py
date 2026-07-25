@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 from quotation.access import (
     can_access_quotation,
     filter_accessible_quotations,
@@ -23,7 +24,6 @@ from quotation.services.quotation_service import (
     create_version_snapshot,
     replace_items,
 )
-from quotation.services.storage import delete_documents_after_commit
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -206,15 +206,14 @@ class QuotationDetailView(APIView):
                 status=409,
             )
         set_request_audit_target(request, target_label=quotation.quote_no)
-        storage_keys = list(
-            quotation.documents.exclude(storage_key="").values_list(
-                "storage_key",
-                flat=True,
+        try:
+            with transaction.atomic():
+                quotation.delete()
+        except ProtectedError:
+            return Response(
+                {"detail": "quotation has active export jobs"},
+                status=status.HTTP_409_CONFLICT,
             )
-        )
-        with transaction.atomic():
-            quotation.delete()
-            delete_documents_after_commit(storage_keys)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

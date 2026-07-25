@@ -5,12 +5,8 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.http import HttpResponse
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
 from quotation.access import (
     DocumentAction,
     filter_accessible_documents,
@@ -28,32 +24,31 @@ from quotation.models import (
     SyncJobType,
 )
 from quotation.permissions import user_display_email
-from quotation.serializers import (
-    build_feishu_file_url,
-    trusted_feishu_file_url,
-)
-from quotation.services.feishu_client import FeishuAPIError
-from quotation.services.feishu_service import folder_token_for_item
-from quotation.services.document_parsing.excel_parser import (
-    QuotationExcelParseError,
-)
-from quotation.services.document_parsing.pdf_parser import (
-    QuotationPdfParseError,
-)
+from quotation.serializers import build_feishu_file_url, trusted_feishu_file_url
+from quotation.services.document_parsing.excel_parser import QuotationExcelParseError
+from quotation.services.document_parsing.pdf_parser import QuotationPdfParseError
 from quotation.services.document_parsing.service import (
     QuotationDocumentParseError,
     parse_and_create_quotation,
     parser_version_for_asset,
 )
+from quotation.services.feishu_client import FeishuAPIError
+from quotation.services.feishu_service import folder_token_for_item
 from quotation.services.storage import (
     delete_document,
     document_storage_key,
     write_document,
 )
-from quotation.services.storage_control import StorageRouter
-from quotation.services.storage_control import FeishuStorageProvider
-from quotation.services.storage_control import RemoteDocumentReference
-from quotation.services.storage_control import remote_document_reference
+from quotation.services.storage_control import (
+    FeishuStorageProvider,
+    RemoteDocumentReference,
+    StorageRouter,
+    preserve_remote_file_reference,
+    remote_document_reference,
+)
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from . import common
 
@@ -70,9 +65,7 @@ def _drive_context_for_reference(
 
 
 def _latest_parse_result(asset: DocumentAsset):
-    prefetched = getattr(asset, "_prefetched_objects_cache", {}).get(
-        "parse_results"
-    )
+    prefetched = getattr(asset, "_prefetched_objects_cache", {}).get("parse_results")
     if prefetched is not None:
         return max(
             prefetched,
@@ -115,13 +108,16 @@ class FeishuImportView(APIView):
             )
 
         try:
-            client, access_token, root_folder_token = (
-                common._system_drive_context()
-            )
-            requested_folder = (
-                request.data.get("folder_token")
-                or request.query_params.get("folder_token")
-            )
+            (
+                client,
+                access_token,
+                root_folder_token,
+                storage_connection,
+                _storage_mount,
+            ) = common._system_drive_context_details()
+            requested_folder = request.data.get(
+                "folder_token"
+            ) or request.query_params.get("folder_token")
             folder_token = common._managed_folder_token(
                 client=client,
                 access_token=access_token,
@@ -218,19 +214,25 @@ class FeishuImportView(APIView):
         doc_type = common._guess_doc_type(safe_name, mime_type)
         feishu_url = file_item.get("url") or build_feishu_file_url(file_token)
         try:
-            asset = DocumentAsset.objects.create(
-                id=asset_id,
-                quotation_id=quotation_id or None,
-                doc_type=doc_type,
-                file_name=safe_name,
-                mime_type=mime_type or "application/octet-stream",
-                storage_key=storage_key,
-                size_bytes=len(content),
-                source="feishu",
-                feishu_file_token=file_token,
-                feishu_url=feishu_url,
-                created_by_email=user_display_email(request.user),
-            )
+            with transaction.atomic():
+                preserve_remote_file_reference(
+                    file_token,
+                    connection=storage_connection,
+                    owned=False,
+                )
+                asset = DocumentAsset.objects.create(
+                    id=asset_id,
+                    quotation_id=quotation_id or None,
+                    doc_type=doc_type,
+                    file_name=safe_name,
+                    mime_type=mime_type or "application/octet-stream",
+                    storage_key=storage_key,
+                    size_bytes=len(content),
+                    source="feishu",
+                    feishu_file_token=file_token,
+                    feishu_url=feishu_url,
+                    created_by_email=user_display_email(request.user),
+                )
         except Exception:
             delete_document(storage_key)
             raise
@@ -336,9 +338,7 @@ class FeishuFolderSyncView(APIView):
         try:
             response = self._sync(request)
             succeeded = response.status_code < 400
-            job.status = (
-                SyncJobStatus.SUCCESS if succeeded else SyncJobStatus.FAILED
-            )
+            job.status = SyncJobStatus.SUCCESS if succeeded else SyncJobStatus.FAILED
             if succeeded:
                 job.result_json = {
                     "created_count": response.data.get("created_count", 0),
@@ -368,9 +368,7 @@ class FeishuFolderSyncView(APIView):
             )
             if isinstance(getattr(response, "data", None), dict):
                 response.data["sync_job_id"] = job.id
-                response.data["storage_connection_id"] = (
-                    job.storage_connection_id
-                )
+                response.data["storage_connection_id"] = job.storage_connection_id
             return response
         except Exception as exc:
             job.status = SyncJobStatus.FAILED
@@ -390,20 +388,20 @@ class FeishuFolderSyncView(APIView):
 
     def _sync(self, request, *, enqueue_parsing: bool = False):
         try:
-            client, access_token, root_folder_token = (
-                common._system_drive_context()
-            )
+            (
+                client,
+                access_token,
+                root_folder_token,
+                storage_connection,
+                _storage_mount,
+            ) = common._system_drive_context_details()
         except FeishuAPIError as exc:
-            return common._feishu_error_response(
-                exc, operation="folder sync"
-            )
+            return common._feishu_error_response(exc, operation="folder sync")
 
         root_folder_name = common.ARCHIVE_FOLDER_LABEL
         if hasattr(client, "get_folder_meta"):
             try:
-                root_meta = client.get_folder_meta(
-                    access_token, root_folder_token
-                )
+                root_meta = client.get_folder_meta(access_token, root_folder_token)
                 root_folder_name = str(
                     root_meta.get("name") or root_folder_name
                 ).strip()
@@ -433,9 +431,7 @@ class FeishuFolderSyncView(APIView):
             }
         }
         folder_paths = {
-            root_folder_token: [
-                {"token": root_folder_token, "name": root_folder_name}
-            ]
+            root_folder_token: [{"token": root_folder_token, "name": root_folder_name}]
         }
 
         def auto_parse_asset(asset: DocumentAsset) -> None:
@@ -449,14 +445,12 @@ class FeishuFolderSyncView(APIView):
                 latest = _latest_parse_result(asset)
                 if (
                     latest is not None
-                    and latest.parser_version
-                    == parser_version_for_asset(asset)
+                    and latest.parser_version == parser_version_for_asset(asset)
                     and (
                         latest.status == DocumentParseStatus.NOT_QUOTATION
                         or (
                             asset.quotation_id
-                            and latest.status
-                            == DocumentParseStatus.CONFIRMED
+                            and latest.status == DocumentParseStatus.CONFIRMED
                         )
                     )
                 ):
@@ -536,9 +530,7 @@ class FeishuFolderSyncView(APIView):
                         page_token=page_token,
                     )
                 except FeishuAPIError as exc:
-                    return common._feishu_error_response(
-                        exc, operation="folder sync"
-                    )
+                    return common._feishu_error_response(exc, operation="folder sync")
 
                 for item in data.get("files") or []:
                     item_type = str(item.get("type") or "").lower()
@@ -552,9 +544,7 @@ class FeishuFolderSyncView(APIView):
                         if child_token and child_token not in visited_folders:
                             pending_folders.append(child_token)
                         if child_token:
-                            child_name = str(
-                                item.get("name") or "Folder"
-                            ).strip()
+                            child_name = str(item.get("name") or "Folder").strip()
                             folders.setdefault(
                                 child_token,
                                 {
@@ -577,11 +567,8 @@ class FeishuFolderSyncView(APIView):
                         continue
                     file_token = str(item.get("token") or "").strip()
                     file_name = str(item.get("name") or file_token).strip()
-                    if (
-                        not file_token
-                        or not file_name.lower().endswith(
-                            tuple(settings.QUOTATION_ALLOWED_EXTENSIONS)
-                        )
+                    if not file_token or not file_name.lower().endswith(
+                        tuple(settings.QUOTATION_ALLOWED_EXTENSIONS)
                     ):
                         skipped += 1
                         continue
@@ -623,15 +610,13 @@ class FeishuFolderSyncView(APIView):
                         continue
 
                     try:
-                        content, mime_type, resolved_name = (
-                            client.download_drive_item(
-                                access_token,
-                                file_token=file_token,
-                                file_type=item.get("type"),
-                                file_name=file_name,
-                            )
+                        content, mime_type, resolved_name = client.download_drive_item(
+                            access_token,
+                            file_token=file_token,
+                            file_type=item.get("type"),
+                            file_name=file_name,
                         )
-                    except FeishuAPIError as exc:
+                    except FeishuAPIError:
                         errors.append(
                             {
                                 "file": file_name,
@@ -640,9 +625,7 @@ class FeishuFolderSyncView(APIView):
                         )
                         continue
                     if not content:
-                        errors.append(
-                            {"file": file_name, "detail": "empty file"}
-                        )
+                        errors.append({"file": file_name, "detail": "empty file"})
                         continue
                     if len(content) > settings.QUOTATION_MAX_UPLOAD_BYTES:
                         errors.append(
@@ -659,23 +642,27 @@ class FeishuFolderSyncView(APIView):
                     write_document(content, storage_key)
                     created_asset = True
                     try:
-                        asset = DocumentAsset.objects.create(
-                            id=asset_id,
-                            doc_type=common._guess_doc_type(
-                                safe_name, mime_type
-                            ),
-                            file_name=safe_name,
-                            mime_type=mime_type or "application/octet-stream",
-                            storage_key=storage_key,
-                            size_bytes=len(content),
-                            source="feishu",
-                            feishu_file_token=file_token,
-                            feishu_url=item.get("url")
-                            or build_feishu_file_url(file_token),
-                            feishu_folder_token=current_folder,
-                            feishu_folder_path=current_path,
-                            created_by_email=email,
-                        )
+                        with transaction.atomic():
+                            preserve_remote_file_reference(
+                                file_token,
+                                connection=storage_connection,
+                                owned=False,
+                            )
+                            asset = DocumentAsset.objects.create(
+                                id=asset_id,
+                                doc_type=common._guess_doc_type(safe_name, mime_type),
+                                file_name=safe_name,
+                                mime_type=(mime_type or "application/octet-stream"),
+                                storage_key=storage_key,
+                                size_bytes=len(content),
+                                source="feishu",
+                                feishu_file_token=file_token,
+                                feishu_url=item.get("url")
+                                or build_feishu_file_url(file_token),
+                                feishu_folder_token=current_folder,
+                                feishu_folder_path=current_path,
+                                created_by_email=email,
+                            )
                     except IntegrityError:
                         delete_document(storage_key)
                         asset = (
@@ -774,9 +761,7 @@ class FeishuFileAccessView(APIView):
         set_request_audit_target(
             request,
             target_label=(
-                asset.quotation.quote_no
-                if asset.quotation_id
-                else asset.file_name
+                asset.quotation.quote_no if asset.quotation_id else asset.file_name
             ),
         )
         reference = remote_document_reference(asset)
@@ -839,9 +824,7 @@ class FeishuFileAccessView(APIView):
                         "document_id": asset.id,
                     }
                 )
-            return common._feishu_error_response(
-                exc, operation="file check"
-            )
+            return common._feishu_error_response(exc, operation="file check")
 
         return Response(
             {
@@ -874,9 +857,7 @@ class FeishuFileAccessBatchView(APIView):
                 )
             document_id = str(raw.get("document_id") or "").strip()
             if not document_id:
-                return Response(
-                    {"detail": "document_id is required"}, status=400
-                )
+                return Response({"detail": "document_id is required"}, status=400)
             asset, denied = get_accessible_document(
                 request.user,
                 document_id,
@@ -889,8 +870,7 @@ class FeishuFileAccessBatchView(APIView):
             return Response({"results": [], "cleared_count": 0})
 
         reference_by_asset_id = {
-            str(asset.id): remote_document_reference(asset)
-            for asset in items
+            str(asset.id): remote_document_reference(asset) for asset in items
         }
         unique_tokens = list(
             dict.fromkeys(
@@ -909,9 +889,7 @@ class FeishuFileAccessBatchView(APIView):
             ]
             if replica_references:
                 for reference in replica_references:
-                    client, access_token = _drive_context_for_reference(
-                        reference
-                    )
+                    client, access_token = _drive_context_for_reference(reference)
                     try:
                         meta = client.batch_query_file_meta(
                             access_token,
@@ -919,9 +897,7 @@ class FeishuFileAccessBatchView(APIView):
                             doc_type="file",
                             with_url=False,
                         )
-                        resolved_token = str(
-                            meta.get("doc_token") or reference.token
-                        )
+                        resolved_token = str(meta.get("doc_token") or reference.token)
                         existing_tokens.add(reference.token)
                         if str(meta.get("doc_type") or "").lower() == "file":
                             client.download_file(
@@ -937,9 +913,7 @@ class FeishuFileAccessBatchView(APIView):
             legacy_tokens = [
                 token
                 for token in unique_tokens
-                if token not in {
-                    reference.token for reference in replica_references
-                }
+                if token not in {reference.token for reference in replica_references}
             ]
             if legacy_tokens:
                 client, access_token, _ = common._system_drive_context()
@@ -967,9 +941,7 @@ class FeishuFileAccessBatchView(APIView):
                                 existing_tokens.discard(token)
                                 missing_tokens.add(token)
         except FeishuAPIError as exc:
-            return common._feishu_error_response(
-                exc, operation="batch file check"
-            )
+            return common._feishu_error_response(exc, operation="batch file check")
 
         results = []
         cleared_count = 0
@@ -1031,9 +1003,7 @@ class FeishuFileContentView(APIView):
         set_request_audit_target(
             request,
             target_label=(
-                asset.quotation.quote_no
-                if asset.quotation_id
-                else asset.file_name
+                asset.quotation.quote_no if asset.quotation_id else asset.file_name
             ),
         )
         reference = remote_document_reference(asset)
@@ -1064,9 +1034,7 @@ class FeishuFileContentView(APIView):
                 return Response({"detail": detail}, status=502)
             return common._feishu_error_response(exc, operation="download")
 
-        filename = (
-            resolved_name or asset.file_name or f"{asset.id}.bin"
-        )
+        filename = resolved_name or asset.file_name or f"{asset.id}.bin"
         response = HttpResponse(
             content, content_type=mime_type or "application/octet-stream"
         )

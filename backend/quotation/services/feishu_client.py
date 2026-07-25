@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import logging
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import logging
 from time import perf_counter
 from types import SimpleNamespace
 from typing import Any
@@ -12,10 +12,8 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from django.conf import settings as dj_settings
-
 from quotation.audit import AUDIT_CONTEXT
 from quotation.metrics import record_storage_operation
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +30,7 @@ def _external_call(operation: str, storage_connection_id: str = ""):
     except Exception as exc:
         result = "failed"
         code = getattr(exc, "code", None)
-        error_code = (
-            f"feishu_{code}" if code is not None else "transport_error"
-        )
+        error_code = f"feishu_{code}" if code is not None else "transport_error"
         raise
     finally:
         duration_seconds = perf_counter() - started
@@ -82,6 +78,10 @@ class FeishuAPIError(RuntimeError):
         self.payload = payload or {}
 
 
+class FeishuDownloadTooLargeError(FeishuAPIError):
+    """Raised before a remote file can exceed its download memory budget."""
+
+
 @dataclass
 class FeishuTokenBundle:
     access_token: str
@@ -121,13 +121,8 @@ class FeishuClient:
         self.storage_connection_id = storage_connection_id
 
     def _ensure_app_credentials(self) -> None:
-        if (
-            not self.settings.feishu_app_id
-            or not self.settings.feishu_app_secret
-        ):
-            raise FeishuAPIError(
-                "Feishu App ID / App Secret is not configured"
-            )
+        if not self.settings.feishu_app_id or not self.settings.feishu_app_secret:
+            raise FeishuAPIError("Feishu App ID / App Secret is not configured")
 
     def _request(
         self,
@@ -283,9 +278,7 @@ class FeishuClient:
             data = payload.get("data") or {}
         access_token = data.get("access_token")
         if not access_token:
-            raise FeishuAPIError(
-                "access_token missing after refresh", payload=payload
-            )
+            raise FeishuAPIError("access_token missing after refresh", payload=payload)
         return FeishuTokenBundle(
             access_token=access_token,
             refresh_token=data.get("refresh_token") or refresh_token,
@@ -419,7 +412,11 @@ class FeishuClient:
         )
 
     def download_file(
-        self, user_access_token: str, file_token: str
+        self,
+        user_access_token: str,
+        file_token: str,
+        *,
+        max_bytes: int | None = None,
     ) -> tuple[bytes, str | None]:
         path = f"/open-apis/drive/v1/files/{quote(file_token)}/download"
         url = f"{self.base_url}{path}"
@@ -429,24 +426,35 @@ class FeishuClient:
             self.storage_connection_id,
         ):
             with httpx.Client(timeout=60.0) as client:
-                response = client.get(url, headers=headers)
-            if response.status_code >= 400:
-                try:
-                    payload = response.json()
-                except Exception:  # noqa: BLE001
-                    payload = {"msg": response.text}
-                raise FeishuAPIError(
-                    "download failed HTTP "
-                    f"{response.status_code}: {payload.get('msg') or payload}",
-                    code=(
-                        payload.get("code")
-                        if isinstance(payload, dict)
-                        else None
-                    ),
-                    payload=payload if isinstance(payload, dict) else {},
-                )
-            content_type = response.headers.get("content-type")
-            return response.content, content_type
+                with client.stream("GET", url, headers=headers) as response:
+                    if response.status_code >= 400:
+                        response.read()
+                        try:
+                            payload = response.json()
+                        except Exception:  # noqa: BLE001
+                            payload = {"msg": response.text}
+                        raise FeishuAPIError(
+                            "download failed HTTP "
+                            f"{response.status_code}: "
+                            f"{payload.get('msg') or payload}",
+                            code=(
+                                payload.get("code")
+                                if isinstance(payload, dict)
+                                else None
+                            ),
+                            payload=(payload if isinstance(payload, dict) else {}),
+                        )
+                    content_type = response.headers.get("content-type")
+                    chunks = []
+                    total_bytes = 0
+                    for chunk in response.iter_bytes():
+                        total_bytes += len(chunk)
+                        if max_bytes is not None and total_bytes > max_bytes:
+                            raise FeishuDownloadTooLargeError(
+                                "download exceeds the allowed size"
+                            )
+                        chunks.append(chunk)
+            return b"".join(chunks), content_type
 
     def export_and_download(
         self,
@@ -469,9 +477,7 @@ class FeishuClient:
         )
         ticket = (create_payload.get("data") or {}).get("ticket")
         if not ticket:
-            raise FeishuAPIError(
-                "export ticket missing", payload=create_payload
-            )
+            raise FeishuAPIError("export ticket missing", payload=create_payload)
 
         export_file_token = None
         for _ in range(20):
@@ -521,11 +527,7 @@ class FeishuClient:
                     "export download failed HTTP "
                     f"{response.status_code}: "
                     f"{payload.get('msg') or payload}",
-                    code=(
-                        payload.get("code")
-                        if isinstance(payload, dict)
-                        else None
-                    ),
+                    code=(payload.get("code") if isinstance(payload, dict) else None),
                     payload=payload if isinstance(payload, dict) else {},
                 )
             return response.content, response.headers.get("content-type")
@@ -592,9 +594,7 @@ class FeishuClient:
                     doc_type="sheet",
                     file_extension="xlsx",
                 )
-                if not name.lower().endswith(
-                    (".xlsx", ".pdf", ".doc", ".docx")
-                ):
+                if not name.lower().endswith((".xlsx", ".pdf", ".doc", ".docx")):
                     name = f"{name}.xlsx"
                 return content, mime, name
             raise
@@ -623,19 +623,14 @@ class FeishuClient:
             self.storage_connection_id,
         ):
             with httpx.Client(timeout=120.0) as client:
-                response = client.post(
-                    url, headers=headers, data=data, files=files
-                )
+                response = client.post(url, headers=headers, data=data, files=files)
             try:
                 payload = response.json()
             except Exception as exc:  # noqa: BLE001
                 raise FeishuAPIError(
                     f"upload non-JSON response ({response.status_code})"
                 ) from exc
-            if (
-                response.status_code >= 400
-                or payload.get("code") not in (0, None)
-            ):
+            if response.status_code >= 400 or payload.get("code") not in (0, None):
                 raise FeishuAPIError(
                     f"upload failed: {payload.get('msg') or payload}",
                     code=payload.get("code"),
@@ -727,6 +722,4 @@ class FeishuClient:
 
 
 def token_expires_at(expires_in: int, *, skew_seconds: int = 60) -> datetime:
-    return datetime.utcnow() + timedelta(
-        seconds=max(expires_in - skew_seconds, 60)
-    )
+    return datetime.utcnow() + timedelta(seconds=max(expires_in - skew_seconds, 60))

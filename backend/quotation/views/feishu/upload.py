@@ -9,21 +9,13 @@ from djangorestframework_camel_case.parser import (
     CamelCaseJSONParser,
     CamelCaseMultiPartParser,
 )
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
 from quotation.access import (
     DocumentAction,
     filter_accessible_documents,
     get_accessible_quotation,
 )
 from quotation.audit import set_request_audit_target
-from quotation.models import (
-    DocumentAsset,
-    QuotationSourceType,
-    QuoteStatus,
-)
+from quotation.models import DocumentAsset, Quotation, QuotationSourceType, QuoteStatus
 from quotation.permissions import user_display_email
 from quotation.serializers import build_feishu_file_url
 from quotation.services.feishu_client import FeishuAPIError
@@ -35,9 +27,13 @@ from quotation.services.storage import (
 )
 from quotation.services.storage_control import (
     StorageRouter,
+    preserve_remote_file_reference,
     register_uploaded_replica,
 )
 from quotation.services.upload_validation import validate_quotation_upload
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from . import common
 
@@ -64,9 +60,7 @@ class FeishuUploadView(APIView):
 
         file_name = upload.name or f"upload-{uuid4().hex}.bin"
         set_request_audit_target(request, target_label=file_name)
-        conflict_action = (
-            str(request.data.get("conflict_action") or "").strip().lower()
-        )
+        conflict_action = str(request.data.get("conflict_action") or "").strip().lower()
         if conflict_action not in {"", "reuse", "rename"}:
             return Response(
                 {"detail": "conflict_action must be reuse or rename"},
@@ -83,11 +77,7 @@ class FeishuUploadView(APIView):
                 return denied
             if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
                 return Response(
-                    {
-                        "detail": (
-                            "document-imported quotations cannot be uploaded"
-                        )
-                    },
+                    {"detail": ("document-imported quotations cannot be uploaded")},
                     status=409,
                 )
             set_request_audit_target(
@@ -96,11 +86,15 @@ class FeishuUploadView(APIView):
             )
 
         try:
-            client, access_token, root_folder_token = (
-                common._system_drive_context()
-            )
-            requested_folder = (
-                request.data.get("folder_token") or request.data.get("folder")
+            (
+                client,
+                access_token,
+                root_folder_token,
+                storage_connection,
+                _storage_mount,
+            ) = common._system_drive_context_details()
+            requested_folder = request.data.get("folder_token") or request.data.get(
+                "folder"
             )
             folder_token = common._managed_folder_token(
                 client=client,
@@ -136,9 +130,7 @@ class FeishuUploadView(APIView):
                             "url": existing.get("url"),
                         },
                         "suggested_file_name": (
-                            common._suggest_unique_file_name(
-                                file_name, existing_names
-                            )
+                            common._suggest_unique_file_name(file_name, existing_names)
                         ),
                         "actions": ["reuse", "rename", "cancel"],
                     },
@@ -172,18 +164,14 @@ class FeishuUploadView(APIView):
                     file_name=file_name,
                     content=content,
                 )
-                uploaded_token = str(
-                    data.get("file_token") or data.get("token") or ""
-                )
+                uploaded_token = str(data.get("file_token") or data.get("token") or "")
                 if uploaded_token and not data.get("url"):
-                    uploaded_meta = (
-                        common._find_file_by_token_or_name_in_folder(
-                            client=client,
-                            access_token=access_token,
-                            folder_token=folder_token,
-                            file_token=uploaded_token,
-                            file_name=file_name,
-                        )
+                    uploaded_meta = common._find_file_by_token_or_name_in_folder(
+                        client=client,
+                        access_token=access_token,
+                        folder_token=folder_token,
+                        file_token=uploaded_token,
+                        file_name=file_name,
                     )
                     if uploaded_meta and uploaded_meta.get("url"):
                         data["url"] = uploaded_meta.get("url")
@@ -207,6 +195,15 @@ class FeishuUploadView(APIView):
         recorded_asset_id = None
         try:
             with transaction.atomic():
+                if quotation_id:
+                    quotation = Quotation.objects.select_for_update().get(
+                        pk=quotation_id
+                    )
+                preserve_remote_file_reference(
+                    file_token,
+                    connection=storage_connection,
+                    owned=not reused_existing,
+                )
                 if reused_existing:
                     matching_assets = filter_accessible_documents(
                         request.user,
@@ -217,14 +214,10 @@ class FeishuUploadView(APIView):
                             feishu_file_token=file_token,
                         ).select_related("quotation"),
                     )
-                    existing_asset = matching_assets.order_by(
-                        "-created_at"
-                    ).first()
+                    existing_asset = matching_assets.order_by("-created_at").first()
                     if existing_asset:
                         recorded_asset_id = existing_asset.id
-                        for duplicate in matching_assets.exclude(
-                            pk=existing_asset.pk
-                        ):
+                        for duplicate in matching_assets.exclude(pk=existing_asset.pk):
                             delete_document(duplicate.storage_key)
                             duplicate.delete()
                         local_storage_key = document_storage_key(
@@ -239,21 +232,15 @@ class FeishuUploadView(APIView):
                             "storage_key": local_storage_key,
                             "size_bytes": len(content),
                             "feishu_url": feishu_url,
-                            "created_by_email": user_display_email(
-                                request.user
-                            ),
+                            "created_by_email": user_display_email(request.user),
                         }
                         for field, value in document_values.items():
                             setattr(existing_asset, field, value)
-                        existing_asset.save(
-                            update_fields=[*document_values.keys()]
-                        )
+                        existing_asset.save(update_fields=[*document_values.keys()])
                     else:
                         asset_id = str(uuid4())
                         recorded_asset_id = asset_id
-                        local_storage_key = document_storage_key(
-                            asset_id, quotation_id
-                        )
+                        local_storage_key = document_storage_key(asset_id, quotation_id)
                         write_document(content, local_storage_key)
                         DocumentAsset.objects.create(
                             id=asset_id,
@@ -262,8 +249,7 @@ class FeishuUploadView(APIView):
                             source="feishu_upload",
                             feishu_file_token=file_token,
                             file_name=file_name,
-                            mime_type=upload.content_type
-                            or "application/octet-stream",
+                            mime_type=upload.content_type or "application/octet-stream",
                             storage_key=local_storage_key,
                             size_bytes=len(content),
                             feishu_url=feishu_url,
@@ -272,9 +258,7 @@ class FeishuUploadView(APIView):
                 else:
                     asset_id = str(uuid4())
                     recorded_asset_id = asset_id
-                    local_storage_key = document_storage_key(
-                        asset_id, quotation_id
-                    )
+                    local_storage_key = document_storage_key(asset_id, quotation_id)
                     write_document(content, local_storage_key)
                     DocumentAsset.objects.create(
                         id=asset_id,
@@ -283,8 +267,7 @@ class FeishuUploadView(APIView):
                         source="feishu_upload",
                         feishu_file_token=file_token,
                         file_name=file_name,
-                        mime_type=upload.content_type
-                        or "application/octet-stream",
+                        mime_type=upload.content_type or "application/octet-stream",
                         storage_key=local_storage_key,
                         size_bytes=len(content),
                         feishu_url=feishu_url,
@@ -294,9 +277,7 @@ class FeishuUploadView(APIView):
                     if quotation:
                         if quotation.status != QuoteStatus.UPLOADED:
                             quotation.status = QuoteStatus.UPLOADED
-                            quotation.save(
-                                update_fields=["status", "updated_at"]
-                            )
+                            quotation.save(update_fields=["status", "updated_at"])
                         create_version_snapshot(
                             quotation,
                             operator_email=user_display_email(request.user),
@@ -332,14 +313,11 @@ class FeishuUploadView(APIView):
         }
         if renamed_from:
             payload["renamed_from"] = renamed_from
-        if (
-            settings.QUOTATION_DOCUMENT_REPLICA_ENABLED
-            and recorded_asset_id
-        ):
+        if settings.QUOTATION_DOCUMENT_REPLICA_ENABLED and recorded_asset_id:
             try:
-                asset = DocumentAsset.objects.select_related(
-                    "quotation"
-                ).get(pk=recorded_asset_id)
+                asset = DocumentAsset.objects.select_related("quotation").get(
+                    pk=recorded_asset_id
+                )
                 route = StorageRouter().resolve(document_type=doc_type)
                 replica = register_uploaded_replica(
                     request=request,
@@ -348,6 +326,8 @@ class FeishuUploadView(APIView):
                     remote_file_token=file_token,
                     remote_url=feishu_url,
                     folder_token=folder_token,
+                    remote_file_owned=not reused_existing,
+                    remote_file_owner_connection=storage_connection,
                 )
                 payload["replica_id"] = replica.id
                 payload["storage_connection_id"] = replica.connection_id

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from hashlib import sha256
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from quotation.audit import AUDIT_CONTEXT
@@ -16,7 +15,10 @@ from quotation.models import (
     QuotationVersion,
 )
 from quotation.permissions import user_display_email
-from quotation.services.export_renderer import ensure_default_template
+from quotation.services.export_renderer import (
+    CURRENT_RENDERER_VERSION,
+    ensure_default_template,
+)
 from quotation.services.quotation_service import create_version_snapshot
 
 logger = logging.getLogger(__name__)
@@ -27,7 +29,7 @@ class ExportRequestError(ValueError):
 
 
 def renderer_version() -> str:
-    return settings.QUOTATION_RENDERER_VERSION
+    return CURRENT_RENDERER_VERSION
 
 
 def _resolve_version(
@@ -121,6 +123,9 @@ def create_export_job(
 ) -> tuple[ExportJob, bool]:
     normalized_formats = sorted(set(formats))
     with transaction.atomic():
+        quotation = Quotation.objects.select_for_update().get(
+            pk=quotation.pk,
+        )
         version = _resolve_version(
             quotation=quotation,
             version_no=quotation_version_no,
