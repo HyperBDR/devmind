@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from datetime import timedelta
 import json
 import logging
 import re
 import uuid
+from datetime import timedelta
 
 from django.db import DatabaseError
 from django.utils import timezone
-
 from quotation.audit import AUDIT_CONTEXT, record_audit_event
 from quotation.models import AuditEvent
-
 
 logger = logging.getLogger(__name__)
 API_PREFIX = "/api/v1/quotation/"
@@ -30,9 +28,6 @@ def _classify(method: str, path: str):
     relative = path.removeprefix(API_PREFIX).strip("/")
     if relative.startswith("audit-events"):
         return None
-    if relative.startswith("pdf/"):
-        return None
-
     quotation = re.fullmatch(r"quotations/([^/]+)", relative)
     if relative == "quotations" and method == "POST":
         return "quotation", "create", "quotation"
@@ -44,8 +39,12 @@ def _classify(method: str, path: str):
         return "quotation", "delete", "quotation"
     if re.fullmatch(r"quotations/[^/]+/generate", relative):
         return "quotation", "generate", "quotation"
-    if re.fullmatch(r"quotations/[^/]+/download-event", relative):
-        return "document", "download", "quotation"
+    if re.fullmatch(r"quotations/[^/]+/exports", relative):
+        return "document", "export", "quotation"
+    if re.fullmatch(r"exports/[^/]+/retry-upload", relative):
+        return "replica", "sync_started", "quotation"
+    if re.fullmatch(r"exports/[^/]+", relative) and method == "GET":
+        return None
     if re.fullmatch(r"quotations/[^/]+/documents", relative):
         if method == "POST":
             return "document", "upload", "document"
@@ -81,10 +80,7 @@ def _classify(method: str, path: str):
 
 def _is_automatic_activity(request) -> bool:
     """Return whether the client marked a background refresh operation."""
-    return (
-        request.META.get("HTTP_X_QUOTATION_AUDIT_SOURCE", "").lower()
-        == "automatic"
-    )
+    return request.META.get("HTTP_X_QUOTATION_AUDIT_SOURCE", "").lower() == "automatic"
 
 
 class RequestIdMiddleware:
@@ -128,9 +124,7 @@ def _json_fields(request) -> list[str]:
         return []
     if not isinstance(payload, dict):
         return []
-    return sorted(
-        key for key in payload if key.lower() not in SENSITIVE_FIELDS
-    )
+    return sorted(key for key in payload if key.lower() not in SENSITIVE_FIELDS)
 
 
 def _response_payload(response) -> dict:
@@ -155,9 +149,7 @@ def _target_id(request, payload: dict) -> str:
 
 
 def _target_label(request, payload: dict) -> str:
-    request_label = str(
-        getattr(request, "quotation_audit_target_label", "") or ""
-    )
+    request_label = str(getattr(request, "quotation_audit_target_label", "") or "")
     if request_label:
         return request_label
     for key in ("quote_no", "file_name", "path", "name"):
@@ -202,9 +194,7 @@ def _audit_metadata(
     """Return safe linkage metadata for an audit event."""
     metadata = {"status_code": response.status_code}
     version_no = payload.get("version_current")
-    skip_pending_version = (
-        action == "update" and "skip_version" in changed_fields
-    )
+    skip_pending_version = action == "update" and "skip_version" in changed_fields
     if isinstance(version_no, int) and not skip_pending_version:
         metadata["version_no"] = version_no
     return metadata
@@ -301,24 +291,22 @@ class QuotationAuditMiddleware:
                         target_type,
                         target_id,
                     ),
-                    document_id=(
-                        target_id if target_type == "document" else ""
-                    ),
+                    document_id=(target_id if target_type == "document" else ""),
                     summary=(
                         "Operation denied"
                         if result == AuditEvent.RESULT_DENIED
-                        else "Operation failed"
-                        if result == AuditEvent.RESULT_FAILED
-                        else ""
+                        else (
+                            "Operation failed"
+                            if result == AuditEvent.RESULT_FAILED
+                            else ""
+                        )
                     ),
                     reason_code=reason_code,
                     error_code=(
                         f"http_{response.status_code}" if not succeeded else ""
                     ),
                     sync_job_id=(
-                        target_id
-                        if module == "feishu" and action == "sync"
-                        else ""
+                        target_id if module == "feishu" and action == "sync" else ""
                     ),
                     storage_connection_id=str(
                         payload.get("storage_connection_id") or ""

@@ -1,0 +1,697 @@
+from __future__ import annotations
+
+import base64
+import binascii
+import os
+import signal
+import subprocess
+from copy import copy
+from datetime import datetime
+from hashlib import sha256
+from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from openpyxl import Workbook, load_workbook
+from openpyxl.drawing.image import Image as SpreadsheetImage
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.workbook.defined_name import DefinedName
+from openpyxl.writer.excel import ExcelWriter
+from PIL import Image as PillowImage
+from PIL import UnidentifiedImageError
+from quotation.models import QuotationTemplate, QuotationTemplateStatus
+from quotation.services.storage import (
+    delete_document,
+    resolve_document_path,
+    template_storage_key,
+    write_document_atomic,
+)
+
+DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
+DEFAULT_TEMPLATE_VERSION = 1
+DEFAULT_WORKSHEET = "Quotation"
+REQUIRED_TEMPLATE_NAMES = {
+    "billing_company",
+    "billing_contact",
+    "billing_email",
+    "client_company",
+    "contact_person",
+    "currency",
+    "email",
+    "expire_date",
+    "grand_total",
+    "issuer_company_name",
+    "issuer_contact_email",
+    "issuer_contact_name",
+    "issuer_signature",
+    "line_items_start",
+    "payment_terms",
+    "project_name",
+    "quote_date",
+    "quote_no",
+    "remarks_disclaimer",
+    "subtotal_before_vat",
+    "vat_amount",
+}
+
+
+class TemplateValidationError(ValueError):
+    def __init__(self, message: str, *, code: str):
+        super().__init__(message)
+        self.code = code
+
+
+class PdfConversionError(RuntimeError):
+    def __init__(self, message: str, *, code: str, retryable: bool = True):
+        super().__init__(message)
+        self.code = code
+        self.retryable = retryable
+
+
+class PdfConversionTimeoutError(PdfConversionError, TimeoutError):
+    pass
+
+
+def _save_workbook_deterministic(workbook: Workbook) -> bytes:
+    """Serialize an XLSX without wall-clock metadata or ZIP timestamps."""
+    stable_modified = (
+        workbook.properties.modified
+        or workbook.properties.created
+        or datetime(2000, 1, 1)
+    )
+    workbook.properties.modified = stable_modified.replace(microsecond=0)
+    raw_output = BytesIO()
+    archive = ZipFile(
+        raw_output,
+        "w",
+        ZIP_DEFLATED,
+        allowZip64=True,
+    )
+    ExcelWriter(workbook, archive).save()
+
+    canonical_output = BytesIO()
+    with ZipFile(BytesIO(raw_output.getvalue())) as source:
+        with ZipFile(
+            canonical_output,
+            "w",
+            ZIP_DEFLATED,
+            allowZip64=True,
+        ) as target:
+            for source_info in source.infolist():
+                target_info = ZipInfo(
+                    source_info.filename,
+                    date_time=(1980, 1, 1, 0, 0, 0),
+                )
+                target_info.compress_type = source_info.compress_type
+                target_info.create_system = source_info.create_system
+                target_info.external_attr = source_info.external_attr
+                target_info.internal_attr = source_info.internal_attr
+                target_info.comment = source_info.comment
+                target.writestr(
+                    target_info,
+                    source.read(source_info.filename),
+                )
+    return canonical_output.getvalue()
+
+
+def _add_defined_name(
+    workbook: Workbook,
+    name: str,
+    cell_reference: str,
+) -> None:
+    workbook.defined_names.add(
+        DefinedName(
+            name,
+            attr_text=f"'{DEFAULT_WORKSHEET}'!${cell_reference}",
+        )
+    )
+
+
+def build_default_template_bytes() -> bytes:
+    """Build the managed fallback template used on fresh deployments."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = DEFAULT_WORKSHEET
+    sheet.sheet_view.showGridLines = False
+    sheet.column_dimensions["A"].width = 9
+    sheet.column_dimensions["B"].width = 30
+    sheet.column_dimensions["C"].width = 10
+    sheet.column_dimensions["D"].width = 15
+    sheet.column_dimensions["E"].width = 12
+    sheet.column_dimensions["F"].width = 16
+    sheet.column_dimensions["G"].width = 17
+
+    thin = Side(style="thin", color="94A3B8")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_fill = PatternFill("solid", fgColor="E2E8F0")
+
+    sheet.merge_cells("A1:G1")
+    sheet["A1"] = "OnePro Cloud Limited"
+    sheet["A1"].font = Font(size=18, bold=True)
+    sheet["A1"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A2:G2")
+    sheet["A2"] = "Quotation"
+    sheet["A2"].font = Font(size=16, bold=True, underline="single")
+    sheet["A2"].alignment = Alignment(horizontal="center")
+
+    labels = {
+        "A4": "Quote No.",
+        "F4": "Date",
+        "F5": "Valid Till",
+        "A6": "Ship to",
+        "C6": "Contact",
+        "E6": "Email",
+        "A7": "Bill to",
+        "C7": "Contact",
+        "E7": "Email",
+        "A8": "Project",
+        "C8": "Payment Terms",
+        "F8": "Currency",
+    }
+    for coordinate, label in labels.items():
+        sheet[coordinate] = label
+        sheet[coordinate].font = Font(bold=True)
+
+    headers = [
+        "Line",
+        "Description",
+        "Qty",
+        "List Price",
+        "Discount",
+        "Net Unit Price",
+        "Extended Price",
+    ]
+    for column, label in enumerate(headers, 1):
+        cell = sheet.cell(row=10, column=column, value=label)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.border = border
+        cell.alignment = Alignment(horizontal="center")
+        item_cell = sheet.cell(row=11, column=column)
+        item_cell.border = border
+        item_cell.alignment = Alignment(
+            horizontal="left" if column == 2 else "right",
+            vertical="top",
+            wrap_text=True,
+        )
+
+    sheet["F12"] = "Subtotal"
+    sheet["F13"] = "Tax"
+    sheet["F14"] = "Grand Total"
+    for row in range(12, 15):
+        sheet.cell(row=row, column=6).font = Font(bold=True)
+        sheet.cell(row=row, column=7).font = Font(bold=True)
+        sheet.cell(row=row, column=6).border = border
+        sheet.cell(row=row, column=7).border = border
+
+    sheet["A16"] = "Remarks"
+    sheet["A16"].font = Font(bold=True)
+    sheet.merge_cells("B16:G16")
+    sheet["B16"].alignment = Alignment(wrap_text=True, vertical="top")
+    sheet["A18"] = "Prepared by"
+    sheet["A18"].font = Font(bold=True)
+    sheet["D18"] = "Email"
+    sheet["D18"].font = Font(bold=True)
+    sheet["D20"] = "Signature"
+    sheet["D20"].font = Font(bold=True)
+    sheet.merge_cells("E20:G22")
+
+    names = {
+        "issuer_company_name": "A1",
+        "quote_no": "B4",
+        "quote_date": "G4",
+        "expire_date": "G5",
+        "client_company": "B6",
+        "contact_person": "D6",
+        "email": "G6",
+        "billing_company": "B7",
+        "billing_contact": "D7",
+        "billing_email": "G7",
+        "project_name": "B8",
+        "payment_terms": "D8",
+        "currency": "G8",
+        "line_items_start": "A11",
+        "subtotal_before_vat": "G12",
+        "vat_amount": "G13",
+        "grand_total": "G14",
+        "remarks_disclaimer": "B16",
+        "issuer_contact_name": "B18",
+        "issuer_contact_email": "E18",
+        "issuer_signature": "E20",
+    }
+    for name, coordinate in names.items():
+        _add_defined_name(workbook, name, coordinate)
+
+    sheet.freeze_panes = "A10"
+    sheet.print_area = "A1:G22"
+    sheet.page_setup.orientation = "portrait"
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def validate_template_bytes(content: bytes) -> None:
+    max_bytes = settings.QUOTATION_MAX_TEMPLATE_BYTES
+    if not content.startswith(b"PK\x03\x04"):
+        raise TemplateValidationError(
+            "Quotation template is not an XLSX file",
+            code="template_invalid_signature",
+        )
+    if len(content) > max_bytes:
+        raise TemplateValidationError(
+            "Quotation template exceeds the size limit",
+            code="template_too_large",
+        )
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            members = archive.infolist()
+            member_names = {member.filename for member in members}
+    except BadZipFile as exc:
+        raise TemplateValidationError(
+            "Quotation template is not a valid ZIP container",
+            code="template_invalid_zip",
+        ) from exc
+    expanded_bytes = sum(member.file_size for member in members)
+    if expanded_bytes > settings.QUOTATION_MAX_TEMPLATE_EXPANDED_BYTES:
+        raise TemplateValidationError(
+            "Quotation template expands beyond the size limit",
+            code="template_expanded_too_large",
+        )
+    if "xl/vbaProject.bin" in member_names:
+        raise TemplateValidationError(
+            "Macro-enabled quotation templates are not allowed",
+            code="template_macros_forbidden",
+        )
+    if any(name.startswith("xl/externalLinks/") for name in member_names):
+        raise TemplateValidationError(
+            "External workbook links are not allowed",
+            code="template_external_links_forbidden",
+        )
+    if "xl/connections.xml" in member_names:
+        raise TemplateValidationError(
+            "External workbook connections are not allowed",
+            code="template_external_connections_forbidden",
+        )
+    try:
+        workbook = load_workbook(BytesIO(content), read_only=False)
+    except Exception as exc:
+        raise TemplateValidationError(
+            "Quotation template cannot be opened",
+            code="template_unreadable",
+        ) from exc
+    has_worksheet = DEFAULT_WORKSHEET in workbook.sheetnames
+    available_names = set(workbook.defined_names)
+    workbook.close()
+    if not has_worksheet:
+        raise TemplateValidationError(
+            "Quotation template is missing the Quotation worksheet",
+            code="template_worksheet_missing",
+        )
+    missing = sorted(REQUIRED_TEMPLATE_NAMES - available_names)
+    if missing:
+        message = "Quotation template is missing named ranges: "
+        message += ", ".join(missing)
+        raise TemplateValidationError(
+            message,
+            code="template_named_ranges_missing",
+        )
+
+
+def ensure_default_template(*, created_by=None) -> QuotationTemplate:
+    active = (
+        QuotationTemplate.objects.filter(status=QuotationTemplateStatus.ACTIVE)
+        .order_by("-version", "id")
+        .first()
+    )
+    if active is not None:
+        return active
+
+    content = build_default_template_bytes()
+    validate_template_bytes(content)
+    template = QuotationTemplate(
+        name=DEFAULT_TEMPLATE_NAME,
+        version=DEFAULT_TEMPLATE_VERSION,
+        content_hash=sha256(content).hexdigest(),
+        status=QuotationTemplateStatus.ACTIVE,
+        created_by=created_by,
+    )
+    template.storage_key = template_storage_key(template.id)
+    write_document_atomic(content, template.storage_key)
+    try:
+        template.save(force_insert=True)
+    except IntegrityError:
+        delete_document(template.storage_key)
+        active = (
+            QuotationTemplate.objects.filter(
+                status=QuotationTemplateStatus.ACTIVE,
+            )
+            .order_by("-version", "id")
+            .first()
+        )
+        if active is not None:
+            return active
+        template = QuotationTemplate.objects.filter(
+            name=DEFAULT_TEMPLATE_NAME,
+            version=DEFAULT_TEMPLATE_VERSION,
+        ).first()
+        if template is None:
+            raise
+        try:
+            template.status = QuotationTemplateStatus.ACTIVE
+            template.save(update_fields=["status", "updated_at"])
+        except IntegrityError:
+            active = (
+                QuotationTemplate.objects.filter(
+                    status=QuotationTemplateStatus.ACTIVE,
+                )
+                .order_by("-version", "id")
+                .first()
+            )
+            if active is None:
+                raise
+            return active
+    return template
+
+
+def register_template_version(
+    *,
+    name: str,
+    version: int,
+    content: bytes,
+    status: str,
+    created_by=None,
+) -> QuotationTemplate:
+    """Validate and atomically register an immutable XLSX template."""
+    validate_template_bytes(content)
+    template = QuotationTemplate(
+        name=name,
+        version=version,
+        content_hash=sha256(content).hexdigest(),
+        status=status,
+        created_by=created_by,
+    )
+    template.storage_key = template_storage_key(template.id)
+    write_document_atomic(content, template.storage_key)
+    try:
+        with transaction.atomic():
+            if status == QuotationTemplateStatus.ACTIVE:
+                QuotationTemplate.objects.filter(
+                    status=QuotationTemplateStatus.ACTIVE,
+                ).update(status=QuotationTemplateStatus.ARCHIVED)
+            template.save(force_insert=True)
+    except Exception:
+        delete_document(template.storage_key)
+        raise
+    return template
+
+
+def template_path(template: QuotationTemplate) -> Path:
+    path = resolve_document_path(template.storage_key)
+    if not path.is_file():
+        raise TemplateValidationError(
+            "Quotation template file is missing",
+            code="template_file_missing",
+        )
+    content = path.read_bytes()
+    validate_template_bytes(content)
+    if sha256(content).hexdigest() != template.content_hash:
+        raise TemplateValidationError(
+            "Quotation template hash does not match its version",
+            code="template_hash_mismatch",
+        )
+    return path
+
+
+def _defined_cell(workbook, name: str):
+    definition = workbook.defined_names.get(name)
+    destinations = list(definition.destinations) if definition else []
+    if len(destinations) != 1:
+        raise TemplateValidationError(
+            f"Named range {name} must point to one cell",
+            code="template_named_range_invalid",
+        )
+    sheet_name, coordinate = destinations[0]
+    return workbook[sheet_name], coordinate.replace("$", "")
+
+
+def _copy_row_style(sheet, source_row: int, target_row: int) -> None:
+    for column in range(1, sheet.max_column + 1):
+        source = sheet.cell(row=source_row, column=column)
+        target = sheet.cell(row=target_row, column=column)
+        if source.has_style:
+            target._style = copy(source._style)
+        target.number_format = source.number_format
+        target.alignment = copy(source.alignment)
+        target.protection = copy(source.protection)
+
+
+def _signature_image(data_url: str) -> SpreadsheetImage | None:
+    if not data_url:
+        return None
+    try:
+        header, encoded = data_url.split(",", 1)
+    except ValueError as exc:
+        raise TemplateValidationError(
+            "Quotation signature is not a data URL",
+            code="signature_invalid",
+        ) from exc
+    allowed_headers = {
+        "data:image/jpeg;base64",
+        "data:image/jpg;base64",
+        "data:image/png;base64",
+    }
+    if header.lower() not in allowed_headers:
+        raise TemplateValidationError(
+            "Quotation signature must be a PNG or JPEG data URL",
+            code="signature_type_invalid",
+        )
+    max_encoded_bytes = ((settings.QUOTATION_MAX_SIGNATURE_BYTES + 2) // 3) * 4
+    if len(encoded) > max_encoded_bytes:
+        raise TemplateValidationError(
+            "Quotation signature exceeds the size limit",
+            code="signature_too_large",
+        )
+    try:
+        image_bytes = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise TemplateValidationError(
+            "Quotation signature contains invalid base64 data",
+            code="signature_invalid",
+        ) from exc
+    if len(image_bytes) > settings.QUOTATION_MAX_SIGNATURE_BYTES:
+        raise TemplateValidationError(
+            "Quotation signature exceeds the size limit",
+            code="signature_too_large",
+        )
+    try:
+        with PillowImage.open(BytesIO(image_bytes)) as image:
+            image.verify()
+        with PillowImage.open(BytesIO(image_bytes)) as image:
+            width, height = image.size
+            image_format = image.format
+    except (OSError, UnidentifiedImageError) as exc:
+        raise TemplateValidationError(
+            "Quotation signature image is invalid",
+            code="signature_invalid",
+        ) from exc
+    if image_format not in {"JPEG", "PNG"} or width > 4000 or height > 4000:
+        raise TemplateValidationError(
+            "Quotation signature image dimensions are invalid",
+            code="signature_dimensions_invalid",
+        )
+    image = SpreadsheetImage(BytesIO(image_bytes))
+    scale = min(180 / image.width, 60 / image.height, 1)
+    image.width = round(image.width * scale)
+    image.height = round(image.height * scale)
+    return image
+
+
+def render_quotation_xlsx(
+    template: QuotationTemplate,
+    snapshot: dict,
+) -> bytes:
+    """Render one immutable quotation snapshot into a validated XLSX."""
+    path = template_path(template)
+    workbook = load_workbook(path)
+    scalar_values = {
+        "issuer_company_name": snapshot.get("issuer_company_name", ""),
+        "quote_no": snapshot.get("quote_no", ""),
+        "quote_date": snapshot.get("quote_date", ""),
+        "expire_date": snapshot.get("expire_date", ""),
+        "client_company": snapshot.get("client_company", ""),
+        "contact_person": snapshot.get("contact_person", ""),
+        "email": snapshot.get("email", ""),
+        "billing_company": snapshot.get("billing_company", ""),
+        "billing_contact": snapshot.get("billing_contact", ""),
+        "billing_email": snapshot.get("billing_email", ""),
+        "project_name": snapshot.get("project_name", ""),
+        "payment_terms": snapshot.get("payment_terms", ""),
+        "currency": snapshot.get("currency", ""),
+        "remarks_disclaimer": snapshot.get("remarks_disclaimer", ""),
+        "issuer_contact_name": snapshot.get("issuer_contact_name", ""),
+        "issuer_contact_email": snapshot.get("issuer_contact_email", ""),
+    }
+    for name, value in scalar_values.items():
+        sheet, coordinate = _defined_cell(workbook, name)
+        sheet[coordinate] = value
+
+    item_sheet, item_coordinate = _defined_cell(
+        workbook,
+        "line_items_start",
+    )
+    item_start_row = item_sheet[item_coordinate].row
+    items = list(snapshot.get("items") or [])
+    render_items = items or [{}]
+    extra_rows = max(len(render_items) - 1, 0)
+    if extra_rows:
+        item_sheet.insert_rows(item_start_row + 1, amount=extra_rows)
+        for offset in range(1, extra_rows + 1):
+            _copy_row_style(
+                item_sheet,
+                item_start_row,
+                item_start_row + offset,
+            )
+
+    signature = _signature_image(snapshot.get("issuer_signature", ""))
+    if signature is not None:
+        signature_sheet, signature_coordinate = _defined_cell(
+            workbook,
+            "issuer_signature",
+        )
+        signature_cell = signature_sheet[signature_coordinate]
+        signature_row = signature_cell.row
+        if signature_sheet == item_sheet and signature_row > item_start_row:
+            signature_row += extra_rows
+        signature.anchor = signature_sheet.cell(
+            row=signature_row,
+            column=signature_cell.column,
+        ).coordinate
+        signature_sheet.add_image(signature)
+
+    columns = (
+        "line_no",
+        "description",
+        "qty",
+        "list_price",
+        "discount_percent",
+        "net_unit_price",
+        "extended_price",
+    )
+    for offset, item in enumerate(render_items):
+        row = item_start_row + offset
+        values = dict(item)
+        values["description"] = item.get("description") or item.get("name") or ""
+        for column, key in enumerate(columns, 1):
+            item_sheet.cell(row=row, column=column, value=values.get(key, ""))
+
+    for name in ("subtotal_before_vat", "vat_amount", "grand_total"):
+        sheet, coordinate = _defined_cell(workbook, name)
+        original = sheet[coordinate]
+        target = sheet.cell(
+            row=original.row + extra_rows,
+            column=original.column,
+        )
+        target.value = snapshot.get(name, "0")
+    item_sheet.print_area = f"A1:G{item_sheet.max_row}"
+
+    try:
+        content = _save_workbook_deterministic(workbook)
+    finally:
+        workbook.close()
+    validate_template_bytes(content)
+    return content
+
+
+def _terminate_process_group(process: subprocess.Popen) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=3)
+
+
+def convert_xlsx_to_pdf(excel_bytes: bytes, *, job_id: str) -> bytes:
+    """Convert XLSX bytes with an isolated headless LibreOffice profile."""
+    with TemporaryDirectory(prefix=f"quotation-render-{job_id}-") as root:
+        root_path = Path(root)
+        profile_path = root_path / "profile"
+        output_path = root_path / "output"
+        profile_path.mkdir()
+        output_path.mkdir()
+        input_path = root_path / "quotation.xlsx"
+        input_path.write_bytes(excel_bytes)
+        command = [
+            settings.QUOTATION_SOFFICE_BINARY,
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nofirststartwizard",
+            f"-env:UserInstallation={profile_path.as_uri()}",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            str(output_path),
+            str(input_path),
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        except FileNotFoundError as exc:
+            raise PdfConversionError(
+                "LibreOffice executable is unavailable",
+                code="libreoffice_unavailable",
+            ) from exc
+        try:
+            _stdout, stderr = process.communicate(
+                timeout=settings.QUOTATION_RENDER_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired as exc:
+            _terminate_process_group(process)
+            raise PdfConversionTimeoutError(
+                "LibreOffice conversion timed out",
+                code="libreoffice_timeout",
+            ) from exc
+        if process.returncode != 0:
+            error_type = "conversion_failed" if stderr else "process_failed"
+            raise PdfConversionError(
+                "LibreOffice conversion failed",
+                code=f"libreoffice_{error_type}",
+            )
+        pdf_path = output_path / "quotation.pdf"
+        if not pdf_path.is_file():
+            raise PdfConversionError(
+                "LibreOffice produced no PDF file",
+                code="libreoffice_no_output",
+            )
+        pdf_bytes = pdf_path.read_bytes()
+        if not pdf_bytes.startswith(b"%PDF-"):
+            raise PdfConversionError(
+                "LibreOffice produced an invalid PDF file",
+                code="libreoffice_invalid_pdf",
+                retryable=False,
+            )
+        if len(pdf_bytes) > settings.QUOTATION_MAX_PDF_BYTES:
+            raise PdfConversionError(
+                "Generated PDF exceeds the size limit",
+                code="libreoffice_pdf_too_large",
+                retryable=False,
+            )
+        return pdf_bytes

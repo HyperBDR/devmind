@@ -170,8 +170,7 @@ start_celery_worker() {
     fi
     DEFAULT_LOG_FILE=/var/log/celery/worker.log
     case "${CELERY_QUEUES:-}" in
-        quotation_pdf) DEFAULT_LOG_FILE=/var/log/celery/pdf-worker.log ;;
-        quotation_excel) DEFAULT_LOG_FILE=/var/log/celery/excel-worker.log ;;
+        quotation_render) DEFAULT_LOG_FILE=/var/log/celery/render-worker.log ;;
         quotation_ocr) DEFAULT_LOG_FILE=/var/log/celery/ocr-worker.log ;;
     esac
 

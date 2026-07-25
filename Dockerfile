@@ -174,7 +174,19 @@ ENTRYPOINT ["/entrypoint.sh"]
 # Parser workers do not carry Chromium or OCR system packages.
 FROM backend-runtime AS backend-parser
 
-# The API delegates PDF conversion to the isolated Gotenberg service.
+# LibreOffice and document fonts exist only in the isolated render worker.
+FROM backend-parser AS backend-render
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        fontconfig \
+        fonts-liberation2 \
+        fonts-noto-cjk \
+        libreoffice-calc \
+    && fc-cache -f \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+
+# The API image intentionally does not contain LibreOffice.
 FROM backend-runtime AS backend
 
 # OCR is intentionally isolated so Tesseract does not increase API and

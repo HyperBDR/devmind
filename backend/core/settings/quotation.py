@@ -4,7 +4,6 @@ import os
 
 from .accounts import FRONTEND_URL
 
-
 STORAGE_ROOT = os.getenv("STORAGE_ROOT", "/opt/storage")
 
 QUOTATION_STORAGE = os.getenv(
@@ -24,10 +23,7 @@ FEISHU_WEB_BASE_URL = os.getenv(
 )
 FEISHU_OAUTH_REDIRECT_URI = os.getenv(
     "FEISHU_OAUTH_REDIRECT_URI",
-    (
-        f"{FRONTEND_URL.rstrip('/')}"
-        "/api/v1/quotation/feishu/oauth/callback"
-    ),
+    (f"{FRONTEND_URL.rstrip('/')}" "/api/v1/quotation/feishu/oauth/callback"),
 )
 FEISHU_OAUTH_SCOPES = os.getenv(
     "FEISHU_OAUTH_SCOPES",
@@ -49,26 +45,32 @@ QUOTATION_MAX_UPLOAD_BYTES = int(
     os.getenv("QUOTATION_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024))
 )
 QUOTATION_ALLOWED_EXTENSIONS = (".xlsx", ".pdf")
-QUOTATION_MAX_PDF_HTML_BYTES = int(
-    os.getenv("QUOTATION_MAX_PDF_HTML_BYTES", str(5 * 1024 * 1024))
+QUOTATION_MAX_TEMPLATE_BYTES = int(
+    os.getenv("QUOTATION_MAX_TEMPLATE_BYTES", str(6 * 1024 * 1024))
 )
-QUOTATION_MAX_PDF_XLSX_BYTES = int(
-    os.getenv("QUOTATION_MAX_PDF_XLSX_BYTES", str(6 * 1024 * 1024))
-)
-QUOTATION_MAX_XLSX_EXPANDED_BYTES = int(
+QUOTATION_MAX_TEMPLATE_EXPANDED_BYTES = int(
     os.getenv(
-        "QUOTATION_MAX_XLSX_EXPANDED_BYTES",
+        "QUOTATION_MAX_TEMPLATE_EXPANDED_BYTES",
         str(50 * 1024 * 1024),
     )
 )
 QUOTATION_MAX_PDF_BYTES = int(
     os.getenv("QUOTATION_MAX_PDF_BYTES", str(20 * 1024 * 1024))
 )
-GOTENBERG_URL = os.getenv("GOTENBERG_URL", "http://gotenberg:3000")
-GOTENBERG_TIMEOUT_SECONDS = float(
-    os.getenv("GOTENBERG_TIMEOUT_SECONDS", "30")
+QUOTATION_MAX_SIGNATURE_BYTES = int(
+    os.getenv("QUOTATION_MAX_SIGNATURE_BYTES", str(2 * 1024 * 1024))
 )
-
+QUOTATION_RENDERER_VERSION = os.getenv(
+    "QUOTATION_RENDERER_VERSION",
+    "openpyxl-libreoffice-v1",
+)
+QUOTATION_SOFFICE_BINARY = os.getenv(
+    "QUOTATION_SOFFICE_BINARY",
+    "soffice",
+)
+QUOTATION_RENDER_TIMEOUT_SECONDS = float(
+    os.getenv("QUOTATION_RENDER_TIMEOUT_SECONDS", "120")
+)
 QUOTATION_SECURITY_ALERT_OWNER = os.getenv(
     "QUOTATION_SECURITY_ALERT_OWNER",
     "Quote Desk administrators",
@@ -101,9 +103,7 @@ QUOTATION_SECURITY_SYNC_FAILURE_THRESHOLD = int(
 QUOTATION_SECURITY_SYNC_FAILURE_WINDOW_MINUTES = int(
     os.getenv("QUOTATION_SECURITY_SYNC_FAILURE_WINDOW_MINUTES", "30")
 )
-QUOTATION_AUDIT_RETENTION_DAYS = int(
-    os.getenv("QUOTATION_AUDIT_RETENTION_DAYS", "365")
-)
+QUOTATION_AUDIT_RETENTION_DAYS = int(os.getenv("QUOTATION_AUDIT_RETENTION_DAYS", "365"))
 QUOTATION_AUDIT_EXPORT_MAX_ROWS = int(
     os.getenv("QUOTATION_AUDIT_EXPORT_MAX_ROWS", "50000")
 )
@@ -111,8 +111,7 @@ QUOTATION_STORAGE_ROUTER_ENABLED = (
     os.getenv("QUOTATION_STORAGE_ROUTER_ENABLED", "true").lower() == "true"
 )
 QUOTATION_DOCUMENT_REPLICA_ENABLED = (
-    os.getenv("QUOTATION_DOCUMENT_REPLICA_ENABLED", "true").lower()
-    == "true"
+    os.getenv("QUOTATION_DOCUMENT_REPLICA_ENABLED", "true").lower() == "true"
 )
 QUOTATION_FEISHU_DIRECT_LINK_MODE = os.getenv(
     "QUOTATION_FEISHU_DIRECT_LINK_MODE",

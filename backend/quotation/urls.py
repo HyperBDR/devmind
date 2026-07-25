@@ -1,5 +1,4 @@
 from django.urls import path
-
 from quotation.views.audit import (
     AuditEventExportView,
     AuditEventListView,
@@ -18,6 +17,12 @@ from quotation.views.documents import (
     DocumentParseView,
     QuotationDocumentListCreateView,
 )
+from quotation.views.exports import (
+    ExportJobDetailView,
+    ExportJobRetryUploadView,
+    QuotationExportCreateView,
+    QuotationTemplateListCreateView,
+)
 from quotation.views.feishu import (
     FeishuDriveTreeView,
     FeishuFileAccessBatchView,
@@ -35,21 +40,17 @@ from quotation.views.feishu import (
     FeishuSyncJobDetailView,
     FeishuUploadView,
 )
-from quotation.views.health import StorageMetricsView
-from quotation.views.pdf import (
-    PdfFromExcelView,
-    PdfFromHtmlView,
-    PdfHealthView,
-)
+from quotation.views.health import ExportMetricsView, StorageMetricsView
 from quotation.views.quotations import (
     QuotationDetailView,
-    QuotationDownloadEventView,
     QuotationGenerateView,
     QuotationListCreateView,
 )
 
 urlpatterns = [
+    path("metrics/exports", ExportMetricsView.as_view()),
     path("metrics/storage", StorageMetricsView.as_view()),
+    path("templates", QuotationTemplateListCreateView.as_view()),
     path("audit-events", AuditEventListView.as_view()),
     path("audit-events/export", AuditEventExportView.as_view()),
     path("security-alerts", SecurityAlertListView.as_view()),
@@ -67,17 +68,20 @@ urlpatterns = [
         QuotationGenerateView.as_view(),
     ),
     path(
-        "quotations/<str:quotation_id>/download-event",
-        QuotationDownloadEventView.as_view(),
-    ),
-    path(
         "quotations/<str:quotation_id>/documents",
         QuotationDocumentListCreateView.as_view(),
     ),
-    path("documents", DocumentListView.as_view()),
     path(
-        "documents/<str:document_id>/download", DocumentDownloadView.as_view()
+        "quotations/<str:quotation_id>/exports",
+        QuotationExportCreateView.as_view(),
     ),
+    path("exports/<str:job_id>", ExportJobDetailView.as_view()),
+    path(
+        "exports/<str:job_id>/retry-upload",
+        ExportJobRetryUploadView.as_view(),
+    ),
+    path("documents", DocumentListView.as_view()),
+    path("documents/<str:document_id>/download", DocumentDownloadView.as_view()),
     path(
         "documents/<str:document_id>/parse",
         DocumentParseView.as_view(),
@@ -110,7 +114,4 @@ urlpatterns = [
     ),
     path("feishu/upload", FeishuUploadView.as_view()),
     path("feishu/health", FeishuHealthView.as_view()),
-    path("pdf/health", PdfHealthView.as_view()),
-    path("pdf/from-excel", PdfFromExcelView.as_view()),
-    path("pdf/from-html", PdfFromHtmlView.as_view()),
 ]

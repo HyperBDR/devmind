@@ -1,14 +1,15 @@
 from django.contrib import admin
-
 from quotation.audit import record_audit_event
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
     DocumentParseResult,
     DocumentReplica,
+    ExportJob,
     FeishuConnection,
     Quotation,
     QuotationItem,
+    QuotationTemplate,
     QuotationVersion,
     StorageConnection,
     StorageMount,
@@ -26,6 +27,8 @@ from quotation.services.storage_control import (
 admin.site.register(Quotation)
 admin.site.register(QuotationItem)
 admin.site.register(QuotationVersion)
+admin.site.register(QuotationTemplate)
+admin.site.register(ExportJob)
 admin.site.register(DocumentAsset)
 admin.site.register(DocumentParseResult)
 admin.site.register(FeishuConnection)
@@ -51,9 +54,11 @@ class StorageConnectionAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         previous_status = None
         if change:
-            previous_status = StorageConnection.objects.filter(
-                pk=obj.pk
-            ).values_list("status", flat=True).first()
+            previous_status = (
+                StorageConnection.objects.filter(pk=obj.pk)
+                .values_list("status", flat=True)
+                .first()
+            )
         super().save_model(request, obj, form, change)
         if not change:
             event_name = "storage.connection_created"
@@ -148,9 +153,7 @@ class StorageMountAdmin(admin.ModelAdmin):
             request=request,
             module="storage",
             action="mount_updated" if change else "mount_created",
-            event_name=(
-                "storage.mount_updated" if change else "storage.mount_created"
-            ),
+            event_name=("storage.mount_updated" if change else "storage.mount_created"),
             result=AuditEvent.RESULT_SUCCEEDED,
             target_type="storage_mount",
             target_id=obj.id,

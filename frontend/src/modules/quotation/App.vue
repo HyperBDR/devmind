@@ -32,8 +32,7 @@ import QuotationDetails from './components/QuotationDetails.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
-import { downloadQuotationExcel } from './utils/excelGenerator'
-import { recordQuotationDownload } from './api/quotations'
+import { exportQuotationFile } from './api/exports'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from './utils/feishuLinkState'
 import {
   loadProductLineOptions,
@@ -449,26 +448,7 @@ async function handleSaveQuotation(newQuote: Quotation) {
 
     if (willGenerate) {
       saved = await generateQuotationApi(saved.id, auth.currentUser.email)
-      const downloaded = await downloadQuotationExcel(
-        {
-          ...ownedQuote,
-          ...saved,
-          issuerSignature: ownedQuote.issuerSignature,
-          remarksDisclaimer:
-            ownedQuote.remarksDisclaimer ?? saved.remarksDisclaimer,
-        },
-        auth.currentUser
-          ? {
-              name: auth.currentUser.name,
-              title: auth.currentUser.title,
-              email: auth.currentUser.email,
-              role: auth.currentUser.role,
-            }
-          : undefined,
-      )
-      if (downloaded) {
-        await recordQuotationDownload(saved.id, 'excel').catch(() => undefined)
-      }
+      await exportQuotationFile(saved.id, 'xlsx')
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id
       if (auth.embeddedAuth) {

@@ -2,25 +2,14 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-const model = readFileSync(
-  new URL('../src/modules/quotation/utils/quotationPreviewModel.ts', import.meta.url),
-  'utf8',
-)
-const excel = readFileSync(
-  new URL('../src/modules/quotation/utils/excelGenerator.ts', import.meta.url),
-  'utf8',
-)
-const pdf = readFileSync(
-  new URL('../src/modules/quotation/utils/pdfExporter.ts', import.meta.url),
+const renderer = readFileSync(
+  new URL('../../backend/quotation/services/export_renderer.py', import.meta.url),
   'utf8',
 )
 
-test('template row padding never truncates real quotation line items', () => {
-  assert.match(model, /length: Math\.max\(count, items\.length\)/)
-  assert.match(excel, /model\.softwareRows/)
-  assert.match(excel, /model\.othersRows/)
-  assert.match(pdf, /renderLineRows\(model\.softwareRows\)/)
-  assert.match(pdf, /renderLineRows\(model\.othersRows\)/)
-  assert.match(excel, /function lineItemRowHeight\(description: string\)/)
-  assert.match(excel, /this\.nextRow\(lineItemRowHeight\(rowDescription\(item\)\)\)/)
+test('backend template rendering never truncates quotation line items', () => {
+  assert.match(renderer, /items = list\(snapshot\.get\("items"\) or \[\]\)/)
+  assert.match(renderer, /extra_rows = max\(len\(render_items\) - 1, 0\)/)
+  assert.match(renderer, /insert_rows\(item_start_row \+ 1, amount=extra_rows\)/)
+  assert.match(renderer, /for offset, item in enumerate\(render_items\)/)
 })

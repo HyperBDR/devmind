@@ -1,21 +1,24 @@
 import os
+
 from kombu import Queue
 
 # For production environments, use Redis or RabbitMQ as result backend.
-CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL",
-                               "redis://localhost:6379")
+CELERY_BROKER_URL = os.getenv(
+    "CELERY_BROKER_URL",
+    "redis://localhost:6379",
+)
 
 # Use Django database as result backend.
-CELERY_RESULT_BACKEND = 'django-db'
+CELERY_RESULT_BACKEND = "django-db"
 
 # Set the default scheduler for Celery Beat
-CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # Celery timezone configuration
 # When USE_TZ=True, Celery uses UTC internally but schedules tasks
 # according to the specified timezone. This ensures crontab schedules
 # are interpreted in the correct timezone (Asia/Shanghai).
-CELERY_TIMEZONE = 'Asia/Shanghai'
+CELERY_TIMEZONE = "Asia/Shanghai"
 CELERY_ENABLE_UTC = True
 
 
@@ -26,7 +29,7 @@ CELERY_ENABLE_UTC = True
 # compatibility reasons. JSON format is lightweight, cross-platform, and less
 # likely to cause potential security issues (such as pickle deserialization
 # vulnerabilities).
-CELERY_ACCEPT_CONTENT = ['json']
+CELERY_ACCEPT_CONTENT = ["json"]
 
 # The CELERY_TASK_SERIALIZER setting specifies how Celery serializes the task
 # message content. Setting it to 'json' means that Celery will serialize the
@@ -36,7 +39,7 @@ CELERY_ACCEPT_CONTENT = ['json']
 # languages and systems. Other optional serialization formats include pickle
 # (not recommended, may have security risks), msgpack (more efficient
 # compression), and yaml (more readable but less efficient).
-CELERY_TASK_SERIALIZER = 'json'
+CELERY_TASK_SERIALIZER = "json"
 
 # Dedicated queue for this project to avoid consuming tasks from other apps
 # that share the same broker.
@@ -44,12 +47,19 @@ CELERY_TASK_DEFAULT_QUEUE = os.getenv("CELERY_TASK_DEFAULT_QUEUE", "backend")
 CELERY_TASK_QUEUES = (
     Queue(CELERY_TASK_DEFAULT_QUEUE, routing_key=CELERY_TASK_DEFAULT_QUEUE),
     Queue("quotation_sync", routing_key="quotation_sync"),
-    Queue("quotation_pdf", routing_key="quotation_pdf"),
-    Queue("quotation_excel", routing_key="quotation_excel"),
+    Queue("quotation_render", routing_key="quotation_render"),
     Queue("quotation_ocr", routing_key="quotation_ocr"),
 )
 CELERY_TASK_DEFAULT_ROUTING_KEY = CELERY_TASK_DEFAULT_QUEUE
 CELERY_TASK_ROUTES = {
+    "quotation.tasks.render_quotation_export": {
+        "queue": "quotation_render",
+        "routing_key": "quotation_render",
+    },
+    "quotation.tasks.sync_document_replica": {
+        "queue": "quotation_sync",
+        "routing_key": "quotation_sync",
+    },
     "quotation.tasks.sync_feishu_folder": {
         "queue": "quotation_sync",
         "routing_key": "quotation_sync",
@@ -63,10 +73,10 @@ CELERY_TASK_REJECT_ON_WORKER_LOST = True
 
 # Prevent task loss in Redis
 CELERY_BROKER_TRANSPORT_OPTIONS = {
-    'visibility_timeout': 43200,
-    'fanout_prefix': True,
-    'fanout_patterns': True,
-    'retry_on_timeout': True,
+    "visibility_timeout": 43200,
+    "fanout_prefix": True,
+    "fanout_patterns": True,
+    "retry_on_timeout": True,
 }
 
 # Keep workers alive across transient Redis DNS or connection failures.
@@ -97,7 +107,7 @@ CELERY_TASK_ACKS_LATE = True
 # This ensures fair task distribution and prevents tasks from queuing
 # behind long-running ones
 CELERY_WORKER_PREFETCH_MULTIPLIER = int(
-    os.getenv('CELERY_WORKER_PREFETCH_MULTIPLIER', 1)
+    os.getenv("CELERY_WORKER_PREFETCH_MULTIPLIER", 1)
 )
 
 # Worker concurrency setting

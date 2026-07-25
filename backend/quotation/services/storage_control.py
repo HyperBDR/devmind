@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
-
 from quotation.audit import AUDIT_CONTEXT, record_audit_event
 from quotation.models import (
     AuditEvent,
@@ -25,6 +24,10 @@ from quotation.models import (
     SyncJobType,
 )
 from quotation.services.feishu_client import FeishuAPIError, FeishuClient
+from quotation.services.feishu_service import (
+    is_folder_drive_item,
+    suggest_unique_file_name,
+)
 from quotation.services.storage import resolve_document_path
 
 
@@ -47,9 +50,7 @@ def active_replica_for_asset(
     asset: DocumentAsset,
 ) -> DocumentReplica | None:
     """Return the newest usable remote replica for one document asset."""
-    prefetched = getattr(asset, "_prefetched_objects_cache", {}).get(
-        "replicas"
-    )
+    prefetched = getattr(asset, "_prefetched_objects_cache", {}).get("replicas")
     if prefetched is not None:
         candidates = [
             replica
@@ -62,9 +63,7 @@ def active_replica_for_asset(
             candidates,
             key=lambda replica: (
                 replica.version,
-                replica.last_synced_at
-                or replica.updated_at
-                or replica.created_at,
+                replica.last_synced_at or replica.updated_at or replica.created_at,
                 replica.created_at,
                 replica.id,
             ),
@@ -188,9 +187,7 @@ class FeishuStorageProvider:
             )
         except FeishuAPIError as exc:
             error_code = (
-                f"feishu_{exc.code}"
-                if exc.code is not None
-                else "feishu_health_failed"
+                f"feishu_{exc.code}" if exc.code is not None else "feishu_health_failed"
             )
             self.connection.status = StorageConnectionStatus.ERROR
             self.connection.last_health_checked_at = checked_at
@@ -225,12 +222,70 @@ class FeishuStorageProvider:
         content: bytes,
         folder_token: str = "",
     ) -> dict:
+        access_token = self.access_token()
+        target_folder = folder_token or mount.root_folder_token
+        files = self._folder_files(
+            access_token=access_token,
+            folder_token=target_folder,
+        )
+        existing = next(
+            (
+                item
+                for item in files
+                if item.get("name") == file_name
+                and item.get("token")
+                and not is_folder_drive_item(item)
+            ),
+            None,
+        )
+        if existing is not None and mount.conflict_policy == "reuse":
+            token = str(existing.get("token") or "")
+            return {
+                "file_token": token,
+                "token": token,
+                "url": str(existing.get("url") or ""),
+                "reused": True,
+            }
+        upload_name = file_name
+        if existing is not None:
+            existing_names = {
+                str(item.get("name"))
+                for item in files
+                if item.get("name") and not is_folder_drive_item(item)
+            }
+            upload_name = suggest_unique_file_name(
+                file_name,
+                existing_names,
+            )
         return self.client.upload_file(
-            self.access_token(),
-            folder_token=folder_token or mount.root_folder_token,
-            file_name=file_name,
+            access_token,
+            folder_token=target_folder,
+            file_name=upload_name,
             content=content,
         )
+
+    def _folder_files(
+        self,
+        *,
+        access_token: str,
+        folder_token: str,
+    ) -> list[dict]:
+        files = []
+        page_token = None
+        for _ in range(20):
+            data = self.client.list_folder_files(
+                access_token,
+                folder_token,
+                page_size=200,
+                page_token=page_token,
+            )
+            files.extend(data.get("files") or [])
+            if not data.get("has_more"):
+                break
+            page_token = data.get("next_page_token")
+            if not page_token:
+                break
+        return files
 
     def download(self, replica: DocumentReplica) -> tuple[bytes, str | None]:
         return self.client.download_file(
@@ -330,11 +385,14 @@ def create_replica(
     route: StorageRoute,
 ) -> DocumentReplica:
     """Create or retry one idempotent managed remote document replica."""
-    version = (
-        max(asset.quotation.version_current or 1, 1)
-        if asset.quotation_id
-        else 1
-    )
+    content = resolve_document_path(asset.storage_key).read_bytes()
+    content_hash = asset.content_hash or sha256(content).hexdigest()
+    if asset.quotation_version_id:
+        version = asset.quotation_version.version_no
+    elif asset.quotation_id:
+        version = max(asset.quotation.version_current or 1, 1)
+    else:
+        version = 1
     replica, _ = DocumentReplica.objects.get_or_create(
         asset=asset,
         connection=route.connection,
@@ -344,6 +402,13 @@ def create_replica(
             "folder_token": route.mount.root_folder_token,
         },
     )
+    if (
+        replica.sync_status == ReplicaSyncStatus.SYNCED
+        and replica.content_hash == content_hash
+        and replica.remote_file_token
+        and replica.revoked_at is None
+    ):
+        return replica
     context = _sync_context(request)
     job = SyncJob.objects.create(
         job_type=SyncJobType.UPLOAD,
@@ -372,7 +437,6 @@ def create_replica(
         sync_job_id=job.id,
     )
     try:
-        content = resolve_document_path(asset.storage_key).read_bytes()
         uploaded = route.provider.upload(
             route.mount,
             file_name=asset.file_name,
@@ -386,7 +450,7 @@ def create_replica(
         with transaction.atomic():
             replica.remote_file_token = token
             replica.remote_url = url
-            replica.content_hash = sha256(content).hexdigest()
+            replica.content_hash = content_hash
             replica.sync_status = ReplicaSyncStatus.SYNCED
             replica.last_synced_at = now
             replica.error_code = ""
@@ -394,9 +458,7 @@ def create_replica(
             replica.save()
             job.status = SyncJobStatus.SUCCESS
             job.result_json = {"replica_id": replica.id}
-            job.save(
-                update_fields=["status", "result_json", "updated_at"]
-            )
+            job.save(update_fields=["status", "result_json", "updated_at"])
         record_audit_event(
             request=request,
             module="replica",
@@ -413,9 +475,7 @@ def create_replica(
     except Exception as exc:
         error_code = getattr(exc, "code", None)
         stable_code = (
-            f"feishu_{error_code}"
-            if error_code is not None
-            else "replica_sync_failed"
+            f"feishu_{error_code}" if error_code is not None else "replica_sync_failed"
         )
         replica.sync_status = ReplicaSyncStatus.FAILED
         replica.error_code = stable_code
@@ -467,11 +527,7 @@ def register_uploaded_replica(
     folder_token: str,
 ) -> DocumentReplica:
     """Register an upload already completed by the compatibility endpoint."""
-    version = (
-        max(asset.quotation.version_current or 1, 1)
-        if asset.quotation_id
-        else 1
-    )
+    version = max(asset.quotation.version_current or 1, 1) if asset.quotation_id else 1
     replica, _ = DocumentReplica.objects.update_or_create(
         asset=asset,
         connection=route.connection,
@@ -523,9 +579,7 @@ def revoke_replica(*, request, replica: DocumentReplica) -> DocumentReplica:
         provider.delete(replica)
     replica.sync_status = ReplicaSyncStatus.REVOKED
     replica.revoked_at = timezone.now()
-    replica.save(
-        update_fields=["sync_status", "revoked_at", "updated_at"]
-    )
+    replica.save(update_fields=["sync_status", "revoked_at", "updated_at"])
     record_audit_event(
         request=request,
         module="replica",

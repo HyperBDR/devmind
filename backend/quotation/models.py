@@ -4,7 +4,6 @@ import uuid
 
 from django.conf import settings
 from django.db import models
-
 from hyperbdr_dashboard.encryption import encryption_service
 
 
@@ -91,6 +90,24 @@ class ReplicaSyncStatus(models.TextChoices):
     REVOKED = "revoked", "Revoked"
 
 
+class QuotationTemplateStatus(models.TextChoices):
+    DRAFT = "draft", "Draft"
+    ACTIVE = "active", "Active"
+    ARCHIVED = "archived", "Archived"
+
+
+class ExportJobStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    RENDERING_EXCEL = "rendering_excel", "Rendering Excel"
+    CONVERTING_PDF = "converting_pdf", "Converting PDF"
+    RENDERED = "rendered", "Rendered"
+    UPLOAD_QUEUED = "upload_queued", "Upload queued"
+    UPLOADING = "uploading", "Uploading"
+    COMPLETED = "completed", "Completed"
+    RENDER_FAILED = "render_failed", "Render failed"
+    UPLOAD_FAILED = "upload_failed", "Upload failed"
+
+
 class TimeStampedModel(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -133,21 +150,13 @@ class Quotation(TimeStampedModel):
     expire_date = models.DateField()
     tax_label = models.CharField(max_length=40, default="VAT")
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    vat_amount = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
-    software_subtotal = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
-    others_subtotal = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
+    vat_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    software_subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    others_subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     subtotal_before_vat = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
     )
-    grand_total = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
+    grand_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
     remarks_disclaimer = models.TextField(blank=True, default="")
 
     issuer_company_name = models.CharField(
@@ -155,9 +164,7 @@ class Quotation(TimeStampedModel):
     )
     issuer_contact_name = models.CharField(max_length=120)
     issuer_contact_email = models.CharField(max_length=255)
-    issuer_contact_title = models.CharField(
-        max_length=120, blank=True, default=""
-    )
+    issuer_contact_title = models.CharField(max_length=120, blank=True, default="")
     issuer_signature = models.TextField(blank=True, default="")
 
     client_company = models.CharField(max_length=255)
@@ -191,18 +198,10 @@ class QuotationItem(TimeStampedModel):
     name = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     qty = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    list_price = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
-    discount_percent = models.DecimalField(
-        max_digits=5, decimal_places=2, default=0
-    )
-    net_unit_price = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
-    extended_price = models.DecimalField(
-        max_digits=18, decimal_places=2, default=0
-    )
+    list_price = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    net_unit_price = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    extended_price = models.DecimalField(max_digits=18, decimal_places=2, default=0)
 
     class Meta:
         db_table = "quotation_items"
@@ -230,6 +229,109 @@ class QuotationVersion(models.Model):
         ordering = ["version_no"]
 
 
+class QuotationTemplate(TimeStampedModel):
+    """Immutable, backend-managed XLSX quotation template version."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    name = models.CharField(max_length=120)
+    version = models.PositiveIntegerField()
+    storage_key = models.CharField(max_length=512)
+    content_hash = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=20,
+        choices=QuotationTemplateStatus.choices,
+        default=QuotationTemplateStatus.DRAFT,
+        db_index=True,
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="quotation_templates",
+    )
+
+    class Meta:
+        db_table = "quotation_templates"
+        ordering = ["name", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name", "version"],
+                name="quotation_template_name_version_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["status"],
+                condition=models.Q(status=QuotationTemplateStatus.ACTIVE),
+                name="quotation_template_single_active",
+            ),
+        ]
+
+
+class ExportJob(TimeStampedModel):
+    """Pinned quotation export request and its observable state."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    quotation = models.ForeignKey(
+        Quotation,
+        on_delete=models.CASCADE,
+        related_name="export_jobs",
+    )
+    quotation_version = models.ForeignKey(
+        QuotationVersion,
+        on_delete=models.PROTECT,
+        related_name="export_jobs",
+    )
+    template = models.ForeignKey(
+        QuotationTemplate,
+        on_delete=models.PROTECT,
+        related_name="export_jobs",
+    )
+    quotation_version_no = models.PositiveIntegerField()
+    template_version = models.PositiveIntegerField()
+    renderer_version = models.CharField(max_length=80)
+    formats = models.JSONField(default=list)
+    archive_to_feishu = models.BooleanField(default=False)
+    idempotency_key = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+    )
+    status = models.CharField(
+        max_length=30,
+        choices=ExportJobStatus.choices,
+        default=ExportJobStatus.QUEUED,
+        db_index=True,
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="quotation_export_jobs",
+    )
+    request_id = models.CharField(max_length=100, blank=True, default="")
+    trace_id = models.CharField(max_length=100, blank=True, default="")
+    celery_task_id = models.CharField(max_length=255, blank=True, default="")
+    error_code = models.CharField(max_length=100, blank=True, default="")
+    error_message = models.CharField(max_length=500, blank=True, default="")
+    started_at = models.DateTimeField(blank=True, null=True)
+    finished_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "quotation_export_jobs"
+        ordering = ["-created_at"]
+
+
 class DocumentAsset(models.Model):
     id = models.CharField(
         primary_key=True, max_length=36, default=_uuid, editable=False
@@ -241,6 +343,27 @@ class DocumentAsset(models.Model):
         null=True,
         blank=True,
     )
+    quotation_version = models.ForeignKey(
+        QuotationVersion,
+        on_delete=models.PROTECT,
+        related_name="document_assets",
+        null=True,
+        blank=True,
+    )
+    template = models.ForeignKey(
+        QuotationTemplate,
+        on_delete=models.PROTECT,
+        related_name="document_assets",
+        null=True,
+        blank=True,
+    )
+    export_job = models.ForeignKey(
+        ExportJob,
+        on_delete=models.SET_NULL,
+        related_name="assets",
+        null=True,
+        blank=True,
+    )
     doc_type = models.CharField(
         max_length=20, choices=DocumentType.choices, db_index=True
     )
@@ -248,6 +371,9 @@ class DocumentAsset(models.Model):
     mime_type = models.CharField(max_length=120)
     storage_key = models.CharField(max_length=512)
     size_bytes = models.IntegerField(default=0)
+    content_hash = models.CharField(max_length=64, blank=True, default="")
+    template_version = models.PositiveIntegerField(default=0)
+    renderer_version = models.CharField(max_length=80, blank=True, default="")
     source = models.CharField(max_length=20, default="local")
     feishu_file_token = models.CharField(max_length=255, blank=True, null=True)
     feishu_url = models.URLField(max_length=512, blank=True, null=True)
@@ -273,7 +399,12 @@ class DocumentAsset(models.Model):
                     & ~models.Q(feishu_file_token="")
                 ),
                 name="quotation_feishu_asset_token_unique",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["export_job", "doc_type"],
+                condition=models.Q(export_job__isnull=False),
+                name="quotation_export_asset_format_unique",
+            ),
         ]
 
 
@@ -891,12 +1022,8 @@ class FeishuConnection(TimeStampedModel):
     token_type = models.CharField(max_length=40, default="Bearer")
     expires_at = models.DateTimeField(null=True, blank=True)
     scope = models.TextField(blank=True, default="")
-    preferred_folder_token = models.CharField(
-        max_length=128, blank=True, null=True
-    )
-    preferred_folder_name = models.CharField(
-        max_length=255, blank=True, null=True
-    )
+    preferred_folder_token = models.CharField(max_length=128, blank=True, null=True)
+    preferred_folder_name = models.CharField(max_length=255, blank=True, null=True)
     shared_folder_bookmarks = models.JSONField(default=list, blank=True)
 
     class Meta:
@@ -906,9 +1033,7 @@ class FeishuConnection(TimeStampedModel):
     def encrypt_token(cls, value: str) -> str:
         if not value or value.startswith(cls.ENCRYPTED_TOKEN_PREFIX):
             return value
-        return (
-            f"{cls.ENCRYPTED_TOKEN_PREFIX}{encryption_service.encrypt(value)}"
-        )
+        return f"{cls.ENCRYPTED_TOKEN_PREFIX}{encryption_service.encrypt(value)}"
 
     @classmethod
     def decrypt_token(cls, value: str) -> str:

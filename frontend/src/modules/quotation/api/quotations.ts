@@ -116,19 +116,6 @@ function mapStatusToApi(status: Quotation['status']): string {
   return STATUS_TO_API[status] || 'draft';
 }
 
-export function recordQuotationDownload(
-  quotationId: string,
-  format: 'excel' | 'pdf',
-): Promise<void> {
-  return apiRequest<void>(
-    `/quotations/${encodeURIComponent(quotationId)}/download-event`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ format }),
-    },
-  );
-}
-
 function formatVersionTime(value?: string | null): string {
   if (!value) return '';
   const date = new Date(value);

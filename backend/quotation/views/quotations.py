@@ -3,11 +3,6 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
 from quotation.access import (
     can_access_quotation,
     filter_accessible_quotations,
@@ -29,6 +24,10 @@ from quotation.services.quotation_service import (
     replace_items,
 )
 from quotation.services.storage import delete_documents_after_commit
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 
 def _ensure_access(user, quotation: Quotation) -> Response | None:
@@ -41,9 +40,7 @@ class QuotationListCreateView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        qs = Quotation.objects.prefetch_related(
-            "items", "documents", "versions"
-        ).all()
+        qs = Quotation.objects.prefetch_related("items", "documents", "versions").all()
         qs = filter_accessible_quotations(request.user, qs)
         status_value = request.query_params.get("status")
         if status_value:
@@ -52,13 +49,13 @@ class QuotationListCreateView(APIView):
             qs = qs.filter(status=status_value)
         try:
             page = max(int(request.query_params.get("page", 1)), 1)
-            page_size = min(
-                max(int(request.query_params.get("page_size", 20)), 1), 200
-            )
+            page_size = min(max(int(request.query_params.get("page_size", 20)), 1), 200)
         except (TypeError, ValueError):
             return Response({"detail": "invalid pagination"}, status=400)
         total = qs.count()
-        items = qs[(page - 1) * page_size : page * page_size]
+        page_start = (page - 1) * page_size
+        page_end = page * page_size
+        items = qs[page_start:page_end]
         return Response(
             {
                 "items": QuotationSerializer(items, many=True).data,
@@ -88,9 +85,7 @@ class QuotationDetailView(APIView):
 
     def get_object(self, quotation_id: str) -> Quotation | None:
         return (
-            Quotation.objects.prefetch_related(
-                "items", "documents", "versions"
-            )
+            Quotation.objects.prefetch_related("items", "documents", "versions")
             .filter(pk=quotation_id)
             .first()
         )
@@ -156,9 +151,7 @@ class QuotationDetailView(APIView):
             with transaction.atomic():
                 if "items" in data:
                     replace_items(quotation, data["items"])
-                    cache = getattr(
-                        quotation, "_prefetched_objects_cache", None
-                    )
+                    cache = getattr(quotation, "_prefetched_objects_cache", None)
                     if cache is not None:
                         cache.pop("items", None)
                 if "items" in data or "vat_rate" in data:
@@ -179,9 +172,7 @@ class QuotationDetailView(APIView):
                     )
                     for k, v in totals.items():
                         setattr(quotation, k, v)
-                status_changed = (
-                    "status" in data and data["status"] != previous_status
-                )
+                status_changed = "status" in data and data["status"] != previous_status
                 items_changed = "items" in data
                 quotation.save()
                 skip_version = bool(data.get("skip_version"))
@@ -232,9 +223,7 @@ class QuotationGenerateView(APIView):
 
     def post(self, request, quotation_id: str):
         quotation = (
-            Quotation.objects.prefetch_related(
-                "items", "documents", "versions"
-            )
+            Quotation.objects.prefetch_related("items", "documents", "versions")
             .filter(pk=quotation_id)
             .first()
         )
@@ -258,28 +247,3 @@ class QuotationGenerateView(APIView):
             "items", "documents", "versions"
         ).get(pk=quotation_id)
         return Response(QuotationSerializer(quotation).data)
-
-
-class QuotationDownloadEventView(APIView):
-    """Record a successful browser-generated quotation download."""
-
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request, quotation_id: str):
-        quotation = Quotation.objects.filter(pk=quotation_id).first()
-        if not quotation:
-            return Response({"detail": "quotation not found"}, status=404)
-        denied = _ensure_access(request.user, quotation)
-        if denied:
-            return denied
-        export_format = str(request.data.get("format") or "").lower()
-        if export_format not in {"excel", "pdf"}:
-            return Response({"detail": "invalid export format"}, status=400)
-        set_request_audit_target(request, target_label=quotation.quote_no)
-        return Response(
-            {
-                "quotation_id": quotation.id,
-                "quote_no": quotation.quote_no,
-                "format": export_format,
-            }
-        )

@@ -16,9 +16,11 @@ import {
 } from 'lucide-vue-next'
 import type { Quotation, QuoteStatus, QuoteVersion } from '../types'
 import { listAuditEvents, type AuditEvent } from '../api/audit'
-import { downloadQuotationExcel } from '../utils/excelGenerator'
-import { downloadQuotationPdf } from '../utils/pdfExporter'
-import { recordQuotationDownload } from '../api/quotations'
+import {
+  exportQuotationFile,
+  type QuotationExportFormat,
+  type QuotationExportStatus,
+} from '../api/exports'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
 import type { PreviewUser } from '../utils/quotationPreviewModel'
 import { getCurrencySymbol } from '../utils/quotationPreviewModel'
@@ -47,6 +49,18 @@ const emit = defineEmits<{
 
 const selectedVersionForModal = ref<QuoteVersion | null>(null)
 const activityEvents = ref<AuditEvent[]>([])
+const exportingFormat = ref<QuotationExportFormat | null>(null)
+const activeExportStatus = ref<QuotationExportStatus | null>(null)
+
+const activeExportStatusLabel = computed(() =>
+  activeExportStatus.value
+    ? t(`quotation.common.exportStatuses.${activeExportStatus.value}`)
+    : '',
+)
+
+function trackExportProgress(status: QuotationExportStatus) {
+  activeExportStatus.value = status
+}
 
 async function loadActivity() {
   const response = await listAuditEvents({
@@ -239,14 +253,20 @@ function formatNow() {
 }
 
 async function handleGenerateExcel() {
-  const success = await downloadQuotationExcel(props.quote, props.currentUser)
-  if (success) {
-    await recordQuotationDownload(props.quote.id, 'excel').catch(() => undefined)
+  exportingFormat.value = 'xlsx'
+  try {
+    await exportQuotationFile(props.quote.id, 'xlsx', {
+      onProgress: (job) => trackExportProgress(job.status),
+    })
     emit('updateQuoteStatus', props.quote.id, {
       status: 'Generated',
       excelGeneratedAt: formatNow(),
       excelFileName: buildQuotationExportFileName(props.quote, 'xlsx'),
     })
+  } catch (error) {
+    alert(error instanceof Error ? error.message : 'Quotation export failed')
+  } finally {
+    exportingFormat.value = null
   }
 }
 
@@ -255,9 +275,11 @@ async function handleDownloadExcel() {
     alert(t('quotation.pages.details.alertCancelledDownload'))
     return
   }
-  const success = await downloadQuotationExcel(props.quote, props.currentUser)
-  if (success) {
-    await recordQuotationDownload(props.quote.id, 'excel').catch(() => undefined)
+  exportingFormat.value = 'xlsx'
+  try {
+    await exportQuotationFile(props.quote.id, 'xlsx', {
+      onProgress: (job) => trackExportProgress(job.status),
+    })
     const formattedDate = formatNow()
     const fileName = buildQuotationExportFileName(props.quote, 'xlsx')
     if (props.quote.status === 'Draft') {
@@ -272,14 +294,24 @@ async function handleDownloadExcel() {
         excelFileName: fileName,
       })
     }
+  } catch (error) {
+    alert(error instanceof Error ? error.message : 'Quotation export failed')
+  } finally {
+    exportingFormat.value = null
   }
 }
 
 async function handleExportPdf() {
   if (props.quote.status === 'Cancelled') return
-  const success = await downloadQuotationPdf(props.quote, props.currentUser)
-  if (success) {
-    await recordQuotationDownload(props.quote.id, 'pdf').catch(() => undefined)
+  exportingFormat.value = 'pdf'
+  try {
+    await exportQuotationFile(props.quote.id, 'pdf', {
+      onProgress: (job) => trackExportProgress(job.status),
+    })
+  } catch (error) {
+    alert(error instanceof Error ? error.message : 'Quotation export failed')
+  } finally {
+    exportingFormat.value = null
   }
 }
 
@@ -339,6 +371,7 @@ function setStatus(status: QuoteStatus) {
         <button
           v-if="quote.status === 'Draft'"
           type="button"
+          :disabled="exportingFormat !== null"
           class="dm-btn-primary cursor-pointer px-3.5 py-2 text-sm font-semibold"
           @click="handleGenerateExcel"
         >
@@ -348,6 +381,7 @@ function setStatus(status: QuoteStatus) {
 
         <button
           type="button"
+          :disabled="quote.status === 'Cancelled' || exportingFormat !== null"
           class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold shadow-xs transition duration-150"
           :class="
             quote.status === 'Cancelled'
@@ -362,7 +396,7 @@ function setStatus(status: QuoteStatus) {
 
         <button
           type="button"
-          :disabled="quote.status === 'Cancelled'"
+          :disabled="quote.status === 'Cancelled' || exportingFormat !== null"
           class="flex items-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-semibold shadow-xs transition duration-150"
           :class="
             quote.status === 'Cancelled'
@@ -375,6 +409,13 @@ function setStatus(status: QuoteStatus) {
           {{ t('quotation.pages.details.exportPdf') }}
         </button>
       </div>
+      <p
+        v-if="activeExportStatus"
+        class="w-full text-right text-xs font-semibold text-indigo-600 sm:w-auto"
+        role="status"
+      >
+        {{ activeExportStatusLabel }}
+      </p>
     </div>
 
     <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
