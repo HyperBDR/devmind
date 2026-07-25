@@ -60,6 +60,14 @@ CELERY_TASK_ROUTES = {
         "queue": "quotation_sync",
         "routing_key": "quotation_sync",
     },
+    "quotation.tasks.dispatch_remote_file_cleanups": {
+        "queue": "quotation_sync",
+        "routing_key": "quotation_sync",
+    },
+    "quotation.tasks.delete_owned_remote_file": {
+        "queue": "quotation_sync",
+        "routing_key": "quotation_sync",
+    },
     "quotation.tasks.sync_feishu_folder": {
         "queue": "quotation_sync",
         "routing_key": "quotation_sync",

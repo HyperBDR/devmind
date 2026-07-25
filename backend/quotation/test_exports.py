@@ -1,25 +1,38 @@
 from datetime import date, timedelta
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from celery.exceptions import Retry
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
+from django.db.models.deletion import RestrictedError
 from django.test import TestCase, override_settings
 from quotation.metrics import export_metrics_snapshot
 from quotation.models import (
+    EXPORT_ARCHIVE_SYNC_STAGE,
+    DocumentAsset,
     DocumentReplica,
     ExportJob,
+    ExportJobStatus,
     Quotation,
     QuotationTemplate,
     QuotationTemplateStatus,
     QuotationVersion,
+    RemoteFileCleanup,
+    RemoteFileCleanupStatus,
     StorageConnection,
     StorageMount,
+    SyncJob,
+    SyncJobStatus,
 )
-from quotation.services.export_archive import sync_export_asset
+from quotation.services.export_archive import (
+    sync_export_asset,
+    update_export_upload_tracking,
+)
 from quotation.services.export_jobs import create_export_job
 from quotation.services.export_renderer import (
+    CURRENT_RENDERER_VERSION,
     build_default_template_bytes,
     ensure_default_template,
 )
@@ -27,7 +40,12 @@ from quotation.services.feishu_client import FeishuAPIError
 from quotation.services.quotation_service import build_quotation_snapshot
 from quotation.services.storage import resolve_document_path
 from quotation.services.storage_control import FeishuStorageProvider
-from quotation.tasks import render_quotation_export_task, sync_document_replica_task
+from quotation.tasks import (
+    delete_owned_remote_file_task,
+    dispatch_remote_file_cleanups_task,
+    render_quotation_export_task,
+    sync_document_replica_task,
+)
 from rest_framework.test import APIClient
 
 
@@ -177,6 +195,476 @@ class QuotationExportApiTests(QuotationExportFixture):
         )
         self.assertEqual(job.quotation_version_no, 2)
 
+    def test_delete_exported_quotation_cascades_jobs_and_assets(self):
+        with patch("quotation.tasks.render_quotation_export_task.apply_async"):
+            job, _created = create_export_job(
+                quotation=self.quotation,
+                formats=["xlsx"],
+                actor=self.user,
+                quotation_version_no=1,
+            )
+        render_quotation_export_task.run(job.id)
+        asset = job.assets.get()
+        asset_path = resolve_document_path(asset.storage_key)
+        connection = StorageConnection.objects.create(
+            display_name="Deletion archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        replica = DocumentReplica.objects.create(
+            asset=asset,
+            connection=connection,
+            mount=mount,
+            remote_file_token="remote-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": True},
+        )
+
+        with self.assertRaises(RestrictedError):
+            self.version.delete()
+        self.assertTrue(ExportJob.objects.filter(pk=job.id).exists())
+        self.assertTrue(asset_path.exists())
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(
+                    f"/api/v1/quotation/quotations/{self.quotation.id}"
+                )
+
+        self.assertEqual(response.status_code, 204)
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="remote-token",
+        )
+        cleanup_task.assert_called_once_with(
+            args=[cleanup.id],
+            queue="quotation_sync",
+        )
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as duplicate_dispatch:
+            dispatch_result = dispatch_remote_file_cleanups_task.run()
+        self.assertEqual(dispatch_result, {"pending": 0, "dispatched": 0})
+        duplicate_dispatch.assert_not_called()
+        self.assertFalse(ExportJob.objects.filter(pk=job.id).exists())
+        replica_exists = DocumentReplica.objects.filter(pk=replica.id).exists()
+        self.assertFalse(replica_exists)
+        version_exists = QuotationVersion.objects.filter(
+            pk=self.version.id,
+        ).exists()
+        self.assertFalse(version_exists)
+        self.assertFalse(asset_path.exists())
+
+    def test_delete_quotation_rejects_active_export_job(self):
+        with patch("quotation.tasks.render_quotation_export_task.apply_async"):
+            job, _created = create_export_job(
+                quotation=self.quotation,
+                formats=["xlsx"],
+                actor=self.user,
+                quotation_version_no=1,
+            )
+
+        response = self.client.delete(
+            f"/api/v1/quotation/quotations/{self.quotation.id}"
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Quotation.objects.filter(pk=self.quotation.pk).exists())
+        self.assertTrue(ExportJob.objects.filter(pk=job.pk).exists())
+
+    def test_orm_delete_uses_central_artifact_cleanup(self):
+        job, _created = create_export_job(
+            quotation=self.quotation,
+            formats=["xlsx"],
+            actor=self.user,
+            quotation_version_no=1,
+        )
+        render_quotation_export_task.run(job.id)
+        asset_path = resolve_document_path(job.assets.get().storage_key)
+
+        quotation_id = self.quotation.id
+        with self.captureOnCommitCallbacks(execute=True):
+            Quotation.objects.filter(pk=quotation_id).delete()
+
+        self.assertFalse(asset_path.exists())
+        self.assertFalse(Quotation.objects.filter(pk=quotation_id).exists())
+
+    def test_delete_quotation_preserves_reused_remote_file(self):
+        job, _created = create_export_job(
+            quotation=self.quotation,
+            formats=["xlsx"],
+            actor=self.user,
+            quotation_version_no=1,
+        )
+        render_quotation_export_task.run(job.id)
+        asset = job.assets.get()
+        connection = StorageConnection.objects.create(
+            display_name="Shared archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        DocumentReplica.objects.create(
+            asset=asset,
+            connection=connection,
+            mount=mount,
+            remote_file_token="shared-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": False},
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(
+                    f"/api/v1/quotation/quotations/{self.quotation.id}"
+                )
+
+        self.assertEqual(response.status_code, 204)
+        cleanup_task.assert_not_called()
+
+    def test_remote_cleanup_is_queued_without_blocking_quotation_delete(self):
+        job, _created = create_export_job(
+            quotation=self.quotation,
+            formats=["xlsx"],
+            actor=self.user,
+            quotation_version_no=1,
+        )
+        render_quotation_export_task.run(job.id)
+        asset = job.assets.get()
+        connection = StorageConnection.objects.create(
+            display_name="Missing archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        DocumentReplica.objects.create(
+            asset=asset,
+            connection=connection,
+            mount=mount,
+            remote_file_token="missing-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": True},
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(
+                    f"/api/v1/quotation/quotations/{self.quotation.id}"
+                )
+
+        self.assertEqual(response.status_code, 204)
+        cleanup_task.assert_called_once()
+        self.assertFalse(Quotation.objects.filter(pk=self.quotation.id).exists())
+
+        with patch(
+            "quotation.services.storage_control.FeishuStorageProvider.delete",
+            side_effect=FeishuAPIError("not found", code=1061004),
+        ):
+            cleanup = RemoteFileCleanup.objects.get(
+                remote_file_token="missing-token",
+            )
+            result = delete_owned_remote_file_task.run(
+                cleanup.id,
+            )
+
+        self.assertEqual(result, {"status": "missing"})
+        cleanup.refresh_from_db()
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.COMPLETED)
+
+    def test_delete_quotation_preserves_file_referenced_by_other_asset(self):
+        job, _created = create_export_job(
+            quotation=self.quotation,
+            formats=["xlsx"],
+            actor=self.user,
+            quotation_version_no=1,
+        )
+        render_quotation_export_task.run(job.id)
+        connection = StorageConnection.objects.create(
+            display_name="Shared reference archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        surviving_connection = StorageConnection.objects.create(
+            display_name="Cross-connection shared reference",
+            app_id="other-app-id",
+            app_secret="other-app-secret",
+        )
+        surviving_mount = StorageMount.objects.create(
+            connection=surviving_connection,
+            root_folder_token="other-folder-token",
+        )
+        shared_asset = DocumentAsset.objects.create(
+            doc_type="excel",
+            file_name="shared.xlsx",
+            mime_type="application/octet-stream",
+            storage_key="documents/shared/reference",
+        )
+        owned_replica = DocumentReplica.objects.create(
+            asset=job.assets.get(),
+            connection=connection,
+            mount=mount,
+            remote_file_token="shared-reference-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": True},
+        )
+        surviving_replica = DocumentReplica.objects.create(
+            asset=shared_asset,
+            connection=surviving_connection,
+            mount=surviving_mount,
+            remote_file_token="shared-reference-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": False},
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(
+                    f"/api/v1/quotation/quotations/{self.quotation.id}"
+                )
+
+        self.assertEqual(response.status_code, 204)
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="shared-reference-token",
+        )
+        cleanup_task.assert_called_once_with(
+            args=[cleanup.id],
+            queue="quotation_sync",
+        )
+        self.assertFalse(DocumentReplica.objects.filter(pk=owned_replica.pk).exists())
+        with patch(
+            "quotation.services.storage_control.FeishuStorageProvider.delete"
+        ) as remote_delete:
+            result = delete_owned_remote_file_task.run(cleanup.id)
+
+        self.assertEqual(result, {"status": "referenced"})
+        cleanup.refresh_from_db()
+        surviving_replica.refresh_from_db()
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.CANCELLED)
+        self.assertTrue(surviving_replica.metadata["remote_file_owned"])
+        remote_delete.assert_not_called()
+
+    def test_delete_quotation_preserves_legacy_asset_remote_reference(self):
+        job, _created = create_export_job(
+            quotation=self.quotation,
+            formats=["xlsx"],
+            actor=self.user,
+            quotation_version_no=1,
+        )
+        render_quotation_export_task.run(job.id)
+        connection = StorageConnection.objects.create(
+            display_name="Legacy reference archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        DocumentReplica.objects.create(
+            asset=job.assets.get(),
+            connection=connection,
+            mount=mount,
+            remote_file_token="legacy-reference-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": True},
+        )
+        DocumentAsset.objects.create(
+            doc_type="excel",
+            source="feishu_upload",
+            feishu_file_token="legacy-reference-token",
+            file_name="legacy-reference.xlsx",
+            mime_type="application/octet-stream",
+            storage_key="documents/legacy/reference",
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.delete(
+                    f"/api/v1/quotation/quotations/{self.quotation.id}"
+                )
+
+        self.assertEqual(response.status_code, 204)
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="legacy-reference-token",
+        )
+        cleanup_task.assert_called_once_with(
+            args=[cleanup.id],
+            queue="quotation_sync",
+        )
+        with patch(
+            "quotation.services.storage_control.FeishuStorageProvider.delete"
+        ) as remote_delete:
+            result = delete_owned_remote_file_task.run(cleanup.id)
+
+        self.assertEqual(result, {"status": "referenced"})
+        cleanup.refresh_from_db()
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.CANCELLED)
+        remote_delete.assert_not_called()
+
+    def test_bulk_delete_cleans_shared_owned_token_once(self):
+        today = date.today()
+        second_quotation = Quotation.objects.create(
+            quote_no="EXPORT-002",
+            project_name="Second export",
+            quote_date=today,
+            expire_date=today + timedelta(days=30),
+            issuer_contact_name="Owner",
+            issuer_contact_email=self.user.email,
+            client_company="Client",
+            contact_person="Contact",
+            email="contact@example.com",
+            created_by_email=self.user.email,
+        )
+        connection = StorageConnection.objects.create(
+            display_name="Bulk deletion archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        for quotation, suffix in (
+            (self.quotation, "one"),
+            (second_quotation, "two"),
+        ):
+            asset = DocumentAsset.objects.create(
+                quotation=quotation,
+                doc_type="excel",
+                file_name=f"{suffix}.xlsx",
+                mime_type="application/octet-stream",
+                storage_key=f"documents/bulk/{suffix}",
+            )
+            DocumentReplica.objects.create(
+                asset=asset,
+                connection=connection,
+                mount=mount,
+                remote_file_token="bulk-shared-token",
+                sync_status="synced",
+                metadata={"remote_file_owned": True},
+            )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                Quotation.objects.filter(
+                    pk__in=[self.quotation.pk, second_quotation.pk]
+                ).delete()
+
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="bulk-shared-token",
+        )
+        self.assertGreaterEqual(cleanup_task.call_count, 1)
+        with patch(
+            "quotation.services.storage_control.FeishuStorageProvider.delete"
+        ) as remote_delete:
+            first = delete_owned_remote_file_task.run(cleanup.id)
+            second = delete_owned_remote_file_task.run(cleanup.id)
+
+        self.assertEqual(first, {"status": "deleted"})
+        self.assertEqual(second, {"status": "completed"})
+        remote_delete.assert_called_once()
+
+    def test_cleanup_dispatch_failure_keeps_pending_intent(self):
+        asset = DocumentAsset.objects.create(
+            quotation=self.quotation,
+            doc_type="excel",
+            file_name="broker-failure.xlsx",
+            mime_type="application/octet-stream",
+            storage_key="documents/broker/failure",
+        )
+        connection = StorageConnection.objects.create(
+            display_name="Broker failure archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        mount = StorageMount.objects.create(
+            connection=connection,
+            root_folder_token="folder-token",
+        )
+        DocumentReplica.objects.create(
+            asset=asset,
+            connection=connection,
+            mount=mount,
+            remote_file_token="broker-failure-token",
+            sync_status="synced",
+            metadata={"remote_file_owned": True},
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async",
+            side_effect=RuntimeError("broker unavailable"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                Quotation.objects.filter(pk=self.quotation.pk).delete()
+
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="broker-failure-token",
+        )
+        self.assertFalse(Quotation.objects.filter(pk=self.quotation.pk).exists())
+        self.assertEqual(cleanup.status, RemoteFileCleanupStatus.PENDING)
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as retry_dispatch:
+            result = dispatch_remote_file_cleanups_task.run()
+
+        self.assertEqual(result, {"pending": 1, "dispatched": 1})
+        retry_dispatch.assert_called_once_with(
+            args=[cleanup.id],
+            queue="quotation_sync",
+        )
+
+    def test_cleanup_dispatch_lease_advances_past_first_batch(self):
+        connection = StorageConnection.objects.create(
+            display_name="Cleanup lease archive",
+            app_id="app-id",
+            app_secret="app-secret",
+        )
+        RemoteFileCleanup.objects.bulk_create(
+            [
+                RemoteFileCleanup(
+                    connection=connection,
+                    remote_file_token=f"leased-token-{index}",
+                    owned=True,
+                )
+                for index in range(201)
+            ]
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as apply_async:
+            first = dispatch_remote_file_cleanups_task.run()
+            second = dispatch_remote_file_cleanups_task.run()
+
+        self.assertEqual(first, {"pending": 200, "dispatched": 200})
+        self.assertEqual(second, {"pending": 1, "dispatched": 1})
+        self.assertEqual(apply_async.call_count, 201)
+
     def test_export_status_is_visible_only_to_quote_owner(self):
         response = self.client.post(
             f"/api/v1/quotation/quotations/{self.quotation.id}/exports",
@@ -208,7 +696,7 @@ class QuotationExportApiTests(QuotationExportFixture):
         self.user.save(update_fields=["is_staff"])
         previous = ensure_default_template(created_by=self.user)
         upload = SimpleUploadedFile(
-            "quotation-v2.xlsx",
+            "quotation-v3.xlsx",
             build_default_template_bytes(),
             content_type=(
                 "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet"
@@ -219,7 +707,7 @@ class QuotationExportApiTests(QuotationExportFixture):
             "/api/v1/quotation/templates",
             {
                 "name": previous.name,
-                "version": 2,
+                "version": 3,
                 "status": "active",
                 "file": upload,
             },
@@ -324,10 +812,88 @@ class QuotationExportTaskTests(QuotationExportFixture):
         asset = job.assets.get()
         self.assertEqual(result["status"], "upload_queued")
         self.assertEqual(job.status, "upload_queued")
+        tracker = SyncJob.objects.get(
+            asset=asset,
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
         apply_async.assert_called_once_with(
-            args=[job.id, asset.id],
+            args=[job.id, asset.id, tracker.id],
             queue="quotation_sync",
         )
+
+    @patch("quotation.tasks.sync_document_replica_task.apply_async")
+    def test_dispatched_archive_survives_task_id_write_failure(
+        self,
+        apply_async,
+    ):
+        apply_async.return_value.id = "sync-task"
+        job = self.create_job(["xlsx"], archive_to_feishu=True)
+
+        with patch(
+            "quotation.services.export_pipeline.SyncJob.objects.filter",
+        ) as tracker_filter:
+            tracker_filter.return_value.update.side_effect = OperationalError(
+                "database unavailable"
+            )
+            with self.captureOnCommitCallbacks(execute=True):
+                result = render_quotation_export_task.run(job.id)
+
+        job.refresh_from_db()
+        tracker = SyncJob.objects.get(
+            asset=job.assets.get(),
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
+        self.assertEqual(result["status"], ExportJobStatus.UPLOAD_QUEUED)
+        self.assertEqual(job.status, ExportJobStatus.UPLOAD_QUEUED)
+        self.assertEqual(tracker.celery_task_id, "")
+        apply_async.assert_called_once()
+
+    @patch(
+        "quotation.services.export_pipeline.convert_xlsx_to_pdf",
+        return_value=b"%PDF-rendered",
+    )
+    def test_partial_archive_enqueue_failure_blocks_quotation_delete(
+        self,
+        _convert,
+    ):
+        dispatched = Mock(id="dispatched-task")
+        job = self.create_job(["xlsx", "pdf"], archive_to_feishu=True)
+
+        with patch(
+            "quotation.tasks.sync_document_replica_task.apply_async",
+            side_effect=[dispatched, RuntimeError("broker unavailable")],
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                render_quotation_export_task.run(job.id)
+
+        job.refresh_from_db()
+        statuses = set(
+            SyncJob.objects.filter(
+                quotation=self.quotation,
+                stage=EXPORT_ARCHIVE_SYNC_STAGE,
+            ).values_list("status", flat=True)
+        )
+        response = self.client.delete(
+            f"/api/v1/quotation/quotations/{self.quotation.id}"
+        )
+        retry_response = self.client.post(
+            f"/api/v1/quotation/exports/{job.id}/retry-upload",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(job.status, "upload_failed")
+        self.assertEqual(
+            statuses,
+            {SyncJobStatus.QUEUED, SyncJobStatus.FAILED},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(retry_response.status_code, 409)
+        self.assertEqual(
+            retry_response.data["detail"],
+            "archive uploads are still active",
+        )
+        self.assertTrue(Quotation.objects.filter(pk=self.quotation.pk).exists())
 
     @patch(
         "quotation.tasks.sync_document_replica_task.apply_async",
@@ -355,6 +921,26 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(job.status, "completed")
         self.assertEqual(job.assets.count(), 1)
+
+    def test_queued_job_rejects_unsupported_pinned_renderer(self):
+        job = self.create_job(["xlsx"])
+        ExportJob.objects.filter(pk=job.id).update(
+            renderer_version="openpyxl-libreoffice-v1"
+        )
+
+        result = render_quotation_export_task.run(job.id)
+
+        job.refresh_from_db()
+        self.assertEqual(result["status"], "render_failed")
+        self.assertEqual(job.status, "render_failed")
+        self.assertEqual(job.error_code, "renderer_version_unsupported")
+        self.assertEqual(job.assets.count(), 0)
+
+    @override_settings(QUOTATION_RENDERER_VERSION="openpyxl-libreoffice-v1")
+    def test_new_job_ignores_legacy_renderer_environment_setting(self):
+        job = self.create_job(["xlsx"])
+
+        self.assertEqual(job.renderer_version, CURRENT_RENDERER_VERSION)
 
     @patch(
         "quotation.services.export_pipeline.convert_xlsx_to_pdf",
@@ -406,17 +992,139 @@ class QuotationExportTaskTests(QuotationExportFixture):
             ):
                 with patch.object(
                     provider.client,
-                    "upload_file",
-                ) as upload:
-                    result = provider.upload(
-                        mount,
-                        file_name="Quote.xlsx",
-                        content=b"xlsx",
-                    )
+                    "download_file",
+                    return_value=(b"xlsx", "application/octet-stream"),
+                ):
+                    with patch.object(
+                        provider.client,
+                        "upload_file",
+                    ) as upload:
+                        result = provider.upload(
+                            mount,
+                            file_name="Quote.xlsx",
+                            content=b"xlsx",
+                        )
 
         self.assertEqual(result["file_token"], "existing-token")
         self.assertTrue(result["reused"])
         upload.assert_not_called()
+
+    def test_provider_does_not_reuse_same_name_with_different_content(self):
+        mount = self.create_storage_route()
+        mount.conflict_policy = "reuse"
+        mount.save(update_fields=["conflict_policy", "updated_at"])
+        provider = FeishuStorageProvider(mount.connection)
+        existing = {
+            "token": "existing-token",
+            "name": "Quote.xlsx",
+            "type": "file",
+        }
+
+        with patch.object(provider, "access_token", return_value="token"):
+            with patch.object(
+                provider.client,
+                "list_folder_files",
+                return_value={"files": [existing], "has_more": False},
+            ):
+                with patch.object(
+                    provider.client,
+                    "download_file",
+                    return_value=(b"old", "application/octet-stream"),
+                ):
+                    with patch.object(
+                        provider.client,
+                        "upload_file",
+                        return_value={"file_token": "new-token"},
+                    ) as upload:
+                        result = provider.upload(
+                            mount,
+                            file_name="Quote.xlsx",
+                            content=b"new",
+                        )
+
+        self.assertEqual(result["file_token"], "new-token")
+        self.assertEqual(
+            upload.call_args.kwargs["file_name"],
+            "Quote (1).xlsx",
+        )
+
+    def test_provider_skips_download_when_remote_size_differs(self):
+        mount = self.create_storage_route()
+        mount.conflict_policy = "reuse"
+        mount.save(update_fields=["conflict_policy", "updated_at"])
+        provider = FeishuStorageProvider(mount.connection)
+        existing = {
+            "token": "existing-token",
+            "name": "Quote.xlsx",
+            "type": "file",
+            "size": 100000000,
+        }
+
+        with patch.object(provider, "access_token", return_value="token"):
+            with patch.object(
+                provider.client,
+                "list_folder_files",
+                return_value={"files": [existing], "has_more": False},
+            ):
+                with patch.object(
+                    provider.client,
+                    "download_file",
+                ) as download:
+                    with patch.object(
+                        provider.client,
+                        "upload_file",
+                        return_value={"file_token": "new-token"},
+                    ) as upload:
+                        provider.upload(
+                            mount,
+                            file_name="Quote.xlsx",
+                            content=b"new",
+                        )
+
+        download.assert_not_called()
+        self.assertEqual(
+            upload.call_args.kwargs["file_name"],
+            "Quote (1).xlsx",
+        )
+
+    def test_provider_renames_same_name_online_document(self):
+        mount = self.create_storage_route()
+        mount.conflict_policy = "reuse"
+        mount.save(update_fields=["conflict_policy", "updated_at"])
+        provider = FeishuStorageProvider(mount.connection)
+        existing = {
+            "token": "online-sheet-token",
+            "name": "Quote.xlsx",
+            "type": "sheet",
+        }
+
+        with patch.object(provider, "access_token", return_value="token"):
+            with patch.object(
+                provider.client,
+                "list_folder_files",
+                return_value={"files": [existing], "has_more": False},
+            ):
+                with patch.object(
+                    provider.client,
+                    "download_file",
+                ) as download:
+                    with patch.object(
+                        provider.client,
+                        "upload_file",
+                        return_value={"file_token": "new-token"},
+                    ) as upload:
+                        result = provider.upload(
+                            mount,
+                            file_name="Quote.xlsx",
+                            content=b"xlsx",
+                        )
+
+        self.assertEqual(result["file_token"], "new-token")
+        download.assert_not_called()
+        self.assertEqual(
+            upload.call_args.kwargs["file_name"],
+            "Quote (1).xlsx",
+        )
 
     def test_provider_renames_same_name_when_mount_policy_requires_it(self):
         mount = self.create_storage_route()
@@ -476,6 +1184,80 @@ class QuotationExportTaskTests(QuotationExportFixture):
 
     @patch(
         "quotation.services.storage_control.FeishuStorageProvider.upload",
+        return_value={"file_token": "remote-file", "url": "https://x"},
+    )
+    def test_success_tracking_database_failure_retries_task(self, _upload):
+        self.create_storage_route()
+        job, asset = self.render_archived_job()
+        calls = 0
+
+        def flaky_tracking_update(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OperationalError("database unavailable")
+            return update_export_upload_tracking(*args, **kwargs)
+
+        with patch(
+            "quotation.services.export_archive.update_export_upload_tracking",
+            side_effect=flaky_tracking_update,
+        ):
+            with patch.object(
+                sync_document_replica_task,
+                "retry",
+                side_effect=Retry(),
+            ) as retry:
+                with self.assertRaises(Retry):
+                    sync_document_replica_task.run(job.id, asset.id)
+
+        tracker = SyncJob.objects.get(
+            asset=asset,
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
+        self.assertEqual(tracker.status, SyncJobStatus.RETRYING)
+        retry.assert_called_once()
+
+    @patch(
+        "quotation.services.storage_control.FeishuStorageProvider.upload",
+        return_value={
+            "file_token": "shared-new-file",
+            "url": "https://x/shared",
+            "reused": True,
+        },
+    )
+    def test_replica_token_switch_does_not_inherit_old_ownership(self, _upload):
+        mount = self.create_storage_route()
+        job, asset = self.render_archived_job()
+        replica = DocumentReplica.objects.create(
+            asset=asset,
+            connection=mount.connection,
+            mount=mount,
+            version=1,
+            remote_file_token="owned-old-file",
+            content_hash="old-content",
+            sync_status="synced",
+            metadata={"remote_file_owned": True},
+        )
+
+        with patch(
+            "quotation.tasks.delete_owned_remote_file_task.apply_async"
+        ) as cleanup_task:
+            with self.captureOnCommitCallbacks(execute=True):
+                sync_document_replica_task.run(job.id, asset.id)
+
+        replica.refresh_from_db()
+        cleanup = RemoteFileCleanup.objects.get(
+            remote_file_token="owned-old-file",
+        )
+        self.assertEqual(replica.remote_file_token, "shared-new-file")
+        self.assertFalse(replica.metadata["remote_file_owned"])
+        cleanup_task.assert_called_once_with(
+            args=[cleanup.id],
+            queue="quotation_sync",
+        )
+
+    @patch(
+        "quotation.services.storage_control.FeishuStorageProvider.upload",
         side_effect=FeishuAPIError("permission denied", code=999),
     )
     def test_terminal_upload_failure_keeps_local_asset(self, _upload):
@@ -491,6 +1273,56 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(job.error_code, "feishu_999")
         self.assertTrue(asset_path.is_file())
         self.assertEqual(job.assets.count(), 1)
+        tracker = SyncJob.objects.get(
+            asset=asset,
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
+        self.assertEqual(tracker.status, SyncJobStatus.FAILED)
+
+    @patch(
+        "quotation.services.storage_control.FeishuStorageProvider.upload",
+        side_effect=FeishuAPIError("permission denied", code=999),
+    )
+    def test_terminal_tracking_database_failure_retries_task(self, _upload):
+        self.create_storage_route()
+        job, asset = self.render_archived_job()
+        calls = 0
+
+        def flaky_tracking_update(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise OperationalError("database unavailable")
+            return update_export_upload_tracking(*args, **kwargs)
+
+        with patch(
+            "quotation.services.export_archive.update_export_upload_tracking",
+            side_effect=flaky_tracking_update,
+        ):
+            with patch.object(
+                sync_document_replica_task,
+                "retry",
+                side_effect=Retry(),
+            ) as retry:
+                with self.assertRaises(Retry):
+                    sync_document_replica_task.run(job.id, asset.id)
+
+        job.refresh_from_db()
+        tracker = SyncJob.objects.get(
+            asset=asset,
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
+        self.assertEqual(job.status, ExportJobStatus.UPLOADING)
+        self.assertEqual(tracker.status, SyncJobStatus.RUNNING)
+        retry.assert_called_once()
+
+        result = sync_document_replica_task.run(job.id, asset.id)
+
+        job.refresh_from_db()
+        tracker.refresh_from_db()
+        self.assertEqual(result["status"], ExportJobStatus.UPLOAD_FAILED)
+        self.assertEqual(job.status, ExportJobStatus.UPLOAD_FAILED)
+        self.assertEqual(tracker.status, SyncJobStatus.FAILED)
 
     @patch(
         "quotation.services.storage_control.FeishuStorageProvider.upload",
@@ -541,6 +1373,19 @@ class QuotationExportTaskTests(QuotationExportFixture):
             archive_to_feishu=True,
             error_code="feishu_999",
         )
+        other_job = self.create_job(["pdf"])
+        with patch(
+            "quotation.services.export_pipeline.convert_xlsx_to_pdf",
+            return_value=b"%PDF-rendered",
+        ):
+            render_quotation_export_task.run(other_job.id)
+        SyncJob.objects.create(
+            job_type="upload",
+            status=SyncJobStatus.RUNNING,
+            quotation=self.quotation,
+            asset=other_job.assets.get(),
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
         apply_async.return_value.id = "retry-task"
 
         with self.captureOnCommitCallbacks(execute=True):
@@ -552,8 +1397,42 @@ class QuotationExportTaskTests(QuotationExportFixture):
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["status"], "upload_queued")
+        tracker = SyncJob.objects.get(
+            asset=asset,
+            stage=EXPORT_ARCHIVE_SYNC_STAGE,
+        )
         apply_async.assert_called_once_with(
-            args=[job.id, asset.id],
+            args=[job.id, asset.id, tracker.id],
             queue="quotation_sync",
         )
         self.assertEqual(job.assets.count(), 1)
+
+    @patch("quotation.tasks.sync_document_replica_task.apply_async")
+    def test_tracking_initialization_failure_leaves_upload_retryable(
+        self,
+        apply_async,
+    ):
+        job = self.create_job(["xlsx"])
+        render_quotation_export_task.run(job.id)
+        ExportJob.objects.filter(pk=job.id).update(
+            status=ExportJobStatus.UPLOAD_FAILED,
+            archive_to_feishu=True,
+            error_code="feishu_999",
+        )
+
+        with patch(
+            "quotation.services.export_pipeline." "prepare_export_upload_tracking",
+            side_effect=OperationalError("database unavailable"),
+        ):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/api/v1/quotation/exports/{job.id}/retry-upload",
+                    {},
+                    format="json",
+                )
+
+        job.refresh_from_db()
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(job.status, ExportJobStatus.UPLOAD_FAILED)
+        self.assertEqual(job.error_code, "archive_tracking_init_failed")
+        apply_async.assert_not_called()

@@ -41,9 +41,5 @@ class QuotationSettingsTests(SimpleTestCase):
             settings.QUOTATION_MAX_SIGNATURE_BYTES,
             2 * 1024 * 1024,
         )
-        self.assertEqual(
-            settings.QUOTATION_RENDERER_VERSION,
-            "openpyxl-libreoffice-v1",
-        )
         self.assertEqual(settings.QUOTATION_SOFFICE_BINARY, "soffice")
         self.assertEqual(settings.QUOTATION_RENDER_TIMEOUT_SECONDS, 120)

@@ -5,26 +5,26 @@ from unittest.mock import patch
 from urllib.parse import unquote
 from uuid import UUID
 
+from accounts.models import Role
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
-from rest_framework.test import APIClient
-
-from accounts.models import Role
 from quotation.models import (
     DocumentAsset,
     DocumentReplica,
     DocumentType,
     FeishuConnection,
+    Quotation,
+    QuoteStatus,
     ReplicaSyncStatus,
     StorageConnection,
     StorageMount,
     StorageMountPurpose,
-    Quotation,
-    QuoteStatus,
 )
+from rest_framework.test import APIClient
 
 
 class DocumentStorageEndpointTests(TestCase):
@@ -76,9 +76,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(str(UUID(parts[1])), parts[1])
         self.assertEqual(str(UUID(parts[2])), parts[2])
         self.assertEqual(parts[2], asset.id)
-        self.assertEqual(
-            (self.storage / asset.storage_key).read_bytes(), expected
-        )
+        self.assertEqual((self.storage / asset.storage_key).read_bytes(), expected)
         self.assertNotIn(asset.file_name, asset.storage_key)
 
     def test_local_upload_download_and_delete_use_uuid_storage(self):
@@ -104,15 +102,11 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(Path(asset.storage_key).parts[1], quote.id)
         self.assert_uuid_storage(asset, b"PK\x03\x04local-file")
 
-        download = self.api.get(
-            f"/api/v1/quotation/documents/{asset.id}/download"
-        )
+        download = self.api.get(f"/api/v1/quotation/documents/{asset.id}/download")
         self.assertEqual(download.status_code, 200)
         disposition = download["Content-Disposition"]
         self.assertIn("filename*=utf-8''", disposition)
-        self.assertEqual(
-            unquote(disposition.split("''", 1)[1]), "客户 报价.xlsx"
-        )
+        self.assertEqual(unquote(disposition.split("''", 1)[1]), "客户 报价.xlsx")
 
         delete = self.api.delete(f"/api/v1/quotation/documents/{asset.id}")
         self.assertEqual(delete.status_code, 404)
@@ -120,6 +114,17 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertTrue(DocumentAsset.objects.filter(pk=asset.id).exists())
 
     def test_feishu_import_uses_uuid_storage_and_keeps_original_name(self):
+        locked_references = []
+
+        def record_reference(file_token, **kwargs):
+            locked_references.append(
+                (
+                    file_token,
+                    kwargs["owned"],
+                    transaction.get_connection().in_atomic_block,
+                )
+            )
+
         class FakeClient:
             def get_tenant_access_token(self):
                 return "tenant-token"
@@ -142,13 +147,15 @@ class DocumentStorageEndpointTests(TestCase):
             def download_drive_item(self, access_token, **kwargs):
                 return b"feishu-file", "application/pdf", "飞书报价.pdf"
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
-            response = self.api.post(
-                "/api/v1/quotation/feishu/import/file_test"
-                "?file_type=file&file_url=https://attacker.example/file"
-            )
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
+            with patch(
+                "quotation.views.feishu.files." "preserve_remote_file_reference",
+                side_effect=record_reference,
+            ):
+                response = self.api.post(
+                    "/api/v1/quotation/feishu/import/file_test"
+                    "?file_type=file&file_url=https://attacker.example/file"
+                )
 
         self.assertEqual(response.status_code, 200)
         asset = DocumentAsset.objects.get(pk=response.data["document_id"])
@@ -165,16 +172,26 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertTrue(response.data["direct_access_allowed"])
         self.assertEqual(Path(asset.storage_key).parts[1], asset.id)
         self.assert_uuid_storage(asset, b"feishu-file")
+        self.assertEqual(locked_references, [("file_test", False, True)])
 
     def test_feishu_folder_sync_imports_new_files_to_configured_storage(self):
         downloaded_tokens = []
+        locked_references = []
+
+        def record_reference(file_token, **kwargs):
+            locked_references.append(
+                (
+                    file_token,
+                    kwargs["owned"],
+                    transaction.get_connection().in_atomic_block,
+                )
+            )
 
         DocumentAsset.objects.create(
             doc_type=DocumentType.EXCEL,
             file_name="Existing.xlsx",
             mime_type=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
+                "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet"
             ),
             storage_key="documents/existing/asset",
             size_bytes=12,
@@ -222,10 +239,12 @@ class DocumentStorageEndpointTests(TestCase):
                 downloaded_tokens.append(kwargs["file_token"])
                 return b"%PDF-synced", "application/pdf", "New Quote.pdf"
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
-            response = self.api.post("/api/v1/quotation/feishu/sync-folder")
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
+            with patch(
+                "quotation.views.feishu.files." "preserve_remote_file_reference",
+                side_effect=record_reference,
+            ):
+                response = self.api.post("/api/v1/quotation/feishu/sync-folder")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(downloaded_tokens, ["new_pdf"])
@@ -235,6 +254,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(asset.created_by_email, self.user.email)
         self.assertEqual(Path(asset.storage_key).parts[1], asset.id)
         self.assert_uuid_storage(asset, b"%PDF-synced")
+        self.assertEqual(locked_references, [("new_pdf", False, True)])
 
     def test_feishu_folder_sync_reuses_asset_created_by_other_user(self):
         other_user = User.objects.create_user(
@@ -277,9 +297,7 @@ class DocumentStorageEndpointTests(TestCase):
             "quotation.views.feishu.common._client",
             return_value=FakeClient(),
         ):
-            response = self.api.post(
-                "/api/v1/quotation/feishu/sync-folder"
-            )
+            response = self.api.post("/api/v1/quotation/feishu/sync-folder")
 
         self.assertEqual(response.status_code, 200, response.data)
         self.assertEqual(response.data["created_count"], 0)
@@ -319,8 +337,7 @@ class DocumentStorageEndpointTests(TestCase):
                                 "name": "Nested Quote.xlsx",
                                 "type": "file",
                                 "url": (
-                                    "https://example.feishu.cn/file/"
-                                    "nested_excel"
+                                    "https://example.feishu.cn/file/" "nested_excel"
                                 ),
                             }
                         ],
@@ -339,9 +356,7 @@ class DocumentStorageEndpointTests(TestCase):
                     "Nested Quote.xlsx",
                 )
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
             response = self.api.post("/api/v1/quotation/feishu/sync-folder")
 
         self.assertEqual(response.status_code, 200)
@@ -415,9 +430,7 @@ class DocumentStorageEndpointTests(TestCase):
             created_by_email="another-user@example.com",
         )
 
-        response = self.api.get(
-            "/api/v1/quotation/documents?source=feishu"
-        )
+        response = self.api.get("/api/v1/quotation/documents?source=feishu")
 
         self.assertEqual(response.status_code, 200)
         matches = [
@@ -434,9 +447,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertTrue(matches[0]["remote_access_available"])
         self.assertIsNone(matches[0]["feishu_file_token"])
         temporary = [
-            item
-            for item in response.data
-            if item["file_name"] == "~$Temporary.xlsx"
+            item for item in response.data if item["file_name"] == "~$Temporary.xlsx"
         ]
         self.assertEqual(len(temporary), 1)
         self.assertEqual(temporary[0]["feishu_folder_path"], path)
@@ -472,9 +483,7 @@ class DocumentStorageEndpointTests(TestCase):
                     "Selected Quote.pdf",
                 )
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
             response = self.api.post(
                 "/api/v1/quotation/feishu/sync-folder",
                 {"folder_token": "selected_folder"},
@@ -511,9 +520,7 @@ class DocumentStorageEndpointTests(TestCase):
                     }
                 return {"files": [], "has_more": False}
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
             response = self.api.post("/api/v1/quotation/feishu/sync-folder")
 
         self.assertEqual(response.status_code, 200)
@@ -522,6 +529,7 @@ class DocumentStorageEndpointTests(TestCase):
 
     def test_feishu_upload_keeps_uuid_only_local_copy(self):
         quote = self.create_quote()
+
         class FakeClient:
             def get_tenant_access_token(self):
                 return "tenant-token"
@@ -549,9 +557,7 @@ class DocumentStorageEndpointTests(TestCase):
                     "url": "https://example.feishu.cn/file/file_uploaded",
                 }
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
             response = self.api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -573,6 +579,59 @@ class DocumentStorageEndpointTests(TestCase):
         )
         self.assertEqual(Path(asset.storage_key).parts[1], quote.id)
         self.assert_uuid_storage(asset, b"%PDF-uploaded-file")
+
+    def test_feishu_upload_locks_quote_before_remote_reference(self):
+        quote = self.create_quote()
+        lock_order = []
+
+        class FakeClient:
+            def get_tenant_access_token(self):
+                return "tenant-token"
+
+            def list_folder_files(self, access_token, folder_token, **kwargs):
+                return {"files": [], "has_more": False}
+
+            def upload_file(self, access_token, **kwargs):
+                return {
+                    "file_token": "ordered-upload",
+                    "url": "https://example.feishu.cn/file/ordered-upload",
+                }
+
+        def select_for_update(*args, **kwargs):
+            lock_order.append("quotation")
+            return Quotation.objects.all().select_for_update(*args, **kwargs)
+
+        def preserve_reference(*args, **kwargs):
+            lock_order.append("remote_file")
+
+        with patch(
+            "quotation.views.feishu.common._client",
+            return_value=FakeClient(),
+        ):
+            with patch(
+                "quotation.views.feishu.upload." "Quotation.objects.select_for_update",
+                side_effect=select_for_update,
+            ):
+                with patch(
+                    "quotation.views.feishu.upload." "preserve_remote_file_reference",
+                    side_effect=preserve_reference,
+                ):
+                    response = self.api.post(
+                        "/api/v1/quotation/feishu/upload",
+                        {
+                            "file": SimpleUploadedFile(
+                                "Ordered Quote.pdf",
+                                b"%PDF-ordered-file",
+                                content_type="application/pdf",
+                            ),
+                            "quotation_id": quote.id,
+                        },
+                        format="multipart",
+                    )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertGreaterEqual(lock_order.count("quotation"), 1)
+        self.assertEqual(lock_order[:2], ["quotation", "remote_file"])
 
     def test_feishu_upload_uses_selected_folder_token(self):
         quote = self.create_quote()
@@ -600,15 +659,10 @@ class DocumentStorageEndpointTests(TestCase):
                 upload_folders.append(kwargs["folder_token"])
                 return {
                     "file_token": "file_selected_folder",
-                    "url": (
-                        "https://example.feishu.cn/file/"
-                        "file_selected_folder"
-                    ),
+                    "url": ("https://example.feishu.cn/file/" "file_selected_folder"),
                 }
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
             response = self.api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -677,9 +731,7 @@ class DocumentStorageEndpointTests(TestCase):
         )
         self.assertEqual(post_response.status_code, 403)
 
-        download = other_api.get(
-            f"/api/v1/quotation/documents/{asset.id}/download"
-        )
+        download = other_api.get(f"/api/v1/quotation/documents/{asset.id}/download")
         self.assertEqual(download.status_code, 403)
 
         delete = other_api.delete(f"/api/v1/quotation/documents/{asset.id}")
@@ -712,9 +764,7 @@ class DocumentStorageEndpointTests(TestCase):
                 raise AssertionError("remote Feishu API should not be called")
 
         fake_client = FakeClient()
-        with patch(
-            "quotation.views.feishu.common._client", return_value=fake_client
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=fake_client):
             response = other_api.post(
                 "/api/v1/quotation/feishu/upload",
                 {
@@ -731,9 +781,7 @@ class DocumentStorageEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(fake_client.called)
-        self.assertFalse(
-            DocumentAsset.objects.filter(quotation=quote).exists()
-        )
+        self.assertFalse(DocumentAsset.objects.filter(quotation=quote).exists())
 
     def test_feishu_import_rejects_inaccessible_quotation_before_download(
         self,
@@ -761,19 +809,14 @@ class DocumentStorageEndpointTests(TestCase):
                 raise AssertionError("remote Feishu API should not be called")
 
         fake_client = FakeClient()
-        with patch(
-            "quotation.views.feishu.common._client", return_value=fake_client
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=fake_client):
             response = other_api.post(
-                "/api/v1/quotation/feishu/import/file_test"
-                f"?quotation_id={quote.id}"
+                "/api/v1/quotation/feishu/import/file_test" f"?quotation_id={quote.id}"
             )
 
         self.assertEqual(response.status_code, 403)
         self.assertFalse(fake_client.called)
-        self.assertFalse(
-            DocumentAsset.objects.filter(quotation=quote).exists()
-        )
+        self.assertFalse(DocumentAsset.objects.filter(quotation=quote).exists())
 
     def test_feishu_missing_file_check_cannot_clear_other_users_link(self):
         quote = self.create_quote()
@@ -784,8 +827,7 @@ class DocumentStorageEndpointTests(TestCase):
             doc_type=DocumentType.EXCEL,
             file_name="owner.xlsx",
             mime_type=(
-                "application/vnd.openxmlformats-officedocument."
-                "spreadsheetml.sheet"
+                "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet"
             ),
             storage_key="documents/owner/asset",
             size_bytes=12,
@@ -817,9 +859,7 @@ class DocumentStorageEndpointTests(TestCase):
 
                 raise FeishuAPIError("not found", code=970005)
 
-        with patch(
-            "quotation.views.feishu.common._client", return_value=FakeClient()
-        ):
+        with patch("quotation.views.feishu.common._client", return_value=FakeClient()):
             response = other_api.get(
                 f"/api/v1/quotation/feishu/documents/{asset.id}/access"
             )
@@ -866,9 +906,7 @@ class DocumentStorageEndpointTests(TestCase):
         api = APIClient()
         api.force_authenticate(user=presales)
 
-        listed = api.get(
-            f"/api/v1/quotation/quotations/{quote.id}/documents"
-        )
+        listed = api.get(f"/api/v1/quotation/quotations/{quote.id}/documents")
         uploaded = api.post(
             f"/api/v1/quotation/quotations/{quote.id}/documents",
             {
@@ -1057,9 +1095,7 @@ class DocumentStorageEndpointTests(TestCase):
             def get_tenant_access_token(self):
                 return "tenant-token"
 
-            def batch_query_file_meta(
-                self, access_token, file_token, **kwargs
-            ):
+            def batch_query_file_meta(self, access_token, file_token, **kwargs):
                 self.checked_token = file_token
                 return {
                     "doc_token": file_token,
@@ -1144,9 +1180,7 @@ class DocumentStorageEndpointTests(TestCase):
         )
 
         class FakeClient:
-            def batch_query_file_meta(
-                self, access_token, file_token, **kwargs
-            ):
+            def batch_query_file_meta(self, access_token, file_token, **kwargs):
                 from quotation.services.feishu_client import FeishuAPIError
 
                 raise FeishuAPIError(
@@ -1194,9 +1228,7 @@ class DocumentStorageEndpointTests(TestCase):
             created_by_email=self.user.email,
         )
 
-        response = self.api.get(
-            f"/api/v1/quotation/feishu/documents/{asset.id}/access"
-        )
+        response = self.api.get(f"/api/v1/quotation/feishu/documents/{asset.id}/access")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["exists"])

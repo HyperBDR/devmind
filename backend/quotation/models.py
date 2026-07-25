@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 
 from django.conf import settings
-from django.db import models
+from django.db import models, router, transaction
+from django.utils import timezone
 from hyperbdr_dashboard.encryption import encryption_service
 
 
@@ -55,6 +56,9 @@ class SyncJobStatus(models.TextChoices):
     FAILED = "failed", "failed"
 
 
+EXPORT_ARCHIVE_SYNC_STAGE = "export_archive"
+
+
 class DocumentParseStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     RUNNING = "running", "Running"
@@ -90,6 +94,12 @@ class ReplicaSyncStatus(models.TextChoices):
     REVOKED = "revoked", "Revoked"
 
 
+class RemoteFileCleanupStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    CANCELLED = "cancelled", "Cancelled"
+    COMPLETED = "completed", "Completed"
+
+
 class QuotationTemplateStatus(models.TextChoices):
     DRAFT = "draft", "Draft"
     ACTIVE = "active", "Active"
@@ -116,7 +126,18 @@ class TimeStampedModel(models.Model):
         abstract = True
 
 
+class QuotationQuerySet(models.QuerySet):
+    """Lock quotations before Django collects their cascade graph."""
+
+    def delete(self):
+        with transaction.atomic(using=self.db):
+            list(self.select_for_update().values_list("pk", flat=True))
+            return super().delete()
+
+
 class Quotation(TimeStampedModel):
+    objects = QuotationQuerySet.as_manager()
+
     id = models.CharField(
         primary_key=True, max_length=36, default=_uuid, editable=False
     )
@@ -181,6 +202,25 @@ class Quotation(TimeStampedModel):
     class Meta:
         db_table = "quotations"
         ordering = ["-created_at"]
+
+    def delete(self, using=None, keep_parents=False):
+        """Lock this quotation before Django collects related artifacts."""
+        database = (
+            using
+            or self._state.db
+            or router.db_for_write(
+                type(self),
+                instance=self,
+            )
+        )
+        with transaction.atomic(using=database):
+            type(self).objects.using(database).select_for_update().get(
+                pk=self.pk,
+            )
+            return super().delete(
+                using=database,
+                keep_parents=keep_parents,
+            )
 
 
 class QuotationItem(TimeStampedModel):
@@ -288,7 +328,7 @@ class ExportJob(TimeStampedModel):
     )
     quotation_version = models.ForeignKey(
         QuotationVersion,
-        on_delete=models.PROTECT,
+        on_delete=models.RESTRICT,
         related_name="export_jobs",
     )
     template = models.ForeignKey(
@@ -345,7 +385,7 @@ class DocumentAsset(models.Model):
     )
     quotation_version = models.ForeignKey(
         QuotationVersion,
-        on_delete=models.PROTECT,
+        on_delete=models.RESTRICT,
         related_name="document_assets",
         null=True,
         blank=True,
@@ -623,6 +663,41 @@ class DocumentReplica(TimeStampedModel):
                 name="quotation_replica_version_unique",
             )
         ]
+
+
+class RemoteFileCleanup(TimeStampedModel):
+    """Durable cleanup intent and serialization point for a remote file."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    connection = models.ForeignKey(
+        StorageConnection,
+        on_delete=models.PROTECT,
+        related_name="remote_file_cleanups",
+    )
+    remote_file_token = models.CharField(max_length=255, unique=True)
+    owned = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=20,
+        choices=RemoteFileCleanupStatus.choices,
+        default=RemoteFileCleanupStatus.PENDING,
+        db_index=True,
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    last_error = models.CharField(max_length=255, blank=True, default="")
+    next_dispatch_at = models.DateTimeField(
+        default=timezone.now,
+        db_index=True,
+    )
+    processed_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "quotation_remote_file_cleanups"
+        ordering = ["created_at", "id"]
 
 
 class SyncJob(TimeStampedModel):

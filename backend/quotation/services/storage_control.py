@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import sha256
@@ -13,6 +14,8 @@ from quotation.models import (
     AuditEvent,
     DocumentAsset,
     DocumentReplica,
+    RemoteFileCleanup,
+    RemoteFileCleanupStatus,
     ReplicaSyncStatus,
     StorageAuthMode,
     StorageConnection,
@@ -23,12 +26,20 @@ from quotation.models import (
     SyncJobStatus,
     SyncJobType,
 )
-from quotation.services.feishu_client import FeishuAPIError, FeishuClient
+from quotation.services.feishu_client import (
+    FeishuAPIError,
+    FeishuClient,
+    FeishuDownloadTooLargeError,
+)
 from quotation.services.feishu_service import (
+    feishu_file_not_found,
     is_folder_drive_item,
+    item_size_bytes,
     suggest_unique_file_name,
 )
 from quotation.services.storage import resolve_document_path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -238,14 +249,32 @@ class FeishuStorageProvider:
             ),
             None,
         )
-        if existing is not None and mount.conflict_policy == "reuse":
+        existing_type = str((existing or {}).get("type") or "").lower()
+        if (
+            existing is not None
+            and existing_type in {"file", "drive#file"}
+            and mount.conflict_policy == "reuse"
+        ):
             token = str(existing.get("token") or "")
-            return {
-                "file_token": token,
-                "token": token,
-                "url": str(existing.get("url") or ""),
-                "reused": True,
-            }
+            remote_size = item_size_bytes(existing)
+            if remote_size is None or remote_size == len(content):
+                try:
+                    remote_content, _mime_type = self.client.download_file(
+                        access_token,
+                        token,
+                        max_bytes=len(content),
+                    )
+                except FeishuDownloadTooLargeError:
+                    remote_content = None
+                if remote_content is not None and (
+                    sha256(remote_content).digest() == sha256(content).digest()
+                ):
+                    return {
+                        "file_token": token,
+                        "token": token,
+                        "url": str(existing.get("url") or ""),
+                        "reused": True,
+                    }
         upload_name = file_name
         if existing is not None:
             existing_names = {
@@ -378,6 +407,64 @@ def _sync_context(request) -> dict[str, str]:
     }
 
 
+def _lock_remote_file_reference(
+    remote_file_token: str,
+    *,
+    connection: StorageConnection,
+    owned: bool,
+) -> None:
+    now = timezone.now()
+    cleanup, created = RemoteFileCleanup.objects.get_or_create(
+        remote_file_token=remote_file_token,
+        defaults={
+            "connection": connection,
+            "owned": owned,
+            "status": RemoteFileCleanupStatus.CANCELLED,
+            "processed_at": now,
+        },
+    )
+    if created:
+        return
+    cleanup = RemoteFileCleanup.objects.select_for_update().get(
+        pk=cleanup.pk,
+    )
+    if cleanup.status == RemoteFileCleanupStatus.COMPLETED and not owned:
+        raise FeishuAPIError("Remote file was deleted while it was being reused")
+    update_fields = [
+        "status",
+        "last_error",
+        "processed_at",
+        "updated_at",
+    ]
+    if owned and cleanup.connection_id != connection.id:
+        cleanup.connection = connection
+        update_fields.append("connection")
+    if owned and not cleanup.owned:
+        cleanup.owned = True
+        update_fields.append("owned")
+    cleanup.status = RemoteFileCleanupStatus.CANCELLED
+    cleanup.last_error = ""
+    cleanup.processed_at = now
+    cleanup.save(update_fields=update_fields)
+
+
+def preserve_remote_file_reference(
+    remote_file_token: str,
+    *,
+    connection: StorageConnection | None,
+    owned: bool,
+) -> None:
+    """Serialize a new reference against cleanup of the same token."""
+    if not remote_file_token or connection is None:
+        return
+    with transaction.atomic():
+        _lock_remote_file_reference(
+            remote_file_token,
+            connection=connection,
+            owned=owned,
+        )
+
+
 def create_replica(
     *,
     request,
@@ -448,6 +535,18 @@ def create_replica(
         url = str(uploaded.get("url") or "")
         now = timezone.now()
         with transaction.atomic():
+            uploaded_file_owned = not bool(uploaded.get("reused"))
+            previous_token = str(replica.remote_file_token or "")
+            previous_owned = bool((replica.metadata or {}).get("remote_file_owned"))
+            previous_owner_connection_id = str(
+                (replica.metadata or {}).get("remote_file_owner_connection_id")
+                or route.connection.id
+            )
+            _lock_remote_file_reference(
+                token,
+                connection=route.connection,
+                owned=uploaded_file_owned,
+            )
             replica.remote_file_token = token
             replica.remote_url = url
             replica.content_hash = content_hash
@@ -455,7 +554,32 @@ def create_replica(
             replica.last_synced_at = now
             replica.error_code = ""
             replica.error_summary = ""
+            remote_file_owned = bool(
+                uploaded_file_owned or (token == previous_token and previous_owned)
+            )
+            metadata = dict(replica.metadata or {})
+            metadata["remote_file_owned"] = remote_file_owned
+            if uploaded_file_owned:
+                metadata["remote_file_owner_connection_id"] = route.connection.id
+            elif not remote_file_owned:
+                metadata.pop("remote_file_owner_connection_id", None)
+            replica.metadata = metadata
             replica.save()
+            if previous_token and previous_token != token and previous_owned:
+                delete_owned_replicas_after_commit(
+                    [
+                        SimpleNamespace(
+                            connection_id=previous_owner_connection_id,
+                            remote_file_token=previous_token,
+                            metadata={
+                                "remote_file_owned": True,
+                                "remote_file_owner_connection_id": (
+                                    previous_owner_connection_id
+                                ),
+                            },
+                        )
+                    ]
+                )
             job.status = SyncJobStatus.SUCCESS
             job.result_json = {"replica_id": replica.id}
             job.save(update_fields=["status", "result_json", "updated_at"])
@@ -525,24 +649,73 @@ def register_uploaded_replica(
     remote_file_token: str,
     remote_url: str,
     folder_token: str,
+    remote_file_owned: bool = False,
+    remote_file_owner_connection: StorageConnection | None = None,
 ) -> DocumentReplica:
     """Register an upload already completed by the compatibility endpoint."""
     version = max(asset.quotation.version_current or 1, 1) if asset.quotation_id else 1
-    replica, _ = DocumentReplica.objects.update_or_create(
-        asset=asset,
-        connection=route.connection,
-        version=version,
-        defaults={
-            "mount": route.mount,
-            "remote_file_token": remote_file_token,
-            "remote_url": remote_url,
-            "folder_token": folder_token,
-            "sync_status": ReplicaSyncStatus.SYNCED,
-            "last_synced_at": timezone.now(),
-            "error_code": "",
-            "error_summary": "",
-        },
-    )
+    with transaction.atomic():
+        owner_connection = remote_file_owner_connection or route.connection
+        _lock_remote_file_reference(
+            remote_file_token,
+            connection=owner_connection,
+            owned=remote_file_owned,
+        )
+        replica = (
+            DocumentReplica.objects.select_for_update()
+            .filter(
+                asset=asset,
+                connection=route.connection,
+                version=version,
+            )
+            .first()
+        )
+        if replica is None:
+            replica = DocumentReplica(
+                asset=asset,
+                connection=route.connection,
+                version=version,
+            )
+        previous_token = str(replica.remote_file_token or "")
+        metadata = dict(replica.metadata or {})
+        previous_owned = bool(metadata.get("remote_file_owned"))
+        current_file_owned = bool(
+            remote_file_owned
+            or (remote_file_token == previous_token and previous_owned)
+        )
+        previous_owner_connection_id = str(
+            metadata.get("remote_file_owner_connection_id") or route.connection.id
+        )
+        metadata["remote_file_owned"] = current_file_owned
+        if remote_file_owned:
+            metadata["remote_file_owner_connection_id"] = owner_connection.id
+        elif not current_file_owned:
+            metadata.pop("remote_file_owner_connection_id", None)
+        replica.mount = route.mount
+        replica.remote_file_token = remote_file_token
+        replica.remote_url = remote_url
+        replica.folder_token = folder_token
+        replica.sync_status = ReplicaSyncStatus.SYNCED
+        replica.last_synced_at = timezone.now()
+        replica.error_code = ""
+        replica.error_summary = ""
+        replica.metadata = metadata
+        replica.save()
+        if previous_token and previous_token != remote_file_token and previous_owned:
+            delete_owned_replicas_after_commit(
+                [
+                    SimpleNamespace(
+                        connection_id=previous_owner_connection_id,
+                        remote_file_token=previous_token,
+                        metadata={
+                            "remote_file_owned": True,
+                            "remote_file_owner_connection_id": (
+                                previous_owner_connection_id
+                            ),
+                        },
+                    )
+                ]
+            )
     context = _sync_context(request)
     job = SyncJob.objects.create(
         job_type=SyncJobType.UPLOAD,
@@ -593,3 +766,167 @@ def revoke_replica(*, request, replica: DocumentReplica) -> DocumentReplica:
         target_organization_id=replica.connection.external_tenant_id,
     )
     return replica
+
+
+def delete_owned_replicas_after_commit(replicas) -> None:
+    """Persist and enqueue cleanup intents for owned remote files."""
+    replicas = tuple(replicas)
+    cleanup_ids = []
+    seen_remote_files = set()
+    for replica in replicas:
+        remote_token = str(replica.remote_file_token or "")
+        metadata = dict(getattr(replica, "metadata", {}) or {})
+        reference_owned = bool(metadata.get("remote_file_owned"))
+        reference_connection_id = getattr(replica, "connection_id", None)
+        owner_connection_id = (
+            metadata.get("remote_file_owner_connection_id") or reference_connection_id
+        )
+        if not remote_token or remote_token in seen_remote_files:
+            continue
+        cleanup = RemoteFileCleanup.objects.filter(
+            remote_file_token=remote_token,
+        ).first()
+        if cleanup is None:
+            if not reference_owned or not owner_connection_id:
+                continue
+            cleanup, _created = RemoteFileCleanup.objects.get_or_create(
+                remote_file_token=remote_token,
+                defaults={
+                    "connection_id": owner_connection_id,
+                    "owned": True,
+                },
+            )
+        cleanup = RemoteFileCleanup.objects.select_for_update().get(
+            pk=cleanup.pk,
+        )
+        if not cleanup.owned and not reference_owned:
+            continue
+        update_fields = [
+            "status",
+            "last_error",
+            "next_dispatch_at",
+            "processed_at",
+            "updated_at",
+        ]
+        if reference_owned and not cleanup.owned:
+            cleanup.owned = True
+            update_fields.append("owned")
+            if owner_connection_id:
+                cleanup.connection_id = owner_connection_id
+                update_fields.append("connection")
+        cleanup.status = RemoteFileCleanupStatus.PENDING
+        cleanup.last_error = ""
+        cleanup.next_dispatch_at = timezone.now()
+        cleanup.processed_at = None
+        cleanup.save(update_fields=update_fields)
+        seen_remote_files.add(remote_token)
+        cleanup_ids.append(cleanup.id)
+
+    def enqueue_cleanup() -> None:
+        from quotation.tasks import delete_owned_remote_file_task
+
+        for cleanup_id in cleanup_ids:
+            dispatch_started_at = timezone.now()
+            claimed = RemoteFileCleanup.objects.filter(
+                pk=cleanup_id,
+                status=RemoteFileCleanupStatus.PENDING,
+                next_dispatch_at__lte=dispatch_started_at,
+            ).update(next_dispatch_at=(dispatch_started_at + timedelta(minutes=5)))
+            if not claimed:
+                continue
+            try:
+                delete_owned_remote_file_task.apply_async(
+                    args=[cleanup_id],
+                    queue="quotation_sync",
+                )
+            except Exception:
+                RemoteFileCleanup.objects.filter(
+                    pk=cleanup_id,
+                    status=RemoteFileCleanupStatus.PENDING,
+                ).update(next_dispatch_at=dispatch_started_at)
+                logger.exception(
+                    "quotation_remote_file_cleanup_enqueue_failed",
+                    extra={"remote_file_cleanup_id": cleanup_id},
+                )
+
+    transaction.on_commit(enqueue_cleanup, robust=True)
+
+
+def delete_remote_file_if_unreferenced(
+    cleanup_id: str,
+) -> str:
+    """Process one durable cleanup while serializing token registration."""
+    pending_error = None
+    result = "pending"
+    with transaction.atomic():
+        cleanup = (
+            RemoteFileCleanup.objects.select_for_update()
+            .select_related("connection")
+            .get(pk=cleanup_id)
+        )
+        if cleanup.status != RemoteFileCleanupStatus.PENDING:
+            return cleanup.status
+        if not cleanup.owned:
+            cleanup.status = RemoteFileCleanupStatus.CANCELLED
+            cleanup.processed_at = timezone.now()
+            cleanup.save(update_fields=["status", "processed_at", "updated_at"])
+            return "unowned"
+        surviving_replica = (
+            DocumentReplica.objects.filter(
+                remote_file_token=cleanup.remote_file_token,
+                revoked_at__isnull=True,
+            )
+            .order_by("created_at", "id")
+            .first()
+        )
+        legacy_reference_exists = DocumentAsset.objects.filter(
+            feishu_file_token=cleanup.remote_file_token,
+        ).exists()
+        if surviving_replica is not None or legacy_reference_exists:
+            if surviving_replica is not None:
+                metadata = dict(surviving_replica.metadata or {})
+                metadata["remote_file_owned"] = True
+                metadata["remote_file_owner_connection_id"] = cleanup.connection_id
+                DocumentReplica.objects.filter(
+                    pk=surviving_replica.pk,
+                ).update(metadata=metadata)
+            cleanup.status = RemoteFileCleanupStatus.CANCELLED
+            cleanup.processed_at = timezone.now()
+            cleanup.save(update_fields=["status", "processed_at", "updated_at"])
+            return "referenced"
+        cleanup.attempts += 1
+        reference = SimpleNamespace(
+            remote_file_token=cleanup.remote_file_token,
+        )
+        try:
+            FeishuStorageProvider(cleanup.connection).delete(reference)
+        except FeishuAPIError as exc:
+            if feishu_file_not_found(exc):
+                result = "missing"
+            else:
+                pending_error = exc
+        except Exception as exc:
+            pending_error = exc
+        if pending_error is None:
+            cleanup.status = RemoteFileCleanupStatus.COMPLETED
+            cleanup.last_error = ""
+            cleanup.processed_at = timezone.now()
+        else:
+            cleanup.status = RemoteFileCleanupStatus.PENDING
+            cleanup.last_error = type(pending_error).__name__[:255]
+            cleanup.next_dispatch_at = timezone.now() + timedelta(
+                minutes=5,
+            )
+        cleanup.save(
+            update_fields=[
+                "status",
+                "attempts",
+                "last_error",
+                "next_dispatch_at",
+                "processed_at",
+                "updated_at",
+            ]
+        )
+    if pending_error is not None:
+        raise pending_error
+    return result if result == "missing" else "deleted"

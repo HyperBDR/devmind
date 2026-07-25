@@ -5,11 +5,15 @@ from django.db import IntegrityError, transaction
 from quotation.access import can_access_quotation, forbidden_response
 from quotation.audit import set_request_audit_target
 from quotation.models import (
+    EXPORT_ARCHIVE_SYNC_STAGE,
     ExportJob,
     ExportJobStatus,
     Quotation,
     QuotationTemplate,
     QuotationTemplateStatus,
+    SyncJob,
+    SyncJobStatus,
+    SyncJobType,
 )
 from quotation.services.export_jobs import ExportRequestError, create_export_job
 from quotation.services.export_renderer import (
@@ -213,7 +217,28 @@ class ExportJobRetryUploadView(APIView):
     def post(self, request, job_id: str):
         from quotation.services.export_pipeline import queue_replica_uploads
 
+        quotation_id = (
+            ExportJob.objects.filter(pk=job_id)
+            .values_list(
+                "quotation_id",
+                flat=True,
+            )
+            .first()
+        )
+        if quotation_id is None:
+            return Response(
+                {"detail": "export job not found"},
+                status=404,
+            )
         with transaction.atomic():
+            quotation = (
+                Quotation.objects.select_for_update().filter(pk=quotation_id).first()
+            )
+            if quotation is None:
+                return Response(
+                    {"detail": "export job not found"},
+                    status=404,
+                )
             job = (
                 ExportJob.objects.select_for_update()
                 .select_related("quotation")
@@ -221,7 +246,7 @@ class ExportJobRetryUploadView(APIView):
                 .filter(pk=job_id)
                 .first()
             )
-            if job is None:
+            if job is None or job.quotation_id != quotation.id:
                 return Response(
                     {"detail": "export job not found"},
                     status=404,
@@ -231,6 +256,21 @@ class ExportJobRetryUploadView(APIView):
             if job.status != ExportJobStatus.UPLOAD_FAILED:
                 return Response(
                     {"detail": "only failed uploads can be retried"},
+                    status=409,
+                )
+            active_uploads = SyncJob.objects.filter(
+                asset__export_job=job,
+                job_type=SyncJobType.UPLOAD,
+                stage=EXPORT_ARCHIVE_SYNC_STAGE,
+                status__in={
+                    SyncJobStatus.QUEUED,
+                    SyncJobStatus.RUNNING,
+                    SyncJobStatus.RETRYING,
+                },
+            )
+            if active_uploads.exists():
+                return Response(
+                    {"detail": "archive uploads are still active"},
                     status=409,
                 )
             assets = list(job.assets.all())

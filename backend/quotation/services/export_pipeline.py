@@ -6,10 +6,24 @@ from hashlib import sha256
 from uuid import NAMESPACE_URL, uuid5
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
-from quotation.models import DocumentAsset, DocumentType, ExportJob, ExportJobStatus
+from quotation.models import (
+    DocumentAsset,
+    DocumentType,
+    ExportJob,
+    ExportJobStatus,
+    Quotation,
+    SyncJob,
+    SyncJobStatus,
+)
+from quotation.services.export_archive import (
+    prepare_export_upload_tracking,
+    update_export_upload_tracking,
+)
 from quotation.services.export_renderer import (
+    CURRENT_RENDERER_VERSION,
+    TemplateValidationError,
     convert_xlsx_to_pdf,
     render_quotation_xlsx,
 )
@@ -94,13 +108,35 @@ def queue_replica_uploads(
 ) -> None:
     from quotation.tasks import sync_document_replica_task
 
+    try:
+        trackers = prepare_export_upload_tracking(job, assets)
+    except DatabaseError:
+        logger.exception(
+            "quotation_archive_tracking_init_failed",
+            extra={"export_job_id": job.id},
+        )
+        ExportJob.objects.filter(pk=job.id).exclude(
+            status=ExportJobStatus.COMPLETED
+        ).update(
+            status=ExportJobStatus.UPLOAD_FAILED,
+            error_code="archive_tracking_init_failed",
+            error_message=("Quotation archive tracking could not be initialized"),
+            finished_at=timezone.now(),
+        )
+        return
     for asset in assets:
+        tracker = trackers[asset.id]
         try:
-            sync_document_replica_task.apply_async(
-                args=[job.id, asset.id],
+            task = sync_document_replica_task.apply_async(
+                args=[job.id, asset.id, tracker.id],
                 queue="quotation_sync",
             )
         except Exception:
+            update_export_upload_tracking(
+                tracker.id,
+                SyncJobStatus.FAILED,
+                error_code="archive_enqueue_failed",
+            )
             logger.exception(
                 "quotation_archive_enqueue_failed",
                 extra={
@@ -116,34 +152,71 @@ def queue_replica_uploads(
                 error_message="Quotation archive could not be queued",
                 finished_at=timezone.now(),
             )
+        else:
+            try:
+                SyncJob.objects.filter(pk=tracker.id).update(
+                    celery_task_id=task.id,
+                )
+            except DatabaseError:
+                logger.exception(
+                    "quotation_archive_task_id_persist_failed",
+                    extra={
+                        "export_job_id": job.id,
+                        "asset_id": asset.id,
+                        "tracking_job_id": tracker.id,
+                    },
+                )
 
 
 def render_export_job(job_id: str) -> dict:
     """Render and persist all requested formats for one pinned export."""
     started = timezone.now()
-    claimed = ExportJob.objects.filter(
-        pk=job_id,
-        status__in={
-            ExportJobStatus.QUEUED,
-            ExportJobStatus.RENDER_FAILED,
-            ExportJobStatus.RENDERING_EXCEL,
-            ExportJobStatus.CONVERTING_PDF,
-        },
-    ).update(
-        status=ExportJobStatus.RENDERING_EXCEL,
-        started_at=started,
-        finished_at=None,
-        error_code="",
-        error_message="",
-    )
-    job = ExportJob.objects.select_related(
-        "quotation",
-        "quotation_version",
-        "template",
-        "requested_by",
+    claimable_statuses = {
+        ExportJobStatus.QUEUED,
+        ExportJobStatus.RENDER_FAILED,
+        ExportJobStatus.RENDERING_EXCEL,
+        ExportJobStatus.CONVERTING_PDF,
+    }
+    quotation_id = ExportJob.objects.values_list(
+        "quotation_id",
+        flat=True,
     ).get(pk=job_id)
-    if not claimed:
-        return {"job_id": job.id, "status": job.status}
+    with transaction.atomic():
+        Quotation.objects.select_for_update().get(
+            pk=quotation_id,
+        )
+        job = (
+            ExportJob.objects.select_for_update()
+            .select_related(
+                "quotation",
+                "quotation_version",
+                "template",
+                "requested_by",
+            )
+            .get(pk=job_id)
+        )
+        if job.status not in claimable_statuses:
+            return {"job_id": job.id, "status": job.status}
+        if job.renderer_version != CURRENT_RENDERER_VERSION:
+            raise TemplateValidationError(
+                "Pinned quotation renderer is no longer supported",
+                code="renderer_version_unsupported",
+            )
+        job.status = ExportJobStatus.RENDERING_EXCEL
+        job.started_at = started
+        job.finished_at = None
+        job.error_code = ""
+        job.error_message = ""
+        job.save(
+            update_fields=[
+                "status",
+                "started_at",
+                "finished_at",
+                "error_code",
+                "error_message",
+                "updated_at",
+            ]
+        )
 
     excel_bytes = render_quotation_xlsx(
         job.template,
