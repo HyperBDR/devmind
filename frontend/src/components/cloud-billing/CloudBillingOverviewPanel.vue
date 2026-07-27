@@ -1644,6 +1644,7 @@ import {
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
 import {
   compareCloudBillingAccounts,
+  hasCloudBillingBalance,
   isCloudBillingAccountCritical,
   selectCloudBillingTrendAccounts
 } from '@/utils/cloudBillingOverviewRisk'
@@ -2850,7 +2851,7 @@ function formatPercent(value) {
 }
 
 function showBalance(account) {
-  return Number(account.balance || 0) > 0
+  return hasCloudBillingBalance(account)
 }
 
 function paymentTypeLabel(type) {

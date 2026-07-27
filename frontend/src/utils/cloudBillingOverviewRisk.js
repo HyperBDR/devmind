@@ -39,6 +39,11 @@ export function isCloudBillingAccountCritical(account) {
   return accountPriority(account) <= 2
 }
 
+export function hasCloudBillingBalance(account) {
+  if (account?.balance == null) return false
+  return Number(account.balance) > 0 || account?.type === 'prepaid'
+}
+
 export function compareCloudBillingAccounts(
   a,
   b,

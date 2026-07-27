@@ -3,12 +3,32 @@ import test from 'node:test'
 
 import {
   compareCloudBillingAccounts,
+  hasCloudBillingBalance,
   isCloudBillingAccountCritical,
   selectCloudBillingTrendAccounts
 } from '../src/utils/cloudBillingOverviewRisk.js'
 
 const byValue = (account) => Number(account?.balance || 0)
 const byCost = (account) => Number(account?.cost || 0)
+
+test('prepaid debt remains visible in account details and exports', () => {
+  assert.equal(
+    hasCloudBillingBalance({ type: 'prepaid', balance: -12.34 }),
+    true
+  )
+  assert.equal(
+    hasCloudBillingBalance({ type: 'prepaid', balance: 0 }),
+    true
+  )
+  assert.equal(
+    hasCloudBillingBalance({ type: 'postpaid', balance: 0 }),
+    false
+  )
+  assert.equal(
+    hasCloudBillingBalance({ type: 'prepaid', balance: null }),
+    false
+  )
+})
 
 test('known debt is critical without days remaining reference', () => {
   const account = {
