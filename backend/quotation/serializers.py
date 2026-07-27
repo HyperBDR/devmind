@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import quote, urlparse
 
@@ -14,10 +13,9 @@ from quotation.models import (
     QuotationItem,
     QuotationVersion,
     ReplicaSyncStatus,
-    SecurityAlert,
     UserQuotationCatalog,
 )
-from quotation.security_alerts import can_manage_security_alerts
+from quotation.permissions import is_quotation_admin
 from quotation.services.storage_control import remote_document_reference
 from rest_framework import serializers
 
@@ -525,7 +523,32 @@ class AuditEventSerializer(serializers.ModelSerializer):
     """Read-only representation of a Quote Desk audit event."""
 
     ip_address = serializers.SerializerMethodField()
+    metadata = serializers.SerializerMethodField()
     target_label = serializers.SerializerMethodField()
+
+    def _terminal_sync_event(self, obj: AuditEvent) -> AuditEvent | None:
+        """Return the terminal event paired with a sync request."""
+        if (
+            obj.event_name != "storage.archive_sync_requested"
+            or not obj.sync_job_id
+        ):
+            return None
+        cache = self.context.setdefault("audit_terminal_sync_cache", {})
+        if obj.sync_job_id not in cache:
+            cache[obj.sync_job_id] = (
+                AuditEvent.objects.filter(sync_job_id=obj.sync_job_id)
+                .exclude(pk=obj.pk)
+                .filter(
+                    event_name__in=[
+                        "storage.archive_sync_succeeded",
+                        "storage.archive_sync_partially_succeeded",
+                        "storage.archive_sync_failed",
+                    ]
+                )
+                .order_by("-created_at", "-id")
+                .first()
+            )
+        return cache[obj.sync_job_id]
 
     def get_ip_address(self, obj: AuditEvent) -> str | None:
         request = self.context.get("request")
@@ -533,10 +556,21 @@ class AuditEventSerializer(serializers.ModelSerializer):
             return str(obj.ip_address) if obj.ip_address else None
         return _mask_ip(obj.ip_address)
 
+    def get_metadata(self, obj: AuditEvent) -> dict:
+        """Include the final counters when serializing a sync request."""
+        metadata = dict(obj.metadata or {})
+        terminal = self._terminal_sync_event(obj)
+        if terminal and isinstance(terminal.metadata, dict):
+            metadata.update(terminal.metadata)
+        return metadata
+
     def get_target_label(self, obj: AuditEvent) -> str:
         """Resolve a missing historical target to its quotation number."""
         if obj.target_label:
             return obj.target_label
+        terminal = self._terminal_sync_event(obj)
+        if terminal and terminal.target_label:
+            return terminal.target_label
         quotation_id = obj.quotation_id_snapshot
         if not quotation_id and obj.target_type == "quotation":
             quotation_id = obj.target_id
@@ -604,8 +638,8 @@ class AuditEventSerializer(serializers.ModelSerializer):
 
 
 def _can_view_sensitive_evidence(user) -> bool:
-    """Return whether a user may inspect unmasked security evidence."""
-    return can_manage_security_alerts(user)
+    """Return whether a user may inspect unmasked audit evidence."""
+    return is_quotation_admin(user)
 
 
 def _mask_ip(value) -> str | None:
@@ -618,165 +652,6 @@ def _mask_ip(value) -> str | None:
         return ".".join([*parts[:3], "*"])
     groups = text.split(":")
     return ":".join(groups[:3]) + "::*"
-
-
-def _device_label(user_agent: str) -> str:
-    """Return a concise browser and operating-system label."""
-    if not user_agent:
-        return "Not available"
-    browser = "Browser"
-    for pattern, label in (
-        (r"Edg/(\d+)", "Edge"),
-        (r"Chrome/(\d+)", "Chrome"),
-        (r"Firefox/(\d+)", "Firefox"),
-        (r"Version/(\d+).+Safari/", "Safari"),
-    ):
-        match = re.search(pattern, user_agent)
-        if match:
-            browser = f"{label} {match.group(1)}"
-            break
-    if "Mac OS X" in user_agent:
-        operating_system = "macOS"
-    elif "Windows" in user_agent:
-        operating_system = "Windows"
-    elif "Android" in user_agent:
-        operating_system = "Android"
-    elif "iPhone" in user_agent or "iPad" in user_agent:
-        operating_system = "iOS"
-    elif "Linux" in user_agent:
-        operating_system = "Linux"
-    else:
-        operating_system = "Unknown OS"
-    return f"{browser} · {operating_system}"
-
-
-class SecurityAlertEvidenceSerializer(serializers.ModelSerializer):
-    """Minimal audit evidence shown in a security alert timeline."""
-
-    ip_address = serializers.SerializerMethodField()
-
-    def get_ip_address(self, obj: AuditEvent) -> str | None:
-        request = self.context.get("request")
-        if _can_view_sensitive_evidence(getattr(request, "user", None)):
-            return str(obj.ip_address) if obj.ip_address else None
-        return _mask_ip(obj.ip_address)
-
-    class Meta:
-        model = AuditEvent
-        fields = [
-            "id",
-            "action",
-            "module",
-            "target_id",
-            "target_label",
-            "request_id",
-            "ip_address",
-            "created_at",
-        ]
-        read_only_fields = fields
-
-
-class SecurityAlertSerializer(serializers.ModelSerializer):
-    """List representation of a Quote Desk security alert."""
-
-    alert_number = serializers.SerializerMethodField()
-    source_ip = serializers.SerializerMethodField()
-    device = serializers.SerializerMethodField()
-    evidence_count = serializers.IntegerField(
-        source="evidence_events.count",
-        read_only=True,
-    )
-
-    def get_alert_number(self, obj: SecurityAlert) -> str:
-        year = obj.created_at.year
-        return f"SA-{year}-{obj.id:05d}"
-
-    def get_source_ip(self, obj: SecurityAlert) -> str | None:
-        request = self.context.get("request")
-        if _can_view_sensitive_evidence(getattr(request, "user", None)):
-            return str(obj.source_ip) if obj.source_ip else None
-        return _mask_ip(obj.source_ip)
-
-    def get_device(self, obj: SecurityAlert) -> str:
-        request = self.context.get("request")
-        if not _can_view_sensitive_evidence(getattr(request, "user", None)):
-            return ""
-        return _device_label(obj.subject_user_agent)
-
-    class Meta:
-        model = SecurityAlert
-        fields = [
-            "id",
-            "alert_number",
-            "rule",
-            "severity",
-            "status",
-            "title",
-            "reason",
-            "recommendation",
-            "runbook",
-            "owner",
-            "threshold",
-            "window_minutes",
-            "subject_email",
-            "subject_name",
-            "source_ip",
-            "device",
-            "trigger_count",
-            "evidence_count",
-            "first_detected_at",
-            "last_detected_at",
-            "acknowledged_at",
-            "resolved_at",
-            "resolution",
-            "resolution_note",
-            "notify_affected_user",
-        ]
-        read_only_fields = fields
-
-
-class SecurityAlertDetailSerializer(SecurityAlertSerializer):
-    """Security alert including its immutable evidence timeline."""
-
-    evidence = SecurityAlertEvidenceSerializer(
-        source="evidence_events",
-        many=True,
-        read_only=True,
-    )
-
-    class Meta(SecurityAlertSerializer.Meta):
-        fields = [*SecurityAlertSerializer.Meta.fields, "evidence"]
-
-
-class SecurityAlertResolutionSerializer(serializers.Serializer):
-    """Validate one administrative alert workflow action."""
-
-    action = serializers.ChoiceField(choices=["acknowledge", "resolve"])
-    resolution = serializers.ChoiceField(
-        choices=SecurityAlert.RESOLUTION_CHOICES,
-        required=False,
-        allow_blank=True,
-    )
-    resolution_note = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        max_length=4000,
-    )
-    notify_affected_user = serializers.BooleanField(
-        required=False,
-        default=False,
-    )
-
-    def validate(self, attrs):
-        if attrs["action"] != "resolve":
-            return attrs
-        if not attrs.get("resolution"):
-            raise serializers.ValidationError({"resolution": "Select a resolution."})
-        if not attrs.get("resolution_note", "").strip():
-            raise serializers.ValidationError(
-                {"resolution_note": "Add a resolution note."}
-            )
-        return attrs
 
 
 class DocumentAssetSerializer(serializers.ModelSerializer):

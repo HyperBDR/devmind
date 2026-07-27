@@ -275,6 +275,10 @@ class FeishuFolderSyncView(APIView):
             trace_id=getattr(request, "audit_trace_id", ""),
             payload_json={
                 "action": "feishu_archive_folder_sync",
+                "audit_source": request.META.get(
+                    "HTTP_X_QUOTATION_AUDIT_SOURCE",
+                    "user",
+                ),
                 "operator_email": user_display_email(request.user),
             },
         )

@@ -289,7 +289,7 @@ function parseStatusClass(doc: ImportedDocument): string {
   return 'bg-slate-50 text-slate-500 ring-slate-200'
 }
 
-void refresh({ syncRemote: true, syncSource: 'automatic' })
+void refresh()
 
 const folderSearchState = computed(() => {
   const query = search.value.trim().toLowerCase()

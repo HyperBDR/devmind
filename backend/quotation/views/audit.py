@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import csv
-from datetime import timedelta
 from io import StringIO
 
 from django.conf import settings
 from django.db.models import Q
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -16,19 +13,14 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from quotation.audit import record_audit_event
-from quotation.models import AuditEvent, SecurityAlert
-from quotation.security_alerts import can_manage_security_alerts
-from quotation.serializers import (
-    AuditEventSerializer,
-    SecurityAlertDetailSerializer,
-    SecurityAlertResolutionSerializer,
-    SecurityAlertSerializer,
-)
+from quotation.models import AuditEvent
+from quotation.permissions import is_quotation_admin
+from quotation.serializers import AuditEventSerializer
 
 
-def _can_manage_alerts(user) -> bool:
-    """Return whether the user may change a security alert's state."""
-    return can_manage_security_alerts(user)
+def _can_export_audit(user) -> bool:
+    """Return whether the user may export operation audit records."""
+    return is_quotation_admin(user)
 
 
 def _pagination(request) -> tuple[int, int]:
@@ -137,7 +129,7 @@ class AuditEventListView(APIView):
                 "total": total,
                 "page": page,
                 "page_size": page_size,
-                "can_export": _can_manage_alerts(request.user),
+                "can_export": _can_export_audit(request.user),
             }
         )
         record_audit_event(
@@ -159,7 +151,7 @@ class AuditEventExportView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        if not _can_manage_alerts(request.user):
+        if not _can_export_audit(request.user):
             record_audit_event(
                 request=request,
                 module="audit",
@@ -187,7 +179,6 @@ class AuditEventExportView(APIView):
                 "action",
                 "result",
                 "reason_code",
-                "risk_level",
                 "target_type",
                 "target_id",
                 "request_id",
@@ -204,7 +195,6 @@ class AuditEventExportView(APIView):
                     event.action,
                     event.result,
                     event.reason_code,
-                    event.risk_level,
                     event.target_type,
                     event.target_id,
                     event.request_id,
@@ -223,189 +213,6 @@ class AuditEventExportView(APIView):
         response = HttpResponse(output.getvalue(), content_type="text/csv")
         response["Content-Disposition"] = (
             'attachment; filename="quote-desk-audit.csv"'
-        )
-        response._quotation_audit_handled = True
-        return response
-
-
-class SecurityAlertListView(APIView):
-    """Return security alerts and review summary to authenticated users."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        queryset = SecurityAlert.objects.prefetch_related("evidence_events")
-        search = request.query_params.get("search", "").strip()
-        severity = request.query_params.get("severity", "").strip()
-        status_filter = request.query_params.get("status", "").strip()
-        rule = request.query_params.get("rule", "").strip()
-        days = request.query_params.get("days", "30").strip()
-
-        if search:
-            queryset = queryset.filter(
-                Q(title__icontains=search)
-                | Q(subject_email__icontains=search)
-                | Q(subject_name__icontains=search)
-                | Q(source_ip__icontains=search)
-            )
-        if severity:
-            queryset = queryset.filter(severity=severity)
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-        if rule:
-            queryset = queryset.filter(rule=rule)
-        if days and days != "all":
-            try:
-                day_count = min(max(int(days), 1), 365)
-            except ValueError as error:
-                raise ValidationError("Invalid date range.") from error
-            queryset = queryset.filter(
-                last_detected_at__gte=timezone.now()
-                - timedelta(days=day_count)
-            )
-
-        page, page_size = _pagination(request)
-        total = queryset.count()
-        start = (page - 1) * page_size
-        alerts = queryset[start : start + page_size]
-        active = SecurityAlert.objects.filter(
-            status__in=[
-                SecurityAlert.STATUS_OPEN,
-                SecurityAlert.STATUS_ACKNOWLEDGED,
-            ]
-        )
-        last_day = timezone.now() - timedelta(hours=24)
-        new_alerts = SecurityAlert.objects.filter(
-            first_detected_at__gte=last_day
-        )
-        summary = {
-            "open": active.count(),
-            "critical": active.filter(
-                severity=SecurityAlert.SEVERITY_CRITICAL
-            ).count(),
-            "high": active.filter(
-                severity=SecurityAlert.SEVERITY_HIGH
-            ).count(),
-            "new_last_24_hours": new_alerts.count(),
-            "immediate_review": active.filter(
-                severity__in=[
-                    SecurityAlert.SEVERITY_CRITICAL,
-                    SecurityAlert.SEVERITY_HIGH,
-                ]
-            ).count(),
-            "affected_users_last_24_hours": new_alerts.exclude(
-                subject_key="system:anonymous"
-            ).values("subject_key").distinct().count(),
-        }
-        return Response(
-            {
-                "items": SecurityAlertSerializer(
-                    alerts,
-                    many=True,
-                    context={"request": request},
-                ).data,
-                "summary": summary,
-                "total": total,
-                "page": page,
-                "page_size": page_size,
-                "can_manage": _can_manage_alerts(request.user),
-            }
-        )
-
-
-class SecurityAlertDetailView(APIView):
-    """Return alert evidence and handle the administrative workflow."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get_object(self, alert_id: int) -> SecurityAlert:
-        return get_object_or_404(
-            SecurityAlert.objects.prefetch_related("evidence_events"),
-            id=alert_id,
-        )
-
-    def get(self, request, alert_id: int):
-        alert = self.get_object(alert_id)
-        return Response(
-            {
-                "alert": SecurityAlertDetailSerializer(
-                    alert,
-                    context={"request": request},
-                ).data,
-                "can_manage": _can_manage_alerts(request.user),
-            }
-        )
-
-    def patch(self, request, alert_id: int):
-        if not _can_manage_alerts(request.user):
-            raise PermissionDenied(
-                "Only administrators can manage security alerts."
-            )
-        alert = self.get_object(alert_id)
-        serializer = SecurityAlertResolutionSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        values = serializer.validated_data
-        action = values["action"]
-
-        if alert.status in {
-            SecurityAlert.STATUS_RESOLVED,
-            SecurityAlert.STATUS_FALSE_POSITIVE,
-        }:
-            raise ValidationError("This alert has already been resolved.")
-        now = timezone.now()
-        if action == "acknowledge":
-            alert.status = SecurityAlert.STATUS_ACKNOWLEDGED
-            alert.acknowledged_by = request.user
-            alert.acknowledged_at = now
-            update_fields = [
-                "status",
-                "acknowledged_by",
-                "acknowledged_at",
-                "updated_at",
-            ]
-        else:
-            resolution = values["resolution"]
-            alert.status = (
-                SecurityAlert.STATUS_FALSE_POSITIVE
-                if resolution == SecurityAlert.RESOLUTION_FALSE_POSITIVE
-                else SecurityAlert.STATUS_RESOLVED
-            )
-            alert.resolved_by = request.user
-            alert.resolved_at = now
-            alert.resolution = resolution
-            alert.resolution_note = values["resolution_note"].strip()
-            alert.notify_affected_user = values["notify_affected_user"]
-            update_fields = [
-                "status",
-                "resolved_by",
-                "resolved_at",
-                "resolution",
-                "resolution_note",
-                "notify_affected_user",
-                "updated_at",
-            ]
-        alert.save(update_fields=update_fields)
-        record_audit_event(
-            request=request,
-            module="security",
-            action=action,
-            result=AuditEvent.RESULT_SUCCEEDED,
-            target_type="security_alert",
-            target_id=str(alert.id),
-            target_label=SecurityAlertSerializer(
-                alert,
-                context={"request": request},
-            ).data["alert_number"],
-            summary=f"Security alert {action}d.",
-        )
-        response = Response(
-            {
-                "alert": SecurityAlertDetailSerializer(
-                    alert,
-                    context={"request": request},
-                ).data,
-                "can_manage": True,
-            }
         )
         response._quotation_audit_handled = True
         return response

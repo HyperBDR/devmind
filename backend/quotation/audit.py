@@ -8,7 +8,6 @@ from typing import Any
 
 from quotation.models import AuditEvent
 from quotation.permissions import user_role
-from quotation.security_alerts import evaluate_security_event
 
 
 AUDIT_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
@@ -30,6 +29,12 @@ def set_request_audit_target(
     if target_label:
         raw_request.quotation_audit_target_label = str(target_label)
 
+
+def set_request_audit_changed_fields(request, fields: list[str]) -> None:
+    """Attach server-verified changed business fields to one request."""
+    raw_request = getattr(request, "_request", request)
+    raw_request.quotation_audit_changed_fields = list(dict.fromkeys(fields))
+
 SENSITIVE_KEY_PARTS = {
     "access_token",
     "authorization",
@@ -49,12 +54,21 @@ SENSITIVE_KEY_PARTS = {
 ALLOWED_METADATA_KEYS = {
     "automatic",
     "catalog_item_type",
+    "created_count",
+    "created_quotation_count",
     "duration_ms",
+    "error_count",
     "fields",
     "file_type",
+    "folder_count",
+    "folder_names",
     "http_method",
+    "parsed_count",
     "provider",
+    "queued_parse_count",
+    "skipped_count",
     "status_code",
+    "updated_quotation_count",
     "version_no",
 }
 
@@ -70,7 +84,7 @@ EVENT_NAMES = {
     ("feishu", "upload"): "document.uploaded",
     ("feishu", "import"): "document.imported",
     ("feishu", "open"): "document.opened",
-    ("feishu", "sync"): "storage.archive_synced",
+    ("feishu", "sync"): "storage.archive_sync_requested",
     ("feishu", "connect"): "feishu.oauth.connected",
     ("feishu", "disconnect"): "feishu.oauth.disconnected",
     ("feishu", "refresh"): "feishu.oauth.refresh_failed",
@@ -310,5 +324,4 @@ def record_audit_event(
         ip_address=_client_ip(request),
         user_agent=_safe_text(request.META.get("HTTP_USER_AGENT", ""), 500),
     )
-    evaluate_security_event(event)
     return event

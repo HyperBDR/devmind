@@ -9,7 +9,10 @@ from quotation.access import (
     filter_accessible_quotations,
     forbidden_response,
 )
-from quotation.audit import set_request_audit_target
+from quotation.audit import (
+    set_request_audit_changed_fields,
+    set_request_audit_target,
+)
 from quotation.models import Quotation, QuotationSourceType, QuoteStatus
 from quotation.permissions import user_display_email
 from quotation.serializers import (
@@ -34,6 +37,81 @@ def _ensure_access(user, quotation: Quotation) -> Response | None:
     if can_access_quotation(user, quotation):
         return None
     return forbidden_response()
+
+
+QUOTATION_UPDATE_FIELDS = (
+    "quote_no",
+    "project_name",
+    "product_line",
+    "currency",
+    "payment_term_option",
+    "payment_terms",
+    "quote_date",
+    "expire_date",
+    "tax_label",
+    "vat_rate",
+    "remarks_disclaimer",
+    "issuer_company_name",
+    "issuer_contact_name",
+    "issuer_contact_email",
+    "issuer_contact_title",
+    "issuer_signature",
+    "client_company",
+    "contact_person",
+    "email",
+    "billing_company",
+    "billing_contact",
+    "billing_email",
+    "status",
+)
+QUOTATION_ITEM_FIELDS = (
+    "line_no",
+    "type",
+    "item_id",
+    "name",
+    "description",
+    "qty",
+    "list_price",
+    "discount_percent",
+    "net_unit_price",
+    "extended_price",
+)
+
+
+def _item_audit_snapshot(item) -> tuple:
+    """Return a stable comparable representation of one quotation item."""
+    values = []
+    for field in QUOTATION_ITEM_FIELDS:
+        value = (
+            item.get(field)
+            if isinstance(item, dict)
+            else getattr(item, field)
+        )
+        if field in {"item_id", "name", "description"}:
+            value = value or ""
+        values.append(value)
+    return tuple(values)
+
+
+def _quotation_changed_fields(quotation: Quotation, data: dict) -> list[str]:
+    """Return only fields whose persisted business values will change."""
+    fields = [
+        field
+        for field in QUOTATION_UPDATE_FIELDS
+        if field in data and getattr(quotation, field) != data[field]
+    ]
+    if "items" in data:
+        current_items = [
+            _item_audit_snapshot(item)
+            for item in quotation.items.all()
+        ]
+        incoming_items = [
+            _item_audit_snapshot(item)
+            for item in data["items"]
+        ]
+        if current_items != incoming_items:
+            fields.append("items")
+    return fields
 
 
 class QuotationListCreateView(APIView):
@@ -119,32 +197,9 @@ class QuotationDetailView(APIView):
         )
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
+        changed_fields = _quotation_changed_fields(quotation, data)
         previous_status = quotation.status
-        for field in (
-            "quote_no",
-            "project_name",
-            "product_line",
-            "currency",
-            "payment_term_option",
-            "payment_terms",
-            "quote_date",
-            "expire_date",
-            "tax_label",
-            "vat_rate",
-            "remarks_disclaimer",
-            "issuer_company_name",
-            "issuer_contact_name",
-            "issuer_contact_email",
-            "issuer_contact_title",
-            "issuer_signature",
-            "client_company",
-            "contact_person",
-            "email",
-            "billing_company",
-            "billing_contact",
-            "billing_email",
-            "status",
-        ):
+        for field in QUOTATION_UPDATE_FIELDS:
             if field in data:
                 setattr(quotation, field, data[field])
         try:
@@ -191,6 +246,7 @@ class QuotationDetailView(APIView):
             return Response({"detail": "quote_no already exists"}, status=409)
         quotation = self.get_object(quotation_id)
         set_request_audit_target(request, target_label=quotation.quote_no)
+        set_request_audit_changed_fields(request, changed_fields)
         return Response(QuotationSerializer(quotation).data)
 
     def delete(self, request, quotation_id: str):
@@ -232,6 +288,11 @@ class QuotationGenerateView(APIView):
         if denied:
             return denied
         set_request_audit_target(request, target_label=quotation.quote_no)
+        changed_fields = (
+            ["status"]
+            if quotation.status != QuoteStatus.GENERATED
+            else []
+        )
         ser = QuotationGenerateSerializer(data=request.data or {})
         ser.is_valid(raise_exception=True)
         quotation.status = QuoteStatus.GENERATED
@@ -245,4 +306,5 @@ class QuotationGenerateView(APIView):
         quotation = Quotation.objects.prefetch_related(
             "items", "documents", "versions"
         ).get(pk=quotation_id)
+        set_request_audit_changed_fields(request, changed_fields)
         return Response(QuotationSerializer(quotation).data)

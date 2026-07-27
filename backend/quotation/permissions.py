@@ -3,6 +3,26 @@ from django.contrib.auth.models import User
 from accounts.access import get_effective_feature_keys, get_effective_roles
 
 
+def is_quotation_admin(user: User) -> bool:
+    """Return whether a user has an explicit administrative identity."""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_staff", False) or getattr(
+        user,
+        "is_superuser",
+        False,
+    ):
+        return True
+    profile = getattr(user, "profile", None)
+    if str(getattr(profile, "role", "") or "").lower() == "admin":
+        return True
+    role_names = {
+        role.name.strip().lower().replace(" ", "_")
+        for role in get_effective_roles(user)
+    }
+    return "admin" in role_names
+
+
 def user_role(user: User) -> str:
     if getattr(user, "is_superuser", False) or getattr(
         user, "is_staff", False

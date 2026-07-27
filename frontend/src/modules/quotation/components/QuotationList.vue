@@ -6,13 +6,18 @@ import {
   FileSpreadsheet,
   FileText,
   Pencil,
+  RefreshCw,
   RotateCcw,
   Search,
   Trash2,
   UploadCloud,
   X,
 } from 'lucide-vue-next'
-import { checkFeishuFileAccess } from '../api/feishu'
+import {
+  checkFeishuFileAccess,
+  getFeishuSyncJob,
+  syncFeishuArchiveFolder,
+} from '../api/feishu'
 import {
   archiveQuotationFile,
   exportQuotationFile,
@@ -90,6 +95,7 @@ const selectedProductLine = ref('ALL')
 const selectedSource = ref('ALL')
 const createdFrom = ref('')
 const createdTo = ref('')
+const syncingFeishu = ref(false)
 const deleteConfirmId = ref<string | null>(null)
 const uploadingQuoteId = ref<string | null>(null)
 const exportProgressByQuote = ref<Record<string, QuotationExportStatus>>({})
@@ -448,6 +454,66 @@ function handleResetFilters() {
   createdTo.value = ''
 }
 
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+async function waitForFeishuSyncJob(jobId: string) {
+  const deadline = Date.now() + 10 * 60 * 1000
+  while (Date.now() < deadline) {
+    const job = await getFeishuSyncJob(jobId)
+    if (job.status === 'success') return job.result
+    if (job.status === 'failed') {
+      throw new Error(
+        job.error_message || t('quotation.pages.list.feishuSyncFailed'),
+      )
+    }
+    await wait(1000)
+  }
+  throw new Error(t('quotation.pages.list.feishuSyncTimeout'))
+}
+
+async function handleManualFeishuSync() {
+  if (syncingFeishu.value) return
+  syncingFeishu.value = true
+  try {
+    let result = await syncFeishuArchiveFolder({ source: 'user' })
+    if (result.sync_job_id && result.sync_status !== 'success') {
+      const completed = await waitForFeishuSyncJob(result.sync_job_id)
+      result = {
+        ...result,
+        ...(completed as Partial<typeof result>),
+      }
+    }
+    emit('feishuUploadDone', '')
+    const errorCount = result.errors?.length || 0
+    emit(
+      'toast',
+      t(
+        errorCount
+          ? 'quotation.pages.list.feishuSyncPartial'
+          : 'quotation.pages.list.feishuSyncComplete',
+        {
+          created: result.created_count || 0,
+          queued: result.queued_parse_count || 0,
+          errors: errorCount,
+        },
+      ),
+      errorCount ? 'info' : 'success',
+    )
+  } catch (error: unknown) {
+    emit(
+      'toast',
+      error instanceof Error
+        ? error.message
+        : t('quotation.pages.list.feishuSyncFailed'),
+      'error',
+    )
+  } finally {
+    syncingFeishu.value = false
+  }
+}
+
 const hasActiveFilters = computed(
   () =>
     searchText.value.trim() !== '' ||
@@ -610,6 +676,23 @@ function displayTotal(quote: Quotation): string {
             <div class="flex h-10 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
               {{ t('quotation.pages.list.filterResultsCount', { count: filteredQuotations.length }) }}
             </div>
+            <button
+              type="button"
+              data-feishu-sync-button
+              class="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-hidden focus:ring-2 focus:ring-blue-200 disabled:cursor-wait disabled:opacity-70"
+              :disabled="syncingFeishu"
+              @click="handleManualFeishuSync"
+            >
+              <RefreshCw
+                class="h-3.5 w-3.5"
+                :class="{ 'animate-spin': syncingFeishu }"
+              />
+              {{
+                syncingFeishu
+                  ? t('quotation.pages.list.feishuSyncing')
+                  : t('quotation.pages.list.feishuSync')
+              }}
+            </button>
             <button
               type="button"
               :class="`inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition cursor-pointer ${

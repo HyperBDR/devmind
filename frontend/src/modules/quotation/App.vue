@@ -32,7 +32,6 @@ import QuotationDetails from './components/QuotationDetails.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
-import { exportQuotationFile } from './api/exports'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from './utils/feishuLinkState'
 import {
   loadProductLineOptions,
@@ -448,7 +447,6 @@ async function handleSaveQuotation(newQuote: Quotation) {
 
     if (willGenerate) {
       saved = await generateQuotationApi(saved.id, auth.currentUser.email)
-      await exportQuotationFile(saved.id, 'xlsx')
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id
       if (auth.embeddedAuth) {
