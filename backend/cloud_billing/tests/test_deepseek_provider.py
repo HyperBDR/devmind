@@ -87,6 +87,31 @@ class TestDeepSeekCloud:
         assert result["data"]["service_costs"] == {}
         assert result["data"]["items"] == []
         assert result["data"]["account_id"] == "deepseek"
+        assert result["data"]["is_available"] is False
+
+    @patch("cloud_billing.clouds.deepseek_provider.requests.Session.get")
+    def test_get_billing_info_accepts_negative_balance(self, mock_get):
+        """Persist an overdrawn balance as valid account state."""
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = {
+            "is_available": False,
+            "balance_infos": [
+                {
+                    "currency": "CNY",
+                    "total_balance": "-12.34",
+                    "granted_balance": "0.00",
+                    "topped_up_balance": "-12.34",
+                }
+            ],
+        }
+        mock_get.return_value = response
+
+        result = self._make_provider().get_billing_info("2026-07")
+
+        assert result["status"] == "success"
+        assert result["data"]["balance"] == -12.34
+        assert result["data"]["is_available"] is False
 
     def test_account_id_is_stable_across_api_key_rotations(self):
         """Keep billing history attached when credentials are rotated."""
@@ -134,7 +159,6 @@ class TestDeepSeekCloud:
         [
             ("EUR", "10.00"),
             ("CNY", "NaN"),
-            ("USD", "-1.00"),
         ],
     )
     @patch("cloud_billing.clouds.deepseek_provider.requests.Session.get")

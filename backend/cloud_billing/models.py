@@ -84,6 +84,21 @@ class CloudProvider(models.Model):
         blank=True,
         help_text="When the latest provider balance was synced",
     )
+    last_collection_status = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Most recent billing collection result",
+    )
+    last_collection_attempt_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When billing collection was last attempted",
+    )
+    consecutive_collection_failures = models.PositiveIntegerField(
+        default=0,
+        help_text="Number of billing collection failures since last success",
+    )
     config = models.JSONField(
         help_text=(
             "Authentication and optional metadata as JSON. For alert "
@@ -169,6 +184,11 @@ class BillingData(models.Model):
         null=True,
         blank=True,
         help_text="Account cash balance at collection time",
+    )
+    is_available = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Provider-reported account availability at collection time",
     )
     hourly_cost = models.DecimalField(
         max_digits=20,

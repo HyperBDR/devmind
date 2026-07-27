@@ -11,10 +11,10 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 from typing import Dict, Optional, Tuple
 
-from celery import shared_task
-from celery import current_task
+from celery import current_task, shared_task
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import F
 from django.utils import timezone
 
 from agentcore_notifier.adapters.django.services.email_service import (
@@ -95,6 +95,24 @@ APPROVER_DISCOVERY_RETRY_BASE_SECONDS = 10
 SUBMITTER_COPY_MAX_ATTEMPTS = 3
 SUBMITTER_COPY_RETRY_BASE_SECONDS = 60
 User = get_user_model()
+
+
+def _record_collection_failure(provider: CloudProvider) -> None:
+    """Persist provider-level collection health after a failed attempt."""
+    CloudProvider.objects.filter(pk=provider.pk).update(
+        last_collection_status="failed",
+        last_collection_attempt_at=timezone.now(),
+        consecutive_collection_failures=(
+            F("consecutive_collection_failures") + 1
+        ),
+    )
+
+
+def _record_collection_success(provider: CloudProvider, attempted_at) -> None:
+    """Reset provider-level collection health after a successful attempt."""
+    provider.last_collection_status = "success"
+    provider.last_collection_attempt_at = attempted_at
+    provider.consecutive_collection_failures = 0
 
 
 def _schedule_recharge_recovery_notifications(
@@ -712,6 +730,7 @@ def collect_billing_data(
                             ),
                         }
                     )
+                    _record_collection_failure(provider)
                     continue
 
                 # get_billing_info will normalize the config internally
@@ -785,6 +804,7 @@ def collect_billing_data(
                     results["failed"].append(
                         {"provider": provider.name, "error": error_msg}
                     )
+                    _record_collection_failure(provider)
                     continue
 
                 billing_data = billing_info.get("data", {})
@@ -798,6 +818,12 @@ def collect_billing_data(
                     else None
                 )
                 balance_debug = billing_data.get("balance_debug") or {}
+                is_available = billing_data.get(
+                    "is_available",
+                    balance_debug.get("is_available"),
+                )
+                if not isinstance(is_available, bool):
+                    is_available = None
                 currency = billing_data.get("currency", "USD")
                 service_costs = billing_data.get("service_costs", {})
                 account_id = billing_data.get("account_id", "")
@@ -882,6 +908,7 @@ def collect_billing_data(
                             defaults={
                                 "total_cost": total_cost,
                                 "balance": balance,
+                                "is_available": is_available,
                                 "hourly_cost": hourly_cost,
                                 "currency": currency,
                                 "service_costs": service_costs,
@@ -894,6 +921,7 @@ def collect_billing_data(
                         billing_record.total_cost = total_cost
                         if balance is not None:
                             billing_record.balance = balance
+                        billing_record.is_available = is_available
                         billing_record.hourly_cost = hourly_cost
                         billing_record.currency = currency
                         billing_record.service_costs = service_costs
@@ -910,6 +938,7 @@ def collect_billing_data(
                             update_fields=[
                                 "total_cost",
                                 "balance",
+                                "is_available",
                                 "hourly_cost",
                                 "currency",
                                 "service_costs",
@@ -948,13 +977,17 @@ def collect_billing_data(
                         provider.balance = balance
                         provider.balance_currency = str(currency or "").upper()
                         provider.balance_updated_at = timezone.now()
-                        provider.save(
-                            update_fields=[
-                                "balance",
-                                "balance_currency",
-                                "balance_updated_at",
-                            ]
-                        )
+                    _record_collection_success(provider, timezone.now())
+                    provider.save(
+                        update_fields=[
+                            "balance",
+                            "balance_currency",
+                            "balance_updated_at",
+                            "last_collection_status",
+                            "last_collection_attempt_at",
+                            "consecutive_collection_failures",
+                        ]
+                    )
 
                 if fallback_balance is not None:
                     log_collector.info(
@@ -989,6 +1022,7 @@ def collect_billing_data(
                 results["failed"].append(
                     {"provider": provider.name, "error": str(e)}
                 )
+                _record_collection_failure(provider)
 
         results["total"] = len(results["success"]) + len(results["failed"])
         task_status = TaskStatus.SUCCESS

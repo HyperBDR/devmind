@@ -71,7 +71,7 @@ class DeepSeekCloud(BaseCloudProvider):
             raise ValueError(
                 "DeepSeek API returned an invalid balance value."
             ) from exc
-        if not parsed.is_finite() or parsed < 0 or parsed >= MAX_BALANCE:
+        if not parsed.is_finite() or abs(parsed) >= MAX_BALANCE:
             raise ValueError("DeepSeek API returned an invalid balance value.")
         return parsed
 
@@ -166,6 +166,7 @@ class DeepSeekCloud(BaseCloudProvider):
                 "data": {
                     "total_cost": 0.0,
                     "balance": balance,
+                    "is_available": debug["is_available"],
                     "balance_debug": debug,
                     "currency": currency or DEFAULT_CURRENCY,
                     "account_id": self.get_account_id(),

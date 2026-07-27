@@ -843,6 +843,84 @@ class TestCollectBillingData:
 
     @patch("cloud_billing.tasks.check_alert_for_provider.delay")
     @patch("cloud_billing.tasks.ProviderService")
+    def test_sync_persists_availability_and_collection_health(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        """Store provider availability and reset collection failures."""
+        cloud_provider.provider_type = "deepseek"
+        cloud_provider.consecutive_collection_failures = 2
+        cloud_provider.save(
+            update_fields=[
+                "provider_type",
+                "consecutive_collection_failures",
+            ]
+        )
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "success",
+            "data": {
+                "total_cost": 0,
+                "balance": -12.34,
+                "is_available": False,
+                "currency": "CNY",
+                "account_id": "deepseek",
+                "service_costs": {},
+            },
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(
+            provider_id=cloud_provider.id,
+            user_id=1,
+        )
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="deepseek",
+        )
+        assert record.balance == Decimal("-12.34")
+        assert record.is_available is False
+        cloud_provider.refresh_from_db()
+        assert cloud_provider.balance == Decimal("-12.34")
+        assert cloud_provider.last_collection_status == "success"
+        assert cloud_provider.last_collection_attempt_at is not None
+        assert cloud_provider.consecutive_collection_failures == 0
+        mock_check_alert_delay.assert_called_once_with(
+            cloud_provider.id,
+            cloud_provider.provider_type,
+        )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    def test_failed_sync_tracks_consecutive_failures(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        """Expose repeated collection failures to dashboard consumers."""
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "error",
+            "error": "upstream unavailable",
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+        collect_billing_data(provider_id=cloud_provider.id, user_id=1)
+
+        cloud_provider.refresh_from_db()
+        assert cloud_provider.last_collection_status == "failed"
+        assert cloud_provider.last_collection_attempt_at is not None
+        assert cloud_provider.consecutive_collection_failures == 2
+        mock_check_alert_delay.assert_not_called()
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
     def test_sync_preserves_previous_balance_when_current_balance_missing(
         self,
         mock_provider_service_class,
