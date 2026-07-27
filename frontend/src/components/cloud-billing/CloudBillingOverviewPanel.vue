@@ -336,6 +336,42 @@
                   {{ t('cloudBilling.billing.overviewQuotaTrendHint') }}
                 </p>
               </div>
+              <div
+                v-if="quotaTrendAttentionAccounts.length"
+                role="status"
+                class="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5"
+              >
+                <div class="text-[11px] font-semibold text-amber-900">
+                  {{ t('cloudBilling.billing.overviewDataAttention') }}
+                </div>
+                <div class="mt-2 flex flex-wrap gap-2">
+                  <div
+                    v-for="account in quotaTrendAttentionAccounts"
+                    :key="`attention-${account.id}`"
+                    class="rounded-md border border-amber-200 bg-white px-2.5 py-1.5 text-[11px] text-amber-900"
+                  >
+                    <span class="font-semibold">
+                      {{ localizedAccountName(account) }} ·
+                      {{ accountAttentionLabel(account) }}
+                    </span>
+                    <span
+                      v-if="account.last_successful_collection_at"
+                      class="ml-1 text-amber-700"
+                    >
+                      {{
+                        t(
+                          'cloudBilling.billing.overviewLastSuccessfulCollection',
+                          {
+                            time: formatTime(
+                              account.last_successful_collection_at
+                            )
+                          }
+                        )
+                      }}
+                    </span>
+                  </div>
+                </div>
+              </div>
               <div class="h-[320px] flex-1">
                 <Line
                   v-if="quotaTrendChartData"
@@ -980,6 +1016,29 @@
                         >
                           {{ account.notes }}
                         </div>
+                        <div
+                          v-if="isCloudBillingAccountCritical(account)"
+                          class="mt-1 text-[11px] font-medium"
+                          :class="accountAttentionTextClass(account)"
+                        >
+                          {{ accountAttentionLabel(account) }}
+                          <span
+                            v-if="account.last_successful_collection_at"
+                            class="font-normal text-zinc-500"
+                          >
+                            ·
+                            {{
+                              t(
+                                'cloudBilling.billing.overviewLastSuccessfulCollection',
+                                {
+                                  time: formatTime(
+                                    account.last_successful_collection_at
+                                  )
+                                }
+                              )
+                            }}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -1583,6 +1642,11 @@ import {
   cloudBillingOverviewSummary
 } from '@/mock/cloudBillingOverview'
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
+import {
+  compareCloudBillingAccounts,
+  isCloudBillingAccountCritical,
+  selectCloudBillingTrendAccounts
+} from '@/utils/cloudBillingOverviewRisk'
 import { getLocalizedProviderDisplayName } from '@/utils/providerDisplay'
 import { useToast } from '@/composables/useToast'
 
@@ -1759,6 +1823,13 @@ function createFallbackOverview() {
       percentage: item.percentage,
       change: item.change,
       risk: item.risk,
+      is_available: item.isAvailable ?? null,
+      collection_status: item.collectionStatus || '',
+      consecutive_collection_failures: item.consecutiveCollectionFailures || 0,
+      is_data_stale: Boolean(item.isDataStale),
+      stale_reason: item.staleReason || '',
+      last_successful_collection_at: item.lastSuccessfulCollectionAt || '',
+      last_collection_attempt_at: item.lastCollectionAttemptAt || '',
       balance: item.balance,
       balance_currency: item.balanceCurrency || '',
       credit_limit: item.creditLimit || null,
@@ -2069,9 +2140,16 @@ const trendChartOptions = computed(() => ({
 }))
 
 const quotaTrendAccounts = computed(() =>
-  [...(overview.value.accounts || [])]
-    .sort(compareAccountsByAvailability)
-    .slice(0, 5)
+  selectCloudBillingTrendAccounts(
+    overview.value.accounts || [],
+    5,
+    normalizedBalanceForSort,
+    normalizedCostForSort
+  )
+)
+
+const quotaTrendAttentionAccounts = computed(() =>
+  quotaTrendAccounts.value.filter(isCloudBillingAccountCritical)
 )
 
 const quotaTrendLabels = computed(() => {
@@ -2640,6 +2718,14 @@ function normalizedBalanceForSort(account) {
   )
 }
 
+function normalizedCostForSort(account) {
+  return convertCurrencyValue(
+    Number(account?.cost || 0),
+    account?.cost_currency || 'CNY',
+    'CNY'
+  )
+}
+
 function providerLevelAccountKey(account) {
   const providerId = String(account?.provider_id || '').trim()
   if (providerId) {
@@ -2657,26 +2743,37 @@ function providerLevelAccountKey(account) {
 }
 
 function compareAccountsByAvailability(a, b) {
-  const aHasReference = hasDaysRemainingReference(a)
-  const bHasReference = hasDaysRemainingReference(b)
+  return compareCloudBillingAccounts(
+    a,
+    b,
+    normalizedBalanceForSort,
+    normalizedCostForSort
+  )
+}
 
-  if (aHasReference && bHasReference) {
-    return (
-      a.days_remaining - b.days_remaining ||
-      convertCurrencyValue(b.cost, b.cost_currency || 'CNY', 'CNY') -
-        convertCurrencyValue(a.cost, a.cost_currency || 'CNY', 'CNY')
-    )
+function accountAttentionLabel(account) {
+  if (account?.is_available === false) {
+    return t('cloudBilling.billing.overviewAccountUnavailable')
   }
-
-  if (!aHasReference && !bHasReference) {
-    return (
-      normalizedBalanceForSort(a) - normalizedBalanceForSort(b) ||
-      convertCurrencyValue(b.cost, b.cost_currency || 'CNY', 'CNY') -
-        convertCurrencyValue(a.cost, a.cost_currency || 'CNY', 'CNY')
-    )
+  if (
+    account?.type === 'prepaid' &&
+    account?.balance != null &&
+    Number(account.balance) <= 0
+  ) {
+    return t('cloudBilling.billing.overviewAccountOverdrawn')
   }
+  if (account?.stale_reason === 'collection_failed') {
+    return t('cloudBilling.billing.overviewCollectionFailed')
+  }
+  if (account?.is_data_stale) {
+    return t('cloudBilling.billing.overviewDataExpired')
+  }
+  return t('cloudBilling.billing.overviewRiskHigh')
+}
 
-  return aHasReference ? -1 : 1
+function accountAttentionTextClass(account) {
+  if (account?.is_data_stale) return 'text-amber-700'
+  return 'text-rose-700'
 }
 
 function recommendationStatus(account, detail) {
