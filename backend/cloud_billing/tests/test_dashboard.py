@@ -331,6 +331,217 @@ class PaymentTypeTests(SimpleTestCase):
 
 class AccountFundsTests(SimpleTestCase):
     @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_unavailable_negative_balance_is_high_risk_without_reference(
+        self,
+        mock_balance_support,
+    ):
+        """Treat known account debt as high risk without a forecast."""
+        mock_balance_support.return_value = {'supported': True}
+        now = datetime(2026, 7, 27, 2, 30, tzinfo=dt_timezone.utc)
+        provider = SimpleNamespace(
+            id=26,
+            provider_type='deepseek',
+            display_name='DeepSeek',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('-12.34'),
+            balance_currency='CNY',
+            last_collection_status='success',
+            last_collection_attempt_at=now,
+            consecutive_collection_failures=0,
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='deepseek',
+                total_cost=Decimal('0.00'),
+                balance=Decimal('-12.34'),
+                is_available=False,
+                currency='CNY',
+                service_costs={},
+                collected_at=now,
+            )
+        ]
+
+        accounts = _build_accounts(
+            latest_billings,
+            [],
+            recent_rows=[],
+            local_tz=dt_timezone.utc,
+            now=now,
+        )
+
+        account = accounts[0]
+        self.assertEqual(account['balance'], -12.34)
+        self.assertEqual(account['balance_currency'], 'CNY')
+        self.assertIs(account['is_available'], False)
+        self.assertEqual(account['risk'], 'high')
+        self.assertIsNone(account['days_remaining'])
+        self.assertFalse(account['has_days_remaining_reference'])
+        self.assertFalse(account['is_data_stale'])
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_repeated_collection_failure_marks_account_data_stale(
+        self,
+        mock_balance_support,
+    ):
+        """Expose failed collection health and the last successful update."""
+        mock_balance_support.return_value = {'supported': True}
+        now = datetime(2026, 7, 27, 2, 30, tzinfo=dt_timezone.utc)
+        last_success = datetime(
+            2026,
+            7,
+            27,
+            2,
+            25,
+            tzinfo=dt_timezone.utc,
+        )
+        provider = SimpleNamespace(
+            id=26,
+            provider_type='deepseek',
+            display_name='DeepSeek',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('0.61'),
+            balance_currency='CNY',
+            last_collection_status='failed',
+            last_collection_attempt_at=now,
+            consecutive_collection_failures=2,
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='deepseek',
+                total_cost=Decimal('0.00'),
+                balance=Decimal('0.61'),
+                is_available=True,
+                currency='CNY',
+                service_costs={},
+                collected_at=last_success,
+            )
+        ]
+
+        account = _build_accounts(
+            latest_billings,
+            [],
+            recent_rows=[],
+            local_tz=dt_timezone.utc,
+            now=now,
+        )[0]
+
+        self.assertEqual(account['collection_status'], 'failed')
+        self.assertEqual(account['consecutive_collection_failures'], 2)
+        self.assertTrue(account['is_data_stale'])
+        self.assertEqual(account['stale_reason'], 'collection_failed')
+        self.assertEqual(
+            account['last_successful_collection_at'],
+            last_success.isoformat(),
+        )
+        self.assertEqual(account['risk'], 'high')
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
+    def test_expired_successful_snapshot_is_marked_stale(
+        self,
+        mock_balance_support,
+    ):
+        """Mark an old successful snapshot stale after the freshness window."""
+        mock_balance_support.return_value = {'supported': True}
+        now = datetime(2026, 7, 27, 2, 30, tzinfo=dt_timezone.utc)
+        last_success = datetime(
+            2026,
+            7,
+            27,
+            1,
+            59,
+            tzinfo=dt_timezone.utc,
+        )
+        provider = SimpleNamespace(
+            id=26,
+            provider_type='deepseek',
+            display_name='DeepSeek',
+            tags=[],
+            notes='',
+            config={},
+            balance=Decimal('10.00'),
+            balance_currency='CNY',
+            last_collection_status='success',
+            last_collection_attempt_at=last_success,
+            consecutive_collection_failures=0,
+        )
+        latest_billings = [
+            SimpleNamespace(
+                provider=provider,
+                account_id='deepseek',
+                total_cost=Decimal('0.00'),
+                balance=Decimal('10.00'),
+                is_available=True,
+                currency='CNY',
+                service_costs={},
+                collected_at=last_success,
+            )
+        ]
+
+        account = _build_accounts(
+            latest_billings,
+            [],
+            recent_rows=[],
+            local_tz=dt_timezone.utc,
+            now=now,
+        )[0]
+
+        self.assertTrue(account['is_data_stale'])
+        self.assertEqual(account['stale_reason'], 'data_expired')
+        self.assertEqual(account['risk'], 'high')
+
+    def test_financial_health_prioritizes_high_risk_without_reference(self):
+        """Keep known critical accounts in risk summaries without 7 days."""
+        accounts = [
+            {
+                'provider_id': 26,
+                'id': '26-deepseek',
+                'type': 'prepaid',
+                'balance': Decimal('-12.34'),
+                'days_remaining': None,
+                'has_days_remaining_reference': False,
+                'risk': 'high',
+                'is_data_stale': False,
+                'is_available': False,
+                'name': 'DeepSeek',
+                'category': 'LLM',
+                'account_id': 'deepseek',
+                'notes': '',
+                'tags': [],
+            },
+            {
+                'provider_id': 2,
+                'id': '2-cloud',
+                'type': 'prepaid',
+                'balance': Decimal('200.00'),
+                'days_remaining': 20,
+                'has_days_remaining_reference': True,
+                'risk': 'medium',
+                'is_data_stale': False,
+                'is_available': True,
+                'name': 'Cloud',
+                'category': 'Cloud',
+                'account_id': 'cloud',
+                'notes': '',
+                'tags': [],
+            },
+        ]
+
+        health = _build_financial_health(accounts)
+
+        self.assertEqual(health['bottleneck'], 'DeepSeek')
+        self.assertEqual(health['recharge_alerts'][0]['risk'], 'high')
+        self.assertIs(
+            health['recharge_alerts'][0]['is_available'],
+            False,
+        )
+
+    @patch('cloud_billing.dashboard.get_balance_support_info')
     def test_huawei_intl_postpaid_uses_credit_limit_instead_of_balance(self, mock_balance_support):
         mock_balance_support.return_value = {'supported': True}
 

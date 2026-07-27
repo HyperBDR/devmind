@@ -33,6 +33,8 @@ EXCHANGE_RATE_CACHE_PREFIX = 'cloud_billing:exchange_rate'
 EXCHANGE_RATE_CACHE_TTL = 60 * 60 * 24
 RECENT_BURN_WINDOW_DAYS = 30
 MIN_DAYS_REMAINING_REFERENCE_DAYS = 7
+DEFAULT_DATA_FRESHNESS_MINUTES = 30
+DATA_FRESHNESS_FAILURE_THRESHOLD = 2
 PROVIDER_PAYMENT_TYPES = {
     'aws': 'postpaid',
     'azure': 'postpaid',
@@ -107,11 +109,12 @@ def _normalize_account_funds(provider, billing, payment_type: str) -> dict[str, 
         or getattr(billing, 'currency', '')
         or 'USD'
     ).upper()
-    raw_balance = _to_float(getattr(provider, 'balance', None))
+    raw_balance_value = getattr(provider, 'balance', None)
+    raw_balance = _to_float(raw_balance_value)
     configured_credit_limit = _credit_limit_for_provider(provider)
 
     balance = raw_balance
-    balance_currency = account_currency if raw_balance > 0 else ''
+    balance_currency = account_currency if raw_balance_value is not None else ''
     credit_limit = configured_credit_limit
     credit_limit_currency = account_currency if configured_credit_limit else ''
     uses_credit_limit_days = False
@@ -533,10 +536,35 @@ def _risk_for_days(days_remaining: int | None) -> str:
 
 
 def _account_sort_key(account: dict[str, object]):
+    is_unavailable = account.get('is_available') is False
+    is_overdrawn = (
+        account.get('type') == 'prepaid'
+        and account.get('balance') is not None
+        and _to_float(account.get('balance')) <= 0
+    )
+    if is_unavailable or is_overdrawn:
+        return (
+            0,
+            _to_float(account.get('balance')),
+            -_to_float(account.get('cost')),
+        )
+    if account.get('is_data_stale'):
+        return (
+            1,
+            _to_float(account.get('balance')),
+            -_to_float(account.get('cost')),
+        )
+    if account.get('risk') == 'high':
+        return (
+            2,
+            int(account.get('days_remaining') or 0),
+            -_to_float(account.get('cost')),
+        )
+
     has_reference = bool(account.get('has_days_remaining_reference'))
     if has_reference:
         return (
-            0,
+            3,
             int(account.get('days_remaining') or 0),
             -_to_float(account.get('cost')),
         )
@@ -548,10 +576,60 @@ def _account_sort_key(account: dict[str, object]):
         else _to_float(account.get('display_funds'))
     )
     return (
-        1,
+        4,
         fallback_balance,
         -_to_float(account.get('cost')),
     )
+
+
+def _data_freshness_minutes() -> int:
+    raw_value = os.getenv(
+        'CLOUD_BILLING_DATA_FRESHNESS_MINUTES',
+        str(DEFAULT_DATA_FRESHNESS_MINUTES),
+    )
+    try:
+        return max(int(raw_value), 1)
+    except (TypeError, ValueError):
+        return DEFAULT_DATA_FRESHNESS_MINUTES
+
+
+def _collection_health(billing, provider, now) -> dict[str, object]:
+    last_success = getattr(billing, 'collected_at', None)
+    last_attempt = getattr(provider, 'last_collection_attempt_at', None)
+    status = str(
+        getattr(provider, 'last_collection_status', '') or 'success'
+    )
+    failures = int(
+        getattr(provider, 'consecutive_collection_failures', 0) or 0
+    )
+    repeated_failure = (
+        status == 'failed'
+        and failures >= DATA_FRESHNESS_FAILURE_THRESHOLD
+    )
+    expired = False
+    if last_success is not None:
+        expired = now - last_success > timedelta(
+            minutes=_data_freshness_minutes(),
+        )
+
+    stale_reason = ''
+    if repeated_failure:
+        stale_reason = 'collection_failed'
+    elif expired:
+        stale_reason = 'data_expired'
+
+    return {
+        'collection_status': status,
+        'consecutive_collection_failures': failures,
+        'is_data_stale': bool(stale_reason),
+        'stale_reason': stale_reason,
+        'last_successful_collection_at': (
+            last_success.isoformat() if last_success else ''
+        ),
+        'last_collection_attempt_at': (
+            last_attempt.isoformat() if last_attempt else ''
+        ),
+    }
 
 
 def _build_account_detail(
@@ -894,6 +972,8 @@ def _build_accounts(
             balance_info['supported'],
         )
         funds = _normalize_account_funds(provider, billing, payment_type)
+        collection_health = _collection_health(billing, provider, now)
+        is_available = getattr(billing, 'is_available', None)
         display_funds = float(funds['display_funds'])
         if not has_days_remaining_reference:
             days_remaining = None
@@ -906,6 +986,20 @@ def _build_accounts(
         else:
             days_remaining = 120
 
+        has_known_funds_risk = (
+            is_available is False
+            or (
+                payment_type == 'prepaid'
+                and getattr(billing, 'balance', None) is not None
+                and float(funds['balance']) <= 0
+            )
+        )
+        risk = (
+            'high'
+            if has_known_funds_risk or collection_health['is_data_stale']
+            else _risk_for_days(days_remaining)
+        )
+
         account_trend = []
         for index in range(10):
             date_key = (now - timedelta(days=9 - index)).strftime('%m-%d')
@@ -914,7 +1008,10 @@ def _build_accounts(
                     'date': date_key,
                     # Back-cast from today's available funds:
                     # older points should be higher when daily burn is positive.
-                    'value': round(max(display_funds + daily_burn * (9 - index), 0), 2),
+                    'value': round(
+                        display_funds + daily_burn * (9 - index),
+                        2,
+                    ),
                 }
             )
 
@@ -940,7 +1037,8 @@ def _build_accounts(
                 'cost_currency': str(getattr(billing, 'currency', '') or 'CNY').upper(),
                 'percentage': round(_to_float(billing.total_cost) / total_cost * 100, 1),
                 'change': round(daily_burn, 1),
-                'risk': _risk_for_days(days_remaining),
+                'risk': risk,
+                'is_available': is_available,
                 'balance': funds['balance'],
                 'balance_currency': funds['balance_currency'],
                 'credit_limit': funds['credit_limit'],
@@ -950,6 +1048,7 @@ def _build_accounts(
                 'days_remaining': days_remaining,
                 'recent_collected_days': recent_collected_days,
                 'has_days_remaining_reference': has_days_remaining_reference,
+                **collection_health,
                 'type': payment_type,
                 'usage_rate': None,
                 'account_id': billing.account_id or '',
@@ -1009,18 +1108,25 @@ def _build_financial_health(accounts):
         item for item in health_accounts
         if item.get('has_days_remaining_reference')
     ]
+    critical_accounts = [
+        item for item in health_accounts
+        if item.get('risk') == 'high'
+    ]
     total_days = min(
         (item['days_remaining'] for item in referenced_accounts),
         default=None,
     )
-    bottleneck = next(
-        (
-            item['name']
-            for item in referenced_accounts
-            if item['days_remaining'] == total_days
-        ),
-        '',
-    )
+    if critical_accounts:
+        bottleneck = critical_accounts[0]['name']
+    else:
+        bottleneck = next(
+            (
+                item['name']
+                for item in referenced_accounts
+                if item['days_remaining'] == total_days
+            ),
+            '',
+        )
     recharge_alerts = [
         {
             'provider_id': item.get('provider_id'),
@@ -1052,6 +1158,15 @@ def _build_financial_health(accounts):
             'has_days_remaining_reference': item.get(
                 'has_days_remaining_reference',
                 False,
+            ),
+            'risk': item.get('risk', 'unknown'),
+            'is_available': item.get('is_available'),
+            'is_data_stale': item.get('is_data_stale', False),
+            'stale_reason': item.get('stale_reason', ''),
+            'collection_status': item.get('collection_status', ''),
+            'last_successful_collection_at': item.get(
+                'last_successful_collection_at',
+                '',
             ),
         }
         for item in health_accounts
