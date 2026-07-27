@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  cloudBillingAccountAttentionReasons,
   compareCloudBillingAccounts,
   hasCloudBillingBalance,
   isCloudBillingAccountCritical,
@@ -10,6 +11,23 @@ import {
 
 const byValue = (account) => Number(account?.balance || 0)
 const byCost = (account) => Number(account?.cost || 0)
+
+test('collection failure remains visible beside debt and availability', () => {
+  const reasons = cloudBillingAccountAttentionReasons({
+    type: 'prepaid',
+    balance: -12.34,
+    is_available: false,
+    is_data_stale: true,
+    stale_reason: 'collection_failed',
+    risk: 'high'
+  })
+
+  assert.deepEqual(reasons, [
+    'collection_failed',
+    'account_unavailable',
+    'account_overdrawn'
+  ])
+})
 
 test('prepaid debt remains visible in account details and exports', () => {
   assert.equal(

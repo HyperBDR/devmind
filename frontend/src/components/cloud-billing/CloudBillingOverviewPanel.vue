@@ -1643,6 +1643,7 @@ import {
 } from '@/mock/cloudBillingOverview'
 import { extractErrorMessage, extractResponseData } from '@/utils/api'
 import {
+  cloudBillingAccountAttentionReasons,
   compareCloudBillingAccounts,
   hasCloudBillingBalance,
   isCloudBillingAccountCritical,
@@ -2753,23 +2754,16 @@ function compareAccountsByAvailability(a, b) {
 }
 
 function accountAttentionLabel(account) {
-  if (account?.is_available === false) {
-    return t('cloudBilling.billing.overviewAccountUnavailable')
+  const translationKeys = {
+    account_overdrawn: 'cloudBilling.billing.overviewAccountOverdrawn',
+    account_unavailable: 'cloudBilling.billing.overviewAccountUnavailable',
+    collection_failed: 'cloudBilling.billing.overviewCollectionFailed',
+    data_expired: 'cloudBilling.billing.overviewDataExpired',
+    high_risk: 'cloudBilling.billing.overviewRiskHigh'
   }
-  if (
-    account?.type === 'prepaid' &&
-    account?.balance != null &&
-    Number(account.balance) <= 0
-  ) {
-    return t('cloudBilling.billing.overviewAccountOverdrawn')
-  }
-  if (account?.stale_reason === 'collection_failed') {
-    return t('cloudBilling.billing.overviewCollectionFailed')
-  }
-  if (account?.is_data_stale) {
-    return t('cloudBilling.billing.overviewDataExpired')
-  }
-  return t('cloudBilling.billing.overviewRiskHigh')
+  return cloudBillingAccountAttentionReasons(account)
+    .map((reason) => t(translationKeys[reason]))
+    .join(' · ')
 }
 
 function accountAttentionTextClass(account) {
