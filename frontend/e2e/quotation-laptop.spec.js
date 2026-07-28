@@ -123,50 +123,6 @@ async function mockAuditEvents(page) {
   })
 }
 
-async function mockSecurityAlerts(page) {
-  await page.route('**/api/v1/quotation/security-alerts**', async (route) => {
-    await route.fulfill({
-      json: {
-        items: [
-          {
-            id: 42,
-            alert_number: 'SA-2026-00042',
-            rule: 'unusual_bulk_downloads',
-            severity: 'high',
-            status: 'open',
-            subject_email: 'quotation_user@example.com',
-            subject_name: 'quotation_user',
-            source_ip: '198.51.100.24',
-            device: 'Chrome 138 · macOS',
-            trigger_count: 26,
-            evidence_count: 26,
-            first_detected_at: '2026-07-20T13:48:06Z',
-            last_detected_at: '2026-07-20T13:56:06Z',
-            acknowledged_at: null,
-            resolved_at: null,
-            resolution: '',
-            resolution_note: '',
-            notify_affected_user: false,
-            evidence: [],
-          },
-        ],
-        summary: {
-          open: 1,
-          critical: 0,
-          high: 1,
-          new_last_24_hours: 1,
-          immediate_review: 1,
-          affected_users_last_24_hours: 1,
-        },
-        total: 1,
-        page: 1,
-        page_size: 20,
-        can_manage: true,
-      },
-    })
-  })
-}
-
 const pages = [
   { path: '/quotation/dashboard', selector: '#dashboard-root', name: 'dashboard' },
   { path: '/quotation/list', selector: '#quote-list-root', name: 'list' },
@@ -187,7 +143,6 @@ for (const viewport of [
       await login(page)
       await setLanguage(page, language)
       await mockAuditEvents(page)
-      await mockSecurityAlerts(page)
       await collapseSidebar(page)
 
       for (const target of pages) {
@@ -205,29 +160,6 @@ for (const viewport of [
           fullPage: false,
         })
 
-        if (target.name === 'audit') {
-          await page
-            .getByRole('button', { name: /Security Alerts|安全告警/ })
-            .click()
-          await expect(page.getByText(/Open alerts|待处理告警/)).toBeVisible()
-          const securityAudit = await auditLaptopLayout(page)
-          expect(
-            securityAudit.pageOverflow,
-            'security alerts has page overflow',
-          ).toBe(false)
-          expect(
-            securityAudit.clippedControls,
-            'security alerts has clipped text',
-          ).toEqual([])
-          expect(
-            securityAudit.offscreenControls,
-            'security alerts has offscreen controls',
-          ).toEqual([])
-          await page.screenshot({
-            path: `${screenshotRoot}/${language}-${viewport.width}-collapsed-security.png`,
-            fullPage: false,
-          })
-        }
       }
 
       await page.goto('/quotation/audit', { waitUntil: 'domcontentloaded' })

@@ -19,7 +19,6 @@ import {
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import FormSelect from './FormSelect.vue'
-import SecurityAlertsPanel from './SecurityAlertsPanel.vue'
 
 const { locale, t } = useQuotationI18n()
 const events = ref<AuditEvent[]>([])
@@ -30,13 +29,10 @@ const loading = ref(false)
 const exporting = ref(false)
 const canExport = ref(false)
 const selected = ref<AuditEvent | null>(null)
-const activeTab = ref<'activity' | 'security'>('activity')
-const securityAlertCount = ref(0)
 const search = ref('')
 const moduleFilter = ref('')
 const actionFilter = ref('')
 const resultFilter = ref('')
-const riskFilter = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -76,14 +72,6 @@ const resultFilterOptions = computed(() => [
   { value: 'denied', label: t('quotation.pages.audit.denied') },
   { value: 'failed', label: t('quotation.pages.audit.failed') },
 ])
-const riskFilterOptions = computed(() => [
-  { value: '', label: t('quotation.pages.audit.allRiskLevels') },
-  ...['critical', 'high', 'medium', 'low'].map((value) => ({
-    value,
-    label: t(`quotation.pages.audit.riskLevels.${value}`),
-  })),
-])
-
 async function loadEvents() {
   loading.value = true
   try {
@@ -92,7 +80,6 @@ async function loadEvents() {
       module: moduleFilter.value,
       action: actionFilter.value,
       result: resultFilter.value,
-      riskLevel: riskFilter.value,
       dateFrom: dateFrom.value,
       dateTo: dateTo.value,
       page: page.value,
@@ -111,7 +98,6 @@ function resetFilters() {
   moduleFilter.value = ''
   actionFilter.value = ''
   resultFilter.value = ''
-  riskFilter.value = ''
   dateFrom.value = ''
   dateTo.value = ''
   page.value = 1
@@ -127,7 +113,6 @@ async function exportEvents() {
       module: moduleFilter.value,
       action: actionFilter.value,
       result: resultFilter.value,
-      riskLevel: riskFilter.value,
       dateFrom: dateFrom.value,
       dateTo: dateTo.value,
     })
@@ -177,7 +162,6 @@ const targetFallbackByType: Record<string, string> = {
   storage_connection: 'storageConnection',
   storage_mount: 'storageMount',
   document_replica: 'documentReplica',
-  security_alert: 'securityAlert',
 }
 
 function targetLabel(event: AuditEvent) {
@@ -214,8 +198,18 @@ function moduleLabel(value: string) {
   )
 }
 
-function actionLabel(value: string, module = '') {
+function actionLabel(value: string, module = '', eventName = '') {
   const moduleKey = normalizedModule(module)
+  if (value === 'sync' && moduleKey === 'feishu') {
+    const syncActions: Record<string, string> = {
+      'storage.archive_sync_requested': 'feishuSyncStarted',
+      'storage.archive_sync_succeeded': 'feishuSyncCompleted',
+      'storage.archive_sync_partially_succeeded': 'feishuSyncCompletedWithErrors',
+      'storage.archive_sync_failed': 'feishuSyncFailed',
+    }
+    const key = syncActions[eventName]
+    if (key) return t(`quotation.pages.audit.actions.${key}`)
+  }
   if (value === 'view' && moduleKey === 'audit') {
     return t('quotation.pages.audit.actions.viewedAuditLog')
   }
@@ -251,7 +245,58 @@ function targetTypeLabel(event: AuditEvent) {
   )
 }
 
-watch([moduleFilter, actionFilter, resultFilter, riskFilter, dateFrom, dateTo], () => {
+const fieldLabelKeys: Record<string, string> = {
+  billing_company: 'billingCompany',
+  billing_contact: 'billingContact',
+  billing_email: 'billingEmail',
+  client_company: 'clientCompany',
+  contact_person: 'contactPerson',
+  currency: 'currency',
+  email: 'email',
+  expire_date: 'expireDate',
+  issuer_company_name: 'issuerCompanyName',
+  issuer_contact_email: 'issuerContactEmail',
+  issuer_contact_name: 'issuerContactName',
+  issuer_contact_title: 'issuerContactTitle',
+  issuer_signature: 'issuerSignature',
+  items: 'items',
+  payment_term_option: 'paymentTermOption',
+  payment_terms: 'paymentTerms',
+  product_line: 'productLine',
+  project_name: 'projectName',
+  quote_date: 'quoteDate',
+  quote_no: 'quoteNo',
+  remarks_disclaimer: 'remarks',
+  status: 'status',
+  tax_label: 'taxLabel',
+  vat_rate: 'vatRate',
+}
+
+function fieldLabel(value: string) {
+  const key = fieldLabelKeys[value]
+  return key
+    ? t(`quotation.pages.audit.fields.${key}`)
+    : fallbackLabel(value)
+}
+
+function syncFolderNames(event: AuditEvent): string[] {
+  return Array.isArray(event.metadata.folder_names)
+    ? event.metadata.folder_names.filter(Boolean)
+    : []
+}
+
+function syncMetric(event: AuditEvent, key: keyof AuditEvent['metadata']) {
+  const value = event.metadata[key]
+  return typeof value === 'number' ? value : 0
+}
+
+function hasSyncMetrics(event: AuditEvent) {
+  return event.module === 'feishu'
+    && event.action === 'sync'
+    && event.metadata.folder_count !== undefined
+}
+
+watch([moduleFilter, actionFilter, resultFilter, dateFrom, dateTo], () => {
   page.value = 1
   void loadEvents()
 })
@@ -291,29 +336,7 @@ onMounted(() => void loadEvents())
       </div>
     </div>
 
-    <div class="flex gap-7 border-b border-dm-border-light">
-      <button
-        type="button"
-        :class="activeTab === 'activity' ? 'border-dm-primary text-dm-text' : 'border-transparent text-dm-text-secondary'"
-        class="border-b-2 px-0.5 pb-3 text-sm font-semibold"
-        @click="activeTab = 'activity'"
-      >
-        {{ t('quotation.pages.audit.activityLog') }}
-      </button>
-      <button
-        type="button"
-        :class="activeTab === 'security' ? 'border-dm-primary text-dm-text' : 'border-transparent text-dm-text-secondary'"
-        class="inline-flex items-center gap-2 border-b-2 px-0.5 pb-3 text-sm font-semibold"
-        @click="activeTab = 'security'"
-      >
-        {{ t('quotation.pages.audit.securityAlerts') }}
-        <span v-if="securityAlertCount" class="inline-flex min-w-5 items-center justify-center rounded-full bg-red-100 px-1.5 py-0.5 text-xs text-red-600">
-          {{ securityAlertCount }}
-        </span>
-      </button>
-    </div>
-
-    <div v-if="activeTab === 'activity'" class="grid gap-3 rounded-xl border border-dm-border bg-white p-4 shadow-sm lg:grid-cols-3 min-[1360px]:grid-cols-[minmax(220px,1.4fr)_repeat(4,minmax(130px,.7fr))_minmax(230px,1fr)_auto]">
+    <div class="grid gap-3 rounded-xl border border-dm-border bg-white p-4 shadow-sm lg:grid-cols-3 min-[1360px]:grid-cols-[minmax(220px,1.4fr)_repeat(3,minmax(130px,.7fr))_minmax(230px,1fr)_auto]">
       <label class="relative">
         <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dm-text-tertiary" />
         <input
@@ -341,12 +364,6 @@ onMounted(() => void loadEvents())
         :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
         :options="resultFilterOptions"
       />
-      <FormSelect
-        v-model="riskFilter"
-        class-name="w-full"
-        :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
-        :options="riskFilterOptions"
-      />
       <div class="grid grid-cols-2 gap-2">
         <BaseDatePicker
           v-model="dateFrom"
@@ -365,7 +382,7 @@ onMounted(() => void loadEvents())
       </button>
     </div>
 
-    <div v-if="activeTab === 'activity'" class="overflow-hidden rounded-xl border border-dm-border bg-white shadow-sm">
+    <div class="overflow-hidden rounded-xl border border-dm-border bg-white shadow-sm">
       <div class="overflow-x-auto">
         <table class="min-w-[900px] w-full table-fixed text-left">
           <thead class="border-b border-dm-border bg-[#fafafa] text-xs font-semibold uppercase tracking-wide text-dm-text-tertiary">
@@ -397,7 +414,7 @@ onMounted(() => void loadEvents())
                 <p class="truncate text-xs text-dm-text-tertiary">{{ event.actor_email }}</p>
               </td>
               <td class="px-4 py-4"><span class="inline-flex max-w-full truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{{ moduleLabel(event.module) }}</span></td>
-              <td class="px-4 py-4 text-sm font-medium text-dm-text">{{ actionLabel(event.action, event.module) }}</td>
+              <td class="px-4 py-4 text-sm font-medium text-dm-text">{{ actionLabel(event.action, event.module, event.event_name) }}</td>
               <td class="truncate px-4 py-4 text-sm font-medium text-dm-primary" :title="targetLabel(event)">{{ targetLabel(event) }}</td>
               <td class="px-4 py-4">
                 <span :class="event.result === 'succeeded' ? 'bg-emerald-50 text-emerald-700' : event.result === 'denied' ? 'bg-orange-50 text-orange-700' : 'bg-red-50 text-red-600'" class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold">
@@ -424,13 +441,9 @@ onMounted(() => void loadEvents())
       </div>
     </div>
 
-    <SecurityAlertsPanel
-      v-if="activeTab === 'security'"
-      @count="securityAlertCount = $event"
-    />
   </section>
 
-  <div v-if="selected && activeTab === 'activity'" class="fixed inset-0 z-50 flex justify-end bg-slate-950/30" @click.self="selected = null">
+  <div v-if="selected" class="fixed inset-0 z-50 flex justify-end bg-slate-950/30" @click.self="selected = null">
     <aside class="h-full w-full max-w-lg overflow-y-auto bg-white p-6 shadow-2xl">
       <div class="flex items-start justify-between gap-4 border-b border-dm-border-light pb-4">
         <div><h2 class="text-lg font-semibold text-dm-text">{{ t('quotation.pages.audit.detailsTitle') }}</h2><p class="mt-1 text-sm text-dm-text-tertiary">{{ formatDateTime(selected.created_at) }}</p></div>
@@ -439,19 +452,47 @@ onMounted(() => void loadEvents())
       <dl class="mt-5 grid grid-cols-[130px_1fr] gap-x-4 gap-y-4 text-sm">
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.performedBy') }}</dt><dd class="font-medium text-dm-text">{{ actorLabel(selected) }}<div class="font-normal text-dm-text-tertiary">{{ selected.actor_email }}</div></dd>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.module') }}</dt><dd>{{ moduleLabel(selected.module) }}</dd>
-        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.action') }}</dt><dd>{{ actionLabel(selected.action, selected.module) }}</dd>
+        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.action') }}</dt><dd>{{ actionLabel(selected.action, selected.module, selected.event_name) }}</dd>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.target') }}</dt><dd class="break-all">{{ targetLabel(selected) }}</dd>
         <template v-if="targetTypeLabel(selected)">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.itemType') }}</dt><dd>{{ targetTypeLabel(selected) }}</dd>
         </template>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.result') }}</dt><dd>{{ t(`quotation.pages.audit.${selected.result}`) }}</dd>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.eventName') }}</dt><dd class="break-all font-mono text-xs">{{ selected.event_name }}</dd>
-        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.riskLevel') }}</dt><dd>{{ t(`quotation.pages.audit.riskLevels.${selected.risk_level}`) }}</dd>
         <template v-if="selected.reason_code">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.reasonCode') }}</dt><dd class="break-all font-mono text-xs">{{ selected.reason_code }}</dd>
         </template>
         <template v-if="selected.changes.fields?.length">
-          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.changedFields') }}</dt><dd>{{ selected.changes.fields.join(', ') }}</dd>
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.changedFields') }}</dt><dd>{{ selected.changes.fields.map(fieldLabel).join('、') }}</dd>
+        </template>
+        <template v-if="hasSyncMetrics(selected)">
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncSuccessCount') }}</dt>
+          <dd>
+            {{ t('quotation.pages.audit.syncSuccessCountValue', {
+              count: syncMetric(selected, 'created_count'),
+            }) }}
+          </dd>
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncFolders') }}</dt>
+          <dd>{{ syncFolderNames(selected).join('、') || targetLabel(selected) }}</dd>
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncFolderCount') }}</dt>
+          <dd>{{ syncMetric(selected, 'folder_count') }}</dd>
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncFileVolume') }}</dt>
+          <dd>
+            {{ t('quotation.pages.audit.syncFileVolumeValue', {
+              created: syncMetric(selected, 'created_count'),
+              skipped: syncMetric(selected, 'skipped_count'),
+              parsed: syncMetric(selected, 'parsed_count'),
+              queued: syncMetric(selected, 'queued_parse_count'),
+              errors: syncMetric(selected, 'error_count'),
+            }) }}
+          </dd>
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncQuotationVolume') }}</dt>
+          <dd>
+            {{ t('quotation.pages.audit.syncQuotationVolumeValue', {
+              created: syncMetric(selected, 'created_quotation_count'),
+              updated: syncMetric(selected, 'updated_quotation_count'),
+            }) }}
+          </dd>
         </template>
         <template v-if="selected.module === 'quotation' && selected.target_id && ['update', 'generate'].includes(selected.action)">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.relatedVersion') }}</dt>
@@ -468,7 +509,17 @@ onMounted(() => void loadEvents())
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.requestId') }}</dt><dd class="break-all font-mono text-xs">{{ selected.request_id || t('quotation.pages.audit.notAvailable') }}</dd>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.traceId') }}</dt><dd class="break-all font-mono text-xs">{{ selected.trace_id || t('quotation.pages.audit.notAvailable') }}</dd>
       </dl>
-      <div v-if="selected.summary" class="mt-6 rounded-dm border border-red-100 bg-red-50 p-4 text-sm text-red-700">{{ selected.summary }}</div>
+      <div
+        v-if="selected.summary"
+        :class="selected.result === 'failed'
+          ? 'border-red-100 bg-red-50 text-red-700'
+          : selected.event_name.includes('partially')
+            ? 'border-amber-200 bg-amber-50 text-amber-700'
+            : 'border-emerald-100 bg-emerald-50 text-emerald-700'"
+        class="mt-6 rounded-dm border p-4 text-sm"
+      >
+        {{ selected.summary }}
+      </div>
     </aside>
   </div>
 </template>

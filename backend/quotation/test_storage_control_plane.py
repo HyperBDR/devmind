@@ -323,7 +323,7 @@ class StorageControlPlaneTests(TestCase):
             )
         )
 
-    def test_managed_credential_refresh_failure_is_audited_and_alerted(self):
+    def test_managed_credential_refresh_failure_is_audited(self):
         connection = StorageConnection.objects.create(
             display_name="Managed account",
             external_tenant_id="managed-account",
@@ -343,9 +343,6 @@ class StorageControlPlaneTests(TestCase):
         event = AuditEvent.objects.get(event_name="feishu.oauth.refresh_failed")
         self.assertEqual(event.storage_connection_id, connection.id)
         self.assertEqual(event.error_code, "feishu_10014")
-        self.assertTrue(
-            event.security_alerts.filter(rule="credential_refresh_failure").exists()
-        )
 
     @override_settings(
         FEISHU_APP_ID="legacy-app",

@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
 from django.urls import resolve
@@ -10,7 +12,17 @@ from quotation.middleware import (
     _is_automatic_activity,
     _is_automatic_generate_followup,
 )
-from quotation.models import AuditEvent, DocumentAsset, Quotation
+from quotation.models import (
+    AuditEvent,
+    DocumentAsset,
+    Quotation,
+    QuotationItem,
+    SyncJob,
+    SyncJobStatus,
+    SyncJobType,
+)
+from quotation.tasks import _record_feishu_sync_audit
+from quotation.views.quotations import _quotation_changed_fields
 from rest_framework.response import Response
 from rest_framework.test import APIClient
 
@@ -239,17 +251,75 @@ class QuotationAuditEventTests(TestCase):
         )
         self.assertIsNone(_classify("GET", "/api/v1/quotation/exports/export-id"))
 
-    def test_quote_updates_defer_field_diffs_to_version_history(self):
+    def test_quote_updates_record_the_affected_business_fields(self):
         fields = ["project_name", "status", "items"]
 
         self.assertEqual(
             _audit_changes("quotation", "update", fields),
-            {},
+            {"fields": fields},
         )
         self.assertEqual(
             _audit_changes("catalog", "update", fields),
             {"fields": fields},
         )
+
+    def test_full_quote_payload_records_only_real_changes(self):
+        quotation = Quotation.objects.create(
+            quote_no="Q-AUDIT-DIFF-001",
+            project_name="Before",
+            payment_terms="CIA",
+            quote_date="2026-07-21",
+            expire_date="2026-08-21",
+            issuer_contact_name="Audit User",
+            issuer_contact_email=self.user.email,
+            client_company="Example",
+            contact_person="Customer",
+            email="customer@example.com",
+            created_by_email=self.user.email,
+        )
+        item = QuotationItem.objects.create(
+            quotation=quotation,
+            line_no=1,
+            type="software",
+            item_id="product-1",
+            name="Product",
+            description="Description",
+            qty=Decimal("1.00"),
+            list_price=Decimal("100.00"),
+            discount_percent=Decimal("0.00"),
+            net_unit_price=Decimal("100.00"),
+            extended_price=Decimal("100.00"),
+        )
+        quotation = Quotation.objects.prefetch_related("items").get(
+            pk=quotation.pk
+        )
+        item_payload = {
+            field: getattr(item, field)
+            for field in (
+                "line_no",
+                "type",
+                "item_id",
+                "name",
+                "description",
+                "qty",
+                "list_price",
+                "discount_percent",
+                "net_unit_price",
+                "extended_price",
+            )
+        }
+
+        fields = _quotation_changed_fields(
+            quotation,
+            {
+                "quote_no": quotation.quote_no,
+                "project_name": "After",
+                "client_company": quotation.client_company,
+                "items": [item_payload],
+            },
+        )
+
+        self.assertEqual(fields, ["project_name"])
 
     def test_generate_after_quote_update_is_not_a_duplicate_event(self):
         AuditEvent.objects.create(
@@ -314,6 +384,132 @@ class QuotationAuditEventTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(AuditEvent.objects.exists())
+
+    def test_manual_feishu_sync_request_is_audited_as_requested(self):
+        path = "/api/v1/quotation/feishu/sync-folder"
+        factory = RequestFactory()
+        request = factory.post(
+            path,
+            HTTP_X_QUOTATION_AUDIT_SOURCE="user",
+        )
+        request.user = self.user
+        request.resolver_match = resolve(path)
+        middleware = RequestIdMiddleware(
+            QuotationAuditMiddleware(
+                lambda _request: Response(
+                    {
+                        "sync_job_id": "sync-job-id",
+                        "storage_connection_id": "storage-id",
+                    },
+                    status=202,
+                )
+            )
+        )
+
+        response = middleware(request)
+
+        self.assertEqual(response.status_code, 202)
+        event = AuditEvent.objects.get()
+        self.assertEqual(
+            event.event_name,
+            "storage.archive_sync_requested",
+        )
+        self.assertEqual(event.actor, self.user)
+        self.assertEqual(event.sync_job_id, "sync-job-id")
+
+    def test_feishu_sync_terminal_audit_is_idempotent(self):
+        job = SyncJob.objects.create(
+            job_type=SyncJobType.PULL,
+            status=SyncJobStatus.SUCCESS,
+            actor=self.user,
+            request_id="request-id",
+            trace_id="trace-id",
+            payload_json={"audit_source": "user"},
+            result_json={
+                "created_count": 2,
+                "skipped_count": 3,
+                "queued_parse_count": 2,
+                "parsed_count": 1,
+                "folders": [
+                    {"name": "Tower"},
+                    {"name": "Customer A"},
+                ],
+                "errors": [],
+            },
+            duration_ms=125,
+        )
+
+        for _ in range(2):
+            _record_feishu_sync_audit(
+                job,
+                event_name="storage.archive_sync_succeeded",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                summary="Feishu archive synchronization completed",
+            )
+
+        event = AuditEvent.objects.get(
+            event_name="storage.archive_sync_succeeded"
+        )
+        self.assertEqual(event.actor, self.user)
+        self.assertEqual(event.actor_type, AuditEvent.ACTOR_TASK)
+        self.assertEqual(event.sync_job_id, job.id)
+        self.assertEqual(event.metadata["created_count"], 2)
+        self.assertEqual(event.metadata["queued_parse_count"], 2)
+        self.assertEqual(event.metadata["parsed_count"], 1)
+        self.assertEqual(event.metadata["folder_count"], 2)
+        self.assertEqual(
+            event.metadata["folder_names"],
+            ["Tower", "Customer A"],
+        )
+        self.assertEqual(event.target_label, "Tower")
+
+    def test_sync_request_details_include_terminal_counters(self):
+        job = SyncJob.objects.create(
+            job_type=SyncJobType.PULL,
+            status=SyncJobStatus.SUCCESS,
+            actor=self.user,
+            request_id="request-id",
+            trace_id="trace-id",
+            payload_json={"audit_source": "user"},
+            result_json={
+                "created_count": 1,
+                "skipped_count": 64,
+                "queued_parse_count": 1,
+                "parsed_count": 42,
+                "folders": [{"name": "Tower"}],
+                "errors": [],
+            },
+        )
+        requested = AuditEvent.objects.create(
+            actor=self.user,
+            actor_email=self.user.email,
+            module="feishu",
+            action="sync",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            target_type="folder",
+            target_id=str(job.id),
+            sync_job_id=str(job.id),
+            event_name="storage.archive_sync_requested",
+            metadata={"status_code": 202},
+        )
+        _record_feishu_sync_audit(
+            job,
+            event_name="storage.archive_sync_succeeded",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            summary="Feishu archive synchronization completed",
+        )
+
+        response = self.api.get("/api/v1/quotation/audit-events")
+
+        self.assertEqual(response.status_code, 200)
+        item = next(
+            row for row in response.data["items"] if row["id"] == requested.id
+        )
+        self.assertEqual(item["target_label"], "Tower")
+        self.assertEqual(item["metadata"]["created_count"], 1)
+        self.assertEqual(item["metadata"]["skipped_count"], 64)
+        self.assertEqual(item["metadata"]["parsed_count"], 42)
+        self.assertEqual(item["metadata"]["queued_parse_count"], 1)
 
     def test_activity_log_hides_internal_events_by_default(self):
         AuditEvent.objects.create(
@@ -514,6 +710,7 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(exported.status_code, 200)
         self.assertEqual(exported["Content-Type"], "text/csv")
         self.assertIn("export-source", exported.content.decode())
+        self.assertNotIn("risk_level", exported.content.decode().splitlines()[0])
         self.assertTrue(
             AuditEvent.objects.filter(
                 event_name="audit.exported",

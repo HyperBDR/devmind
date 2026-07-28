@@ -1341,6 +1341,7 @@ class DocumentParseEndpointTests(TestCase):
         job = SyncJob.objects.get(pk=response.data["sync_job_id"])
         self.assertEqual(job.status, SyncJobStatus.QUEUED)
         self.assertEqual(job.celery_task_id, "celery-sync-task")
+        self.assertEqual(job.payload_json["audit_source"], "user")
         enqueue.assert_called_once_with(
             args=[job.id, self.user.id],
             queue="quotation_sync",

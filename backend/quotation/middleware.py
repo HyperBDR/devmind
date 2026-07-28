@@ -21,6 +21,11 @@ SENSITIVE_FIELDS = {
     "refresh_token",
     "token",
 }
+AUDIT_IGNORED_FIELDS = {
+    "async",
+    "notes",
+    "skip_version",
+}
 
 
 def _classify(method: str, path: str):
@@ -124,7 +129,12 @@ def _json_fields(request) -> list[str]:
         return []
     if not isinstance(payload, dict):
         return []
-    return sorted(key for key in payload if key.lower() not in SENSITIVE_FIELDS)
+    return sorted(
+        key
+        for key in payload
+        if key.lower() not in SENSITIVE_FIELDS
+        and key.lower() not in AUDIT_IGNORED_FIELDS
+    )
 
 
 def _response_payload(response) -> dict:
@@ -179,9 +189,7 @@ def _audit_changes(
     action: str,
     changed_fields: list[str],
 ) -> dict:
-    """Keep quote version details in version history, not the audit event."""
-    if module == "quotation" and action in {"update", "generate"}:
-        return {}
+    """Return the business fields affected by one user operation."""
     return {"fields": changed_fields} if changed_fields else {}
 
 
@@ -255,6 +263,13 @@ class QuotationAuditMiddleware:
 
             module, action, target_type = classification
             payload = _response_payload(response)
+            changed_fields = list(
+                getattr(
+                    request,
+                    "quotation_audit_changed_fields",
+                    changed_fields,
+                )
+            )
             succeeded = response.status_code < 400
             if response.status_code in {401, 403}:
                 result = AuditEvent.RESULT_DENIED

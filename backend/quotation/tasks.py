@@ -10,8 +10,10 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.core.cache import cache
 from django.db import OperationalError, transaction
 from django.utils import timezone
+from quotation.audit import record_audit_event
 from quotation.metrics import record_export_operation
 from quotation.models import (
+    AuditEvent,
     DocumentAsset,
     DocumentParseStatus,
     RemoteFileCleanup,
@@ -37,6 +39,86 @@ def _record_export_stage(stage: str, result: str, started: float) -> None:
         result=result,
         duration_seconds=max(perf_counter() - started, 0),
     )
+
+
+def _record_feishu_sync_audit(
+    job: SyncJob,
+    *,
+    event_name: str,
+    result: str,
+    summary: str,
+    error_code: str = "",
+) -> None:
+    """Record an idempotent terminal audit event for a Feishu sync job."""
+    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    audit_source = str(payload.get("audit_source") or "user").lower()
+    request = SimpleNamespace(
+        user=job.actor,
+        META={
+            "HTTP_X_QUOTATION_AUDIT_SOURCE": audit_source,
+            "HTTP_X_REQUEST_ID": job.request_id,
+            "HTTP_X_TRACE_ID": job.trace_id,
+            "HTTP_IDEMPOTENCY_KEY": f"{job.id}:{event_name}",
+        },
+        audit_request_id=job.request_id,
+        audit_trace_id=job.trace_id,
+    )
+    sync_result = job.result_json if isinstance(job.result_json, dict) else {}
+    errors = sync_result.get("errors")
+    error_count = len(errors) if isinstance(errors, list) else 0
+    folders = sync_result.get("folders")
+    folder_names = [
+        str(folder.get("name") or "").strip()
+        for folder in folders
+        if isinstance(folder, dict) and folder.get("name")
+    ] if isinstance(folders, list) else []
+    try:
+        record_audit_event(
+            request=request,
+            module="feishu",
+            action="sync",
+            result=result,
+            target_type="folder",
+            target_id=str(job.id),
+            target_label=(
+                folder_names[0]
+                if folder_names
+                else "Feishu quotation archive"
+            ),
+            summary=summary,
+            metadata={
+                "created_count": sync_result.get("created_count", 0),
+                "skipped_count": sync_result.get("skipped_count", 0),
+                "queued_parse_count": sync_result.get(
+                    "queued_parse_count",
+                    0,
+                ),
+                "created_quotation_count": sync_result.get(
+                    "created_quotation_count",
+                    0,
+                ),
+                "updated_quotation_count": sync_result.get(
+                    "updated_quotation_count",
+                    0,
+                ),
+                "error_count": error_count,
+                "folder_count": len(folder_names),
+                "folder_names": folder_names,
+                "parsed_count": sync_result.get("parsed_count", 0),
+                "duration_ms": job.duration_ms,
+            },
+            event_name=event_name,
+            reason_code=("operation_failed" if error_code else ""),
+            actor_type=AuditEvent.ACTOR_TASK,
+            storage_connection_id=str(job.storage_connection_id or ""),
+            sync_job_id=str(job.id),
+            error_code=error_code,
+        )
+    except Exception:
+        logger.exception(
+            "quotation_feishu_sync_audit_failed",
+            extra={"sync_job_id": str(job.id)},
+        )
 
 
 @shared_task(
@@ -689,6 +771,30 @@ def sync_feishu_folder_task(self, job_id: str, actor_id: int):
                 "updated_at",
             ]
         )
+        if job.status == SyncJobStatus.FAILED:
+            _record_feishu_sync_audit(
+                job,
+                event_name="storage.archive_sync_failed",
+                result=AuditEvent.RESULT_FAILED,
+                summary="Feishu archive synchronization failed",
+                error_code=job.error_code,
+            )
+        elif job.result_json.get("errors"):
+            _record_feishu_sync_audit(
+                job,
+                event_name="storage.archive_sync_partially_succeeded",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                summary=(
+                    "Feishu archive synchronization completed with errors"
+                ),
+            )
+        else:
+            _record_feishu_sync_audit(
+                job,
+                event_name="storage.archive_sync_succeeded",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                summary="Feishu archive synchronization completed",
+            )
         return job.result_json or {"detail": job.error_message}
     except Exception as exc:
         if self.request.retries < self.max_retries:
@@ -727,6 +833,13 @@ def sync_feishu_folder_task(self, job_id: str, actor_id: int):
                 "duration_ms",
                 "updated_at",
             ]
+        )
+        _record_feishu_sync_audit(
+            job,
+            event_name="storage.archive_sync_failed",
+            result=AuditEvent.RESULT_FAILED,
+            summary="Feishu archive synchronization failed",
+            error_code=job.error_code,
         )
         raise
     finally:

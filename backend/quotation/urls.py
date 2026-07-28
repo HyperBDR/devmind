@@ -2,8 +2,6 @@ from django.urls import path
 from quotation.views.audit import (
     AuditEventExportView,
     AuditEventListView,
-    SecurityAlertDetailView,
-    SecurityAlertListView,
 )
 from quotation.views.catalog import (
     CatalogBootstrapView,
@@ -53,11 +51,6 @@ urlpatterns = [
     path("templates", QuotationTemplateListCreateView.as_view()),
     path("audit-events", AuditEventListView.as_view()),
     path("audit-events/export", AuditEventExportView.as_view()),
-    path("security-alerts", SecurityAlertListView.as_view()),
-    path(
-        "security-alerts/<int:alert_id>",
-        SecurityAlertDetailView.as_view(),
-    ),
     path("catalog", UserQuotationCatalogView.as_view()),
     path("catalog/import-legacy", LegacyCatalogImportView.as_view()),
     path("catalog/bootstrap", CatalogBootstrapView.as_view()),

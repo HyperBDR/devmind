@@ -32,9 +32,12 @@ test('Feishu archive refresh keeps original access and uses document IDs', () =>
   assert.match(feishuApi, /syncFeishuArchiveFolder/)
   assert.match(feishuApi, /\/feishu\/sync-folder/)
   assert.match(importsPage, /syncFeishuArchiveFolder/)
-  assert.match(importsPage, /syncSource: 'automatic'/)
   assert.match(importsPage, /syncSource: 'user'/)
   assert.match(importsPage, /options\.syncSource !== 'automatic'/)
+  assert.doesNotMatch(
+    importsPage,
+    /void refresh\(\{ syncRemote: true, syncSource: 'automatic' \}\)/,
+  )
   assert.match(feishuApi, /X-Quotation-Audit-Source/)
   assert.doesNotMatch(importsPage, /canSyncArchive/)
   assert.match(importsPage, /checkFeishuFileAccess\(doc\.id\)/)
@@ -63,7 +66,11 @@ test('Imported files panel no longer opens a personal Feishu drive picker', () =
 test('Imported files browser stays mounted while its visible panels are hidden', () => {
   assert.match(importsPage, /id="import-filter-panel"\s+v-show="false"/)
   assert.match(importsPage, /id="import-table-panel"\s+v-show="false"/)
-  assert.match(importsPage, /void refresh\(\{ syncRemote: true, syncSource: 'automatic' \}\)/)
+  assert.match(importsPage, /void refresh\(\)/)
+  assert.doesNotMatch(
+    importsPage,
+    /void refresh\(\{ syncRemote: true, syncSource: 'automatic' \}\)/,
+  )
   assert.match(importsPage, /listImportedFeishuDocuments\(\)/)
   assert.match(importsPage, /syncFeishuArchiveFolder\(/)
   assert.match(importsPage, /downloadImportedDocument\(doc\.id, doc\.file_name\)/)
