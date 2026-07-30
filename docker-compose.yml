@@ -130,6 +130,56 @@ services:
         condition: service_healthy
     command: celery
 
+  quotation-excel-worker:
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-parser:${APP_VERSION:?APP_VERSION is required}
+    container_name: quotation-excel-worker
+    restart: unless-stopped
+    stop_grace_period: 120s
+    env_file:
+      - ./.env
+    environment:
+      CELERY_CONCURRENCY: "2"
+      CELERY_QUEUES: quotation_excel
+      CELERY_MAX_TASKS_PER_CHILD: "200"
+      CELERY_MAX_MEMORY_PER_CHILD: "256000"
+      CELERY_LOG_FILE: /var/log/celery/excel-worker.log
+    volumes:
+      - ./data/logs/worker:/var/log/celery
+      - ./data/storage:/opt/storage
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery
+
+  quotation-pdf-worker:
+    image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-parser:${APP_VERSION:?APP_VERSION is required}
+    container_name: quotation-pdf-worker
+    restart: unless-stopped
+    stop_grace_period: 150s
+    env_file:
+      - ./.env
+    environment:
+      CELERY_CONCURRENCY: "2"
+      CELERY_QUEUES: quotation_pdf
+      CELERY_MAX_TASKS_PER_CHILD: "100"
+      CELERY_MAX_MEMORY_PER_CHILD: "384000"
+      CELERY_LOG_FILE: /var/log/celery/pdf-worker.log
+    volumes:
+      - ./data/logs/worker:/var/log/celery
+      - ./data/storage:/opt/storage
+    networks:
+      - backend_network
+    depends_on:
+      postgresql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: celery
+
   quotation-render-worker:
     image: registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-render:${APP_VERSION:?APP_VERSION is required}
     container_name: quotation-render-worker

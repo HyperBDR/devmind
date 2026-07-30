@@ -14,6 +14,18 @@ const devCompose = readFileSync(
   new URL('../../docker-compose.dev.yml', import.meta.url),
   'utf8',
 )
+const celerySettings = readFileSync(
+  new URL('../../backend/core/settings/celery.py', import.meta.url),
+  'utf8',
+)
+const installScript = readFileSync(
+  new URL('../../scripts/install.sh', import.meta.url),
+  'utf8',
+)
+const controlScript = readFileSync(
+  new URL('../../scripts/devmindctl.sh', import.meta.url),
+  'utf8',
+)
 const quotationList = readFileSync(
   new URL('../src/modules/quotation/components/QuotationList.vue', import.meta.url),
   'utf8',
@@ -44,7 +56,35 @@ test('LibreOffice is isolated to the quotation render worker', () => {
     assert.match(source, /quotation-render-worker:/)
     assert.match(source, /CELERY_QUEUES: quotation_render/)
     assert.doesNotMatch(source, /gotenberg:/)
-    assert.doesNotMatch(source, /quotation-pdf-worker:/)
-    assert.doesNotMatch(source, /quotation-excel-worker:/)
+  }
+})
+
+test('document parser queues are declared and have dedicated workers', () => {
+  const parserWorkers = [
+    ['quotation-excel-worker', 'quotation_excel'],
+    ['quotation-pdf-worker', 'quotation_pdf'],
+  ]
+
+  for (const [service, queue] of parserWorkers) {
+    assert.match(celerySettings, new RegExp(`Queue\\("${queue}"`))
+    for (const source of [compose, devCompose]) {
+      assert.match(
+        source,
+        new RegExp(`${service}:[\\s\\S]*?CELERY_QUEUES: ${queue}`),
+      )
+    }
+  }
+})
+
+test('deployment tools manage every quotation worker', () => {
+  const workers = [
+    'quotation-excel-worker',
+    'quotation-pdf-worker',
+    'quotation-render-worker',
+  ]
+
+  for (const worker of workers) {
+    assert.match(installScript, new RegExp(worker))
+    assert.match(controlScript, new RegExp(worker))
   }
 })

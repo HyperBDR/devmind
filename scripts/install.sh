@@ -277,15 +277,23 @@ fi
 
 log "Rolling backend workers and scheduler to ${IMAGE_TAG}"
 if [ "$LOCAL_MODE" = "true" ]; then
-    sync_images backend-worker quotation-render-worker
+    sync_images \
+        backend-worker \
+        quotation-excel-worker \
+        quotation-pdf-worker \
+        quotation-render-worker
 else
     sync_images \
         backend-worker \
+        quotation-excel-worker \
+        quotation-pdf-worker \
         quotation-render-worker \
         backend-scheduler
 fi
 compose up -d \
     backend-worker \
+    quotation-excel-worker \
+    quotation-pdf-worker \
     quotation-render-worker \
     backend-scheduler
 write_color_version "$DEPLOY_COLOR" "$IMAGE_TAG"

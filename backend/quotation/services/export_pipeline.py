@@ -185,16 +185,7 @@ def render_export_job(job_id: str) -> dict:
         Quotation.objects.select_for_update().get(
             pk=quotation_id,
         )
-        job = (
-            ExportJob.objects.select_for_update()
-            .select_related(
-                "quotation",
-                "quotation_version",
-                "template",
-                "requested_by",
-            )
-            .get(pk=job_id)
-        )
+        job = ExportJob.objects.select_for_update().get(pk=job_id)
         if job.status not in claimable_statuses:
             return {"job_id": job.id, "status": job.status}
         if job.renderer_version != CURRENT_RENDERER_VERSION:
