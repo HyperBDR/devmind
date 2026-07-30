@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import base64
 import binascii
+import fcntl
 import os
 import signal
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from copy import copy
 from datetime import datetime
 from hashlib import sha256
@@ -81,8 +84,40 @@ class PdfConversionError(RuntimeError):
         self.retryable = retryable
 
 
+class PdfConversionBusyError(PdfConversionError):
+    pass
+
+
 class PdfConversionTimeoutError(PdfConversionError, TimeoutError):
     pass
+
+
+@contextmanager
+def _libreoffice_conversion_slot() -> Iterator[None]:
+    """Acquire one cross-process LibreOffice conversion slot."""
+    lock_dir = Path(settings.QUOTATION_RENDER_LOCK_DIR)
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    for slot in range(settings.QUOTATION_RENDER_CONCURRENCY):
+        lock_path = lock_dir / f"slot-{slot}.lock"
+        lock_file = lock_path.open("a+b")
+        try:
+            fcntl.flock(
+                lock_file.fileno(),
+                fcntl.LOCK_EX | fcntl.LOCK_NB,
+            )
+        except BlockingIOError:
+            lock_file.close()
+            continue
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
+        return
+    raise PdfConversionBusyError(
+        "LibreOffice conversion capacity is busy",
+        code="libreoffice_busy",
+    )
 
 
 def _save_workbook_deterministic(workbook: Workbook) -> bytes:
@@ -783,6 +818,12 @@ def _terminate_process_group(process: subprocess.Popen) -> None:
 
 
 def convert_xlsx_to_pdf(excel_bytes: bytes, *, job_id: str) -> bytes:
+    """Convert XLSX bytes while respecting shared process capacity."""
+    with _libreoffice_conversion_slot():
+        return _convert_xlsx_to_pdf_unlocked(excel_bytes, job_id=job_id)
+
+
+def _convert_xlsx_to_pdf_unlocked(excel_bytes: bytes, *, job_id: str) -> bytes:
     """Convert XLSX bytes with an isolated headless LibreOffice profile."""
     with TemporaryDirectory(prefix=f"quotation-render-{job_id}-") as root:
         root_path = Path(root)

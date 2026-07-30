@@ -38,8 +38,12 @@ renderer 版本由代码实现固定，并自动参与导出幂等键，不能�
 
 - `QUOTATION_SOFFICE_BINARY`：默认 `soffice`。
 - `QUOTATION_RENDER_TIMEOUT_SECONDS`：单次转换硬超时，默认 120 秒。
-- `CELERY_CONCURRENCY`：统一 Worker 的并发数，需要同时考虑普通任务、
-  文档解析和 LibreOffice 转换的内存占用。
+- `QUOTATION_RENDER_CONCURRENCY`：跨 Worker 进程的 LibreOffice 最大并发
+  数，默认 1。转换槽位使用共享存储文件锁协调；槽位繁忙时任务释放 Worker
+  子进程并延迟重试。
+- `QUOTATION_RENDER_RETRY_SECONDS`：转换槽位繁忙时的重试间隔，默认 10 秒。
+- `CELERY_CONCURRENCY`：统一 Worker 的总并发数，可根据普通任务和文档解析
+  吞吐调整，不再直接决定 LibreOffice 并发数。
 - `QUOTATION_MAX_TEMPLATE_BYTES`、`QUOTATION_MAX_TEMPLATE_EXPANDED_BYTES`：
   输入模板的压缩体积和展开体积上限。
 - `QUOTATION_MAX_PDF_BYTES`：输出 PDF 上限。
@@ -73,6 +77,8 @@ Worker 或飞书不可用时，API 仍可启动并处理同步请求以外的业
   `quotation_render`，并检查 Redis 连接。
 - `libreoffice_timeout`：检查 Worker 内存、字体和输入模板；任务最多自动
   重试一次。
+- `libreoffice_busy`：所有转换槽位均被占用；任务会保持可重试状态并自动
+  延迟重试，不需要人工重新提交导出。
 - `template_*`：属于数据或模板错误，不自动重试；校验工作表、命名区域、
   宏、外部连接和文件哈希。
 - `upload_failed`：检查 `StorageConnection`、`StorageMount` 和飞书权限，

@@ -43,3 +43,5 @@ class QuotationSettingsTests(SimpleTestCase):
         )
         self.assertEqual(settings.QUOTATION_SOFFICE_BINARY, "soffice")
         self.assertEqual(settings.QUOTATION_RENDER_TIMEOUT_SECONDS, 120)
+        self.assertEqual(settings.QUOTATION_RENDER_CONCURRENCY, 1)
+        self.assertEqual(settings.QUOTATION_RENDER_RETRY_SECONDS, 10)
