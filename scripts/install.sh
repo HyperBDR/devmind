@@ -3,7 +3,6 @@
 set -euo pipefail
 
 BACKEND_IMAGE_REPO="${BACKEND_IMAGE_REPO:-registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend}"
-BACKEND_PARSER_IMAGE_REPO="${BACKEND_PARSER_IMAGE_REPO:-registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-parser}"
 BACKEND_RENDER_IMAGE_REPO="${BACKEND_RENDER_IMAGE_REPO:-registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-backend-render}"
 FRONTEND_IMAGE_REPO="${FRONTEND_IMAGE_REPO:-registry.cn-beijing.aliyuncs.com/hypermotion_dockers/devmind-frontend}"
 
@@ -277,24 +276,14 @@ fi
 
 log "Rolling backend workers and scheduler to ${IMAGE_TAG}"
 if [ "$LOCAL_MODE" = "true" ]; then
-    sync_images \
-        backend-worker \
-        quotation-excel-worker \
-        quotation-pdf-worker \
-        quotation-render-worker
+    sync_images backend-worker
 else
     sync_images \
         backend-worker \
-        quotation-excel-worker \
-        quotation-pdf-worker \
-        quotation-render-worker \
         backend-scheduler
 fi
 compose up -d \
     backend-worker \
-    quotation-excel-worker \
-    quotation-pdf-worker \
-    quotation-render-worker \
     backend-scheduler
 write_color_version "$DEPLOY_COLOR" "$IMAGE_TAG"
 
@@ -311,7 +300,6 @@ prune_old_image_tags() {
 if [ "$LOCAL_MODE" != "true" ] \
     && [ "$DEPLOY_PRUNE_OLD_IMAGES" = "true" ]; then
     prune_old_image_tags "$BACKEND_IMAGE_REPO"
-    prune_old_image_tags "$BACKEND_PARSER_IMAGE_REPO"
     prune_old_image_tags "$BACKEND_RENDER_IMAGE_REPO"
     prune_old_image_tags "$FRONTEND_IMAGE_REPO"
     docker image prune -f >/dev/null

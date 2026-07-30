@@ -51,40 +51,40 @@ test('quotation export progress and upload-only retry are visible', () => {
   assert.match(quotationDetails, /activeExportStatus/)
 })
 
-test('LibreOffice is isolated to the quotation render worker', () => {
+test('the backend worker includes LibreOffice and consumes quotation queues', () => {
+  const queues = [
+    'backend',
+    'quotation_sync',
+    'quotation_excel',
+    'quotation_pdf',
+    'quotation_render',
+  ].join(',')
+
   for (const source of [compose, devCompose]) {
-    assert.match(source, /quotation-render-worker:/)
-    assert.match(source, /CELERY_QUEUES: quotation_render/)
+    assert.match(
+      source,
+      new RegExp(
+        `backend-worker:[\\s\\S]*?target: backend-render[\\s\\S]*?CELERY_QUEUES: ${queues}`,
+      ),
+    )
+    assert.doesNotMatch(source, /quotation-render-worker:/)
+    assert.doesNotMatch(source, /quotation-excel-worker:/)
+    assert.doesNotMatch(source, /quotation-pdf-worker:/)
     assert.doesNotMatch(source, /gotenberg:/)
   }
 })
 
-test('document parser queues are declared and have dedicated workers', () => {
-  const parserWorkers = [
-    ['quotation-excel-worker', 'quotation_excel'],
-    ['quotation-pdf-worker', 'quotation_pdf'],
-  ]
-
-  for (const [service, queue] of parserWorkers) {
+test('document parser queues remain declared', () => {
+  for (const queue of ['quotation_excel', 'quotation_pdf']) {
     assert.match(celerySettings, new RegExp(`Queue\\("${queue}"`))
-    for (const source of [compose, devCompose]) {
-      assert.match(
-        source,
-        new RegExp(`${service}:[\\s\\S]*?CELERY_QUEUES: ${queue}`),
-      )
-    }
   }
 })
 
-test('deployment tools manage every quotation worker', () => {
-  const workers = [
-    'quotation-excel-worker',
-    'quotation-pdf-worker',
-    'quotation-render-worker',
-  ]
-
-  for (const worker of workers) {
-    assert.match(installScript, new RegExp(worker))
-    assert.match(controlScript, new RegExp(worker))
+test('deployment tools manage only the consolidated backend worker', () => {
+  for (const source of [installScript, controlScript]) {
+    assert.match(source, /backend-worker/)
+    assert.doesNotMatch(source, /quotation-excel-worker/)
+    assert.doesNotMatch(source, /quotation-pdf-worker/)
+    assert.doesNotMatch(source, /quotation-render-worker/)
   }
 })

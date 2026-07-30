@@ -174,7 +174,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 # Parser workers do not carry Chromium or OCR system packages.
 FROM backend-runtime AS backend-parser
 
-# LibreOffice and document fonts exist only in the isolated render worker.
+# The render-capable worker extends the parser runtime with office tooling.
 FROM backend-parser AS backend-render
 
 RUN apt-get update \

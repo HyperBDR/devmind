@@ -58,8 +58,6 @@ jobs:
         include:
           - image_name: devmind-backend
             target: backend
-          - image_name: devmind-backend-parser
-            target: backend-parser
           - image_name: devmind-backend-render
             target: backend-render
           - image_name: devmind-frontend

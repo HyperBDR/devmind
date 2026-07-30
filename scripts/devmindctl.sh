@@ -42,9 +42,6 @@ cmd_status() {
     compose ps \
         "backend-api-${active}" "frontend-${active}" \
         backend-worker \
-        quotation-excel-worker \
-        quotation-pdf-worker \
-        quotation-render-worker \
         backend-scheduler nginx \
         2>/dev/null || true
     echo
@@ -65,9 +62,6 @@ cmd_restart_workers() {
     log "Restarting backend workers and backend-scheduler"
     compose restart \
         backend-worker \
-        quotation-excel-worker \
-        quotation-pdf-worker \
-        quotation-render-worker \
         backend-scheduler
     log "Done"
 }
@@ -108,9 +102,6 @@ cmd_rollback() {
     log "Rolling backend workers and scheduler back to ${target_version}"
     compose up -d \
         backend-worker \
-        quotation-excel-worker \
-        quotation-pdf-worker \
-        quotation-render-worker \
         backend-scheduler
 
     log "Rolled back. Active color is now ${target}."
