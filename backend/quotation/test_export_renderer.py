@@ -3,16 +3,18 @@ import io
 import subprocess
 from datetime import datetime
 from tempfile import TemporaryDirectory
+from threading import Event, Thread
 from unittest.mock import patch
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as SpreadsheetImage
 from quotation.models import QuotationTemplate
 from quotation.services.export_renderer import (
     DEFAULT_TEMPLATE_NAME,
     LEGACY_DEFAULT_TEMPLATE_NAME,
+    PdfConversionBusyError,
     TemplateValidationError,
     _build_managed_template_bytes,
     _signature_image,
@@ -363,7 +365,18 @@ class TimeoutLibreOfficeProcess(FakeLibreOfficeProcess):
         return self.returncode
 
 
-class LibreOfficeConversionTests(TestCase):
+class LibreOfficeConversionTests(SimpleTestCase):
+    def setUp(self):
+        self.lock_dir = TemporaryDirectory()
+        self.settings_override = override_settings(
+            QUOTATION_RENDER_LOCK_DIR=self.lock_dir.name,
+        )
+        self.settings_override.enable()
+
+    def tearDown(self):
+        self.settings_override.disable()
+        self.lock_dir.cleanup()
+
     @patch(
         "quotation.services.export_renderer.subprocess.Popen",
         side_effect=FakeLibreOfficeProcess,
@@ -391,3 +404,53 @@ class LibreOfficeConversionTests(TestCase):
             convert_xlsx_to_pdf(b"PK\x03\x04xlsx", job_id="job-2")
 
         killpg.assert_called_once()
+
+    def test_conversion_defers_when_all_slots_are_busy(self):
+        conversion_started = Event()
+        release_conversion = Event()
+        first_result = []
+        first_error = []
+
+        class BlockingLibreOfficeProcess(FakeLibreOfficeProcess):
+            def communicate(self, timeout):
+                conversion_started.set()
+                release_conversion.wait(timeout=2)
+                return super().communicate(timeout)
+
+        def run_first_conversion():
+            try:
+                first_result.append(
+                    convert_xlsx_to_pdf(
+                        b"PK\x03\x04xlsx",
+                        job_id="job-busy-1",
+                    )
+                )
+            except Exception as exc:
+                first_error.append(exc)
+
+        with TemporaryDirectory() as lock_dir:
+            with self.settings(
+                QUOTATION_RENDER_CONCURRENCY=1,
+                QUOTATION_RENDER_LOCK_DIR=lock_dir,
+            ):
+                with patch(
+                    "quotation.services.export_renderer.subprocess.Popen",
+                    side_effect=BlockingLibreOfficeProcess,
+                ) as popen:
+                    thread = Thread(target=run_first_conversion)
+                    thread.start()
+                    self.assertTrue(conversion_started.wait(timeout=1))
+
+                    with self.assertRaises(PdfConversionBusyError):
+                        convert_xlsx_to_pdf(
+                            b"PK\x03\x04xlsx",
+                            job_id="job-busy-2",
+                        )
+
+                    release_conversion.set()
+                    thread.join(timeout=2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(first_result, [b"%PDF-rendered"])
+        self.assertEqual(first_error, [])
+        self.assertEqual(popen.call_count, 1)

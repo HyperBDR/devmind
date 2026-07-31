@@ -14,3 +14,12 @@ def test_business_tasks_are_registered_before_worker_consumes():
     assert "cloud_billing.tasks.collect_billing_data" in app.tasks
     assert "data_collector.tasks.run_collect" in app.tasks
     assert "sals.tasks.sync_incidents" in app.tasks
+
+
+def test_document_parser_queues_are_registered():
+    from core.celery import app
+
+    queue_names = {queue.name for queue in app.conf.task_queues}
+
+    assert "quotation_excel" in queue_names
+    assert "quotation_pdf" in queue_names

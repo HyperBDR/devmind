@@ -33,6 +33,8 @@ from quotation.services.export_archive import (
 from quotation.services.export_jobs import create_export_job
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
+    PdfConversionBusyError,
+    PdfConversionError,
     build_default_template_bytes,
     ensure_default_template,
 )
@@ -921,6 +923,56 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(result["status"], "completed")
         self.assertEqual(job.status, "completed")
         self.assertEqual(job.assets.count(), 1)
+
+    @patch(
+        "quotation.services.export_pipeline.render_export_job",
+        side_effect=PdfConversionBusyError(
+            "LibreOffice conversion capacity is busy",
+            code="libreoffice_busy",
+        ),
+    )
+    def test_busy_conversion_retries_without_marking_render_failed(
+        self,
+        _render,
+    ):
+        job = self.create_job(["pdf"])
+
+        with patch.object(
+            render_quotation_export_task,
+            "retry",
+            side_effect=Retry(),
+        ) as retry:
+            with self.assertRaises(Retry):
+                render_quotation_export_task.run(job.id)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ExportJobStatus.QUEUED)
+        self.assertEqual(job.error_code, "libreoffice_busy")
+        retry.assert_called_once()
+        self.assertEqual(retry.call_args.kwargs["args"], (job.id, 0))
+        self.assertEqual(retry.call_args.kwargs["countdown"], 10)
+
+    @patch(
+        "quotation.services.export_pipeline.render_export_job",
+        side_effect=PdfConversionError(
+            "LibreOffice conversion failed",
+            code="libreoffice_conversion_failed",
+        ),
+    )
+    def test_conversion_failure_stops_after_one_failure_retry(
+        self,
+        _render,
+    ):
+        job = self.create_job(["pdf"])
+
+        with patch.object(render_quotation_export_task, "retry") as retry:
+            result = render_quotation_export_task.run(job.id, 1)
+
+        job.refresh_from_db()
+        self.assertEqual(result["status"], ExportJobStatus.RENDER_FAILED)
+        self.assertEqual(job.status, ExportJobStatus.RENDER_FAILED)
+        self.assertEqual(job.error_code, "libreoffice_conversion_failed")
+        retry.assert_not_called()
 
     def test_queued_job_rejects_unsupported_pinned_renderer(self):
         job = self.create_job(["xlsx"])

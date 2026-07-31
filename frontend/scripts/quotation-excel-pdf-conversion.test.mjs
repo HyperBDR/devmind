@@ -14,6 +14,18 @@ const devCompose = readFileSync(
   new URL('../../docker-compose.dev.yml', import.meta.url),
   'utf8',
 )
+const celerySettings = readFileSync(
+  new URL('../../backend/core/settings/celery.py', import.meta.url),
+  'utf8',
+)
+const installScript = readFileSync(
+  new URL('../../scripts/install.sh', import.meta.url),
+  'utf8',
+)
+const controlScript = readFileSync(
+  new URL('../../scripts/devmindctl.sh', import.meta.url),
+  'utf8',
+)
 const quotationList = readFileSync(
   new URL('../src/modules/quotation/components/QuotationList.vue', import.meta.url),
   'utf8',
@@ -39,12 +51,40 @@ test('quotation export progress and upload-only retry are visible', () => {
   assert.match(quotationDetails, /activeExportStatus/)
 })
 
-test('LibreOffice is isolated to the quotation render worker', () => {
+test('the backend worker includes LibreOffice and consumes quotation queues', () => {
+  const queues = [
+    'backend',
+    'quotation_sync',
+    'quotation_excel',
+    'quotation_pdf',
+    'quotation_render',
+  ].join(',')
+
   for (const source of [compose, devCompose]) {
-    assert.match(source, /quotation-render-worker:/)
-    assert.match(source, /CELERY_QUEUES: quotation_render/)
-    assert.doesNotMatch(source, /gotenberg:/)
-    assert.doesNotMatch(source, /quotation-pdf-worker:/)
+    assert.match(
+      source,
+      new RegExp(
+        `backend-worker:[\\s\\S]*?target: backend-render[\\s\\S]*?CELERY_QUEUES: ${queues}`,
+      ),
+    )
+    assert.doesNotMatch(source, /quotation-render-worker:/)
     assert.doesNotMatch(source, /quotation-excel-worker:/)
+    assert.doesNotMatch(source, /quotation-pdf-worker:/)
+    assert.doesNotMatch(source, /gotenberg:/)
+  }
+})
+
+test('document parser queues remain declared', () => {
+  for (const queue of ['quotation_excel', 'quotation_pdf']) {
+    assert.match(celerySettings, new RegExp(`Queue\\("${queue}"`))
+  }
+})
+
+test('deployment tools manage only the consolidated backend worker', () => {
+  for (const source of [installScript, controlScript]) {
+    assert.match(source, /backend-worker/)
+    assert.doesNotMatch(source, /quotation-excel-worker/)
+    assert.doesNotMatch(source, /quotation-pdf-worker/)
+    assert.doesNotMatch(source, /quotation-render-worker/)
   }
 })

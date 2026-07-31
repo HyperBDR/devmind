@@ -41,7 +41,8 @@ cmd_status() {
     echo
     compose ps \
         "backend-api-${active}" "frontend-${active}" \
-        backend-worker backend-scheduler nginx \
+        backend-worker \
+        backend-scheduler nginx \
         2>/dev/null || true
     echo
     status="$(
@@ -58,8 +59,10 @@ cmd_status() {
 
 cmd_restart_workers() {
     acquire_deploy_lock
-    log "Restarting backend-worker and backend-scheduler"
-    compose restart backend-worker backend-scheduler
+    log "Restarting backend workers and backend-scheduler"
+    compose restart \
+        backend-worker \
+        backend-scheduler
     log "Done"
 }
 
@@ -96,8 +99,10 @@ cmd_rollback() {
     switch_traffic "$active" "$target"
     echo "$target" > "$DEPLOY_PATH/.active_color"
 
-    log "Rolling backend-worker and backend-scheduler back to ${target_version}"
-    compose up -d backend-worker backend-scheduler
+    log "Rolling backend workers and scheduler back to ${target_version}"
+    compose up -d \
+        backend-worker \
+        backend-scheduler
 
     log "Rolled back. Active color is now ${target}."
     log "${active} is left running or stopped as-is for inspection."

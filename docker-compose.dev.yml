@@ -99,13 +99,14 @@ services:
       start_period: 120s
 
   backend-worker:
-    image: devmind-backend-parser:dev
+    image: devmind-backend-render:dev
     container_name: backend-worker-dev
     restart: unless-stopped
+    stop_grace_period: 330s
     build:
       context: .
       dockerfile: Dockerfile
-      target: backend-parser
+      target: backend-render
       args:
         USE_MIRROR: ${USE_MIRROR:-true}
         DEV_MODE: "1"
@@ -113,7 +114,9 @@ services:
       - ./.env.dev
     environment:
       WORKSPACE_ROOT: /opt/backend
-      CELERY_QUEUES: backend,quotation_sync
+      CELERY_QUEUES: backend,quotation_sync,quotation_excel,quotation_pdf,quotation_render
+      CELERY_MAX_TASKS_PER_CHILD: "50"
+      CELERY_MAX_MEMORY_PER_CHILD: "768000"
       CELERY_LOG_FILE: /var/log/celery/worker.log
     volumes:
       - ./cache.dev:/opt/cache
@@ -130,45 +133,6 @@ services:
       redis:
         condition: service_healthy
     command: celery
-
-  quotation-render-worker:
-    image: devmind-backend-render:dev
-    container_name: quotation-render-worker-dev
-    restart: unless-stopped
-    stop_grace_period: 330s
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: backend-render
-      args:
-        USE_MIRROR: ${USE_MIRROR:-true}
-        DEV_MODE: "1"
-    env_file:
-      - ./.env.dev
-    environment:
-      CELERY_CONCURRENCY: ${QUOTATION_RENDER_CONCURRENCY:-1}
-      CELERY_QUEUES: quotation_render
-      CELERY_MAX_TASKS_PER_CHILD: "50"
-      CELERY_MAX_MEMORY_PER_CHILD: "768000"
-      CELERY_LOG_FILE: /var/log/celery/render-worker.log
-    volumes:
-      - ./data.dev/logs/worker:/var/log/celery
-      - ./data.dev/storage:/opt/storage
-      - ./backend:/opt/backend
-    networks:
-      - backend_network
-    depends_on:
-      postgresql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: celery
-    healthcheck:
-      test: ["CMD", "soffice", "--headless", "--version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
 
   quotation-ocr-worker:
     profiles: ["ocr"]

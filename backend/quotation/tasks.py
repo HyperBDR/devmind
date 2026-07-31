@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
+from django.conf import settings
 from django.core.cache import cache
 from django.db import OperationalError, transaction
 from django.utils import timezone
@@ -169,18 +170,23 @@ def dispatch_remote_file_cleanups_task():
     name="quotation.tasks.render_quotation_export",
     acks_late=True,
     reject_on_worker_lost=True,
-    max_retries=1,
+    max_retries=None,
     soft_time_limit=240,
     time_limit=300,
 )
-def render_quotation_export_task(self, job_id: str):
-    """Render one pinned quotation export in the dedicated worker."""
+def render_quotation_export_task(
+    self,
+    job_id: str,
+    failure_retries: int = 0,
+):
+    """Render one pinned quotation export in the unified worker."""
     from quotation.services.export_pipeline import (
         mark_render_failed,
         render_export_job,
         reset_render_for_retry,
     )
     from quotation.services.export_renderer import (
+        PdfConversionBusyError,
         PdfConversionError,
         TemplateValidationError,
     )
@@ -207,11 +213,27 @@ def render_quotation_export_task(self, job_id: str):
             },
         )
         return {"job_id": job_id, "status": "render_failed"}
+    except PdfConversionBusyError as exc:
+        reset_render_for_retry(job_id, exc)
+        _record_export_stage("render", "retry", started)
+        logger.info(
+            "quotation_export_render_capacity_busy",
+            extra={
+                "export_job_id": job_id,
+                "duration_ms": _duration_ms(started),
+            },
+        )
+        raise self.retry(
+            args=(job_id, failure_retries),
+            exc=exc,
+            countdown=settings.QUOTATION_RENDER_RETRY_SECONDS,
+        )
     except PdfConversionError as exc:
-        if exc.retryable and self.request.retries < self.max_retries:
+        if exc.retryable and failure_retries < 1:
             reset_render_for_retry(job_id, exc)
             _record_export_stage("render", "retry", started)
             raise self.retry(
+                args=(job_id, failure_retries + 1),
                 exc=exc,
                 countdown=10 * (2**self.request.retries),
             )
@@ -224,10 +246,11 @@ def render_quotation_export_task(self, job_id: str):
         SoftTimeLimitExceeded,
         TimeoutError,
     ) as exc:
-        if self.request.retries < self.max_retries:
+        if failure_retries < 1:
             reset_render_for_retry(job_id, exc)
             _record_export_stage("render", "retry", started)
             raise self.retry(
+                args=(job_id, failure_retries + 1),
                 exc=exc,
                 countdown=10 * (2**self.request.retries),
             )

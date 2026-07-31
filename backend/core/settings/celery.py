@@ -48,6 +48,8 @@ CELERY_TASK_QUEUES = (
     Queue(CELERY_TASK_DEFAULT_QUEUE, routing_key=CELERY_TASK_DEFAULT_QUEUE),
     Queue("quotation_sync", routing_key="quotation_sync"),
     Queue("quotation_render", routing_key="quotation_render"),
+    Queue("quotation_excel", routing_key="quotation_excel"),
+    Queue("quotation_pdf", routing_key="quotation_pdf"),
     Queue("quotation_ocr", routing_key="quotation_ocr"),
 )
 CELERY_TASK_DEFAULT_ROUTING_KEY = CELERY_TASK_DEFAULT_QUEUE
