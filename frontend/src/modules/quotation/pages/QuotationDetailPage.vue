@@ -6,7 +6,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import QuotationDetails from '../components/QuotationDetails.vue'
-import { listQuotations, updateQuotation } from '../api/quotations'
+import { getQuotation, updateQuotation } from '../api/quotations'
 import { isFeishuLinkOnlyUpdate } from '../utils/feishuLinkState'
 import { useAuthStore } from '../stores/auth'
 import type { Quotation } from '../types'
@@ -25,9 +25,7 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const all = await listQuotations()
-    quote.value = all.find((item) => item.id === String(route.params.id)) || null
-    if (!quote.value) error.value = '未找到该报价单'
+    quote.value = await getQuotation(String(route.params.id))
   } catch (err) {
     error.value = err instanceof Error ? err.message : '加载失败'
     quote.value = null

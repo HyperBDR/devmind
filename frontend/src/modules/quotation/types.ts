@@ -100,6 +100,7 @@ export interface Quotation {
   issuerSignature?: string;
   status: QuoteStatus;
   items: QuotationLineItem[];
+  itemCount?: number;
   softwareSubtotal: number;
   othersSubtotal: number;
   subtotalBeforeVat: number;

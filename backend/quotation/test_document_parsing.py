@@ -837,7 +837,7 @@ class DocumentParseEndpointTests(TestCase):
             list_response.data["items"][0]["quote_no"], "CloudX160726"
         )
         self.assertEqual(
-            len(list_response.data["items"][0]["items"]),
+            list_response.data["items"][0]["item_count"],
             2,
         )
 
@@ -1295,7 +1295,7 @@ class DocumentParseEndpointTests(TestCase):
                     "status": item["status"],
                     "source_type": item["source_type"],
                     "source_document_type": item["source_document_type"],
-                    "item_count": len(item["items"]),
+                    "item_count": item["item_count"],
                 }
                 for item in list_response.data["items"]
             },

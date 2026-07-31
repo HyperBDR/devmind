@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import {
   Download,
   ExternalLink,
@@ -25,6 +32,7 @@ import {
   waitForQuotationExport,
   type QuotationExportStatus,
 } from '../api/exports'
+import type { QuotationListParams } from '../api/quotations'
 import type { Quotation, QuoteStatus } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
@@ -41,6 +49,10 @@ type FeishuUploadFormat = 'excel' | 'pdf'
 const props = defineProps<{
   quotations: Quotation[]
   loading?: boolean
+  page: number
+  pageSize: 10 | 20 | 50
+  total: number
+  totalPages: number
   currentUser?: {
     name: string
     title: string
@@ -57,6 +69,7 @@ const emit = defineEmits<{
   reconcileFeishuLinks: []
   editQuote: [id: string]
   toast: [message: string, type?: 'success' | 'info' | 'error']
+  queryChange: [query: QuotationListParams]
 }>()
 
 const { t, quoteStatusLabel, statusFilterOptions } = useQuotationI18n()
@@ -77,6 +90,11 @@ const sourceFilterOptions = computed(() => [
     label: t('quotation.pages.list.sourceDocumentImport'),
   },
 ])
+
+const pageSizeOptions = [10, 20, 50].map((value) => ({
+  value: String(value),
+  label: String(value),
+}))
 
 const tableStatusValues: QuoteStatus[] = [
   'Draft',
@@ -114,6 +132,8 @@ const pendingFeishuOpen = ref<{
   documentId: string
 } | null>(null)
 let reconcileTimer: number | undefined
+let searchTimer: number | undefined
+let suppressFilterWatch = false
 
 function scheduleFeishuLinkReconcile() {
   window.clearTimeout(reconcileTimer)
@@ -220,6 +240,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handlePageVisible)
   window.removeEventListener('focus', handlePageVisible)
   window.clearTimeout(reconcileTimer)
+  window.clearTimeout(searchTimer)
 })
 
 function currencySymbol(currency: Quotation['currency']): string {
@@ -445,14 +466,76 @@ async function retryFailedUpload(quote: Quotation) {
   }
 }
 
-function handleResetFilters() {
+function listQuery(
+  page = props.page,
+  pageSize = props.pageSize,
+): QuotationListParams {
+  return {
+    page,
+    pageSize,
+    search: searchText.value.trim() || undefined,
+    status:
+      selectedStatus.value === 'ALL'
+        ? undefined
+        : (selectedStatus.value as QuoteStatus),
+    productLine:
+      selectedProductLine.value === 'ALL'
+        ? undefined
+        : selectedProductLine.value,
+    sourceType:
+      selectedSource.value === 'ALL'
+        ? undefined
+        : (selectedSource.value as 'manual' | 'document_import'),
+    createdFrom: createdFrom.value || undefined,
+    createdTo: createdTo.value || undefined,
+  }
+}
+
+function requestPage(page: number) {
+  if (page < 1 || page > Math.max(props.totalPages, 1)) return
+  emit('queryChange', listQuery(page))
+}
+
+function handlePageSizeChange(selectedValue: string) {
+  const value = Number(selectedValue)
+  if (![10, 20, 50].includes(value)) return
+  emit('queryChange', listQuery(1, value as 10 | 20 | 50))
+}
+
+async function handleResetFilters() {
+  suppressFilterWatch = true
   searchText.value = ''
   selectedStatus.value = 'ALL'
   selectedProductLine.value = 'ALL'
   selectedSource.value = 'ALL'
   createdFrom.value = ''
   createdTo.value = ''
+  await nextTick()
+  suppressFilterWatch = false
+  emit('queryChange', listQuery(1))
 }
+
+watch(searchText, () => {
+  if (suppressFilterWatch) return
+  window.clearTimeout(searchTimer)
+  searchTimer = window.setTimeout(() => {
+    emit('queryChange', listQuery(1))
+  }, 300)
+})
+
+watch(
+  [
+    selectedStatus,
+    selectedProductLine,
+    selectedSource,
+    createdFrom,
+    createdTo,
+  ],
+  () => {
+    if (suppressFilterWatch) return
+    emit('queryChange', listQuery(1))
+  },
+)
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
@@ -524,36 +607,19 @@ const hasActiveFilters = computed(
     createdTo.value !== '',
 )
 
-const filteredQuotations = computed(() => {
-  return props.quotations.filter((q) => {
-    const matchesText =
-      q.quoteNo.toLowerCase().includes(searchText.value.toLowerCase()) ||
-      q.projectName.toLowerCase().includes(searchText.value.toLowerCase()) ||
-      q.clientCompany.toLowerCase().includes(searchText.value.toLowerCase()) ||
-      q.contactPerson.toLowerCase().includes(searchText.value.toLowerCase()) ||
-      q.email.toLowerCase().includes(searchText.value.toLowerCase())
-
-    const matchesStatus = selectedStatus.value === 'ALL' || q.status === selectedStatus.value
-    const quoteProductLine = (q.productLine || '').trim() || 'BDR'
-    const matchesProductLine =
-      selectedProductLine.value === 'ALL' ||
-      quoteProductLine === selectedProductLine.value
-    const matchesSource =
-      selectedSource.value === 'ALL' ||
-      (q.sourceType || 'manual') === selectedSource.value
-    const quoteDate = q.createdAt.substring(0, 10)
-    const matchesCreatedFrom = !createdFrom.value || quoteDate >= createdFrom.value
-    const matchesCreatedTo = !createdTo.value || quoteDate <= createdTo.value
-
-    return (
-      matchesText &&
-      matchesStatus &&
-      matchesProductLine &&
-      matchesSource &&
-      matchesCreatedFrom &&
-      matchesCreatedTo
-    )
-  })
+const rangeStart = computed(() =>
+  props.total ? (props.page - 1) * props.pageSize + 1 : 0,
+)
+const rangeEnd = computed(() =>
+  Math.min(props.page * props.pageSize, props.total),
+)
+const pageNumbers = computed(() => {
+  const totalPages = props.totalPages
+  if (totalPages <= 5) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1)
+  }
+  const start = Math.max(1, Math.min(props.page - 2, totalPages - 4))
+  return Array.from({ length: 5 }, (_, index) => start + index)
 })
 
 function displayContact(quote: Quotation): string {
@@ -674,7 +740,7 @@ function displayTotal(quote: Quotation): string {
 
           <div class="flex items-center gap-1 md:col-span-2 xl:col-span-1">
             <div class="flex h-10 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
-              {{ t('quotation.pages.list.filterResultsCount', { count: filteredQuotations.length }) }}
+              {{ t('quotation.pages.list.filterResultsCount', { count: total }) }}
             </div>
             <button
               type="button"
@@ -733,14 +799,19 @@ function displayTotal(quote: Quotation): string {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 text-sm">
-            <tr v-if="filteredQuotations.length === 0">
+            <tr v-if="loading">
+              <td colspan="8" class="py-12 text-center text-dm-text-tertiary">
+                {{ t('quotation.pages.list.syncing') }}
+              </td>
+            </tr>
+            <tr v-else-if="quotations.length === 0">
               <td colspan="8" class="py-12 text-center text-dm-text-tertiary">
                 {{ t('quotation.pages.list.emptyResults') }}
               </td>
             </tr>
             <template v-else>
             <tr
-              v-for="quote in filteredQuotations"
+              v-for="quote in quotations"
               :key="quote.id"
               class="hover:bg-[#fafafa] transition duration-150"
             >
@@ -764,7 +835,11 @@ function displayTotal(quote: Quotation): string {
                     {{ quote.projectName }}
                   </p>
                   <p class="text-xs text-dm-text-tertiary font-mono mt-0.5">
-                    {{ t('quotation.common.lineItemCount', { count: quote.items.length }) }}
+                    {{
+                      t('quotation.common.lineItemCount', {
+                        count: quote.itemCount ?? quote.items.length,
+                      })
+                    }}
                   </p>
                 </div>
               </td>
@@ -928,6 +1003,61 @@ function displayTotal(quote: Quotation): string {
             </template>
           </tbody>
         </table>
+      </div>
+      <div
+        class="flex flex-col gap-3 border-t border-dm-border-light px-4 py-3 text-sm text-dm-text-tertiary sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>共 {{ total }} 条</span>
+          <span>显示 {{ rangeStart }}–{{ rangeEnd }} 条</span>
+          <span>共 {{ totalPages }} 页</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <label class="flex items-center gap-2">
+            <span>每页</span>
+            <FormSelect
+              :value="String(pageSize)"
+              class-name="w-20"
+              trigger-class-name="h-8 rounded-md border-dm-border bg-white px-2 text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              panel-class-name="bottom-full top-auto mb-1 mt-0"
+              :options="pageSizeOptions"
+              test-id="quotation-page-size"
+              @change="handlePageSizeChange"
+            />
+            <span>条</span>
+          </label>
+          <button
+            type="button"
+            class="h-8 rounded-md border border-dm-border px-2.5 disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="page <= 1 || loading"
+            @click="requestPage(page - 1)"
+          >
+            上一页
+          </button>
+          <button
+            v-for="pageNumber in pageNumbers"
+            :key="pageNumber"
+            type="button"
+            class="h-8 min-w-8 rounded-md border px-2"
+            :class="
+              pageNumber === page
+                ? 'border-dm-primary bg-dm-primary text-white'
+                : 'border-dm-border bg-white text-dm-text-secondary'
+            "
+            :disabled="loading"
+            @click="requestPage(pageNumber)"
+          >
+            {{ pageNumber }}
+          </button>
+          <button
+            type="button"
+            class="h-8 rounded-md border border-dm-border px-2.5 disabled:cursor-not-allowed disabled:opacity-40"
+            :disabled="page >= totalPages || loading || totalPages === 0"
+            @click="requestPage(page + 1)"
+          >
+            下一页
+          </button>
+        </div>
       </div>
     </div>
 

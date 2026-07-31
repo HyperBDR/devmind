@@ -17,7 +17,7 @@ onMounted(async () => {
       listQuotations(),
       listImportedFeishuDocuments().catch(() => []),
     ])
-    quoteCount.value = quotes.length
+    quoteCount.value = quotes.total
     importCount.value = docs.length
   } finally {
     loading.value = false

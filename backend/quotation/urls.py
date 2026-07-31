@@ -8,6 +8,11 @@ from quotation.views.catalog import (
     LegacyCatalogImportView,
     UserQuotationCatalogView,
 )
+from quotation.views.dashboard import (
+    DashboardAnalyticsView,
+    DashboardRecentView,
+    DashboardSummaryView,
+)
 from quotation.views.documents import (
     DocumentDownloadView,
     DocumentListView,
@@ -41,11 +46,15 @@ from quotation.views.feishu import (
 from quotation.views.health import ExportMetricsView, StorageMetricsView
 from quotation.views.quotations import (
     QuotationDetailView,
+    QuotationFormContextView,
     QuotationGenerateView,
     QuotationListCreateView,
 )
 
 urlpatterns = [
+    path("dashboard/summary", DashboardSummaryView.as_view()),
+    path("dashboard/analytics", DashboardAnalyticsView.as_view()),
+    path("dashboard/recent", DashboardRecentView.as_view()),
     path("metrics/exports", ExportMetricsView.as_view()),
     path("metrics/storage", StorageMetricsView.as_view()),
     path("templates", QuotationTemplateListCreateView.as_view()),
@@ -55,6 +64,7 @@ urlpatterns = [
     path("catalog/import-legacy", LegacyCatalogImportView.as_view()),
     path("catalog/bootstrap", CatalogBootstrapView.as_view()),
     path("quotations", QuotationListCreateView.as_view()),
+    path("quotations/form-context", QuotationFormContextView.as_view()),
     path("quotations/<str:quotation_id>", QuotationDetailView.as_view()),
     path(
         "quotations/<str:quotation_id>/generate",

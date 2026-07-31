@@ -82,6 +82,64 @@ interface ApiQuotation {
   versions?: ApiQuotationVersion[];
 }
 
+interface ApiQuotationListItem {
+  id: string;
+  quote_no: string;
+  display_quote_no: string;
+  project_name: string;
+  client_company: string;
+  contact_person: string;
+  created_at: string;
+  currency: string;
+  grand_total: number | string;
+  status: string;
+  source_type: 'manual' | 'document_import';
+  source_document_type?: 'excel' | 'pdf' | null;
+  product_line: string;
+  item_count: number;
+  latest_excel_document_id?: string | null;
+  latest_pdf_document_id?: string | null;
+}
+
+interface ApiQuotationFormContextItem {
+  id: string;
+  quote_no: string;
+  display_quote_no: string;
+  project_name: string;
+  client_company: string;
+  contact_person: string;
+  email: string;
+  product_line: string;
+  billing_company: string;
+  billing_contact: string;
+  billing_email: string;
+  currency: string;
+  tax_label: string;
+  issuer_contact_name: string;
+  issuer_contact_email: string;
+  created_by_email?: string | null;
+  created_at: string;
+}
+
+export interface QuotationListParams {
+  page?: number;
+  pageSize?: 10 | 20 | 50;
+  search?: string;
+  status?: Quotation['status'];
+  productLine?: string;
+  sourceType?: 'manual' | 'document_import';
+  createdFrom?: string;
+  createdTo?: string;
+}
+
+export interface QuotationListResult {
+  items: Quotation[];
+  total: number;
+  page: number;
+  pageSize: 10 | 20 | 50;
+  totalPages: number;
+}
+
 function toNumber(value: unknown): number {
   return Number(value || 0);
 }
@@ -343,6 +401,73 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
   };
 }
 
+function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
+  return {
+    id: api.id,
+    quoteNo: api.display_quote_no || api.quote_no,
+    sourceType: api.source_type || 'manual',
+    sourceDocumentType: api.source_document_type || undefined,
+    projectName: api.project_name,
+    clientCompany: api.client_company,
+    contactPerson: api.contact_person,
+    email: '',
+    productLine: api.product_line,
+    region: '',
+    industry: '',
+    salesperson: '',
+    currency: (api.currency as Quotation['currency']) || 'USD',
+    paymentTerms: '',
+    status: mapStatus(api.status),
+    items: [],
+    itemCount: Number(api.item_count || 0),
+    softwareSubtotal: 0,
+    othersSubtotal: 0,
+    subtotalBeforeVat: 0,
+    vatRate: 0,
+    vatAmount: 0,
+    grandTotal: toNumber(api.grand_total),
+    createdAt: api.created_at,
+    feishuExcelDocumentId:
+      api.latest_excel_document_id || undefined,
+    feishuPdfDocumentId: api.latest_pdf_document_id || undefined,
+  };
+}
+
+function mapApiQuotationFormContextItem(
+  api: ApiQuotationFormContextItem,
+): Quotation {
+  return {
+    id: api.id,
+    quoteNo: api.display_quote_no || api.quote_no,
+    projectName: api.project_name,
+    clientCompany: api.client_company,
+    contactPerson: api.contact_person,
+    email: api.email,
+    productLine: api.product_line,
+    billingCompany: api.billing_company,
+    billingContact: api.billing_contact,
+    billingEmail: api.billing_email,
+    region: '',
+    industry: '',
+    salesperson: api.issuer_contact_name,
+    issuerContactEmail: api.issuer_contact_email,
+    createdByEmail: api.created_by_email || undefined,
+    sourceType: 'manual',
+    currency: (api.currency as Quotation['currency']) || 'USD',
+    paymentTerms: '',
+    taxLabel: api.tax_label,
+    status: 'Draft',
+    items: [],
+    softwareSubtotal: 0,
+    othersSubtotal: 0,
+    subtotalBeforeVat: 0,
+    vatRate: 0,
+    vatAmount: 0,
+    grandTotal: 0,
+    createdAt: api.created_at,
+  };
+}
+
 export function mapQuotationToCreatePayload(quote: Quotation) {
   return {
     quote_no: quote.quoteNo,
@@ -384,14 +509,44 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
   };
 }
 
-export async function listQuotations(): Promise<Quotation[]> {
-  const data = await apiRequest<{ items: ApiQuotation[]; total: number }>('/quotations?page=1&page_size=200');
-  return data.items.map(mapApiQuotation);
+export async function listQuotations(
+  params: QuotationListParams = {},
+): Promise<QuotationListResult> {
+  const query = new URLSearchParams();
+  query.set('page', String(params.page || 1));
+  query.set('page_size', String(params.pageSize || 10));
+  if (params.search?.trim()) query.set('search', params.search.trim());
+  if (params.status) query.set('status', mapStatusToApi(params.status));
+  if (params.productLine) query.set('product_line', params.productLine);
+  if (params.sourceType) query.set('source_type', params.sourceType);
+  if (params.createdFrom) query.set('created_from', params.createdFrom);
+  if (params.createdTo) query.set('created_to', params.createdTo);
+  const data = await apiRequest<{
+    items: ApiQuotationListItem[];
+    total: number;
+    page: number;
+    page_size: 10 | 20 | 50;
+    total_pages: number;
+  }>(`/quotations?${query.toString()}`);
+  return {
+    items: data.items.map(mapApiQuotationListItem),
+    total: data.total,
+    page: data.page,
+    pageSize: data.page_size,
+    totalPages: data.total_pages,
+  };
 }
 
 export async function getQuotation(quoteId: string): Promise<Quotation> {
-  const data = await apiRequest<ApiQuotation>(`/quotations/${quoteId}`)
-  return mapApiQuotation(data)
+  const data = await apiRequest<ApiQuotation>(`/quotations/${quoteId}`);
+  return mapApiQuotation(data);
+}
+
+export async function getQuotationFormContext(): Promise<Quotation[]> {
+  const data = await apiRequest<{
+    items: ApiQuotationFormContextItem[];
+  }>('/quotations/form-context');
+  return data.items.map(mapApiQuotationFormContextItem);
 }
 
 export async function createQuotation(quote: Quotation): Promise<Quotation> {

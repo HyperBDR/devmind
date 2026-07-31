@@ -19,7 +19,12 @@ import type {
   QuoteProductLine,
   Service,
 } from '../types'
-import { listQuotations, createQuotation, updateQuotation } from '../api/quotations'
+import {
+  createQuotation,
+  getQuotation,
+  getQuotationFormContext,
+  updateQuotation,
+} from '../api/quotations'
 import { useAuthStore } from '../stores/auth'
 import { clearCreateQuoteDraft } from '../utils/createDraftStorage'
 import { loadProductLineOptions, saveCustomProductLineOptions } from '../utils/quotationNumbering'
@@ -44,7 +49,13 @@ const currentUser = computed(() => auth.currentUser || undefined)
 
 onMounted(async () => {
   try {
-    quotations.value = await listQuotations()
+    const editId =
+      typeof route.query.edit === 'string' ? route.query.edit : null
+    const [context, detail] = await Promise.all([
+      getQuotationFormContext(),
+      editId ? getQuotation(editId) : Promise.resolve(null),
+    ])
+    quotations.value = detail ? [detail, ...context] : context
   } catch {
     quotations.value = []
   }

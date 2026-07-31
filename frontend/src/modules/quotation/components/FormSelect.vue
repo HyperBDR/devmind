@@ -19,6 +19,7 @@ const props = withDefaults(
     disabled?: boolean
     className?: string
     triggerClassName?: string
+    panelClassName?: string
     testId?: string
     placeholder?: string
   }>(),
@@ -26,6 +27,7 @@ const props = withDefaults(
     disabled: false,
     className: '',
     triggerClassName: '',
+    panelClassName: '',
     placeholder: '请选择',
   },
 )
@@ -74,7 +76,11 @@ function selectOption(option: FormSelectOption) {
       <span class="block truncate">{{ displayLabel }}</span>
     </button>
 
-    <DropdownPanel v-if="open && !disabled" :test-id="testId ? `${testId}-menu` : undefined">
+    <DropdownPanel
+      v-if="open && !disabled"
+      :test-id="testId ? `${testId}-menu` : undefined"
+      :class-name="panelClassName"
+    >
       <li v-for="option in options" :key="option.value">
         <DropdownOption
           :selected="option.value === currentValue"
