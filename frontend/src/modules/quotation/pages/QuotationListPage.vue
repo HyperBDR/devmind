@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { listQuotations, updateQuotation, deleteQuotation } from '../api/quotations'
+import {
+  deleteQuotation,
+  getQuotation,
+  listQuotations,
+  type QuotationListParams,
+  updateQuotation,
+} from '../api/quotations'
 import ImportedDocumentsPage from '../components/ImportedDocumentsPage.vue'
 import QuotationList from '../components/QuotationList.vue'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from '../utils/feishuLinkState'
@@ -13,6 +19,9 @@ const auth = useAuthStore()
 
 const quotations = ref<Quotation[]>([])
 const loading = ref(false)
+const query = ref<QuotationListParams>({ page: 1, pageSize: 10 })
+const total = ref(0)
+const totalPages = ref(0)
 const toast = ref<{ message: string; type: string } | null>(null)
 let toastTimer: number | undefined
 
@@ -34,19 +43,32 @@ function showToast(message: string, type: 'success' | 'info' | 'error' = 'info')
   }, 4000)
 }
 
-async function load() {
+let requestId = 0
+
+async function load(nextQuery: QuotationListParams = query.value) {
+  const currentRequest = ++requestId
+  query.value = { ...nextQuery }
   loading.value = true
   try {
-    quotations.value = await listQuotations()
-    const staleLinks = await reconcileFeishuQuotationLinks(quotations.value)
-    if (staleLinks) {
-      quotations.value = await listQuotations()
+    const result = await listQuotations(nextQuery)
+    if (currentRequest !== requestId) return
+    quotations.value = result.items
+    total.value = result.total
+    totalPages.value = result.totalPages
+    query.value = {
+      ...nextQuery,
+      page: result.page,
+      pageSize: result.pageSize,
     }
   } catch (err: unknown) {
     showToast(err instanceof Error ? err.message : '加载报价单失败', 'error')
-    quotations.value = []
+    if (currentRequest === requestId) {
+      quotations.value = []
+      total.value = 0
+      totalPages.value = 0
+    }
   } finally {
-    loading.value = false
+    if (currentRequest === requestId) loading.value = false
   }
 }
 
@@ -79,13 +101,18 @@ function handleEditQuote(id: string) {
 }
 
 async function handleDeleteQuote(id: string) {
-  const previous = quotations.value
-  quotations.value = quotations.value.filter((q) => q.id !== id)
   try {
     await deleteQuotation(id)
+    const currentPage = query.value.page || 1
+    await load({
+      ...query.value,
+      page:
+        quotations.value.length === 1 && currentPage > 1
+          ? currentPage - 1
+          : currentPage,
+    })
     showToast('报价单已安全从系统抹除！', 'info')
   } catch (err: unknown) {
-    quotations.value = previous
     showToast(err instanceof Error ? err.message : '删除失败', 'error')
   }
 }
@@ -93,7 +120,7 @@ async function handleDeleteQuote(id: string) {
 async function handleReconcileFeishuLinks() {
   const staleLinks = await reconcileFeishuQuotationLinks(quotations.value)
   if (staleLinks) {
-    quotations.value = await listQuotations()
+    await load(query.value)
   }
 }
 
@@ -129,7 +156,13 @@ function handleUpdateQuoteStatus(
     return
   }
 
-  void updateQuotation(nextQuote, { notes: computedNotes || undefined })
+  void getQuotation(id)
+    .then((detail) =>
+      updateQuotation(
+        { ...detail, ...updatedFields },
+        { notes: computedNotes || undefined },
+      ),
+    )
     .then((saved) => {
       quotations.value = quotations.value.map((q) =>
         q.id === id ? saved : q,
@@ -190,6 +223,11 @@ function handleUpdateQuoteStatus(
       <QuotationList
         v-else
         :quotations="quotations"
+        :loading="loading"
+        :page="query.page || 1"
+        :page-size="query.pageSize || 10"
+        :total="total"
+        :total-pages="totalPages"
         :current-user="currentUser"
         @view-quote="handleViewQuote"
         @delete-quote="handleDeleteQuote"
@@ -198,6 +236,7 @@ function handleUpdateQuoteStatus(
         @reconcile-feishu-links="handleReconcileFeishuLinks"
         @edit-quote="handleEditQuote"
         @toast="showToast"
+        @query-change="load"
       />
 
       <div class="hidden" aria-hidden="true">

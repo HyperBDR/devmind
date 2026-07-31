@@ -5,6 +5,7 @@ import uuid
 from django.conf import settings
 from django.db import models, router, transaction
 from django.utils import timezone
+
 from hyperbdr_dashboard.encryption import encryption_service
 
 
@@ -202,6 +203,28 @@ class Quotation(TimeStampedModel):
     class Meta:
         db_table = "quotations"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["currency", "status", "created_at"],
+                name="quote_dash_curr_stat_created",
+            ),
+            models.Index(
+                fields=["created_by_email", "currency", "status"],
+                name="quote_dash_owner_curr_stat",
+            ),
+            models.Index(
+                fields=["-created_at", "-id"],
+                name="quote_list_created_id",
+            ),
+            models.Index(
+                fields=["created_by_email", "-created_at", "-id"],
+                name="quote_list_owner_created",
+            ),
+            models.Index(
+                fields=["product_line", "-created_at", "-id"],
+                name="quote_list_product_created",
+            ),
+        ]
 
     def delete(self, using=None, keep_parents=False):
         """Lock this quotation before Django collects related artifacts."""
@@ -267,6 +290,12 @@ class QuotationVersion(models.Model):
         db_table = "quotation_versions"
         unique_together = [("quotation", "version_no")]
         ordering = ["version_no"]
+        indexes = [
+            models.Index(
+                fields=["quotation", "status", "created_at"],
+                name="quote_ver_quote_stat_created",
+            ),
+        ]
 
 
 class QuotationTemplate(TimeStampedModel):
@@ -430,6 +459,12 @@ class DocumentAsset(models.Model):
     class Meta:
         db_table = "document_assets"
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["quotation", "doc_type", "-created_at", "-id"],
+                name="quote_doc_quote_type_created",
+            ),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["source", "feishu_file_token"],
@@ -657,6 +692,17 @@ class DocumentReplica(TimeStampedModel):
     class Meta:
         db_table = "quotation_document_replicas"
         ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=[
+                    "asset",
+                    "sync_status",
+                    "revoked_at",
+                    "-version",
+                ],
+                name="quote_replica_asset_status",
+            ),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["asset", "connection", "version"],

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Line, Pie } from 'vue-chartjs'
 import {
   ArcElement,
@@ -16,15 +16,17 @@ import {
   type Plugin,
   type TooltipItem,
 } from 'chart.js'
+import {
+  getDashboardAnalytics,
+  getDashboardRecent,
+  getDashboardSummary,
+  type DashboardAnalytics,
+  type DashboardRecentQuotation,
+  type DashboardSummary,
+} from '../api/dashboard'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 import type { Quotation } from '../types'
 import StatusBadge from './StatusBadge.vue'
-import {
-  isChartQuoteStatus,
-  isExpiringSoonStatus,
-  isOpenQuoteStatus,
-  isWonQuoteStatus,
-} from '../utils/quoteStatus'
 import {
   TrendingUp,
   Users,
@@ -48,11 +50,6 @@ ChartJS.register(
 
 type TrendGrain = 'weekly' | 'monthly'
 
-const TREND_WEEK_COUNT = 8
-const TREND_MONTH_COUNT = 6
-const QUOTE_BREAKDOWN_MIN_SHARE = 2
-const QUOTE_BREAKDOWN_MAX_SLICES = 8
-
 const QUOTE_BREAKDOWN_COLORS = [
   '#2b9da3',
   '#389e0d',
@@ -64,18 +61,18 @@ const QUOTE_BREAKDOWN_COLORS = [
   '#d6a21f',
 ]
 
-const props = defineProps<{
-  quotations: Quotation[]
-}>()
-
 const emit = defineEmits<{
   viewQuote: [id: string]
   navigateToTab: [tab: string]
 }>()
 
-const { t, locale, quoteStatusLabel } = useQuotationI18n()
+const { t, locale } = useQuotationI18n()
 
 const trendGrain = ref<TrendGrain>('monthly')
+const dashboardCurrency = ref('USD')
+const summary = ref<DashboardSummary | null>(null)
+const analytics = ref<DashboardAnalytics | null>(null)
+const recentQuotes = ref<DashboardRecentQuotation[]>([])
 
 function currencySymbol(currency: Quotation['currency']): string {
   if (currency === 'USD') return t('quotation.common.currencyUsd')
@@ -83,58 +80,33 @@ function currencySymbol(currency: Quotation['currency']): string {
   return t('quotation.common.currencyCny')
 }
 
-const signedAmount = computed(() =>
-  props.quotations
-    .filter((q) => isWonQuoteStatus(q.status))
-    .reduce((sum, q) => sum + q.grandTotal, 0),
-)
-
-const activeForRate = computed(() =>
-  props.quotations.filter(
-    (q) => isOpenQuoteStatus(q.status) || isWonQuoteStatus(q.status),
-  ),
-)
-
-const successRate = computed(() =>
-  activeForRate.value.length > 0
-    ? Math.round(
-        (props.quotations.filter((q) => isWonQuoteStatus(q.status)).length /
-          activeForRate.value.length) *
-          100,
-      )
-    : 0,
-)
-
-const expiringSoonCount = computed(
-  () => props.quotations.filter((q) => isExpiringSoonStatus(q.status)).length,
-)
-
-const activeCount = computed(
-  () => props.quotations.filter((q) => isOpenQuoteStatus(q.status)).length,
-)
-
-const draftCount = computed(
-  () => props.quotations.filter((q) => q.status === 'Draft').length,
-)
+const signedAmount = computed(() => summary.value?.monthWonAmount || 0)
+const signedAmountLabel = computed(() => {
+  const currency = summary.value?.currency || 'USD'
+  return `${currencySymbol(currency)}${signedAmount.value.toLocaleString()}`
+})
+const successRate = computed(() => summary.value?.successRate || 0)
+const expiringSoonCount = computed(() => summary.value?.followUpCount || 0)
+const activeCount = computed(() => summary.value?.activeCount || 0)
+const draftCount = computed(() => summary.value?.draftCount || 0)
 
 const quoteBreakdownData = computed(() =>
-  props.quotations
-    .filter((quote) => quote.grandTotal > 0)
-    .sort((a, b) => b.grandTotal - a.grandTotal)
-    .map((quote, index) => {
-      const amountLabel = `${currencySymbol(quote.currency)}${quote.grandTotal.toLocaleString()}`
-      return {
-        key: quote.id,
-        quoteNo: quote.quoteNo,
-        value: quote.grandTotal,
-        color: QUOTE_BREAKDOWN_COLORS[index % QUOTE_BREAKDOWN_COLORS.length],
-        amountLabel,
-        currency: quote.currency,
-        share: 0,
-        status: quote.status,
-        label: `${quote.quoteNo} · ${amountLabel}`,
-      }
-    }),
+  (analytics.value?.amountBreakdown || []).map((quote, index) => {
+    const currency = analytics.value?.currency || 'USD'
+    const amountLabel =
+      `${currencySymbol(currency)}${quote.amount.toLocaleString()}`
+    return {
+      key: quote.quotationId,
+      quoteNo: quote.quoteNo,
+      value: quote.amount,
+      color: QUOTE_BREAKDOWN_COLORS[index % QUOTE_BREAKDOWN_COLORS.length],
+      amountLabel,
+      currency,
+      share: 0,
+      status: quote.status,
+      label: `${quote.quoteNo} · ${amountLabel}`,
+    }
+  }),
 )
 
 const quoteBreakdownTotal = computed(() =>
@@ -147,10 +119,7 @@ const quoteBreakdownChartRows = computed(() => {
     ...row,
     share: (row.value / total) * 100,
   }))
-  const visible = rows
-    .filter((row) => row.share >= QUOTE_BREAKDOWN_MIN_SHARE)
-    .slice(0, QUOTE_BREAKDOWN_MAX_SLICES)
-  return visible.length ? visible : rows.slice(0, 1)
+  return rows
 })
 
 const quoteBreakdownRotation = computed(() => {
@@ -320,148 +289,32 @@ const quoteBreakdownPieOptions = computed<ChartOptions<'pie'>>(() => ({
   },
 }))
 
-function parseQuoteDate(value?: string): Date | null {
-  if (!value) return null
-  const normalized = value.includes('T')
-    ? value
-    : value.replace(' ', 'T')
-  const date = new Date(normalized)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-function startOfWeekMonday(date: Date): Date {
-  const next = new Date(date)
-  next.setHours(0, 0, 0, 0)
-  const day = next.getDay()
-  const diff = (day + 6) % 7
-  next.setDate(next.getDate() - diff)
-  return next
-}
-
-function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
-
-function periodKey(date: Date, grain: TrendGrain): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  if (grain === 'monthly') return `${year}-${month}`
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function formatPeriodLabel(date: Date, grain: TrendGrain): string {
-  const month = String(date.getMonth() + 1).padStart(2, '0')
+function formatPeriodLabel(period: string, grain: TrendGrain): string {
+  const [, month = '', day = ''] = period.split('-')
   if (grain === 'monthly') {
     if (String(locale.value || '').startsWith('zh')) {
       return t('quotation.pages.dashboard.chartTrendMonthLabel', {
         month: Number(month),
       })
     }
+    const date = new Date(`${period}-01T00:00:00`)
     return date.toLocaleString('en', { month: 'short' })
   }
-  const day = String(date.getDate()).padStart(2, '0')
   return `${month}-${day}`
 }
 
-/**
- * Prefer first Accepted version timestamp; else updatedAt; else createdAt.
- */
-function resolveWonAt(quote: Quotation): Date | null {
-  if (!isWonQuoteStatus(quote.status)) return null
-  const acceptedVersions = (quote.versions || [])
-    .filter((version) => version.status === 'Accepted')
-    .map((version) => parseQuoteDate(version.updateTime))
-    .filter((date): date is Date => Boolean(date))
-    .sort((a, b) => a.getTime() - b.getTime())
-  if (acceptedVersions[0]) return acceptedVersions[0]
-  return (
-    parseQuoteDate(quote.updatedAt) || parseQuoteDate(quote.createdAt)
-  )
-}
-
-const trendPeriods = computed(() => {
-  const grain = trendGrain.value
-  const periods: Array<{ key: string; label: string; start: Date }> = []
-
-  if (grain === 'monthly') {
-    const current = startOfMonth(new Date())
-    for (let index = TREND_MONTH_COUNT - 1; index >= 0; index -= 1) {
-      const start = new Date(
-        current.getFullYear(),
-        current.getMonth() - index,
-        1,
-      )
-      periods.push({
-        key: periodKey(start, grain),
-        label: formatPeriodLabel(start, grain),
-        start,
-      })
-    }
-    return periods
-  }
-
-  const latestMonday = startOfWeekMonday(new Date())
-  for (let index = TREND_WEEK_COUNT - 1; index >= 0; index -= 1) {
-    const start = new Date(latestMonday)
-    start.setDate(latestMonday.getDate() - index * 7)
-    periods.push({
-      key: periodKey(start, grain),
-      label: formatPeriodLabel(start, grain),
-      start,
-    })
-  }
-  return periods
-})
+const trendPeriods = computed(() =>
+  (analytics.value?.trends[trendGrain.value] || []).map((row) => ({
+    key: row.period,
+    label: formatPeriodLabel(row.period, trendGrain.value),
+  })),
+)
 
 const trendSeries = computed(() => {
-  const grain = trendGrain.value
-  const createdMap = new Map<string, number>()
-  const wonMap = new Map<string, number>()
-  trendPeriods.value.forEach((period) => {
-    createdMap.set(period.key, 0)
-    wonMap.set(period.key, 0)
-  })
-
-  const firstStart = trendPeriods.value[0]?.start
-  if (!firstStart) {
-    return { created: [] as number[], won: [] as number[] }
-  }
-
-  props.quotations.forEach((quote) => {
-    if (!isChartQuoteStatus(quote.status)) return
-
-    const createdAt = parseQuoteDate(quote.createdAt)
-    if (createdAt && createdAt >= firstStart) {
-      const bucketStart =
-        grain === 'monthly'
-          ? startOfMonth(createdAt)
-          : startOfWeekMonday(createdAt)
-      const key = periodKey(bucketStart, grain)
-      if (createdMap.has(key)) {
-        createdMap.set(
-          key,
-          (createdMap.get(key) || 0) + (quote.grandTotal || 0),
-        )
-      }
-    }
-
-    const wonAt = resolveWonAt(quote)
-    if (wonAt && wonAt >= firstStart) {
-      const bucketStart =
-        grain === 'monthly' ? startOfMonth(wonAt) : startOfWeekMonday(wonAt)
-      const key = periodKey(bucketStart, grain)
-      if (wonMap.has(key)) {
-        wonMap.set(key, (wonMap.get(key) || 0) + (quote.grandTotal || 0))
-      }
-    }
-  })
-
+  const rows = analytics.value?.trends[trendGrain.value] || []
   return {
-    created: trendPeriods.value.map(
-      (period) => createdMap.get(period.key) || 0,
-    ),
-    won: trendPeriods.value.map((period) => wonMap.get(period.key) || 0),
+    created: rows.map((row) => row.createdAmount),
+    won: rows.map((row) => row.wonAmount),
   }
 })
 
@@ -527,7 +380,8 @@ const trendLineOptions = computed<ChartOptions<'line'>>(() => ({
       callbacks: {
         label: (item: TooltipItem<'line'>) => {
           const value = Number(item.raw) || 0
-          return `${item.dataset.label}: ¥${value.toLocaleString()}`
+          const symbol = currencySymbol(analytics.value?.currency || 'USD')
+          return `${item.dataset.label}: ${symbol}${value.toLocaleString()}`
         },
       },
     },
@@ -565,15 +419,6 @@ const trendLineOptions = computed<ChartOptions<'line'>>(() => ({
   },
 }))
 
-const recentQuotes = computed(() =>
-  [...props.quotations]
-    .sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-    )
-    .slice(0, 5),
-)
-
 function formatRecentQuoteTime(value: string): string {
   const match = String(value || '').match(
     /^\d{4}-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/,
@@ -589,6 +434,32 @@ function formatRecentQuoteTime(value: string): string {
 function setTrendGrain(grain: TrendGrain) {
   trendGrain.value = grain
 }
+
+onMounted(async () => {
+  await Promise.all([
+    getDashboardSummary(dashboardCurrency.value)
+      .then((data) => {
+        summary.value = data
+      })
+      .catch((error) => {
+        console.error('Unable to load dashboard summary', error)
+      }),
+    getDashboardAnalytics(dashboardCurrency.value)
+      .then((data) => {
+        analytics.value = data
+      })
+      .catch((error) => {
+        console.error('Unable to load dashboard analytics', error)
+      }),
+    getDashboardRecent(5)
+      .then((data) => {
+        recentQuotes.value = data
+      })
+      .catch((error) => {
+        console.error('Unable to load recent quotations', error)
+      }),
+  ])
+})
 </script>
 
 <template>
@@ -626,7 +497,7 @@ function setTrendGrain(grain: TrendGrain) {
             {{ t('quotation.pages.dashboard.kpiRevenueLabel') }}
           </span>
           <div class="font-mono text-2xl font-semibold text-dm-text">
-            ¥{{ signedAmount.toLocaleString() }}
+            {{ signedAmountLabel }}
           </div>
           <div class="flex items-center gap-1 text-xs font-medium text-emerald-500">
             <TrendingUp class="h-3 w-3" />

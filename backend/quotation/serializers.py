@@ -5,6 +5,8 @@ from urllib.parse import quote, urlparse
 
 from django.conf import settings
 from django.db.models import Q
+from rest_framework import serializers
+
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
@@ -17,7 +19,68 @@ from quotation.models import (
 )
 from quotation.permissions import is_quotation_admin
 from quotation.services.storage_control import remote_document_reference
-from rest_framework import serializers
+
+
+class DashboardCurrencyQuerySerializer(serializers.Serializer):
+    """Validate the currency used by dashboard amount aggregates."""
+
+    currency = serializers.RegexField(
+        regex=r"^[A-Z0-9]{3,10}$",
+        default="USD",
+        required=False,
+    )
+
+
+class DashboardRecentQuerySerializer(serializers.Serializer):
+    """Validate the bounded recent quotation list size."""
+
+    limit = serializers.IntegerField(
+        default=5,
+        max_value=20,
+        min_value=1,
+        required=False,
+    )
+
+
+class QuotationListQuerySerializer(serializers.Serializer):
+    """Validate quotation list pagination and database filters."""
+
+    search = serializers.CharField(
+        allow_blank=True,
+        default="",
+        max_length=255,
+        required=False,
+        trim_whitespace=True,
+    )
+    status = serializers.ChoiceField(
+        choices=Quotation._meta.get_field("status").choices,
+        required=False,
+    )
+    product_line = serializers.CharField(
+        max_length=40,
+        required=False,
+    )
+    source_type = serializers.ChoiceField(
+        choices=Quotation._meta.get_field("source_type").choices,
+        required=False,
+    )
+    created_from = serializers.DateField(required=False)
+    created_to = serializers.DateField(required=False)
+    page = serializers.IntegerField(default=1, min_value=1, required=False)
+    page_size = serializers.ChoiceField(
+        choices=(10, 20, 50),
+        default=10,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        created_from = attrs.get("created_from")
+        created_to = attrs.get("created_to")
+        if created_from and created_to and created_from > created_to:
+            raise serializers.ValidationError(
+                {"created_to": "must be on or after created_from"}
+            )
+        return attrs
 
 
 class CatalogObjectListField(serializers.ListField):
@@ -169,6 +232,82 @@ class QuotationVersionSerializer(serializers.ModelSerializer):
             "operator_email",
             "created_at",
             "snapshot",
+        ]
+        read_only_fields = fields
+
+
+class QuotationListSerializer(serializers.ModelSerializer):
+    """Serialize only fields required by the paginated list."""
+
+    display_quote_no = serializers.SerializerMethodField()
+    item_count = serializers.IntegerField(read_only=True)
+    latest_excel_document_id = serializers.CharField(
+        allow_null=True,
+        read_only=True,
+    )
+    latest_pdf_document_id = serializers.CharField(
+        allow_null=True,
+        read_only=True,
+    )
+    source_document_type = serializers.CharField(
+        allow_null=True,
+        read_only=True,
+    )
+
+    def get_display_quote_no(self, obj: Quotation) -> str:
+        return obj.source_quote_no or obj.quote_no
+
+    class Meta:
+        model = Quotation
+        fields = [
+            "id",
+            "quote_no",
+            "display_quote_no",
+            "project_name",
+            "client_company",
+            "contact_person",
+            "created_at",
+            "currency",
+            "grand_total",
+            "status",
+            "source_type",
+            "source_document_type",
+            "product_line",
+            "item_count",
+            "latest_excel_document_id",
+            "latest_pdf_document_id",
+        ]
+        read_only_fields = fields
+
+
+class QuotationFormContextSerializer(serializers.ModelSerializer):
+    """Serialize lightweight history fields used by the create form."""
+
+    display_quote_no = serializers.SerializerMethodField()
+
+    def get_display_quote_no(self, obj: Quotation) -> str:
+        return obj.source_quote_no or obj.quote_no
+
+    class Meta:
+        model = Quotation
+        fields = [
+            "id",
+            "quote_no",
+            "display_quote_no",
+            "project_name",
+            "client_company",
+            "contact_person",
+            "email",
+            "product_line",
+            "billing_company",
+            "billing_contact",
+            "billing_email",
+            "currency",
+            "tax_label",
+            "issuer_contact_name",
+            "issuer_contact_email",
+            "created_by_email",
+            "created_at",
         ]
         read_only_fields = fields
 

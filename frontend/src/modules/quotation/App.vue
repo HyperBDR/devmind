@@ -53,7 +53,9 @@ import {
   deleteQuotation as deleteQuotationApi,
   generateQuotation as generateQuotationApi,
   getQuotation as getQuotationApi,
+  getQuotationFormContext,
   listQuotations,
+  type QuotationListParams,
   updateQuotation as updateQuotationApi,
 } from './api/quotations'
 import { useAuthStore } from './stores/auth'
@@ -108,6 +110,17 @@ function syncTabFromRoute() {
 }
 
 const quotations = ref<Quotation[]>([])
+const quotationListLoading = ref(false)
+const quotationListQuery = ref<QuotationListParams>({
+  page: 1,
+  pageSize: 10,
+})
+const quotationListTotal = ref(0)
+const quotationListTotalPages = ref(0)
+const activeQuote = ref<Quotation | null>(null)
+const editingQuote = ref<Quotation | null>(null)
+const quotationFormContext = ref<Quotation[]>([])
+let quotationListRequestId = 0
 
 function shouldUseStoredCatalog() {
   return localStorage.getItem('qmp_catalog_version') === MOCK_CATALOG_VERSION
@@ -258,24 +271,106 @@ function triggerToast(msg: string, type: 'success' | 'info' | 'error' = 'success
   }, 4000)
 }
 
-async function refreshQuotations() {
+async function refreshQuotations(
+  query: QuotationListParams = quotationListQuery.value,
+) {
+  const requestId = ++quotationListRequestId
+  quotationListQuery.value = { ...query }
+  quotationListLoading.value = true
   try {
-    quotations.value = await listQuotations()
-    const staleLinks = await reconcileFeishuQuotationLinks(quotations.value)
-    if (staleLinks) {
-      quotations.value = await listQuotations()
+    const result = await listQuotations(query)
+    if (requestId !== quotationListRequestId) return
+    quotations.value = result.items
+    quotationListTotal.value = result.total
+    quotationListTotalPages.value = result.totalPages
+    quotationListQuery.value = {
+      ...query,
+      page: result.page,
+      pageSize: result.pageSize,
     }
   } catch (error: unknown) {
+    if (requestId !== quotationListRequestId) return
     console.error(error)
     const message = error instanceof Error ? error.message : t('quotation.app.loadFailed')
     triggerToast(message, 'error')
+    quotations.value = []
+    quotationListTotal.value = 0
+    quotationListTotalPages.value = 0
+  } finally {
+    if (requestId === quotationListRequestId) {
+      quotationListLoading.value = false
+    }
+  }
+}
+
+async function loadActiveQuote(id: string) {
+  try {
+    activeQuote.value = await getQuotationApi(id)
+  } catch (error) {
+    activeQuote.value = null
+    triggerToast(
+      error instanceof Error ? error.message : t('quotation.app.loadFailed'),
+      'error',
+    )
+  }
+}
+
+async function loadEditingQuote(id: string | null) {
+  if (!id) {
+    editingQuote.value = null
+    return
+  }
+  try {
+    editingQuote.value = await getQuotationApi(id)
+  } catch (error) {
+    editingQuote.value = null
+    triggerToast(
+      error instanceof Error ? error.message : t('quotation.app.loadFailed'),
+      'error',
+    )
+  }
+}
+
+async function loadQuotationFormContext() {
+  try {
+    quotationFormContext.value = await getQuotationFormContext()
+  } catch (error) {
+    quotationFormContext.value = []
+    triggerToast(
+      error instanceof Error ? error.message : t('quotation.app.loadFailed'),
+      'error',
+    )
+  }
+}
+
+async function loadCurrentQuotationTab() {
+  if (currentTab.value === 'list') {
+    await refreshQuotations()
+    return
+  }
+  if (currentTab.value === 'details' && selectedQuotationId.value) {
+    if (activeQuote.value?.id !== selectedQuotationId.value) {
+      await loadActiveQuote(selectedQuotationId.value)
+    }
+    return
+  }
+  if (currentTab.value === 'create') {
+    const tasks: Promise<unknown>[] = [loadQuotationFormContext()]
+    if (editingQuote.value?.id !== editingQuoteId.value) {
+      tasks.push(loadEditingQuote(editingQuoteId.value))
+    }
+    await Promise.all(tasks)
   }
 }
 
 onMounted(async () => {
   await auth.bootstrap()
   if (auth.isAuthenticated) {
-    await Promise.all([refreshQuotations(), hydrateUserCatalog()])
+    const tasks: Promise<unknown>[] = [
+      hydrateUserCatalog(),
+      loadCurrentQuotationTab(),
+    ]
+    await Promise.all(tasks)
   }
 
   const params = new URLSearchParams(window.location.search)
@@ -294,15 +389,22 @@ onMounted(async () => {
 
 watch(
   () => route.fullPath,
-  () => {
+  async () => {
     syncTabFromRoute()
+    if (auth.isAuthenticated) {
+      await loadCurrentQuotationTab()
+    }
   },
   { immediate: true },
 )
 
 async function handleLoginSuccess() {
   const me = await auth.fetchCurrentUser()
-  await Promise.all([refreshQuotations(), hydrateUserCatalog()])
+  const tasks: Promise<unknown>[] = [
+    hydrateUserCatalog(),
+    loadCurrentQuotationTab(),
+  ]
+  await Promise.all(tasks)
   triggerToast(t('quotation.app.welcomeBack', { name: me.name }), 'success')
 }
 
@@ -311,23 +413,23 @@ async function handleLogout() {
   catalogReady.value = false
   await auth.logout()
   quotations.value = []
+  quotationListTotal.value = 0
+  quotationListTotalPages.value = 0
+  activeQuote.value = null
+  editingQuote.value = null
+  quotationFormContext.value = []
   currentTab.value = 'dashboard'
   selectedQuotationId.value = null
   editingQuoteId.value = null
 }
 
 const userQuotations = computed(() =>
-  auth.currentUser ? filterQuotationsByUser(quotations.value, auth.currentUser) : [],
-)
-
-const activeQuote = computed(() =>
-  quotations.value.find((q) => q.id === selectedQuotationId.value),
-)
-
-const editingQuote = computed(() =>
-  editingQuoteId.value
-    ? quotations.value.find((q) => q.id === editingQuoteId.value) || null
-    : null,
+  auth.currentUser
+    ? filterQuotationsByUser(
+        quotationFormContext.value,
+        auth.currentUser,
+      )
+    : [],
 )
 
 const userInitials = computed(() => {
@@ -363,8 +465,6 @@ function goTab(tab: string) {
 }
 
 async function handleDeleteQuote(id: string) {
-  const previous = quotations.value
-  quotations.value = quotations.value.filter((q) => q.id !== id)
   if (selectedQuotationId.value === id) {
     selectedQuotationId.value = null
     if (currentTab.value === 'details') {
@@ -373,9 +473,17 @@ async function handleDeleteQuote(id: string) {
   }
   try {
     await deleteQuotationApi(id)
+    const currentPage = quotationListQuery.value.page || 1
+    const nextPage =
+      quotations.value.length === 1 && currentPage > 1
+        ? currentPage - 1
+        : currentPage
+    await refreshQuotations({
+      ...quotationListQuery.value,
+      page: nextPage,
+    })
     triggerToast(t('quotation.app.quoteDeleted'), 'info')
   } catch (err) {
-    quotations.value = previous
     triggerToast(
       err instanceof Error ? err.message : t('quotation.app.saveFailed'),
       'error',
@@ -384,14 +492,7 @@ async function handleDeleteQuote(id: string) {
 }
 
 async function handleViewQuoteDetails(id: string) {
-  try {
-    const latest = await getQuotationApi(id)
-    quotations.value = quotations.value.map((quote) =>
-      quote.id === id ? latest : quote,
-    )
-  } catch (error) {
-    console.error('Unable to load quotation details', error)
-  }
+  await loadActiveQuote(id)
   if (auth.embeddedAuth) {
     currentTab.value = 'details'
     selectedQuotationId.value = id
@@ -412,7 +513,7 @@ async function handleSaveQuotation(newQuote: Quotation) {
 
   try {
     const wasCreate = !editingQuoteId.value
-    const exists = quotations.value.some((q) => q.id === ownedQuote.id)
+    const exists = Boolean(editingQuoteId.value)
     const willGenerate = ownedQuote.status === 'Generated'
     let saved = exists
       ? await updateQuotationApi(ownedQuote, {
@@ -464,7 +565,7 @@ async function handleSaveQuotation(newQuote: Quotation) {
     }
 
     editingQuoteId.value = null
-    await refreshQuotations()
+    await refreshQuotations(quotationListQuery.value)
   } catch (error: unknown) {
     console.error(error)
     const message = error instanceof Error ? error.message : t('quotation.app.saveFailed')
@@ -482,7 +583,10 @@ async function handleImportedQuotationCreated(id: string) {
 }
 
 async function handleReconcileFeishuLinks() {
-  await refreshQuotations()
+  const staleLinks = await reconcileFeishuQuotationLinks(quotations.value)
+  if (staleLinks) {
+    await refreshQuotations(quotationListQuery.value)
+  }
 }
 
 async function handleUpdateQuote(
@@ -490,15 +594,16 @@ async function handleUpdateQuote(
   updatedFields: Partial<Quotation>,
   notes?: string,
 ) {
-  const previous = quotations.value.find((q) => q.id === id)
-  if (!previous) return
+  const previousListQuote = quotations.value.find((q) => q.id === id)
+  if (!previousListQuote) return
 
-  const nextQuote = { ...previous, ...updatedFields }
   const statusChanged = Boolean(
-    updatedFields.status && updatedFields.status !== previous.status,
+    updatedFields.status &&
+      updatedFields.status !== previousListQuote.status,
   )
   const isExcelGenerated =
-    updatedFields.status === 'Generated' && previous.status === 'Draft'
+    updatedFields.status === 'Generated' &&
+    previousListQuote.status === 'Draft'
 
   let computedNotes = notes || ''
   if (!computedNotes) {
@@ -514,7 +619,7 @@ async function handleUpdateQuote(
   }
 
   quotations.value = quotations.value.map((q) =>
-    q.id === id ? nextQuote : q,
+    q.id === id ? { ...q, ...updatedFields } : q,
   )
 
   if (isFeishuLinkOnlyUpdate(updatedFields)) {
@@ -523,13 +628,18 @@ async function handleUpdateQuote(
 
   if (statusChanged || notes || isExcelGenerated) {
     try {
-      const saved = await updateQuotationApi(nextQuote, {
+      const detail = await getQuotationApi(id)
+      const saved = await updateQuotationApi({
+        ...detail,
+        ...updatedFields,
+      }, {
         notes: computedNotes,
       })
       quotations.value = quotations.value.map((q) =>
         q.id === id
           ? {
-              ...saved,
+              ...q,
+              status: saved.status,
               region: q.region,
               industry: q.industry,
             }
@@ -537,7 +647,7 @@ async function handleUpdateQuote(
       )
     } catch (err) {
       quotations.value = quotations.value.map((q) =>
-        q.id === id ? previous : q,
+        q.id === id ? previousListQuote : q,
       )
       triggerToast(
         err instanceof Error ? err.message : t('quotation.app.saveFailed'),
@@ -622,8 +732,9 @@ function handleDeleteProductLine(productLine: QuoteProductLine) {
   )
 }
 
-function handleEditQuote(id: string) {
+async function handleEditQuote(id: string) {
   editingQuoteId.value = id
+  await loadEditingQuote(id)
   if (auth.embeddedAuth) {
     router.push({ path: '/quotation/create', query: { edit: id } })
     return
@@ -848,7 +959,6 @@ function reloadPage() {
       >
         <Dashboard
           v-if="currentTab === 'dashboard'"
-          :quotations="quotations"
           @view-quote="handleViewQuoteDetails"
           @navigate-to-tab="handleNavigateToTab"
         />
@@ -859,6 +969,11 @@ function reloadPage() {
         >
           <QuotationList
             :quotations="quotations"
+            :loading="quotationListLoading"
+            :page="quotationListQuery.page || 1"
+            :page-size="quotationListQuery.pageSize || 10"
+            :total="quotationListTotal"
+            :total-pages="quotationListTotalPages"
             :current-user="auth.currentUser"
             @view-quote="handleViewQuoteDetails"
             @delete-quote="handleDeleteQuote"
@@ -867,6 +982,7 @@ function reloadPage() {
             @reconcile-feishu-links="handleReconcileFeishuLinks"
             @edit-quote="handleEditQuote"
             @toast="triggerToast"
+            @query-change="refreshQuotations"
           />
 
           <ImportedDocumentsPage
@@ -881,7 +997,7 @@ function reloadPage() {
           :products="products"
           :services="services"
           :discounts="discounts"
-          :quotations="quotations"
+          :quotations="quotationFormContext"
           :history-quotations="userQuotations"
           :editing-quote="editingQuote"
           :current-user="auth.currentUser"

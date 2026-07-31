@@ -47,14 +47,12 @@ test('dashboard chart cards use laptop-safe balanced desktop proportions', () =>
   assert.doesNotMatch(enLocale, /chartAmountQuoteCount/)
 })
 
-test('dashboard quote breakdown uses one centered filtered pie', () => {
-  assert.match(dashboardSource, /QUOTE_BREAKDOWN_MIN_SHARE = 2/)
-  assert.match(dashboardSource, /QUOTE_BREAKDOWN_MAX_SLICES = 8/)
-  assert.match(dashboardSource, /row\.share >= QUOTE_BREAKDOWN_MIN_SHARE/)
+test('dashboard quote breakdown uses one centered server-filtered pie', () => {
   assert.match(
     dashboardSource,
-    /const quoteBreakdownData = computed\(\(\) =>\s*props\.quotations/,
+    /const quoteBreakdownData = computed\(\(\) =>\s*\(analytics\.value\?\.amountBreakdown/,
   )
+  assert.match(dashboardSource, /getDashboardAnalytics/)
   assert.doesNotMatch(dashboardSource, /const chartQuotes/)
   assert.doesNotMatch(dashboardSource, /selectedBreakdownCurrency/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownCurrencies/)
