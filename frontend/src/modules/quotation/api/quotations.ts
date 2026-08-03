@@ -89,6 +89,7 @@ interface ApiQuotationListItem {
   project_name: string;
   client_company: string;
   contact_person: string;
+  quote_date?: string | null;
   created_at: string;
   currency: string;
   grand_total: number | string;
@@ -426,6 +427,7 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     vatRate: 0,
     vatAmount: 0,
     grandTotal: toNumber(api.grand_total),
+    quoteDate: api.quote_date || undefined,
     createdAt: api.created_at,
     feishuExcelDocumentId:
       api.latest_excel_document_id || undefined,

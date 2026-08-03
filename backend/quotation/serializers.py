@@ -266,6 +266,7 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "project_name",
             "client_company",
             "contact_person",
+            "quote_date",
             "created_at",
             "currency",
             "grand_total",

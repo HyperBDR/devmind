@@ -29,6 +29,7 @@ import LoginPage from './components/LoginPage.vue'
 import QuotationList from './components/QuotationList.vue'
 import QuotationCreate from './components/QuotationCreate.vue'
 import QuotationDetails from './components/QuotationDetails.vue'
+import QuotationDetailsDrawer from './components/QuotationDetailsDrawer.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
@@ -118,6 +119,7 @@ const quotationListQuery = ref<QuotationListParams>({
 const quotationListTotal = ref(0)
 const quotationListTotalPages = ref(0)
 const activeQuote = ref<Quotation | null>(null)
+const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
 let quotationListRequestId = 0
@@ -416,6 +418,7 @@ async function handleLogout() {
   quotationListTotal.value = 0
   quotationListTotalPages.value = 0
   activeQuote.value = null
+  drawerQuoteId.value = null
   editingQuote.value = null
   quotationFormContext.value = []
   currentTab.value = 'dashboard'
@@ -450,6 +453,7 @@ function navClass(tab: string) {
 
 function goTab(tab: string) {
   selectedQuotationId.value = null
+  drawerQuoteId.value = null
   if (tab === 'create') editingQuoteId.value = null
 
   if (auth.embeddedAuth) {
@@ -501,6 +505,14 @@ async function handleViewQuoteDetails(id: string) {
   }
   selectedQuotationId.value = id
   currentTab.value = 'details'
+}
+
+function handleOpenDetailDrawer(id: string) {
+  drawerQuoteId.value = id
+}
+
+function handleCloseDetailDrawer() {
+  drawerQuoteId.value = null
 }
 
 async function handleSaveQuotation(newQuote: Quotation) {
@@ -955,7 +967,7 @@ function reloadPage() {
 
       <main
         id="app-scroll-stage"
-        class="flex-1 overflow-y-auto scroll-smooth bg-dm-page p-6"
+        class="flex-1 overflow-x-hidden overflow-y-auto scroll-smooth bg-dm-page p-6"
       >
         <Dashboard
           v-if="currentTab === 'dashboard'"
@@ -965,7 +977,7 @@ function reloadPage() {
 
         <div
           v-if="currentTab === 'list'"
-          class="space-y-5"
+          class="flex flex-col"
         >
           <QuotationList
             :quotations="quotations"
@@ -976,6 +988,7 @@ function reloadPage() {
             :total-pages="quotationListTotalPages"
             :current-user="auth.currentUser"
             @view-quote="handleViewQuoteDetails"
+            @open-detail-drawer="handleOpenDetailDrawer"
             @delete-quote="handleDeleteQuote"
             @update-quote-status="handleUpdateQuote"
             @feishu-upload-done="handleFeishuUploadDone"
@@ -1033,6 +1046,14 @@ function reloadPage() {
 
         <AuditLogPage v-if="currentTab === 'audit'" />
       </main>
+
+      <QuotationDetailsDrawer
+        :quote-id="drawerQuoteId"
+        :current-user="auth.currentUser"
+        @close="handleCloseDetailDrawer"
+        @edit-quote="handleEditQuote"
+        @update-quote-status="handleUpdateQuote"
+      />
     </div>
   </div>
 </template>

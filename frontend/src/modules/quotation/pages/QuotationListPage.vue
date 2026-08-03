@@ -9,6 +9,7 @@ import {
   updateQuotation,
 } from '../api/quotations'
 import ImportedDocumentsPage from '../components/ImportedDocumentsPage.vue'
+import QuotationDetailsDrawer from '../components/QuotationDetailsDrawer.vue'
 import QuotationList from '../components/QuotationList.vue'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from '../utils/feishuLinkState'
 import { useAuthStore } from '../stores/auth'
@@ -22,6 +23,7 @@ const loading = ref(false)
 const query = ref<QuotationListParams>({ page: 1, pageSize: 10 })
 const total = ref(0)
 const totalPages = ref(0)
+const drawerQuoteId = ref<string | null>(null)
 const toast = ref<{ message: string; type: string } | null>(null)
 let toastTimer: number | undefined
 
@@ -94,6 +96,14 @@ onMounted(() => {
 
 function handleViewQuote(id: string) {
   void router.push(`/quotations/${id}`)
+}
+
+function handleOpenDetailDrawer(id: string) {
+  drawerQuoteId.value = id
+}
+
+function handleCloseDetailDrawer() {
+  drawerQuoteId.value = null
 }
 
 function handleEditQuote(id: string) {
@@ -202,7 +212,7 @@ function handleUpdateQuoteStatus(
 </script>
 
 <template>
-  <div>
+  <div class="h-full">
     <div
       v-if="toast"
       class="fixed right-6 top-6 z-50 rounded-lg px-4 py-2 text-sm font-medium shadow-lg"
@@ -215,13 +225,14 @@ function handleUpdateQuoteStatus(
       {{ toast.message }}
     </div>
 
-    <div class="space-y-5">
+    <div class="flex h-full flex-col gap-5">
       <div v-if="loading && !quotations.length" class="py-16 text-center text-sm text-slate-400">
         正在加载报价单…
       </div>
 
       <QuotationList
         v-else
+        class="flex-1"
         :quotations="quotations"
         :loading="loading"
         :page="query.page || 1"
@@ -230,6 +241,7 @@ function handleUpdateQuoteStatus(
         :total-pages="totalPages"
         :current-user="currentUser"
         @view-quote="handleViewQuote"
+        @open-detail-drawer="handleOpenDetailDrawer"
         @delete-quote="handleDeleteQuote"
         @update-quote-status="handleUpdateQuoteStatus"
         @feishu-upload-done="handleFeishuUploadDone"
@@ -246,6 +258,14 @@ function handleUpdateQuoteStatus(
           @quotation-created="handleImportedQuotationCreated"
         />
       </div>
+
+      <QuotationDetailsDrawer
+        :quote-id="drawerQuoteId"
+        :current-user="currentUser"
+        @close="handleCloseDetailDrawer"
+        @edit-quote="handleEditQuote"
+        @update-quote-status="handleUpdateQuoteStatus"
+      />
     </div>
   </div>
 </template>

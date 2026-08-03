@@ -92,6 +92,7 @@ class QuotationListAPITests(TestCase):
         assert first.data["page"] == 1
         assert first.data["page_size"] == 10
         assert first.data["total_pages"] == 2
+        assert first.data["items"][0]["quote_date"] == "2026-07-01"
         assert len(second.data["items"]) == 2
         assert second.data["page"] == 2
         expected = sorted(

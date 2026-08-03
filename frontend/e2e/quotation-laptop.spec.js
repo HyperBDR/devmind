@@ -183,14 +183,125 @@ for (const viewport of [
 
       await page.goto('/quotation/list', { waitUntil: 'domcontentloaded' })
       await page.waitForTimeout(750)
-      const firstQuoteAction = page
-        .locator('#table-panel tbody tr')
+      await expect(
+        page.getByText(/All quotes\. Signed in as|全部报价.*当前登录用户/),
+      ).toHaveCount(0)
+      const listStageOverflow = await page.evaluate(() => {
+        const stage = document.querySelector('#app-scroll-stage')
+        if (!stage) return null
+        const style = getComputedStyle(stage)
+        return {
+          overflowX: style.overflowX,
+          scrollWidth: stage.scrollWidth,
+          clientWidth: stage.clientWidth,
+        }
+      })
+      expect(listStageOverflow).not.toBeNull()
+      expect(listStageOverflow.overflowX).toBe('hidden')
+      expect(listStageOverflow.scrollWidth).toBeLessThanOrEqual(
+        listStageOverflow.clientWidth + 1,
+      )
+      const quoteRows = page.locator('[data-quotation-row]')
+      if ((await quoteRows.count()) >= 10) {
+        const tenRowsFit = await page.evaluate(() => {
+          const rows = [...document.querySelectorAll('[data-quotation-row]')]
+          const stage = document.querySelector('#app-scroll-stage')
+          if (rows.length < 10 || !stage) return false
+          return (
+            rows[9].getBoundingClientRect().bottom <=
+            stage.getBoundingClientRect().bottom + 1
+          )
+        })
+        expect(tenRowsFit, 'ten quote rows fit in the list viewport').toBe(true)
+      }
+
+      const projectHeader = page.locator('[data-column-header="project"]')
+      const projectResizer = page.locator(
+        '[data-column-resizer][data-column-key="project"]',
+      )
+      if (await projectResizer.isVisible().catch(() => false)) {
+        const beforeWidth = await projectHeader.evaluate(
+          (element) => element.getBoundingClientRect().width,
+        )
+        const handleBox = await projectResizer.boundingBox()
+        expect(handleBox).not.toBeNull()
+        await page.mouse.move(
+          handleBox.x + handleBox.width / 2,
+          handleBox.y + handleBox.height / 2,
+        )
+        await page.mouse.down()
+        await page.mouse.move(
+          handleBox.x + handleBox.width / 2 + 96,
+          handleBox.y + handleBox.height / 2,
+          { steps: 5 },
+        )
+        await page.mouse.up()
+        const draggedWidth = await projectHeader.evaluate(
+          (element) => element.getBoundingClientRect().width,
+        )
+        expect(draggedWidth).toBeGreaterThan(beforeWidth + 80)
+
+        await projectResizer.focus()
+        await page.keyboard.press('ArrowLeft')
+        const keyboardWidth = await projectHeader.evaluate(
+          (element) => element.getBoundingClientRect().width,
+        )
+        expect(keyboardWidth).toBeLessThan(draggedWidth)
+      }
+
+      const pageSizeTrigger = page.getByTestId('quotation-page-size')
+      if (await pageSizeTrigger.isVisible().catch(() => false)) {
+        await pageSizeTrigger.click()
+        const pageSizeMenu = page.getByTestId('quotation-page-size-menu')
+        await expect(pageSizeMenu).toBeVisible()
+        const menuIsVisible = await pageSizeMenu.evaluate((element) => {
+          const rect = element.getBoundingClientRect()
+          return (
+            rect.top >= 0 &&
+            rect.left >= 0 &&
+            rect.right <= window.innerWidth &&
+            rect.bottom <= window.innerHeight
+          )
+        })
+        expect(menuIsVisible, 'page-size menu is not clipped').toBe(true)
+        await page.keyboard.press('Escape')
+      }
+
+      const importedRow = page
+        .locator('[data-quotation-row][data-source-type="document_import"]')
         .first()
-        .locator('td:last-child button')
-        .first()
-      if (await firstQuoteAction.isVisible().catch(() => false)) {
-        await firstQuoteAction.click()
+      if (await importedRow.isVisible().catch(() => false)) {
+        const listUrl = page.url()
+        await importedRow.click()
+        await expect(page.locator('[data-quotation-detail-drawer]')).toBeVisible()
         await expect(page.locator('#quote-details-root')).toBeVisible()
+        await expect(page.locator('[data-embedded-quotation-preview]')).toBeVisible()
+        await expect(page.locator('[data-quotation-details-sidebar]')).toHaveCount(0)
+        const drawerOverflow = await page.evaluate(() => {
+          const drawerScroll = document.querySelector(
+            '[data-quotation-drawer-scroll]',
+          )
+          const preview = document.querySelector(
+            '[data-embedded-quotation-preview]',
+          )
+          return {
+            scrollbarWidth: drawerScroll
+              ? getComputedStyle(drawerScroll).scrollbarWidth
+              : null,
+            drawerClientHeight: drawerScroll?.clientHeight ?? null,
+            drawerScrollHeight: drawerScroll?.scrollHeight ?? null,
+            previewClientHeight: preview?.clientHeight ?? null,
+            previewScrollHeight: preview?.scrollHeight ?? null,
+          }
+        })
+        expect(drawerOverflow.scrollbarWidth).toBe('none')
+        expect(drawerOverflow.drawerScrollHeight).toBeGreaterThan(
+          drawerOverflow.drawerClientHeight,
+        )
+        expect(drawerOverflow.previewScrollHeight).toBeLessThanOrEqual(
+          drawerOverflow.previewClientHeight + 1,
+        )
+        expect(page.url()).toBe(listUrl)
         const detailsAudit = await auditLaptopLayout(page)
         expect(detailsAudit.pageOverflow, 'details has page overflow').toBe(false)
         expect(detailsAudit.clippedControls, 'details has clipped text').toEqual([])
@@ -199,6 +310,15 @@ for (const viewport of [
           path: `${screenshotRoot}/${language}-${viewport.width}-collapsed-details.png`,
           fullPage: false,
         })
+        await page.keyboard.press('Escape')
+        await expect(page.locator('[data-quotation-detail-drawer]')).toHaveCount(0)
+        await expect(importedRow).toBeFocused()
+      } else {
+        const firstQuoteAction = page.locator('[data-view-details]').first()
+        if (await firstQuoteAction.isVisible().catch(() => false)) {
+          await firstQuoteAction.click()
+          await expect(page.locator('#quote-details-root')).toBeVisible()
+        }
       }
     })
   }

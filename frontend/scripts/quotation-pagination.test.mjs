@@ -68,12 +68,19 @@ test('pagination controls expose ranges, totals, pages and sizes', () => {
   assert.match(quotationList, /test-id="quotation-page-size"/)
   assert.match(
     quotationList,
-    /panel-class-name="bottom-full top-auto mb-1 mt-0"/,
+    /panel-class-name="!bottom-full !top-auto !mb-1 !mt-0"/,
   )
   assert.doesNotMatch(quotationList, /<select[\s\S]*?:value="pageSize"/)
   assert.match(quotationList, /rangeStart/)
   assert.match(quotationList, /rangeEnd/)
   assert.match(quotationList, /totalPages/)
+  assert.match(quotationList, /quotation\.pages\.list\.paginationTotal/)
+  assert.match(quotationList, /quotation\.pages\.list\.paginationRange/)
+  assert.match(quotationList, /quotation\.pages\.list\.paginationPageSize/)
+  assert.doesNotMatch(quotationList, />共 \{\{ total \}\} 条</)
+  assert.doesNotMatch(quotationList, /<span>条<\/span>/)
+  assert.doesNotMatch(quotationList, />上一页</)
+  assert.doesNotMatch(quotationList, />下一页</)
   assert.match(quotationList, /requestPage\(page - 1\)/)
   assert.match(quotationList, /requestPage\(page \+ 1\)/)
 })

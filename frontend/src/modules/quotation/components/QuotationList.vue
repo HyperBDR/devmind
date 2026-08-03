@@ -63,6 +63,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   viewQuote: [id: string]
+  openDetailDrawer: [id: string]
   deleteQuote: [id: string]
   updateQuoteStatus: [id: string, updatedFields: Partial<Quotation>, notes?: string]
   feishuUploadDone: [id: string]
@@ -106,6 +107,99 @@ const tableStatusValues: QuoteStatus[] = [
   'Expired',
   'Cancelled',
 ]
+
+const columnConfig = {
+  quoteNo: {
+    defaultWidth: 170,
+    minWidth: 130,
+    maxWidth: 360,
+    labelKey: 'quotation.pages.list.tableQuoteNo',
+    align: 'left',
+  },
+  project: {
+    defaultWidth: 210,
+    minWidth: 150,
+    maxWidth: 720,
+    labelKey: 'quotation.pages.list.tableProjectName',
+    align: 'left',
+  },
+  customer: {
+    defaultWidth: 170,
+    minWidth: 140,
+    maxWidth: 600,
+    labelKey: 'quotation.pages.list.tableCustomer',
+    align: 'left',
+  },
+  contact: {
+    defaultWidth: 150,
+    minWidth: 130,
+    maxWidth: 480,
+    labelKey: 'quotation.pages.list.tableContact',
+    align: 'left',
+  },
+  total: {
+    defaultWidth: 120,
+    minWidth: 108,
+    maxWidth: 280,
+    labelKey: 'quotation.pages.list.tableTotal',
+    align: 'right',
+  },
+  statusSource: {
+    defaultWidth: 200,
+    minWidth: 176,
+    maxWidth: 360,
+    labelKey: 'quotation.pages.list.tableStatusSource',
+    align: 'center',
+  },
+  quoteDate: {
+    defaultWidth: 120,
+    minWidth: 112,
+    maxWidth: 240,
+    labelKey: 'quotation.pages.list.tableQuoteDate',
+    align: 'left',
+  },
+} as const
+
+type ResizableColumnKey = keyof typeof columnConfig
+
+const ACTIONS_COLUMN_WIDTH = 184
+const COLUMN_RESIZE_STEP = 16
+
+const columnWidths = ref<Record<ResizableColumnKey, number>>({
+  quoteNo: columnConfig.quoteNo.defaultWidth,
+  project: columnConfig.project.defaultWidth,
+  customer: columnConfig.customer.defaultWidth,
+  contact: columnConfig.contact.defaultWidth,
+  total: columnConfig.total.defaultWidth,
+  statusSource: columnConfig.statusSource.defaultWidth,
+  quoteDate: columnConfig.quoteDate.defaultWidth,
+})
+
+const resizableColumns = computed(() =>
+  (Object.keys(columnConfig) as ResizableColumnKey[]).map((key) => ({
+    key,
+    ...columnConfig[key],
+    label: t(columnConfig[key].labelKey),
+  })),
+)
+
+const tableWidth = computed(
+  () =>
+    Object.values(columnWidths.value).reduce(
+      (total, width) => total + width,
+      ACTIONS_COLUMN_WIDTH,
+    ),
+)
+
+let activeColumnResize: {
+  key: ResizableColumnKey
+  pointerId: number
+  startX: number
+  startWidth: number
+  handle: HTMLElement
+  previousCursor: string
+  previousUserSelect: string
+} | null = null
 
 const searchText = ref('')
 const selectedStatus = ref('ALL')
@@ -225,6 +319,89 @@ function handleOutsideClick(event: MouseEvent) {
   }
 }
 
+function clampColumnWidth(key: ResizableColumnKey, width: number): number {
+  const config = columnConfig[key]
+  return Math.min(config.maxWidth, Math.max(config.minWidth, width))
+}
+
+function setColumnWidth(key: ResizableColumnKey, width: number) {
+  columnWidths.value[key] = clampColumnWidth(key, Math.round(width))
+}
+
+function finishColumnResize(event?: PointerEvent) {
+  const resize = activeColumnResize
+  if (!resize) return
+  if (event && event.pointerId !== resize.pointerId) return
+
+  if (resize.handle.hasPointerCapture(resize.pointerId)) {
+    resize.handle.releasePointerCapture(resize.pointerId)
+  }
+  document.body.style.cursor = resize.previousCursor
+  document.body.style.userSelect = resize.previousUserSelect
+  activeColumnResize = null
+}
+
+function startColumnResize(key: ResizableColumnKey, event: PointerEvent) {
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+  finishColumnResize()
+
+  const handle = event.currentTarget as HTMLElement
+  activeColumnResize = {
+    key,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: columnWidths.value[key],
+    handle,
+    previousCursor: document.body.style.cursor,
+    previousUserSelect: document.body.style.userSelect,
+  }
+  handle.setPointerCapture(event.pointerId)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function handleColumnResize(event: PointerEvent) {
+  const resize = activeColumnResize
+  if (!resize || event.pointerId !== resize.pointerId) return
+  setColumnWidth(
+    resize.key,
+    resize.startWidth + event.clientX - resize.startX,
+  )
+}
+
+function resizeColumnBy(key: ResizableColumnKey, delta: number) {
+  setColumnWidth(key, columnWidths.value[key] + delta)
+}
+
+function isNestedRowAction(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return Boolean(
+    target.closest(
+      'button, a, input, select, textarea, [role="button"], [data-row-action]',
+    ),
+  )
+}
+
+function openImportedQuote(quote: Quotation) {
+  if (quote.sourceType === 'document_import') {
+    emit('openDetailDrawer', quote.id)
+  }
+}
+
+function handleRowClick(quote: Quotation, event: MouseEvent) {
+  if (isNestedRowAction(event.target)) return
+  if (event.currentTarget instanceof HTMLElement) {
+    event.currentTarget.focus()
+  }
+  openImportedQuote(quote)
+}
+
+function handleRowKeydown(quote: Quotation, event: KeyboardEvent) {
+  if (isNestedRowAction(event.target)) return
+  event.preventDefault()
+  openImportedQuote(quote)
+}
+
 onMounted(() => {
   document.addEventListener('mousedown', handleOutsideClick)
   window.addEventListener('scroll', closeActionMenu, true)
@@ -234,6 +411,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  finishColumnResize()
   document.removeEventListener('mousedown', handleOutsideClick)
   window.removeEventListener('scroll', closeActionMenu, true)
   window.removeEventListener('resize', closeActionMenu)
@@ -641,24 +819,27 @@ function displayTotal(quote: Quotation): string {
   return `${currencySymbol(quote.currency)}${total.toLocaleString()}`
 }
 
+function displayQuoteDate(quote: Quotation): string {
+  return quote.quoteDate ? quote.quoteDate.substring(0, 10) : '—'
+}
+
 </script>
 
 <template>
-  <div id="quote-list-root" class="space-y-6">
+  <div
+    id="quote-list-root"
+    class="flex h-full min-h-[calc(100dvh-7.0625rem)] flex-col gap-3"
+  >
     <div v-if="loading" class="text-sm text-dm-text-tertiary">
       {{ t('quotation.pages.list.syncing') }}
     </div>
-    <p v-if="currentUser" class="text-sm text-dm-text-tertiary">
-      {{ t('quotation.pages.list.userHint', { name: currentUser.name }) }}
-    </p>
-
     <div
       id="filter-panel"
       data-filter-toolbar
       aria-label="Quote filters"
-      class="rounded-xl border border-dm-border-light bg-white p-2.5 shadow-xs"
+      class="rounded-xl border border-dm-border-light bg-white p-2 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.35fr)_minmax(110px,0.55fr)_minmax(120px,0.6fr)_minmax(120px,0.6fr)_minmax(220px,1fr)_auto]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(160px,1.1fr)_minmax(80px,0.5fr)_minmax(85px,0.55fr)_minmax(80px,0.5fr)_minmax(170px,1fr)_auto]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -668,7 +849,7 @@ function displayTotal(quote: Quotation): string {
                 v-model="searchText"
                 type="text"
                 :placeholder="t('quotation.pages.list.keywordPlaceholder')"
-                class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-slate-50/70 py-2 pl-9 pr-9 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-slate-50/70 py-1.5 pl-9 pr-9 text-sm text-dm-text transition placeholder:text-slate-400 hover:bg-white focus:border-blue-300 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-dm-text-tertiary" />
               <button
@@ -722,30 +903,30 @@ function displayTotal(quote: Quotation): string {
 
           <div data-filter-date-range class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
-              {{ t('quotation.pages.list.createdFromLabel') }} / {{ t('quotation.pages.list.createdToLabel') }}
+              {{ t('quotation.pages.list.dateRangeLabel') }}
             </label>
             <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
               <BaseDatePicker
                 v-model="createdFrom"
                 :placeholder="t('quotation.pages.list.createdFromLabel')"
-                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                input-class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-1.5 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <BaseDatePicker
                 v-model="createdTo"
                 :placeholder="t('quotation.pages.list.createdToLabel')"
-                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                input-class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-1.5 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
             </div>
           </div>
 
           <div class="flex items-center gap-1 md:col-span-2 xl:col-span-1">
-            <div class="flex h-10 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
+            <div class="flex h-9 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
               {{ t('quotation.pages.list.filterResultsCount', { count: total }) }}
             </div>
             <button
               type="button"
               data-feishu-sync-button
-              class="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-hidden focus:ring-2 focus:ring-blue-200 disabled:cursor-wait disabled:opacity-70"
+              class="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-300 bg-blue-50 px-2.5 text-xs font-semibold text-blue-700 transition hover:border-blue-400 hover:bg-blue-100 focus:outline-hidden focus:ring-2 focus:ring-blue-200 disabled:cursor-wait disabled:opacity-70"
               :disabled="syncingFeishu"
               @click="handleManualFeishuSync"
             >
@@ -761,7 +942,7 @@ function displayTotal(quote: Quotation): string {
             </button>
             <button
               type="button"
-              :class="`inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition cursor-pointer ${
+              :class="`inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 text-xs font-semibold transition cursor-pointer ${
                 hasActiveFilters
                   ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
                   : 'text-dm-text-tertiary hover:bg-slate-50 hover:text-dm-text-secondary'
@@ -775,37 +956,98 @@ function displayTotal(quote: Quotation): string {
       </div>
     </div>
 
-    <div id="table-panel" class="bg-white rounded-xl border border-dm-border-light shadow-xs overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full min-w-[1180px] text-left border-collapse">
+    <div
+      id="table-panel"
+      class="flex flex-1 flex-col rounded-xl border border-dm-border-light bg-white shadow-xs"
+    >
+      <div class="flex flex-1 overflow-hidden rounded-t-xl">
+        <div
+          class="flex-1 overflow-x-auto"
+          data-quotation-table-scroller
+        >
+        <table
+          class="w-full table-fixed border-collapse text-left"
+          :class="{ 'h-full': pageSize === 10 && quotations.length === 10 }"
+          :style="{ minWidth: `${tableWidth}px` }"
+        >
+          <colgroup>
+            <col
+              v-for="column in resizableColumns"
+              :key="column.key"
+              :data-column-key="column.key"
+              :style="{ width: `${columnWidths[column.key]}px` }"
+            />
+            <col :style="{ width: `${ACTIONS_COLUMN_WIDTH}px` }" />
+          </colgroup>
           <thead>
             <tr
               class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-bold tracking-wider"
             >
-              <th class="w-[220px] py-3 px-4">
-                {{ t('quotation.pages.list.tableQuoteNo') }}
+              <th
+                v-for="column in resizableColumns"
+                :key="column.key"
+                :data-column-header="column.key"
+                class="relative px-3 py-1.5"
+                :class="{
+                  'text-center': column.align === 'center',
+                  'text-right': column.align === 'right',
+                }"
+              >
+                <span class="block truncate whitespace-nowrap">
+                  {{ column.label }}
+                </span>
+                <span
+                  role="separator"
+                  aria-orientation="vertical"
+                  :aria-label="
+                    t('quotation.pages.list.resizeColumn', {
+                      column: column.label,
+                    })
+                  "
+                  :aria-valuemin="column.minWidth"
+                  :aria-valuemax="column.maxWidth"
+                  :aria-valuenow="columnWidths[column.key]"
+                  :title="t('quotation.pages.list.resizeColumnHint')"
+                  tabindex="0"
+                  class="group absolute -right-1 top-0 z-10 flex h-full w-3 touch-none select-none items-center justify-center cursor-col-resize focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                  data-column-resizer
+                  :data-column-key="column.key"
+                  @click.stop.prevent
+                  @pointerdown.stop.prevent="startColumnResize(column.key, $event)"
+                  @pointermove.stop.prevent="handleColumnResize"
+                  @pointerup.stop.prevent="finishColumnResize"
+                  @pointercancel.stop.prevent="finishColumnResize"
+                  @keydown.left.stop.prevent="
+                    resizeColumnBy(column.key, -COLUMN_RESIZE_STEP)
+                  "
+                  @keydown.right.stop.prevent="
+                    resizeColumnBy(column.key, COLUMN_RESIZE_STEP)
+                  "
+                >
+                  <span
+                    class="h-5 w-px bg-slate-300 transition group-hover:w-0.5 group-hover:bg-blue-500 group-focus:w-0.5 group-focus:bg-blue-500"
+                  />
+                </span>
               </th>
-              <th class="py-3 px-4">{{ t('quotation.pages.list.tableProjectName') }}</th>
-              <th class="py-3 px-4">{{ t('quotation.pages.list.tableCustomer') }}</th>
-              <th class="py-3 px-4">{{ t('quotation.pages.list.tableContact') }}</th>
-              <th class="whitespace-nowrap py-3 px-4">{{ t('quotation.pages.list.tableCreatedAt') }}</th>
-              <th class="py-3 px-4 text-right">{{ t('quotation.pages.list.tableTotal') }}</th>
-              <th class="w-[136px] whitespace-nowrap py-3 px-4 text-center">
-                {{ t('quotation.pages.list.tableStatusSource') }}
-              </th>
-              <th class="w-[200px] py-3 px-4 text-center">
+              <th class="px-3 py-1.5 text-center">
                 {{ t('quotation.pages.list.tableActions') }}
               </th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100 text-sm">
             <tr v-if="loading">
-              <td colspan="8" class="py-12 text-center text-dm-text-tertiary">
+              <td
+                :colspan="resizableColumns.length + 1"
+                class="py-12 text-center text-dm-text-tertiary"
+              >
                 {{ t('quotation.pages.list.syncing') }}
               </td>
             </tr>
             <tr v-else-if="quotations.length === 0">
-              <td colspan="8" class="py-12 text-center text-dm-text-tertiary">
+              <td
+                :colspan="resizableColumns.length + 1"
+                class="py-12 text-center text-dm-text-tertiary"
+              >
                 {{ t('quotation.pages.list.emptyResults') }}
               </td>
             </tr>
@@ -813,11 +1055,27 @@ function displayTotal(quote: Quotation): string {
             <tr
               v-for="quote in quotations"
               :key="quote.id"
-              class="hover:bg-[#fafafa] transition duration-150"
+              data-quotation-row
+              :data-source-type="quote.sourceType"
+              :tabindex="quote.sourceType === 'document_import' ? 0 : undefined"
+              :aria-label="
+                quote.sourceType === 'document_import'
+                  ? t('quotation.pages.list.openRowDetails', {
+                      quoteNo: quote.quoteNo,
+                    })
+                  : undefined
+              "
+              class="group transition duration-150 hover:bg-[#fafafa] focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-300"
+              :class="{
+                'cursor-pointer': quote.sourceType === 'document_import',
+              }"
+              @click="handleRowClick(quote, $event)"
+              @keydown.enter="handleRowKeydown(quote, $event)"
+              @keydown.space="handleRowKeydown(quote, $event)"
             >
-              <td class="w-[220px] max-w-[220px] py-3.5 px-4">
+              <td class="px-3 py-1">
                 <p
-                  class="block truncate whitespace-nowrap font-mono font-medium text-dm-primary"
+                  class="block truncate whitespace-nowrap font-mono font-semibold text-slate-700 transition group-hover:text-blue-700"
                   :title="quote.quoteNo"
                 >
                   {{ quote.quoteNo }}
@@ -829,12 +1087,15 @@ function displayTotal(quote: Quotation): string {
                   {{ exportProgressLabel(quote.id) }}
                 </p>
               </td>
-              <td class="py-3.5 px-4">
-                <div class="max-w-[180px] sm:max-w-xs truncate">
-                  <p class="font-semibold text-dm-text" :title="quote.projectName">
+              <td class="px-3 py-1">
+                <div class="min-w-0">
+                  <p
+                    class="truncate whitespace-nowrap font-semibold text-dm-text"
+                    :title="quote.projectName"
+                  >
                     {{ quote.projectName }}
                   </p>
-                  <p class="text-xs text-dm-text-tertiary font-mono mt-0.5">
+                  <p class="mt-0.5 truncate whitespace-nowrap font-mono text-xs text-dm-text-tertiary">
                     {{
                       t('quotation.common.lineItemCount', {
                         count: quote.itemCount ?? quote.items.length,
@@ -843,29 +1104,29 @@ function displayTotal(quote: Quotation): string {
                   </p>
                 </div>
               </td>
-              <td class="py-3.5 px-4">
-                <div class="max-w-[160px] truncate">
-                  <p class="text-dm-text font-medium" :title="quote.clientCompany">
+              <td class="px-3 py-1">
+                <div class="min-w-0">
+                  <p
+                    class="truncate whitespace-nowrap font-medium text-dm-text"
+                    :title="quote.clientCompany"
+                  >
                     {{ quote.clientCompany }}
                   </p>
                 </div>
               </td>
               <td
-                class="py-3.5 px-4 text-dm-text-secondary font-medium"
+                class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium"
                 :title="displayContact(quote) === '—' ? undefined : displayContact(quote)"
               >
                 {{ displayContact(quote) }}
               </td>
-              <td class="whitespace-nowrap py-3.5 px-4 text-dm-text-tertiary font-mono">
-                {{ quote.createdAt.substring(0, 10) }}
-              </td>
-              <td class="py-3.5 px-4 text-right font-bold text-dm-text font-mono">
+              <td class="px-3 py-1 text-right font-bold text-dm-text font-mono">
                 {{ displayTotal(quote) }}
               </td>
-              <td class="w-[136px] py-3.5 px-4 text-center">
+              <td class="px-3 py-1 text-center">
                 <span
                   v-if="quote.sourceType === 'document_import'"
-                  class="inline-flex whitespace-nowrap rounded-full bg-fuchsia-100 px-2.5 py-1 text-xs font-semibold text-fuchsia-800 ring-1 ring-inset ring-fuchsia-300"
+                  class="inline-flex whitespace-nowrap rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-semibold text-fuchsia-800 ring-1 ring-inset ring-fuchsia-300"
                 >
                   {{ t('quotation.pages.list.sourceDocumentImport') }}
                 </span>
@@ -884,9 +1145,14 @@ function displayTotal(quote: Quotation): string {
                   "
                 />
               </td>
-              <td class="w-[200px] py-3.5 px-4">
+              <td class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary">
+                {{ displayQuoteDate(quote) }}
+              </td>
+              <td class="px-3 py-1">
                 <div class="flex items-center justify-center gap-1.5">
                   <button
+                    v-if="quote.sourceType !== 'document_import'"
+                    data-view-details
                     :title="t('quotation.pages.list.viewDetails')"
                     class="p-1 text-dm-text-tertiary hover:text-dm-text hover:bg-slate-100 rounded-sm transition duration-100 cursor-pointer"
                     @click="emit('viewQuote', quote.id)"
@@ -1003,28 +1269,43 @@ function displayTotal(quote: Quotation): string {
             </template>
           </tbody>
         </table>
+        </div>
       </div>
       <div
-        class="flex flex-col gap-3 border-t border-dm-border-light px-4 py-3 text-sm text-dm-text-tertiary sm:flex-row sm:items-center sm:justify-between"
+        class="flex flex-col gap-2 border-t border-dm-border-light px-3 py-2 text-sm text-dm-text-tertiary sm:flex-row sm:items-center sm:justify-between"
       >
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span>共 {{ total }} 条</span>
-          <span>显示 {{ rangeStart }}–{{ rangeEnd }} 条</span>
-          <span>共 {{ totalPages }} 页</span>
+          <span>
+            {{ t('quotation.pages.list.paginationTotal', { count: total }) }}
+          </span>
+          <span>
+            {{
+              t('quotation.pages.list.paginationRange', {
+                start: rangeStart,
+                end: rangeEnd,
+              })
+            }}
+          </span>
+          <span>
+            {{
+              t('quotation.pages.list.paginationPages', {
+                count: totalPages,
+              })
+            }}
+          </span>
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <label class="flex items-center gap-2">
-            <span>每页</span>
+            <span>{{ t('quotation.pages.list.paginationPageSize') }}</span>
             <FormSelect
               :value="String(pageSize)"
               class-name="w-20"
               trigger-class-name="h-8 rounded-md border-dm-border bg-white px-2 text-sm focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
-              panel-class-name="bottom-full top-auto mb-1 mt-0"
+              panel-class-name="!bottom-full !top-auto !mb-1 !mt-0"
               :options="pageSizeOptions"
               test-id="quotation-page-size"
               @change="handlePageSizeChange"
             />
-            <span>条</span>
           </label>
           <button
             type="button"
@@ -1032,7 +1313,7 @@ function displayTotal(quote: Quotation): string {
             :disabled="page <= 1 || loading"
             @click="requestPage(page - 1)"
           >
-            上一页
+            {{ t('quotation.pages.list.paginationPrevious') }}
           </button>
           <button
             v-for="pageNumber in pageNumbers"
@@ -1055,7 +1336,7 @@ function displayTotal(quote: Quotation): string {
             :disabled="page >= totalPages || loading || totalPages === 0"
             @click="requestPage(page + 1)"
           >
-            下一页
+            {{ t('quotation.pages.list.paginationNext') }}
           </button>
         </div>
       </div>
