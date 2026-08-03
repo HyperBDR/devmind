@@ -229,6 +229,14 @@ class Quotation(TimeStampedModel):
                 fields=["product_line", "-created_at", "-id"],
                 name="quote_list_product_created",
             ),
+            models.Index(
+                fields=["quote_date"],
+                name="quote_list_quote_date",
+            ),
+            models.Index(
+                fields=["product_line_name"],
+                name="quote_list_product_name",
+            ),
         ]
 
     def delete(self, using=None, keep_parents=False):

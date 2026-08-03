@@ -39,6 +39,7 @@ const { t } = useQuotationI18n()
 const props = defineProps<{
   quote: Quotation
   currentUser?: PreviewUser
+  embedded?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -323,9 +324,12 @@ function setStatus(status: QuoteStatus) {
 </script>
 
 <template>
-  <div id="quote-details-root" class="mx-auto max-w-[1400px] space-y-6">
+  <div
+    id="quote-details-root"
+    :class="embedded ? 'space-y-0' : 'mx-auto max-w-[1400px] space-y-6'"
+  >
     <div
-      v-if="quote.status === 'Cancelled'"
+      v-if="!embedded && quote.status === 'Cancelled'"
       class="flex gap-3 rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-800"
     >
       <Ban class="mt-0.5 h-5 w-5 shrink-0 text-rose-600" />
@@ -345,6 +349,7 @@ function setStatus(status: QuoteStatus) {
     </div>
 
     <div
+      v-if="!embedded"
       class="flex flex-col items-start justify-between gap-4 dm-card p-4 shadow-xs sm:flex-row sm:items-center"
     >
       <button
@@ -420,12 +425,26 @@ function setStatus(status: QuoteStatus) {
       </p>
     </div>
 
-    <div class="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_300px]">
-      <div class="min-w-0 overflow-x-auto overflow-y-auto rounded-xl border border-dm-border bg-slate-100 p-4">
+    <div
+      :class="
+        embedded
+          ? 'block'
+          : 'grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_300px]'
+      "
+    >
+      <div
+        data-embedded-quotation-preview
+        class="min-w-0 overflow-x-auto rounded-xl border border-dm-border bg-slate-100"
+        :class="embedded ? 'p-0 sm:p-2' : 'p-4'"
+      >
         <QuotationPreview :quote="quote" :current-user="currentUser" />
       </div>
 
-      <div class="min-w-0 space-y-6 xl:w-[300px]">
+      <div
+        v-if="!embedded"
+        class="min-w-0 space-y-6 xl:w-[300px]"
+        data-quotation-details-sidebar
+      >
         <div
           v-if="
             quote.excelGeneratedAt ||

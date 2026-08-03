@@ -90,6 +90,8 @@ interface ApiQuotationListItem {
   project_name: string;
   client_company: string;
   contact_person: string;
+  quote_date?: string | null;
+  issuer_contact_name?: string | null;
   created_at: string;
   currency: string;
   grand_total: number | string;
@@ -137,6 +139,7 @@ export interface QuotationListParams {
 
 export interface QuotationListResult {
   items: Quotation[];
+  productLines: string[];
   total: number;
   page: number;
   pageSize: 10 | 20 | 50;
@@ -424,7 +427,7 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     productLineName: api.product_line_name,
     region: '',
     industry: '',
-    salesperson: '',
+    salesperson: api.issuer_contact_name || '',
     currency: (api.currency as Quotation['currency']) || 'USD',
     paymentTerms: '',
     status: mapStatus(api.status),
@@ -436,6 +439,7 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     vatRate: 0,
     vatAmount: 0,
     grandTotal: toNumber(api.grand_total),
+    quoteDate: api.quote_date || undefined,
     createdAt: api.created_at,
     feishuExcelDocumentId:
       api.latest_excel_document_id || undefined,
@@ -529,7 +533,9 @@ export async function listQuotations(
   query.set('page_size', String(params.pageSize || 10));
   if (params.search?.trim()) query.set('search', params.search.trim());
   if (params.status) query.set('status', mapStatusToApi(params.status));
-  if (params.productLine) query.set('product_line', params.productLine);
+  if (params.productLine) {
+    query.set('product_line_name', params.productLine);
+  }
   if (params.sourceType) query.set('source_type', params.sourceType);
   if (params.createdFrom) query.set('created_from', params.createdFrom);
   if (params.createdTo) query.set('created_to', params.createdTo);
@@ -539,9 +545,13 @@ export async function listQuotations(
     page: number;
     page_size: 10 | 20 | 50;
     total_pages: number;
+    facets?: {
+      product_lines?: string[];
+    };
   }>(`/quotations?${query.toString()}`);
   return {
     items: data.items.map(mapApiQuotationListItem),
+    productLines: data.facets?.product_lines || [],
     total: data.total,
     page: data.page,
     pageSize: data.page_size,

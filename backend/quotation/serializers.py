@@ -60,6 +60,10 @@ class QuotationListQuerySerializer(serializers.Serializer):
         max_length=40,
         required=False,
     )
+    product_line_name = serializers.CharField(
+        max_length=120,
+        required=False,
+    )
     source_type = serializers.ChoiceField(
         choices=Quotation._meta.get_field("source_type").choices,
         required=False,
@@ -266,6 +270,7 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "project_name",
             "client_company",
             "contact_person",
+            "quote_date",
             "created_at",
             "currency",
             "grand_total",
@@ -274,6 +279,7 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "source_document_type",
             "product_line",
             "product_line_name",
+            "issuer_contact_name",
             "item_count",
             "latest_excel_document_id",
             "latest_pdf_document_id",
