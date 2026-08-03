@@ -14,8 +14,12 @@ from django.utils import timezone
 
 from quotation.models import (
     DocumentAsset,
+    DocumentParseResult,
+    DocumentParseStatus,
     DocumentReplica,
     Quotation,
+    QuotationSourceType,
+    QuotationVersion,
     ReplicaSyncStatus,
 )
 
@@ -87,24 +91,36 @@ def attach_quotation_document_summaries(
         quotation.latest_excel_document_id = None
         quotation.latest_pdf_document_id = None
         quotation.source_document_type = None
+        quotation.source_document = None
+        quotation.available_versions = []
     if not quotations:
         return
 
+    quotation_ids = [quote.pk for quote in quotations]
     active_replica = DocumentReplica.objects.filter(
         asset_id=OuterRef("pk"),
         sync_status=ReplicaSyncStatus.SYNCED,
         revoked_at__isnull=True,
     ).exclude(remote_file_token="")
+    confirmed_parse = DocumentParseResult.objects.filter(
+        asset_id=OuterRef("pk"),
+        quotation_id=OuterRef("quotation_id"),
+        status=DocumentParseStatus.CONFIRMED,
+    )
     documents = (
         DocumentAsset.objects.filter(
-            quotation_id__in=[quote.pk for quote in quotations],
+            quotation_id__in=quotation_ids,
             doc_type__in=("excel", "pdf"),
         )
-        .annotate(has_active_replica=Exists(active_replica))
+        .annotate(
+            has_active_replica=Exists(active_replica),
+            has_confirmed_parse=Exists(confirmed_parse),
+        )
         .only(
             "id",
             "quotation_id",
             "doc_type",
+            "file_name",
             "source",
             "feishu_file_token",
             "created_at",
@@ -115,12 +131,47 @@ def attach_quotation_document_summaries(
     for document in documents:
         quotation = quotations_by_id[document.quotation_id]
         if (
-            quotation.source_document_type is None
-            and document.source == "feishu"
+            quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT
+            and quotation.source_document is None
+            and document.source in {"feishu", "local"}
+            and document.has_confirmed_parse
         ):
             quotation.source_document_type = document.doc_type
+            quotation.source_document = {
+                "id": document.pk,
+                "doc_type": document.doc_type,
+                "file_name": document.file_name,
+            }
         field = f"latest_{document.doc_type}_document_id"
         if getattr(quotation, field) is not None:
             continue
         if document.has_active_replica or document.feishu_file_token:
             setattr(quotation, field, document.pk)
+
+    imported_ids = [
+        quotation.pk
+        for quotation in quotations
+        if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT
+    ]
+    versions = QuotationVersion.objects.filter(
+        quotation_id__in=imported_ids,
+    ).values(
+        "quotation_id",
+        "version_no",
+        "status",
+        "created_at",
+    ).order_by("quotation_id", "-version_no")
+    for version in versions:
+        quotations_by_id[version["quotation_id"]].available_versions.append(
+            {
+                "version_no": version["version_no"],
+                "status": version["status"],
+                "created_at": version["created_at"],
+            }
+        )
+    for quotation in quotations_by_id.values():
+        if quotation.source_document and quotation.available_versions:
+            quotation.source_document["version_no"] = min(
+                version["version_no"]
+                for version in quotation.available_versions
+            )

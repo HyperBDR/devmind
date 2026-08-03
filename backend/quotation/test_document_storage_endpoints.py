@@ -16,6 +16,7 @@ from quotation.models import (
     DocumentAsset,
     DocumentReplica,
     DocumentType,
+    ExportJob,
     FeishuConnection,
     Quotation,
     QuoteStatus,
@@ -107,6 +108,7 @@ class DocumentStorageEndpointTests(TestCase):
         disposition = download["Content-Disposition"]
         self.assertIn("filename*=utf-8''", disposition)
         self.assertEqual(unquote(disposition.split("''", 1)[1]), "客户 报价.xlsx")
+        self.assertFalse(ExportJob.objects.exists())
 
         delete = self.api.delete(f"/api/v1/quotation/documents/{asset.id}")
         self.assertEqual(delete.status_code, 404)

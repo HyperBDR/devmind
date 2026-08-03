@@ -12,10 +12,13 @@ from quotation.metrics import export_metrics_snapshot
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
     DocumentAsset,
+    DocumentParseResult,
+    DocumentParseStatus,
     DocumentReplica,
     ExportJob,
     ExportJobStatus,
     Quotation,
+    QuotationSourceType,
     QuotationTemplate,
     QuotationTemplateStatus,
     QuotationVersion,
@@ -40,7 +43,7 @@ from quotation.services.export_renderer import (
 )
 from quotation.services.feishu_client import FeishuAPIError
 from quotation.services.quotation_service import build_quotation_snapshot
-from quotation.services.storage import resolve_document_path
+from quotation.services.storage import resolve_document_path, write_document
 from quotation.services.storage_control import FeishuStorageProvider
 from quotation.tasks import (
     delete_owned_remote_file_task,
@@ -755,6 +758,108 @@ class QuotationExportTaskTests(QuotationExportFixture):
                 archive_to_feishu=archive_to_feishu,
             )
         return job
+
+    def create_imported_excel_source(
+        self,
+        content: bytes,
+        *,
+        persist: bool = True,
+    ) -> DocumentAsset:
+        self.quotation.source_type = QuotationSourceType.DOCUMENT_IMPORT
+        self.quotation.save(update_fields=["source_type", "updated_at"])
+        asset = DocumentAsset.objects.create(
+            quotation=self.quotation,
+            doc_type="excel",
+            file_name="Original quotation.xlsx",
+            mime_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            storage_key="documents/original/source.xlsx",
+            size_bytes=len(content),
+            source="local",
+            created_by_email=self.user.email,
+        )
+        DocumentParseResult.objects.create(
+            asset=asset,
+            quotation=self.quotation,
+            status=DocumentParseStatus.CONFIRMED,
+            parser_name="test-parser",
+            parser_version="1",
+            content_hash="source-content-hash",
+        )
+        if persist:
+            write_document(content, asset.storage_key)
+        return asset
+
+    def test_imported_first_revision_uses_untouched_source_excel(self):
+        source_bytes = b"PK\x03\x04-untouched-original-excel"
+        self.create_imported_excel_source(source_bytes)
+        job = self.create_job(["xlsx", "pdf"])
+
+        with patch(
+            "quotation.services.export_pipeline.render_quotation_xlsx"
+        ) as render_xlsx, patch(
+            "quotation.services.export_pipeline.convert_xlsx_to_pdf",
+            return_value=b"%PDF-from-original",
+        ) as convert_pdf:
+            result = render_quotation_export_task.run(job.id)
+
+        self.assertEqual(result["status"], ExportJobStatus.COMPLETED)
+        render_xlsx.assert_not_called()
+        convert_pdf.assert_called_once_with(source_bytes, job_id=job.id)
+        excel_asset = job.assets.get(doc_type="excel")
+        self.assertEqual(
+            resolve_document_path(excel_asset.storage_key).read_bytes(),
+            source_bytes,
+        )
+
+    def test_imported_first_revision_fails_when_source_file_is_missing(self):
+        self.create_imported_excel_source(b"missing", persist=False)
+        job = self.create_job(["xlsx"])
+
+        with patch(
+            "quotation.services.export_pipeline.render_quotation_xlsx"
+        ) as render_xlsx:
+            result = render_quotation_export_task.run(job.id)
+
+        job.refresh_from_db()
+        self.assertEqual(result["status"], ExportJobStatus.RENDER_FAILED)
+        self.assertEqual(job.error_code, "original_import_unavailable")
+        self.assertEqual(job.assets.count(), 0)
+        render_xlsx.assert_not_called()
+
+    def test_imported_later_revision_still_uses_its_snapshot(self):
+        self.create_imported_excel_source(b"original")
+        later_version = QuotationVersion.objects.create(
+            quotation=self.quotation,
+            version_no=2,
+            status="generated",
+            snapshot_json={
+                **build_quotation_snapshot(self.quotation),
+                "project_name": "Edited revision",
+            },
+            operator_email=self.user.email,
+        )
+        with patch("quotation.tasks.render_quotation_export_task.apply_async"):
+            job, _ = create_export_job(
+                quotation=self.quotation,
+                formats=["xlsx"],
+                actor=self.user,
+                quotation_version_no=later_version.version_no,
+            )
+
+        with patch(
+            "quotation.services.export_pipeline.render_quotation_xlsx",
+            return_value=b"generated-revision",
+        ) as render_xlsx:
+            result = render_quotation_export_task.run(job.id)
+
+        self.assertEqual(result["status"], ExportJobStatus.COMPLETED)
+        render_xlsx.assert_called_once_with(
+            job.template,
+            later_version.snapshot_json,
+        )
 
     @patch(
         "quotation.services.export_pipeline.convert_xlsx_to_pdf",

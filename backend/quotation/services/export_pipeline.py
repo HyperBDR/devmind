@@ -10,10 +10,13 @@ from django.db import DatabaseError, transaction
 from django.utils import timezone
 from quotation.models import (
     DocumentAsset,
+    DocumentParseResult,
+    DocumentParseStatus,
     DocumentType,
     ExportJob,
     ExportJobStatus,
     Quotation,
+    QuotationSourceType,
     SyncJob,
     SyncJobStatus,
 )
@@ -30,10 +33,51 @@ from quotation.services.export_renderer import (
 from quotation.services.storage import (
     delete_document,
     document_storage_key,
+    resolve_document_path,
     write_document_atomic,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _original_import_excel_bytes(job: ExportJob) -> bytes | None:
+    """Return the untouched Excel source for an imported first revision."""
+    if job.quotation.source_type != QuotationSourceType.DOCUMENT_IMPORT:
+        return None
+    first_version_no = (
+        job.quotation.versions.order_by("version_no")
+        .values_list("version_no", flat=True)
+        .first()
+    )
+    if job.quotation_version_no != first_version_no:
+        return None
+    parse_result = (
+        DocumentParseResult.objects.select_related("asset")
+        .filter(
+            quotation_id=job.quotation_id,
+            asset__quotation_id=job.quotation_id,
+            asset__doc_type=DocumentType.EXCEL,
+            asset__source__in=("feishu", "local"),
+            status__in=(
+                DocumentParseStatus.CONFIRMED,
+                DocumentParseStatus.SUPERSEDED,
+            ),
+        )
+        .order_by("confirmed_at", "created_at", "id")
+        .first()
+    )
+    if parse_result is None:
+        raise TemplateValidationError(
+            "Original imported Excel file is unavailable",
+            code="original_import_unavailable",
+        )
+    path = resolve_document_path(parse_result.asset.storage_key)
+    if not path.is_file():
+        raise TemplateValidationError(
+            "Original imported Excel file is unavailable",
+            code="original_import_unavailable",
+        )
+    return path.read_bytes()
 
 
 def _asset_id(job_id: str, doc_type: str) -> str:
@@ -209,10 +253,12 @@ def render_export_job(job_id: str) -> dict:
             ]
         )
 
-    excel_bytes = render_quotation_xlsx(
-        job.template,
-        job.quotation_version.snapshot_json,
-    )
+    excel_bytes = _original_import_excel_bytes(job)
+    if excel_bytes is None:
+        excel_bytes = render_quotation_xlsx(
+            job.template,
+            job.quotation_version.snapshot_json,
+        )
     outputs = {}
     if "xlsx" in job.formats:
         outputs[DocumentType.EXCEL] = excel_bytes

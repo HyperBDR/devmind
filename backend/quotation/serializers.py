@@ -236,6 +236,26 @@ class QuotationVersionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class QuotationListDocumentSerializer(serializers.Serializer):
+    """Serialize the original document behind an imported quotation."""
+
+    id = serializers.CharField(read_only=True)
+    doc_type = serializers.ChoiceField(
+        choices=("excel", "pdf"),
+        read_only=True,
+    )
+    file_name = serializers.CharField(read_only=True)
+    version_no = serializers.IntegerField(read_only=True)
+
+
+class QuotationListVersionSerializer(serializers.Serializer):
+    """Serialize a revision without returning its full snapshot."""
+
+    version_no = serializers.IntegerField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
 class QuotationListSerializer(serializers.ModelSerializer):
     """Serialize only fields required by the paginated list."""
 
@@ -251,6 +271,14 @@ class QuotationListSerializer(serializers.ModelSerializer):
     )
     source_document_type = serializers.CharField(
         allow_null=True,
+        read_only=True,
+    )
+    source_document = QuotationListDocumentSerializer(
+        allow_null=True,
+        read_only=True,
+    )
+    available_versions = QuotationListVersionSerializer(
+        many=True,
         read_only=True,
     )
 
@@ -272,6 +300,8 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "status",
             "source_type",
             "source_document_type",
+            "source_document",
+            "available_versions",
             "product_line",
             "item_count",
             "latest_excel_document_id",

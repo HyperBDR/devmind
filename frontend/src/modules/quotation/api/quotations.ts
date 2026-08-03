@@ -95,6 +95,17 @@ interface ApiQuotationListItem {
   status: string;
   source_type: 'manual' | 'document_import';
   source_document_type?: 'excel' | 'pdf' | null;
+  source_document?: {
+    id: string;
+    doc_type: 'excel' | 'pdf';
+    file_name: string;
+    version_no: number;
+  } | null;
+  available_versions?: Array<{
+    version_no: number;
+    status: string;
+    created_at: string;
+  }>;
   product_line: string;
   item_count: number;
   latest_excel_document_id?: string | null;
@@ -407,6 +418,19 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     quoteNo: api.display_quote_no || api.quote_no,
     sourceType: api.source_type || 'manual',
     sourceDocumentType: api.source_document_type || undefined,
+    sourceDocument: api.source_document
+      ? {
+          id: api.source_document.id,
+          docType: api.source_document.doc_type,
+          fileName: api.source_document.file_name,
+          versionNo: api.source_document.version_no,
+        }
+      : undefined,
+    availableVersions: (api.available_versions || []).map((version) => ({
+      versionNo: version.version_no,
+      status: version.status,
+      createdAt: version.created_at,
+    })),
     projectName: api.project_name,
     clientCompany: api.client_company,
     contactPerson: api.contact_person,
