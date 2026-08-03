@@ -6,6 +6,8 @@ from ipaddress import ip_address
 import re
 from typing import Any
 
+from django.db.models import Q
+
 from quotation.models import AuditEvent
 from quotation.permissions import user_role
 
@@ -109,6 +111,54 @@ EVENT_NAMES = {
     ("replica", "sync_failed"): "document.replica_sync_failed",
     ("replica", "revoked"): "document.replica_revoked",
 }
+
+BUSINESS_AUDIT_OPERATIONS = frozenset(
+    {
+        ("catalog", "create"),
+        ("catalog", "delete"),
+        ("catalog", "update"),
+        ("document", "delete"),
+        ("document", "download"),
+        ("document", "upload"),
+        ("feishu", "import"),
+        ("feishu", "upload"),
+        ("quotation", "create"),
+        ("quotation", "delete"),
+        ("quotation", "generate"),
+        ("quotation", "update"),
+    }
+)
+
+BUSINESS_AUDIT_EVENT_NAMES = frozenset(
+    {
+        "catalog.item_created",
+        "catalog.item_deleted",
+        "catalog.item_updated",
+        "document.deleted",
+        "document.downloaded",
+        "document.imported",
+        "document.uploaded",
+        "quotation.created",
+        "quotation.deleted",
+        "quotation.generated",
+        "quotation.status_changed",
+        "quotation.updated",
+        "quotation.version_created",
+    }
+)
+
+
+def is_business_audit_operation(module: str, action: str) -> bool:
+    """Return whether one operation belongs in user-facing history."""
+    return (module, action) in BUSINESS_AUDIT_OPERATIONS
+
+
+def business_audit_events_query() -> Q:
+    """Return a query matching approved current and legacy business events."""
+    query = Q(event_name__in=BUSINESS_AUDIT_EVENT_NAMES)
+    for module, action in BUSINESS_AUDIT_OPERATIONS:
+        query |= Q(event_name="", module=module, action=action)
+    return query
 
 
 def _actor_name(actor) -> str:

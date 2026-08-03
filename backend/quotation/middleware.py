@@ -8,7 +8,11 @@ from datetime import timedelta
 
 from django.db import DatabaseError
 from django.utils import timezone
-from quotation.audit import AUDIT_CONTEXT, record_audit_event
+from quotation.audit import (
+    AUDIT_CONTEXT,
+    is_business_audit_operation,
+    record_audit_event,
+)
 from quotation.models import AuditEvent
 
 logger = logging.getLogger(__name__)
@@ -45,7 +49,7 @@ def _classify(method: str, path: str):
     if re.fullmatch(r"quotations/[^/]+/generate", relative):
         return "quotation", "generate", "quotation"
     if re.fullmatch(r"quotations/[^/]+/exports", relative):
-        return "document", "export", "quotation"
+        return "quotation", "generate", "quotation"
     if re.fullmatch(r"exports/[^/]+/retry-upload", relative):
         return "replica", "sync_started", "quotation"
     if re.fullmatch(r"exports/[^/]+", relative) and method == "GET":
@@ -68,7 +72,7 @@ def _classify(method: str, path: str):
     if relative.startswith("feishu/import/") and method == "POST":
         return "feishu", "import", "document"
     if relative == "feishu/files/access/batch":
-        return None
+        return "feishu", "open", "document"
     if "/content" in relative or "/access" in relative:
         return "feishu", "open", "document"
     if relative == "feishu/oauth/start" and method == "GET":
@@ -83,9 +87,15 @@ def _classify(method: str, path: str):
     return None
 
 
-def _is_automatic_activity(request) -> bool:
-    """Return whether the client marked a background refresh operation."""
-    return request.META.get("HTTP_X_QUOTATION_AUDIT_SOURCE", "").lower() == "automatic"
+def _should_record_audit(
+    module: str,
+    action: str,
+    status_code: int,
+) -> bool:
+    """Return whether a classified response requires an audit event."""
+    if status_code in {401, 403}:
+        return True
+    return is_business_audit_operation(module, action)
 
 
 class RequestIdMiddleware:
@@ -252,8 +262,6 @@ class QuotationAuditMiddleware:
 
         try:
             response = self.get_response(request)
-            if _is_automatic_activity(request):
-                return response
             if not classification or getattr(
                 response,
                 "_quotation_audit_handled",
@@ -262,6 +270,12 @@ class QuotationAuditMiddleware:
                 return response
 
             module, action, target_type = classification
+            if not _should_record_audit(
+                module,
+                action,
+                response.status_code,
+            ):
+                return response
             payload = _response_payload(response)
             changed_fields = list(
                 getattr(
