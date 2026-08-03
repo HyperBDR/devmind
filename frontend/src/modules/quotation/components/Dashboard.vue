@@ -674,7 +674,7 @@ onMounted(async () => {
 
     <div
       id="dashboard-charts"
-      class="grid grid-cols-1 items-stretch gap-6 2xl:grid-cols-[minmax(0,1.18fr)_minmax(480px,0.82fr)]"
+      class="grid grid-cols-1 items-stretch gap-6"
     >
       <div id="chart-quote-amount" class="dm-card flex h-full flex-col p-5">
         <div

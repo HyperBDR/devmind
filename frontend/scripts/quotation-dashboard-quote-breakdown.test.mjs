@@ -41,15 +41,16 @@ test('dashboard pie chart shows quote-level breakdown with native English copy',
   assert.doesNotMatch(enLocale, /Leader lines show quote no\. and total/)
 })
 
-test('dashboard keeps the original chart order and desktop proportions', () => {
+test('dashboard keeps charts stacked at every desktop width', () => {
   assert.match(
     dashboardSource,
     /id="dashboard-quotation-overview"[^>]*xl:grid-cols-\[minmax\(23rem,0\.86fr\)_minmax\(0,1\.64fr\)\]/
   )
   assert.match(
     dashboardSource,
-    /2xl:grid-cols-\[minmax\(0,1\.18fr\)_minmax\(480px,0\.82fr\)\]/
+    /id="dashboard-charts"[\s\S]*class="grid grid-cols-1 items-stretch gap-6"/
   )
+  assert.doesNotMatch(dashboardSource, /dashboard-charts[\s\S]{0,180}2xl:grid-cols/)
   assert.match(
     dashboardSource,
     /id="chart-quote-amount" class="dm-card flex h-full flex-col p-5"/
