@@ -522,12 +522,15 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div id="dashboard-root" class="space-y-4">
+  <div
+    id="dashboard-root"
+    class="min-w-0 max-w-full space-y-4 overflow-x-hidden"
+  >
     <div
       id="dashboard-overview-header"
-      class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+      class="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between"
     >
-      <div>
+      <div class="min-w-0">
         <h2 class="text-xl font-semibold text-dm-text">
           {{ t('quotation.pages.dashboard.overviewTitle') }}
         </h2>
@@ -535,7 +538,7 @@ onMounted(async () => {
           {{ t('quotation.pages.dashboard.overviewSubtitle') }}
         </p>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex shrink-0 items-center gap-3">
         <span class="text-xs text-dm-text-tertiary">
           {{
             t('quotation.pages.dashboard.generatedAt', {
@@ -568,9 +571,12 @@ onMounted(async () => {
 
     <div
       id="dashboard-quotation-overview"
-      class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(23rem,0.86fr)_minmax(0,1.64fr)]"
+      class="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-[minmax(23rem,0.86fr)_minmax(0,1.64fr)]"
     >
-      <div id="dashboard-month-summary" class="dm-card min-h-40 p-4">
+      <div
+        id="dashboard-month-summary"
+        class="dm-card min-h-40 min-w-0 p-4"
+      >
         <div class="flex items-start justify-between gap-3">
           <div>
             <h3 class="text-sm font-semibold text-dm-text">
@@ -635,7 +641,10 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div id="dashboard-recent-overview" class="dm-card min-h-40 p-4">
+      <div
+        id="dashboard-recent-overview"
+        class="dm-card min-h-40 min-w-0 p-4"
+      >
         <div class="flex items-start justify-between gap-3">
           <div>
             <h3 class="text-sm font-semibold text-dm-text">
@@ -697,9 +706,12 @@ onMounted(async () => {
 
     <div
       id="dashboard-charts"
-      class="grid grid-cols-1 items-stretch gap-6"
+      class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6"
     >
-      <div id="chart-quote-amount" class="dm-card flex h-full flex-col p-5">
+      <div
+        id="chart-quote-amount"
+        class="dm-card flex h-full min-w-0 max-w-full flex-col p-5"
+      >
         <div
           class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
         >
@@ -714,7 +726,7 @@ onMounted(async () => {
         </div>
 
         <div
-          class="relative flex min-h-[16rem] flex-1 items-center justify-center overflow-hidden px-1 py-2"
+          class="relative flex min-h-[16rem] min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden px-1 py-2"
         >
           <div
             v-if="quoteBreakdownData.length === 0"
@@ -727,7 +739,9 @@ onMounted(async () => {
             id="quote-breakdown-layout"
             class="flex w-full min-w-0 items-center justify-center"
           >
-            <div class="flex min-h-[320px] w-full items-center justify-center">
+            <div
+              class="flex min-h-[320px] w-full min-w-0 max-w-full items-center justify-center"
+            >
               <div class="relative h-80 w-[min(100%,700px)]">
                 <Pie
                   :data="quoteBreakdownPieData"
@@ -742,7 +756,7 @@ onMounted(async () => {
 
       <div
         id="chart-trend"
-        class="dm-card flex h-full flex-col justify-between p-5"
+        class="dm-card flex h-full min-w-0 max-w-full flex-col justify-between p-5"
       >
         <div
           class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"

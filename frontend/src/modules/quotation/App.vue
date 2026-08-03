@@ -897,7 +897,10 @@ function reloadPage() {
       </div>
     </aside>
 
-    <div id="main-content-pane" class="flex flex-1 flex-col overflow-hidden">
+    <div
+      id="main-content-pane"
+      class="flex min-w-0 w-0 flex-1 flex-col overflow-hidden"
+    >
       <header
         id="app-header"
         class="flex h-12 shrink-0 items-center justify-between border-b border-dm-border-light bg-white px-6"
@@ -955,7 +958,7 @@ function reloadPage() {
 
       <main
         id="app-scroll-stage"
-        class="flex-1 overflow-y-auto scroll-smooth bg-dm-page p-6"
+        class="min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto scroll-smooth bg-dm-page p-6"
       >
         <Dashboard
           v-if="currentTab === 'dashboard'"

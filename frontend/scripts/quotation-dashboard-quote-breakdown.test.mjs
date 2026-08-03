@@ -6,6 +6,10 @@ const dashboardSource = readFileSync(
   new URL('../src/modules/quotation/components/Dashboard.vue', import.meta.url),
   'utf8'
 )
+const quotationAppSource = readFileSync(
+  new URL('../src/modules/quotation/App.vue', import.meta.url),
+  'utf8'
+)
 const enLocale = readFileSync(
   new URL('../src/modules/quotation/locales/en.json', import.meta.url),
   'utf8'
@@ -48,29 +52,56 @@ test('dashboard keeps charts stacked at every desktop width', () => {
   )
   assert.match(
     dashboardSource,
-    /id="dashboard-charts"[\s\S]*class="grid grid-cols-1 items-stretch gap-6"/
+    /id="dashboard-charts"[\s\S]*class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6"/
   )
   assert.doesNotMatch(dashboardSource, /dashboard-charts[\s\S]{0,180}2xl:grid-cols/)
   assert.match(
     dashboardSource,
-    /id="chart-quote-amount" class="dm-card flex h-full flex-col p-5"/
+    /id="chart-quote-amount"[\s\S]{0,120}class="dm-card flex h-full min-w-0 max-w-full flex-col p-5"/
   )
   assert.doesNotMatch(dashboardSource, /chartAmountSummaryLabel/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownSummaryRows/)
   assert.match(
     dashboardSource,
-    /class="relative flex min-h-\[16rem\] flex-1 items-center justify-center/
+    /class="relative flex min-h-\[16rem\] min-w-0 max-w-full flex-1 items-center justify-center/
   )
   assert.doesNotMatch(dashboardSource, /id="dashboard-recent-grid"/)
   assert.match(
     dashboardSource,
-    /class="dm-card flex h-full flex-col justify-between p-5"/
+    /class="dm-card flex h-full min-w-0 max-w-full flex-col justify-between p-5"/
   )
   assert.match(dashboardSource, /<Line/)
   assert.match(dashboardSource, /:data="trendLineData"/)
   assert.doesNotMatch(dashboardSource, /<VueChart/)
   assert.doesNotMatch(enLocale, /chartAmountSummaryLabel/)
   assert.doesNotMatch(enLocale, /chartAmountQuoteCount/)
+})
+
+test('dashboard width chain shrinks after moving between displays', () => {
+  assert.match(
+    quotationAppSource,
+    /id="main-content-pane"[\s\S]{0,100}class="flex min-w-0 w-0 flex-1 flex-col overflow-hidden"/
+  )
+  assert.match(
+    quotationAppSource,
+    /id="app-scroll-stage"[\s\S]{0,120}class="min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-root"[\s\S]{0,100}class="min-w-0 max-w-full space-y-4 overflow-x-hidden"/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-quotation-overview"[\s\S]{0,100}class="grid min-w-0/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-month-summary"[\s\S]{0,100}min-w-0/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-recent-overview"[\s\S]{0,100}min-w-0/
+  )
 })
 
 test('dashboard quote breakdown uses one centered server-filtered pie', () => {
@@ -93,7 +124,7 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
     /class="flex w-full min-w-0 items-center justify-center"/
   )
   assert.match(dashboardSource, /min-h-\[16rem\]/)
-  assert.match(dashboardSource, /min-h-\[320px\] w-full/)
+  assert.match(dashboardSource, /min-h-\[320px\] w-full min-w-0 max-w-full/)
   assert.match(dashboardSource, /relative h-80/)
   assert.match(dashboardSource, /w-\[min\(100%,700px\)\]/)
   assert.match(dashboardSource, /radius: '92%'/)
