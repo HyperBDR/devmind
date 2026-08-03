@@ -1,5 +1,6 @@
 """Tests for the Zhipu AI billing provider."""
 
+import logging
 from unittest.mock import Mock, patch
 
 import pytest
@@ -102,3 +103,34 @@ class TestZhipuCloud:
 
         assert provider.validate_credentials() is True
         assert mock_request.call_count == 1
+
+    @patch("cloud_billing.clouds.zhipu_provider.requests.Session.request")
+    def test_security_verification_is_configuration_error(
+        self, mock_request, caplog
+    ):
+        provider = self._make_provider()
+        login_response = Mock()
+        login_response.raise_for_status.return_value = None
+        login_response.json.return_value = {
+            "code": 500,
+            "msg": "请完成安全验证",
+        }
+        mock_request.return_value = login_response
+
+        with caplog.at_level(
+            logging.WARNING,
+            logger="cloud_billing.clouds.zhipu_provider",
+        ):
+            result = provider.get_billing_info("2026-08")
+
+        assert result == {
+            "status": "error",
+            "data": None,
+            "error": "请完成安全验证",
+            "is_config_error": True,
+        }
+        assert not [
+            record
+            for record in caplog.records
+            if record.levelno >= logging.ERROR
+        ]

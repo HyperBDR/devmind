@@ -504,8 +504,24 @@ class ZhipuCloud(BaseCloudProvider):
             logger.error("Zhipu billing HTTP error: %s", body)
             return {"status": "error", "data": None, "error": body}
         except Exception as exc:
-            logger.error("Zhipu billing error: %s", exc)
-            return {"status": "error", "data": None, "error": str(exc)}
+            error_message = str(exc)
+            requires_security_verification = (
+                "安全验证" in error_message
+                or "security verification" in error_message.lower()
+            )
+            if requires_security_verification:
+                logger.warning(
+                    "Zhipu billing requires account action: %s",
+                    error_message,
+                )
+                return {
+                    "status": "error",
+                    "data": None,
+                    "error": error_message,
+                    "is_config_error": True,
+                }
+            logger.error("Zhipu billing error: %s", error_message)
+            return {"status": "error", "data": None, "error": error_message}
 
     def get_account_id(self) -> str:
         if self._last_account_id:
