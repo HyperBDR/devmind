@@ -1,7 +1,7 @@
 {
   "quotation": {
     "status": {
-      "all": "All Statuses",
+      "all": "All",
       "Draft": "Draft",
       "Generated": "Generated",
       "Uploaded": "Uploaded",
@@ -199,9 +199,9 @@
         "statusLabel": "Status",
         "statusAll": "All statuses",
         "productLineLabel": "Product line",
-        "productLineAll": "All product lines",
+        "productLineAll": "All",
         "sourceLabel": "Source",
-        "sourceAll": "All sources",
+        "sourceAll": "All",
         "sourceManual": "Manual",
         "sourceDocumentImport": "Parsed import",
         "salespersonLabel": "Sales rep",
@@ -496,7 +496,7 @@
         "numberingMode": "Numbering",
         "numberingAuto": "Auto",
         "numberingCustom": "Custom",
-        "addProductLine": "Add product line",
+        "addProductLine": "Add",
         "closeAddProductLine": "Close",
         "productLineName": "Product line name",
         "productLineNamePlaceholder": "e.g. Cloud Backup",

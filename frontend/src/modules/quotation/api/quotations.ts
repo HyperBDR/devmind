@@ -35,6 +35,7 @@ interface ApiQuotation {
   source_type: 'manual' | 'document_import';
   source_document_type?: 'excel' | 'pdf' | null;
   product_line: string;
+  product_line_name?: string;
   project_name: string;
   currency: string;
   payment_term_option: string;
@@ -96,6 +97,7 @@ interface ApiQuotationListItem {
   source_type: 'manual' | 'document_import';
   source_document_type?: 'excel' | 'pdf' | null;
   product_line: string;
+  product_line_name?: string;
   item_count: number;
   latest_excel_document_id?: string | null;
   latest_pdf_document_id?: string | null;
@@ -110,6 +112,7 @@ interface ApiQuotationFormContextItem {
   contact_person: string;
   email: string;
   product_line: string;
+  product_line_name?: string;
   billing_company: string;
   billing_contact: string;
   billing_email: string;
@@ -290,6 +293,11 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     contactPerson: snapText(snap, 'contact_person', 'contactPerson'),
     email: snapText(snap, 'email', 'email'),
     productLine: snapText(snap, 'product_line', 'productLine'),
+    productLineName: snapText(
+      snap,
+      'product_line_name',
+      'productLineName',
+    ),
     billingCompany: snapText(snap, 'billing_company', 'billingCompany'),
     billingContact: snapText(snap, 'billing_contact', 'billingContact'),
     billingEmail: snapText(snap, 'billing_email', 'billingEmail'),
@@ -353,6 +361,7 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     contactPerson: api.contact_person,
     email: api.email,
     productLine: api.product_line,
+    productLineName: api.product_line_name,
     billingCompany: api.billing_company,
     billingContact: api.billing_contact,
     billingEmail: api.billing_email,
@@ -412,6 +421,7 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     contactPerson: api.contact_person,
     email: '',
     productLine: api.product_line,
+    productLineName: api.product_line_name,
     region: '',
     industry: '',
     salesperson: '',
@@ -444,6 +454,7 @@ function mapApiQuotationFormContextItem(
     contactPerson: api.contact_person,
     email: api.email,
     productLine: api.product_line,
+    productLineName: api.product_line_name,
     billingCompany: api.billing_company,
     billingContact: api.billing_contact,
     billingEmail: api.billing_email,
@@ -472,6 +483,7 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
   return {
     quote_no: quote.quoteNo,
     product_line: quote.productLine || 'BDR',
+    product_line_name: quote.productLineName || '',
     project_name: quote.projectName,
     currency: quote.currency,
     payment_term_option: quote.paymentTermOption || 'CIA',

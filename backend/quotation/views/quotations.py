@@ -52,6 +52,7 @@ QUOTATION_UPDATE_FIELDS = (
     "quote_no",
     "project_name",
     "product_line",
+    "product_line_name",
     "currency",
     "payment_term_option",
     "payment_terms",

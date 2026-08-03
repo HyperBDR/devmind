@@ -41,6 +41,7 @@ export interface QuoteVersion {
   contactPerson: string;
   email: string;
   productLine?: QuoteProductLine;
+  productLineName?: string;
   billingCompany?: string;
   billingContact?: string;
   billingEmail?: string;
@@ -80,6 +81,7 @@ export interface Quotation {
   contactPerson: string;
   email: string;
   productLine?: QuoteProductLine;
+  productLineName?: string;
   billingCompany?: string;
   billingContact?: string;
   billingEmail?: string;
