@@ -21,11 +21,12 @@ import {
   getDashboardRecent,
   getDashboardSummary,
   type DashboardAnalytics,
+  type DashboardCurrency,
   type DashboardRecentQuotation,
   type DashboardSummary
 } from '../api/dashboard'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
-import type { Quotation } from '../types'
+import FormSelect from './FormSelect.vue'
 import { ChevronRight, FileSpreadsheet } from 'lucide-vue-next'
 
 ChartJS.register(
@@ -51,6 +52,7 @@ const QUOTE_BREAKDOWN_COLORS = [
   '#136b73',
   '#d6a21f'
 ]
+const CURRENCY_ORDER = ['USD', 'CNY', 'EUR', 'HKD', 'MYR']
 
 const emit = defineEmits<{
   viewQuote: [id: string]
@@ -69,10 +71,19 @@ const summaryError = ref(false)
 const analyticsLoading = ref(true)
 const analyticsError = ref(false)
 
-function currencySymbol(currency: Quotation['currency']): string {
+function normalizeDashboardCurrency(currency: string): string {
+  return currency === 'RMB' ? 'CNY' : currency
+}
+
+function currencySymbol(currency: DashboardCurrency): string {
   if (currency === 'USD') return t('quotation.common.currencyUsd')
+  if (currency === 'CNY' || currency === 'RMB') {
+    return t('quotation.common.currencyCny')
+  }
   if (currency === 'EUR') return t('quotation.common.currencyEur')
-  return t('quotation.common.currencyCny')
+  if (currency === 'HKD') return 'HK$'
+  if (currency === 'MYR') return 'RM'
+  return `${currency} `
 }
 
 function formatCurrencyAmount(value: number): string {
@@ -83,9 +94,28 @@ function formatCurrencyAmount(value: number): string {
 const monthQuoteAmountLabel = computed(() =>
   formatCurrencyAmount(summary.value?.monthQuoteAmount || 0)
 )
-const availableCurrencies = computed(() => {
+const availableCurrencyOptions = computed(() => {
   const currencies = summary.value?.availableCurrencies || []
-  return currencies.length ? currencies : [dashboardCurrency.value]
+  const fallback = normalizeDashboardCurrency(dashboardCurrency.value)
+  const normalized = [
+    ...new Set(
+      (currencies.length ? currencies : [fallback]).map(
+        normalizeDashboardCurrency
+      )
+    )
+  ]
+  return normalized
+    .sort((left, right) => {
+      const leftIndex = CURRENCY_ORDER.indexOf(left)
+      const rightIndex = CURRENCY_ORDER.indexOf(right)
+      if (leftIndex === -1 && rightIndex === -1) {
+        return left.localeCompare(right)
+      }
+      if (leftIndex === -1) return 1
+      if (rightIndex === -1) return -1
+      return leftIndex - rightIndex
+    })
+    .map((currency) => ({ value: currency, label: currency }))
 })
 const overviewRecentQuotes = computed(() => recentQuotes.value.slice(0, 3))
 
@@ -515,22 +545,15 @@ onMounted(async () => {
             })
           }}
         </span>
-        <label class="sr-only" for="dashboard-currency">
-          {{ t('quotation.pages.dashboard.currencyLabel') }}
-        </label>
-        <select
-          id="dashboard-currency"
+        <FormSelect
           v-model="dashboardCurrency"
-          class="rounded-lg border border-dm-border bg-white px-3 py-2 text-xs font-semibold text-dm-text-secondary outline-none focus:border-dm-primary"
-        >
-          <option
-            v-for="currency in availableCurrencies"
-            :key="currency"
-            :value="currency"
-          >
-            {{ currency }}
-          </option>
-        </select>
+          :aria-label="t('quotation.pages.dashboard.currencyLabel')"
+          :options="availableCurrencyOptions"
+          class-name="w-24 shrink-0"
+          trigger-class-name="h-9 px-3 text-xs font-semibold text-dm-text-secondary"
+          panel-class-name="min-w-24"
+          test-id="dashboard-currency"
+        />
         <button
           id="btn-quick-create"
           type="button"

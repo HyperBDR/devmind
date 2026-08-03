@@ -22,6 +22,7 @@ const props = withDefaults(
     panelClassName?: string
     testId?: string
     placeholder?: string
+    ariaLabel?: string
   }>(),
   {
     disabled: false,
@@ -67,6 +68,7 @@ function selectOption(option: FormSelectOption) {
     <button
       type="button"
       :data-testid="testId"
+      :aria-label="ariaLabel"
       :disabled="disabled"
       :class="`${FORM_SELECT_CLASS} ${FORM_SELECT_DISABLED_CLASS} text-left ${triggerClassName} ${
         disabled ? 'cursor-not-allowed' : 'cursor-pointer'

@@ -2,9 +2,10 @@ import type { Quotation } from '../types'
 import { apiRequest } from './client'
 
 export type DashboardTrendGrain = 'weekly' | 'monthly'
+export type DashboardCurrency = string
 
 export interface DashboardSummary {
-  currency: Quotation['currency']
+  currency: DashboardCurrency
   availableCurrencies: string[]
   currentPeriod: string
   previousPeriod: string
@@ -38,7 +39,7 @@ export interface DashboardTrendPoint {
 }
 
 export interface DashboardAnalytics {
-  currency: Quotation['currency']
+  currency: DashboardCurrency
   availableCurrencies: string[]
   amountBreakdown: DashboardBreakdownItem[]
   breakdownTotalAmount: number
@@ -56,13 +57,13 @@ export interface DashboardRecentQuotation {
   salesperson: string
   createdAt: string
   updatedAt: string
-  currency: Quotation['currency']
+  currency: DashboardCurrency
   grandTotal: number
   status: Quotation['status']
 }
 
 interface ApiSummary {
-  currency: Quotation['currency']
+  currency: DashboardCurrency
   available_currencies: string[]
   current_period: string
   previous_period: string
@@ -89,7 +90,7 @@ interface ApiTrendPoint {
 }
 
 interface ApiAnalytics {
-  currency: Quotation['currency']
+  currency: DashboardCurrency
   available_currencies: string[]
   amount_breakdown: Array<{
     quotation_id: string
@@ -112,7 +113,7 @@ interface ApiRecentQuotation {
   salesperson: string
   created_at: string
   updated_at: string
-  currency: Quotation['currency']
+  currency: DashboardCurrency
   grand_total: string
   status: string
 }

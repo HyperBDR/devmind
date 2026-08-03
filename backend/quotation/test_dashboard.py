@@ -162,6 +162,74 @@ class QuotationDashboardTests(TestCase):
         assert response.data["month_quote_amount"] == "200.00"
         assert response.data["previous_month_quote_amount"] == "80.00"
 
+    def test_cny_dashboard_merges_rmb_alias_without_duplicate_option(self):
+        current_month = timezone.localdate().replace(day=1)
+        accepted_rmb = self._quote(
+            "Q-RMB-ACCEPTED",
+            amount="300.00",
+            currency="RMB",
+            quote_date=current_month,
+            status=QuoteStatus.ACCEPTED,
+        )
+        self._accept(accepted_rmb)
+        self._quote(
+            "Q-CNY-CURRENT",
+            amount="200.00",
+            currency="CNY",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-HKD-CURRENT",
+            amount="900.00",
+            currency="HKD",
+            quote_date=current_month,
+        )
+
+        summary = self.api.get(
+            "/api/v1/quotation/dashboard/summary?currency=CNY"
+        )
+        analytics = self.api.get(
+            "/api/v1/quotation/dashboard/analytics?currency=CNY"
+        )
+
+        assert summary.status_code == 200
+        assert summary.data["currency"] == "CNY"
+        assert summary.data["available_currencies"] == ["CNY", "HKD"]
+        assert summary.data["month_quote_count"] == 2
+        assert summary.data["month_quote_amount"] == "500.00"
+        assert summary.data["month_won_amount"] == "300.00"
+        assert analytics.status_code == 200
+        assert analytics.data["currency"] == "CNY"
+        assert analytics.data["available_currencies"] == ["CNY", "HKD"]
+        assert analytics.data["breakdown_total_amount"] == "500.00"
+        assert {
+            row["quote_no"] for row in analytics.data["amount_breakdown"]
+        } == {"Q-CNY-CURRENT", "Q-RMB-ACCEPTED"}
+
+    def test_rmb_dashboard_request_is_normalized_to_cny(self):
+        current_month = timezone.localdate().replace(day=1)
+        self._quote(
+            "Q-CNY",
+            amount="125.00",
+            currency="CNY",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-RMB",
+            amount="75.00",
+            currency="RMB",
+            quote_date=current_month,
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary?currency=RMB"
+        )
+
+        assert response.status_code == 200
+        assert response.data["currency"] == "CNY"
+        assert response.data["month_quote_amount"] == "200.00"
+        assert response.data["available_currencies"] == ["CNY"]
+
     def test_analytics_returns_bounded_rows_and_fixed_period_counts(self):
         accepted = self._quote(
             "Q-ACCEPTED",

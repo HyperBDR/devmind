@@ -33,19 +33,31 @@ MONTH_PERIOD_COUNT = 6
 WEEK_PERIOD_COUNT = 8
 BREAKDOWN_MIN_SHARE = Decimal("0.02")
 BREAKDOWN_MAX_ITEMS = 8
+CURRENCY_ALIASES = {
+    "CNY": ("CNY", "RMB"),
+}
 
 
 def _money(value: Decimal | None) -> str:
     return f"{value or Decimal('0'):.2f}"
 
 
+def _normalize_currency(currency: str) -> str:
+    return "CNY" if currency == "RMB" else currency
+
+
+def _currency_values(currency: str) -> tuple[str, ...]:
+    return CURRENCY_ALIASES.get(currency, (currency,))
+
+
 def _available_currencies(queryset: QuerySet[Quotation]) -> list[str]:
-    return list(
+    currencies = (
         queryset.exclude(currency="")
         .order_by("currency")
         .values_list("currency", flat=True)
         .distinct()
     )
+    return sorted({_normalize_currency(currency) for currency in currencies})
 
 
 def _with_first_accepted_at(
@@ -97,6 +109,8 @@ def build_dashboard_summary(
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
 ) -> dict[str, object]:
     """Build lightweight KPI aggregates for the quotation dashboard."""
+    currency = _normalize_currency(currency)
+    currency_values = _currency_values(currency)
     local_now = timezone.localtime()
     month_start = _month_start(local_now)
     month_end = _next_month(month_start)
@@ -117,7 +131,7 @@ def build_dashboard_summary(
         month_quote_count=Count(
             "pk",
             filter=Q(
-                currency=currency,
+                currency__in=currency_values,
                 quote_date__gte=month_start.date(),
                 quote_date__lt=month_end.date(),
             ),
@@ -125,7 +139,7 @@ def build_dashboard_summary(
         previous_month_quote_count=Count(
             "pk",
             filter=Q(
-                currency=currency,
+                currency__in=currency_values,
                 quote_date__gte=previous_month_start.date(),
                 quote_date__lt=month_start.date(),
             ),
@@ -133,7 +147,7 @@ def build_dashboard_summary(
         month_quote_amount=Sum(
             "grand_total",
             filter=Q(
-                currency=currency,
+                currency__in=currency_values,
                 quote_date__gte=month_start.date(),
                 quote_date__lt=month_end.date(),
             ),
@@ -141,7 +155,7 @@ def build_dashboard_summary(
         previous_month_quote_amount=Sum(
             "grand_total",
             filter=Q(
-                currency=currency,
+                currency__in=currency_values,
                 quote_date__gte=previous_month_start.date(),
                 quote_date__lt=month_start.date(),
             ),
@@ -150,7 +164,7 @@ def build_dashboard_summary(
     won_amount = (
         _with_first_accepted_at(
             queryset.filter(
-                currency=currency,
+                currency__in=currency_values,
                 status=QuoteStatus.ACCEPTED,
             )
         )
@@ -311,8 +325,11 @@ def build_dashboard_analytics(
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
 ) -> dict[str, object]:
     """Build bounded chart aggregates without serializing quotation rows."""
+    currency = _normalize_currency(currency)
     local_now = timezone.localtime()
-    currency_queryset = queryset.filter(currency=currency)
+    currency_queryset = queryset.filter(
+        currency__in=_currency_values(currency)
+    )
     breakdown_queryset = currency_queryset.filter(
         status__in=CHART_STATUSES,
         grand_total__gt=0,

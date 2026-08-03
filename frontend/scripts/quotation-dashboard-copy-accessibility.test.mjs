@@ -39,6 +39,17 @@ test('dashboard uses quotation-only overview copy and stable recent fields', () 
   assert.doesNotMatch(dashboard, /expiringSoonCount/)
 })
 
+test('dashboard currency selector deduplicates aliases and formats symbols', () => {
+  assert.match(dashboard, /<FormSelect/)
+  assert.match(dashboard, /test-id="dashboard-currency"/)
+  assert.doesNotMatch(dashboard, /<select\s+id="dashboard-currency"/)
+  assert.match(dashboard, /currency === 'RMB' \? 'CNY' : currency/)
+  assert.match(dashboard, /new Set/)
+  assert.match(dashboard, /\['USD', 'CNY', 'EUR', 'HKD', 'MYR'\]/)
+  assert.match(dashboard, /if \(currency === 'HKD'\) return 'HK\$'/)
+  assert.match(dashboard, /if \(currency === 'MYR'\) return 'RM'/)
+})
+
 test('catalog delete icons expose item-specific names and tooltips', () => {
   assert.match(
     catalog,
