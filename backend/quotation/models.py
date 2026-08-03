@@ -164,6 +164,11 @@ class Quotation(TimeStampedModel):
     )
 
     product_line = models.CharField(max_length=40, default="BDR")
+    product_line_name = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
     project_name = models.CharField(max_length=255)
     currency = models.CharField(max_length=10, default="USD")
     payment_term_option = models.CharField(max_length=40, default="CIA")
