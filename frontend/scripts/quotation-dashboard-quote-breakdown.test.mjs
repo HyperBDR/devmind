@@ -41,18 +41,18 @@ test('dashboard pie chart shows quote-level breakdown with native English copy',
   assert.doesNotMatch(enLocale, /Leader lines show quote no\. and total/)
 })
 
-test('dashboard chart cards use laptop-safe balanced desktop proportions', () => {
+test('dashboard keeps the original chart order and desktop proportions', () => {
   assert.match(
     dashboardSource,
     /id="dashboard-quotation-overview"[^>]*xl:grid-cols-\[minmax\(23rem,0\.86fr\)_minmax\(0,1\.64fr\)\]/
   )
   assert.match(
     dashboardSource,
-    /xl:grid-cols-\[minmax\(0,1\.35fr\)_minmax\(22rem,0\.65fr\)\]/
+    /2xl:grid-cols-\[minmax\(0,1\.18fr\)_minmax\(480px,0\.82fr\)\]/
   )
   assert.match(
     dashboardSource,
-    /id="chart-quote-amount"[\s\S]*order-2 flex h-full flex-col p-5/
+    /id="chart-quote-amount" class="dm-card flex h-full flex-col p-5"/
   )
   assert.doesNotMatch(dashboardSource, /chartAmountSummaryLabel/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownSummaryRows/)
@@ -63,8 +63,11 @@ test('dashboard chart cards use laptop-safe balanced desktop proportions', () =>
   assert.doesNotMatch(dashboardSource, /id="dashboard-recent-grid"/)
   assert.match(
     dashboardSource,
-    /class="dm-card order-1 flex h-full flex-col justify-between p-5"/
+    /class="dm-card flex h-full flex-col justify-between p-5"/
   )
+  assert.match(dashboardSource, /<Line/)
+  assert.match(dashboardSource, /:data="trendLineData"/)
+  assert.doesNotMatch(dashboardSource, /<VueChart/)
   assert.doesNotMatch(enLocale, /chartAmountSummaryLabel/)
   assert.doesNotMatch(enLocale, /chartAmountQuoteCount/)
 })

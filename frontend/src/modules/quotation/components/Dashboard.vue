@@ -1,16 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Chart as VueChart, Pie } from 'vue-chartjs'
+import { Line, Pie } from 'vue-chartjs'
 import {
   ArcElement,
-  BarController,
-  BarElement,
   CategoryScale,
   Chart as ChartJS,
   Filler,
   Legend,
   LinearScale,
-  LineController,
   LineElement,
   PointElement,
   Tooltip,
@@ -33,13 +30,10 @@ import { ChevronRight, FileSpreadsheet } from 'lucide-vue-next'
 
 ChartJS.register(
   ArcElement,
-  BarController,
-  BarElement,
   CategoryScale,
   Filler,
   Legend,
   LinearScale,
-  LineController,
   LineElement,
   PointElement,
   Tooltip
@@ -88,9 +82,6 @@ function formatCurrencyAmount(value: number): string {
 
 const monthQuoteAmountLabel = computed(() =>
   formatCurrencyAmount(summary.value?.monthQuoteAmount || 0)
-)
-const previousMonthQuoteAmountLabel = computed(() =>
-  formatCurrencyAmount(summary.value?.previousMonthQuoteAmount || 0)
 )
 const availableCurrencies = computed(() => {
   const currencies = summary.value?.availableCurrencies || []
@@ -328,48 +319,47 @@ const trendPeriods = computed(() =>
 const trendSeries = computed(() => {
   const rows = analytics.value?.trends[trendGrain.value] || []
   return {
-    amount: rows.map((row) => row.quoteAmount),
-    count: rows.map((row) => row.quoteCount)
+    created: rows.map((row) => row.createdAmount),
+    won: rows.map((row) => row.wonAmount)
   }
 })
 
 const hasTrendData = computed(
   () =>
-    trendSeries.value.amount.some((value) => value > 0) ||
-    trendSeries.value.count.some((value) => value > 0)
+    trendSeries.value.created.some((value) => value > 0) ||
+    trendSeries.value.won.some((value) => value > 0)
 )
 
-const trendChartData = computed<ChartData<'bar' | 'line'>>(() => ({
+const trendLineData = computed<ChartData<'line'>>(() => ({
   labels: trendPeriods.value.map((period) => period.label),
   datasets: [
     {
-      type: 'line',
-      label: t('quotation.pages.dashboard.chartTrendQuoteAmount'),
-      data: trendSeries.value.amount,
+      label: t('quotation.pages.dashboard.chartTrendCreated'),
+      data: trendSeries.value.created,
       borderColor: '#1677ff',
       backgroundColor: 'rgba(22, 119, 255, 0.12)',
       fill: true,
       tension: 0.35,
       pointRadius: 3,
       pointHoverRadius: 5,
-      borderWidth: 2,
-      yAxisID: 'amount'
+      borderWidth: 2
     },
     {
-      type: 'bar',
-      label: t('quotation.pages.dashboard.chartTrendQuoteCount'),
-      data: trendSeries.value.count,
-      backgroundColor: 'rgba(89, 168, 139, 0.38)',
-      borderColor: 'rgba(89, 168, 139, 0.7)',
-      borderWidth: 1,
-      borderRadius: 5,
-      maxBarThickness: 34,
-      yAxisID: 'count'
+      label: t('quotation.pages.dashboard.chartTrendWon'),
+      data: trendSeries.value.won,
+      borderColor: '#389e0d',
+      backgroundColor: 'rgba(56, 158, 13, 0.08)',
+      fill: false,
+      tension: 0.35,
+      pointRadius: 3,
+      pointHoverRadius: 5,
+      borderWidth: 2,
+      borderDash: [5, 4]
     }
   ]
 }))
 
-const trendChartOptions = computed<ChartOptions<'bar' | 'line'>>(() => ({
+const trendLineOptions = computed<ChartOptions<'line'>>(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: {
@@ -395,13 +385,8 @@ const trendChartOptions = computed<ChartOptions<'bar' | 'line'>>(() => ({
       bodyFont: { size: 11 },
       padding: 10,
       callbacks: {
-        label: (item: TooltipItem<'bar' | 'line'>) => {
+        label: (item: TooltipItem<'line'>) => {
           const value = Number(item.raw) || 0
-          if (item.dataset.yAxisID === 'count') {
-            return t('quotation.pages.dashboard.chartTrendCountTooltip', {
-              count: value
-            })
-          }
           const symbol = currencySymbol(analytics.value?.currency || 'USD')
           return `${item.dataset.label}: ${symbol}${value.toLocaleString()}`
         }
@@ -417,9 +402,7 @@ const trendChartOptions = computed<ChartOptions<'bar' | 'line'>>(() => ({
       },
       border: { display: false }
     },
-    amount: {
-      type: 'linear',
-      position: 'left',
+    y: {
       beginAtZero: true,
       grid: {
         color: 'rgba(148, 163, 184, 0.2)'
@@ -437,22 +420,6 @@ const trendChartOptions = computed<ChartOptions<'bar' | 'line'>>(() => ({
           }
           return `${amount}`
         }
-      },
-      border: { display: false }
-    },
-    count: {
-      type: 'linear',
-      position: 'right',
-      beginAtZero: true,
-      grid: { drawOnChartArea: false },
-      ticks: {
-        color: '#94a3b8',
-        font: { size: 10 },
-        precision: 0,
-        callback: (value) =>
-          t('quotation.pages.dashboard.chartTrendCountAxis', {
-            count: Number(value)
-          })
       },
       border: { display: false }
     }
@@ -586,9 +553,6 @@ onMounted(async () => {
             <h3 class="text-sm font-semibold text-dm-text">
               {{ t('quotation.pages.dashboard.monthSummaryTitle') }}
             </h3>
-            <p class="mt-0.5 text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.monthSummarySubtitle') }}
-            </p>
           </div>
           <span
             v-if="summary?.currentPeriod"
@@ -612,7 +576,7 @@ onMounted(async () => {
         </div>
         <div
           v-else
-          class="mt-4 grid grid-cols-[0.75fr_1.25fr] divide-x divide-dm-border-light"
+          class="mt-5 grid grid-cols-[0.75fr_1.25fr] divide-x divide-dm-border-light"
           :class="{ 'animate-pulse opacity-50': summaryLoading }"
         >
           <div class="pr-4">
@@ -625,13 +589,6 @@ onMounted(async () => {
                 {{ t('quotation.pages.dashboard.quoteUnit') }}
               </span>
             </div>
-            <p class="mt-2 text-xs text-dm-text-tertiary">
-              {{
-                t('quotation.pages.dashboard.previousMonthCount', {
-                  count: summary?.previousMonthQuoteCount || 0
-                })
-              }}
-            </p>
           </div>
           <div class="pl-4">
             <span class="text-xs text-dm-text-tertiary">
@@ -640,22 +597,11 @@ onMounted(async () => {
             <div class="mt-1 font-mono text-2xl font-bold text-dm-text">
               {{ summaryLoading ? '—' : monthQuoteAmountLabel }}
             </div>
-            <p class="mt-2 text-xs text-dm-text-tertiary">
-              {{
-                t('quotation.pages.dashboard.previousMonthAmount', {
-                  amount: previousMonthQuoteAmountLabel
-                })
-              }}
-            </p>
           </div>
         </div>
         <div
-          class="mt-3 flex items-center justify-between border-t border-dm-border-light pt-2 text-xs"
+          class="mt-4 flex justify-end border-t border-dm-border-light pt-3 text-xs"
         >
-          <span class="text-dm-text-tertiary">
-            {{ t('quotation.pages.dashboard.monthSummaryFormula') }} ·
-            {{ dashboardCurrency }}
-          </span>
           <button
             type="button"
             class="font-medium text-dm-primary"
@@ -728,12 +674,9 @@ onMounted(async () => {
 
     <div
       id="dashboard-charts"
-      class="grid grid-cols-1 items-stretch gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,0.65fr)]"
+      class="grid grid-cols-1 items-stretch gap-6 2xl:grid-cols-[minmax(0,1.18fr)_minmax(480px,0.82fr)]"
     >
-      <div
-        id="chart-quote-amount"
-        class="dm-card order-2 flex h-full flex-col p-5"
-      >
+      <div id="chart-quote-amount" class="dm-card flex h-full flex-col p-5">
         <div
           class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
         >
@@ -776,7 +719,7 @@ onMounted(async () => {
 
       <div
         id="chart-trend"
-        class="dm-card order-1 flex h-full flex-col justify-between p-5"
+        class="dm-card flex h-full flex-col justify-between p-5"
       >
         <div
           class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
@@ -846,12 +789,7 @@ onMounted(async () => {
           >
             {{ t('quotation.pages.dashboard.chartTrendEmpty') }}
           </div>
-          <VueChart
-            v-else
-            type="bar"
-            :data="trendChartData"
-            :options="trendChartOptions"
-          />
+          <Line v-else :data="trendLineData" :options="trendLineOptions" />
         </div>
 
         <div
