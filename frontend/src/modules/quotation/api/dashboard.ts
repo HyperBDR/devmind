@@ -6,6 +6,12 @@ export type DashboardTrendGrain = 'weekly' | 'monthly'
 export interface DashboardSummary {
   currency: Quotation['currency']
   availableCurrencies: string[]
+  currentPeriod: string
+  previousPeriod: string
+  monthQuoteCount: number
+  previousMonthQuoteCount: number
+  monthQuoteAmount: number
+  previousMonthQuoteAmount: number
   monthWonAmount: number
   successRate: number
   successRateNumerator: number
@@ -25,6 +31,8 @@ export interface DashboardBreakdownItem {
 
 export interface DashboardTrendPoint {
   period: string
+  quoteAmount: number
+  quoteCount: number
   createdAmount: number
   wonAmount: number
 }
@@ -47,6 +55,7 @@ export interface DashboardRecentQuotation {
   clientCompany: string
   salesperson: string
   createdAt: string
+  updatedAt: string
   currency: Quotation['currency']
   grandTotal: number
   status: Quotation['status']
@@ -55,6 +64,12 @@ export interface DashboardRecentQuotation {
 interface ApiSummary {
   currency: Quotation['currency']
   available_currencies: string[]
+  current_period: string
+  previous_period: string
+  month_quote_count: number
+  previous_month_quote_count: number
+  month_quote_amount: string
+  previous_month_quote_amount: string
   month_won_amount: string
   success_rate: number
   success_rate_numerator: number
@@ -67,6 +82,8 @@ interface ApiSummary {
 
 interface ApiTrendPoint {
   period: string
+  quote_amount: string
+  quote_count: number
   created_amount: string
   won_amount: string
 }
@@ -94,6 +111,7 @@ interface ApiRecentQuotation {
   client_company: string
   salesperson: string
   created_at: string
+  updated_at: string
   currency: Quotation['currency']
   grand_total: string
   status: string
@@ -107,7 +125,7 @@ const API_TO_STATUS: Record<string, Quotation['status']> = {
   accepted: 'Accepted',
   rejected: 'Rejected',
   expired: 'Expired',
-  cancelled: 'Cancelled',
+  cancelled: 'Cancelled'
 }
 
 function mapStatus(value: string): Quotation['status'] {
@@ -119,14 +137,20 @@ function currencyQuery(currency: string): string {
 }
 
 export async function getDashboardSummary(
-  currency = 'USD',
+  currency = 'USD'
 ): Promise<DashboardSummary> {
   const data = await apiRequest<ApiSummary>(
-    `/dashboard/summary?${currencyQuery(currency)}`,
+    `/dashboard/summary?${currencyQuery(currency)}`
   )
   return {
     currency: data.currency,
     availableCurrencies: data.available_currencies,
+    currentPeriod: data.current_period,
+    previousPeriod: data.previous_period,
+    monthQuoteCount: data.month_quote_count,
+    previousMonthQuoteCount: data.previous_month_quote_count,
+    monthQuoteAmount: Number(data.month_quote_amount || 0),
+    previousMonthQuoteAmount: Number(data.previous_month_quote_amount || 0),
     monthWonAmount: Number(data.month_won_amount || 0),
     successRate: data.success_rate,
     successRateNumerator: data.success_rate_numerator,
@@ -134,20 +158,22 @@ export async function getDashboardSummary(
     followUpCount: data.follow_up_count,
     activeCount: data.active_count,
     draftCount: data.draft_count,
-    generatedAt: data.generated_at,
+    generatedAt: data.generated_at
   }
 }
 
 export async function getDashboardAnalytics(
-  currency = 'USD',
+  currency = 'USD'
 ): Promise<DashboardAnalytics> {
   const data = await apiRequest<ApiAnalytics>(
-    `/dashboard/analytics?${currencyQuery(currency)}`,
+    `/dashboard/analytics?${currencyQuery(currency)}`
   )
   const mapTrend = (row: ApiTrendPoint): DashboardTrendPoint => ({
     period: row.period,
+    quoteAmount: Number(row.quote_amount || 0),
+    quoteCount: row.quote_count || 0,
     createdAmount: Number(row.created_amount || 0),
-    wonAmount: Number(row.won_amount || 0),
+    wonAmount: Number(row.won_amount || 0)
   })
   return {
     currency: data.currency,
@@ -156,24 +182,24 @@ export async function getDashboardAnalytics(
       quotationId: row.quotation_id,
       quoteNo: row.quote_no,
       amount: Number(row.amount || 0),
-      status: mapStatus(row.status),
+      status: mapStatus(row.status)
     })),
     breakdownTotalAmount: Number(data.breakdown_total_amount || 0),
     breakdownOmittedCount: data.breakdown_omitted_count,
     breakdownOmittedAmount: Number(data.breakdown_omitted_amount || 0),
     trends: {
       monthly: data.trends.monthly.map(mapTrend),
-      weekly: data.trends.weekly.map(mapTrend),
+      weekly: data.trends.weekly.map(mapTrend)
     },
-    generatedAt: data.generated_at,
+    generatedAt: data.generated_at
   }
 }
 
 export async function getDashboardRecent(
-  limit = 5,
+  limit = 5
 ): Promise<DashboardRecentQuotation[]> {
   const data = await apiRequest<{ items: ApiRecentQuotation[] }>(
-    `/dashboard/recent?limit=${limit}`,
+    `/dashboard/recent?limit=${limit}`
   )
   return data.items.map((row) => ({
     id: row.id,
@@ -182,8 +208,9 @@ export async function getDashboardRecent(
     clientCompany: row.client_company,
     salesperson: row.salesperson,
     createdAt: row.created_at,
+    updatedAt: row.updated_at,
     currency: row.currency,
     grandTotal: Number(row.grand_total || 0),
-    status: mapStatus(row.status),
+    status: mapStatus(row.status)
   }))
 }
