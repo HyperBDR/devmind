@@ -1,4 +1,12 @@
-"""Shared executable contract for normalized tiered price tables."""
+"""Shared executable contract for normalized tiered price tables.
+
+A table represents one model, source/platform variant, billing dimension,
+currency, and billing unit. Usage-range tiers use ``[tier_start, tier_end)``;
+``tier_end=None`` means that the final tier is unbounded. The first-phase
+metric is the input token count of one request, and the matched tier prices
+the whole request. Volume tiers remain disabled until cumulative periods and
+graduated-versus-matched charging are defined.
+"""
 
 from __future__ import annotations
 
@@ -136,7 +144,7 @@ def validate_price_table_groups(rows: Sequence[Any]) -> None:
     for row in rows:
         key = (
             str(_value(row, "dimension") or ""),
-            _variant_spec_key(_value(row, "spec")),
+            price_table_variant_key(row),
         )
         tables.setdefault(key, []).append(row)
     for table in tables.values():
@@ -160,6 +168,11 @@ def match_usage_range_tier(rows: Sequence[Any], metric_value: Any) -> Any:
             if end is None or value < end:
                 return row
     return None
+
+
+def price_table_variant_key(row: Any) -> str:
+    """Return display metadata that identifies an independent table."""
+    return _variant_spec_key(_value(row, "spec"))
 
 
 def _validate_flat_table(rows: Sequence[Any]) -> None:
