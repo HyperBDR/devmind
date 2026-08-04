@@ -29,6 +29,10 @@ from .models import (
     ResaleListing,
     ResaleListingPriceHistory,
 )
+from .price_table_validation import (
+    validate_price_table_groups,
+    with_usage_range_spec,
+)
 
 
 ZERO = Decimal("0")
@@ -1425,6 +1429,7 @@ def sync_channel_price_items(
     """Sync normalized channel price items from one channel/model config."""
     source = price.price_source
     payloads = channel_price_item_payloads(price, source=source)
+    validate_price_table_groups(payloads)
     now = timezone.now()
     ChannelPriceItem.objects.filter(
         channel=price.channel,
@@ -1767,6 +1772,9 @@ def channel_price_payload_from_base_item(
         currency,
         base_item,
     )
+    spec = base_item.spec or {}
+    if base_item.tier_type == ModelPriceItem.TIER_USAGE_RANGE:
+        spec = with_usage_range_spec(spec)
     return {
         "channel": price.channel,
         "model": price.model,
@@ -1780,7 +1788,7 @@ def channel_price_payload_from_base_item(
         "tier_type": base_item.tier_type,
         "tier_start": base_item.tier_start,
         "tier_end": base_item.tier_end,
-        "spec": base_item.spec or {},
+        "spec": spec,
         "price_source_type": source_type,
         "settlement_ratio": price.settlement_ratio,
         "comparison_status": comparison["status"],

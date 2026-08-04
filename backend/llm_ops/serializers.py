@@ -38,6 +38,11 @@ from .models import (
     ResaleWorkflowConfig,
     UsageReconciliationRecord,
 )
+from .price_table_validation import (
+    PriceTableValidationError,
+    price_table_variant_key,
+    validate_price_table,
+)
 from .services import (
     SUPPORTED_DISPLAY_CURRENCIES,
     calculate_channel_model_cost,
@@ -874,6 +879,11 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("unit_price must be >= 0.")
         return value
 
+    def validate(self, attrs):
+        rows = model_price_table_rows(attrs, instance=self.instance)
+        validate_serializer_price_table(rows)
+        return attrs
+
     def create(self, validated_data):
         meta_model = price_item_meta_model(validated_data)
         source = price_item_source(validated_data)
@@ -1264,6 +1274,97 @@ def related_id(data: dict, field: str, instance) -> int | None:
     return value.id if value is not None else None
 
 
+PRICE_TABLE_FIELDS = (
+    "dimension",
+    "billing_unit",
+    "currency",
+    "tier_type",
+    "tier_start",
+    "tier_end",
+    "spec",
+)
+
+
+def price_table_candidate(data: dict, instance=None) -> dict:
+    """Merge serializer input with persisted values for table validation."""
+    return {
+        field: data.get(field, getattr(instance, field, None))
+        for field in PRICE_TABLE_FIELDS
+    }
+
+
+def validate_serializer_price_table(rows) -> None:
+    """Translate the shared contract error to a stable DRF error code."""
+    try:
+        validate_price_table(rows)
+    except PriceTableValidationError as exc:
+        error = {
+            "code": serializers.ErrorDetail(exc.code, code=exc.code),
+            "message": serializers.ErrorDetail(exc.message, code=exc.code),
+        }
+        raise serializers.ValidationError({"price_table": error}) from exc
+
+
+def model_price_table_rows(data: dict, *, instance=None) -> list:
+    """Return the current official table plus a serializer candidate."""
+    candidate = price_table_candidate(data, instance)
+    queryset = ModelPriceItem.objects.none()
+    offering = data.get("offering", getattr(instance, "offering", None))
+    model = data.get("model", getattr(instance, "model", None))
+    sku = data.get("sku", getattr(instance, "sku", None))
+    source = data.get("source", getattr(instance, "source", None))
+    dimension = candidate["dimension"]
+    if offering is not None:
+        queryset = ModelPriceItem.objects.filter(
+            offering=offering,
+            dimension=dimension,
+            is_current=True,
+        )
+    elif model is not None:
+        queryset = ModelPriceItem.objects.filter(
+            model=model,
+            source=source,
+            dimension=dimension,
+            is_current=True,
+        )
+    elif sku is not None:
+        queryset = ModelPriceItem.objects.filter(
+            sku=sku,
+            source=source,
+            dimension=dimension,
+            is_current=True,
+        )
+    if instance is not None and instance.pk:
+        queryset = queryset.exclude(pk=instance.pk)
+    variant_key = price_table_variant_key(candidate)
+    rows = [
+        row for row in queryset if price_table_variant_key(row) == variant_key
+    ]
+    return [*rows, candidate]
+
+
+def channel_price_table_rows(data: dict, *, instance=None) -> list:
+    """Return the current channel table plus a serializer candidate."""
+    candidate = price_table_candidate(data, instance)
+    channel = data.get("channel", getattr(instance, "channel", None))
+    model = data.get("model", getattr(instance, "model", None))
+    queryset = ChannelPriceItem.objects.none()
+    if channel is not None and model is not None:
+        queryset = ChannelPriceItem.objects.filter(
+            channel=channel,
+            model=model,
+            dimension=candidate["dimension"],
+            is_current=True,
+        )
+    if instance is not None and instance.pk:
+        queryset = queryset.exclude(pk=instance.pk)
+    variant_key = price_table_variant_key(candidate)
+    rows = [
+        row for row in queryset if price_table_variant_key(row) == variant_key
+    ]
+    return [*rows, candidate]
+
+
 class ProcurementChannelSerializer(serializers.ModelSerializer):
     """Serializer for upstream procurement channels."""
 
@@ -1465,6 +1566,11 @@ class ChannelPriceItemSerializer(serializers.ModelSerializer):
         if value < Decimal("0"):
             raise serializers.ValidationError("unit_price must be >= 0.")
         return value
+
+    def validate(self, attrs):
+        rows = channel_price_table_rows(attrs, instance=self.instance)
+        validate_serializer_price_table(rows)
+        return attrs
 
     def create(self, validated_data):
         validated_data["meta_model"] = validated_data["model"].meta_model
