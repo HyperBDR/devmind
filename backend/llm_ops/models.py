@@ -2096,6 +2096,7 @@ class UsageReconciliationRecord(models.Model):
     )
     input_tokens = models.PositiveBigIntegerField(default=0)
     output_tokens = models.PositiveBigIntegerField(default=0)
+    cache_input_tokens = models.PositiveBigIntegerField(default=0)
     audio_input_seconds = models.DecimalField(
         max_digits=14,
         decimal_places=3,

@@ -33,6 +33,15 @@ from .price_table_validation import (
     validate_price_table_groups,
     with_usage_range_spec,
 )
+from .tier_pricing import (
+    PriceSchedule,
+    PriceTier,
+    TieredPriceNotSupportedError,
+    UnitPrices,
+    UsageContext,
+    calculate_price_schedule_usage_cost,
+    resolve_usage_unit_prices,
+)
 
 
 ZERO = Decimal("0")
@@ -87,20 +96,6 @@ def invalidate_meta_model_lookup_cache() -> None:
 def normalize_meta_model_lookup_name(value: str | None) -> str:
     """Normalize a model display name for loose matching."""
     return _normalize_lookup_name(value)
-
-
-@dataclass(frozen=True)
-class UnitPrices:
-    """Resolved procurement unit prices for a channel/model pair."""
-
-    input_per_million: Decimal
-    output_per_million: Decimal
-    cache_input_per_million: Decimal
-    image_output_per_image: Decimal
-    audio_input_per_second: Decimal
-    audio_output_per_second: Decimal
-    video_input_per_second: Decimal
-    video_output_per_second: Decimal
 
 
 @dataclass(frozen=True)
@@ -1039,6 +1034,282 @@ def decimal_or_zero(value) -> Decimal:
     return Decimal(str(value))
 
 
+def resolve_channel_price_schedule(
+    channel: ProcurementChannel,
+    model: LLMModel,
+    *,
+    override: ChannelModelPrice | None = None,
+    source_items: list[ModelPriceItem] | None = None,
+    video_resolution: str = "",
+) -> PriceSchedule:
+    """Resolve every channel price interval without flattening tiers."""
+    if override is None:
+        override = ChannelModelPrice.objects.filter(
+            channel=channel,
+            model=model,
+        ).first()
+
+    if source_items is None and override is not None:
+        source_items = current_model_price_items_for_channel_price(override)
+    source_items = list(source_items or [])
+    if source_items:
+        return _schedule_from_source_items(
+            channel,
+            model,
+            override=override,
+            source_items=source_items,
+            video_resolution=video_resolution,
+        )
+    if override is not None and override.price_source_id:
+        return _schedule_from_source_items(
+            channel,
+            model,
+            override=override,
+            source_items=[],
+            video_resolution=video_resolution,
+        )
+
+    unit_prices = resolve_channel_model_price(
+        channel,
+        model,
+        override=override,
+        source_items=[],
+        video_resolution=video_resolution,
+    )
+    currency = resolve_channel_model_currency(
+        channel,
+        model,
+        override=override,
+    )
+    return _flat_schedule_from_unit_prices(unit_prices, currency=currency)
+
+
+def _schedule_from_source_items(
+    channel: ProcurementChannel,
+    model: LLMModel,
+    *,
+    override: ChannelModelPrice | None,
+    source_items: list[ModelPriceItem],
+    video_resolution: str,
+) -> PriceSchedule:
+    """Convert normalized source items into channel settlement prices."""
+    currency = resolve_channel_model_currency(
+        channel,
+        model,
+        override=override,
+    )
+    ratio = decimal_or_zero(channel.settlement_ratio) or ONE
+    if override is not None and override.settlement_ratio is not None:
+        ratio = decimal_or_zero(override.settlement_ratio)
+
+    tiers = []
+    for item in source_items:
+        spec = item.spec or {}
+        if item.tier_type == ModelPriceItem.TIER_USAGE_RANGE:
+            spec = with_usage_range_spec(spec)
+        item_currency = currency
+        unit_price = convert_currency_between(
+            item.unit_price,
+            item.currency,
+            currency,
+        )
+        if unit_price is None:
+            unit_price = decimal_or_zero(item.unit_price)
+            item_currency = normalize_currency(item.currency) or currency
+        unit_price *= ratio
+        custom_price = None
+        if override is not None:
+            custom_price = custom_price_for_dimension(
+                override,
+                item.dimension,
+            )
+        if custom_price is not None and item.tier_type == item.TIER_FLAT:
+            unit_price = custom_price
+        resolution_price = _video_resolution_price(
+            model,
+            override=override,
+            dimension=item.dimension,
+            video_resolution=video_resolution,
+            ratio=ratio,
+        )
+        if resolution_price is not None and item.tier_type == item.TIER_FLAT:
+            unit_price = resolution_price
+        tiers.append(
+            PriceTier(
+                dimension=item.dimension,
+                billing_unit=item.billing_unit,
+                currency=item_currency,
+                unit_price=unit_price,
+                tier_type=item.tier_type,
+                tier_start=item.tier_start,
+                tier_end=item.tier_end,
+                spec=dict(spec),
+            )
+        )
+    existing_dimensions = {tier.dimension for tier in tiers}
+    custom_dimensions = (
+        (
+            ModelPriceItem.DIMENSION_TEXT_INPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+        ),
+        (
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+        ),
+        (
+            ModelPriceItem.DIMENSION_AUDIO_INPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+        ),
+        (
+            ModelPriceItem.DIMENSION_AUDIO_OUTPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+        ),
+        (
+            ModelPriceItem.DIMENSION_VIDEO_INPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+        ),
+        (
+            ModelPriceItem.DIMENSION_VIDEO_OUTPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+        ),
+    )
+    for dimension, billing_unit in custom_dimensions:
+        if override is None or dimension in existing_dimensions:
+            continue
+        custom_price = custom_price_for_dimension(override, dimension)
+        resolution_price = _video_resolution_price(
+            model,
+            override=override,
+            dimension=dimension,
+            video_resolution=video_resolution,
+            ratio=ratio,
+        )
+        if custom_price is None and resolution_price is None:
+            continue
+        tiers.append(
+            PriceTier(
+                dimension=dimension,
+                billing_unit=billing_unit,
+                currency=currency,
+                unit_price=(
+                    resolution_price
+                    if resolution_price is not None
+                    else custom_price
+                ),
+                tier_type=ModelPriceItem.TIER_FLAT,
+                tier_start=None,
+                tier_end=None,
+                spec={},
+            )
+        )
+    schedule = PriceSchedule(tiers=tuple(tiers))
+    validate_price_table_groups(schedule.tiers)
+    return schedule
+
+
+def _video_resolution_price(
+    model: LLMModel,
+    *,
+    override: ChannelModelPrice | None,
+    dimension: str,
+    video_resolution: str,
+    ratio: Decimal,
+) -> Decimal | None:
+    """Resolve the legacy video-resolution override precedence."""
+    dimension_key = {
+        ModelPriceItem.DIMENSION_VIDEO_INPUT: "input",
+        ModelPriceItem.DIMENSION_VIDEO_OUTPUT: "output",
+    }.get(dimension)
+    if not video_resolution or dimension_key is None:
+        return None
+
+    unit_price = None
+    resolution_prices = model.video_resolution_prices or {}
+    model_price = resolution_prices.get(video_resolution) or {}
+    if model_price.get(dimension_key) is not None:
+        unit_price = decimal_or_zero(model_price[dimension_key]) * ratio
+
+    if override is None:
+        return unit_price
+    custom_price = custom_price_for_dimension(override, dimension)
+    if custom_price is not None:
+        unit_price = custom_price
+    custom_resolution_prices = override.custom_video_resolution_prices or {}
+    custom_resolution_price = (
+        custom_resolution_prices.get(video_resolution) or {}
+    )
+    if custom_resolution_price.get(dimension_key) is not None:
+        unit_price = decimal_or_zero(
+            custom_resolution_price[dimension_key]
+        )
+    return unit_price
+
+
+def _flat_schedule_from_unit_prices(
+    unit_prices: UnitPrices,
+    *,
+    currency: str,
+) -> PriceSchedule:
+    """Expose legacy scalar prices through the normalized schedule API."""
+    values = (
+        (
+            ModelPriceItem.DIMENSION_TEXT_INPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+            unit_prices.input_per_million,
+        ),
+        (
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+            unit_prices.output_per_million,
+        ),
+        (
+            ModelPriceItem.DIMENSION_CACHE_INPUT,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+            unit_prices.cache_input_per_million,
+        ),
+        (
+            ModelPriceItem.DIMENSION_IMAGE_OUTPUT,
+            ModelPriceItem.UNIT_PER_IMAGE,
+            unit_prices.image_output_per_image,
+        ),
+        (
+            ModelPriceItem.DIMENSION_AUDIO_INPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            unit_prices.audio_input_per_second,
+        ),
+        (
+            ModelPriceItem.DIMENSION_AUDIO_OUTPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            unit_prices.audio_output_per_second,
+        ),
+        (
+            ModelPriceItem.DIMENSION_VIDEO_INPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            unit_prices.video_input_per_second,
+        ),
+        (
+            ModelPriceItem.DIMENSION_VIDEO_OUTPUT,
+            ModelPriceItem.UNIT_PER_SECOND,
+            unit_prices.video_output_per_second,
+        ),
+    )
+    return PriceSchedule(
+        tiers=tuple(
+            PriceTier(
+                dimension=dimension,
+                billing_unit=billing_unit,
+                currency=currency,
+                unit_price=unit_price,
+                tier_type=ModelPriceItem.TIER_FLAT,
+                tier_start=None,
+                tier_end=None,
+                spec={},
+            )
+            for dimension, billing_unit, unit_price in values
+        )
+    )
+
+
 def resolve_channel_model_price(
     channel: ProcurementChannel,
     model: LLMModel,
@@ -1244,15 +1515,9 @@ def source_unit_prices_for_channel_model(
 def selected_price_item_for_channel_model(
     items: list[ModelPriceItem],
 ) -> ModelPriceItem | None:
-    """Select a flat item or the highest tiered unit price."""
+    """Select one flat item for the legacy scalar price interface."""
     if not items:
         return None
-
-    flat_items = [
-        item for item in items if item.tier_type == ModelPriceItem.TIER_FLAT
-    ]
-    if flat_items:
-        return sorted(flat_items, key=lambda item: item.id)[0]
 
     tiered_items = [
         item
@@ -1260,18 +1525,17 @@ def selected_price_item_for_channel_model(
         if item.tier_type
         in (ModelPriceItem.TIER_USAGE_RANGE, ModelPriceItem.TIER_VOLUME)
     ]
-    if not tiered_items:
-        return None
+    if tiered_items:
+        raise TieredPriceNotSupportedError(
+            "Tiered prices require resolve_channel_price_schedule()."
+        )
 
-    return sorted(
-        tiered_items,
-        key=lambda item: (
-            decimal_or_zero(item.unit_price),
-            decimal_or_zero(item.tier_start),
-            item.id,
-        ),
-        reverse=True,
-    )[0]
+    flat_items = [
+        item for item in items if item.tier_type == ModelPriceItem.TIER_FLAT
+    ]
+    if flat_items:
+        return sorted(flat_items, key=lambda item: item.id)[0]
+    return None
 
 
 def calculate_usage_cost(
@@ -1279,6 +1543,7 @@ def calculate_usage_cost(
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cache_input_tokens: int = 0,
     audio_input_seconds: Decimal | int | str = 0,
     audio_output_seconds: Decimal | int | str = 0,
     video_input_seconds: Decimal | int | str = 0,
@@ -1289,6 +1554,8 @@ def calculate_usage_cost(
     input_cost *= unit_prices.input_per_million
     output_cost = Decimal(output_tokens or 0) / Decimal(1000000)
     output_cost *= unit_prices.output_per_million
+    cache_input_cost = Decimal(cache_input_tokens or 0) / Decimal(1000000)
+    cache_input_cost *= unit_prices.cache_input_per_million
 
     audio_input_cost = decimal_or_zero(audio_input_seconds)
     audio_input_cost *= unit_prices.audio_input_per_second
@@ -1302,6 +1569,7 @@ def calculate_usage_cost(
     return (
         input_cost
         + output_cost
+        + cache_input_cost
         + audio_input_cost
         + audio_output_cost
         + video_input_cost
@@ -1315,6 +1583,7 @@ def calculate_channel_model_cost(
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    cache_input_tokens: int = 0,
     audio_input_seconds: Decimal | int | str = 0,
     audio_output_seconds: Decimal | int | str = 0,
     video_input_seconds: Decimal | int | str = 0,
@@ -1322,19 +1591,22 @@ def calculate_channel_model_cost(
     video_resolution: str = "",
 ) -> Decimal:
     """Resolve channel prices and calculate expected usage cost."""
-    unit_prices = resolve_channel_model_price(
+    schedule = resolve_channel_price_schedule(
         channel,
         model,
         video_resolution=video_resolution,
     )
-    return calculate_usage_cost(
-        unit_prices,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        audio_input_seconds=audio_input_seconds,
-        audio_output_seconds=audio_output_seconds,
-        video_input_seconds=video_input_seconds,
-        video_output_seconds=video_output_seconds,
+    return calculate_price_schedule_usage_cost(
+        schedule,
+        UsageContext(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_input_tokens=cache_input_tokens,
+            audio_input_seconds=audio_input_seconds,
+            audio_output_seconds=audio_output_seconds,
+            video_input_seconds=video_input_seconds,
+            video_output_seconds=video_output_seconds,
+        ),
     )
 
 
@@ -1343,13 +1615,23 @@ def record_channel_model_price_history(
     *,
     video_resolution: str = "",
 ) -> ChannelModelPriceHistory | None:
-    """Record a channel/model price version when price fields change."""
-    unit_prices = resolve_channel_model_price(
+    """Record a flat channel price version when price fields change.
+
+    Tiered history remains in normalized channel price items because the
+    legacy snapshot cannot represent interval boundaries.
+    """
+    schedule = resolve_channel_price_schedule(
         price.channel,
         price.model,
         override=price,
         video_resolution=video_resolution,
     )
+    if any(
+        tier.tier_type != ModelPriceItem.TIER_FLAT
+        for tier in schedule.tiers
+    ):
+        return None
+    unit_prices = resolve_usage_unit_prices(schedule, UsageContext())
     currency = resolve_channel_model_currency(
         price.channel,
         price.model,
@@ -1423,6 +1705,7 @@ def record_channel_model_price_history(
     )
 
 
+@transaction.atomic
 def sync_channel_price_items(
     price: ChannelModelPrice,
 ) -> list[ChannelPriceItem]:
