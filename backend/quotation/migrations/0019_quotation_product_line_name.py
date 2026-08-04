@@ -32,4 +32,18 @@ class Migration(migrations.Migration):
             backfill_product_line_names,
             migrations.RunPython.noop,
         ),
+        migrations.AddIndex(
+            model_name="quotation",
+            index=models.Index(
+                fields=["quote_date"],
+                name="quote_list_quote_date",
+            ),
+        ),
+        migrations.AddIndex(
+            model_name="quotation",
+            index=models.Index(
+                fields=["product_line_name"],
+                name="quote_list_product_name",
+            ),
+        ),
     ]
