@@ -102,8 +102,10 @@ class PriceTableIntegrationTests(TestCase):
         """Assert the DRF boundary preserves the shared error code."""
         self.assertFalse(serializer.is_valid())
         self.assertIn("price_table", serializer.errors, serializer.errors)
-        error = serializer.errors["price_table"][0]
-        self.assertEqual(error.code, expected_code)
+        error = serializer.errors["price_table"]
+        self.assertEqual(str(error["code"]), expected_code)
+        self.assertEqual(error["code"].code, expected_code)
+        self.assertTrue(str(error["message"]))
 
     def test_collected_usage_range_payload_adds_contract_spec(self):
         payload = price_item_payload(

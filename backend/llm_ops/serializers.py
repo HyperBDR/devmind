@@ -1298,7 +1298,10 @@ def validate_serializer_price_table(rows) -> None:
     try:
         validate_price_table(rows)
     except PriceTableValidationError as exc:
-        error = serializers.ErrorDetail(exc.message, code=exc.code)
+        error = {
+            "code": serializers.ErrorDetail(exc.code, code=exc.code),
+            "message": serializers.ErrorDetail(exc.message, code=exc.code),
+        }
         raise serializers.ValidationError({"price_table": error}) from exc
 
 

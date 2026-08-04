@@ -81,6 +81,11 @@ def usage_range_spec() -> dict[str, str]:
 
 def with_usage_range_spec(spec: Mapping[str, Any] | None) -> dict:
     """Add the canonical usage-range contract to display metadata."""
+    if spec is not None and not isinstance(spec, Mapping):
+        _raise(
+            ERROR_INVALID_USAGE_RANGE_SPEC,
+            "Tier spec must be a JSON object.",
+        )
     return {**dict(spec or {}), **usage_range_spec()}
 
 
@@ -332,9 +337,12 @@ def _decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
+        result = Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         _raise(ERROR_INVALID_BOUNDARY, "Tier boundaries must be numbers.")
+    if not result.is_finite():
+        _raise(ERROR_INVALID_BOUNDARY, "Tier boundaries must be finite.")
+    return result
 
 
 def _value(row: Any, field: str) -> Any:

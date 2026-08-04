@@ -22,6 +22,7 @@ from llm_ops.price_table_validation import (
     match_usage_range_tier,
     usage_range_spec,
     validate_price_table,
+    with_usage_range_spec,
 )
 
 
@@ -126,6 +127,12 @@ class PriceTableValidationTests(TestCase):
             [price_row("0", "0")],
         )
 
+    def test_rejects_non_finite_boundary(self):
+        self.assert_error_code(
+            ERROR_INVALID_BOUNDARY,
+            [price_row("NaN", None)],
+        )
+
     def test_rejects_duplicate_range(self):
         rows = [price_row("0", "10"), price_row("0", "10")]
 
@@ -192,6 +199,15 @@ class PriceTableValidationTests(TestCase):
         rows = [price_row("0", None, spec=["request_input_tokens"])]
 
         self.assert_error_code(ERROR_INVALID_USAGE_RANGE_SPEC, rows)
+
+    def test_rejects_non_object_spec_when_adding_contract(self):
+        with self.assertRaises(PriceTableValidationError) as raised:
+            with_usage_range_spec(["request_input_tokens"])
+
+        self.assertEqual(
+            raised.exception.code,
+            ERROR_INVALID_USAGE_RANGE_SPEC,
+        )
 
     def test_rejects_volume_until_business_contract_is_defined(self):
         rows = [price_row("0", None, tier_type="volume")]
