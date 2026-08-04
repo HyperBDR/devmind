@@ -46,6 +46,10 @@ from .price_collectors import (
     registered_vendor_price_collector_codes,
     vendor_price_collector_exists,
 )
+from .price_table_validation import (
+    validate_price_table_groups,
+    with_usage_range_spec,
+)
 from .services import (
     find_aggregated_model,
     match_meta_model_by_alias_or_name,
@@ -3181,6 +3185,8 @@ def sync_model_price_items(
     if not payloads:
         return []
 
+    validate_price_table_groups(payloads)
+
     now = timezone.now()
     current_filter = {
         "offering": offering,
@@ -3582,6 +3588,7 @@ def price_item_payload(
     tier_type = ModelPriceItem.TIER_FLAT
     if tier_start is not None or tier_end is not None:
         tier_type = ModelPriceItem.TIER_USAGE_RANGE
+        spec = with_usage_range_spec(spec)
     return {
         **common,
         "dimension": dimension,
