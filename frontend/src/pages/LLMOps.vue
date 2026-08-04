@@ -470,14 +470,19 @@ const inlineCanPublish = computed(() => {
   if (!platformId || !modelId || !hasChanges || !listings.length) return false
   const changedListings = listings.filter((item) => item.hasChanges !== false)
   if (!changedListings.length) return false
-  return changedListings.every(
-    (listing) =>
+  return changedListings.every((listing) => {
+    if (listing.hasTieredPrices) {
+      return !Object.keys(listing.tierErrors || {}).length
+    }
+    return (
+      !Object.keys(listing.tierErrors || {}).length &&
       !listing.priceBelowReference &&
       Number.isFinite(Number(listing.priceIn)) &&
       Number.isFinite(Number(listing.priceOut)) &&
       Number(listing.priceIn) > 0 &&
       Number(listing.priceOut) > 0
-  )
+    )
+  })
 })
 
 const inlineCanDraft = computed(() => {
