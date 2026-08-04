@@ -1,4 +1,4 @@
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
@@ -9,6 +9,9 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from quotation.models import (
+    DocumentAsset,
+    DocumentParseResult,
+    DocumentParseStatus,
     Quotation,
     QuotationItem,
     QuotationSourceType,
@@ -36,7 +39,10 @@ class QuotationListAPITests(TestCase):
         owner: str = "owner@example.com",
         status: str = QuoteStatus.DRAFT,
         product_line: str = "BDR",
+        product_line_name: str = "HyperBDR",
         source_type: str = QuotationSourceType.MANUAL,
+        quote_date: str = "2026-07-01",
+        salesperson: str = "Sales Person",
         created_at=None,
     ) -> Quotation:
         quotation = Quotation.objects.create(
@@ -49,13 +55,14 @@ class QuotationListAPITests(TestCase):
             status=status,
             source_type=source_type,
             product_line=product_line,
+            product_line_name=product_line_name,
             project_name=f"Project Alpha {index}",
             currency="USD",
             payment_terms="CIA",
-            quote_date="2026-07-01",
+            quote_date=quote_date,
             expire_date="2026-08-01",
             grand_total=Decimal(index + 1),
-            issuer_contact_name="Sales Person",
+            issuer_contact_name=salesperson,
             issuer_contact_email="sales@example.com",
             client_company=f"Client {index}",
             contact_person=f"Contact {index}",
@@ -141,6 +148,7 @@ class QuotationListAPITests(TestCase):
             "page": 1,
             "page_size": 10,
             "total_pages": 0,
+            "facets": {"product_lines": []},
         }
         assert beyond.status_code == 200
         assert beyond.data["items"] == []
@@ -206,25 +214,20 @@ class QuotationListAPITests(TestCase):
             matching.id
         ]
 
-    def test_created_date_range_includes_the_whole_end_date(self):
-        local_tz = timezone.get_current_timezone()
-        selected_date = timezone.localdate()
-        start = timezone.make_aware(
-            datetime.combine(selected_date, time.min),
-            local_tz,
-        )
+    def test_quote_date_range_is_inclusive_and_ignores_created_time(self):
         inside = self._quote(
             1,
-            created_at=start + timedelta(hours=23, minutes=59),
+            quote_date="2026-07-15",
+            created_at=timezone.now() - timedelta(days=365),
         )
-        self._quote(2, created_at=start - timedelta(seconds=1))
-        self._quote(3, created_at=start + timedelta(days=1))
+        self._quote(2, quote_date="2026-07-14")
+        self._quote(3, quote_date="2026-07-16")
 
         response = self.api.get(
             self.url,
             {
-                "created_from": selected_date.isoformat(),
-                "created_to": selected_date.isoformat(),
+                "created_from": "2026-07-15",
+                "created_to": "2026-07-15",
             },
         )
 
@@ -232,9 +235,76 @@ class QuotationListAPITests(TestCase):
             inside.id
         ]
 
+    def test_list_returns_quote_date_salesperson_and_business_product_line(self):
+        quotation = self._quote(
+            1,
+            product_line="Motion",
+            product_line_name="HyperMotion",
+            quote_date="2026-07-12",
+            salesperson="Taylor Sales",
+        )
+
+        response = self.api.get(self.url)
+        row = response.data["items"][0]
+
+        assert row["id"] == quotation.id
+        assert row["quote_date"] == "2026-07-12"
+        assert row["issuer_contact_name"] == "Taylor Sales"
+        assert row["product_line_name"] == "HyperMotion"
+
+    def test_product_line_facets_cover_accessible_rows_beyond_page(self):
+        self._create_quotes(11)
+        matching = self._quote(
+            20,
+            product_line="Motion",
+            product_line_name="HyperMotion",
+        )
+        self._quote(
+            21,
+            owner="other@example.com",
+            product_line="Private",
+            product_line_name="Private Line",
+        )
+
+        response = self.api.get(self.url)
+        filtered = self.api.get(
+            self.url,
+            {"product_line_name": "HyperMotion"},
+        )
+
+        assert "HyperMotion" in response.data["facets"]["product_lines"]
+        assert "Private Line" not in response.data["facets"]["product_lines"]
+        assert [row["id"] for row in filtered.data["items"]] == [
+            matching.id
+        ]
+        assert "HyperBDR" in filtered.data["facets"]["product_lines"]
+
+    def test_product_line_facets_fall_back_to_legacy_prefix(self):
+        legacy = self._quote(
+            1,
+            product_line="Legacy",
+            product_line_name="",
+        )
+
+        response = self.api.get(self.url)
+        filtered = self.api.get(
+            self.url,
+            {"product_line_name": "Legacy"},
+        )
+
+        assert "Legacy" in response.data["facets"]["product_lines"]
+        assert [row["id"] for row in filtered.data["items"]] == [
+            legacy.id
+        ]
+
     def test_owner_permission_and_staff_visibility(self):
         own = self._quote(1)
-        other = self._quote(2, owner="other@example.com")
+        other = self._quote(
+            2,
+            owner="other@example.com",
+            product_line="Private",
+            product_line_name="Private Line",
+        )
 
         owner_response = self.api.get(self.url)
         self.user.is_staff = True
@@ -244,10 +314,16 @@ class QuotationListAPITests(TestCase):
         assert [row["id"] for row in owner_response.data["items"]] == [
             own.id
         ]
+        assert "Private Line" not in owner_response.data["facets"][
+            "product_lines"
+        ]
         assert {row["id"] for row in staff_response.data["items"]} == {
             own.id,
             other.id,
         }
+        assert "Private Line" in staff_response.data["facets"][
+            "product_lines"
+        ]
 
     def test_list_is_lightweight_and_item_count_is_annotated(self):
         quotation = self._quote(1)
@@ -278,8 +354,99 @@ class QuotationListAPITests(TestCase):
         assert "snapshot_json" not in row
         assert "documents" not in row
 
+    def test_imported_quote_lists_original_document_and_revision_summaries(
+        self,
+    ):
+        quotation = self._quote(
+            1,
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+        )
+        source = DocumentAsset.objects.create(
+            quotation=quotation,
+            doc_type="excel",
+            file_name="Original quote.xlsx",
+            mime_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            storage_key="documents/original/quote.xlsx",
+            source="local",
+            created_by_email=self.user.email,
+        )
+        DocumentParseResult.objects.create(
+            asset=source,
+            quotation=quotation,
+            status=DocumentParseStatus.CONFIRMED,
+            parser_name="test-parser",
+            parser_version="1",
+            content_hash="source-hash",
+        )
+        for version_no in (1, 2):
+            QuotationVersion.objects.create(
+                quotation=quotation,
+                version_no=version_no,
+                status=QuoteStatus.GENERATED,
+                snapshot_json={"private": f"snapshot-{version_no}"},
+            )
+
+        response = self.api.get(self.url)
+
+        assert response.status_code == 200
+        row = response.data["items"][0]
+        assert row["source_document_type"] == "excel"
+        assert row["source_document"] == {
+            "id": source.id,
+            "doc_type": "excel",
+            "file_name": "Original quote.xlsx",
+            "version_no": 1,
+        }
+        assert [
+            version["version_no"]
+            for version in row["available_versions"]
+        ] == [2, 1]
+        assert all(
+            "snapshot" not in version
+            for version in row["available_versions"]
+        )
+
+    def test_imported_quote_ignores_unconfirmed_and_generated_documents(
+        self,
+    ):
+        quotation = self._quote(
+            1,
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+        )
+        for source, status in (
+            ("local", DocumentParseStatus.READY),
+            ("generated", DocumentParseStatus.CONFIRMED),
+        ):
+            asset = DocumentAsset.objects.create(
+                quotation=quotation,
+                doc_type="pdf",
+                file_name=f"{source}.pdf",
+                mime_type="application/pdf",
+                storage_key=f"documents/{source}/quote.pdf",
+                source=source,
+                created_by_email=self.user.email,
+            )
+            DocumentParseResult.objects.create(
+                asset=asset,
+                quotation=quotation,
+                status=status,
+                parser_name="test-parser",
+                parser_version="1",
+                content_hash=f"{source}-hash",
+            )
+
+        response = self.api.get(self.url)
+
+        row = response.data["items"][0]
+        assert row["source_document_type"] is None
+        assert row["source_document"] is None
+        assert row["available_versions"] == []
+
     def test_detail_still_returns_items_versions_and_snapshots(self):
-        quotation = self._quote(1)
+        quotation = self._quote(1, status=QuoteStatus.EXPIRED)
         QuotationItem.objects.create(
             quotation=quotation,
             line_no=1,
@@ -305,6 +472,7 @@ class QuotationListAPITests(TestCase):
         assert response.data["versions"][0]["snapshot"] == {
             "status": "draft"
         }
+        assert response.data["status"] == QuoteStatus.EXPIRED
 
     def test_list_query_count_does_not_grow_with_page_size(self):
         self._create_quotes(50)

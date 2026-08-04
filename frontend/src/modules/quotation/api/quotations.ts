@@ -35,6 +35,7 @@ interface ApiQuotation {
   source_type: 'manual' | 'document_import';
   source_document_type?: 'excel' | 'pdf' | null;
   product_line: string;
+  product_line_name?: string;
   project_name: string;
   currency: string;
   payment_term_option: string;
@@ -89,13 +90,27 @@ interface ApiQuotationListItem {
   project_name: string;
   client_company: string;
   contact_person: string;
+  quote_date?: string | null;
+  issuer_contact_name: string;
   created_at: string;
   currency: string;
   grand_total: number | string;
   status: string;
   source_type: 'manual' | 'document_import';
   source_document_type?: 'excel' | 'pdf' | null;
+  source_document?: {
+    id: string;
+    doc_type: 'excel' | 'pdf';
+    file_name: string;
+    version_no: number;
+  } | null;
+  available_versions?: Array<{
+    version_no: number;
+    status: string;
+    created_at: string;
+  }>;
   product_line: string;
+  product_line_name?: string;
   item_count: number;
   latest_excel_document_id?: string | null;
   latest_pdf_document_id?: string | null;
@@ -110,6 +125,7 @@ interface ApiQuotationFormContextItem {
   contact_person: string;
   email: string;
   product_line: string;
+  product_line_name?: string;
   billing_company: string;
   billing_contact: string;
   billing_email: string;
@@ -134,6 +150,7 @@ export interface QuotationListParams {
 
 export interface QuotationListResult {
   items: Quotation[];
+  productLines: string[];
   total: number;
   page: number;
   pageSize: 10 | 20 | 50;
@@ -290,6 +307,11 @@ function mapApiVersion(version: ApiQuotationVersion): QuoteVersion {
     contactPerson: snapText(snap, 'contact_person', 'contactPerson'),
     email: snapText(snap, 'email', 'email'),
     productLine: snapText(snap, 'product_line', 'productLine'),
+    productLineName: snapText(
+      snap,
+      'product_line_name',
+      'productLineName',
+    ),
     billingCompany: snapText(snap, 'billing_company', 'billingCompany'),
     billingContact: snapText(snap, 'billing_contact', 'billingContact'),
     billingEmail: snapText(snap, 'billing_email', 'billingEmail'),
@@ -353,6 +375,7 @@ export function mapApiQuotation(api: ApiQuotation): Quotation {
     contactPerson: api.contact_person,
     email: api.email,
     productLine: api.product_line,
+    productLineName: api.product_line_name,
     billingCompany: api.billing_company,
     billingContact: api.billing_contact,
     billingEmail: api.billing_email,
@@ -407,14 +430,28 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     quoteNo: api.display_quote_no || api.quote_no,
     sourceType: api.source_type || 'manual',
     sourceDocumentType: api.source_document_type || undefined,
+    sourceDocument: api.source_document
+      ? {
+          id: api.source_document.id,
+          docType: api.source_document.doc_type,
+          fileName: api.source_document.file_name,
+          versionNo: api.source_document.version_no,
+        }
+      : undefined,
+    availableVersions: (api.available_versions || []).map((version) => ({
+      versionNo: version.version_no,
+      status: version.status,
+      createdAt: version.created_at,
+    })),
     projectName: api.project_name,
     clientCompany: api.client_company,
     contactPerson: api.contact_person,
     email: '',
     productLine: api.product_line,
+    productLineName: api.product_line_name,
     region: '',
     industry: '',
-    salesperson: '',
+    salesperson: api.issuer_contact_name || '',
     currency: (api.currency as Quotation['currency']) || 'USD',
     paymentTerms: '',
     status: mapStatus(api.status),
@@ -426,6 +463,7 @@ function mapApiQuotationListItem(api: ApiQuotationListItem): Quotation {
     vatRate: 0,
     vatAmount: 0,
     grandTotal: toNumber(api.grand_total),
+    quoteDate: api.quote_date || undefined,
     createdAt: api.created_at,
     feishuExcelDocumentId:
       api.latest_excel_document_id || undefined,
@@ -444,6 +482,7 @@ function mapApiQuotationFormContextItem(
     contactPerson: api.contact_person,
     email: api.email,
     productLine: api.product_line,
+    productLineName: api.product_line_name,
     billingCompany: api.billing_company,
     billingContact: api.billing_contact,
     billingEmail: api.billing_email,
@@ -472,6 +511,7 @@ export function mapQuotationToCreatePayload(quote: Quotation) {
   return {
     quote_no: quote.quoteNo,
     product_line: quote.productLine || 'BDR',
+    product_line_name: quote.productLineName || '',
     project_name: quote.projectName,
     currency: quote.currency,
     payment_term_option: quote.paymentTermOption || 'CIA',
@@ -517,7 +557,9 @@ export async function listQuotations(
   query.set('page_size', String(params.pageSize || 10));
   if (params.search?.trim()) query.set('search', params.search.trim());
   if (params.status) query.set('status', mapStatusToApi(params.status));
-  if (params.productLine) query.set('product_line', params.productLine);
+  if (params.productLine) {
+    query.set('product_line_name', params.productLine);
+  }
   if (params.sourceType) query.set('source_type', params.sourceType);
   if (params.createdFrom) query.set('created_from', params.createdFrom);
   if (params.createdTo) query.set('created_to', params.createdTo);
@@ -527,9 +569,13 @@ export async function listQuotations(
     page: number;
     page_size: 10 | 20 | 50;
     total_pages: number;
+    facets?: {
+      product_lines?: string[];
+    };
   }>(`/quotations?${query.toString()}`);
   return {
     items: data.items.map(mapApiQuotationListItem),
+    productLines: data.facets?.product_lines || [],
     total: data.total,
     page: data.page,
     pageSize: data.page_size,

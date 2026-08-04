@@ -11,6 +11,11 @@ from openpyxl.utils.exceptions import InvalidFileException
 from pypdf import PdfReader
 
 from quotation.models import DocumentAsset
+from quotation.services.document_parsing.business_fields import (
+    PRODUCT_LINE_LABELS,
+    explicit_product_line,
+    known_product_line,
+)
 from quotation.services.document_parsing.excel_parser import _decimal
 from quotation.services.document_parsing.schemas import (
     ParsedDocumentData,
@@ -88,6 +93,17 @@ def _pdf_date(layout: str, label: str) -> date | None:
         except ValueError:
             continue
     return None
+
+
+def _pdf_product_line(layout: str) -> tuple[str, str]:
+    for label in PRODUCT_LINE_LABELS:
+        raw = _pdf_label(
+            layout,
+            rf"{re.escape(label)}\s*:?\s*([^\n\r]+)",
+        )
+        if raw:
+            return explicit_product_line(raw)
+    return "", ""
 
 
 def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
@@ -423,6 +439,20 @@ def complete_document_parse(
             return _not_quotation_result(parsed)
         if not quote.items:
             quote.items = _pdf_items(layout)
+        if not quote.product_line_name:
+            (
+                quote.product_line_name,
+                quote.product_line,
+            ) = _pdf_product_line(layout)
+        if not quote.product_line_name:
+            for item in quote.items:
+                name, prefix = known_product_line(
+                    item.name or item.description or ""
+                )
+                if name:
+                    quote.product_line_name = name
+                    quote.product_line = prefix
+                    break
         total = _pdf_total(layout)
         if not total:
             total = Decimal(parsed.source_totals.get("grand_total", "0"))
@@ -439,6 +469,15 @@ def complete_document_parse(
                 quote.items = _excel_items(path)
             except Exception:
                 quote.items = []
+        if not quote.product_line_name:
+            for item in quote.items:
+                name, prefix = known_product_line(
+                    item.name or item.description or ""
+                )
+                if name:
+                    quote.product_line_name = name
+                    quote.product_line = prefix
+                    break
         total = sum(
             (item.extended_price for item in quote.items),
             Decimal("0"),
@@ -465,12 +504,8 @@ def complete_document_parse(
     )
     if quote.expire_date < quote.quote_date:
         quote.expire_date = quote.quote_date + timedelta(days=30)
-    quote.issuer_contact_name = (
-        quote.issuer_contact_name or "OnePro Cloud Sales"
-    )
-    quote.issuer_contact_email = (
-        quote.issuer_contact_email or "sales@oneprocloud.com"
-    )
+    missing_issuer_name = not quote.issuer_contact_name
+    missing_issuer_email = not quote.issuer_contact_email
     if not quote.items:
         quote.items = [
             ParsedQuotationItem(
@@ -497,6 +532,22 @@ def complete_document_parse(
         }
     )
     warnings = list(parsed.validation_warnings)
+    if missing_issuer_name:
+        warnings.append(
+            {
+                "field": "issuer_contact_name",
+                "code": "missing_salesperson",
+                "detail": "Salesperson was not parsed from the source",
+            }
+        )
+    if missing_issuer_email:
+        warnings.append(
+            {
+                "field": "issuer_contact_email",
+                "code": "missing_salesperson_email",
+                "detail": "Salesperson email was not parsed from the source",
+            }
+        )
     if pdf_extraction_attempted and not layout.strip():
         warnings.append(
             {

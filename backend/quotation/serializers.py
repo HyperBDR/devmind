@@ -60,6 +60,10 @@ class QuotationListQuerySerializer(serializers.Serializer):
         max_length=40,
         required=False,
     )
+    product_line_name = serializers.CharField(
+        max_length=120,
+        required=False,
+    )
     source_type = serializers.ChoiceField(
         choices=Quotation._meta.get_field("source_type").choices,
         required=False,
@@ -236,6 +240,26 @@ class QuotationVersionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class QuotationListDocumentSerializer(serializers.Serializer):
+    """Serialize the original document behind an imported quotation."""
+
+    id = serializers.CharField(read_only=True)
+    doc_type = serializers.ChoiceField(
+        choices=("excel", "pdf"),
+        read_only=True,
+    )
+    file_name = serializers.CharField(read_only=True)
+    version_no = serializers.IntegerField(read_only=True)
+
+
+class QuotationListVersionSerializer(serializers.Serializer):
+    """Serialize a revision without returning its full snapshot."""
+
+    version_no = serializers.IntegerField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
 class QuotationListSerializer(serializers.ModelSerializer):
     """Serialize only fields required by the paginated list."""
 
@@ -253,6 +277,14 @@ class QuotationListSerializer(serializers.ModelSerializer):
         allow_null=True,
         read_only=True,
     )
+    source_document = QuotationListDocumentSerializer(
+        allow_null=True,
+        read_only=True,
+    )
+    available_versions = QuotationListVersionSerializer(
+        many=True,
+        read_only=True,
+    )
 
     def get_display_quote_no(self, obj: Quotation) -> str:
         return obj.source_quote_no or obj.quote_no
@@ -266,13 +298,18 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "project_name",
             "client_company",
             "contact_person",
+            "quote_date",
             "created_at",
             "currency",
             "grand_total",
             "status",
             "source_type",
             "source_document_type",
+            "source_document",
+            "available_versions",
             "product_line",
+            "product_line_name",
+            "issuer_contact_name",
             "item_count",
             "latest_excel_document_id",
             "latest_pdf_document_id",
@@ -299,6 +336,7 @@ class QuotationFormContextSerializer(serializers.ModelSerializer):
             "contact_person",
             "email",
             "product_line",
+            "product_line_name",
             "billing_company",
             "billing_contact",
             "billing_email",
@@ -489,6 +527,7 @@ class QuotationSerializer(serializers.ModelSerializer):
             "source_type",
             "source_document_type",
             "product_line",
+            "product_line_name",
             "project_name",
             "currency",
             "payment_term_option",
@@ -539,7 +578,16 @@ class QuotationSerializer(serializers.ModelSerializer):
 
 class QuotationCreateSerializer(serializers.Serializer):
     quote_no = serializers.CharField()
-    product_line = serializers.CharField(required=False, default="BDR")
+    product_line = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        default="BDR",
+    )
+    product_line_name = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        default="",
+    )
     project_name = serializers.CharField()
     currency = serializers.CharField(required=False, default="USD")
     payment_term_option = serializers.CharField(required=False, default="CIA")
@@ -561,8 +609,8 @@ class QuotationCreateSerializer(serializers.Serializer):
     issuer_company_name = serializers.CharField(
         required=False, default="OnePro Cloud Limited"
     )
-    issuer_contact_name = serializers.CharField()
-    issuer_contact_email = serializers.CharField()
+    issuer_contact_name = serializers.CharField(allow_blank=True)
+    issuer_contact_email = serializers.CharField(allow_blank=True)
     issuer_contact_title = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
@@ -584,7 +632,12 @@ class QuotationCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if not self.context.get("document_import"):
-            for field in ("contact_person", "email"):
+            for field in (
+                "contact_person",
+                "email",
+                "issuer_contact_name",
+                "issuer_contact_email",
+            ):
                 if not attrs.get(field, "").strip():
                     raise serializers.ValidationError(
                         {field: "This field may not be blank."}
@@ -599,7 +652,14 @@ class QuotationCreateSerializer(serializers.Serializer):
 class QuotationUpdateSerializer(serializers.Serializer):
     quote_no = serializers.CharField(required=False)
     project_name = serializers.CharField(required=False)
-    product_line = serializers.CharField(required=False)
+    product_line = serializers.CharField(
+        allow_blank=True,
+        required=False,
+    )
+    product_line_name = serializers.CharField(
+        allow_blank=True,
+        required=False,
+    )
     currency = serializers.CharField(required=False)
     payment_term_option = serializers.CharField(required=False)
     payment_terms = serializers.CharField(required=False)

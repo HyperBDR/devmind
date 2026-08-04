@@ -41,6 +41,7 @@ export interface QuoteVersion {
   contactPerson: string;
   email: string;
   productLine?: QuoteProductLine;
+  productLineName?: string;
   billingCompany?: string;
   billingContact?: string;
   billingEmail?: string;
@@ -74,12 +75,24 @@ export interface Quotation {
   quoteNo: string;
   sourceType?: 'manual' | 'document_import';
   sourceDocumentType?: 'excel' | 'pdf';
+  sourceDocument?: {
+    id: string;
+    docType: 'excel' | 'pdf';
+    fileName: string;
+    versionNo: number;
+  };
+  availableVersions?: Array<{
+    versionNo: number;
+    status: string;
+    createdAt: string;
+  }>;
   versionCurrent?: number;
   projectName: string;
   clientCompany: string;
   contactPerson: string;
   email: string;
   productLine?: QuoteProductLine;
+  productLineName?: string;
   billingCompany?: string;
   billingContact?: string;
   billingEmail?: string;

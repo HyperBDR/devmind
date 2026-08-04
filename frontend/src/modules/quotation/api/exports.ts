@@ -53,6 +53,7 @@ interface CreateQuotationExportResponse {
 
 interface QuotationExportProgressOptions {
   onProgress?: (job: QuotationExportJob) => void
+  quotationVersion?: number
 }
 
 const TERMINAL_STATUSES = new Set<QuotationExportStatus>([
@@ -114,7 +115,7 @@ export async function waitForQuotationExport(
   } = {},
 ): Promise<QuotationExportJob> {
   const deadline = Date.now() + (options.timeoutMs ?? 600_000)
-  const pollMs = options.pollMs ?? 1_000
+  const pollMs = options.pollMs ?? 250
   while (Date.now() < deadline) {
     const job = await getQuotationExport(jobId)
     options.onProgress?.(job)
@@ -153,7 +154,9 @@ export async function exportQuotationFile(
   format: QuotationExportFormat,
   options: QuotationExportProgressOptions = {},
 ): Promise<QuotationExportJob> {
-  const created = await createQuotationExport(quotationId, [format])
+  const created = await createQuotationExport(quotationId, [format], {
+    quotationVersion: options.quotationVersion,
+  })
   const job = await waitForQuotationExport(created.job_id, options)
   if (job.status === 'render_failed') {
     throw new ApiError(job.error_message || 'Quotation rendering failed', 422)

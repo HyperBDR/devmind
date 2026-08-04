@@ -13,6 +13,12 @@ try:
 except ImportError:
     CalamineWorkbook = None
 
+from quotation.services.document_parsing.business_fields import (
+    PRODUCT_LINE_LABELS,
+    QUOTE_DATE_LABELS,
+    explicit_product_line,
+    known_product_line,
+)
 from quotation.services.document_parsing.schemas import (
     ParsedDocumentData,
     ParsedQuotation,
@@ -20,7 +26,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.2.0"
+PARSER_VERSION = "2.4.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -211,6 +217,32 @@ def _label_value(rows: list[list[Any]], label: str) -> str:
     return ""
 
 
+def _label_value_aliases(
+    rows: list[list[Any]], labels: tuple[str, ...]
+) -> str:
+    for label in labels:
+        value = _label_value(rows, label)
+        if value:
+            return value
+    return ""
+
+
+def _product_line(
+    rows: list[list[Any]],
+    items: list[ParsedQuotationItem],
+) -> tuple[str, str]:
+    explicit = _label_value_aliases(rows, PRODUCT_LINE_LABELS)
+    if explicit:
+        return explicit_product_line(explicit)
+    for item in items:
+        name, prefix = known_product_line(
+            item.name or item.description or ""
+        )
+        if name:
+            return name, prefix
+    return "", ""
+
+
 def _section_fields(
     rows: list[list[Any]], section_label: str
 ) -> dict[str, str]:
@@ -253,14 +285,32 @@ def _section_fields(
 def _project_fields(rows: list[list[Any]]) -> dict[str, str]:
     headers = {
         "contact person": "issuer_contact_name",
+        "sales person": "issuer_contact_name",
+        "salesperson": "issuer_contact_name",
+        "sales representative": "issuer_contact_name",
+        "prepared by": "issuer_contact_name",
+        "account manager": "issuer_contact_name",
         "email": "issuer_contact_email",
+        "job title": "issuer_contact_title",
+        "position": "issuer_contact_title",
+        "title": "issuer_contact_title",
         "project": "project_name",
         "payment terms": "payment_terms",
         "currency": "currency",
     }
+    issuer_headers = {
+        "account manager",
+        "contact person",
+        "prepared by",
+        "sales person",
+        "sales representative",
+        "salesperson",
+    }
     for row_index, row in enumerate(rows[:-1]):
         normalized = [_normalized(value) for value in row]
-        if "project" not in normalized or "currency" not in normalized:
+        if "project" not in normalized or not (
+            issuer_headers.intersection(normalized) or "email" in normalized
+        ):
             continue
         values = rows[row_index + 1]
         result = {}
@@ -473,6 +523,7 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
     items.extend(_line_items(rows, "Others", "Other"))
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no
+    product_line_name, product_line = _product_line(rows, items)
 
     tax_label, vat_rate = _tax_details(rows)
     total_amount = _amount_by_label(rows, "total amount")
@@ -505,11 +556,13 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
             break
     quotation = ParsedQuotation(
         quote_no=quote_no,
+        product_line=product_line,
+        product_line_name=product_line_name,
         project_name=project.get("project_name", ""),
         currency=project.get("currency", "USD").upper() or "USD",
         payment_term_option=_payment_term_option(payment_terms),
         payment_terms=payment_terms,
-        quote_date=_date(_label_value(rows, "Date")),
+        quote_date=_date(_label_value_aliases(rows, QUOTE_DATE_LABELS)),
         expire_date=_date(_label_value(rows, "Quote Valid Till")),
         tax_label=tax_label,
         vat_rate=vat_rate,
@@ -519,7 +572,12 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
         issuer_company_name=issuer_company,
         issuer_contact_name=project.get("issuer_contact_name", ""),
         issuer_contact_email=project.get("issuer_contact_email", ""),
-        issuer_contact_title=_last_prefixed(rows, "Title"),
+        issuer_contact_title=(
+            project.get("issuer_contact_title", "")
+            or _last_prefixed(rows, "Job Title")
+            or _last_prefixed(rows, "Position")
+            or _last_prefixed(rows, "Title")
+        ),
         client_company=ship_to.get("company", ""),
         contact_person=ship_to.get("name", ""),
         email=ship_to.get("email", ""),

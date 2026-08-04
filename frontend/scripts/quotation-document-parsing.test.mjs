@@ -21,6 +21,10 @@ const quotationListPage = await readFile(
   new URL('../src/modules/quotation/pages/QuotationListPage.vue', import.meta.url),
   'utf8',
 )
+const exportsApi = await readFile(
+  new URL('../src/modules/quotation/api/exports.ts', import.meta.url),
+  'utf8',
+)
 const quotationsApi = await readFile(
   new URL('../src/modules/quotation/api/quotations.ts', import.meta.url),
   'utf8',
@@ -43,6 +47,12 @@ test('document parsing API exposes automatic parse and fallback confirm operatio
   assert.match(documentsApi, /getDocumentParseResult/)
   assert.match(documentsApi, /confirmDocumentParseResult/)
   assert.match(documentsApi, /document-parse-results\/.*\/confirm/)
+})
+
+test('quotation API keeps product line names separate from number prefixes', () => {
+  assert.match(quotationsApi, /product_line_name/)
+  assert.match(quotationsApi, /productLineName/)
+  assert.match(quotationsApi, /product_line: quote\.productLine/)
 })
 
 test('archive sync imports Excel and PDF files into normal quotations', () => {
@@ -116,7 +126,8 @@ test('quotation list shows one source or status indicator per quotation', () => 
 })
 
 test('quotation number is constrained and exposes its full value on hover', () => {
-  assert.match(quotationList, /max-w-\[220px\]/)
+  assert.match(quotationList, /quoteNo:\s*\{[\s\S]*?minWidth:\s*130/)
+  assert.match(quotationList, /:data-column-key="column\.key"/)
   assert.match(quotationList, /truncate whitespace-nowrap/)
   assert.match(quotationList, /:title="quote\.quoteNo"/)
 })
@@ -129,21 +140,40 @@ test('quotation metadata has hover details and Feishu opens instead of downloadi
   assert.doesNotMatch(quotationList, /downloadRemoteDocument/)
 })
 
-test('imported quotations only expose their original download format', () => {
+test('imported quotation downloads expose revision formats', () => {
   assert.match(quotationsApi, /source_document_type/)
-  assert.match(quotationsApi, /sourceDocumentType/)
+  assert.match(quotationsApi, /source_document/)
+  assert.match(quotationsApi, /available_versions/)
+  assert.match(documentsApi, /downloadImportedDocument/)
+  assert.match(quotationList, /sourceDocument\?\.docType === 'pdf'/)
+  assert.match(quotationList, /handleDownloadOriginal\(quote\)/)
+  assert.match(quotationsApi, /version_no/)
+  assert.match(quotationList, /quotationVersion === quote\.sourceDocument\.versionNo/)
+  assert.doesNotMatch(
+    quotationList,
+    /quotation\.pages\.list\.downloadOriginal/,
+  )
+  assert.match(quotationList, /downloadGeneratedRevision/)
+  assert.match(quotationList, /availableVersions/)
+  assert.match(quotationList, /version\.versionNo/)
   assert.match(
     quotationList,
-    /sourceDocumentType !== format/,
+    /handleDownloadLocal\([\s\S]*?'excel',[\s\S]*?version\.versionNo/,
   )
   assert.match(
     quotationList,
-    /sourceDocumentType === 'excel'/,
+    /handleDownloadLocal\([\s\S]*?'pdf',[\s\S]*?version\.versionNo/,
   )
   assert.match(
     quotationList,
-    /sourceDocumentType === 'pdf'/,
+    /openFeishuFile\(quote, 'excel'\)[\s\S]*?<ExternalLink/,
   )
+  assert.match(
+    exportsApi,
+    /quotationVersion: options\.quotationVersion/,
+  )
+  assert.match(exportsApi, /quotation_version: options\.quotationVersion/)
+  assert.match(exportsApi, /options\.pollMs \?\? 250/)
 })
 
 test('missing imported contact and amount placeholders are not displayed', () => {

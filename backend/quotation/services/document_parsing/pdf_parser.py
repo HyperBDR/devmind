@@ -11,6 +11,12 @@ try:
 except ImportError:
     pymupdf = None
 
+from quotation.services.document_parsing.business_fields import (
+    PRODUCT_LINE_LABELS,
+    QUOTE_DATE_LABELS,
+    explicit_product_line,
+    known_product_line,
+)
 from quotation.services.document_parsing.excel_parser import (
     _date,
     _decimal,
@@ -24,7 +30,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.4.0"
+PARSER_VERSION = "2.7.0"
 
 
 class QuotationPdfParseError(ValueError):
@@ -99,6 +105,30 @@ def _line_value(lines: list[str], label: str) -> str:
     return ""
 
 
+def _line_value_aliases(lines: list[str], labels: tuple[str, ...]) -> str:
+    for label in labels:
+        value = _line_value(lines, label)
+        if value:
+            return value
+    return ""
+
+
+def _product_line(
+    lines: list[str],
+    items: list[ParsedQuotationItem],
+) -> tuple[str, str]:
+    explicit = _line_value_aliases(lines, PRODUCT_LINE_LABELS)
+    if explicit:
+        return explicit_product_line(explicit)
+    for item in items:
+        name, prefix = known_product_line(
+            item.name or item.description or ""
+        )
+        if name:
+            return name, prefix
+    return "", ""
+
+
 def _section_fields(lines: list[str], start_label: str) -> dict[str, str]:
     start = None
     for index, line in enumerate(lines):
@@ -134,15 +164,36 @@ def _split_row(line: str) -> list[str]:
 def _project_fields(lines: list[str]) -> dict[str, str]:
     headers = {
         "contact person": "issuer_contact_name",
+        "sales person": "issuer_contact_name",
+        "salesperson": "issuer_contact_name",
+        "sales representative": "issuer_contact_name",
+        "prepared by": "issuer_contact_name",
+        "account manager": "issuer_contact_name",
         "email": "issuer_contact_email",
+        "job title": "issuer_contact_title",
+        "position": "issuer_contact_title",
+        "title": "issuer_contact_title",
         "project": "project_name",
         "payment terms": "payment_terms",
         "currency": "currency",
     }
+    issuer_headers = {
+        "account manager",
+        "contact person",
+        "prepared by",
+        "sales person",
+        "sales representative",
+        "salesperson",
+    }
     for index, line in enumerate(lines[:-1]):
         cells = [cell.lower() for cell in _split_row(line)]
         lower_line = line.lower()
-        if "project" not in lower_line or "currency" not in lower_line:
+        has_issuer_header = any(
+            header in lower_line for header in issuer_headers
+        )
+        if "project" not in lower_line or not (
+            has_issuer_header or "email" in lower_line
+        ):
             continue
         values = _split_row(lines[index + 1])
         result = {}
@@ -162,27 +213,201 @@ def _project_fields(lines: list[str]) -> dict[str, str]:
             return result
         issuer_name = value_line[: email_match.start()].strip()
         trailing = value_line[email_match.end() :].strip().split()
-        if len(trailing) < 3:
+        if len(trailing) < 2:
             return result
-        currency = trailing[-1]
-        payment_start = len(trailing) - 2
-        payment_terms = trailing[payment_start]
+        currency = ""
+        if "currency" in lower_line:
+            currency = trailing.pop()
+        payment_terms = ""
         if (
-            payment_start >= 1
-            and trailing[payment_start - 1].upper() == "NET"
+            len(trailing) >= 2
+            and trailing[-2].upper() == "NET"
+            and trailing[-1].isdigit()
         ):
-            payment_start -= 1
-            payment_terms = " ".join(trailing[payment_start:-1])
+            payment_terms = " ".join(trailing[-2:])
+            trailing = trailing[:-2]
+        elif trailing and trailing[-1].upper() == "CIA":
+            payment_terms = trailing.pop()
+        if not trailing:
+            return result
         result.update(
             {
                 "issuer_contact_name": issuer_name,
                 "issuer_contact_email": email_match.group(0),
-                "project_name": " ".join(trailing[:payment_start]),
-                "payment_terms": payment_terms,
-                "currency": currency,
+                "project_name": " ".join(trailing),
             }
         )
+        if payment_terms:
+            result["payment_terms"] = payment_terms
+        if currency:
+            result["currency"] = currency
         return result
+    return {}
+
+
+def _valid_issuer_name(
+    value: str,
+    excluded_names: set[str],
+) -> bool:
+    normalized = value.strip().casefold()
+    return bool(
+        normalized
+        and "@" not in normalized
+        and normalized not in excluded_names
+        and not re.match(
+            r"^(?:Email|E-mail|Title|Position)\s*:",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _valid_issuer_email(
+    value: str,
+    excluded_emails: set[str],
+) -> bool:
+    normalized = value.strip().casefold()
+    return bool(
+        normalized
+        and normalized not in excluded_emails
+        and re.fullmatch(
+            r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
+            value.strip(),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _valid_issuer_candidate(
+    fields: dict[str, str],
+    excluded_names: set[str],
+    excluded_emails: set[str],
+) -> bool:
+    return _valid_issuer_name(
+        fields.get("issuer_contact_name", ""),
+        excluded_names,
+    ) and _valid_issuer_email(
+        fields.get("issuer_contact_email", ""),
+        excluded_emails,
+    )
+
+
+def _signature_name(line: str) -> str:
+    match = re.search(
+        r"(?:^|\s)Name\s*:\s*(.+)$",
+        line,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return ""
+    name = re.sub(
+        r"^(?:Name\s*:\s*)+",
+        "",
+        match.group(1).strip(),
+        flags=re.IGNORECASE,
+    )
+    return re.split(
+        r"\s+(?:Title|Email|E-mail)\s*:",
+        name,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+
+
+def _signature_title(lines: list[str]) -> str:
+    for line in lines:
+        match = re.search(
+            r"(?:^|\s)(?:Job Title|Position|Title)\s*:\s*(.+)$",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            continue
+        title = match.group(1).strip()
+        if re.match(
+            r"^(?:Email|E-mail|Name)\s*:",
+            title,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        title = re.split(
+            r"\s+(?:Email|E-mail|Name)\s*:",
+            title,
+            maxsplit=1,
+            flags=re.IGNORECASE,
+        )[0].strip()
+        if title and "@" not in title:
+            return title
+    return ""
+
+
+def _issuer_signature_fields(
+    lines: list[str],
+    *,
+    excluded_names: set[str],
+    excluded_emails: set[str],
+) -> dict[str, str]:
+    """Recover a paired issuer contact from the document tail."""
+    email_pattern = r"[A-Z0-9._%+-]+@oneprocloud\.com"
+    tail_size = max(12, len(lines) // 3)
+    tail_start = max(0, len(lines) - tail_size)
+    for index in range(len(lines) - 1, tail_start - 1, -1):
+        email_match = re.search(
+            rf"(?:^|\s)(?:Email|E-mail)\s*:\s*({email_pattern})",
+            lines[index],
+            flags=re.IGNORECASE,
+        )
+        if email_match is None:
+            continue
+        window_start = max(tail_start, index - 4)
+        window_end = min(len(lines), index + 2)
+        window = lines[window_start:window_end]
+        for line in reversed(window):
+            candidate = {
+                "issuer_contact_name": _signature_name(line),
+                "issuer_contact_email": email_match.group(1),
+            }
+            if not _valid_issuer_candidate(
+                candidate,
+                excluded_names,
+                excluded_emails,
+            ):
+                continue
+            title = _signature_title(window)
+            if title:
+                candidate["issuer_contact_title"] = title
+            return candidate
+    return {}
+
+
+def _select_issuer_fields(
+    project: dict[str, str],
+    signature: dict[str, str],
+    excluded_names: set[str],
+    excluded_emails: set[str],
+) -> dict[str, str]:
+    if _valid_issuer_candidate(
+        project,
+        excluded_names,
+        excluded_emails,
+    ):
+        result = dict(project)
+        if (
+            not result.get("issuer_contact_title")
+            and signature.get("issuer_contact_email", "").casefold()
+            == result.get("issuer_contact_email", "").casefold()
+        ):
+            result["issuer_contact_title"] = signature.get(
+                "issuer_contact_title",
+                "",
+            )
+        return result
+    if _valid_issuer_candidate(
+        signature,
+        excluded_names,
+        excluded_emails,
+    ):
+        return signature
     return {}
 
 
@@ -350,10 +575,32 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     ship_to = _section_fields(lines, "Ship to")
     bill_to = _section_fields(lines, "Bill to")
     project = _project_fields(lines)
+    excluded_names = {
+        value.strip().casefold()
+        for value in (ship_to.get("name", ""), bill_to.get("name", ""))
+        if value.strip()
+    }
+    excluded_emails = {
+        value.strip().casefold()
+        for value in (ship_to.get("email", ""), bill_to.get("email", ""))
+        if value.strip()
+    }
+    signature = _issuer_signature_fields(
+        lines,
+        excluded_names=excluded_names,
+        excluded_emails=excluded_emails,
+    )
+    issuer = _select_issuer_fields(
+        project,
+        signature,
+        excluded_names,
+        excluded_emails,
+    )
     items = _line_items(lines, "Software", "Software")
     items.extend(_line_items(lines, "Others", "Other"))
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no
+    product_line_name, product_line = _product_line(lines, items)
 
     tax_label, vat_rate = _tax_details(lines)
     total_amount = _amount_by_label(lines, "total amount")
@@ -383,6 +630,8 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     payment_terms = project.get("payment_terms", "")
     quotation = ParsedQuotation(
         quote_no=_line_value(lines, "Quote No."),
+        product_line=product_line,
+        product_line_name=product_line_name,
         project_name=project.get("project_name", ""),
         currency=(
             project.get("currency", "USD").upper().split("/", 1)[0]
@@ -390,15 +639,15 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         ),
         payment_term_option=_payment_term_option(payment_terms),
         payment_terms=payment_terms,
-        quote_date=_date(_line_value(lines, "Date")),
+        quote_date=_date(_line_value_aliases(lines, QUOTE_DATE_LABELS)),
         expire_date=_date(_line_value(lines, "Quote Valid Till")),
         tax_label=tax_label,
         vat_rate=vat_rate,
         remarks_disclaimer=_remarks(lines),
         issuer_company_name=_issuer_company(lines),
-        issuer_contact_name=project.get("issuer_contact_name", ""),
-        issuer_contact_email=project.get("issuer_contact_email", ""),
-        issuer_contact_title=_line_value(lines, "Title"),
+        issuer_contact_name=issuer.get("issuer_contact_name", ""),
+        issuer_contact_email=issuer.get("issuer_contact_email", ""),
+        issuer_contact_title=issuer.get("issuer_contact_title", ""),
         client_company=ship_to.get("company", ""),
         contact_person=ship_to.get("name", ""),
         email=ship_to.get("email", ""),

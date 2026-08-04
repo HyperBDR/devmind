@@ -688,6 +688,7 @@
 
       <!-- Settings Menu -->
       <div
+        v-if="!isQuotationPlatform"
         class="mt-auto border-t pt-4"
         :class="isQuotationPlatform ? 'quotation-settings' : 'border-gray-200'"
       >

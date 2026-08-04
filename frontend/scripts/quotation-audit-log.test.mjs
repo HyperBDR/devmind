@@ -49,9 +49,7 @@ test('Audit Log is visible to Quote Desk users and remains read-only', () => {
   assert.match(auditPage, /downloadAuditExport/)
   assert.doesNotMatch(auditPage, /riskFilter/)
   assert.doesNotMatch(auditPage, /selected\.risk_level/)
-  assert.match(auditPage, /syncFolderNames/)
-  assert.match(auditPage, /syncSuccessCountValue/)
-  assert.match(auditPage, /syncFileVolumeValue/)
+  assert.doesNotMatch(auditPage, /syncFolderNames|hasSyncMetrics/)
   assert.match(auditPage, /selected\.changes\.fields\.map\(fieldLabel\)/)
   assert.match(auditPage, /selected\.trace_id/)
   assert.doesNotMatch(auditPage, /<select/)
@@ -95,25 +93,12 @@ test('Audit Log normalizes legacy module keys before display', () => {
   assert.match(auditPage, /inline-flex max-w-full truncate/)
 })
 
-test('Audit Log gives missing historical targets a useful label', () => {
-  assert.match(auditPage, /targetFallbackByOperation/)
+test('Audit Log gives missing business targets a useful label', () => {
+  assert.doesNotMatch(auditPage, /targetFallbackByOperation/)
   assert.match(auditPage, /targetFallbackByType/)
-  assert.match(auditPage, /'audit\.view': 'auditLog'/)
-  assert.match(auditPage, /'feishu\.sync': 'archiveFolder'/)
   assert.match(auditPage, /quotation\.pages\.audit\.targets/)
-  assert.equal(
-    english.quotation.pages.audit.targets.auditLog,
-    'Audit log',
-  )
-  assert.equal(
-    english.quotation.pages.audit.targets.archiveFolder,
-    'Feishu archive folder',
-  )
-  assert.match(auditPage, /moduleKey === 'audit'/)
-  assert.equal(
-    english.quotation.pages.audit.actions.viewedAuditLog,
-    'Viewed audit log',
-  )
+  assert.equal(english.quotation.pages.audit.targets.document, 'File')
+  assert.equal(english.quotation.pages.audit.targets.quotation, 'Quotation')
 })
 
 test('Audit Log uses concise, native English product copy', () => {
@@ -121,16 +106,7 @@ test('Audit Log uses concise, native English product copy', () => {
   assert.equal(copy.title, 'Audit Log')
   assert.equal(copy.performedBy, 'Performed by')
   assert.equal(copy.readOnly, 'Read-only activity records')
-  assert.equal(copy.actions.view, 'Viewed quote')
-  assert.equal(copy.actions.feishuSyncStarted, 'Sync started')
-  assert.equal(copy.actions.feishuSyncCompleted, 'Sync completed')
-  assert.equal(
-    copy.actions.feishuSyncCompletedWithErrors,
-    'Sync completed with errors',
-  )
-  assert.equal(copy.actions.feishuSyncFailed, 'Sync failed')
-  assert.match(auditPage, /storage\.archive_sync_requested': 'feishuSyncStarted'/)
-  assert.match(auditPage, /storage\.archive_sync_succeeded': 'feishuSyncCompleted'/)
+  assert.equal(copy.actions.generate, 'Generated quote')
   assert.equal(copy.actions.updatedQuote, 'Updated quote')
   assert.equal(copy.actions.deletedQuote, 'Deleted quote')
   assert.equal(copy.actions.deletedFile, 'Deleted file')
@@ -142,4 +118,23 @@ test('Audit Log uses concise, native English product copy', () => {
   assert.equal(copy.denied, 'Denied')
   assert.equal(copy.exportCsv, 'Export CSV')
   assert.equal(copy.failed, 'Failed')
+})
+
+test('Audit Log only offers approved business action filters', () => {
+  for (const action of [
+    'create',
+    'update',
+    'delete',
+    'generate',
+    'upload',
+    'download',
+    'import',
+  ]) {
+    assert.match(auditPage, new RegExp(`'${action}'`))
+  }
+  assert.doesNotMatch(auditPage, /'view'|'sync'|'open'|'connect'/)
+  assert.doesNotMatch(
+    auditPage,
+    /storage\.archive_sync_|viewedAuditLog|syncSuccessCount/,
+  )
 })

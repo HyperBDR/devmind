@@ -1,9 +1,11 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.db import connection
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from quotation.models import Quotation, QuotationVersion, QuoteStatus
@@ -26,6 +28,7 @@ class QuotationDashboardTests(TestCase):
         amount: str = "100.00",
         currency: str = "USD",
         owner: str = "owner@example.com",
+        quote_date=None,
         status: str = QuoteStatus.GENERATED,
     ) -> Quotation:
         return Quotation.objects.create(
@@ -34,7 +37,7 @@ class QuotationDashboardTests(TestCase):
             project_name=f"Project {quote_no}",
             currency=currency,
             payment_terms="CIA",
-            quote_date="2026-07-01",
+            quote_date=quote_date or "2026-07-01",
             expire_date="2026-08-01",
             grand_total=Decimal(amount),
             issuer_contact_name="Sales Person",
@@ -112,6 +115,121 @@ class QuotationDashboardTests(TestCase):
         assert response.status_code == 200
         assert response.data["follow_up_count"] == 205
 
+    def test_summary_aggregates_current_and_previous_month_quotes(self):
+        current_month = timezone.localdate().replace(day=1)
+        previous_month = (current_month - timedelta(days=1)).replace(day=1)
+        self._quote(
+            "Q-CURRENT-1",
+            amount="125.00",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-CURRENT-2",
+            amount="75.00",
+            quote_date=timezone.localdate(),
+        )
+        self._quote(
+            "Q-PREVIOUS",
+            amount="80.00",
+            quote_date=previous_month,
+        )
+        self._quote(
+            "Q-CURRENT-CNY",
+            amount="900.00",
+            currency="CNY",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-CURRENT-HIDDEN",
+            amount="500.00",
+            owner="other@example.com",
+            quote_date=current_month,
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary?currency=USD"
+        )
+
+        assert response.status_code == 200
+        assert response.data["current_period"] == current_month.strftime(
+            "%Y-%m"
+        )
+        assert response.data["previous_period"] == previous_month.strftime(
+            "%Y-%m"
+        )
+        assert response.data["month_quote_count"] == 2
+        assert response.data["previous_month_quote_count"] == 1
+        assert response.data["month_quote_amount"] == "200.00"
+        assert response.data["previous_month_quote_amount"] == "80.00"
+
+    def test_cny_dashboard_merges_rmb_alias_without_duplicate_option(self):
+        current_month = timezone.localdate().replace(day=1)
+        accepted_rmb = self._quote(
+            "Q-RMB-ACCEPTED",
+            amount="300.00",
+            currency="RMB",
+            quote_date=current_month,
+            status=QuoteStatus.ACCEPTED,
+        )
+        self._accept(accepted_rmb)
+        self._quote(
+            "Q-CNY-CURRENT",
+            amount="200.00",
+            currency="CNY",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-HKD-CURRENT",
+            amount="900.00",
+            currency="HKD",
+            quote_date=current_month,
+        )
+
+        summary = self.api.get(
+            "/api/v1/quotation/dashboard/summary?currency=CNY"
+        )
+        analytics = self.api.get(
+            "/api/v1/quotation/dashboard/analytics?currency=CNY"
+        )
+
+        assert summary.status_code == 200
+        assert summary.data["currency"] == "CNY"
+        assert summary.data["available_currencies"] == ["CNY", "HKD"]
+        assert summary.data["month_quote_count"] == 2
+        assert summary.data["month_quote_amount"] == "500.00"
+        assert summary.data["month_won_amount"] == "300.00"
+        assert analytics.status_code == 200
+        assert analytics.data["currency"] == "CNY"
+        assert analytics.data["available_currencies"] == ["CNY", "HKD"]
+        assert analytics.data["breakdown_total_amount"] == "500.00"
+        assert {
+            row["quote_no"] for row in analytics.data["amount_breakdown"]
+        } == {"Q-CNY-CURRENT", "Q-RMB-ACCEPTED"}
+
+    def test_rmb_dashboard_request_is_normalized_to_cny(self):
+        current_month = timezone.localdate().replace(day=1)
+        self._quote(
+            "Q-CNY",
+            amount="125.00",
+            currency="CNY",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-RMB",
+            amount="75.00",
+            currency="RMB",
+            quote_date=current_month,
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary?currency=RMB"
+        )
+
+        assert response.status_code == 200
+        assert response.data["currency"] == "CNY"
+        assert response.data["month_quote_amount"] == "200.00"
+        assert response.data["available_currencies"] == ["CNY"]
+
     def test_analytics_returns_bounded_rows_and_fixed_period_counts(self):
         accepted = self._quote(
             "Q-ACCEPTED",
@@ -155,6 +273,13 @@ class QuotationDashboardTests(TestCase):
         assert Decimal(
             response.data["trends"]["weekly"][-1]["won_amount"]
         ) == Decimal("300.00")
+        july = next(
+            row
+            for row in response.data["trends"]["monthly"]
+            if row["period"] == "2026-07"
+        )
+        assert july["quote_count"] == 14
+        assert Decimal(july["quote_amount"]) == Decimal("12633.00")
         quote_numbers = {
             row["quote_no"] for row in response.data["amount_breakdown"]
         }
@@ -162,10 +287,14 @@ class QuotationDashboardTests(TestCase):
         assert "Q-CNY" not in quote_numbers
         assert response.data["breakdown_omitted_count"] == 5
 
-    def test_recent_returns_projection_and_honors_access_and_limit(self):
-        self._quote("Q-OLDER")
-        newest = self._quote("Q-NEWEST", amount="8143.75")
+    def test_recent_returns_updated_projection_and_honors_access(self):
+        recently_updated = self._quote("Q-OLDER", amount="8143.75")
+        self._quote("Q-NEWEST")
         self._quote("Q-HIDDEN", owner="other@example.com")
+        Quotation.objects.filter(pk=recently_updated.pk).update(
+            updated_at=timezone.now() + timedelta(minutes=1)
+        )
+        recently_updated.refresh_from_db()
 
         response = self.api.get(
             "/api/v1/quotation/dashboard/recent?limit=1"
@@ -175,12 +304,13 @@ class QuotationDashboardTests(TestCase):
         assert response.data == {
             "items": [
                 {
-                    "id": newest.id,
-                    "quote_no": "Q-NEWEST",
-                    "project_name": "Project Q-NEWEST",
+                    "id": recently_updated.id,
+                    "quote_no": "Q-OLDER",
+                    "project_name": "Project Q-OLDER",
                     "client_company": "Client Company",
                     "salesperson": "Sales Person",
-                    "created_at": newest.created_at.isoformat(),
+                    "created_at": recently_updated.created_at.isoformat(),
+                    "updated_at": recently_updated.updated_at.isoformat(),
                     "currency": "USD",
                     "grand_total": "8143.75",
                     "status": QuoteStatus.GENERATED,

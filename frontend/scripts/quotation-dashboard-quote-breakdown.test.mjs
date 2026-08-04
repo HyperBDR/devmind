@@ -4,19 +4,29 @@ import assert from 'node:assert/strict'
 
 const dashboardSource = readFileSync(
   new URL('../src/modules/quotation/components/Dashboard.vue', import.meta.url),
-  'utf8',
+  'utf8'
+)
+const quotationAppSource = readFileSync(
+  new URL('../src/modules/quotation/App.vue', import.meta.url),
+  'utf8'
 )
 const enLocale = readFileSync(
   new URL('../src/modules/quotation/locales/en.json', import.meta.url),
-  'utf8',
+  'utf8'
 )
 
 test('dashboard pie chart shows quote-level breakdown with native English copy', () => {
   assert.match(dashboardSource, /quoteBreakdownData/)
   assert.match(dashboardSource, /quoteBreakdownChartRows/)
   assert.match(dashboardSource, /quoteNo/)
-  assert.match(dashboardSource, /label: `\$\{quote\.quoteNo\} · \$\{amountLabel\}`/)
-  assert.match(dashboardSource, /labels: quoteBreakdownChartRows\.value\.map\(\(row\) => row\.label\)/)
+  assert.match(
+    dashboardSource,
+    /label: `\$\{quote\.quoteNo\} · \$\{amountLabel\}`/
+  )
+  assert.match(
+    dashboardSource,
+    /labels: quoteBreakdownChartRows\.value\.map\(\(row\) => row\.label\)/
+  )
   assert.match(dashboardSource, /<Pie/)
   assert.doesNotMatch(dashboardSource, /cutout:/)
   assert.match(dashboardSource, /quotePieLeaderLabelPlugin/)
@@ -27,7 +37,7 @@ test('dashboard pie chart shows quote-level breakdown with native English copy',
   assert.match(enLocale, /"chartAmountTitle": "Quote Breakdown"/)
   assert.match(
     enLocale,
-    /"chartAmountSubtitle": "Slices reflect each quote amount; small-value quotes are hidden\."/,
+    /"chartAmountSubtitle": "Slices reflect each quote amount; small-value quotes are hidden\."/
   )
   assert.doesNotMatch(enLocale, /chartAmountMixedCurrency/)
   assert.doesNotMatch(enLocale, /chartAmountTotalLabel/)
@@ -35,33 +45,86 @@ test('dashboard pie chart shows quote-level breakdown with native English copy',
   assert.doesNotMatch(enLocale, /Leader lines show quote no\. and total/)
 })
 
-test('dashboard chart cards use laptop-safe balanced desktop proportions', () => {
-  assert.match(dashboardSource, /2xl:grid-cols-\[minmax\(0,1\.18fr\)_minmax\(480px,0\.82fr\)\]/)
-  assert.match(dashboardSource, /id="chart-quote-amount" class="dm-card flex h-full flex-col p-5"/)
+test('dashboard keeps charts stacked at every desktop width', () => {
+  assert.match(
+    dashboardSource,
+    /id="dashboard-quotation-overview"[^>]*xl:grid-cols-\[minmax\(23rem,0\.86fr\)_minmax\(0,1\.64fr\)\]/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-charts"[\s\S]*class="grid min-w-0 max-w-full grid-cols-1 items-stretch gap-6"/
+  )
+  assert.doesNotMatch(dashboardSource, /dashboard-charts[\s\S]{0,180}2xl:grid-cols/)
+  assert.match(
+    dashboardSource,
+    /id="chart-quote-amount"[\s\S]{0,120}class="dm-card flex h-full min-w-0 max-w-full flex-col p-5"/
+  )
   assert.doesNotMatch(dashboardSource, /chartAmountSummaryLabel/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownSummaryRows/)
-  assert.match(dashboardSource, /class="relative flex min-h-\[16rem\] flex-1 items-center justify-center/)
-  assert.match(dashboardSource, /id="dashboard-recent-grid"[^>]*2xl:grid-cols-\[minmax\(0,1\.18fr\)_minmax\(480px,0\.82fr\)\]/)
-  assert.match(dashboardSource, /class="dm-card flex h-full flex-col justify-between p-5"/)
+  assert.match(
+    dashboardSource,
+    /class="relative flex min-h-\[16rem\] min-w-0 max-w-full flex-1 items-center justify-center/
+  )
+  assert.doesNotMatch(dashboardSource, /id="dashboard-recent-grid"/)
+  assert.match(
+    dashboardSource,
+    /class="dm-card flex h-full min-w-0 max-w-full flex-col justify-between p-5"/
+  )
+  assert.match(dashboardSource, /<Line/)
+  assert.match(dashboardSource, /:data="trendLineData"/)
+  assert.doesNotMatch(dashboardSource, /<VueChart/)
   assert.doesNotMatch(enLocale, /chartAmountSummaryLabel/)
   assert.doesNotMatch(enLocale, /chartAmountQuoteCount/)
+})
+
+test('dashboard width chain shrinks after moving between displays', () => {
+  assert.match(
+    quotationAppSource,
+    /id="main-content-pane"[\s\S]{0,100}class="flex min-w-0 w-0 flex-1 flex-col overflow-hidden"/
+  )
+  assert.match(
+    quotationAppSource,
+    /id="app-scroll-stage"[\s\S]{0,120}class="min-w-0 w-full flex-1 overflow-x-hidden overflow-y-auto/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-root"[\s\S]{0,100}class="min-w-0 max-w-full space-y-4 overflow-x-hidden"/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-quotation-overview"[\s\S]{0,100}class="grid min-w-0/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-month-summary"[\s\S]{0,100}min-w-0/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-recent-overview"[\s\S]{0,100}min-w-0/
+  )
 })
 
 test('dashboard quote breakdown uses one centered server-filtered pie', () => {
   assert.match(
     dashboardSource,
-    /const quoteBreakdownData = computed\(\(\) =>\s*\(analytics\.value\?\.amountBreakdown/,
+    /const quoteBreakdownData = computed\(\(\) =>\s*\(analytics\.value\?\.amountBreakdown/
   )
   assert.match(dashboardSource, /getDashboardAnalytics/)
   assert.doesNotMatch(dashboardSource, /const chartQuotes/)
   assert.doesNotMatch(dashboardSource, /selectedBreakdownCurrency/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownCurrencies/)
-  assert.doesNotMatch(dashboardSource, /v-for="currency in quoteBreakdownCurrencies"/)
+  assert.doesNotMatch(
+    dashboardSource,
+    /v-for="currency in quoteBreakdownCurrencies"/
+  )
   assert.doesNotMatch(dashboardSource, /chartAmountCurrencyToggleAria/)
   assert.match(dashboardSource, /id="quote-breakdown-layout"/)
-  assert.match(dashboardSource, /class="flex w-full min-w-0 items-center justify-center"/)
+  assert.match(
+    dashboardSource,
+    /class="flex w-full min-w-0 items-center justify-center"/
+  )
   assert.match(dashboardSource, /min-h-\[16rem\]/)
-  assert.match(dashboardSource, /min-h-\[320px\] w-full/)
+  assert.match(dashboardSource, /min-h-\[320px\] w-full min-w-0 max-w-full/)
   assert.match(dashboardSource, /relative h-80/)
   assert.match(dashboardSource, /w-\[min\(100%,700px\)\]/)
   assert.match(dashboardSource, /radius: '92%'/)
@@ -74,19 +137,28 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
   assert.doesNotMatch(dashboardSource, /formatCompactChartAmount/)
   assert.doesNotMatch(
     dashboardSource,
-    /absolute inset-0 flex flex-col items-center justify-center text-center/,
+    /absolute inset-0 flex flex-col items-center justify-center text-center/
   )
   assert.doesNotMatch(dashboardSource, /chartAmountRankingTitle/)
   assert.doesNotMatch(dashboardSource, /chartAmountTotalLabel/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownRemainingCount/)
   assert.doesNotMatch(dashboardSource, /chartAmountMoreQuotes/)
-  assert.doesNotMatch(dashboardSource, /\.slice\(0, QUOTE_BREAKDOWN_RANK_LIMIT\)/)
+  assert.doesNotMatch(
+    dashboardSource,
+    /\.slice\(0, QUOTE_BREAKDOWN_RANK_LIMIT\)/
+  )
 })
 
 test('dashboard pie labels use balanced reference-style leader lines', () => {
   assert.match(dashboardSource, /arrangePieLineLabels/)
-  assert.match(dashboardSource, /entries\.filter\(\(entry\) => entry\.side === -1\)/)
-  assert.match(dashboardSource, /entries\.filter\(\(entry\) => entry\.side === 1\)/)
+  assert.match(
+    dashboardSource,
+    /entries\.filter\(\(entry\) => entry\.side === -1\)/
+  )
+  assert.match(
+    dashboardSource,
+    /entries\.filter\(\(entry\) => entry\.side === 1\)/
+  )
   assert.match(dashboardSource, /quoteBreakdownRotation/)
   assert.match(dashboardSource, /rotation: quoteBreakdownRotation\.value/)
   assert.doesNotMatch(dashboardSource, /ctx\.lineTo\(bendX, entry\.anchorY\)/)
@@ -103,19 +175,17 @@ test('dashboard pie labels use balanced reference-style leader lines', () => {
   assert.match(dashboardSource, /:plugins="\[quotePieLeaderLabelPlugin\]"/)
 })
 
-test('dashboard recent quotes use a responsive, low-noise hierarchy', () => {
-  assert.match(dashboardSource, /id="dashboard-recent-quotes"/)
+test('dashboard recent overview uses stable update metadata without status', () => {
+  assert.match(dashboardSource, /id="dashboard-recent-overview"/)
   assert.match(
     dashboardSource,
-    /sm:grid-cols-\[minmax\(0,1fr\)_auto\]/,
+    /grid-cols-\[7\.5rem_minmax\(0,1fr\)_6\.5rem_6\.5rem_1rem\]/
   )
   assert.match(dashboardSource, /formatRecentQuoteTime/)
-  assert.match(dashboardSource, /flex min-w-0 flex-wrap items-center/)
-  assert.match(dashboardSource, /bg-blue-50 px-2 py-1 font-mono text-xs/)
-  assert.doesNotMatch(dashboardSource, /quote\.createdAt\.substring\(5, 16\)/)
-  assert.doesNotMatch(dashboardSource, /quotation\.common\.separator/)
-  assert.match(
+  assert.match(dashboardSource, /formatRecentQuoteTime\(quote\.updatedAt\)/)
+  assert.match(dashboardSource, /overviewRecentQuotes/)
+  assert.doesNotMatch(
     dashboardSource,
-    /class="flex justify-center"[\s\S]*<StatusBadge :status="quote\.status" \/>/,
+    /dashboard-recent-overview[\s\S]{0,3000}StatusBadge/
   )
 })

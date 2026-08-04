@@ -12,7 +12,6 @@ import FormSelect from './FormSelect.vue'
 import {
   ChevronDown,
   FolderOpen,
-  Settings,
   Percent,
   Plus,
   Search,
@@ -54,7 +53,6 @@ const searchQuery = ref('')
 const isFormOpen = ref(false)
 const quoteDescriptionsExpanded = ref(true)
 const discountSettingsExpanded = ref(true)
-const systemSettingsExpanded = ref(true)
 
 function setSubTab(next: 'products' | 'services' | 'discounts') {
   subTab.value = next
@@ -291,17 +289,6 @@ watch(
           </div>
         </div>
 
-        <div data-catalog-parent="system-settings" class="mt-2">
-          <button type="button" class="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-sm font-semibold text-dm-text hover:bg-slate-50" :aria-expanded="systemSettingsExpanded" @click="systemSettingsExpanded = !systemSettingsExpanded">
-            <ChevronDown class="h-3.5 w-3.5 text-dm-text-tertiary transition-transform" :class="systemSettingsExpanded ? '' : '-rotate-90'" /><Settings class="h-4 w-4 text-dm-text-tertiary" />
-            <span>{{ t('quotation.pages.catalog.systemSettings') }}</span>
-          </button>
-          <div v-show="systemSettingsExpanded" class="ml-4 space-y-0.5 border-l border-dm-border-light pl-2">
-            <span v-for="key in ['productCategories', 'currenciesPricing', 'paymentTerms', 'quoteNumbering']" :key="key" class="flex h-8 items-center px-3 text-sm text-dm-text-tertiary">
-              {{ t(`quotation.pages.catalog.${key}`) }}
-            </span>
-          </div>
-        </div>
       </aside>
 
       <section data-catalog-content class="min-w-0">
