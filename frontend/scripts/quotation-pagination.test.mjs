@@ -13,6 +13,25 @@ const quotationList = await readFile(
   ),
   'utf8',
 )
+const quotationDetailsDrawer = await readFile(
+  new URL(
+    '../src/modules/quotation/components/QuotationDetailsDrawer.vue',
+    import.meta.url,
+  ),
+  'utf8',
+)
+const quotationEnglishCopy = JSON.parse(
+  await readFile(
+    new URL('../src/modules/quotation/locales/en.json', import.meta.url),
+    'utf8',
+  ),
+)
+const quotationChineseCopy = JSON.parse(
+  await readFile(
+    new URL('../src/modules/quotation/locales/zh-CN.json', import.meta.url),
+    'utf8',
+  ),
+)
 const quotationApp = await readFile(
   new URL('../src/modules/quotation/App.vue', import.meta.url),
   'utf8',
@@ -120,6 +139,11 @@ test('search is debounced and filters reset the first page', () => {
 })
 
 test('empty, loading and failed request states stay inside the list panel', () => {
+  const rootStart = quotationList.indexOf('id="quote-list-root"')
+  const filterStart = quotationList.indexOf('id="filter-panel"')
+  const beforeFilterPanel = quotationList.slice(rootStart, filterStart)
+
+  assert.doesNotMatch(beforeFilterPanel, /v-if="loading"/)
   assert.match(quotationList, /<tr v-if="loading">/)
   assert.match(quotationList, /emptyResults/)
   assert.match(quotationApp, /triggerToast\(message, 'error'\)/)
@@ -136,6 +160,31 @@ test('rows open the details drawer without a separate view-details button', () =
   assert.doesNotMatch(quotationList, /openImportedQuote/)
   assert.doesNotMatch(quotationList, /data-view-details/)
   assert.doesNotMatch(quotationList, /emit\('viewQuote', quote\.id\)/)
+})
+
+test('details drawer copy distinguishes local and imported quotations', () => {
+  assert.match(
+    quotationDetailsDrawer,
+    /sourceType === 'document_import'/,
+  )
+  assert.match(quotationDetailsDrawer, /drawerSubtitleImported/)
+  assert.match(quotationDetailsDrawer, /drawerSubtitleLocal/)
+  assert.equal(
+    quotationEnglishCopy.quotation.pages.list.drawerSubtitleImported,
+    'Review the imported quote without leaving the list.',
+  )
+  assert.equal(
+    quotationEnglishCopy.quotation.pages.list.drawerSubtitleLocal,
+    'Review this Quote Desk quote without leaving the list.',
+  )
+  assert.equal(
+    quotationChineseCopy.quotation.pages.list.drawerSubtitleImported,
+    '无需离开列表即可查看导入的完整报价。',
+  )
+  assert.equal(
+    quotationChineseCopy.quotation.pages.list.drawerSubtitleLocal,
+    '无需离开列表即可查看本地创建的完整报价。',
+  )
 })
 
 test('list column widths reserve stable space for longer headers and actions', () => {

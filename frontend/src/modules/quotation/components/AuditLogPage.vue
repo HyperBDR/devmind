@@ -17,6 +17,10 @@ import {
   type AuditEvent,
 } from '../api/audit'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import {
+  buildAuditChangeLines,
+  type AuditDiffLineKind,
+} from '../utils/auditChangeDiff'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import FormSelect from './FormSelect.vue'
 
@@ -238,16 +242,27 @@ function fieldLabel(value: string) {
     : fallbackLabel(value)
 }
 
-function formatChangeValue(value: unknown): string {
-  if (value === null || value === undefined || value === '') return 'null'
-  if (typeof value === 'string') return JSON.stringify(value)
-  return JSON.stringify(value, null, 2)
+function changeLineClass(kind: AuditDiffLineKind): string {
+  if (kind === 'removed') return 'bg-red-50 text-red-700'
+  if (kind === 'added') {
+    return 'bg-emerald-50 text-emerald-700'
+  }
+  return 'text-dm-text'
+}
+
+function linePrefix(kind: AuditDiffLineKind): string {
+  if (kind === 'removed') return '- '
+  if (kind === 'added') return '+ '
+  return '  '
 }
 
 function changeDetails(event: AuditEvent) {
   return Object.entries(event.changes || {})
     .filter(([field]) => field !== 'fields')
-    .map(([field, value]) => ({ field, value }))
+    .map(([field, value]) => ({
+      field,
+      lines: buildAuditChangeLines(value),
+    }))
 }
 
 watch([moduleFilter, actionFilter, resultFilter, dateFrom, dateTo], () => {
@@ -430,7 +445,20 @@ onMounted(() => void loadEvents())
               <p class="mb-2 text-xs font-semibold text-dm-text-secondary">
                 {{ fieldLabel(change.field) }}
               </p>
-              <pre class="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-dm-text">{{ formatChangeValue(change.value) }}</pre>
+              <pre
+                class="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed"
+              ><span
+                v-for="(line, lineIndex) in change.lines"
+                :key="`${change.field}-${lineIndex}`"
+                class="block rounded-sm px-1"
+                :class="changeLineClass(line.kind)"
+                :data-change-line-removed="
+                  line.kind === 'removed' || undefined
+                "
+                :data-change-line-added="
+                  line.kind === 'added' || undefined
+                "
+              >{{ linePrefix(line.kind) }}{{ line.text }}</span></pre>
             </div>
           </dd>
         </template>

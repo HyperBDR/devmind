@@ -50,10 +50,19 @@ test('Audit Log is visible to Quote Desk users and remains read-only', () => {
   assert.doesNotMatch(auditPage, /riskFilter/)
   assert.doesNotMatch(auditPage, /selected\.risk_level/)
   assert.doesNotMatch(auditPage, /syncFolderNames|hasSyncMetrics/)
-  assert.match(auditPage, /formatChangeValue/)
+  assert.match(auditPage, /buildAuditChangeLines/)
   assert.match(auditPage, /selected\.changes\.fields\.map\(fieldLabel\)/)
   assert.match(auditPage, /selected\.trace_id/)
   assert.doesNotMatch(auditPage, /<select/)
+})
+
+test('Audit Log renders JSON additions and removals with semantic colors', () => {
+  assert.match(auditPage, /buildAuditChangeLines/)
+  assert.match(auditPage, /data-change-line-removed/)
+  assert.match(auditPage, /data-change-line-added/)
+  assert.match(auditPage, /bg-red-50/)
+  assert.match(auditPage, /bg-emerald-50/)
+  assert.match(auditPage, /linePrefix\(line\.kind\)/)
 })
 
 test('background Feishu return checks do not duplicate open audits', () => {

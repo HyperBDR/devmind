@@ -867,9 +867,6 @@ function displayQuoteDate(quote: Quotation): string {
     id="quote-list-root"
     class="flex h-full min-h-[calc(100dvh-7.0625rem)] flex-col gap-3"
   >
-    <div v-if="loading" class="text-sm text-dm-text-tertiary">
-      {{ t('quotation.pages.list.syncing') }}
-    </div>
     <div
       id="filter-panel"
       data-filter-toolbar
@@ -1034,7 +1031,7 @@ function displayQuoteDate(quote: Quotation): string {
                   :aria-valuenow="columnWidths[column.key]"
                   :title="t('quotation.pages.list.resizeColumnHint')"
                   tabindex="0"
-                  class="group absolute -right-1 top-0 z-10 flex h-full w-3 touch-none select-none items-center justify-center cursor-col-resize focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                  class="group absolute right-0 top-0 z-10 flex h-full w-3 touch-none select-none items-center justify-center cursor-col-resize focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-400"
                   data-column-resizer
                   :data-column-key="column.key"
                   @click.stop.prevent
