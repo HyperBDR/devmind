@@ -14,6 +14,7 @@ from llm_ops.models import (
     SourceSkuOffering,
 )
 from llm_ops.price_table_validation import (
+    ERROR_INVALID_USAGE_RANGE_SPEC,
     ERROR_MIXED_FLAT_AND_TIERED,
     ERROR_VOLUME_UNSUPPORTED,
     usage_range_spec,
@@ -129,6 +130,16 @@ class PriceTableIntegrationTests(TestCase):
         )
 
         self.assert_price_table_error(serializer, ERROR_VOLUME_UNSUPPORTED)
+
+    def test_model_serializer_rejects_non_object_tier_spec(self):
+        serializer = ModelPriceItemSerializer(
+            data=self.model_payload(spec=["request_input_tokens"])
+        )
+
+        self.assert_price_table_error(
+            serializer,
+            ERROR_INVALID_USAGE_RANGE_SPEC,
+        )
 
     def test_channel_serializer_returns_same_volume_error_code(self):
         serializer = ChannelPriceItemSerializer(
