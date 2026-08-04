@@ -425,6 +425,7 @@ def update_imported_quotation_from_parse(
         quotation.source_quote_no = str(data["quote_no"])
         field_names = (
             "product_line",
+            "product_line_name",
             "project_name",
             "currency",
             "payment_term_option",

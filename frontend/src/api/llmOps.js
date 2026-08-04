@@ -252,6 +252,30 @@ export const llmOpsApi = {
     return apiClient.post(`${base}/resale-listings/bulk-draft/`, { items })
   },
 
+  saveResaleListingPriceDraft(id, payload) {
+    return apiClient.put(`${base}/resale-listings/${id}/price-draft/`, payload)
+  },
+
+  previewResaleListingPrice(id, payload) {
+    return apiClient.post(
+      `${base}/resale-listings/${id}/price-preview/`,
+      payload
+    )
+  },
+
+  submitResaleListingPriceRevision(id, revisionId) {
+    return apiClient.post(
+      `${base}/resale-listings/${id}/submit-price-revision/`,
+      {
+        revision_id: revisionId
+      }
+    )
+  },
+
+  listResaleListingPriceRevisions(id) {
+    return apiClient.get(`${base}/resale-listings/${id}/price-revisions/`)
+  },
+
   bulkOfflineResaleListings(payload) {
     return apiClient.post(`${base}/resale-listings/bulk-offline/`, payload)
   },

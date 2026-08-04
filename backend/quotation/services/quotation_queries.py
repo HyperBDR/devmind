@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timedelta
-
-from django.conf import settings
 from django.db.models import (
+    Case,
+    CharField,
     Count,
     Exists,
+    F,
     OuterRef,
     Q,
     QuerySet,
+    When,
 )
-from django.utils import timezone
 
 from quotation.models import (
     DocumentAsset,
@@ -27,16 +27,7 @@ SEARCH_FIELDS = (
     "client_company",
     "contact_person",
 )
-
-
-def _local_day_start(value) -> datetime:
-    result = datetime.combine(value, time.min)
-    if settings.USE_TZ:
-        return timezone.make_aware(
-            result,
-            timezone.get_current_timezone(),
-        )
-    return result
+PRODUCT_LINE_FACET_LIMIT = 100
 
 
 def filter_quotation_list(
@@ -56,20 +47,50 @@ def filter_quotation_list(
         if value:
             queryset = queryset.filter(**{field: value})
 
+    product_line_name = filters.get("product_line_name")
+    if product_line_name:
+        queryset = queryset.filter(
+            Q(product_line_name=product_line_name)
+            | Q(
+                product_line_name="",
+                product_line=product_line_name,
+            )
+        )
+
     created_from = filters.get("created_from")
     if created_from:
-        queryset = queryset.filter(
-            created_at__gte=_local_day_start(created_from)
-        )
+        queryset = queryset.filter(quote_date__gte=created_from)
 
     created_to = filters.get("created_to")
     if created_to:
-        exclusive_end = _local_day_start(
-            created_to + timedelta(days=1)
-        )
-        queryset = queryset.filter(created_at__lt=exclusive_end)
+        queryset = queryset.filter(quote_date__lte=created_to)
 
     return queryset
+
+
+def quotation_product_line_facets(
+    queryset: QuerySet[Quotation],
+    filters: dict,
+) -> list[str]:
+    """Return bounded business product lines from accessible matches."""
+    facet_filters = {
+        key: value
+        for key, value in filters.items()
+        if key != "product_line_name"
+    }
+    queryset = filter_quotation_list(queryset, facet_filters)
+    product_line = Case(
+        When(product_line_name="", then=F("product_line")),
+        default=F("product_line_name"),
+        output_field=CharField(),
+    )
+    return list(
+        queryset.annotate(facet_product_line=product_line)
+        .exclude(facet_product_line="")
+        .values_list("facet_product_line", flat=True)
+        .order_by("facet_product_line")
+        .distinct()[:PRODUCT_LINE_FACET_LIMIT]
+    )
 
 
 def annotate_quotation_list(

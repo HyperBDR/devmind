@@ -21,7 +21,8 @@ class ParsedQuotationItem(BaseModel):
 
 class ParsedQuotation(BaseModel):
     quote_no: str = ""
-    product_line: str = "BDR"
+    product_line: str = ""
+    product_line_name: str = ""
     project_name: str = ""
     currency: str = "USD"
     payment_term_option: str = "CIA"

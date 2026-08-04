@@ -29,6 +29,7 @@ import LoginPage from './components/LoginPage.vue'
 import QuotationList from './components/QuotationList.vue'
 import QuotationCreate from './components/QuotationCreate.vue'
 import QuotationDetails from './components/QuotationDetails.vue'
+import QuotationDetailsDrawer from './components/QuotationDetailsDrawer.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
@@ -117,7 +118,9 @@ const quotationListQuery = ref<QuotationListParams>({
 })
 const quotationListTotal = ref(0)
 const quotationListTotalPages = ref(0)
+const quotationListProductLines = ref<string[]>([])
 const activeQuote = ref<Quotation | null>(null)
+const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
 let quotationListRequestId = 0
@@ -281,6 +284,7 @@ async function refreshQuotations(
     const result = await listQuotations(query)
     if (requestId !== quotationListRequestId) return
     quotations.value = result.items
+    quotationListProductLines.value = result.productLines
     quotationListTotal.value = result.total
     quotationListTotalPages.value = result.totalPages
     quotationListQuery.value = {
@@ -294,6 +298,7 @@ async function refreshQuotations(
     const message = error instanceof Error ? error.message : t('quotation.app.loadFailed')
     triggerToast(message, 'error')
     quotations.value = []
+    quotationListProductLines.value = []
     quotationListTotal.value = 0
     quotationListTotalPages.value = 0
   } finally {
@@ -416,6 +421,7 @@ async function handleLogout() {
   quotationListTotal.value = 0
   quotationListTotalPages.value = 0
   activeQuote.value = null
+  drawerQuoteId.value = null
   editingQuote.value = null
   quotationFormContext.value = []
   currentTab.value = 'dashboard'
@@ -450,6 +456,7 @@ function navClass(tab: string) {
 
 function goTab(tab: string) {
   selectedQuotationId.value = null
+  drawerQuoteId.value = null
   if (tab === 'create') editingQuoteId.value = null
 
   if (auth.embeddedAuth) {
@@ -501,6 +508,14 @@ async function handleViewQuoteDetails(id: string) {
   }
   selectedQuotationId.value = id
   currentTab.value = 'details'
+}
+
+function handleOpenDetailDrawer(id: string) {
+  drawerQuoteId.value = id
+}
+
+function handleCloseDetailDrawer() {
+  drawerQuoteId.value = null
 }
 
 async function handleSaveQuotation(newQuote: Quotation) {
@@ -968,10 +983,11 @@ function reloadPage() {
 
         <div
           v-if="currentTab === 'list'"
-          class="space-y-5"
+          class="flex flex-col"
         >
           <QuotationList
             :quotations="quotations"
+            :product-lines="quotationListProductLines"
             :loading="quotationListLoading"
             :page="quotationListQuery.page || 1"
             :page-size="quotationListQuery.pageSize || 10"
@@ -979,6 +995,7 @@ function reloadPage() {
             :total-pages="quotationListTotalPages"
             :current-user="auth.currentUser"
             @view-quote="handleViewQuoteDetails"
+            @open-detail-drawer="handleOpenDetailDrawer"
             @delete-quote="handleDeleteQuote"
             @update-quote-status="handleUpdateQuote"
             @feishu-upload-done="handleFeishuUploadDone"
@@ -1036,6 +1053,14 @@ function reloadPage() {
 
         <AuditLogPage v-if="currentTab === 'audit'" />
       </main>
+
+      <QuotationDetailsDrawer
+        :quote-id="drawerQuoteId"
+        :current-user="auth.currentUser"
+        @close="handleCloseDetailDrawer"
+        @edit-quote="handleEditQuote"
+        @update-quote-status="handleUpdateQuote"
+      />
     </div>
   </div>
 </template>

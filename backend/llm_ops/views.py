@@ -62,6 +62,7 @@ from .models import (
     ResaleListing,
     ResaleListingExclusion,
     ResaleListingPriceHistory,
+    ResaleListingPriceRevision,
     ResalePlatform,
     ResaleWorkflowConfig,
     UsageReconciliationRecord,
@@ -84,6 +85,8 @@ from .serializers import (
     ProcurementChannelSerializer,
     ResaleListingExclusionSerializer,
     ResaleListingPriceHistorySerializer,
+    ResaleListingPriceItemInputSerializer,
+    ResaleListingPriceRevisionSerializer,
     ResaleListingSerializer,
     ResalePlatformSerializer,
     ResaleWorkflowConfigSerializer,
@@ -93,21 +96,30 @@ from .serializers import (
 from .services import (
     OPERATION_SCOPE_MARKET_REFERENCE,
     OPERATION_SCOPE_OPERATIONAL,
+    ResalePriceRevisionError,
+    approve_and_publish_resale_price_revision,
+    approve_resale_listing_price_revision,
     build_currency_conversion_context,
     calculate_usage_cost,
     compute_model_decision,
     convert_currency_amount,
     current_model_price_items_for_channel_price,
     import_manual_model_prices,
+    preview_resale_listing_price,
     record_channel_model_price_history,
     record_resale_listing_price_history,
     resolve_channel_model_currency,
-    resolve_channel_model_price,
+    resolve_channel_price_schedule,
     resolve_resale_listing_currency,
+    save_resale_listing_price_draft,
     selected_price_item_group,
     sync_channel_price_items,
     sync_dependent_channel_price_items_for_price_items,
+    sync_resale_listing_flat_revision,
+    submit_resale_listing_price_revision,
 )
+from .price_table_validation import PriceTableValidationError
+from .tier_pricing import UsageContext, resolve_usage_unit_prices
 from .source_collectors import source_supports_code_collection
 from .tasks import collect_price_source_prices, run_model_price_sync_agent
 from .workflow_config import (
@@ -1689,6 +1701,9 @@ class ResaleListingViewSet(
             "meta_model",
             "model",
             "channel",
+            "current_price_revision",
+            "pending_price_revision",
+            "published_price_revision",
         )
         platform = self.request.query_params.get("platform")
         meta_model = self.request.query_params.get("meta_model")
@@ -1717,6 +1732,11 @@ class ResaleListingViewSet(
             is_active=False,
         )
         record_resale_listing_price_history(listing)
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_DRAFT,
+            created_by=self.request.user,
+        )
         record_audit_log(
             request=self.request,
             action=AuditLog.ACTION_CREATE,
@@ -1731,6 +1751,11 @@ class ResaleListingViewSet(
         status_defaults = _listing_draft_status(serializer.instance)
         listing = serializer.save(**status_defaults)
         record_resale_listing_price_history(listing)
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_DRAFT,
+            created_by=self.request.user,
+        )
         record_audit_log(
             request=self.request,
             action=AuditLog.ACTION_UPDATE,
@@ -1739,6 +1764,154 @@ class ResaleListingViewSet(
             summary=f"Updated resale listing {listing}",
             before=before,
             after=snapshot_instance(listing),
+        )
+
+    @action(detail=True, methods=["put"], url_path="price-draft")
+    def price_draft(self, request, pk=None):
+        """Atomically replace the listing's complete price draft."""
+        listing = self.get_object()
+        items = request.data.get("items")
+        if not isinstance(items, list) or not items:
+            return Response(
+                {
+                    "code": "resale_price.items_required",
+                    "detail": "items must be a non-empty list.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        serializer = ResaleListingPriceItemInputSerializer(
+            data=items,
+            many=True,
+        )
+        if not serializer.is_valid():
+            return Response(
+                {
+                    "code": "resale_price.invalid_items",
+                    "detail": serializer.errors,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            revision = save_resale_listing_price_draft(
+                listing,
+                items=serializer.validated_data,
+                currency=request.data.get("currency") or listing.currency,
+                created_by=request.user,
+                expected_revision_id=request.data.get(
+                    "expected_revision_id"
+                ),
+            )
+        except (ResalePriceRevisionError, PriceTableValidationError) as exc:
+            return _resale_price_error_response(exc)
+        record_audit_log(
+            request=request,
+            action=AuditLog.ACTION_UPDATE,
+            category=AuditLog.CATEGORY_PRICING,
+            target=listing,
+            summary=f"Saved resale price draft v{revision.version}",
+            metadata={"price_revision_id": revision.id},
+        )
+        output = ResaleListingPriceRevisionSerializer(revision)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="price-preview")
+    def price_preview(self, request, pk=None):
+        """Return canonical tier costs, fees, margins and approval result."""
+        listing = self.get_object()
+        revision = None
+        validated_items = None
+        items = request.data.get("items")
+        if items is not None:
+            serializer = ResaleListingPriceItemInputSerializer(
+                data=items,
+                many=True,
+            )
+            if not serializer.is_valid():
+                return Response(
+                    {
+                        "code": "resale_price.invalid_items",
+                        "detail": serializer.errors,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            validated_items = serializer.validated_data
+        revision_id = request.data.get("revision_id")
+        if revision_id is not None:
+            revision = ResaleListingPriceRevision.objects.filter(
+                pk=revision_id,
+                listing=listing,
+            ).first()
+            if revision is None:
+                return _resale_price_revision_not_found()
+        try:
+            preview = preview_resale_listing_price(
+                listing,
+                revision=revision,
+                items=validated_items,
+                currency=request.data.get("currency") or listing.currency,
+            )
+        except (ResalePriceRevisionError, PriceTableValidationError) as exc:
+            return _resale_price_error_response(exc)
+        return Response(preview, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="submit-price-revision",
+    )
+    def submit_price_revision(self, request, pk=None):
+        """Submit one concrete revision with immutable decision evidence."""
+        listing = self.get_object()
+        revision = ResaleListingPriceRevision.objects.filter(
+            pk=request.data.get("revision_id"),
+            listing=listing,
+        ).first()
+        if revision is None:
+            return _resale_price_revision_not_found()
+        try:
+            revision, preview = submit_resale_listing_price_revision(
+                listing,
+                revision,
+                submitted_by=request.user,
+            )
+        except (ResalePriceRevisionError, PriceTableValidationError) as exc:
+            return _resale_price_error_response(exc)
+        record_audit_log(
+            request=request,
+            action=AuditLog.ACTION_TRANSITION,
+            category=AuditLog.CATEGORY_APPROVAL,
+            target=listing,
+            summary=f"Submitted resale price revision v{revision.version}",
+            metadata={
+                "price_revision_id": revision.id,
+                "decision_fingerprint": revision.decision_fingerprint,
+                "auto_approved": preview["approval"]["eligible"],
+            },
+        )
+        output = ResaleListingPriceRevisionSerializer(revision)
+        return Response(
+            {"revision": output.data, "preview": preview},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["get"], url_path="price-revisions")
+    def price_revisions(self, request, pk=None):
+        """Return current pointers and the complete immutable history."""
+        listing = self.get_object()
+        revisions = listing.price_revisions.prefetch_related(
+            "items"
+        ).order_by("-version", "-id")
+        output = ResaleListingPriceRevisionSerializer(revisions, many=True)
+        return Response(
+            {
+                "current_revision_id": listing.current_price_revision_id,
+                "pending_revision_id": listing.pending_price_revision_id,
+                "published_revision_id": (
+                    listing.published_price_revision_id
+                ),
+                "revisions": output.data,
+            },
+            status=status.HTTP_200_OK,
         )
 
     @action(detail=False, methods=["post"], url_path="bulk-upsert")
@@ -1790,6 +1963,11 @@ class ResaleListingViewSet(
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                sync_resale_listing_flat_revision(
+                    listing,
+                    status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+                    created_by=request.user,
+                )
                 record_audit_log(
                     request=request,
                     action=(
@@ -1858,6 +2036,11 @@ class ResaleListingViewSet(
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                sync_resale_listing_flat_revision(
+                    listing,
+                    status=ResaleListingPriceRevision.STATUS_DRAFT,
+                    created_by=request.user,
+                )
                 record_audit_log(
                     request=request,
                     action=(
@@ -1964,6 +2147,11 @@ class ResaleListingViewSet(
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                sync_resale_listing_flat_revision(
+                    listing,
+                    status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+                    created_by=request.user,
+                )
                 record_audit_log(
                     request=request,
                     action=(
@@ -2052,14 +2240,36 @@ class ResaleListingViewSet(
                     target_listings.append(listing)
             for listing in target_listings:
                 before = snapshot_instance(listing)
+                bound_revision = None
                 try:
                     _apply_resale_listing_transition(listing, action_name)
+                    if action_name in {"confirm_publish", "confirm_update"}:
+                        pending_revision = listing.pending_price_revision
+                        if (
+                            pending_revision is not None
+                            and pending_revision.decision_snapshot
+                        ):
+                            bound_revision = (
+                                approve_and_publish_resale_price_revision(
+                                    listing,
+                                    approved_by=request.user,
+                                )
+                            )
+                except ResalePriceRevisionError as exc:
+                    transaction.set_rollback(True)
+                    return _resale_price_error_response(exc)
                 except ValueError as exc:
+                    transaction.set_rollback(True)
                     return Response(
                         {"detail": str(exc)},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 listing.save()
+                _sync_resale_listing_revision_for_transition(
+                    listing,
+                    action_name,
+                    request.user,
+                )
                 record_resale_listing_price_history(listing)
                 record_audit_log(
                     request=request,
@@ -2069,7 +2279,12 @@ class ResaleListingViewSet(
                     summary=f"Applied resale workflow action {action_name}",
                     before=before,
                     after=snapshot_instance(listing),
-                    metadata={"workflow_action": action_name},
+                    metadata={
+                        "workflow_action": action_name,
+                        "price_revision_id": (
+                            bound_revision.id if bound_revision else None
+                        ),
+                    },
                 )
                 listings.append(listing)
 
@@ -2383,6 +2598,8 @@ def _listing_submit_status(existing: ResaleListing | None) -> dict:
         ResaleListing.WORKFLOW_DRAFT,
         ResaleListing.WORKFLOW_ONLINE,
         ResaleListing.WORKFLOW_UPDATE_DRAFT,
+        ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        ResaleListing.WORKFLOW_PENDING_UPDATE,
     }
     if existing.workflow_status not in _allowed_submit_workflows:
         raise ValueError(f"Cannot submit from {existing.workflow_status}.")
@@ -2414,6 +2631,8 @@ def _listing_draft_status(existing: ResaleListing | None) -> dict:
         ResaleListing.WORKFLOW_DRAFT,
         ResaleListing.WORKFLOW_ONLINE,
         ResaleListing.WORKFLOW_UPDATE_DRAFT,
+        ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        ResaleListing.WORKFLOW_PENDING_UPDATE,
     }
     if existing.workflow_status not in _allowed_draft_workflows:
         raise ValueError(f"Cannot save draft from {existing.workflow_status}.")
@@ -2431,6 +2650,35 @@ def _listing_draft_status(existing: ResaleListing | None) -> dict:
     }
 
 
+def _resale_price_error_response(exc):
+    """Map stable resale price service errors to API responses."""
+    if isinstance(exc, ResalePriceRevisionError):
+        response_status = (
+            status.HTTP_409_CONFLICT
+            if exc.conflict
+            else status.HTTP_400_BAD_REQUEST
+        )
+        return Response(
+            {"code": exc.code, "detail": exc.detail},
+            status=response_status,
+        )
+    return Response(
+        {"code": exc.code, "detail": str(exc)},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _resale_price_revision_not_found():
+    """Return the stable missing-revision API response."""
+    return Response(
+        {
+            "code": "resale_price.revision_not_found",
+            "detail": "The price revision was not found.",
+        },
+        status=status.HTTP_404_NOT_FOUND,
+    )
+
+
 def _set_listing_state(
     listing: ResaleListing,
     *,
@@ -2441,6 +2689,37 @@ def _set_listing_state(
     listing.publish_status = publish_status
     listing.workflow_status = workflow_status
     listing.is_active = is_active
+
+
+def _sync_resale_listing_revision_for_transition(
+    listing: ResaleListing,
+    action_name: str,
+    user,
+) -> None:
+    """Keep revision pointers aligned with listing workflow transitions."""
+    if action_name in {"confirm_publish", "confirm_update"}:
+        if listing.published_price_revision_id:
+            return
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+            created_by=user,
+        )
+        approve_resale_listing_price_revision(listing)
+        return
+    if action_name in {"submit", "republish"}:
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+            created_by=user,
+        )
+        return
+    if action_name in {"start_edit", "withdraw"}:
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_DRAFT,
+            created_by=user,
+        )
 
 
 def _invalid_transition(action_name: str, listing: ResaleListing):
@@ -3111,6 +3390,7 @@ def _summary_listing_rows(
     overrides,
     price_item_indexes,
     rows_by_model,
+    usage_context,
     video_resolution,
 ):
     """Build full listing rows for dashboard sections that need them."""
@@ -3149,7 +3429,7 @@ def _summary_listing_rows(
                 or not override.is_listed
             ):
                 continue
-            unit_prices = resolve_channel_model_price(
+            schedule = resolve_channel_price_schedule(
                 channel,
                 listing.model,
                 override=override,
@@ -3158,6 +3438,10 @@ def _summary_listing_rows(
                     price_item_indexes,
                 ),
                 video_resolution=video_resolution,
+            )
+            unit_prices = resolve_usage_unit_prices(
+                schedule,
+                usage_context,
             )
             cost_input = unit_prices.input_per_million
             cost_output = unit_prices.output_per_million
@@ -3378,6 +3662,14 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         output_tokens = int(
             request.query_params.get("output_tokens") or DEFAULT_OUTPUT_TOKENS
         )
+        cache_input_tokens = int(
+            request.query_params.get("cache_input_tokens") or 0
+        )
+        usage_context = UsageContext(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_input_tokens=cache_input_tokens,
+        )
         video_resolution = request.query_params.get("video_resolution") or ""
         display_currency = (
             request.query_params.get("display_currency") or "CNY"
@@ -3445,12 +3737,16 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     override,
                     price_item_indexes,
                 )
-                unit_prices = resolve_channel_model_price(
+                schedule = resolve_channel_price_schedule(
                     channel,
                     model,
                     override=override,
                     source_items=price_items,
                     video_resolution=video_resolution,
+                )
+                unit_prices = resolve_usage_unit_prices(
+                    schedule,
+                    usage_context,
                 )
                 if not _has_procurement_text_price(unit_prices):
                     continue
@@ -3463,6 +3759,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     unit_prices,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cache_input_tokens=cache_input_tokens,
                 )
                 option = {
                     "channel_id": channel.id,
@@ -3664,6 +3961,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 overrides=overrides,
                 price_item_indexes=price_item_indexes,
                 rows_by_model=rows_by_model,
+                usage_context=usage_context,
                 video_resolution=video_resolution,
             )
         )
