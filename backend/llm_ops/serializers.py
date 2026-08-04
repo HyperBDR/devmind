@@ -1691,7 +1691,12 @@ class ResaleListingSerializer(serializers.ModelSerializer):
     class Meta:
         model = ResaleListing
         fields = "__all__"
-        read_only_fields = ("created_at", "updated_at")
+        read_only_fields = (
+            "current_price_revision",
+            "pending_price_revision",
+            "created_at",
+            "updated_at",
+        )
         extra_kwargs = {
             "meta_model": {"required": False},
         }

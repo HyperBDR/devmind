@@ -8,7 +8,7 @@ import re
 
 from cloud_billing.dashboard import _build_exchange_rate_info
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Max, Q
 from django.utils import timezone
 
 from .meta_model_lookup import (
@@ -28,6 +28,8 @@ from .models import (
     ProcurementChannel,
     ResaleListing,
     ResaleListingPriceHistory,
+    ResaleListingPriceItem,
+    ResaleListingPriceRevision,
 )
 from .price_table_validation import (
     validate_price_table_groups,
@@ -2101,6 +2103,237 @@ def record_resale_listing_price_history(
         effective_from=now,
         is_current=True,
     )
+
+
+def _resale_revision_fingerprint(currency: str, items: list[dict]) -> str:
+    """Return a stable fingerprint for one normalized resale price table."""
+    normalized_items = []
+    for item in items:
+        normalized_items.append(
+            {
+                "dimension": item["dimension"],
+                "billing_unit": item.get(
+                    "billing_unit",
+                    ResaleListingPriceItem.UNIT_PER_1M_TOKENS,
+                ),
+                "tier_type": item.get(
+                    "tier_type",
+                    ResaleListingPriceItem.TIER_FLAT,
+                ),
+                "tier_start": decimal_to_string(item.get("tier_start")),
+                "tier_end": decimal_to_string(item.get("tier_end")),
+                "unit_price": decimal_to_string(item["unit_price"]),
+                "spec": item.get("spec") or {},
+            }
+        )
+    normalized_items.sort(
+        key=lambda item: (
+            item["dimension"],
+            item["tier_start"] or "",
+            item["tier_end"] or "",
+        )
+    )
+    return stable_fingerprint(
+        {
+            "currency": normalize_currency(currency),
+            "items": normalized_items,
+        }
+    )
+
+
+@transaction.atomic
+def create_resale_listing_price_revision(
+    *,
+    listing: ResaleListing,
+    currency: str,
+    status: str,
+    items: list[dict],
+    created_by=None,
+    effective_from=None,
+) -> ResaleListingPriceRevision:
+    """Atomically create a complete normalized resale price revision."""
+    valid_statuses = {
+        choice[0] for choice in ResaleListingPriceRevision.STATUS_CHOICES
+    }
+    if status not in valid_statuses:
+        raise ValueError(
+            f"Unsupported resale price revision status: {status}."
+        )
+    if not items:
+        raise ValueError("A resale price revision requires at least one item.")
+
+    normalized_currency = normalize_currency(currency)
+    if not normalized_currency:
+        raise ValueError("Resale price revision currency is required.")
+    allowed_dimensions = {
+        ResaleListingPriceItem.DIMENSION_TEXT_INPUT,
+        ResaleListingPriceItem.DIMENSION_TEXT_OUTPUT,
+        ResaleListingPriceItem.DIMENSION_CACHE_INPUT,
+    }
+    unsupported_dimensions = {
+        item["dimension"]
+        for item in items
+        if item["dimension"] not in allowed_dimensions
+    }
+    if unsupported_dimensions:
+        dimensions = ", ".join(sorted(unsupported_dimensions))
+        raise ValueError(f"Unsupported dimension: {dimensions}.")
+
+    locked_listing = ResaleListing.objects.select_for_update().get(
+        pk=listing.pk
+    )
+    max_version = (
+        ResaleListingPriceRevision.objects.filter(
+            listing=locked_listing
+        ).aggregate(value=Max("version"))["value"]
+        or 0
+    )
+    revision = ResaleListingPriceRevision.objects.create(
+        listing=locked_listing,
+        version=max_version + 1,
+        status=ResaleListingPriceRevision.STATUS_DRAFT,
+        currency=normalized_currency,
+        price_fingerprint=_resale_revision_fingerprint(
+            normalized_currency,
+            items,
+        ),
+        effective_from=effective_from,
+        created_by=created_by,
+    )
+    price_items = [
+        ResaleListingPriceItem(
+            revision=revision,
+            dimension=item["dimension"],
+            billing_unit=item.get(
+                "billing_unit",
+                ResaleListingPriceItem.UNIT_PER_1M_TOKENS,
+            ),
+            tier_type=item.get(
+                "tier_type",
+                ResaleListingPriceItem.TIER_FLAT,
+            ),
+            tier_start=item.get("tier_start"),
+            tier_end=item.get("tier_end"),
+            unit_price=item["unit_price"],
+            spec=item.get("spec") or {},
+        )
+        for item in items
+    ]
+    ResaleListingPriceItem.objects.bulk_create(price_items)
+    if status != ResaleListingPriceRevision.STATUS_DRAFT:
+        ResaleListingPriceRevision.objects.filter(pk=revision.pk).update(
+            status=status,
+        )
+        revision.status = status
+    return revision
+
+
+def _flat_resale_listing_price_items(listing: ResaleListing) -> list[dict]:
+    """Build normalized flat items from compatibility listing columns."""
+    items = [
+        {
+            "dimension": ResaleListingPriceItem.DIMENSION_TEXT_INPUT,
+            "unit_price": listing.retail_input_price_per_million,
+        },
+        {
+            "dimension": ResaleListingPriceItem.DIMENSION_TEXT_OUTPUT,
+            "unit_price": listing.retail_output_price_per_million,
+        },
+    ]
+    if listing.retail_cache_input_price_per_million is not None:
+        items.append(
+            {
+                "dimension": ResaleListingPriceItem.DIMENSION_CACHE_INPUT,
+                "unit_price": (listing.retail_cache_input_price_per_million),
+            }
+        )
+    return items
+
+
+@transaction.atomic
+def sync_resale_listing_flat_revision(
+    listing: ResaleListing,
+    *,
+    status: str,
+    created_by=None,
+) -> ResaleListingPriceRevision:
+    """Dual-write compatibility flat fields into a complete revision."""
+    locked_listing = (
+        ResaleListing.objects.select_for_update()
+        .select_related("pending_price_revision")
+        .get(pk=listing.pk)
+    )
+    items = _flat_resale_listing_price_items(locked_listing)
+    currency = resolve_resale_listing_currency(locked_listing)
+    fingerprint = _resale_revision_fingerprint(currency, items)
+    pending = locked_listing.pending_price_revision
+    if pending and pending.price_fingerprint == fingerprint:
+        if (
+            pending.status == ResaleListingPriceRevision.STATUS_DRAFT
+            and status == ResaleListingPriceRevision.STATUS_SUBMITTED
+        ):
+            pending.status = status
+            pending.save(update_fields=["status"])
+            listing.pending_price_revision_id = pending.id
+            return pending
+        if pending.status == status:
+            listing.pending_price_revision_id = pending.id
+            return pending
+
+    revision = create_resale_listing_price_revision(
+        listing=locked_listing,
+        currency=currency,
+        status=status,
+        items=items,
+        created_by=created_by,
+    )
+    if pending is not None:
+        ResaleListingPriceRevision.objects.filter(pk=pending.pk).update(
+            status=ResaleListingPriceRevision.STATUS_SUPERSEDED,
+        )
+    ResaleListing.objects.filter(pk=locked_listing.pk).update(
+        pending_price_revision=revision,
+    )
+    listing.pending_price_revision_id = revision.id
+    return revision
+
+
+@transaction.atomic
+def approve_resale_listing_price_revision(
+    listing: ResaleListing,
+) -> ResaleListingPriceRevision:
+    """Approve the exact pending revision and supersede the old current one."""
+    locked_listing = (
+        ResaleListing.objects.select_for_update()
+        .select_related(
+            "current_price_revision",
+            "pending_price_revision",
+        )
+        .get(pk=listing.pk)
+    )
+    pending = locked_listing.pending_price_revision
+    if pending is None or pending.status != pending.STATUS_SUBMITTED:
+        raise ValueError("A submitted pending price revision is required.")
+
+    current = locked_listing.current_price_revision
+    if current is not None and current.pk != pending.pk:
+        ResaleListingPriceRevision.objects.filter(pk=current.pk).update(
+            status=ResaleListingPriceRevision.STATUS_SUPERSEDED,
+        )
+    now = timezone.now()
+    ResaleListingPriceRevision.objects.filter(pk=pending.pk).update(
+        status=ResaleListingPriceRevision.STATUS_APPROVED,
+        effective_from=now,
+    )
+    ResaleListing.objects.filter(pk=locked_listing.pk).update(
+        current_price_revision=pending,
+        pending_price_revision=None,
+    )
+    pending.status = pending.STATUS_APPROVED
+    pending.effective_from = now
+    listing.current_price_revision_id = pending.id
+    listing.pending_price_revision_id = None
+    return pending
 
 
 def stable_fingerprint(payload: dict) -> str:

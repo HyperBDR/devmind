@@ -62,6 +62,7 @@ from .models import (
     ResaleListing,
     ResaleListingExclusion,
     ResaleListingPriceHistory,
+    ResaleListingPriceRevision,
     ResalePlatform,
     ResaleWorkflowConfig,
     UsageReconciliationRecord,
@@ -93,6 +94,7 @@ from .serializers import (
 from .services import (
     OPERATION_SCOPE_MARKET_REFERENCE,
     OPERATION_SCOPE_OPERATIONAL,
+    approve_resale_listing_price_revision,
     build_currency_conversion_context,
     calculate_usage_cost,
     compute_model_decision,
@@ -107,6 +109,7 @@ from .services import (
     selected_price_item_group,
     sync_channel_price_items,
     sync_dependent_channel_price_items_for_price_items,
+    sync_resale_listing_flat_revision,
 )
 from .source_collectors import source_supports_code_collection
 from .tasks import collect_price_source_prices, run_model_price_sync_agent
@@ -1689,6 +1692,8 @@ class ResaleListingViewSet(
             "meta_model",
             "model",
             "channel",
+            "current_price_revision",
+            "pending_price_revision",
         )
         platform = self.request.query_params.get("platform")
         meta_model = self.request.query_params.get("meta_model")
@@ -1717,6 +1722,11 @@ class ResaleListingViewSet(
             is_active=False,
         )
         record_resale_listing_price_history(listing)
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_DRAFT,
+            created_by=self.request.user,
+        )
         record_audit_log(
             request=self.request,
             action=AuditLog.ACTION_CREATE,
@@ -1731,6 +1741,11 @@ class ResaleListingViewSet(
         status_defaults = _listing_draft_status(serializer.instance)
         listing = serializer.save(**status_defaults)
         record_resale_listing_price_history(listing)
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_DRAFT,
+            created_by=self.request.user,
+        )
         record_audit_log(
             request=self.request,
             action=AuditLog.ACTION_UPDATE,
@@ -1790,6 +1805,11 @@ class ResaleListingViewSet(
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                sync_resale_listing_flat_revision(
+                    listing,
+                    status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+                    created_by=request.user,
+                )
                 record_audit_log(
                     request=request,
                     action=(
@@ -1858,6 +1878,11 @@ class ResaleListingViewSet(
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                sync_resale_listing_flat_revision(
+                    listing,
+                    status=ResaleListingPriceRevision.STATUS_DRAFT,
+                    created_by=request.user,
+                )
                 record_audit_log(
                     request=request,
                     action=(
@@ -1964,6 +1989,11 @@ class ResaleListingViewSet(
                     model=data["model"],
                 ).delete()
                 record_resale_listing_price_history(listing)
+                sync_resale_listing_flat_revision(
+                    listing,
+                    status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+                    created_by=request.user,
+                )
                 record_audit_log(
                     request=request,
                     action=(
@@ -2060,6 +2090,11 @@ class ResaleListingViewSet(
                         status=status.HTTP_400_BAD_REQUEST,
                     )
                 listing.save()
+                _sync_resale_listing_revision_for_transition(
+                    listing,
+                    action_name,
+                    request.user,
+                )
                 record_resale_listing_price_history(listing)
                 record_audit_log(
                     request=request,
@@ -2383,6 +2418,8 @@ def _listing_submit_status(existing: ResaleListing | None) -> dict:
         ResaleListing.WORKFLOW_DRAFT,
         ResaleListing.WORKFLOW_ONLINE,
         ResaleListing.WORKFLOW_UPDATE_DRAFT,
+        ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        ResaleListing.WORKFLOW_PENDING_UPDATE,
     }
     if existing.workflow_status not in _allowed_submit_workflows:
         raise ValueError(f"Cannot submit from {existing.workflow_status}.")
@@ -2414,6 +2451,8 @@ def _listing_draft_status(existing: ResaleListing | None) -> dict:
         ResaleListing.WORKFLOW_DRAFT,
         ResaleListing.WORKFLOW_ONLINE,
         ResaleListing.WORKFLOW_UPDATE_DRAFT,
+        ResaleListing.WORKFLOW_PENDING_PUBLISH,
+        ResaleListing.WORKFLOW_PENDING_UPDATE,
     }
     if existing.workflow_status not in _allowed_draft_workflows:
         raise ValueError(f"Cannot save draft from {existing.workflow_status}.")
@@ -2441,6 +2480,35 @@ def _set_listing_state(
     listing.publish_status = publish_status
     listing.workflow_status = workflow_status
     listing.is_active = is_active
+
+
+def _sync_resale_listing_revision_for_transition(
+    listing: ResaleListing,
+    action_name: str,
+    user,
+) -> None:
+    """Keep revision pointers aligned with listing workflow transitions."""
+    if action_name in {"confirm_publish", "confirm_update"}:
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+            created_by=user,
+        )
+        approve_resale_listing_price_revision(listing)
+        return
+    if action_name in {"submit", "republish"}:
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_SUBMITTED,
+            created_by=user,
+        )
+        return
+    if action_name in {"start_edit", "withdraw"}:
+        sync_resale_listing_flat_revision(
+            listing,
+            status=ResaleListingPriceRevision.STATUS_DRAFT,
+            created_by=user,
+        )
 
 
 def _invalid_transition(action_name: str, listing: ResaleListing):
