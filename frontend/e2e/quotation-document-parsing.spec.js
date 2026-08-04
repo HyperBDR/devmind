@@ -246,7 +246,7 @@ test('synced Excel is automatically imported into the quote list', async ({
   const importedQuoteRow = page
     .getByRole('row')
     .filter({ hasText: 'PARSE-DEMO-001' })
-  await expect(importedQuoteRow.getByText('Parsed import')).toBeVisible()
+  await expect(importedQuoteRow.getByText('Imported')).toBeVisible()
   await expect(importedQuoteRow.getByText('QA Contact')).toBeVisible()
   await expect(importedQuoteRow.getByText('$1,080')).toBeVisible()
   await expect(importedQuoteRow.getByText('V1')).toHaveCount(0)

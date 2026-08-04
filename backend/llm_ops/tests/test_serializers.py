@@ -325,6 +325,7 @@ class UsageReconciliationRecordSerializerTests(TestCase):
             code="gpt-4o",
             input_price_per_million=Decimal("2.5"),
             output_price_per_million=Decimal("10"),
+            cache_input_price_per_million=Decimal("1"),
         )
         channel = ProcurementChannel.objects.create(
             name="Direct",
@@ -338,6 +339,7 @@ class UsageReconciliationRecordSerializerTests(TestCase):
                 "model": model.id,
                 "input_tokens": 1_000_000,
                 "output_tokens": 1_000_000,
+                "cache_input_tokens": 2_000_000,
                 "charged_amount": "20",
             }
         )
@@ -345,8 +347,9 @@ class UsageReconciliationRecordSerializerTests(TestCase):
         self.assertTrue(serializer.is_valid(), serializer.errors)
         record = serializer.save()
 
-        self.assertEqual(record.expected_amount, Decimal("12.500000"))
-        self.assertEqual(record.discrepancy, Decimal("-7.500000"))
+        self.assertEqual(record.expected_amount, Decimal("14.500000"))
+        self.assertEqual(record.discrepancy, Decimal("-5.500000"))
+        self.assertEqual(record.cache_input_tokens, 2_000_000)
         self.assertEqual(record.status, "overcharged")
 
     def test_meta_model_serializer_exposes_owner_fields(self):
