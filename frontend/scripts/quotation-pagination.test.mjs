@@ -38,6 +38,13 @@ const quotationCreatePage = await readFile(
   ),
   'utf8',
 )
+const quotationI18n = await readFile(
+  new URL(
+    '../src/modules/quotation/composables/useQuotationI18n.ts',
+    import.meta.url,
+  ),
+  'utf8',
+)
 
 test('quotation API defaults to ten and supports allowed page sizes', () => {
   assert.match(quotationsApi, /params\.page \|\| 1/)
@@ -51,7 +58,7 @@ test('list sends all search and filter values to the server', () => {
   for (const parameter of [
     'search',
     'status',
-    'product_line',
+    'product_line_name',
     'source_type',
     'created_from',
     'created_to',
@@ -59,6 +66,39 @@ test('list sends all search and filter values to the server', () => {
     assert.match(quotationsApi, new RegExp(`query\\.set\\('${parameter}'`))
   }
   assert.doesNotMatch(quotationList, /filteredQuotations/)
+})
+
+test('list maps business metadata and server product-line facets', () => {
+  assert.match(quotationsApi, /quote_date: string/)
+  assert.match(quotationsApi, /issuer_contact_name: string/)
+  assert.match(quotationsApi, /salesperson: api\.issuer_contact_name/)
+  assert.match(quotationsApi, /quoteDate: api\.quote_date/)
+  assert.match(quotationsApi, /facets\?\.product_lines/)
+  assert.match(quotationList, /props\.productLines\.map/)
+  assert.doesNotMatch(quotationList, /loadProductLineOptions/)
+})
+
+test('list presents quote dates, salespeople and approved query statuses', () => {
+  assert.match(quotationList, /tableQuoteDate/)
+  assert.match(quotationList, /displayQuoteDate\(quote\)/)
+  assert.match(quotationList, /tableSalesperson/)
+  assert.match(quotationList, /quote\.salesperson \|\| '—'/)
+  assert.match(quotationI18n, /value: 'Draft'/)
+  assert.match(quotationI18n, /value: 'Generated'/)
+  for (const status of [
+    'Uploaded',
+    'Sent',
+    'Accepted',
+    'Rejected',
+    'Expired',
+    'Cancelled',
+  ]) {
+    assert.doesNotMatch(
+      quotationI18n,
+      new RegExp(`value: '${status}'`),
+    )
+  }
+  assert.match(quotationList, /const tableStatusValues[\s\S]*?'Cancelled'/)
 })
 
 test('pagination controls expose ranges, totals, pages and sizes', () => {

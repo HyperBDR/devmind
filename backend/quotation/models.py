@@ -164,6 +164,11 @@ class Quotation(TimeStampedModel):
     )
 
     product_line = models.CharField(max_length=40, default="BDR")
+    product_line_name = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
     project_name = models.CharField(max_length=255)
     currency = models.CharField(max_length=10, default="USD")
     payment_term_option = models.CharField(max_length=40, default="CIA")
@@ -223,6 +228,14 @@ class Quotation(TimeStampedModel):
             models.Index(
                 fields=["product_line", "-created_at", "-id"],
                 name="quote_list_product_created",
+            ),
+            models.Index(
+                fields=["quote_date"],
+                name="quote_list_quote_date",
+            ),
+            models.Index(
+                fields=["product_line_name"],
+                name="quote_list_product_name",
             ),
         ]
 

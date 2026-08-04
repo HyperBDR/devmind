@@ -106,7 +106,7 @@ test('quotation columns expose pointer and keyboard resize controls', () => {
   assert.doesNotMatch(list, /data-quotation-top-scrollbar/)
 })
 
-test('total, status/source and created date use the requested order', () => {
+test('total, status/source and quote date use the requested order', () => {
   const totalColumn = list.indexOf(
     "labelKey: 'quotation.pages.list.tableTotal'"
   )
@@ -174,7 +174,7 @@ test('English quotation labels use concise CRM terminology', () => {
   for (const copy of [
     '"tableQuoteNo": "Quote number"',
     '"tableSalesperson": "Sales owner"',
-    '"tableQuoteDate": "Date created"',
+    '"tableQuoteDate": "Quote date"',
     '"sourceDocumentImport": "Imported"',
     '"feishuSync": "Sync from Feishu"',
     '"drawerTitle": "Quote details"',
@@ -182,5 +182,5 @@ test('English quotation labels use concise CRM terminology', () => {
     assert.match(enLocale, new RegExp(copy))
   }
   assert.doesNotMatch(enLocale, /"tableSalesperson": "Sales rep"/)
-  assert.doesNotMatch(enLocale, /"tableQuoteDate": "Created date"/)
+  assert.doesNotMatch(enLocale, /"tableQuoteDate": "Date created"/)
 })

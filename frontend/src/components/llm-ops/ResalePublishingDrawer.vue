@@ -200,6 +200,7 @@ const canPublish = computed(() => {
   if (!changedListings.length) return false
   return changedListings.every(
     (l) =>
+      !Object.keys(l.tierErrors || {}).length &&
       !l.priceBelowReference &&
       Number.isFinite(Number(l.priceIn)) &&
       Number.isFinite(Number(l.priceOut)) &&

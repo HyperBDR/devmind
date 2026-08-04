@@ -23,6 +23,7 @@ const loading = ref(false)
 const query = ref<QuotationListParams>({ page: 1, pageSize: 10 })
 const total = ref(0)
 const totalPages = ref(0)
+const productLines = ref<string[]>([])
 const drawerQuoteId = ref<string | null>(null)
 const toast = ref<{ message: string; type: string } | null>(null)
 let toastTimer: number | undefined
@@ -55,6 +56,7 @@ async function load(nextQuery: QuotationListParams = query.value) {
     const result = await listQuotations(nextQuery)
     if (currentRequest !== requestId) return
     quotations.value = result.items
+    productLines.value = result.productLines
     total.value = result.total
     totalPages.value = result.totalPages
     query.value = {
@@ -66,6 +68,7 @@ async function load(nextQuery: QuotationListParams = query.value) {
     showToast(err instanceof Error ? err.message : '加载报价单失败', 'error')
     if (currentRequest === requestId) {
       quotations.value = []
+      productLines.value = []
       total.value = 0
       totalPages.value = 0
     }
@@ -234,6 +237,7 @@ function handleUpdateQuoteStatus(
         v-else
         class="flex-1"
         :quotations="quotations"
+        :product-lines="productLines"
         :loading="loading"
         :page="query.page || 1"
         :page-size="query.pageSize || 10"

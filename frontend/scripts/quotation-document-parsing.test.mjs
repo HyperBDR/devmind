@@ -45,6 +45,12 @@ test('document parsing API exposes automatic parse and fallback confirm operatio
   assert.match(documentsApi, /document-parse-results\/.*\/confirm/)
 })
 
+test('quotation API keeps product line names separate from number prefixes', () => {
+  assert.match(quotationsApi, /product_line_name/)
+  assert.match(quotationsApi, /productLineName/)
+  assert.match(quotationsApi, /product_line: quote\.productLine/)
+})
+
 test('archive sync imports Excel and PDF files into normal quotations', () => {
   assert.match(importedDocumentsPage, /syncResult\.created_quotation_ids/)
   assert.match(importedDocumentsPage, /created_quotation_count/)

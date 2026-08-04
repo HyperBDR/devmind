@@ -29,10 +29,11 @@ from llm_ops.services import (
     compute_model_decision,
     convert_currency_amount,
     resolve_channel_model_currency,
-    resolve_channel_model_price,
+    resolve_channel_price_schedule,
     resolve_resale_listing_currency,
     selected_price_item_group,
 )
+from llm_ops.tier_pricing import UsageContext, resolve_usage_unit_prices
 
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
@@ -522,13 +523,18 @@ def _channel_options(
     price_items_by_override,
 ):
     options = []
+    usage_context = UsageContext(
+        input_tokens=DEFAULT_INPUT_TOKENS,
+        output_tokens=DEFAULT_OUTPUT_TOKENS,
+    )
     for override in overrides:
-        unit_prices = resolve_channel_model_price(
+        schedule = resolve_channel_price_schedule(
             override.channel,
             model,
             override=override,
             source_items=price_items_by_override.get(override.id, []),
         )
+        unit_prices = resolve_usage_unit_prices(schedule, usage_context)
         input_price = Decimal(str(unit_prices.input_per_million or "0"))
         output_price = Decimal(str(unit_prices.output_per_million or "0"))
         if input_price <= 0 or output_price <= 0:

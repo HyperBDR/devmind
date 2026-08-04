@@ -37,7 +37,6 @@ import type { Quotation, QuoteStatus } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
-import { loadProductLineOptions } from '../utils/quotationNumbering'
 import FormSelect from './FormSelect.vue'
 import StatusBadge from './StatusBadge.vue'
 import StatusSelect from './StatusSelect.vue'
@@ -48,6 +47,7 @@ type FeishuUploadFormat = 'excel' | 'pdf'
 
 const props = defineProps<{
   quotations: Quotation[]
+  productLines: string[]
   loading?: boolean
   page: number
   pageSize: 10 | 20 | 50
@@ -77,9 +77,9 @@ const { t, quoteStatusLabel, statusFilterOptions } = useQuotationI18n()
 
 const productLineFilterOptions = computed(() => [
   { value: 'ALL', label: t('quotation.pages.list.productLineAll') },
-  ...loadProductLineOptions().map((option) => ({
-    value: option.value,
-    label: option.label,
+  ...props.productLines.map((productLine) => ({
+    value: productLine,
+    label: productLine,
   })),
 ])
 
@@ -137,6 +137,13 @@ const columnConfig = {
     labelKey: 'quotation.pages.list.tableContact',
     align: 'left',
   },
+  salesperson: {
+    defaultWidth: 140,
+    minWidth: 120,
+    maxWidth: 360,
+    labelKey: 'quotation.pages.list.tableSalesperson',
+    align: 'left',
+  },
   total: {
     defaultWidth: 120,
     minWidth: 108,
@@ -170,6 +177,7 @@ const columnWidths = ref<Record<ResizableColumnKey, number>>({
   project: columnConfig.project.defaultWidth,
   customer: columnConfig.customer.defaultWidth,
   contact: columnConfig.contact.defaultWidth,
+  salesperson: columnConfig.salesperson.defaultWidth,
   total: columnConfig.total.defaultWidth,
   statusSource: columnConfig.statusSource.defaultWidth,
   quoteDate: columnConfig.quoteDate.defaultWidth,
@@ -903,18 +911,18 @@ function displayQuoteDate(quote: Quotation): string {
 
           <div data-filter-date-range class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
-              {{ t('quotation.pages.list.dateRangeLabel') }}
+              {{ t('quotation.pages.list.quoteDateFromLabel') }} / {{ t('quotation.pages.list.quoteDateToLabel') }}
             </label>
             <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
               <BaseDatePicker
                 v-model="createdFrom"
-                :placeholder="t('quotation.pages.list.createdFromLabel')"
-                input-class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-1.5 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                :placeholder="t('quotation.pages.list.quoteDateFromLabel')"
+                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <BaseDatePicker
                 v-model="createdTo"
-                :placeholder="t('quotation.pages.list.createdToLabel')"
-                input-class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-1.5 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                :placeholder="t('quotation.pages.list.quoteDateToLabel')"
+                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
             </div>
           </div>
@@ -1119,6 +1127,9 @@ function displayQuoteDate(quote: Quotation): string {
                 :title="displayContact(quote) === '—' ? undefined : displayContact(quote)"
               >
                 {{ displayContact(quote) }}
+              </td>
+              <td class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium">
+                {{ quote.salesperson || '—' }}
               </td>
               <td class="px-3 py-1 text-right font-bold text-dm-text font-mono">
                 {{ displayTotal(quote) }}

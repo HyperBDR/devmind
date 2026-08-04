@@ -118,6 +118,7 @@ const quotationListQuery = ref<QuotationListParams>({
 })
 const quotationListTotal = ref(0)
 const quotationListTotalPages = ref(0)
+const quotationListProductLines = ref<string[]>([])
 const activeQuote = ref<Quotation | null>(null)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
@@ -283,6 +284,7 @@ async function refreshQuotations(
     const result = await listQuotations(query)
     if (requestId !== quotationListRequestId) return
     quotations.value = result.items
+    quotationListProductLines.value = result.productLines
     quotationListTotal.value = result.total
     quotationListTotalPages.value = result.totalPages
     quotationListQuery.value = {
@@ -296,6 +298,7 @@ async function refreshQuotations(
     const message = error instanceof Error ? error.message : t('quotation.app.loadFailed')
     triggerToast(message, 'error')
     quotations.value = []
+    quotationListProductLines.value = []
     quotationListTotal.value = 0
     quotationListTotalPages.value = 0
   } finally {
@@ -981,6 +984,7 @@ function reloadPage() {
         >
           <QuotationList
             :quotations="quotations"
+            :product-lines="quotationListProductLines"
             :loading="quotationListLoading"
             :page="quotationListQuery.page || 1"
             :page-size="quotationListQuery.pageSize || 10"
