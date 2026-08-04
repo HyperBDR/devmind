@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -15,6 +16,7 @@ from quotation.access import (
     forbidden_response,
 )
 from quotation.audit import (
+    set_request_audit_change_details,
     set_request_audit_changed_fields,
     set_request_audit_target,
 )
@@ -104,6 +106,32 @@ def _item_audit_snapshot(item) -> tuple:
     return tuple(values)
 
 
+def _audit_json_value(value):
+    """Return a stable JSON-safe value for audit old/new details."""
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {
+            str(key): _audit_json_value(raw_value)
+            for key, raw_value in value.items()
+        }
+    if isinstance(value, list):
+        return [_audit_json_value(item) for item in value]
+    return value
+
+
+def _item_audit_detail(item) -> dict:
+    """Return a JSON-safe quotation item snapshot for audit details."""
+    return {
+        field: _audit_json_value(
+            item.get(field) if isinstance(item, dict) else getattr(item, field)
+        )
+        for field in QUOTATION_ITEM_FIELDS
+    }
+
+
 def _quotation_changed_fields(quotation: Quotation, data: dict) -> list[str]:
     """Return only fields whose persisted business values will change."""
     fields = [
@@ -123,6 +151,43 @@ def _quotation_changed_fields(quotation: Quotation, data: dict) -> list[str]:
         if current_items != incoming_items:
             fields.append("items")
     return fields
+
+
+def _quotation_change_details(quotation: Quotation, data: dict) -> dict:
+    """Return JSON-style old/new details for changed quotation fields."""
+    changes = {}
+    for field in QUOTATION_UPDATE_FIELDS:
+        if field not in data:
+            continue
+        current = getattr(quotation, field)
+        incoming = data[field]
+        if current != incoming:
+            changes[field] = {
+                "old": _audit_json_value(current),
+                "new": _audit_json_value(incoming),
+            }
+
+    if "items" in data:
+        current_items = [
+            _item_audit_snapshot(item)
+            for item in quotation.items.all()
+        ]
+        incoming_items = [
+            _item_audit_snapshot(item)
+            for item in data["items"]
+        ]
+        if current_items != incoming_items:
+            changes["items"] = {
+                "old": [
+                    _item_audit_detail(item)
+                    for item in quotation.items.all()
+                ],
+                "new": [
+                    _item_audit_detail(item)
+                    for item in data["items"]
+                ],
+            }
+    return changes
 
 
 class QuotationListCreateView(APIView):
@@ -253,6 +318,7 @@ class QuotationDetailView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         changed_fields = _quotation_changed_fields(quotation, data)
+        change_details = _quotation_change_details(quotation, data)
         previous_status = quotation.status
         for field in QUOTATION_UPDATE_FIELDS:
             if field in data:
@@ -309,6 +375,7 @@ class QuotationDetailView(APIView):
         quotation = self.get_object(quotation_id)
         set_request_audit_target(request, target_label=quotation.quote_no)
         set_request_audit_changed_fields(request, changed_fields)
+        set_request_audit_change_details(request, change_details)
         return Response(QuotationSerializer(quotation).data)
 
     def delete(self, request, quotation_id: str):

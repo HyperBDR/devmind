@@ -23,7 +23,10 @@ from quotation.models import (
     SyncJobType,
 )
 from quotation.tasks import _record_feishu_sync_observability
-from quotation.views.quotations import _quotation_changed_fields
+from quotation.views.quotations import (
+    _quotation_change_details,
+    _quotation_changed_fields,
+)
 from rest_framework.response import Response
 from rest_framework.test import APIClient
 
@@ -151,7 +154,7 @@ class QuotationAuditEventTests(TestCase):
             self.user.email,
         )
 
-    def test_missing_document_target_resolves_to_quote_number(self):
+    def test_document_download_history_is_not_user_facing(self):
         quotation = Quotation.objects.create(
             quote_no="Q-AUDIT-TARGET-001",
             project_name="Audit target",
@@ -186,11 +189,7 @@ class QuotationAuditEventTests(TestCase):
         response = self.api.get("/api/v1/quotation/audit-events")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["total"], 1)
-        self.assertEqual(
-            response.data["items"][0]["target_label"],
-            quotation.quote_no,
-        )
+        self.assertEqual(response.data["total"], 0)
 
     def test_audit_endpoint_is_read_only(self):
         response = self.api.post(
@@ -265,11 +264,6 @@ class QuotationAuditEventTests(TestCase):
             ("quotation", "update"),
             ("quotation", "delete"),
             ("quotation", "generate"),
-            ("document", "upload"),
-            ("document", "download"),
-            ("document", "delete"),
-            ("feishu", "upload"),
-            ("feishu", "import"),
             ("catalog", "create"),
             ("catalog", "update"),
             ("catalog", "delete"),
@@ -281,21 +275,34 @@ class QuotationAuditEventTests(TestCase):
         quiet_cases = [
             ("quotation", "view"),
             ("document", "view"),
+            ("document", "upload"),
+            ("document", "download"),
+            ("document", "delete"),
             ("feishu", "open"),
             ("feishu", "sync"),
+            ("feishu", "upload"),
+            ("feishu", "import"),
             ("storage", "health_checked"),
         ]
         for module, action in quiet_cases:
             with self.subTest(module=module, action=action):
                 self.assertFalse(_should_record_audit(module, action, 200))
-                self.assertTrue(_should_record_audit(module, action, 403))
+                self.assertFalse(_should_record_audit(module, action, 403))
 
     def test_quote_updates_record_the_affected_business_fields(self):
         fields = ["project_name", "status", "items"]
 
         self.assertEqual(
-            _audit_changes("quotation", "update", fields),
-            {"fields": fields},
+            _audit_changes(
+                "quotation",
+                "update",
+                fields,
+                {"project_name": {"old": "Before", "new": "After"}},
+            ),
+            {
+                "fields": fields,
+                "project_name": {"old": "Before", "new": "After"},
+            },
         )
         self.assertEqual(
             _audit_changes("catalog", "update", fields),
@@ -359,6 +366,53 @@ class QuotationAuditEventTests(TestCase):
         )
 
         self.assertEqual(fields, ["project_name"])
+
+        details = _quotation_change_details(
+            quotation,
+            {
+                "quote_no": quotation.quote_no,
+                "project_name": "After",
+                "client_company": quotation.client_company,
+                "items": [item_payload],
+            },
+        )
+
+        self.assertEqual(
+            details,
+            {"project_name": {"old": "Before", "new": "After"}},
+        )
+
+    def test_quote_update_audit_event_stores_json_change_details(self):
+        quotation = Quotation.objects.create(
+            quote_no="Q-AUDIT-JSON-001",
+            project_name="Before",
+            payment_terms="CIA",
+            quote_date="2026-07-21",
+            expire_date="2026-08-21",
+            issuer_contact_name="Audit User",
+            issuer_contact_email=self.user.email,
+            client_company="Example",
+            contact_person="Customer",
+            email="customer@example.com",
+            created_by_email=self.user.email,
+        )
+
+        response = self.api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            {"project_name": "After"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        event = AuditEvent.objects.get(
+            module="quotation",
+            action="update",
+        )
+        self.assertEqual(event.changes["fields"], ["project_name"])
+        self.assertEqual(
+            event.changes["project_name"],
+            {"old": "Before", "new": "After"},
+        )
 
     def test_generate_after_quote_update_is_not_a_duplicate_event(self):
         AuditEvent.objects.create(
@@ -458,7 +512,7 @@ class QuotationAuditEventTests(TestCase):
 
         self.assertFalse(AuditEvent.objects.exists())
 
-    def test_unregistered_mutation_only_records_authorization_denial(self):
+    def test_unregistered_mutation_does_not_create_user_audit_history(self):
         path = "/api/v1/quotation/unregistered-action"
         factory = RequestFactory()
         middleware = RequestIdMiddleware(
@@ -485,10 +539,7 @@ class QuotationAuditEventTests(TestCase):
         denied_response = denied_middleware(denied_request)
 
         self.assertEqual(denied_response.status_code, 403)
-        event = AuditEvent.objects.get()
-        self.assertEqual(event.event_name, "quotation.post")
-        self.assertEqual(event.result, AuditEvent.RESULT_DENIED)
-        self.assertEqual(event.target_type, "request")
+        self.assertFalse(AuditEvent.objects.exists())
 
     def test_feishu_sync_uses_operational_telemetry_not_audit(self):
         job = SyncJob.objects.create(
@@ -584,6 +635,15 @@ class QuotationAuditEventTests(TestCase):
             target_type="document",
             target_id="document-id",
         )
+        AuditEvent.objects.create(
+            actor=self.user,
+            module="quotation",
+            action="update",
+            event_name="quotation.updated",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            target_type="quotation",
+            target_id="quote-id",
+        )
 
         response = self.api.get("/api/v1/quotation/audit-events")
 
@@ -591,7 +651,7 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(response.data["total"], 1)
         self.assertEqual(
             response.data["items"][0]["event_name"],
-            "document.uploaded",
+            "quotation.updated",
         )
 
     def test_activity_log_hides_internal_events_by_default(self):
@@ -635,6 +695,15 @@ class QuotationAuditEventTests(TestCase):
         )
         AuditEvent.objects.create(
             actor=self.user,
+            module="quotation",
+            action="update",
+            event_name="quotation.updated",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            target_type="quotation",
+            target_id="quote-id",
+        )
+        AuditEvent.objects.create(
+            actor=self.user,
             module="document",
             action="download",
             event_name="document.downloaded",
@@ -647,7 +716,7 @@ class QuotationAuditEventTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["total"], 1)
-        self.assertEqual(response.data["items"][0]["action"], "upload")
+        self.assertEqual(response.data["items"][0]["action"], "update")
 
     def test_internal_audit_history_requires_an_administrator(self):
         AuditEvent.objects.create(
@@ -707,9 +776,9 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(response["X-Trace-ID"], "trace-from-client")
 
     def test_denied_request_has_reason_risk_and_resource_link(self):
-        path = "/api/v1/quotation/documents/private-id/download"
+        path = "/api/v1/quotation/quotations/private-id"
         factory = RequestFactory()
-        request = factory.get(path)
+        request = factory.delete(path)
         request.user = self.user
         request.resolver_match = resolve(path)
         middleware = RequestIdMiddleware(
@@ -723,20 +792,20 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(event.result, AuditEvent.RESULT_DENIED)
         self.assertEqual(event.reason_code, "authorization_denied")
         self.assertEqual(event.risk_level, AuditEvent.RISK_HIGH)
-        self.assertEqual(event.document_id_snapshot, "private-id")
+        self.assertEqual(event.quotation_id_snapshot, "private-id")
         self.assertEqual(event.request_id, response["X-Request-ID"])
 
     def test_request_target_hint_is_used_when_response_has_no_object(self):
-        path = "/api/v1/quotation/feishu/upload"
+        path = "/api/v1/quotation/quotations/quote-id/exports"
         factory = RequestFactory()
         request = factory.post(path)
         request.user = self.user
         request.resolver_match = resolve(path)
-        request.quotation_audit_target_label = "Quote-BDR2600001.pdf"
+        request.quotation_audit_target_label = "BDR2600001"
         middleware = RequestIdMiddleware(
             QuotationAuditMiddleware(
                 lambda _request: Response(
-                    {"detail": "Feishu resource not found"},
+                    {"detail": "quotation not found"},
                     status=404,
                 )
             )
@@ -746,8 +815,8 @@ class QuotationAuditEventTests(TestCase):
 
         event = AuditEvent.objects.get()
         self.assertEqual(response.status_code, 404)
-        self.assertEqual(event.target_type, "document")
-        self.assertEqual(event.target_label, "Quote-BDR2600001.pdf")
+        self.assertEqual(event.target_type, "quotation")
+        self.assertEqual(event.target_label, "BDR2600001")
 
     def test_sensitive_values_are_removed_from_audit_payload(self):
         request = RequestFactory().post("/", HTTP_AUTHORIZATION="Bearer bad")

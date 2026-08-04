@@ -110,19 +110,17 @@ test('imported documents cannot be deleted from the list', () => {
   assert.doesNotMatch(importedDocumentsPage, /type="checkbox"/)
 })
 
-test('quotation list shows one source or status indicator per quotation', () => {
+test('quotation list shows one source indicator per quotation', () => {
   assert.match(quotationsApi, /source_type/)
   assert.match(quotationsApi, /versionCurrent/)
   assert.match(quotationList, /sourceDocumentImport/)
+  assert.match(quotationList, /sourceLocalCreated/)
   assert.match(quotationList, /bg-fuchsia-100/)
   assert.match(quotationList, /selectedSource/)
   assert.doesNotMatch(quotationList, /V\{\{ quote\.versionCurrent \}\}/)
-  assert.match(quotationList, /quote\.sourceType !== 'document_import'/)
-  assert.match(
-    quotationList,
-    /v-if="quote\.sourceType === 'document_import'"/,
-  )
-  assert.match(quotationList, /v-else-if="quote\.status === 'Cancelled'"/)
+  assert.doesNotMatch(quotationList, /StatusSelect/)
+  assert.doesNotMatch(quotationList, /StatusBadge/)
+  assert.doesNotMatch(quotationList, /tableStatusValues/)
 })
 
 test('quotation number is constrained and exposes its full value on hover', () => {

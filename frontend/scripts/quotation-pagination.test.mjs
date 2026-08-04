@@ -54,10 +54,9 @@ test('quotation API defaults to ten and supports allowed page sizes', () => {
   assert.match(quotationsApi, /total_pages/)
 })
 
-test('list sends all search and filter values to the server', () => {
+test('list sends all search and source filter values to the server', () => {
   for (const parameter of [
     'search',
-    'status',
     'product_line_name',
     'source_type',
     'created_from',
@@ -78,28 +77,18 @@ test('list maps business metadata and server product-line facets', () => {
   assert.doesNotMatch(quotationList, /loadProductLineOptions/)
 })
 
-test('list presents quote dates, salespeople and approved query statuses', () => {
+test('list presents quote dates, salespeople and source labels', () => {
   assert.match(quotationList, /tableQuoteDate/)
   assert.match(quotationList, /function displayQuoteDate/)
   assert.match(quotationList, /quote\.quoteDate \? quote\.quoteDate\.substring\(0, 10\) : '—'/)
   assert.match(quotationList, /tableSalesperson/)
   assert.match(quotationList, /quote\.salesperson \|\| '—'/)
-  assert.match(quotationI18n, /value: 'Draft'/)
-  assert.match(quotationI18n, /value: 'Generated'/)
-  for (const status of [
-    'Uploaded',
-    'Sent',
-    'Accepted',
-    'Rejected',
-    'Expired',
-    'Cancelled',
-  ]) {
-    assert.doesNotMatch(
-      quotationI18n,
-      new RegExp(`value: '${status}'`),
-    )
-  }
-  assert.match(quotationList, /const tableStatusValues[\s\S]*?'Cancelled'/)
+  assert.match(quotationList, /tableSource/)
+  assert.match(quotationList, /sourceLocalCreated/)
+  assert.match(quotationList, /sourceDocumentImport/)
+  assert.doesNotMatch(quotationList, /tableStatusSource/)
+  assert.doesNotMatch(quotationList, /const tableStatusValues/)
+  assert.doesNotMatch(quotationI18n, /statusFilterOptions/)
 })
 
 test('pagination controls expose ranges, totals, pages and sizes', () => {
@@ -123,18 +112,39 @@ test('search is debounced and filters reset the first page', () => {
   assert.match(quotationList, /window\.setTimeout\(\(\) => \{/)
   assert.match(quotationList, /}, 300\)/)
   assert.match(quotationList, /listQuery\(1\)/)
-  assert.match(quotationList, /selectedStatus/)
   assert.match(quotationList, /selectedProductLine/)
   assert.match(quotationList, /selectedSource/)
   assert.match(quotationList, /createdFrom/)
   assert.match(quotationList, /createdTo/)
+  assert.doesNotMatch(quotationList, /selectedStatus/)
 })
 
-test('empty, loading and failed request states are explicit', () => {
+test('empty, loading and failed request states stay inside the list panel', () => {
   assert.match(quotationList, /<tr v-if="loading">/)
   assert.match(quotationList, /emptyResults/)
   assert.match(quotationApp, /triggerToast\(message, 'error'\)/)
   assert.match(quotationListPage, /showToast\(.*'error'\)/s)
+  assert.doesNotMatch(quotationListPage, /v-if="loading && !quotations\.length"/)
+  assert.doesNotMatch(quotationListPage, /<QuotationList\s+v-else/)
+})
+
+test('rows open the details drawer without a separate view-details button', () => {
+  assert.match(quotationList, /function openQuoteDetails\(quote: Quotation\)/)
+  assert.match(quotationList, /emit\('openDetailDrawer', quote\.id\)/)
+  assert.match(quotationList, /tabindex="0"/)
+  assert.match(quotationList, /cursor-pointer/)
+  assert.doesNotMatch(quotationList, /openImportedQuote/)
+  assert.doesNotMatch(quotationList, /data-view-details/)
+  assert.doesNotMatch(quotationList, /emit\('viewQuote', quote\.id\)/)
+})
+
+test('list column widths reserve stable space for longer headers and actions', () => {
+  assert.match(quotationList, /project:\s*\{[\s\S]*?defaultWidth:\s*260/)
+  assert.match(quotationList, /customer:\s*\{[\s\S]*?defaultWidth:\s*200/)
+  assert.match(quotationList, /contact:\s*\{[\s\S]*?defaultWidth:\s*180/)
+  assert.match(quotationList, /salesperson:\s*\{[\s\S]*?defaultWidth:\s*170/)
+  assert.match(quotationList, /source:\s*\{[\s\S]*?defaultWidth:\s*170/)
+  assert.match(quotationList, /const ACTIONS_COLUMN_WIDTH = 152/)
 })
 
 test('older list requests cannot overwrite newer results', () => {

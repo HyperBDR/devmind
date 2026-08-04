@@ -229,12 +229,7 @@ function handleUpdateQuoteStatus(
     </div>
 
     <div class="flex h-full flex-col gap-5">
-      <div v-if="loading && !quotations.length" class="py-16 text-center text-sm text-slate-400">
-        正在加载报价单…
-      </div>
-
       <QuotationList
-        v-else
         class="flex-1"
         :quotations="quotations"
         :product-lines="productLines"

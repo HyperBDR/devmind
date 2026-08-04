@@ -94,7 +94,7 @@ def _should_record_audit(
 ) -> bool:
     """Return whether a classified response requires an audit event."""
     if status_code in {401, 403}:
-        return True
+        return is_business_audit_operation(module, action)
     return is_business_audit_operation(module, action)
 
 
@@ -198,9 +198,13 @@ def _audit_changes(
     module: str,
     action: str,
     changed_fields: list[str],
+    change_details: dict | None = None,
 ) -> dict:
     """Return the business fields affected by one user operation."""
-    return {"fields": changed_fields} if changed_fields else {}
+    details = dict(change_details or {})
+    if changed_fields:
+        details["fields"] = changed_fields
+    return details
 
 
 def _audit_metadata(
@@ -255,6 +259,7 @@ class QuotationAuditMiddleware:
         )
         classification = None
         changed_fields: list[str] = []
+        change_details: dict = {}
         if request.path.startswith(API_PREFIX):
             classification = _classify(request.method, request.path)
             if classification:
@@ -283,6 +288,14 @@ class QuotationAuditMiddleware:
                     "quotation_audit_changed_fields",
                     changed_fields,
                 )
+            )
+            change_details = dict(
+                getattr(
+                    request,
+                    "quotation_audit_change_details",
+                    change_details,
+                )
+                or {}
             )
             succeeded = response.status_code < 400
             if response.status_code in {401, 403}:
@@ -340,7 +353,12 @@ class QuotationAuditMiddleware:
                     storage_connection_id=str(
                         payload.get("storage_connection_id") or ""
                     ),
-                    changes=_audit_changes(module, action, changed_fields),
+                    changes=_audit_changes(
+                        module,
+                        action,
+                        changed_fields,
+                        change_details,
+                    ),
                     metadata=_audit_metadata(
                         response,
                         payload,
