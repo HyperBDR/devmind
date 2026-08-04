@@ -34,6 +34,8 @@ from .models import (
     ChannelPriceItem,
     ResaleListing,
     ResaleListingPriceHistory,
+    ResaleListingPriceItem,
+    ResaleListingPriceRevision,
     ResalePlatform,
     ResaleWorkflowConfig,
     UsageReconciliationRecord,
@@ -1691,7 +1693,12 @@ class ResaleListingSerializer(serializers.ModelSerializer):
     class Meta:
         model = ResaleListing
         fields = "__all__"
-        read_only_fields = ("created_at", "updated_at")
+        read_only_fields = (
+            "current_price_revision",
+            "pending_price_revision",
+            "created_at",
+            "updated_at",
+        )
         extra_kwargs = {
             "meta_model": {"required": False},
         }
@@ -1726,6 +1733,89 @@ class ResaleListingSerializer(serializers.ModelSerializer):
         model = validated_data.get("model", instance.model)
         validated_data["meta_model"] = model.meta_model
         return super().update(instance, validated_data)
+
+
+class ResaleListingPriceItemInputSerializer(serializers.Serializer):
+    """Validate one item inside an atomic resale price draft payload."""
+
+    dimension = serializers.ChoiceField(
+        choices=ResaleListingPriceItem.DIMENSION_CHOICES
+    )
+    billing_unit = serializers.ChoiceField(
+        choices=ResaleListingPriceItem.BILLING_UNIT_CHOICES
+    )
+    currency = serializers.CharField(max_length=10)
+    unit_price = serializers.DecimalField(max_digits=14, decimal_places=6)
+    tier_type = serializers.ChoiceField(choices=ModelPriceItem.TIER_CHOICES)
+    tier_start = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        allow_null=True,
+        required=False,
+    )
+    tier_end = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        allow_null=True,
+        required=False,
+    )
+    spec = serializers.JSONField(required=False, default=dict)
+
+
+class ResaleListingPriceItemSerializer(serializers.ModelSerializer):
+    """Read-only normalized resale price item."""
+
+    currency = serializers.CharField(
+        source="revision.currency",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ResaleListingPriceItem
+        fields = (
+            "id",
+            "dimension",
+            "billing_unit",
+            "currency",
+            "unit_price",
+            "tier_type",
+            "tier_start",
+            "tier_end",
+            "spec",
+            "created_at",
+        )
+
+
+class ResaleListingPriceRevisionSerializer(serializers.ModelSerializer):
+    """Read one complete resale price revision and decision evidence."""
+
+    price_items = ResaleListingPriceItemSerializer(
+        source="items",
+        many=True,
+        read_only=True,
+    )
+
+    class Meta:
+        model = ResaleListingPriceRevision
+        fields = (
+            "id",
+            "listing",
+            "version",
+            "status",
+            "currency",
+            "price_fingerprint",
+            "decision_snapshot",
+            "decision_fingerprint",
+            "effective_from",
+            "created_by",
+            "submitted_by",
+            "submitted_at",
+            "approved_by",
+            "approved_at",
+            "price_items",
+            "created_at",
+        )
+        read_only_fields = fields
 
 
 class ResaleListingExclusionSerializer(serializers.ModelSerializer):
@@ -1883,6 +1973,7 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
             model,
             input_tokens=attrs.get("input_tokens") or 0,
             output_tokens=attrs.get("output_tokens") or 0,
+            cache_input_tokens=attrs.get("cache_input_tokens") or 0,
             audio_input_seconds=attrs.get("audio_input_seconds") or 0,
             audio_output_seconds=attrs.get("audio_output_seconds") or 0,
             video_input_seconds=attrs.get("video_input_seconds") or 0,
