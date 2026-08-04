@@ -3,7 +3,11 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("llm_ops", "0008_performance_indexes"),
+        (
+            "llm_ops",
+            "0009_resalelistingpricerevision_"
+            "resalelistingpriceitem_and_more",
+        ),
     ]
 
     operations = [
