@@ -45,6 +45,12 @@ test('document parsing API exposes automatic parse and fallback confirm operatio
   assert.match(documentsApi, /document-parse-results\/.*\/confirm/)
 })
 
+test('quotation API keeps product line names separate from number prefixes', () => {
+  assert.match(quotationsApi, /product_line_name/)
+  assert.match(quotationsApi, /productLineName/)
+  assert.match(quotationsApi, /product_line: quote\.productLine/)
+})
+
 test('archive sync imports Excel and PDF files into normal quotations', () => {
   assert.match(importedDocumentsPage, /syncResult\.created_quotation_ids/)
   assert.match(importedDocumentsPage, /created_quotation_count/)
@@ -100,7 +106,7 @@ test('imported documents cannot be deleted from the list', () => {
   assert.doesNotMatch(importedDocumentsPage, /type="checkbox"/)
 })
 
-test('quotation list shows one source or status indicator per quotation', () => {
+test('quotation list combines source and status indicators', () => {
   assert.match(quotationsApi, /source_type/)
   assert.match(quotationsApi, /versionCurrent/)
   assert.match(quotationList, /sourceDocumentImport/)
@@ -108,15 +114,22 @@ test('quotation list shows one source or status indicator per quotation', () => 
   assert.match(quotationList, /selectedSource/)
   assert.doesNotMatch(quotationList, /V\{\{ quote\.versionCurrent \}\}/)
   assert.match(quotationList, /quote\.sourceType !== 'document_import'/)
+  assert.match(quotationList, /tableStatusSource/)
+  assert.doesNotMatch(quotationList, /labelKey: 'quotation\.pages\.list\.tableSource'/)
+  assert.doesNotMatch(quotationList, /labelKey: 'quotation\.pages\.list\.tableStatus'/)
   assert.match(
     quotationList,
-    /v-if="quote\.sourceType === 'document_import'"/,
+    /v-if="quote\.sourceType === 'document_import'"/
   )
-  assert.match(quotationList, /v-else-if="quote\.status === 'Cancelled'"/)
+  assert.match(
+    quotationList,
+    /v-else-if="quote\.status === 'Cancelled'"/
+  )
 })
 
 test('quotation number is constrained and exposes its full value on hover', () => {
-  assert.match(quotationList, /max-w-\[220px\]/)
+  assert.match(quotationList, /quoteNo:[\s\S]*?minWidth:[\s\S]*?maxWidth:/)
+  assert.match(quotationList, /data-column-header="column\.key"/)
   assert.match(quotationList, /truncate whitespace-nowrap/)
   assert.match(quotationList, /:title="quote\.quoteNo"/)
 })

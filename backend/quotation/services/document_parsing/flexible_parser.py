@@ -11,6 +11,11 @@ from openpyxl.utils.exceptions import InvalidFileException
 from pypdf import PdfReader
 
 from quotation.models import DocumentAsset
+from quotation.services.document_parsing.business_fields import (
+    PRODUCT_LINE_LABELS,
+    explicit_product_line,
+    known_product_line,
+)
 from quotation.services.document_parsing.excel_parser import _decimal
 from quotation.services.document_parsing.schemas import (
     ParsedDocumentData,
@@ -88,6 +93,17 @@ def _pdf_date(layout: str, label: str) -> date | None:
         except ValueError:
             continue
     return None
+
+
+def _pdf_product_line(layout: str) -> tuple[str, str]:
+    for label in PRODUCT_LINE_LABELS:
+        raw = _pdf_label(
+            layout,
+            rf"{re.escape(label)}\s*:?\s*([^\n\r]+)",
+        )
+        if raw:
+            return explicit_product_line(raw)
+    return "", ""
 
 
 def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
@@ -423,6 +439,20 @@ def complete_document_parse(
             return _not_quotation_result(parsed)
         if not quote.items:
             quote.items = _pdf_items(layout)
+        if not quote.product_line_name:
+            (
+                quote.product_line_name,
+                quote.product_line,
+            ) = _pdf_product_line(layout)
+        if not quote.product_line_name:
+            for item in quote.items:
+                name, prefix = known_product_line(
+                    item.name or item.description or ""
+                )
+                if name:
+                    quote.product_line_name = name
+                    quote.product_line = prefix
+                    break
         total = _pdf_total(layout)
         if not total:
             total = Decimal(parsed.source_totals.get("grand_total", "0"))
@@ -439,6 +469,15 @@ def complete_document_parse(
                 quote.items = _excel_items(path)
             except Exception:
                 quote.items = []
+        if not quote.product_line_name:
+            for item in quote.items:
+                name, prefix = known_product_line(
+                    item.name or item.description or ""
+                )
+                if name:
+                    quote.product_line_name = name
+                    quote.product_line = prefix
+                    break
         total = sum(
             (item.extended_price for item in quote.items),
             Decimal("0"),

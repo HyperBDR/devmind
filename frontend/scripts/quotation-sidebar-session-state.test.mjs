@@ -6,6 +6,10 @@ const appLayout = readFileSync(
   new URL('../src/components/layout/AppLayout.vue', import.meta.url),
   'utf8',
 )
+const appSidebar = readFileSync(
+  new URL('../src/components/layout/AppSidebar.vue', import.meta.url),
+  'utf8',
+)
 
 test('sidebar collapse state stays independent in each browser tab', () => {
   assert.match(
@@ -19,5 +23,12 @@ test('sidebar collapse state stays independent in each browser tab', () => {
   assert.doesNotMatch(
     appLayout,
     /localStorage\.(?:getItem|setItem)\(\s*SIDEBAR_COLLAPSED_STORAGE_KEY/,
+  )
+})
+
+test('Quote Desk does not show the global settings link', () => {
+  assert.match(
+    appSidebar,
+    /v-if="!isQuotationPlatform"[\s\S]*?SettingsNotifications/,
   )
 })

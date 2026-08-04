@@ -688,15 +688,14 @@
 
       <!-- Settings Menu -->
       <div
-        class="mt-auto border-t pt-4"
-        :class="isQuotationPlatform ? 'quotation-settings' : 'border-gray-200'"
+        v-if="!isQuotationPlatform"
+        class="mt-auto border-t border-gray-200 pt-4"
       >
         <router-link
           :to="{ name: 'SettingsNotifications' }"
           class="nav-item"
           :class="[
             isActive('/settings/notifications') ? 'nav-item-active' : '',
-            isQuotationPlatform ? 'quotation-settings-link' : '',
             collapsed && !isMobile ? 'nav-item-collapsed' : ''
           ]"
           @mouseenter="preloadRoute('/settings/notifications')"

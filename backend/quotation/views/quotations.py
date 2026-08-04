@@ -33,6 +33,7 @@ from quotation.services.quotation_queries import (
     annotate_quotation_list,
     attach_quotation_document_summaries,
     filter_quotation_list,
+    quotation_product_line_facets,
 )
 from quotation.services.quotation_service import (
     build_quotation,
@@ -52,6 +53,7 @@ QUOTATION_UPDATE_FIELDS = (
     "quote_no",
     "project_name",
     "product_line",
+    "product_line_name",
     "currency",
     "payment_term_option",
     "payment_terms",
@@ -150,6 +152,7 @@ class QuotationListCreateView(APIView):
             request.user,
             Quotation.objects.all(),
         )
+        product_lines = quotation_product_line_facets(queryset, filters)
         queryset = filter_quotation_list(queryset, filters)
         total = queryset.count()
         page_start = (page - 1) * page_size
@@ -168,6 +171,7 @@ class QuotationListCreateView(APIView):
                 "page": page,
                 "page_size": page_size,
                 "total_pages": total_pages,
+                "facets": {"product_lines": product_lines},
             }
         )
 

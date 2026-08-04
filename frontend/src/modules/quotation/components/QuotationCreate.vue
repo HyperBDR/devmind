@@ -270,7 +270,7 @@ const productLineSelectOptions = computed(() => [
     value: option.value,
     label: `${option.label} (${option.value})`,
   })),
-  { value: ADD_PRODUCT_LINE_OPTION, label: `+ ${t('quotation.pages.create.addProductLine')}...` },
+  { value: ADD_PRODUCT_LINE_OPTION, label: `+ ${t('quotation.pages.create.addProductLine')}` },
 ])
 
 function regenerateQuoteNo(line = productLine.value, date = quoteDate.value) {
@@ -854,6 +854,7 @@ const previewQuote = computed<Quotation>(() => ({
   id: props.editingQuote ? props.editingQuote.id : 'live-preview',
   quoteNo: quoteNo.value,
   productLine: productLine.value,
+  productLineName: selectedProductLineOption.value?.label || '',
   projectName: projectName.value,
   clientCompany: clientCompany.value,
   contactPerson: contactPerson.value,
@@ -975,6 +976,7 @@ function handleSubmit(status: 'Draft' | 'Generated') {
     id: props.editingQuote ? props.editingQuote.id : `quote-${Date.now()}`,
     quoteNo: quoteNo.value,
     productLine: productLine.value,
+    productLineName: selectedProductLineOption.value?.label || '',
     projectName: projectName.value,
     clientCompany: clientCompany.value,
     contactPerson: contactPerson.value,
