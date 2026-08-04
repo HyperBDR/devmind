@@ -1787,6 +1787,14 @@ class ResaleListing(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
+    published_price_revision = models.ForeignKey(
+        "ResaleListingPriceRevision",
+        related_name="+",
+        blank=True,
+        null=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+    )
     display_name = models.CharField(max_length=255, blank=True, default="")
     currency = models.CharField(max_length=10, blank=True, default="")
     retail_input_price_per_million = models.DecimalField(
@@ -1928,6 +1936,31 @@ class ResaleListingPriceRevision(models.Model):
         STATUS_APPROVED,
         STATUS_SUPERSEDED,
     }
+    ALLOWED_STATUS_TRANSITIONS = {
+        STATUS_DRAFT: {
+            STATUS_SUBMITTED,
+            STATUS_APPROVED,
+            STATUS_SUPERSEDED,
+        },
+        STATUS_SUBMITTED: {STATUS_APPROVED, STATUS_SUPERSEDED},
+        STATUS_APPROVED: {STATUS_SUPERSEDED},
+        STATUS_SUPERSEDED: set(),
+    }
+    IMMUTABLE_FIELDS = (
+        "listing_id",
+        "version",
+        "currency",
+        "price_fingerprint",
+        "decision_snapshot",
+        "decision_fingerprint",
+        "submitted_by_id",
+        "submitted_at",
+        "created_by_id",
+    )
+    APPROVAL_FIELDS = (
+        "approved_by_id",
+        "approved_at",
+    )
 
     listing = models.ForeignKey(
         ResaleListing,
@@ -1943,6 +1976,13 @@ class ResaleListingPriceRevision(models.Model):
     )
     currency = models.CharField(max_length=10)
     price_fingerprint = models.CharField(max_length=64, db_index=True)
+    decision_snapshot = models.JSONField(blank=True, default=dict)
+    decision_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
     effective_from = models.DateTimeField(blank=True, null=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -1951,6 +1991,22 @@ class ResaleListingPriceRevision(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_submitted_resale_price_revisions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    submitted_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_approved_resale_price_revisions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    approved_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1968,12 +2024,84 @@ class ResaleListingPriceRevision(models.Model):
     def save(self, *args, **kwargs):
         """Prevent in-place changes after a revision leaves draft."""
         if self.pk:
-            previous = type(self).objects.only("status").get(pk=self.pk)
-            if previous.status in self.IMMUTABLE_STATUSES:
-                raise ValidationError(
-                    "Submitted price revisions cannot be modified in place."
-                )
+            previous = type(self).objects.get(pk=self.pk)
+            if previous.status != self.STATUS_DRAFT:
+                changed = [
+                    field
+                    for field in self.IMMUTABLE_FIELDS
+                    if getattr(previous, field) != getattr(self, field)
+                ]
+                if changed:
+                    raise ValidationError(
+                        {
+                            field: "Submitted price revisions are immutable."
+                            for field in changed
+                        }
+                    )
+            if previous.status in {
+                self.STATUS_APPROVED,
+                self.STATUS_SUPERSEDED,
+            }:
+                changed = [
+                    field
+                    for field in self.APPROVAL_FIELDS
+                    if getattr(previous, field) != getattr(self, field)
+                ]
+                if changed:
+                    raise ValidationError(
+                        {
+                            field: "Approval evidence is immutable."
+                            for field in changed
+                        }
+                    )
+            self._validate_status_transition(previous.status)
+            if (
+                previous.status == self.STATUS_DRAFT
+                and self.status != self.STATUS_DRAFT
+            ):
+                self.validate_price_items()
+        elif self.status != self.STATUS_DRAFT:
+            raise ValidationError(
+                {"status": "New price revisions must start as draft."}
+            )
         super().save(*args, **kwargs)
+
+    def validate_price_items(self):
+        """Validate the complete normalized price table before submission."""
+        from .price_table_validation import validate_price_table_groups
+
+        items = list(self.items.order_by("dimension", "tier_start", "id"))
+        if not items:
+            raise ValidationError(
+                {"items": "A submitted revision requires price items."}
+            )
+        payloads = [
+            {
+                "dimension": item.dimension,
+                "billing_unit": item.billing_unit,
+                "currency": self.currency,
+                "tier_type": item.tier_type,
+                "tier_start": item.tier_start,
+                "tier_end": item.tier_end,
+                "spec": item.spec,
+            }
+            for item in items
+        ]
+        try:
+            validate_price_table_groups(payloads)
+        except ValueError as exc:
+            code = getattr(exc, "code", str(exc))
+            raise ValidationError({"items": code}) from exc
+
+    def _validate_status_transition(self, previous_status):
+        """Reject illegal revision lifecycle transitions."""
+        if self.status == previous_status:
+            return
+        allowed = self.ALLOWED_STATUS_TRANSITIONS.get(previous_status, set())
+        if self.status not in allowed:
+            raise ValidationError(
+                {"status": "Invalid price revision status transition."}
+            )
 
     def delete(self, *args, **kwargs):
         """Prevent deletion of immutable approval evidence."""

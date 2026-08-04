@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from decimal import Decimal
 import hashlib
 import json
@@ -30,6 +31,8 @@ from .models import (
     ResaleListingPriceHistory,
     ResaleListingPriceItem,
     ResaleListingPriceRevision,
+    ResalePlatform,
+    ResaleWorkflowConfig,
 )
 from .price_table_validation import (
     validate_price_table_groups,
@@ -38,10 +41,13 @@ from .price_table_validation import (
 from .tier_pricing import (
     PriceSchedule,
     PriceTier,
+    RevenuePolicy,
     TieredPriceNotSupportedError,
     UnitPrices,
     UsageContext,
+    analyze_tier_profit,
     calculate_price_schedule_usage_cost,
+    resolve_price_tier,
     resolve_usage_unit_prices,
 )
 
@@ -109,6 +115,25 @@ class CurrencyConversionContext:
     rate_source_label: str
     rate_source_url: str
     rate_collected_at: str
+
+
+class TieredPriceScheduleRequired(ValueError):
+    """Raised when a legacy flat-price API receives tiered prices."""
+
+    code = "price_schedule.tiered_requires_usage_context"
+
+    def __init__(self):
+        super().__init__(self.code)
+
+
+class ResalePriceRevisionError(ValueError):
+    """Stable policy or state error for resale price revision APIs."""
+
+    def __init__(self, code: str, detail: str, *, conflict: bool = False):
+        self.code = code
+        self.detail = detail
+        self.conflict = conflict
+        super().__init__(code)
 
 
 def normalize_currency(value: str | None) -> str:
@@ -2617,6 +2642,770 @@ def approve_resale_listing_price_revision(
     listing.current_price_revision_id = pending.id
     listing.pending_price_revision_id = None
     return pending
+
+
+def _normalize_resale_price_schedule(items) -> PriceSchedule:
+    """Normalize resale rows into the canonical tier schedule."""
+    allowed_dimensions = {
+        choice[0] for choice in ResaleListingPriceItem.DIMENSION_CHOICES
+    }
+    tiers = []
+    for item in items:
+        dimension = item["dimension"]
+        if dimension not in allowed_dimensions:
+            raise ResalePriceRevisionError(
+                "resale_price.unsupported_dimension",
+                f"Unsupported resale price dimension: {dimension}.",
+            )
+        tier_type = item.get(
+            "tier_type",
+            ResaleListingPriceItem.TIER_FLAT,
+        )
+        spec = dict(item.get("spec") or {})
+        if tier_type == ResaleListingPriceItem.TIER_USAGE_RANGE:
+            spec = with_usage_range_spec(spec)
+        tiers.append(
+            PriceTier(
+                dimension=dimension,
+                billing_unit=item.get(
+                    "billing_unit",
+                    ResaleListingPriceItem.UNIT_PER_1M_TOKENS,
+                ),
+                currency=normalize_currency(item.get("currency")),
+                unit_price=decimal_or_zero(item.get("unit_price")),
+                tier_type=tier_type,
+                tier_start=(
+                    decimal_or_zero(item["tier_start"])
+                    if item.get("tier_start") is not None
+                    else None
+                ),
+                tier_end=(
+                    decimal_or_zero(item["tier_end"])
+                    if item.get("tier_end") is not None
+                    else None
+                ),
+                spec=spec,
+            )
+        )
+    schedule = PriceSchedule(tiers=tuple(tiers))
+    validate_price_table_groups(schedule.tiers)
+    return schedule
+
+
+def _replace_resale_revision_items(
+    revision: ResaleListingPriceRevision,
+    schedule: PriceSchedule,
+) -> None:
+    """Replace all rows belonging to one mutable draft revision."""
+    revision.items.all().delete()
+    ResaleListingPriceItem.objects.bulk_create(
+        [
+            ResaleListingPriceItem(
+                revision=revision,
+                dimension=tier.dimension,
+                billing_unit=tier.billing_unit,
+                unit_price=tier.unit_price,
+                tier_type=tier.tier_type,
+                tier_start=tier.tier_start,
+                tier_end=tier.tier_end,
+                spec=tier.spec,
+            )
+            for tier in schedule.tiers
+        ]
+    )
+
+
+def resale_listing_price_schedule(
+    listing: ResaleListing,
+    *,
+    revision: ResaleListingPriceRevision | None = None,
+) -> PriceSchedule:
+    """Return a revision or compatibility listing as a canonical schedule."""
+    selected_revision = revision
+    if selected_revision is None:
+        selected_revision = (
+            listing.pending_price_revision
+            or listing.current_price_revision
+        )
+    if selected_revision is not None:
+        tiers = tuple(
+            PriceTier(
+                dimension=item.dimension,
+                billing_unit=item.billing_unit,
+                currency=selected_revision.currency,
+                unit_price=item.unit_price,
+                tier_type=item.tier_type,
+                tier_start=item.tier_start,
+                tier_end=item.tier_end,
+                spec=dict(item.spec or {}),
+            )
+            for item in selected_revision.items.all()
+        )
+        schedule = PriceSchedule(tiers=tiers)
+        validate_price_table_groups(schedule.tiers)
+        return schedule
+
+    currency = resolve_resale_listing_currency(listing)
+    rows = [
+        {**item, "currency": currency}
+        for item in _flat_resale_listing_price_items(listing)
+    ]
+    return _normalize_resale_price_schedule(rows)
+
+
+@transaction.atomic
+def save_resale_listing_price_draft(
+    listing: ResaleListing,
+    *,
+    items,
+    currency: str,
+    created_by=None,
+    expected_revision_id=None,
+) -> ResaleListingPriceRevision:
+    """Atomically save a complete resale schedule as the active draft."""
+    locked = (
+        ResaleListing.objects.select_for_update()
+        .select_related("platform", "model", "pending_price_revision")
+        .get(pk=listing.pk)
+    )
+    if locked.workflow_status == ResaleListing.WORKFLOW_ONLINE:
+        locked.workflow_status = ResaleListing.WORKFLOW_UPDATE_DRAFT
+    elif locked.workflow_status not in {
+        ResaleListing.WORKFLOW_DRAFT,
+        ResaleListing.WORKFLOW_UPDATE_DRAFT,
+    }:
+        raise ResalePriceRevisionError(
+            "resale_price.invalid_listing_state",
+            "The listing is not in an editable price state.",
+        )
+    normalized = _normalize_resale_price_schedule(items)
+    normalized_currency = normalize_currency(currency)
+    if not normalized_currency:
+        raise ResalePriceRevisionError(
+            "resale_price.currency_required",
+            "A resale price currency is required.",
+        )
+    if any(
+        normalize_currency(tier.currency) != normalized_currency
+        for tier in normalized.tiers
+    ):
+        raise ResalePriceRevisionError(
+            "resale_price.currency_mismatch",
+            "Every price item must use the revision currency.",
+        )
+
+    pending = locked.pending_price_revision
+    active_draft = (
+        pending
+        if pending
+        and pending.status == ResaleListingPriceRevision.STATUS_DRAFT
+        else None
+    )
+    if expected_revision_id is not None and (
+        active_draft is None
+        or str(active_draft.id) != str(expected_revision_id)
+    ):
+        raise ResalePriceRevisionError(
+            "resale_price.revision_conflict",
+            "The price draft changed after it was loaded.",
+            conflict=True,
+        )
+
+    fingerprint = stable_fingerprint(
+        {
+            "currency": normalized_currency,
+            "items": _standard_price_schedule(normalized),
+        }
+    )
+    if active_draft is not None:
+        revision = active_draft
+        _replace_resale_revision_items(revision, normalized)
+        revision.currency = normalized_currency
+        revision.price_fingerprint = fingerprint
+        revision.decision_snapshot = {}
+        revision.decision_fingerprint = ""
+        revision.save(
+            update_fields=[
+                "currency",
+                "price_fingerprint",
+                "decision_snapshot",
+                "decision_fingerprint",
+            ]
+        )
+    else:
+        next_version = (
+            locked.price_revisions.aggregate(maximum=Max("version"))[
+                "maximum"
+            ]
+            or 0
+        ) + 1
+        revision = ResaleListingPriceRevision.objects.create(
+            listing=locked,
+            version=next_version,
+            currency=normalized_currency,
+            price_fingerprint=fingerprint,
+            created_by=created_by,
+        )
+        _replace_resale_revision_items(revision, normalized)
+
+    _project_resale_schedule_to_legacy_fields(
+        locked,
+        normalized,
+        normalized_currency,
+    )
+    locked.pending_price_revision = revision
+    locked.save()
+    listing.pending_price_revision_id = revision.id
+    listing.workflow_status = locked.workflow_status
+    return revision
+
+
+def _project_resale_schedule_to_legacy_fields(
+    listing: ResaleListing,
+    schedule: PriceSchedule,
+    currency: str,
+) -> None:
+    """Keep flat legacy fields as a usage-zero compatibility projection."""
+    prices = {}
+    for dimension in {tier.dimension for tier in schedule.tiers}:
+        tier = resolve_price_tier(
+            schedule,
+            dimension=dimension,
+            usage=ZERO,
+        )
+        prices[dimension] = tier.unit_price
+    required = {
+        ModelPriceItem.DIMENSION_TEXT_INPUT,
+        ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+    }
+    if listing.model.modality == LLMModel.MODALITY_TEXT and not (
+        required <= set(prices)
+    ):
+        raise ResalePriceRevisionError(
+            "resale_price.required_dimension_missing",
+            "Text listings require input and output prices.",
+        )
+    field_map = {
+        ModelPriceItem.DIMENSION_TEXT_INPUT: (
+            "retail_input_price_per_million"
+        ),
+        ModelPriceItem.DIMENSION_TEXT_OUTPUT: (
+            "retail_output_price_per_million"
+        ),
+        ModelPriceItem.DIMENSION_CACHE_INPUT: (
+            "retail_cache_input_price_per_million"
+        ),
+        ModelPriceItem.DIMENSION_IMAGE_OUTPUT: (
+            "retail_image_output_price_per_image"
+        ),
+        ModelPriceItem.DIMENSION_AUDIO_INPUT: (
+            "retail_audio_input_price_per_second"
+        ),
+        ModelPriceItem.DIMENSION_AUDIO_OUTPUT: (
+            "retail_audio_output_price_per_second"
+        ),
+        ModelPriceItem.DIMENSION_VIDEO_INPUT: (
+            "retail_video_input_price_per_second"
+        ),
+        ModelPriceItem.DIMENSION_VIDEO_OUTPUT: (
+            "retail_video_output_price_per_second"
+        ),
+    }
+    listing.currency = currency
+    for dimension, field_name in field_map.items():
+        setattr(listing, field_name, prices.get(dimension))
+
+
+def preview_resale_listing_price(
+    listing: ResaleListing,
+    *,
+    revision: ResaleListingPriceRevision | None = None,
+    items=None,
+    currency: str | None = None,
+) -> dict:
+    """Build the canonical cost, fee, margin and approval preview."""
+    _validate_resale_listing_context(listing)
+    if revision is not None:
+        retail_schedule = resale_listing_price_schedule(
+            listing,
+            revision=revision,
+        )
+        retail_currency = revision.currency
+    elif items is not None:
+        retail_schedule = _normalize_resale_price_schedule(items)
+        retail_currency = normalize_currency(currency)
+    else:
+        retail_schedule = resale_listing_price_schedule(listing)
+        retail_currency = resolve_resale_listing_currency(listing)
+    if not retail_currency:
+        raise ResalePriceRevisionError(
+            "resale_price.currency_required",
+            "A resale price currency is required.",
+        )
+    if not retail_schedule.tiers:
+        raise ResalePriceRevisionError(
+            "resale_price.items_required",
+            "At least one resale price item is required.",
+        )
+    if any(
+        normalize_currency(tier.currency) != retail_currency
+        for tier in retail_schedule.tiers
+    ):
+        raise ResalePriceRevisionError(
+            "resale_price.currency_mismatch",
+            "Every price item must use the preview currency.",
+        )
+
+    override = (
+        ChannelModelPrice.objects.select_related(
+            "channel",
+            "model",
+            "price_source",
+        )
+        .filter(
+            channel=listing.channel,
+            model=listing.model,
+            is_listed=True,
+        )
+        .first()
+    )
+    if override is None:
+        raise ResalePriceRevisionError(
+            "resale_price.channel_price_unavailable",
+            "The selected channel has no active model price.",
+        )
+    if override.price_source and not override.price_source.is_enabled:
+        raise ResalePriceRevisionError(
+            "resale_price.price_source_inactive",
+            "The selected price source is inactive.",
+        )
+
+    source_items = current_model_price_items_for_channel_price(override)
+    raw_cost_schedule = resolve_channel_price_schedule(
+        listing.channel,
+        listing.model,
+        override=override,
+        source_items=source_items,
+    )
+    cost_schedule = _matching_cost_schedule(
+        raw_cost_schedule,
+        retail_schedule,
+    )
+    profitability = calculate_tiered_profitability(
+        cost_schedule,
+        retail_schedule,
+        platform=listing.platform,
+    )
+    lineage = _cost_schedule_lineage(source_items, override)
+    cost_stale = any(item["is_stale"] for item in lineage)
+    approval = _resale_auto_approval(listing, profitability)
+    currency_context = build_currency_conversion_context(retail_currency)
+    return {
+        "retail_schedule": _standard_price_schedule(retail_schedule),
+        "cost_schedule": _standard_price_schedule(cost_schedule),
+        "profitability": profitability,
+        "fee_config": {
+            "fee_rate": listing.platform.fee_rate,
+            "service_fee_rate": listing.platform.service_fee_rate,
+            "tax_rate": listing.platform.tax_rate,
+            "settlement_rate": listing.platform.settlement_rate,
+            "yield_warning": listing.platform.yield_warning,
+            "auto_approve_max_margin_rate": (
+                listing.platform.auto_approve_max_margin_rate
+            ),
+        },
+        "exchange_rate": {
+            "display_currency": currency_context.display_currency,
+            "usd_to_cny_rate": currency_context.usd_to_cny_rate,
+            "source_label": currency_context.rate_source_label,
+            "source_url": currency_context.rate_source_url,
+            "collected_at": currency_context.rate_collected_at,
+        },
+        "cost_lineage": lineage,
+        "cost_stale": cost_stale,
+        "approval": approval,
+    }
+
+
+def _validate_resale_listing_context(listing: ResaleListing) -> None:
+    """Validate stable listing dependencies before pricing decisions."""
+    if not listing.platform.is_active:
+        raise ResalePriceRevisionError(
+            "resale_price.platform_inactive",
+            "The resale platform is inactive.",
+        )
+    if not listing.model.is_active:
+        raise ResalePriceRevisionError(
+            "resale_price.model_inactive",
+            "The model is inactive.",
+        )
+    if listing.channel is None:
+        raise ResalePriceRevisionError(
+            "resale_price.channel_required",
+            "A fixed procurement channel is required for tier preview.",
+        )
+    if not listing.channel.is_active:
+        raise ResalePriceRevisionError(
+            "resale_price.channel_inactive",
+            "The procurement channel is inactive.",
+        )
+
+
+def _matching_cost_schedule(
+    cost_schedule: PriceSchedule,
+    retail_schedule: PriceSchedule,
+) -> PriceSchedule:
+    """Select canonical cost dimensions required by the retail schedule."""
+    retail_dimensions = {
+        tier.dimension for tier in retail_schedule.tiers
+    }
+    for dimension in retail_dimensions:
+        if not cost_schedule.for_dimension(dimension):
+            raise ResalePriceRevisionError(
+                "resale_price.cost_dimension_missing",
+                "A resale dimension has no matching procurement cost.",
+            )
+    selected = tuple(
+        tier
+        for tier in cost_schedule.tiers
+        if tier.dimension in retail_dimensions
+    )
+    schedule = PriceSchedule(tiers=selected)
+    validate_price_table_groups(schedule.tiers)
+    return schedule
+
+
+def _standard_price_schedule(schedule: PriceSchedule) -> list[dict]:
+    """Serialize a canonical schedule without changing its semantics."""
+    return [
+        {
+            "dimension": tier.dimension,
+            "billing_unit": tier.billing_unit,
+            "currency": tier.currency,
+            "unit_price": tier.unit_price,
+            "tier_type": tier.tier_type,
+            "tier_start": tier.tier_start,
+            "tier_end": tier.tier_end,
+            "spec": tier.spec,
+        }
+        for tier in schedule.tiers
+    ]
+
+
+def calculate_tiered_profitability(
+    cost_schedule: PriceSchedule,
+    retail_schedule: PriceSchedule,
+    *,
+    platform: ResalePlatform,
+) -> dict:
+    """Adapt canonical tier-profit analysis to the approval API payload."""
+    intervals = []
+    for dimension in sorted(
+        {tier.dimension for tier in retail_schedule.tiers}
+    ):
+        cost_tiers = cost_schedule.for_dimension(dimension)
+        retail_tiers = retail_schedule.for_dimension(dimension)
+        cost_rate = convert_currency_between(
+            ONE,
+            cost_tiers[0].currency,
+            retail_tiers[0].currency,
+        )
+        if cost_rate is None:
+            raise ResalePriceRevisionError(
+                "resale_price.currency_conversion_required",
+                "The procurement cost currency cannot be converted.",
+            )
+        policy = RevenuePolicy(
+            target_currency=retail_tiers[0].currency,
+            cost_exchange_rate=cost_rate,
+            platform_fee_rate=decimal_or_zero(platform.fee_rate),
+            service_fee_rate=decimal_or_zero(platform.service_fee_rate),
+            tax_rate=decimal_or_zero(platform.tax_rate),
+            settlement_rate=decimal_or_zero(platform.settlement_rate),
+            risk_net_yield_rate=decimal_or_zero(platform.yield_warning),
+        )
+        analysis = analyze_tier_profit(
+            cost_schedule,
+            retail_schedule,
+            dimension=dimension,
+            policy=policy,
+        )
+        for interval in analysis.intervals:
+            retail_tier = resolve_price_tier(
+                retail_schedule,
+                dimension=dimension,
+                usage=interval.tier_start,
+            )
+            markup_rate = ZERO
+            if interval.converted_cost_unit_price:
+                markup_rate = (
+                    interval.converted_retail_unit_price
+                    - interval.converted_cost_unit_price
+                ) / interval.converted_cost_unit_price
+            elif interval.converted_retail_unit_price > ZERO:
+                markup_rate = ONE
+            intervals.append(
+                {
+                    "dimension": interval.dimension,
+                    "billing_unit": interval.billing_unit,
+                    "currency": interval.currency,
+                    "spec": retail_tier.spec,
+                    "tier_start": interval.tier_start,
+                    "tier_end": interval.tier_end,
+                    "cost_unit_price": (
+                        interval.converted_cost_unit_price
+                    ),
+                    "retail_unit_price": (
+                        interval.converted_retail_unit_price
+                    ),
+                    "settled_cost": interval.cost,
+                    "platform_fee": (
+                        interval.gross_revenue
+                        * policy.platform_fee_rate
+                    ).quantize(Decimal("0.000001")),
+                    "service_fee": (
+                        interval.gross_revenue
+                        * policy.service_fee_rate
+                    ).quantize(Decimal("0.000001")),
+                    "tax_fee": (
+                        interval.gross_revenue * policy.tax_rate
+                    ).quantize(Decimal("0.000001")),
+                    "net_revenue": interval.net_revenue,
+                    "gross_margin": interval.gross_profit,
+                    "gross_margin_rate": interval.gross_margin_rate,
+                    "net_yield_rate": interval.net_yield_rate,
+                    "markup_rate": markup_rate.quantize(
+                        Decimal("0.000001")
+                    ),
+                    "is_risk": interval.is_risk,
+                }
+            )
+
+    risk_intervals = [item for item in intervals if item["is_risk"]]
+    minimum_margin_interval = min(
+        intervals,
+        key=lambda item: item["gross_margin"],
+        default=None,
+    )
+    return {
+        "intervals": intervals,
+        "minimum_gross_margin": (
+            minimum_margin_interval["gross_margin"]
+            if minimum_margin_interval
+            else None
+        ),
+        "minimum_gross_margin_interval": minimum_margin_interval,
+        "minimum_gross_margin_rate": min(
+            (item["gross_margin_rate"] for item in intervals),
+            default=None,
+        ),
+        "minimum_net_yield_rate": min(
+            (item["net_yield_rate"] for item in intervals),
+            default=None,
+        ),
+        "maximum_markup_rate": max(
+            (item["markup_rate"] for item in intervals),
+            default=None,
+        ),
+        "risk_intervals": risk_intervals,
+    }
+
+
+def _cost_schedule_lineage(source_items, override) -> list[dict]:
+    """Capture immutable source versions and freshness for cost evidence."""
+    stale_before = timezone.now() - timedelta(days=30)
+    lineage = []
+    seen = set()
+    for base_item in source_items:
+        key = base_item.id
+        if key in seen:
+            continue
+        seen.add(key)
+        observed_at = None
+        if base_item is not None:
+            observed_at = base_item.effective_from or base_item.updated_at
+        lineage.append(
+            {
+                "channel_id": override.channel_id,
+                "channel_price_id": override.id,
+                "price_source_id": override.price_source_id,
+                "base_price_item_id": key,
+                "observed_at": (
+                    observed_at.isoformat() if observed_at else None
+                ),
+                "is_stale": bool(
+                    observed_at and observed_at < stale_before
+                ),
+            }
+        )
+    return lineage
+
+
+def _resale_auto_approval(listing, profitability) -> dict:
+    """Evaluate all tier markups against the server-side workflow policy."""
+    from .workflow_config import merge_resale_workflow_config
+
+    saved = ResaleWorkflowConfig.objects.filter(
+        platform=listing.platform
+    ).first()
+    config = merge_resale_workflow_config(
+        listing.platform,
+        saved.config if saved else None,
+    )
+    enabled = bool(config["policies"].get("auto_approve_enabled"))
+    maximum_markup = profitability.get("maximum_markup_rate")
+    limit_percent = decimal_or_zero(
+        listing.platform.auto_approve_max_margin_rate
+    )
+    eligible = bool(
+        enabled
+        and maximum_markup is not None
+        and maximum_markup * Decimal("100") <= limit_percent
+        and not profitability.get("risk_intervals")
+    )
+    return {
+        "enabled": enabled,
+        "eligible": eligible,
+        "result": (
+            "auto_approved" if eligible else "manual_review_required"
+        ),
+        "maximum_markup_rate": maximum_markup,
+        "limit_percent": limit_percent,
+        "requires_manual_review": not eligible,
+    }
+
+
+@transaction.atomic
+def submit_resale_listing_price_revision(
+    listing: ResaleListing,
+    revision: ResaleListingPriceRevision,
+    *,
+    submitted_by=None,
+) -> tuple[ResaleListingPriceRevision, dict]:
+    """Submit a concrete draft with immutable decision evidence."""
+    locked = (
+        ResaleListing.objects.select_for_update()
+        .select_related("platform", "model", "channel")
+        .get(pk=listing.pk)
+    )
+    revision = ResaleListingPriceRevision.objects.select_for_update().get(
+        pk=revision.pk,
+        listing=locked,
+    )
+    if locked.pending_price_revision_id != revision.id:
+        raise ResalePriceRevisionError(
+            "resale_price.revision_not_pending",
+            "The revision is no longer the active draft.",
+            conflict=True,
+        )
+    if revision.status != ResaleListingPriceRevision.STATUS_DRAFT:
+        raise ResalePriceRevisionError(
+            "resale_price.invalid_revision_state",
+            "Only a draft price revision can be submitted.",
+        )
+
+    preview = preview_resale_listing_price(locked, revision=revision)
+    if preview["cost_stale"]:
+        raise ResalePriceRevisionError(
+            "resale_price.cost_stale",
+            "The procurement cost snapshot is stale.",
+        )
+    if preview["profitability"]["risk_intervals"]:
+        raise ResalePriceRevisionError(
+            "resale_price.minimum_margin_below_warning",
+            "At least one tier is below the platform yield warning.",
+        )
+
+    submitted_at = timezone.now()
+    snapshot = json_safe_payload(preview)
+    snapshot["submitted_at"] = submitted_at.isoformat()
+    snapshot["submitted_by_id"] = (
+        submitted_by.id if submitted_by is not None else None
+    )
+    revision.decision_snapshot = snapshot
+    revision.decision_fingerprint = stable_fingerprint(snapshot)
+    revision.submitted_by = submitted_by
+    revision.submitted_at = submitted_at
+    auto_approved = bool(preview["approval"]["eligible"])
+    revision.status = (
+        ResaleListingPriceRevision.STATUS_APPROVED
+        if auto_approved
+        else ResaleListingPriceRevision.STATUS_SUBMITTED
+    )
+    if auto_approved:
+        revision.approved_by = submitted_by
+        revision.approved_at = submitted_at
+    revision.save()
+
+    if locked.workflow_status == ResaleListing.WORKFLOW_DRAFT:
+        locked.workflow_status = ResaleListing.WORKFLOW_PENDING_PUBLISH
+    elif locked.workflow_status == ResaleListing.WORKFLOW_UPDATE_DRAFT:
+        locked.workflow_status = ResaleListing.WORKFLOW_PENDING_UPDATE
+    else:
+        raise ResalePriceRevisionError(
+            "resale_price.invalid_listing_state",
+            "The listing is not in an editable draft state.",
+        )
+    locked.save(update_fields=["workflow_status", "updated_at"])
+    listing.workflow_status = locked.workflow_status
+    return revision, preview
+
+
+@transaction.atomic
+def approve_and_publish_resale_price_revision(
+    listing: ResaleListing,
+    *,
+    approved_by=None,
+) -> ResaleListingPriceRevision | None:
+    """Bind manual approval and publication to the pending revision."""
+    locked = (
+        ResaleListing.objects.select_for_update()
+        .select_related(
+            "current_price_revision",
+            "pending_price_revision",
+        )
+        .get(pk=listing.pk)
+    )
+    revision = locked.pending_price_revision
+    if revision is None:
+        return None
+    if not revision.decision_snapshot:
+        raise ResalePriceRevisionError(
+            "resale_price.approval_evidence_missing",
+            "The pending revision has no immutable decision snapshot.",
+        )
+    if revision.status == ResaleListingPriceRevision.STATUS_SUBMITTED:
+        revision.status = ResaleListingPriceRevision.STATUS_APPROVED
+        revision.approved_by = approved_by
+        revision.approved_at = timezone.now()
+        revision.save()
+    elif revision.status != ResaleListingPriceRevision.STATUS_APPROVED:
+        raise ResalePriceRevisionError(
+            "resale_price.invalid_revision_state",
+            "The pending revision is not ready for approval.",
+        )
+
+    current = locked.current_price_revision
+    if current and current.id != revision.id:
+        current.status = ResaleListingPriceRevision.STATUS_SUPERSEDED
+        current.save(update_fields=["status"])
+    revision.effective_from = timezone.now()
+    revision.save(update_fields=["effective_from"])
+    locked.current_price_revision = revision
+    locked.pending_price_revision = None
+    locked.published_price_revision = revision
+    locked.save(
+        update_fields=[
+            "current_price_revision",
+            "pending_price_revision",
+            "published_price_revision",
+            "updated_at",
+        ]
+    )
+    listing.current_price_revision_id = revision.id
+    listing.pending_price_revision_id = None
+    listing.published_price_revision_id = revision.id
+    return revision
 
 
 def stable_fingerprint(payload: dict) -> str:
