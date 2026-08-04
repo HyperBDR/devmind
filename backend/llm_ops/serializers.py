@@ -1888,6 +1888,7 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
             model,
             input_tokens=attrs.get("input_tokens") or 0,
             output_tokens=attrs.get("output_tokens") or 0,
+            cache_input_tokens=attrs.get("cache_input_tokens") or 0,
             audio_input_seconds=attrs.get("audio_input_seconds") or 0,
             audio_output_seconds=attrs.get("audio_output_seconds") or 0,
             video_input_seconds=attrs.get("video_input_seconds") or 0,

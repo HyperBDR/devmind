@@ -104,13 +104,14 @@ from .services import (
     record_channel_model_price_history,
     record_resale_listing_price_history,
     resolve_channel_model_currency,
-    resolve_channel_model_price,
+    resolve_channel_price_schedule,
     resolve_resale_listing_currency,
     selected_price_item_group,
     sync_channel_price_items,
     sync_dependent_channel_price_items_for_price_items,
     sync_resale_listing_flat_revision,
 )
+from .tier_pricing import UsageContext, resolve_usage_unit_prices
 from .source_collectors import source_supports_code_collection
 from .tasks import collect_price_source_prices, run_model_price_sync_agent
 from .workflow_config import (
@@ -3179,6 +3180,7 @@ def _summary_listing_rows(
     overrides,
     price_item_indexes,
     rows_by_model,
+    usage_context,
     video_resolution,
 ):
     """Build full listing rows for dashboard sections that need them."""
@@ -3217,7 +3219,7 @@ def _summary_listing_rows(
                 or not override.is_listed
             ):
                 continue
-            unit_prices = resolve_channel_model_price(
+            schedule = resolve_channel_price_schedule(
                 channel,
                 listing.model,
                 override=override,
@@ -3226,6 +3228,10 @@ def _summary_listing_rows(
                     price_item_indexes,
                 ),
                 video_resolution=video_resolution,
+            )
+            unit_prices = resolve_usage_unit_prices(
+                schedule,
+                usage_context,
             )
             cost_input = unit_prices.input_per_million
             cost_output = unit_prices.output_per_million
@@ -3446,6 +3452,14 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         output_tokens = int(
             request.query_params.get("output_tokens") or DEFAULT_OUTPUT_TOKENS
         )
+        cache_input_tokens = int(
+            request.query_params.get("cache_input_tokens") or 0
+        )
+        usage_context = UsageContext(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_input_tokens=cache_input_tokens,
+        )
         video_resolution = request.query_params.get("video_resolution") or ""
         display_currency = (
             request.query_params.get("display_currency") or "CNY"
@@ -3513,12 +3527,16 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     override,
                     price_item_indexes,
                 )
-                unit_prices = resolve_channel_model_price(
+                schedule = resolve_channel_price_schedule(
                     channel,
                     model,
                     override=override,
                     source_items=price_items,
                     video_resolution=video_resolution,
+                )
+                unit_prices = resolve_usage_unit_prices(
+                    schedule,
+                    usage_context,
                 )
                 if not _has_procurement_text_price(unit_prices):
                     continue
@@ -3531,6 +3549,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     unit_prices,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
+                    cache_input_tokens=cache_input_tokens,
                 )
                 option = {
                     "channel_id": channel.id,
@@ -3732,6 +3751,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 overrides=overrides,
                 price_item_indexes=price_item_indexes,
                 rows_by_model=rows_by_model,
+                usage_context=usage_context,
                 video_resolution=video_resolution,
             )
         )
