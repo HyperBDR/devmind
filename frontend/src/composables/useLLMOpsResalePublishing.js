@@ -245,6 +245,75 @@ export function useLLMOpsResalePublishing({
     }
   }
 
+  function tieredListings(payload) {
+    return payload.listings.filter(
+      (item) => item.hasChanges !== false && item.hasTieredPrices
+    )
+  }
+
+  function tierDraftIsInvalid(item) {
+    return Object.keys(item.tierErrors || {}).length > 0
+  }
+
+  async function saveTieredDrafts(items) {
+    if (!items.length) return []
+    if (items.some(tierDraftIsInvalid)) {
+      throw new Error(t('llmOps.messages.invalidListingPrices'))
+    }
+    const response = await llmOpsApi.bulkDraftResaleListings(
+      items.map(mapWorkspaceListingToPayload)
+    )
+    const draftListings = asArray(extract(response))
+    return Promise.all(
+      draftListings.map(async (listing, index) => {
+        const source = items[index]
+        const saved = await llmOpsApi.saveResaleListingPriceDraft(listing.id, {
+          currency: source.currency,
+          items: source.tierItems
+        })
+        return { listing, revision: extract(saved), source }
+      })
+    )
+  }
+
+  async function submitTieredListings(items) {
+    const drafts = await saveTieredDrafts(items)
+    const submitted = await Promise.all(
+      drafts.map(async (draft) => {
+        const response = await llmOpsApi.submitResaleListingPriceRevision(
+          draft.listing.id,
+          draft.revision.id
+        )
+        return { ...draft, result: extract(response) }
+      })
+    )
+    const publishIds = submitted
+      .filter((item) => item.result?.preview?.approval?.eligible)
+      .filter((item) => item.listing.workflow_status !== 'update_draft')
+      .map((item) => item.listing.id)
+    const updateIds = submitted
+      .filter((item) => item.result?.preview?.approval?.eligible)
+      .filter((item) => item.listing.workflow_status === 'update_draft')
+      .map((item) => item.listing.id)
+    await Promise.all([
+      publishIds.length
+        ? llmOpsApi.bulkTransitionResaleListings({
+            action: 'confirm_publish',
+            listings: publishIds,
+            platform: agionePlatform.value?.id
+          })
+        : null,
+      updateIds.length
+        ? llmOpsApi.bulkTransitionResaleListings({
+            action: 'confirm_update',
+            listings: updateIds,
+            platform: agionePlatform.value?.id
+          })
+        : null
+    ])
+    return submitted
+  }
+
   async function handleResaleWorkspacePublished(payload) {
     if (!payload || !payload.listings || !payload.listings.length) {
       showInfo(t('llmOps.messages.noListingsToPublish'))
@@ -263,29 +332,34 @@ export function useLLMOpsResalePublishing({
     }
     const publishListings = changedListings.filter(
       (item) =>
+        !item.hasTieredPrices &&
         !item.priceBelowReference &&
         Number(item.priceIn) > 0 &&
         Number(item.priceOut) > 0
     )
+    const tiered = tieredListings(payload)
     const items = publishListings.map(mapWorkspaceListingToPayload)
-    if (!items.length) {
+    if (!items.length && !tiered.length) {
       showError(t('llmOps.messages.invalidListingPrices'))
       return false
     }
     try {
-      const response = await llmOpsApi.bulkUpsertResaleListings(items)
+      const response = items.length
+        ? await llmOpsApi.bulkUpsertResaleListings(items)
+        : null
       const submittedListings = asArray(extract(response))
       const autoConfirmedCount = await confirmAutoApprovedListings(
         submittedListings,
         publishListings
       )
+      const tieredSubmitted = await submitTieredListings(tiered)
       const messageKey = autoConfirmedCount
         ? 'llmOps.messages.publishAutoConfirmed'
         : 'llmOps.messages.publishSubmitted'
       showSuccess(
         t(messageKey, {
-          count: items.length,
-          confirmed: autoConfirmedCount
+          count: items.length + tiered.length,
+          confirmed: autoConfirmedCount + tieredSubmitted.length
         })
       )
       resalePublishingDrawerOpen.value = false
@@ -356,16 +430,26 @@ export function useLLMOpsResalePublishing({
       showInfo(t('llmOps.messages.noChangesToSave'))
       return false
     }
-    const items = payload.listings
-      .filter((item) => item.hasChanges !== false)
-      .map(mapWorkspaceListingToPayload)
-    if (!items.length) {
+    const changedListings = payload.listings.filter(
+      (item) => item.hasChanges !== false
+    )
+    const standardListings = changedListings.filter(
+      (item) => !item.hasTieredPrices
+    )
+    const tiered = tieredListings(payload)
+    const items = standardListings.map(mapWorkspaceListingToPayload)
+    if (!items.length && !tiered.length) {
       showInfo(t('llmOps.messages.noChangesToSave'))
       return false
     }
     try {
-      await llmOpsApi.bulkDraftResaleListings(items)
-      showSuccess(t('llmOps.messages.draftsSaved', { count: items.length }))
+      if (items.length) await llmOpsApi.bulkDraftResaleListings(items)
+      await saveTieredDrafts(tiered)
+      showSuccess(
+        t('llmOps.messages.draftsSaved', {
+          count: items.length + tiered.length
+        })
+      )
       resalePublishingDrawerOpen.value = false
       refreshLight()
       return true

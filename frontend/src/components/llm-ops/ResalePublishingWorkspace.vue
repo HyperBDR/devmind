@@ -508,6 +508,17 @@
                 </div>
               </template>
             </div>
+            <ResaleTierEditor
+              :currency="currencyLabel"
+              :errors="tierErrorsFor(row)"
+              :model-value="tierDraftFor(row)"
+              :preview="tierPreviewFor(row)"
+              :preview-error="tierPreviewErrorFor(row)"
+              :preview-loading="tierPreviewLoadingFor(row)"
+              :previous-preview="previousTierPreviewFor(row)"
+              @preview="requestTierPreview(row)"
+              @update:model-value="updateTierDraft(row, $event)"
+            />
             <div class="pricing-axis-block compact-pricing-axis">
               <BulletChart
                 :min="marginAxisRangeFor(row).min"
@@ -550,8 +561,10 @@ import '@/components/llm-ops/resalePublishingWorkspace.css'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { llmOpsApi } from '@/api/llmOps'
 import BulletChart from '@/components/llm-ops/BulletChart.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import ResaleTierEditor from '@/components/llm-ops/ResaleTierEditor.vue'
 import { useResaleChainRows } from '@/composables/useResaleChainRows'
 import { useResaleMarketAverages } from '@/composables/useResaleMarketAverages'
 import { useResalePerformance } from '@/composables/useResalePerformance'
@@ -560,6 +573,14 @@ import { useResaleWorkspaceForm } from '@/composables/useResaleWorkspaceForm'
 import { useResaleWorkspaceOptions } from '@/composables/useResaleWorkspaceOptions'
 import { useResizableSidebar } from '@/composables/useResizableSidebar'
 import { RESALE_PRICE_DIMENSION_SPECS } from '@/utils/resalePricing'
+import {
+  buildFlatResalePriceItems,
+  hasTieredResalePrices,
+  normalizeResalePriceDraft,
+  resaleTierDraftFromItems,
+  validateResalePriceDraft
+} from '@/utils/resaleTierDraft'
+import { errorMessage, extract } from '@/utils/llmOpsPagination'
 
 const props = defineProps({
   initialModelId: {
@@ -833,6 +854,105 @@ function updateChainState(row, patch) {
   }
 }
 
+function tierDraftFor(row) {
+  const state = getChainState(row.uniqueId)
+  if (state.tierDraft) return state.tierDraft
+  return resaleTierDraftFromItems(
+    buildFlatResalePriceItems(
+      {
+        cache: row.priceCacheInRaw,
+        input: row.priceInRaw,
+        output: row.priceOutRaw
+      },
+      currencyLabel.value
+    )
+  )
+}
+
+function tierErrorsFor(row) {
+  return getChainState(row.uniqueId).tierErrors || {}
+}
+
+function updateTierDraft(row, tierDraft) {
+  const errors = validateResalePriceDraft(tierDraft)
+  const flatValues = {
+    priceCacheInRaw: tierDraft.cache?.[0]?.price ?? row.priceCacheInRaw,
+    priceInRaw: tierDraft.input?.[0]?.price ?? row.priceInRaw,
+    priceOutRaw: tierDraft.output?.[0]?.price ?? row.priceOutRaw
+  }
+  flatValues.margin = normalizeMargin(
+    marginFromRowPrices(row, flatValues) ?? row.margin
+  )
+  updateChainState(row, {
+    ...flatValues,
+    tierDraft,
+    tierErrors: errors,
+    tierPreview: null,
+    tierPreviewError: ''
+  })
+  emitChange()
+}
+
+function tierPreviewFor(row) {
+  return getChainState(row.uniqueId).tierPreview || null
+}
+
+function tierPreviewErrorFor(row) {
+  return getChainState(row.uniqueId).tierPreviewError || ''
+}
+
+function previousTierPreviewFor(row) {
+  return getChainState(row.uniqueId).previousTierPreview || null
+}
+
+function tierPreviewLoadingFor(row) {
+  return Boolean(getChainState(row.uniqueId).tierPreviewLoading)
+}
+
+async function requestTierPreview(row) {
+  const errors = validateResalePriceDraft(tierDraftFor(row))
+  if (Object.keys(errors).length) {
+    updateChainState(row, { tierErrors: errors })
+    return
+  }
+  const listing = listingForRow(row)
+  if (!listing) {
+    updateChainState(row, {
+      tierPreviewError: t('llmOps.publishingWorkspace.tiers.saveDraftFirst')
+    })
+    return
+  }
+  updateChainState(row, { tierPreviewError: '', tierPreviewLoading: true })
+  try {
+    const [previewResponse, revisionsResponse] = await Promise.all([
+      llmOpsApi.previewResaleListingPrice(listing.id, {
+        currency: currencyLabel.value,
+        items: normalizeResalePriceDraft(tierDraftFor(row), currencyLabel.value)
+      }),
+      llmOpsApi.listResaleListingPriceRevisions(listing.id)
+    ])
+    const revisions = extract(revisionsResponse)
+    const approvedId =
+      revisions.current_revision_id || revisions.published_revision_id
+    const approvedRevision = (revisions.revisions || []).find(
+      (revision) => revision.id === approvedId
+    )
+    updateChainState(row, {
+      previousTierPreview: approvedRevision?.decision_snapshot || null,
+      tierPreview: extract(previewResponse)
+    })
+  } catch (error) {
+    updateChainState(row, {
+      tierPreviewError: errorMessage(
+        error,
+        t('llmOps.publishingWorkspace.tiers.previewFailed')
+      )
+    })
+  } finally {
+    updateChainState(row, { tierPreviewLoading: false })
+  }
+}
+
 function migrateChainStateCurrency(previousCurrency, nextCurrency) {
   const source = String(previousCurrency || '').toUpperCase()
   const target = String(nextCurrency || '').toUpperCase()
@@ -852,6 +972,23 @@ function migrateChainStateCurrency(previousCurrency, nextCurrency) {
         migrated[field] = formatEditablePrice(converted)
       }
     })
+    if (migrated.tierDraft) {
+      migrated.tierDraft = Object.fromEntries(
+        Object.entries(migrated.tierDraft).map(([dimension, rows]) => [
+          dimension,
+          rows.map((row) => {
+            const converted = convertCurrencyAmount(
+              row.price,
+              stateCurrency,
+              target
+            )
+            return converted === null
+              ? row
+              : { ...row, price: formatEditablePrice(converted) }
+          })
+        ])
+      )
+    }
     nextState[key] = migrated
   })
   chainState.value = nextState
@@ -1106,6 +1243,10 @@ function baselineForRow(row) {
 }
 
 function listingRowHasChanges(row) {
+  const tierDraft = getChainState(row.uniqueId).tierDraft
+  if (hasTieredResalePrices(tierDraft)) {
+    return true
+  }
   const baseline = baselineForRow(row)
   if (!baseline) return true
   return (
@@ -1132,6 +1273,12 @@ function workspacePayload() {
       priceIn: row.priceInRaw,
       priceOut: row.priceOutRaw,
       priceCacheIn: row.priceCacheInRaw,
+      tierItems: normalizeResalePriceDraft(
+        tierDraftFor(row),
+        currencyLabel.value
+      ),
+      tierErrors: tierErrorsFor(row),
+      hasTieredPrices: hasTieredResalePrices(tierDraftFor(row)),
       margin: row.margin,
       priceBelowReference: rowHasBelowReferencePrice(row),
       hasChanges: listingRowHasChanges(row)
