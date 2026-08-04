@@ -115,6 +115,7 @@ class ResaleListingPriceRevisionMigrationTests(TransactionTestCase):
         self.assertEqual(revision.status, "approved")
         self.assertEqual(revision.currency, "CNY")
         self.assertEqual(online.current_price_revision_id, revision.id)
+        self.assertEqual(online.published_price_revision_id, revision.id)
         self.assertIsNone(online.pending_price_revision_id)
         self.assertEqual(
             set(revision.items.values_list("dimension", "unit_price")),
@@ -138,6 +139,7 @@ class ResaleListingPriceRevisionMigrationTests(TransactionTestCase):
         self.assertEqual(current_revision.status, "approved")
         self.assertEqual(current_revision.version, 1)
         self.assertEqual(pending_revision.version, 2)
+        self.assertIsNone(pending.published_price_revision_id)
         self.assertEqual(
             pending.pending_price_revision_id,
             pending_revision.id,
@@ -162,3 +164,31 @@ class ResaleListingPriceRevisionMigrationTests(TransactionTestCase):
             online.retail_output_price_per_million,
             Decimal("2.400000"),
         )
+
+    def test_consolidated_migration_contains_final_schema(self):
+        """Keep the former 0010 and 0011 fields in consolidated 0009."""
+        Revision = self.apps.get_model(
+            "llm_ops",
+            "ResaleListingPriceRevision",
+        )
+        UsageRecord = self.apps.get_model(
+            "llm_ops",
+            "UsageReconciliationRecord",
+        )
+
+        revision_fields = {
+            field.name for field in Revision._meta.get_fields()
+        }
+        self.assertTrue(
+            {
+                "decision_snapshot",
+                "decision_fingerprint",
+                "submitted_by",
+                "submitted_at",
+                "approved_by",
+                "approved_at",
+            }
+            <= revision_fields
+        )
+        cache_field = UsageRecord._meta.get_field("cache_input_tokens")
+        self.assertEqual(cache_field.default, 0)
