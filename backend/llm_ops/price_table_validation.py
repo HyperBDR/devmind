@@ -195,7 +195,7 @@ def _validate_usage_range_table(rows: Sequence[Any]) -> None:
             "Usage-range tiers only support text and cached input prices.",
         )
 
-    specs = [dict(_value(row, "spec") or {}) for row in rows]
+    specs = [_price_spec(row) for row in rows]
     _require_spec_consistent(
         specs,
         "tier_metric",
@@ -306,10 +306,26 @@ def _sorted_tiers(rows: Sequence[Any]) -> list[Any]:
 
 
 def _variant_spec_key(spec: Any) -> str:
+    if spec is not None and not isinstance(spec, Mapping):
+        return json.dumps(
+            {"invalid_spec": spec},
+            default=str,
+            sort_keys=True,
+        )
     values = dict(spec or {})
     for key in TIER_CONTRACT_SPEC_KEYS:
         values.pop(key, None)
     return json.dumps(values, default=str, sort_keys=True)
+
+
+def _price_spec(row: Any) -> dict:
+    value = _value(row, "spec")
+    if value is not None and not isinstance(value, Mapping):
+        _raise(
+            ERROR_INVALID_USAGE_RANGE_SPEC,
+            "Tier spec must be a JSON object.",
+        )
+    return dict(value or {})
 
 
 def _decimal(value: Any) -> Decimal | None:

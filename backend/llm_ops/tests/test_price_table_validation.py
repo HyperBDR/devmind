@@ -11,6 +11,7 @@ from llm_ops.price_table_validation import (
     ERROR_INCONSISTENT_TIER_TYPE,
     ERROR_INCONSISTENT_UNIT,
     ERROR_INVALID_BOUNDARY,
+    ERROR_INVALID_USAGE_RANGE_SPEC,
     ERROR_MIXED_FLAT_AND_TIERED,
     ERROR_TIER_MUST_START_AT_ZERO,
     ERROR_UNBOUNDED_TIER_NOT_LAST,
@@ -186,6 +187,11 @@ class PriceTableValidationTests(TestCase):
         ]
 
         self.assert_error_code(ERROR_INCONSISTENT_METRIC, rows)
+
+    def test_rejects_non_object_usage_range_spec(self):
+        rows = [price_row("0", None, spec=["request_input_tokens"])]
+
+        self.assert_error_code(ERROR_INVALID_USAGE_RANGE_SPEC, rows)
 
     def test_rejects_volume_until_business_contract_is_defined(self):
         rows = [price_row("0", None, tier_type="volume")]
