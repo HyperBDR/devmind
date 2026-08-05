@@ -47,16 +47,12 @@ const moduleAliases: Record<string, string> = {
 }
 const actionOptions = [
   'create',
-  'view',
   'update',
   'delete',
   'generate',
   'upload',
   'download',
-  'sync',
   'import',
-  'open',
-  'connect',
 ]
 const moduleFilterOptions = computed(() => [
   { value: '', label: t('quotation.pages.audit.allModules') },
@@ -142,35 +138,17 @@ function actorLabel(event: AuditEvent) {
   return event.actor_name || event.actor_email || t('quotation.pages.audit.system')
 }
 
-const targetFallbackByOperation: Record<string, string> = {
-  'audit.view': 'auditLog',
-  'audit.export': 'auditLog',
-  'feishu.sync': 'archiveFolder',
-  'feishu.connect': 'feishuAccount',
-  'feishu.disconnect': 'feishuAccount',
-  'feishu.refresh': 'feishuAccount',
-}
-
 const targetFallbackByType: Record<string, string> = {
-  audit_log: 'auditLog',
-  folder: 'archiveFolder',
   document: 'document',
   quotation: 'quotation',
-  request: 'request',
-  account: 'feishuAccount',
   catalog: 'catalog',
-  storage_connection: 'storageConnection',
-  storage_mount: 'storageMount',
-  document_replica: 'documentReplica',
 }
 
 function targetLabel(event: AuditEvent) {
   if (event.target_label || event.target_id) {
     return event.target_label || event.target_id
   }
-  const operationKey = `${normalizedModule(event.module)}.${event.action}`
-  const fallbackKey = targetFallbackByOperation[operationKey]
-    || targetFallbackByType[event.target_type]
+  const fallbackKey = targetFallbackByType[event.target_type]
     || 'recordedOperation'
   return t(`quotation.pages.audit.targets.${fallbackKey}`)
 }
@@ -198,21 +176,8 @@ function moduleLabel(value: string) {
   )
 }
 
-function actionLabel(value: string, module = '', eventName = '') {
+function actionLabel(value: string, module = '') {
   const moduleKey = normalizedModule(module)
-  if (value === 'sync' && moduleKey === 'feishu') {
-    const syncActions: Record<string, string> = {
-      'storage.archive_sync_requested': 'feishuSyncStarted',
-      'storage.archive_sync_succeeded': 'feishuSyncCompleted',
-      'storage.archive_sync_partially_succeeded': 'feishuSyncCompletedWithErrors',
-      'storage.archive_sync_failed': 'feishuSyncFailed',
-    }
-    const key = syncActions[eventName]
-    if (key) return t(`quotation.pages.audit.actions.${key}`)
-  }
-  if (value === 'view' && moduleKey === 'audit') {
-    return t('quotation.pages.audit.actions.viewedAuditLog')
-  }
   if (value === 'delete' && moduleKey === 'quotation') {
     return t('quotation.pages.audit.actions.deletedQuote')
   }
@@ -277,23 +242,6 @@ function fieldLabel(value: string) {
   return key
     ? t(`quotation.pages.audit.fields.${key}`)
     : fallbackLabel(value)
-}
-
-function syncFolderNames(event: AuditEvent): string[] {
-  return Array.isArray(event.metadata.folder_names)
-    ? event.metadata.folder_names.filter(Boolean)
-    : []
-}
-
-function syncMetric(event: AuditEvent, key: keyof AuditEvent['metadata']) {
-  const value = event.metadata[key]
-  return typeof value === 'number' ? value : 0
-}
-
-function hasSyncMetrics(event: AuditEvent) {
-  return event.module === 'feishu'
-    && event.action === 'sync'
-    && event.metadata.folder_count !== undefined
 }
 
 watch([moduleFilter, actionFilter, resultFilter, dateFrom, dateTo], () => {
@@ -414,7 +362,7 @@ onMounted(() => void loadEvents())
                 <p class="truncate text-xs text-dm-text-tertiary">{{ event.actor_email }}</p>
               </td>
               <td class="px-4 py-4"><span class="inline-flex max-w-full truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">{{ moduleLabel(event.module) }}</span></td>
-              <td class="px-4 py-4 text-sm font-medium text-dm-text">{{ actionLabel(event.action, event.module, event.event_name) }}</td>
+              <td class="px-4 py-4 text-sm font-medium text-dm-text">{{ actionLabel(event.action, event.module) }}</td>
               <td class="truncate px-4 py-4 text-sm font-medium text-dm-primary" :title="targetLabel(event)">{{ targetLabel(event) }}</td>
               <td class="px-4 py-4">
                 <span :class="event.result === 'succeeded' ? 'bg-emerald-50 text-emerald-700' : event.result === 'denied' ? 'bg-orange-50 text-orange-700' : 'bg-red-50 text-red-600'" class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold">
@@ -452,7 +400,7 @@ onMounted(() => void loadEvents())
       <dl class="mt-5 grid grid-cols-[130px_1fr] gap-x-4 gap-y-4 text-sm">
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.performedBy') }}</dt><dd class="font-medium text-dm-text">{{ actorLabel(selected) }}<div class="font-normal text-dm-text-tertiary">{{ selected.actor_email }}</div></dd>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.module') }}</dt><dd>{{ moduleLabel(selected.module) }}</dd>
-        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.action') }}</dt><dd>{{ actionLabel(selected.action, selected.module, selected.event_name) }}</dd>
+        <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.action') }}</dt><dd>{{ actionLabel(selected.action, selected.module) }}</dd>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.target') }}</dt><dd class="break-all">{{ targetLabel(selected) }}</dd>
         <template v-if="targetTypeLabel(selected)">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.itemType') }}</dt><dd>{{ targetTypeLabel(selected) }}</dd>
@@ -464,35 +412,6 @@ onMounted(() => void loadEvents())
         </template>
         <template v-if="selected.changes.fields?.length">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.changedFields') }}</dt><dd>{{ selected.changes.fields.map(fieldLabel).join('、') }}</dd>
-        </template>
-        <template v-if="hasSyncMetrics(selected)">
-          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncSuccessCount') }}</dt>
-          <dd>
-            {{ t('quotation.pages.audit.syncSuccessCountValue', {
-              count: syncMetric(selected, 'created_count'),
-            }) }}
-          </dd>
-          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncFolders') }}</dt>
-          <dd>{{ syncFolderNames(selected).join('、') || targetLabel(selected) }}</dd>
-          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncFolderCount') }}</dt>
-          <dd>{{ syncMetric(selected, 'folder_count') }}</dd>
-          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncFileVolume') }}</dt>
-          <dd>
-            {{ t('quotation.pages.audit.syncFileVolumeValue', {
-              created: syncMetric(selected, 'created_count'),
-              skipped: syncMetric(selected, 'skipped_count'),
-              parsed: syncMetric(selected, 'parsed_count'),
-              queued: syncMetric(selected, 'queued_parse_count'),
-              errors: syncMetric(selected, 'error_count'),
-            }) }}
-          </dd>
-          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.syncQuotationVolume') }}</dt>
-          <dd>
-            {{ t('quotation.pages.audit.syncQuotationVolumeValue', {
-              created: syncMetric(selected, 'created_quotation_count'),
-              updated: syncMetric(selected, 'updated_quotation_count'),
-            }) }}
-          </dd>
         </template>
         <template v-if="selected.module === 'quotation' && selected.target_id && ['update', 'generate'].includes(selected.action)">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.relatedVersion') }}</dt>

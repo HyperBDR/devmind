@@ -68,9 +68,7 @@ async function loadActivity() {
     quotationId: props.quote.id,
     pageSize: 8,
   })
-  activityEvents.value = response.items.filter(
-    (event) => event.event_name !== 'audit.viewed',
-  )
+  activityEvents.value = response.items
 }
 
 function activityActor(event: AuditEvent) {
