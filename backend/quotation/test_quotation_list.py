@@ -9,6 +9,9 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from quotation.models import (
+    DocumentAsset,
+    DocumentParseResult,
+    DocumentParseStatus,
     Quotation,
     QuotationItem,
     QuotationSourceType,
@@ -351,6 +354,97 @@ class QuotationListAPITests(TestCase):
         assert "versions" not in row
         assert "snapshot_json" not in row
         assert "documents" not in row
+
+    def test_imported_quote_lists_original_document_and_revision_summaries(
+        self,
+    ):
+        quotation = self._quote(
+            1,
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+        )
+        source = DocumentAsset.objects.create(
+            quotation=quotation,
+            doc_type="excel",
+            file_name="Original quote.xlsx",
+            mime_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            storage_key="documents/original/quote.xlsx",
+            source="local",
+            created_by_email=self.user.email,
+        )
+        DocumentParseResult.objects.create(
+            asset=source,
+            quotation=quotation,
+            status=DocumentParseStatus.CONFIRMED,
+            parser_name="test-parser",
+            parser_version="1",
+            content_hash="source-hash",
+        )
+        for version_no in (1, 2):
+            QuotationVersion.objects.create(
+                quotation=quotation,
+                version_no=version_no,
+                status=QuoteStatus.GENERATED,
+                snapshot_json={"private": f"snapshot-{version_no}"},
+            )
+
+        response = self.api.get(self.url)
+
+        assert response.status_code == 200
+        row = response.data["items"][0]
+        assert row["source_document_type"] == "excel"
+        assert row["source_document"] == {
+            "id": source.id,
+            "doc_type": "excel",
+            "file_name": "Original quote.xlsx",
+            "version_no": 1,
+        }
+        assert [
+            version["version_no"]
+            for version in row["available_versions"]
+        ] == [2, 1]
+        assert all(
+            "snapshot" not in version
+            for version in row["available_versions"]
+        )
+
+    def test_imported_quote_ignores_unconfirmed_and_generated_documents(
+        self,
+    ):
+        quotation = self._quote(
+            1,
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+        )
+        for source, status in (
+            ("local", DocumentParseStatus.READY),
+            ("generated", DocumentParseStatus.CONFIRMED),
+        ):
+            asset = DocumentAsset.objects.create(
+                quotation=quotation,
+                doc_type="pdf",
+                file_name=f"{source}.pdf",
+                mime_type="application/pdf",
+                storage_key=f"documents/{source}/quote.pdf",
+                source=source,
+                created_by_email=self.user.email,
+            )
+            DocumentParseResult.objects.create(
+                asset=asset,
+                quotation=quotation,
+                status=status,
+                parser_name="test-parser",
+                parser_version="1",
+                content_hash=f"{source}-hash",
+            )
+
+        response = self.api.get(self.url)
+
+        row = response.data["items"][0]
+        assert row["source_document_type"] is None
+        assert row["source_document"] is None
+        assert row["available_versions"] == []
 
     def test_detail_still_returns_items_versions_and_snapshots(self):
         quotation = self._quote(1, status=QuoteStatus.EXPIRED)

@@ -75,6 +75,17 @@ export interface Quotation {
   quoteNo: string;
   sourceType?: 'manual' | 'document_import';
   sourceDocumentType?: 'excel' | 'pdf';
+  sourceDocument?: {
+    id: string;
+    docType: 'excel' | 'pdf';
+    fileName: string;
+    versionNo: number;
+  };
+  availableVersions?: Array<{
+    versionNo: number;
+    status: string;
+    createdAt: string;
+  }>;
   versionCurrent?: number;
   projectName: string;
   clientCompany: string;

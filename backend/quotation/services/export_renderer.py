@@ -43,7 +43,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "openpyxl-libreoffice-v2"
+CURRENT_RENDERER_VERSION = "openpyxl-libreoffice-v5-original-import"
 DEFAULT_WORKSHEET = "Quotation"
 REQUIRED_TEMPLATE_NAMES = {
     "billing_company",

@@ -32,6 +32,7 @@ import {
   waitForQuotationExport,
   type QuotationExportStatus,
 } from '../api/exports'
+import { downloadImportedDocument } from '../api/documents'
 import type { QuotationListParams } from '../api/quotations'
 import type { Quotation, QuoteStatus } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
@@ -277,8 +278,8 @@ function handlePageVisible() {
   void verifyPendingFeishuOpen()
 }
 
-const ACTION_MENU_WIDTH = 176
-const ACTION_MENU_HEIGHT = 88
+const ACTION_MENU_WIDTH = 240
+const ACTION_MENU_MAX_HEIGHT = 320
 
 const actionMenuQuote = computed(() =>
   actionMenu.value
@@ -306,8 +307,8 @@ function toggleActionMenu(
   const trigger = event.currentTarget as HTMLElement
   const rect = trigger.getBoundingClientRect()
   let top = rect.bottom + 6
-  if (top + ACTION_MENU_HEIGHT > window.innerHeight - 8) {
-    top = rect.top - ACTION_MENU_HEIGHT - 6
+  if (top + ACTION_MENU_MAX_HEIGHT > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - ACTION_MENU_MAX_HEIGHT - 6)
   }
 
   actionMenu.value = {
@@ -316,6 +317,21 @@ function toggleActionMenu(
     top: Math.max(8, top),
     left: Math.max(8, rect.right - ACTION_MENU_WIDTH),
   }
+}
+
+function canDownloadQuote(quote: Quotation): boolean {
+  if (quote.status === 'Cancelled') return false
+  if (quote.sourceType !== 'document_import') return true
+  return Boolean(quote.sourceDocument)
+}
+
+function handleDownloadClick(quote: Quotation, event: MouseEvent) {
+  if (!canDownloadQuote(quote)) return
+  if (quote.sourceDocument?.docType === 'pdf') {
+    void handleDownloadOriginal(quote)
+    return
+  }
+  toggleActionMenu(quote, 'download', event)
 }
 
 const quoteToDelete = computed(() => props.quotations.find((q) => q.id === deleteConfirmId.value))
@@ -519,26 +535,62 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
   }
 }
 
-async function handleDownloadLocal(quote: Quotation, format: FeishuUploadFormat) {
+async function handleDownloadOriginal(quote: Quotation) {
+  const sourceDocument = quote.sourceDocument
+  if (!sourceDocument || quote.status === 'Cancelled') return
+  closeActionMenu()
+  try {
+    await downloadImportedDocument(
+      sourceDocument.id,
+      sourceDocument.fileName,
+    )
+    emit(
+      'toast',
+      t('quotation.pages.list.toastOriginalDownloadStarted', {
+        quoteNo: quote.quoteNo,
+      }),
+      'success',
+    )
+  } catch (error) {
+    emit(
+      'toast',
+      error instanceof Error
+        ? error.message
+        : t('quotation.pages.list.toastOriginalDownloadFailed'),
+      'error',
+    )
+  }
+}
+
+async function handleDownloadLocal(
+  quote: Quotation,
+  format: FeishuUploadFormat,
+  quotationVersion?: number,
+) {
   if (quote.status === 'Cancelled') return
   closeActionMenu()
-  if (
-    quote.sourceType === 'document_import' &&
-    quote.sourceDocumentType !== format
-  ) {
-    return
-  }
   try {
+    if (
+      format === 'excel' &&
+      quote.sourceDocument?.docType === 'excel' &&
+      quotationVersion === quote.sourceDocument.versionNo
+    ) {
+      await handleDownloadOriginal(quote)
+      return
+    }
     const exportFormat = format === 'excel' ? 'xlsx' : 'pdf'
     await exportQuotationFile(quote.id, exportFormat, {
       onProgress: (job) => updateExportProgress(quote.id, job.status),
+      quotationVersion,
     })
     if (format === 'excel') {
-      emit('updateQuoteStatus', quote.id, {
-        status: quote.status === 'Draft' ? 'Generated' : quote.status,
-        excelGeneratedAt: formatNow(),
-        excelFileName: buildQuotationExportFileName(quote, 'xlsx'),
-      })
+      if (quote.sourceType !== 'document_import') {
+        emit('updateQuoteStatus', quote.id, {
+          status: quote.status === 'Draft' ? 'Generated' : quote.status,
+          excelGeneratedAt: formatNow(),
+          excelFileName: buildQuotationExportFileName(quote, 'xlsx'),
+        })
+      }
       emit(
         'toast',
         t('quotation.pages.list.toastExcelDownloadStarted', { quoteNo: quote.quoteNo }),
@@ -1220,18 +1272,17 @@ function displayQuoteDate(quote: Quotation): string {
                       :title="
                         quote.status === 'Cancelled'
                           ? t('quotation.pages.list.downloadDisabled')
+                          : !canDownloadQuote(quote)
+                            ? t('quotation.pages.list.downloadUnavailable')
                           : t('quotation.pages.list.downloadLocal')
                       "
-                      :disabled="quote.status === 'Cancelled'"
+                      :disabled="!canDownloadQuote(quote)"
                       :class="`p-1 rounded-sm transition duration-100 ${
-                        quote.status === 'Cancelled'
+                        !canDownloadQuote(quote)
                           ? 'text-slate-300 cursor-not-allowed'
                           : 'text-dm-text-tertiary hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer'
                       }`"
-                      @click="
-                        quote.status !== 'Cancelled' &&
-                          toggleActionMenu(quote, 'download', $event)
-                      "
+                      @click="handleDownloadClick(quote, $event)"
                     >
                       <Download class="w-4 h-4" />
                     </button>
@@ -1254,7 +1305,7 @@ function displayQuoteDate(quote: Quotation): string {
                     class="p-1 rounded-sm transition duration-100 text-dm-text-tertiary hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer"
                     @click="void openFeishuFile(quote, 'excel')"
                   >
-                    <FileSpreadsheet class="w-4 h-4" />
+                    <ExternalLink class="w-4 h-4" />
                   </button>
 
                   <button
@@ -1419,7 +1470,7 @@ function displayQuoteDate(quote: Quotation): string {
       <div
         v-if="actionMenu && actionMenuQuote"
         data-action-menu
-        class="fixed z-[120] w-44 overflow-hidden rounded-lg border border-dm-border bg-white py-1 shadow-lg"
+        class="fixed z-[120] w-60 max-h-80 overflow-y-auto rounded-lg border border-dm-border bg-white py-1 shadow-lg"
         :style="{
           top: `${actionMenu.top}px`,
           left: `${actionMenu.left}px`,
@@ -1444,30 +1495,74 @@ function displayQuoteDate(quote: Quotation): string {
           </button>
         </template>
         <template v-else>
-          <button
-            v-if="
-              actionMenuQuote.sourceType !== 'document_import' ||
-              actionMenuQuote.sourceDocumentType === 'excel'
-            "
-            type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
-            @click="handleDownloadLocal(actionMenuQuote, 'excel')"
-          >
-            <FileSpreadsheet class="h-3.5 w-3.5" />
-            {{ t('quotation.actions.downloadExcel') }}
-          </button>
-          <button
-            v-if="
-              actionMenuQuote.sourceType !== 'document_import' ||
-              actionMenuQuote.sourceDocumentType === 'pdf'
-            "
-            type="button"
-            class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
-            @click="handleDownloadLocal(actionMenuQuote, 'pdf')"
-          >
-            <ExternalLink class="h-3.5 w-3.5" />
-            {{ t('quotation.actions.downloadPdf') }}
-          </button>
+          <template v-if="actionMenuQuote.sourceType === 'document_import'">
+            <template v-if="actionMenuQuote.availableVersions?.length">
+              <p class="px-3 py-1 text-xs font-semibold text-dm-text-tertiary">
+                {{ t('quotation.pages.list.downloadGeneratedRevision') }}
+              </p>
+              <div
+                v-for="version in actionMenuQuote.availableVersions"
+                :key="version.versionNo"
+                class="px-3 py-2"
+              >
+                <p class="mb-1 text-xs text-dm-text-secondary">
+                  {{
+                    t('quotation.pages.list.downloadRevision', {
+                      version: version.versionNo,
+                    })
+                  }}
+                </p>
+                <div class="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    class="flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
+                    @click="
+                      handleDownloadLocal(
+                        actionMenuQuote,
+                        'excel',
+                        version.versionNo,
+                      )
+                    "
+                  >
+                    <FileSpreadsheet class="h-3.5 w-3.5" />
+                    {{ t('quotation.actions.downloadExcel') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
+                    @click="
+                      handleDownloadLocal(
+                        actionMenuQuote,
+                        'pdf',
+                        version.versionNo,
+                      )
+                    "
+                  >
+                    <FileText class="h-3.5 w-3.5" />
+                    {{ t('quotation.actions.downloadPdf') }}
+                  </button>
+                </div>
+              </div>
+            </template>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
+              @click="handleDownloadLocal(actionMenuQuote, 'excel')"
+            >
+              <FileSpreadsheet class="h-3.5 w-3.5" />
+              {{ t('quotation.actions.downloadExcel') }}
+            </button>
+            <button
+              type="button"
+              class="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-dm-text hover:bg-emerald-50 hover:text-emerald-700"
+              @click="handleDownloadLocal(actionMenuQuote, 'pdf')"
+            >
+              <ExternalLink class="h-3.5 w-3.5" />
+              {{ t('quotation.actions.downloadPdf') }}
+            </button>
+          </template>
         </template>
       </div>
     </Teleport>
