@@ -39,6 +39,16 @@ let returnFocusElement: HTMLElement | null = null
 let returnFocusTimer: number | undefined
 
 const open = computed(() => Boolean(props.quoteId))
+const drawerSubtitle = computed(() => {
+  if (!quote.value) {
+    return t('quotation.pages.list.drawerLoading')
+  }
+  return t(
+    quote.value.sourceType === 'document_import'
+      ? 'quotation.pages.list.drawerSubtitleImported'
+      : 'quotation.pages.list.drawerSubtitleLocal'
+  )
+})
 
 async function loadQuote() {
   const quoteId = props.quoteId
@@ -170,7 +180,7 @@ onBeforeUnmount(() => {
                       }}
                     </DialogTitle>
                     <p class="mt-0.5 text-xs text-dm-text-tertiary">
-                      {{ t('quotation.pages.list.drawerSubtitle') }}
+                      {{ drawerSubtitle }}
                     </p>
                   </div>
                   <button

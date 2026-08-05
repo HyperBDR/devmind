@@ -504,12 +504,8 @@ def complete_document_parse(
     )
     if quote.expire_date < quote.quote_date:
         quote.expire_date = quote.quote_date + timedelta(days=30)
-    quote.issuer_contact_name = (
-        quote.issuer_contact_name or "OnePro Cloud Sales"
-    )
-    quote.issuer_contact_email = (
-        quote.issuer_contact_email or "sales@oneprocloud.com"
-    )
+    missing_issuer_name = not quote.issuer_contact_name
+    missing_issuer_email = not quote.issuer_contact_email
     if not quote.items:
         quote.items = [
             ParsedQuotationItem(
@@ -536,6 +532,22 @@ def complete_document_parse(
         }
     )
     warnings = list(parsed.validation_warnings)
+    if missing_issuer_name:
+        warnings.append(
+            {
+                "field": "issuer_contact_name",
+                "code": "missing_salesperson",
+                "detail": "Salesperson was not parsed from the source",
+            }
+        )
+    if missing_issuer_email:
+        warnings.append(
+            {
+                "field": "issuer_contact_email",
+                "code": "missing_salesperson_email",
+                "detail": "Salesperson email was not parsed from the source",
+            }
+        )
     if pdf_extraction_attempted and not layout.strip():
         warnings.append(
             {

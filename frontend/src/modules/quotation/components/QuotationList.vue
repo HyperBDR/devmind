@@ -34,13 +34,11 @@ import {
 } from '../api/exports'
 import { downloadImportedDocument } from '../api/documents'
 import type { QuotationListParams } from '../api/quotations'
-import type { Quotation, QuoteStatus } from '../types'
+import type { Quotation } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
 import FormSelect from './FormSelect.vue'
-import StatusBadge from './StatusBadge.vue'
-import StatusSelect from './StatusSelect.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
 
@@ -74,7 +72,7 @@ const emit = defineEmits<{
   queryChange: [query: QuotationListParams]
 }>()
 
-const { t, quoteStatusLabel, statusFilterOptions } = useQuotationI18n()
+const { t } = useQuotationI18n()
 
 const productLineFilterOptions = computed(() => [
   { value: 'ALL', label: t('quotation.pages.list.productLineAll') },
@@ -86,7 +84,7 @@ const productLineFilterOptions = computed(() => [
 
 const sourceFilterOptions = computed(() => [
   { value: 'ALL', label: t('quotation.pages.list.sourceAll') },
-  { value: 'manual', label: t('quotation.pages.list.sourceManual') },
+  { value: 'manual', label: t('quotation.pages.list.sourceLocalCreated') },
   {
     value: 'document_import',
     label: t('quotation.pages.list.sourceDocumentImport'),
@@ -98,17 +96,6 @@ const pageSizeOptions = [10, 20, 50].map((value) => ({
   label: String(value),
 }))
 
-const tableStatusValues: QuoteStatus[] = [
-  'Draft',
-  'Generated',
-  'Uploaded',
-  'Sent',
-  'Accepted',
-  'Rejected',
-  'Expired',
-  'Cancelled',
-]
-
 const columnConfig = {
   quoteNo: {
     defaultWidth: 170,
@@ -118,30 +105,30 @@ const columnConfig = {
     align: 'left',
   },
   project: {
-    defaultWidth: 210,
-    minWidth: 150,
+    defaultWidth: 260,
+    minWidth: 180,
     maxWidth: 720,
     labelKey: 'quotation.pages.list.tableProjectName',
     align: 'left',
   },
   customer: {
-    defaultWidth: 170,
-    minWidth: 140,
+    defaultWidth: 200,
+    minWidth: 160,
     maxWidth: 600,
     labelKey: 'quotation.pages.list.tableCustomer',
     align: 'left',
   },
   contact: {
-    defaultWidth: 150,
-    minWidth: 130,
+    defaultWidth: 180,
+    minWidth: 150,
     maxWidth: 480,
     labelKey: 'quotation.pages.list.tableContact',
     align: 'left',
   },
   salesperson: {
-    defaultWidth: 140,
-    minWidth: 120,
-    maxWidth: 360,
+    defaultWidth: 170,
+    minWidth: 140,
+    maxWidth: 480,
     labelKey: 'quotation.pages.list.tableSalesperson',
     align: 'left',
   },
@@ -152,11 +139,11 @@ const columnConfig = {
     labelKey: 'quotation.pages.list.tableTotal',
     align: 'right',
   },
-  statusSource: {
-    defaultWidth: 200,
-    minWidth: 176,
+  source: {
+    defaultWidth: 170,
+    minWidth: 150,
     maxWidth: 360,
-    labelKey: 'quotation.pages.list.tableStatusSource',
+    labelKey: 'quotation.pages.list.tableSource',
     align: 'center',
   },
   quoteDate: {
@@ -170,7 +157,7 @@ const columnConfig = {
 
 type ResizableColumnKey = keyof typeof columnConfig
 
-const ACTIONS_COLUMN_WIDTH = 184
+const ACTIONS_COLUMN_WIDTH = 152
 const COLUMN_RESIZE_STEP = 16
 
 const columnWidths = ref<Record<ResizableColumnKey, number>>({
@@ -180,7 +167,7 @@ const columnWidths = ref<Record<ResizableColumnKey, number>>({
   contact: columnConfig.contact.defaultWidth,
   salesperson: columnConfig.salesperson.defaultWidth,
   total: columnConfig.total.defaultWidth,
-  statusSource: columnConfig.statusSource.defaultWidth,
+  source: columnConfig.source.defaultWidth,
   quoteDate: columnConfig.quoteDate.defaultWidth,
 })
 
@@ -211,7 +198,6 @@ let activeColumnResize: {
 } | null = null
 
 const searchText = ref('')
-const selectedStatus = ref('ALL')
 const selectedProductLine = ref('ALL')
 const selectedSource = ref('ALL')
 const createdFrom = ref('')
@@ -406,10 +392,8 @@ function isNestedRowAction(target: EventTarget | null): boolean {
   )
 }
 
-function openImportedQuote(quote: Quotation) {
-  if (quote.sourceType === 'document_import') {
-    emit('openDetailDrawer', quote.id)
-  }
+function openQuoteDetails(quote: Quotation) {
+  emit('openDetailDrawer', quote.id)
 }
 
 function handleRowClick(quote: Quotation, event: MouseEvent) {
@@ -417,13 +401,13 @@ function handleRowClick(quote: Quotation, event: MouseEvent) {
   if (event.currentTarget instanceof HTMLElement) {
     event.currentTarget.focus()
   }
-  openImportedQuote(quote)
+  openQuoteDetails(quote)
 }
 
 function handleRowKeydown(quote: Quotation, event: KeyboardEvent) {
   if (isNestedRowAction(event.target)) return
   event.preventDefault()
-  openImportedQuote(quote)
+  openQuoteDetails(quote)
 }
 
 onMounted(() => {
@@ -712,10 +696,6 @@ function listQuery(
     page,
     pageSize,
     search: searchText.value.trim() || undefined,
-    status:
-      selectedStatus.value === 'ALL'
-        ? undefined
-        : (selectedStatus.value as QuoteStatus),
     productLine:
       selectedProductLine.value === 'ALL'
         ? undefined
@@ -743,7 +723,6 @@ function handlePageSizeChange(selectedValue: string) {
 async function handleResetFilters() {
   suppressFilterWatch = true
   searchText.value = ''
-  selectedStatus.value = 'ALL'
   selectedProductLine.value = 'ALL'
   selectedSource.value = 'ALL'
   createdFrom.value = ''
@@ -763,7 +742,6 @@ watch(searchText, () => {
 
 watch(
   [
-    selectedStatus,
     selectedProductLine,
     selectedSource,
     createdFrom,
@@ -838,7 +816,6 @@ async function handleManualFeishuSync() {
 const hasActiveFilters = computed(
   () =>
     searchText.value.trim() !== '' ||
-    selectedStatus.value !== 'ALL' ||
     selectedProductLine.value !== 'ALL' ||
     selectedSource.value !== 'ALL' ||
     createdFrom.value !== '' ||
@@ -890,16 +867,13 @@ function displayQuoteDate(quote: Quotation): string {
     id="quote-list-root"
     class="flex h-full min-h-[calc(100dvh-7.0625rem)] flex-col gap-3"
   >
-    <div v-if="loading" class="text-sm text-dm-text-tertiary">
-      {{ t('quotation.pages.list.syncing') }}
-    </div>
     <div
       id="filter-panel"
       data-filter-toolbar
       aria-label="Quote filters"
       class="rounded-xl border border-dm-border-light bg-white p-2 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(160px,1.1fr)_minmax(80px,0.5fr)_minmax(85px,0.55fr)_minmax(80px,0.5fr)_minmax(170px,1fr)_auto]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(180px,1.15fr)_minmax(100px,0.55fr)_minmax(120px,0.65fr)_minmax(180px,1fr)_auto]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -923,18 +897,6 @@ function displayQuoteDate(quote: Quotation): string {
                 <X class="h-4 w-4" />
               </button>
             </div>
-          </div>
-
-          <div class="min-w-0">
-            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
-              {{ t('quotation.pages.list.statusLabel') }}
-            </label>
-            <FormSelect
-              v-model="selectedStatus"
-              class-name="w-full"
-              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
-              :options="statusFilterOptions"
-            />
           </div>
 
           <div class="min-w-0">
@@ -963,18 +925,18 @@ function displayQuoteDate(quote: Quotation): string {
 
           <div data-filter-date-range class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
-              {{ t('quotation.pages.list.quoteDateFromLabel') }} / {{ t('quotation.pages.list.quoteDateToLabel') }}
+              {{ t('quotation.pages.list.dateRangeLabel') }}
             </label>
             <div class="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
               <BaseDatePicker
                 v-model="createdFrom"
                 :placeholder="t('quotation.pages.list.quoteDateFromLabel')"
-                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                input-class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-1.5 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
               <BaseDatePicker
                 v-model="createdTo"
                 :placeholder="t('quotation.pages.list.quoteDateToLabel')"
-                input-class="h-10 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-2 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
+                input-class="h-9 w-full min-w-0 rounded-lg border border-dm-border-light bg-white px-3 py-1.5 text-sm text-dm-text transition placeholder:text-slate-400 focus:border-blue-300 focus:outline-hidden focus:ring-2 focus:ring-blue-100"
               />
             </div>
           </div>
@@ -1069,7 +1031,7 @@ function displayQuoteDate(quote: Quotation): string {
                   :aria-valuenow="columnWidths[column.key]"
                   :title="t('quotation.pages.list.resizeColumnHint')"
                   tabindex="0"
-                  class="group absolute -right-1 top-0 z-10 flex h-full w-3 touch-none select-none items-center justify-center cursor-col-resize focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-400"
+                  class="group absolute right-0 top-0 z-10 flex h-full w-3 touch-none select-none items-center justify-center cursor-col-resize focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-400"
                   data-column-resizer
                   :data-column-key="column.key"
                   @click.stop.prevent
@@ -1117,18 +1079,14 @@ function displayQuoteDate(quote: Quotation): string {
               :key="quote.id"
               data-quotation-row
               :data-source-type="quote.sourceType"
-              :tabindex="quote.sourceType === 'document_import' ? 0 : undefined"
+              tabindex="0"
               :aria-label="
-                quote.sourceType === 'document_import'
-                  ? t('quotation.pages.list.openRowDetails', {
-                      quoteNo: quote.quoteNo,
-                    })
-                  : undefined
+                t('quotation.pages.list.openRowDetails', {
+                  quoteNo: quote.quoteNo,
+                })
               "
               class="group transition duration-150 hover:bg-[#fafafa] focus:outline-hidden focus:ring-2 focus:ring-inset focus:ring-blue-300"
-              :class="{
-                'cursor-pointer': quote.sourceType === 'document_import',
-              }"
+              :class="{ 'cursor-pointer': true }"
               @click="handleRowClick(quote, $event)"
               @keydown.enter="handleRowKeydown(quote, $event)"
               @keydown.space="handleRowKeydown(quote, $event)"
@@ -1193,36 +1151,18 @@ function displayQuoteDate(quote: Quotation): string {
                 >
                   {{ t('quotation.pages.list.sourceDocumentImport') }}
                 </span>
-                <StatusBadge
-                  v-else-if="quote.status === 'Cancelled'"
-                  :status="quote.status"
-                />
-                <StatusSelect
+                <span
                   v-else
-                  :model-value="quote.status"
-                  :options="tableStatusValues"
-                  @change="
-                    emit('updateQuoteStatus', quote.id, {
-                      status: $event,
-                    })
-                  "
-                />
+                  class="inline-flex whitespace-nowrap rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700 ring-1 ring-inset ring-sky-200"
+                >
+                  {{ t('quotation.pages.list.sourceLocalCreated') }}
+                </span>
               </td>
               <td class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary">
                 {{ displayQuoteDate(quote) }}
               </td>
               <td class="px-3 py-1">
                 <div class="flex items-center justify-center gap-1.5">
-                  <button
-                    v-if="quote.sourceType !== 'document_import'"
-                    data-view-details
-                    :title="t('quotation.pages.list.viewDetails')"
-                    class="p-1 text-dm-text-tertiary hover:text-dm-text hover:bg-slate-100 rounded-sm transition duration-100 cursor-pointer"
-                    @click="emit('viewQuote', quote.id)"
-                  >
-                    <FileText class="w-4 h-4" />
-                  </button>
-
                   <button
                     v-if="quote.sourceType !== 'document_import'"
                     :title="

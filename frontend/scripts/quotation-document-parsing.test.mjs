@@ -110,30 +110,22 @@ test('imported documents cannot be deleted from the list', () => {
   assert.doesNotMatch(importedDocumentsPage, /type="checkbox"/)
 })
 
-test('quotation list combines source and status indicators', () => {
+test('quotation list shows one source indicator per quotation', () => {
   assert.match(quotationsApi, /source_type/)
   assert.match(quotationsApi, /versionCurrent/)
   assert.match(quotationList, /sourceDocumentImport/)
+  assert.match(quotationList, /sourceLocalCreated/)
   assert.match(quotationList, /bg-fuchsia-100/)
   assert.match(quotationList, /selectedSource/)
   assert.doesNotMatch(quotationList, /V\{\{ quote\.versionCurrent \}\}/)
-  assert.match(quotationList, /quote\.sourceType !== 'document_import'/)
-  assert.match(quotationList, /tableStatusSource/)
-  assert.doesNotMatch(quotationList, /labelKey: 'quotation\.pages\.list\.tableSource'/)
-  assert.doesNotMatch(quotationList, /labelKey: 'quotation\.pages\.list\.tableStatus'/)
-  assert.match(
-    quotationList,
-    /v-if="quote\.sourceType === 'document_import'"/
-  )
-  assert.match(
-    quotationList,
-    /v-else-if="quote\.status === 'Cancelled'"/
-  )
+  assert.doesNotMatch(quotationList, /StatusSelect/)
+  assert.doesNotMatch(quotationList, /StatusBadge/)
+  assert.doesNotMatch(quotationList, /tableStatusValues/)
 })
 
 test('quotation number is constrained and exposes its full value on hover', () => {
-  assert.match(quotationList, /quoteNo:[\s\S]*?minWidth:[\s\S]*?maxWidth:/)
-  assert.match(quotationList, /data-column-header="column\.key"/)
+  assert.match(quotationList, /quoteNo:\s*\{[\s\S]*?minWidth:\s*130/)
+  assert.match(quotationList, /:data-column-key="column\.key"/)
   assert.match(quotationList, /truncate whitespace-nowrap/)
   assert.match(quotationList, /:title="quote\.quoteNo"/)
 })

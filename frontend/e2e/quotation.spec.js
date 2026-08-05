@@ -84,9 +84,9 @@ test.describe('Quotation desktop experience', () => {
     await expect(page.getByRole('link', { name: 'Catalog' })).toBeVisible()
 
     await page.getByRole('link', { name: 'Quotes' }).click()
-    await expect(page.getByLabel('Imported file filters')).toBeVisible()
+    await expect(page.getByLabel('Quote filters')).toBeVisible()
     await expect(
-      page.getByRole('button', { name: 'Sync Feishu archive' }),
+      page.getByRole('button', { name: 'Sync from Feishu' }),
     ).toBeVisible()
   })
 

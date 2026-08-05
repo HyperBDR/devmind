@@ -609,8 +609,8 @@ class QuotationCreateSerializer(serializers.Serializer):
     issuer_company_name = serializers.CharField(
         required=False, default="OnePro Cloud Limited"
     )
-    issuer_contact_name = serializers.CharField()
-    issuer_contact_email = serializers.CharField()
+    issuer_contact_name = serializers.CharField(allow_blank=True)
+    issuer_contact_email = serializers.CharField(allow_blank=True)
     issuer_contact_title = serializers.CharField(
         required=False, allow_blank=True, default=""
     )
@@ -632,7 +632,12 @@ class QuotationCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         if not self.context.get("document_import"):
-            for field in ("contact_person", "email"):
+            for field in (
+                "contact_person",
+                "email",
+                "issuer_contact_name",
+                "issuer_contact_email",
+            ):
                 if not attrs.get(field, "").strip():
                     raise serializers.ValidationError(
                         {field: "This field may not be blank."}

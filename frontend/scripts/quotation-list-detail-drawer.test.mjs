@@ -43,18 +43,14 @@ const enLocale = await readFile(
   'utf8'
 )
 
-test('parsed quotation rows open the detail drawer without routing', () => {
+test('quotation rows open the detail drawer without routing', () => {
   assert.match(list, /openDetailDrawer: \[id: string\]/)
-  assert.match(list, /quote\.sourceType === 'document_import'/)
   assert.match(list, /emit\('openDetailDrawer', quote\.id\)/)
   assert.match(list, /@click="handleRowClick\(quote, \$event\)"/)
   assert.match(list, /event\.currentTarget\.focus\(\)/)
   assert.match(list, /@keydown\.enter="handleRowKeydown/)
   assert.match(list, /@keydown\.space="handleRowKeydown/)
-  assert.match(
-    list,
-    /v-if="quote\.sourceType !== 'document_import'"[\s\S]*?data-view-details/
-  )
+  assert.doesNotMatch(list, /data-view-details/)
   assert.match(app, /@open-detail-drawer="handleOpenDetailDrawer"/)
   assert.match(app, /:quote-id="drawerQuoteId"/)
 })
@@ -106,19 +102,19 @@ test('quotation columns expose pointer and keyboard resize controls', () => {
   assert.doesNotMatch(list, /data-quotation-top-scrollbar/)
 })
 
-test('total, status/source and quote date use the requested order', () => {
+test('total, source and quote date use the requested order', () => {
   const totalColumn = list.indexOf(
     "labelKey: 'quotation.pages.list.tableTotal'"
   )
-  const statusSourceColumn = list.indexOf(
-    "labelKey: 'quotation.pages.list.tableStatusSource'"
+  const sourceColumn = list.indexOf(
+    "labelKey: 'quotation.pages.list.tableSource'"
   )
   const dateColumn = list.indexOf(
     "labelKey: 'quotation.pages.list.tableQuoteDate'"
   )
   assert.ok(totalColumn >= 0)
-  assert.ok(statusSourceColumn > totalColumn)
-  assert.ok(dateColumn > statusSourceColumn)
+  assert.ok(sourceColumn > totalColumn)
+  assert.ok(dateColumn > sourceColumn)
   assert.match(api, /quote_date\?: string \| null/)
   assert.match(api, /quoteDate: api\.quote_date \|\| undefined/)
 })
@@ -150,7 +146,7 @@ test('long contact names cannot expand compact quotation rows', () => {
 
 test('quotation list removes the user hint and page-level horizontal scroll', () => {
   assert.doesNotMatch(list, /quotation\.pages\.list\.userHint/)
-  assert.match(list, /xl:grid-cols-\[minmax\(160px,1\.1fr\)/)
+  assert.match(list, /xl:grid-cols-\[minmax\(180px,1\.15fr\)/)
   assert.match(app, /overflow-x-hidden overflow-y-auto/)
   assert.match(app, /v-if="currentTab === 'list'"\s+class="flex flex-col"/)
 })
@@ -175,7 +171,7 @@ test('English quotation labels use concise CRM terminology', () => {
     '"tableQuoteNo": "Quote number"',
     '"tableSalesperson": "Sales owner"',
     '"tableQuoteDate": "Quote date"',
-    '"sourceDocumentImport": "Imported"',
+    '"sourceDocumentImport": "Imported from Feishu"',
     '"feishuSync": "Sync from Feishu"',
     '"drawerTitle": "Quote details"',
   ]) {

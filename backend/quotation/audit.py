@@ -37,6 +37,12 @@ def set_request_audit_changed_fields(request, fields: list[str]) -> None:
     raw_request = getattr(request, "_request", request)
     raw_request.quotation_audit_changed_fields = list(dict.fromkeys(fields))
 
+
+def set_request_audit_change_details(request, changes: dict) -> None:
+    """Attach server-verified old/new business values to one request."""
+    raw_request = getattr(request, "_request", request)
+    raw_request.quotation_audit_change_details = changes
+
 SENSITIVE_KEY_PARTS = {
     "access_token",
     "authorization",
@@ -80,11 +86,7 @@ EVENT_NAMES = {
     ("quotation", "update"): "quotation.updated",
     ("quotation", "delete"): "quotation.deleted",
     ("quotation", "generate"): "quotation.generated",
-    ("document", "upload"): "document.uploaded",
-    ("document", "download"): "document.downloaded",
     ("document", "delete"): "document.deleted",
-    ("feishu", "upload"): "document.uploaded",
-    ("feishu", "import"): "document.imported",
     ("feishu", "open"): "document.opened",
     ("feishu", "sync"): "storage.archive_sync_requested",
     ("feishu", "connect"): "feishu.oauth.connected",
@@ -198,16 +200,35 @@ def _safe_text(value: Any, max_length: int) -> str:
     return text[:max_length]
 
 
+def _safe_json_value(raw_value: Any, *, depth: int = 0) -> Any:
+    """Return a bounded JSON-like value without sensitive nested content."""
+    if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
+        return _safe_text(raw_value, 500) if isinstance(raw_value, str) else raw_value
+    if depth >= 3:
+        return _safe_text(raw_value, 100)
+    if isinstance(raw_value, list):
+        return [
+            _safe_json_value(item, depth=depth + 1)
+            for item in raw_value[:50]
+            if isinstance(item, (str, int, float, bool, dict, list))
+            or item is None
+        ]
+    if isinstance(raw_value, dict):
+        return _safe_mapping(raw_value, depth=depth + 1)
+    return _safe_text(raw_value, 100)
+
+
 def _safe_mapping(
     value: dict | None,
     *,
     allowlist: set[str] | None = None,
+    depth: int = 0,
 ) -> dict:
-    """Return a shallow allowlisted mapping without sensitive values."""
+    """Return an allowlisted mapping without sensitive values."""
     if not isinstance(value, dict):
         return {}
     output = {}
-    for raw_key, raw_value in value.items():
+    for raw_key, raw_value in list(value.items())[:50]:
         key = str(raw_key)[:100]
         lowered = key.lower()
         if allowlist is not None and key not in allowlist:
@@ -216,17 +237,7 @@ def _safe_mapping(
             part in lowered for part in SENSITIVE_KEY_PARTS
         ):
             continue
-        if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
-            output[key] = _safe_text(raw_value, 500) if isinstance(
-                raw_value,
-                str,
-            ) else raw_value
-        elif isinstance(raw_value, list):
-            output[key] = [
-                _safe_text(item, 100)
-                for item in raw_value[:50]
-                if isinstance(item, (str, int, float, bool))
-            ]
+        output[key] = _safe_json_value(raw_value, depth=depth)
     return output
 
 
@@ -356,7 +367,7 @@ def record_audit_event(
         summary=_safe_text(summary, 500),
         before_summary=_safe_mapping(before_summary),
         after_summary=_safe_mapping(after_summary),
-        changes=_safe_mapping(changes, allowlist={"fields"}),
+        changes=_safe_mapping(changes),
         metadata=safe_metadata,
         request_id=_safe_text(request_id, 100),
         trace_id=_safe_text(trace_id, 100),

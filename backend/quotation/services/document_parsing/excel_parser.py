@@ -26,7 +26,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.3.0"
+PARSER_VERSION = "2.4.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -298,9 +298,19 @@ def _project_fields(rows: list[list[Any]]) -> dict[str, str]:
         "payment terms": "payment_terms",
         "currency": "currency",
     }
+    issuer_headers = {
+        "account manager",
+        "contact person",
+        "prepared by",
+        "sales person",
+        "sales representative",
+        "salesperson",
+    }
     for row_index, row in enumerate(rows[:-1]):
         normalized = [_normalized(value) for value in row]
-        if "project" not in normalized or "currency" not in normalized:
+        if "project" not in normalized or not (
+            issuer_headers.intersection(normalized) or "email" in normalized
+        ):
             continue
         values = rows[row_index + 1]
         result = {}

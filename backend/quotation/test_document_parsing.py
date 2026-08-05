@@ -29,7 +29,7 @@ from quotation.services.document_parsing.excel_parser import (
 from quotation.services.storage import document_storage_key, write_document
 
 
-def standard_quotation_workbook() -> bytes:
+def standard_quotation_workbook(*, include_currency: bool = True) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Quotation"
@@ -77,7 +77,7 @@ def standard_quotation_workbook() -> bytes:
         "",
         "",
         "Payment Terms",
-        "Currency",
+        "Currency" if include_currency else "",
     )
     values = (
         "Alice Chen",
@@ -86,7 +86,7 @@ def standard_quotation_workbook() -> bytes:
         "",
         "",
         "NET 30",
-        "USD",
+        "USD" if include_currency else "",
     )
     for column, value in enumerate(headers, start=1):
         sheet.cell(14, column, value)
@@ -383,6 +383,23 @@ class StandardQuotationExcelParserTests(TestCase):
         self.assertEqual(parsed.validation_errors, [])
         self.assertEqual(parsed.validation_warnings, [])
 
+    def test_parses_salesperson_when_currency_column_is_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quotation-without-currency.xlsx"
+            path.write_bytes(
+                standard_quotation_workbook(include_currency=False)
+            )
+
+            parsed = parse_standard_quotation_excel(path)
+
+        quote = parsed.quotation
+        self.assertEqual(quote.issuer_contact_name, "Alice Chen")
+        self.assertEqual(quote.issuer_contact_email, "sales@example.com")
+        self.assertEqual(quote.project_name, "Lifecycle Test")
+        self.assertEqual(quote.payment_terms, "NET 30")
+        self.assertEqual(quote.currency, "USD")
+        self.assertEqual(parsed.validation_errors, [])
+
     def test_parses_split_customer_cells_and_flexible_columns(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "asl.xlsx"
@@ -514,6 +531,130 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(parsed.source_totals["grand_total"], "45088.00")
         self.assertEqual(parsed.validation_errors, [])
         self.assertEqual(parsed.validation_warnings, [])
+
+    def test_parses_salesperson_when_currency_column_is_missing(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Contact Person Email Project Payment Terms",
+                    (
+                        "Evelyn Chee evelyn.chee@oneprocloud.com "
+                        "Vonosis- DR Project for Asia Pacific "
+                        "Petrochemical_7VM_Renewal CIA"
+                    ),
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.issuer_contact_name, "Evelyn Chee")
+        self.assertEqual(
+            quote.issuer_contact_email,
+            "evelyn.chee@oneprocloud.com",
+        )
+        self.assertEqual(
+            quote.project_name,
+            (
+                "Vonosis- DR Project for Asia Pacific "
+                "Petrochemical_7VM_Renewal"
+            ),
+        )
+        self.assertEqual(quote.payment_terms, "CIA")
+        self.assertEqual(quote.currency, "USD")
+
+    def test_parses_salesperson_from_misaligned_signature_block(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Contact Person Email Project Payment Terms Currency",
+                    (
+                        "evelyn.chee@oneprocloud. Evelyn Chee "
+                        "HyperBDR License for Customer CIA USD/MYR"
+                    ),
+                    "Name : Name : Evelyn Chee",
+                    "Title : Email : evelyn.chee@oneprocloud.com",
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.issuer_contact_name, "Evelyn Chee")
+        self.assertEqual(
+            quote.issuer_contact_email,
+            "evelyn.chee@oneprocloud.com",
+        )
+        self.assertEqual(quote.issuer_contact_title, "")
+
+    def test_signature_fallback_excludes_customer_contacts(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Ship to",
+                    "Company : Customer Limited",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Bill to:",
+                    "Company : Customer Limited",
+                    "Name : Billing Contact",
+                    "Email : billing@example.com",
+                    "Contact Person  Email  Project  Payment Terms  Currency",
+                    (
+                        "evelyn.chee@oneprocloud.  Evelyn Chee  "
+                        "HyperBDR License  CIA  USD/MYR"
+                    ),
+                    "Name : Name : Evelyn Chee",
+                    "Title : Email : evelyn.chee@oneprocloud.com",
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.contact_person, "Customer Contact")
+        self.assertEqual(quote.email, "customer@example.com")
+        self.assertEqual(quote.issuer_contact_name, "Evelyn Chee")
+        self.assertEqual(
+            quote.issuer_contact_email,
+            "evelyn.chee@oneprocloud.com",
+        )
+
+    def test_customer_contact_is_not_used_as_salesperson(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Ship to",
+                    "Company : Customer Limited",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Bill to:",
+                    "Company : Customer Limited",
+                    "Name : Billing Contact",
+                    "Email : billing@example.com",
+                    "Contact Person Email Project Payment Terms",
+                    "Incomplete imported row",
+                ]
+            )
+        )
+
+        self.assertEqual(parsed.quotation.issuer_contact_name, "")
+        self.assertEqual(parsed.quotation.issuer_contact_email, "")
 
     def test_parses_explicit_unknown_product_line_without_bdr_default(self):
         from quotation.services.document_parsing.pdf_parser import (
@@ -728,6 +869,8 @@ class DocumentParseEndpointTests(TestCase):
         self.assertEqual(parsed.quotation.email, "")
         self.assertEqual(parsed.quotation.billing_contact, "")
         self.assertEqual(parsed.quotation.billing_email, "")
+        self.assertEqual(parsed.quotation.issuer_contact_name, "")
+        self.assertEqual(parsed.quotation.issuer_contact_email, "")
 
     def test_inventory_excel_is_marked_not_quotation(self):
         write_document(
@@ -960,7 +1103,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.3.0")
+        self.assertEqual(new_result.parser_version, "2.4.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)
@@ -1060,7 +1203,16 @@ class DocumentParseEndpointTests(TestCase):
         self.assertEqual(response.data["status"], "confirmed", response.data)
         quotation = Quotation.objects.get()
         self.assertEqual(quotation.source_quote_no, "LEGACY-001")
+        self.assertEqual(quotation.issuer_contact_name, "")
+        self.assertEqual(quotation.issuer_contact_email, "")
         self.assertEqual(str(quotation.grand_total), "1234.50")
+        self.assertIn(
+            "missing_salesperson",
+            {
+                warning["code"]
+                for warning in response.data["validation_warnings_json"]
+            },
+        )
 
     def test_changed_document_with_same_quote_number_creates_separate_quote(self):
         from quotation.services.document_parsing.service import (

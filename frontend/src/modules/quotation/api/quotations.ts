@@ -91,7 +91,7 @@ interface ApiQuotationListItem {
   client_company: string;
   contact_person: string;
   quote_date?: string | null;
-  issuer_contact_name?: string | null;
+  issuer_contact_name: string;
   created_at: string;
   currency: string;
   grand_total: number | string;

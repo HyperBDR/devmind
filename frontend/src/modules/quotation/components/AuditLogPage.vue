@@ -17,6 +17,10 @@ import {
   type AuditEvent,
 } from '../api/audit'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import {
+  buildAuditChangeLines,
+  type AuditDiffLineKind,
+} from '../utils/auditChangeDiff'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import FormSelect from './FormSelect.vue'
 
@@ -181,9 +185,6 @@ function actionLabel(value: string, module = '') {
   if (value === 'delete' && moduleKey === 'quotation') {
     return t('quotation.pages.audit.actions.deletedQuote')
   }
-  if (value === 'delete' && moduleKey === 'document') {
-    return t('quotation.pages.audit.actions.deletedFile')
-  }
   if (value === 'update' && moduleKey === 'quotation') {
     return t('quotation.pages.audit.actions.updatedQuote')
   }
@@ -242,6 +243,29 @@ function fieldLabel(value: string) {
   return key
     ? t(`quotation.pages.audit.fields.${key}`)
     : fallbackLabel(value)
+}
+
+function changeLineClass(kind: AuditDiffLineKind): string {
+  if (kind === 'removed') return 'bg-red-50 text-red-700'
+  if (kind === 'added') {
+    return 'bg-emerald-50 text-emerald-700'
+  }
+  return 'text-dm-text'
+}
+
+function linePrefix(kind: AuditDiffLineKind): string {
+  if (kind === 'removed') return '- '
+  if (kind === 'added') return '+ '
+  return '  '
+}
+
+function changeDetails(event: AuditEvent) {
+  return Object.entries(event.changes || {})
+    .filter(([field]) => field !== 'fields')
+    .map(([field, value]) => ({
+      field,
+      lines: buildAuditChangeLines(value),
+    }))
 }
 
 watch([moduleFilter, actionFilter, resultFilter, dateFrom, dateTo], () => {
@@ -412,6 +436,34 @@ onMounted(() => void loadEvents())
         </template>
         <template v-if="selected.changes.fields?.length">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.changedFields') }}</dt><dd>{{ selected.changes.fields.map(fieldLabel).join('、') }}</dd>
+        </template>
+        <template v-if="changeDetails(selected).length">
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.changeDetails') }}</dt>
+          <dd class="space-y-2">
+            <div
+              v-for="change in changeDetails(selected)"
+              :key="change.field"
+              class="rounded-lg border border-dm-border-light bg-slate-50 p-3"
+            >
+              <p class="mb-2 text-xs font-semibold text-dm-text-secondary">
+                {{ fieldLabel(change.field) }}
+              </p>
+              <pre
+                class="max-h-56 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed"
+              ><span
+                v-for="(line, lineIndex) in change.lines"
+                :key="`${change.field}-${lineIndex}`"
+                class="block rounded-sm px-1"
+                :class="changeLineClass(line.kind)"
+                :data-change-line-removed="
+                  line.kind === 'removed' || undefined
+                "
+                :data-change-line-added="
+                  line.kind === 'added' || undefined
+                "
+              >{{ linePrefix(line.kind) }}{{ line.text }}</span></pre>
+            </div>
+          </dd>
         </template>
         <template v-if="selected.module === 'quotation' && selected.target_id && ['update', 'generate'].includes(selected.action)">
           <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.relatedVersion') }}</dt>

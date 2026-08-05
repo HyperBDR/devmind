@@ -16,7 +16,10 @@ export interface AuditEvent {
   target_id: string
   target_label: string
   summary: string
-  changes: { fields?: string[] }
+  changes: {
+    fields?: string[]
+    [field: string]: unknown
+  }
   metadata: {
     status_code?: number
     version_no?: number
