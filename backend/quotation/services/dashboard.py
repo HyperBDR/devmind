@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db.models import (
@@ -33,19 +33,31 @@ MONTH_PERIOD_COUNT = 6
 WEEK_PERIOD_COUNT = 8
 BREAKDOWN_MIN_SHARE = Decimal("0.02")
 BREAKDOWN_MAX_ITEMS = 8
+CURRENCY_ALIASES = {
+    "CNY": ("CNY", "RMB"),
+}
 
 
 def _money(value: Decimal | None) -> str:
     return f"{value or Decimal('0'):.2f}"
 
 
+def _normalize_currency(currency: str) -> str:
+    return "CNY" if currency == "RMB" else currency
+
+
+def _currency_values(currency: str) -> tuple[str, ...]:
+    return CURRENCY_ALIASES.get(currency, (currency,))
+
+
 def _available_currencies(queryset: QuerySet[Quotation]) -> list[str]:
-    return list(
+    currencies = (
         queryset.exclude(currency="")
         .order_by("currency")
         .values_list("currency", flat=True)
         .distinct()
     )
+    return sorted({_normalize_currency(currency) for currency in currencies})
 
 
 def _with_first_accepted_at(
@@ -97,9 +109,12 @@ def build_dashboard_summary(
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
 ) -> dict[str, object]:
     """Build lightweight KPI aggregates for the quotation dashboard."""
+    currency = _normalize_currency(currency)
+    currency_values = _currency_values(currency)
     local_now = timezone.localtime()
     month_start = _month_start(local_now)
     month_end = _next_month(month_start)
+    previous_month_start = _shift_month(month_start, -1)
     counts = queryset.aggregate(
         accepted_count=Count(
             "pk",
@@ -113,11 +128,43 @@ def build_dashboard_summary(
             "pk",
             filter=Q(status=QuoteStatus.DRAFT),
         ),
+        month_quote_count=Count(
+            "pk",
+            filter=Q(
+                currency__in=currency_values,
+                quote_date__gte=month_start.date(),
+                quote_date__lt=month_end.date(),
+            ),
+        ),
+        previous_month_quote_count=Count(
+            "pk",
+            filter=Q(
+                currency__in=currency_values,
+                quote_date__gte=previous_month_start.date(),
+                quote_date__lt=month_start.date(),
+            ),
+        ),
+        month_quote_amount=Sum(
+            "grand_total",
+            filter=Q(
+                currency__in=currency_values,
+                quote_date__gte=month_start.date(),
+                quote_date__lt=month_end.date(),
+            ),
+        ),
+        previous_month_quote_amount=Sum(
+            "grand_total",
+            filter=Q(
+                currency__in=currency_values,
+                quote_date__gte=previous_month_start.date(),
+                quote_date__lt=month_start.date(),
+            ),
+        ),
     )
     won_amount = (
         _with_first_accepted_at(
             queryset.filter(
-                currency=currency,
+                currency__in=currency_values,
                 status=QuoteStatus.ACCEPTED,
             )
         )
@@ -135,6 +182,16 @@ def build_dashboard_summary(
     return {
         "currency": currency,
         "available_currencies": _available_currencies(queryset),
+        "current_period": month_start.strftime("%Y-%m"),
+        "previous_period": previous_month_start.strftime("%Y-%m"),
+        "month_quote_count": counts["month_quote_count"],
+        "previous_month_quote_count": counts[
+            "previous_month_quote_count"
+        ],
+        "month_quote_amount": _money(counts["month_quote_amount"]),
+        "previous_month_quote_amount": _money(
+            counts["previous_month_quote_amount"]
+        ),
         "month_won_amount": _money(won_amount),
         "success_rate": success_rate,
         "success_rate_numerator": accepted_count,
@@ -205,13 +262,74 @@ def _trend_rows(
     ]
 
 
+def _quotation_trend_rows(
+    queryset: QuerySet[Quotation],
+    starts: list[datetime],
+    truncation,
+    period_format,
+) -> list[dict[str, object]]:
+    """Aggregate quotation amount and count by business quote date."""
+    end = (
+        _next_month(starts[-1])
+        if truncation is TruncMonth
+        else starts[-1] + timedelta(days=7)
+    )
+    rows = (
+        queryset.filter(
+            quote_date__gte=starts[0].date(),
+            quote_date__lt=end.date(),
+        )
+        .annotate(period=truncation("quote_date"))
+        .values("period")
+        .annotate(
+            quote_amount=Sum("grand_total"),
+            quote_count=Count("pk"),
+        )
+        .order_by("period")
+    )
+    aggregates: dict[date, dict[str, object]] = {
+        row["period"]: row for row in rows
+    }
+    return [
+        {
+            "period": period_format(start),
+            "quote_amount": _money(
+                aggregates.get(start.date(), {}).get("quote_amount")
+            ),
+            "quote_count": aggregates.get(start.date(), {}).get(
+                "quote_count",
+                0,
+            ),
+        }
+        for start in starts
+    ]
+
+
+def _merge_trend_rows(
+    legacy_rows: list[dict[str, str]],
+    quotation_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Keep legacy trend fields while adding quotation-only metrics."""
+    return [
+        {**legacy, **quotation}
+        for legacy, quotation in zip(
+            legacy_rows,
+            quotation_rows,
+            strict=True,
+        )
+    ]
+
+
 def build_dashboard_analytics(
     queryset: QuerySet[Quotation],
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
 ) -> dict[str, object]:
     """Build bounded chart aggregates without serializing quotation rows."""
+    currency = _normalize_currency(currency)
     local_now = timezone.localtime()
-    currency_queryset = queryset.filter(currency=currency)
+    currency_queryset = queryset.filter(
+        currency__in=_currency_values(currency)
+    )
     breakdown_queryset = currency_queryset.filter(
         status__in=CHART_STATUSES,
         grand_total__gt=0,
@@ -267,17 +385,33 @@ def build_dashboard_analytics(
         ),
         "breakdown_omitted_amount": _money(total_amount - displayed_amount),
         "trends": {
-            "monthly": _trend_rows(
-                currency_queryset,
-                month_starts,
-                TruncMonth,
-                lambda value: value.strftime("%Y-%m"),
+            "monthly": _merge_trend_rows(
+                _trend_rows(
+                    currency_queryset,
+                    month_starts,
+                    TruncMonth,
+                    lambda value: value.strftime("%Y-%m"),
+                ),
+                _quotation_trend_rows(
+                    currency_queryset,
+                    month_starts,
+                    TruncMonth,
+                    lambda value: value.strftime("%Y-%m"),
+                ),
             ),
-            "weekly": _trend_rows(
-                currency_queryset,
-                week_starts,
-                TruncWeek,
-                lambda value: value.date().isoformat(),
+            "weekly": _merge_trend_rows(
+                _trend_rows(
+                    currency_queryset,
+                    week_starts,
+                    TruncWeek,
+                    lambda value: value.date().isoformat(),
+                ),
+                _quotation_trend_rows(
+                    currency_queryset,
+                    week_starts,
+                    TruncWeek,
+                    lambda value: value.date().isoformat(),
+                ),
             ),
         },
         "generated_at": local_now.isoformat(),
@@ -289,7 +423,7 @@ def build_dashboard_recent(
     limit: int,
 ) -> dict[str, object]:
     """Return a bounded projection for the recent quotations card."""
-    rows = queryset.order_by("-created_at").values(
+    rows = queryset.order_by("-updated_at", "-id").values(
         "id",
         "quote_no",
         "source_quote_no",
@@ -297,6 +431,7 @@ def build_dashboard_recent(
         "client_company",
         "issuer_contact_name",
         "created_at",
+        "updated_at",
         "currency",
         "grand_total",
         "status",
@@ -310,6 +445,7 @@ def build_dashboard_recent(
                 "client_company": row["client_company"],
                 "salesperson": row["issuer_contact_name"],
                 "created_at": row["created_at"].isoformat(),
+                "updated_at": row["updated_at"].isoformat(),
                 "currency": row["currency"],
                 "grand_total": _money(row["grand_total"]),
                 "status": row["status"],
