@@ -45,7 +45,7 @@ const pageCount = computed(() => Math.max(Math.ceil(total.value / pageSize), 1))
 const rangeStart = computed(() => total.value ? (page.value - 1) * pageSize + 1 : 0)
 const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
 
-const moduleOptions = ['quotation', 'catalog']
+const moduleOptions = ['quotation', 'document', 'feishu', 'catalog']
 const moduleAliases: Record<string, string> = {
   quote: 'quotation',
 }
@@ -54,6 +54,9 @@ const actionOptions = [
   'update',
   'delete',
   'generate',
+  'upload',
+  'download',
+  'import',
 ]
 const moduleFilterOptions = computed(() => [
   { value: '', label: t('quotation.pages.audit.allModules') },
@@ -460,6 +463,17 @@ onMounted(() => void loadEvents())
                 "
               >{{ linePrefix(line.kind) }}{{ line.text }}</span></pre>
             </div>
+          </dd>
+        </template>
+        <template v-if="selected.module === 'quotation' && selected.target_id && ['update', 'generate'].includes(selected.action)">
+          <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.relatedVersion') }}</dt>
+          <dd>
+            <span v-if="selected.metadata.version_no !== undefined" class="mr-2">
+              {{ t('quotation.pages.audit.versionValue', { version: selected.metadata.version_no }) }}
+            </span>
+            <RouterLink :to="`/quotation/details/${selected.target_id}`" class="font-medium text-dm-primary hover:underline" @click="selected = null">
+              {{ t('quotation.pages.audit.viewVersionHistory') }}
+            </RouterLink>
           </dd>
         </template>
         <dt class="text-dm-text-tertiary">{{ t('quotation.pages.audit.ipAddress') }}</dt><dd>{{ selected.ip_address || t('quotation.pages.audit.notAvailable') }}</dd>

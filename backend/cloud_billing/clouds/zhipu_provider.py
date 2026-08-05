@@ -98,6 +98,7 @@ class ZhipuCloud(BaseCloudProvider):
 
     def __init__(self, config: ZhipuConfig):
         super().__init__(config)
+        self.config: ZhipuConfig = config
         self.name = "zhipu"
         self._session = requests.Session()
         self._token: Optional[str] = None

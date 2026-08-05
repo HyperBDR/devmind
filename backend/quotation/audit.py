@@ -119,6 +119,11 @@ BUSINESS_AUDIT_OPERATIONS = frozenset(
         ("catalog", "create"),
         ("catalog", "delete"),
         ("catalog", "update"),
+        ("document", "delete"),
+        ("document", "download"),
+        ("document", "upload"),
+        ("feishu", "import"),
+        ("feishu", "upload"),
         ("quotation", "create"),
         ("quotation", "delete"),
         ("quotation", "generate"),
@@ -131,11 +136,16 @@ BUSINESS_AUDIT_EVENT_NAMES = frozenset(
         "catalog.item_created",
         "catalog.item_deleted",
         "catalog.item_updated",
+        "document.deleted",
+        "document.downloaded",
+        "document.imported",
+        "document.uploaded",
         "quotation.created",
         "quotation.deleted",
         "quotation.generated",
         "quotation.status_changed",
         "quotation.updated",
+        "quotation.version_created",
     }
 )
 

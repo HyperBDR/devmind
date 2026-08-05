@@ -162,6 +162,10 @@ test('imported quotation downloads expose revision formats', () => {
     quotationList,
     /handleDownloadLocal\([\s\S]*?'pdf',[\s\S]*?version\.versionNo/,
   )
+  assert.doesNotMatch(
+    quotationList,
+    /sourceDocumentType !== format/,
+  )
   assert.match(
     quotationList,
     /openFeishuFile\(quote, 'excel'\)[\s\S]*?<ExternalLink/,

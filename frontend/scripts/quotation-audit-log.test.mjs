@@ -134,10 +134,13 @@ test('Audit Log only offers approved business action filters', () => {
     'update',
     'delete',
     'generate',
+    'upload',
+    'download',
+    'import',
   ]) {
     assert.match(auditPage, new RegExp(`'${action}'`))
   }
-  assert.doesNotMatch(auditPage, /'view'|'sync'|'open'|'connect'|'upload'|'download'|'import'/)
+  assert.doesNotMatch(auditPage, /'view'|'sync'|'open'|'connect'/)
   assert.doesNotMatch(
     auditPage,
     /storage\.archive_sync_|viewedAuditLog|syncSuccessCount/,

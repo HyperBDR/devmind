@@ -94,7 +94,7 @@ def _should_record_audit(
 ) -> bool:
     """Return whether a classified response requires an audit event."""
     if status_code in {401, 403}:
-        return is_business_audit_operation(module, action)
+        return True
     return is_business_audit_operation(module, action)
 
 

@@ -264,6 +264,11 @@ class QuotationAuditEventTests(TestCase):
             ("quotation", "update"),
             ("quotation", "delete"),
             ("quotation", "generate"),
+            ("document", "upload"),
+            ("document", "download"),
+            ("document", "delete"),
+            ("feishu", "upload"),
+            ("feishu", "import"),
             ("catalog", "create"),
             ("catalog", "update"),
             ("catalog", "delete"),
@@ -275,19 +280,14 @@ class QuotationAuditEventTests(TestCase):
         quiet_cases = [
             ("quotation", "view"),
             ("document", "view"),
-            ("document", "upload"),
-            ("document", "download"),
-            ("document", "delete"),
             ("feishu", "open"),
             ("feishu", "sync"),
-            ("feishu", "upload"),
-            ("feishu", "import"),
             ("storage", "health_checked"),
         ]
         for module, action in quiet_cases:
             with self.subTest(module=module, action=action):
                 self.assertFalse(_should_record_audit(module, action, 200))
-                self.assertFalse(_should_record_audit(module, action, 403))
+                self.assertTrue(_should_record_audit(module, action, 403))
 
     def test_quote_updates_record_the_affected_business_fields(self):
         fields = ["project_name", "status", "items"]
@@ -512,7 +512,7 @@ class QuotationAuditEventTests(TestCase):
 
         self.assertFalse(AuditEvent.objects.exists())
 
-    def test_unregistered_mutation_does_not_create_user_audit_history(self):
+    def test_unregistered_mutation_only_records_authorization_denial(self):
         path = "/api/v1/quotation/unregistered-action"
         factory = RequestFactory()
         middleware = RequestIdMiddleware(
@@ -539,7 +539,10 @@ class QuotationAuditEventTests(TestCase):
         denied_response = denied_middleware(denied_request)
 
         self.assertEqual(denied_response.status_code, 403)
-        self.assertFalse(AuditEvent.objects.exists())
+        event = AuditEvent.objects.get()
+        self.assertEqual(event.event_name, "quotation.post")
+        self.assertEqual(event.result, AuditEvent.RESULT_DENIED)
+        self.assertEqual(event.target_type, "request")
 
     def test_feishu_sync_uses_operational_telemetry_not_audit(self):
         job = SyncJob.objects.create(
@@ -648,10 +651,13 @@ class QuotationAuditEventTests(TestCase):
         response = self.api.get("/api/v1/quotation/audit-events")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["total"], 1)
+        self.assertEqual(response.data["total"], 2)
         self.assertEqual(
-            response.data["items"][0]["event_name"],
-            "quotation.updated",
+            {
+                item["event_name"]
+                for item in response.data["items"]
+            },
+            {"document.uploaded", "quotation.updated"},
         )
 
     def test_activity_log_hides_internal_events_by_default(self):
@@ -715,8 +721,11 @@ class QuotationAuditEventTests(TestCase):
         response = self.api.get("/api/v1/quotation/audit-events")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["total"], 1)
-        self.assertEqual(response.data["items"][0]["action"], "update")
+        self.assertEqual(response.data["total"], 2)
+        self.assertEqual(
+            {item["action"] for item in response.data["items"]},
+            {"upload", "update"},
+        )
 
     def test_internal_audit_history_requires_an_administrator(self):
         AuditEvent.objects.create(
