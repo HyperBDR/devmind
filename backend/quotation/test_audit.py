@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
@@ -9,8 +10,8 @@ from quotation.middleware import (
     RequestIdMiddleware,
     _audit_changes,
     _classify,
-    _is_automatic_activity,
     _is_automatic_generate_followup,
+    _should_record_audit,
 )
 from quotation.models import (
     AuditEvent,
@@ -21,7 +22,7 @@ from quotation.models import (
     SyncJobStatus,
     SyncJobType,
 )
-from quotation.tasks import _record_feishu_sync_audit
+from quotation.tasks import _record_feishu_sync_observability
 from quotation.views.quotations import _quotation_changed_fields
 from rest_framework.response import Response
 from rest_framework.test import APIClient
@@ -236,20 +237,58 @@ class QuotationAuditEventTests(TestCase):
             (
                 "POST",
                 "/api/v1/quotation/quotations/quote-id/exports",
-                ("document", "export", "quotation"),
+                ("quotation", "generate", "quotation"),
             ),
         ]
         for method, path, expected in cases:
             with self.subTest(method=method, path=path):
                 self.assertEqual(_classify(method, path), expected)
 
-        self.assertIsNone(
+        self.assertEqual(
             _classify(
                 "POST",
                 "/api/v1/quotation/feishu/files/access/batch",
-            )
+            ),
+            ("feishu", "open", "document"),
         )
-        self.assertIsNone(_classify("GET", "/api/v1/quotation/exports/export-id"))
+        self.assertIsNone(
+            _classify("GET", "/api/v1/quotation/exports/export-id")
+        )
+        self.assertEqual(
+            _classify("POST", "/api/v1/quotation/unregistered-action"),
+            ("quotation", "post", "request"),
+        )
+
+    def test_business_actions_and_authorization_denials_are_recorded(self):
+        business_cases = [
+            ("quotation", "create"),
+            ("quotation", "update"),
+            ("quotation", "delete"),
+            ("quotation", "generate"),
+            ("document", "upload"),
+            ("document", "download"),
+            ("document", "delete"),
+            ("feishu", "upload"),
+            ("feishu", "import"),
+            ("catalog", "create"),
+            ("catalog", "update"),
+            ("catalog", "delete"),
+        ]
+        for module, action in business_cases:
+            with self.subTest(module=module, action=action):
+                self.assertTrue(_should_record_audit(module, action, 200))
+
+        quiet_cases = [
+            ("quotation", "view"),
+            ("document", "view"),
+            ("feishu", "open"),
+            ("feishu", "sync"),
+            ("storage", "health_checked"),
+        ]
+        for module, action in quiet_cases:
+            with self.subTest(module=module, action=action):
+                self.assertFalse(_should_record_audit(module, action, 200))
+                self.assertTrue(_should_record_audit(module, action, 403))
 
     def test_quote_updates_record_the_affected_business_fields(self):
         fields = ["project_name", "status", "items"]
@@ -352,19 +391,6 @@ class QuotationAuditEventTests(TestCase):
             )
         )
 
-    def test_background_refresh_is_not_user_activity(self):
-        request = type(
-            "Request",
-            (),
-            {
-                "META": {
-                    "HTTP_X_QUOTATION_AUDIT_SOURCE": "automatic",
-                }
-            },
-        )()
-
-        self.assertTrue(_is_automatic_activity(request))
-
     def test_background_refresh_is_not_persisted_as_activity(self):
         path = "/api/v1/quotation/feishu/sync-folder"
         factory = RequestFactory()
@@ -385,7 +411,7 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(AuditEvent.objects.exists())
 
-    def test_manual_feishu_sync_request_is_audited_as_requested(self):
+    def test_manual_feishu_sync_request_is_not_business_history(self):
         path = "/api/v1/quotation/feishu/sync-folder"
         factory = RequestFactory()
         request = factory.post(
@@ -409,15 +435,62 @@ class QuotationAuditEventTests(TestCase):
         response = middleware(request)
 
         self.assertEqual(response.status_code, 202)
-        event = AuditEvent.objects.get()
-        self.assertEqual(
-            event.event_name,
-            "storage.archive_sync_requested",
-        )
-        self.assertEqual(event.actor, self.user)
-        self.assertEqual(event.sync_job_id, "sync-job-id")
+        self.assertFalse(AuditEvent.objects.exists())
 
-    def test_feishu_sync_terminal_audit_is_idempotent(self):
+    def test_successful_views_do_not_create_business_history(self):
+        cases = [
+            "/api/v1/quotation/quotations/quote-id",
+            "/api/v1/quotation/quotations/quote-id/documents",
+            "/api/v1/quotation/feishu/documents/file-id/access",
+        ]
+        for path in cases:
+            with self.subTest(path=path):
+                request = RequestFactory().get(path)
+                request.user = self.user
+                request.resolver_match = resolve(path)
+                middleware = RequestIdMiddleware(
+                    QuotationAuditMiddleware(
+                        lambda _request: Response({"ok": True}, status=200)
+                    )
+                )
+                response = middleware(request)
+                self.assertEqual(response.status_code, 200)
+
+        self.assertFalse(AuditEvent.objects.exists())
+
+    def test_unregistered_mutation_only_records_authorization_denial(self):
+        path = "/api/v1/quotation/unregistered-action"
+        factory = RequestFactory()
+        middleware = RequestIdMiddleware(
+            QuotationAuditMiddleware(
+                lambda _request: Response({"ok": True}, status=200)
+            )
+        )
+        successful_request = factory.post(path)
+        successful_request.user = self.user
+
+        successful_response = middleware(successful_request)
+
+        self.assertEqual(successful_response.status_code, 200)
+        self.assertFalse(AuditEvent.objects.exists())
+
+        denied_middleware = RequestIdMiddleware(
+            QuotationAuditMiddleware(
+                lambda _request: Response(status=403)
+            )
+        )
+        denied_request = factory.post(path)
+        denied_request.user = self.user
+
+        denied_response = denied_middleware(denied_request)
+
+        self.assertEqual(denied_response.status_code, 403)
+        event = AuditEvent.objects.get()
+        self.assertEqual(event.event_name, "quotation.post")
+        self.assertEqual(event.result, AuditEvent.RESULT_DENIED)
+        self.assertEqual(event.target_type, "request")
+
+    def test_feishu_sync_uses_operational_telemetry_not_audit(self):
         job = SyncJob.objects.create(
             job_type=SyncJobType.PULL,
             status=SyncJobStatus.SUCCESS,
@@ -439,77 +512,87 @@ class QuotationAuditEventTests(TestCase):
             duration_ms=125,
         )
 
-        for _ in range(2):
-            _record_feishu_sync_audit(
+        with patch(
+            "quotation.tasks.record_storage_operation"
+        ) as record_metric, self.assertLogs(
+            "quotation.tasks",
+            level="INFO",
+        ) as logs:
+            _record_feishu_sync_observability(
                 job,
-                event_name="storage.archive_sync_succeeded",
-                result=AuditEvent.RESULT_SUCCEEDED,
-                summary="Feishu archive synchronization completed",
+                result="success",
             )
 
-        event = AuditEvent.objects.get(
-            event_name="storage.archive_sync_succeeded"
+        record_metric.assert_called_once_with(
+            provider="feishu",
+            operation="archive_sync",
+            result="success",
+            duration_seconds=0.125,
         )
-        self.assertEqual(event.actor, self.user)
-        self.assertEqual(event.actor_type, AuditEvent.ACTOR_TASK)
-        self.assertEqual(event.sync_job_id, job.id)
-        self.assertEqual(event.metadata["created_count"], 2)
-        self.assertEqual(event.metadata["queued_parse_count"], 2)
-        self.assertEqual(event.metadata["parsed_count"], 1)
-        self.assertEqual(event.metadata["folder_count"], 2)
-        self.assertEqual(
-            event.metadata["folder_names"],
-            ["Tower", "Customer A"],
-        )
-        self.assertEqual(event.target_label, "Tower")
+        self.assertIn("quotation_feishu_sync_completed", logs.output[0])
+        self.assertFalse(AuditEvent.objects.exists())
 
-    def test_sync_request_details_include_terminal_counters(self):
+    def test_feishu_sync_failures_use_error_logs_and_metrics(self):
         job = SyncJob.objects.create(
             job_type=SyncJobType.PULL,
-            status=SyncJobStatus.SUCCESS,
+            status=SyncJobStatus.FAILED,
             actor=self.user,
-            request_id="request-id",
-            trace_id="trace-id",
-            payload_json={"audit_source": "user"},
-            result_json={
-                "created_count": 1,
-                "skipped_count": 64,
-                "queued_parse_count": 1,
-                "parsed_count": 42,
-                "folders": [{"name": "Tower"}],
-                "errors": [],
-            },
+            error_code="folder_sync_failed",
+            duration_ms=250,
         )
-        requested = AuditEvent.objects.create(
+
+        with patch(
+            "quotation.tasks.record_storage_operation"
+        ) as record_metric, self.assertLogs(
+            "quotation.tasks",
+            level="ERROR",
+        ) as logs:
+            _record_feishu_sync_observability(
+                job,
+                result="failure",
+                error_code=job.error_code,
+            )
+
+        record_metric.assert_called_once_with(
+            provider="feishu",
+            operation="archive_sync",
+            result="failure",
+            duration_seconds=0.25,
+        )
+        self.assertIn("quotation_feishu_sync_completed", logs.output[0])
+        self.assertFalse(AuditEvent.objects.exists())
+
+    def test_archive_sync_history_is_not_user_facing(self):
+        AuditEvent.objects.create(
             actor=self.user,
             actor_email=self.user.email,
             module="feishu",
             action="sync",
             result=AuditEvent.RESULT_SUCCEEDED,
             target_type="folder",
-            target_id=str(job.id),
-            sync_job_id=str(job.id),
+            target_id="sync-job-id",
+            sync_job_id="sync-job-id",
             event_name="storage.archive_sync_requested",
             metadata={"status_code": 202},
         )
-        _record_feishu_sync_audit(
-            job,
-            event_name="storage.archive_sync_succeeded",
+        AuditEvent.objects.create(
+            actor=self.user,
+            module="feishu",
+            action="upload",
+            event_name="document.uploaded",
             result=AuditEvent.RESULT_SUCCEEDED,
-            summary="Feishu archive synchronization completed",
+            target_type="document",
+            target_id="document-id",
         )
 
         response = self.api.get("/api/v1/quotation/audit-events")
 
         self.assertEqual(response.status_code, 200)
-        item = next(
-            row for row in response.data["items"] if row["id"] == requested.id
+        self.assertEqual(response.data["total"], 1)
+        self.assertEqual(
+            response.data["items"][0]["event_name"],
+            "document.uploaded",
         )
-        self.assertEqual(item["target_label"], "Tower")
-        self.assertEqual(item["metadata"]["created_count"], 1)
-        self.assertEqual(item["metadata"]["skipped_count"], 64)
-        self.assertEqual(item["metadata"]["parsed_count"], 42)
-        self.assertEqual(item["metadata"]["queued_parse_count"], 1)
 
     def test_activity_log_hides_internal_events_by_default(self):
         AuditEvent.objects.create(
@@ -550,6 +633,15 @@ class QuotationAuditEventTests(TestCase):
             target_type="document",
             target_id="document-id",
         )
+        AuditEvent.objects.create(
+            actor=self.user,
+            module="document",
+            action="download",
+            event_name="document.downloaded",
+            result=AuditEvent.RESULT_DENIED,
+            target_type="document",
+            target_id="private-document-id",
+        )
 
         response = self.api.get("/api/v1/quotation/audit-events")
 
@@ -557,15 +649,54 @@ class QuotationAuditEventTests(TestCase):
         self.assertEqual(response.data["total"], 1)
         self.assertEqual(response.data["items"][0]["action"], "upload")
 
+    def test_internal_audit_history_requires_an_administrator(self):
+        AuditEvent.objects.create(
+            actor=self.user,
+            module="document",
+            action="download",
+            event_name="document.downloaded",
+            result=AuditEvent.RESULT_DENIED,
+            target_type="document",
+            target_id="private-document-id",
+        )
+
+        denied = self.api.get(
+            "/api/v1/quotation/audit-events",
+            {"include_internal": "true"},
+        )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                event_name="audit.viewed",
+                result=AuditEvent.RESULT_DENIED,
+                reason_code="administrator_required",
+            ).exists()
+        )
+
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        allowed = self.api.get(
+            "/api/v1/quotation/audit-events",
+            {"include_internal": "true"},
+        )
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.data["total"], 2)
+        self.assertEqual(
+            {
+                item["event_name"]
+                for item in allowed.data["items"]
+            },
+            {"document.downloaded", "audit.viewed"},
+        )
+
     def test_request_and_trace_ids_are_generated_and_propagated(self):
         response = self.api.get("/api/v1/quotation/audit-events")
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response["X-Request-ID"])
         self.assertEqual(response["X-Trace-ID"], response["X-Request-ID"])
-        event = AuditEvent.objects.get(event_name="audit.viewed")
-        self.assertEqual(event.request_id, response["X-Request-ID"])
-        self.assertEqual(event.trace_id, response["X-Trace-ID"])
+        self.assertFalse(AuditEvent.objects.exists())
 
         response = self.api.get(
             "/api/v1/quotation/audit-events",
@@ -687,6 +818,24 @@ class QuotationAuditEventTests(TestCase):
             module="quotation",
             action="create",
             result=AuditEvent.RESULT_SUCCEEDED,
+            target_id="business-quote-id",
+            request_id="export-source",
+        )
+        AuditEvent.objects.create(
+            actor=self.user,
+            module="feishu",
+            action="sync",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            target_id="internal-sync-id",
+            request_id="export-source",
+        )
+        AuditEvent.objects.create(
+            actor=self.user,
+            module="document",
+            action="download",
+            event_name="document.downloaded",
+            result=AuditEvent.RESULT_DENIED,
+            target_id="private-document-id",
             request_id="export-source",
         )
 
@@ -709,8 +858,11 @@ class QuotationAuditEventTests(TestCase):
         )
         self.assertEqual(exported.status_code, 200)
         self.assertEqual(exported["Content-Type"], "text/csv")
-        self.assertIn("export-source", exported.content.decode())
-        self.assertNotIn("risk_level", exported.content.decode().splitlines()[0])
+        content = exported.content.decode()
+        self.assertIn("business-quote-id", content)
+        self.assertNotIn("internal-sync-id", content)
+        self.assertNotIn("private-document-id", content)
+        self.assertNotIn("risk_level", content.splitlines()[0])
         self.assertTrue(
             AuditEvent.objects.filter(
                 event_name="audit.exported",

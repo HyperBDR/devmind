@@ -60,6 +60,10 @@ class QuotationListQuerySerializer(serializers.Serializer):
         max_length=40,
         required=False,
     )
+    product_line_name = serializers.CharField(
+        max_length=120,
+        required=False,
+    )
     source_type = serializers.ChoiceField(
         choices=Quotation._meta.get_field("source_type").choices,
         required=False,
@@ -266,6 +270,7 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "project_name",
             "client_company",
             "contact_person",
+            "quote_date",
             "created_at",
             "currency",
             "grand_total",
@@ -273,6 +278,8 @@ class QuotationListSerializer(serializers.ModelSerializer):
             "source_type",
             "source_document_type",
             "product_line",
+            "product_line_name",
+            "issuer_contact_name",
             "item_count",
             "latest_excel_document_id",
             "latest_pdf_document_id",
@@ -299,6 +306,7 @@ class QuotationFormContextSerializer(serializers.ModelSerializer):
             "contact_person",
             "email",
             "product_line",
+            "product_line_name",
             "billing_company",
             "billing_contact",
             "billing_email",
@@ -489,6 +497,7 @@ class QuotationSerializer(serializers.ModelSerializer):
             "source_type",
             "source_document_type",
             "product_line",
+            "product_line_name",
             "project_name",
             "currency",
             "payment_term_option",
@@ -539,7 +548,16 @@ class QuotationSerializer(serializers.ModelSerializer):
 
 class QuotationCreateSerializer(serializers.Serializer):
     quote_no = serializers.CharField()
-    product_line = serializers.CharField(required=False, default="BDR")
+    product_line = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        default="BDR",
+    )
+    product_line_name = serializers.CharField(
+        allow_blank=True,
+        required=False,
+        default="",
+    )
     project_name = serializers.CharField()
     currency = serializers.CharField(required=False, default="USD")
     payment_term_option = serializers.CharField(required=False, default="CIA")
@@ -599,7 +617,14 @@ class QuotationCreateSerializer(serializers.Serializer):
 class QuotationUpdateSerializer(serializers.Serializer):
     quote_no = serializers.CharField(required=False)
     project_name = serializers.CharField(required=False)
-    product_line = serializers.CharField(required=False)
+    product_line = serializers.CharField(
+        allow_blank=True,
+        required=False,
+    )
+    product_line_name = serializers.CharField(
+        allow_blank=True,
+        required=False,
+    )
     currency = serializers.CharField(required=False)
     payment_term_option = serializers.CharField(required=False)
     payment_terms = serializers.CharField(required=False)

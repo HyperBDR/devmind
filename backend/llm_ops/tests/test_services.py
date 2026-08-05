@@ -21,6 +21,7 @@ from llm_ops.models import (
     ResalePlatform,
     SourceSkuOffering,
 )
+from llm_ops.price_table_validation import usage_range_spec
 from llm_ops.services import (
     calculate_channel_model_cost,
     import_manual_model_prices,
@@ -30,10 +31,12 @@ from llm_ops.services import (
     record_resale_listing_price_history,
     resolve_channel_model_currency,
     resolve_channel_model_price,
+    resolve_channel_price_schedule,
     resolve_resale_listing_currency,
     sync_channel_price_items,
     sync_dependent_channel_price_items_for_price_items,
 )
+from llm_ops.tier_pricing import TieredPriceNotSupportedError
 
 
 class LLMOpsPricingServiceTests(TestCase):
@@ -84,6 +87,19 @@ class LLMOpsPricingServiceTests(TestCase):
         )
 
         self.assertEqual(cost, Decimal("28.000000"))
+
+    def test_calculates_cached_token_cost(self):
+        self.model.cache_input_price_per_million = Decimal("1")
+        self.model.save(update_fields=["cache_input_price_per_million"])
+
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            input_tokens=1_000_000,
+            cache_input_tokens=2_000_000,
+        )
+
+        self.assertEqual(cost, Decimal("3.600000"))
 
     def test_repeated_meta_model_alias_matches_share_full_table_load(self):
         from llm_ops import services
@@ -700,7 +716,7 @@ class LLMOpsPricingServiceTests(TestCase):
             {Decimal("1.000000"), Decimal("2.000000")},
         )
 
-    def test_channel_source_uses_highest_usage_range_price(self):
+    def test_channel_schedule_preserves_usage_range_prices(self):
         source = PriceCollectionSource.objects.create(
             name="Aliyun Tiered Official",
             slug="aliyun-tiered-official",
@@ -757,6 +773,7 @@ class LLMOpsPricingServiceTests(TestCase):
                 tier_type=ModelPriceItem.TIER_USAGE_RANGE,
                 tier_start=Decimal(start),
                 tier_end=Decimal(end),
+                spec=usage_range_spec(),
                 price_fingerprint=fingerprint,
                 is_current=True,
             )
@@ -766,14 +783,214 @@ class LLMOpsPricingServiceTests(TestCase):
             price_source=source,
         )
 
-        unit_prices = resolve_channel_model_price(
+        schedule = resolve_channel_price_schedule(
             self.channel,
             self.model,
             override=price,
         )
 
-        self.assertEqual(unit_prices.input_per_million, Decimal("0.960000"))
-        self.assertEqual(unit_prices.output_per_million, Decimal("9.600000"))
+        input_tiers = schedule.for_dimension(
+            ModelPriceItem.DIMENSION_TEXT_INPUT
+        )
+        output_tiers = schedule.for_dimension(
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT
+        )
+        self.assertEqual(len(schedule.tiers), 4)
+        self.assertEqual(
+            [tier.unit_price for tier in input_tiers],
+            [Decimal("0.160000"), Decimal("0.960000")],
+        )
+        self.assertEqual(
+            [tier.tier_start for tier in output_tiers],
+            [Decimal("0"), Decimal("128000")],
+        )
+        self.assertEqual(output_tiers[-1].tier_end, Decimal("256000"))
+        self.assertEqual(output_tiers[-1].currency, "CNY")
+        self.assertEqual(
+            output_tiers[-1].spec,
+            usage_range_spec(),
+        )
+        self.assertEqual(
+            output_tiers[-1].billing_unit,
+            ModelPriceItem.UNIT_PER_1M_TOKENS,
+        )
+        self.assertIsNone(record_channel_model_price_history(price))
+
+    def test_legacy_unit_price_resolution_rejects_tiered_prices(self):
+        source = PriceCollectionSource.objects.create(
+            name="Tiered Supplier",
+            slug="tiered-supplier",
+            provider=self.provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        ModelPriceItem.objects.create(
+            provider=self.provider,
+            model=self.model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal("1"),
+            tier_type=ModelPriceItem.TIER_USAGE_RANGE,
+            tier_start=Decimal("0"),
+            tier_end=None,
+            price_fingerprint="tiered-input",
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+        )
+
+        with self.assertRaises(TieredPriceNotSupportedError):
+            resolve_channel_model_price(
+                self.channel,
+                self.model,
+                override=price,
+            )
+
+    def test_channel_schedule_preserves_video_resolution_precedence(self):
+        source = PriceCollectionSource.objects.create(
+            name="Video Source",
+            slug="video-source",
+            provider=self.provider,
+            currency="USD",
+        )
+        ModelPriceItem.objects.create(
+            provider=self.provider,
+            model=self.model,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_VIDEO_OUTPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_SECOND,
+            currency="USD",
+            unit_price=Decimal("1"),
+            price_fingerprint="video-output",
+        )
+        self.model.video_resolution_prices = {
+            "1080P": {"output": "4"},
+        }
+        self.model.save(update_fields=["video_resolution_prices"])
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+            settlement_ratio=Decimal("0.5"),
+        )
+
+        schedule = resolve_channel_price_schedule(
+            self.channel,
+            self.model,
+            override=price,
+            video_resolution="1080P",
+        )
+        output_tier = schedule.for_dimension(
+            ModelPriceItem.DIMENSION_VIDEO_OUTPUT
+        )[0]
+        self.assertEqual(output_tier.unit_price, Decimal("2"))
+
+        price.custom_video_output_price_per_second = Decimal("3")
+        price.custom_video_resolution_prices = {
+            "1080P": {"output": "6"},
+        }
+        price.save()
+        schedule = resolve_channel_price_schedule(
+            self.channel,
+            self.model,
+            override=price,
+            video_resolution="1080P",
+        )
+        output_tier = schedule.for_dimension(
+            ModelPriceItem.DIMENSION_VIDEO_OUTPUT
+        )[0]
+        self.assertEqual(output_tier.unit_price, Decimal("6"))
+
+    def test_channel_cost_hits_exact_boundary_and_includes_cached_tokens(self):
+        source = PriceCollectionSource.objects.create(
+            name="Tiered Supplier",
+            slug="tiered-cost-supplier",
+            provider=self.provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+        )
+        tiers = (
+            (ModelPriceItem.DIMENSION_TEXT_INPUT, "1", "0", "1000"),
+            (ModelPriceItem.DIMENSION_TEXT_INPUT, "2", "1000", None),
+            (ModelPriceItem.DIMENSION_TEXT_OUTPUT, "4", "0", None),
+            (ModelPriceItem.DIMENSION_CACHE_INPUT, "0.5", "0", "500"),
+            (ModelPriceItem.DIMENSION_CACHE_INPUT, "1", "500", None),
+        )
+        for index, (dimension, unit_price, start, end) in enumerate(tiers):
+            ModelPriceItem.objects.create(
+                provider=self.provider,
+                model=self.model,
+                source=source,
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="USD",
+                unit_price=Decimal(unit_price),
+                tier_type=ModelPriceItem.TIER_USAGE_RANGE,
+                tier_start=Decimal(start),
+                tier_end=Decimal(end) if end is not None else None,
+                price_fingerprint=f"tiered-cost-{index}",
+            )
+        ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+            settlement_ratio=Decimal("1"),
+        )
+
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            input_tokens=1000,
+            output_tokens=2000,
+            cache_input_tokens=500,
+        )
+
+        self.assertEqual(cost, Decimal("0.010500"))
+
+    def test_channel_price_sync_is_atomic(self):
+        for index, dimension in enumerate(
+            (
+                ModelPriceItem.DIMENSION_TEXT_INPUT,
+                ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+            )
+        ):
+            ModelPriceItem.objects.create(
+                provider=self.provider,
+                model=self.model,
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="USD",
+                unit_price=Decimal(index + 1),
+                price_fingerprint=f"atomic-{index}",
+            )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+        )
+        original = sync_channel_price_items(price)
+        original_ids = [item.id for item in original]
+
+        with mock.patch.object(
+            ChannelPriceItem.objects,
+            "update_or_create",
+            side_effect=RuntimeError("simulated write failure"),
+        ):
+            with self.assertRaises(RuntimeError):
+                sync_channel_price_items(price)
+
+        self.assertEqual(
+            list(
+                ChannelPriceItem.objects.filter(is_current=True)
+                .order_by("id")
+                .values_list("id", flat=True)
+            ),
+            original_ids,
+        )
+
 
     def test_marks_channel_item_comparison_unknown_for_currency_mismatch(self):
         ModelPriceItem.objects.create(

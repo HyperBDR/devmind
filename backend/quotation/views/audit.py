@@ -12,7 +12,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from quotation.audit import record_audit_event
+from quotation.audit import business_audit_events_query, record_audit_event
 from quotation.models import AuditEvent
 from quotation.permissions import is_quotation_admin
 from quotation.serializers import AuditEventSerializer
@@ -42,16 +42,28 @@ def _audit_queryset(request):
     include_internal = (
         request.query_params.get("include_internal", "").lower() == "true"
     )
-    if not include_internal:
-        queryset = queryset.exclude(
-            Q(metadata__has_key="automatic") & Q(metadata__automatic=True)
-        ).exclude(
-            module__in=["replica"],
-        ).exclude(
-            target_type="request",
-        ).exclude(
+    if include_internal and not is_quotation_admin(request.user):
+        record_audit_event(
+            request=request,
             module="audit",
             action="view",
+            result=AuditEvent.RESULT_DENIED,
+            target_type="audit_log",
+            summary="Internal audit access denied.",
+            reason_code="administrator_required",
+            error_code="authorization_denied",
+            metadata={"status_code": 403},
+        )
+        raise PermissionDenied(
+            "Only administrators can view internal audit records."
+        )
+    if not include_internal:
+        queryset = queryset.filter(
+            business_audit_events_query(),
+        ).exclude(
+            result=AuditEvent.RESULT_DENIED,
+        ).exclude(
+            Q(metadata__has_key="automatic") & Q(metadata__automatic=True)
         )
     search = request.query_params.get("search", "").strip()
     filters = {
@@ -119,7 +131,7 @@ class AuditEventListView(APIView):
         total = queryset.count()
         start = (page - 1) * page_size
         events = queryset[start : start + page_size]
-        response = Response(
+        return Response(
             {
                 "items": AuditEventSerializer(
                     events,
@@ -132,17 +144,6 @@ class AuditEventListView(APIView):
                 "can_export": _can_export_audit(request.user),
             }
         )
-        record_audit_event(
-            request=request,
-            module="audit",
-            action="view",
-            result=AuditEvent.RESULT_SUCCEEDED,
-            target_type="audit_log",
-            summary="Viewed audit records.",
-            metadata={"status_code": 200},
-        )
-        response._quotation_audit_handled = True
-        return response
 
 
 class AuditEventExportView(APIView):

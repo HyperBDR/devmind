@@ -13,12 +13,6 @@ export function useQuotationI18n() {
     { value: 'ALL', label: t('quotation.status.all') },
     { value: 'Draft', label: t('quotation.status.Draft') },
     { value: 'Generated', label: t('quotation.status.Generated') },
-    { value: 'Uploaded', label: t('quotation.status.Uploaded') },
-    { value: 'Sent', label: t('quotation.status.Sent') },
-    { value: 'Accepted', label: t('quotation.status.Accepted') },
-    { value: 'Rejected', label: t('quotation.status.Rejected') },
-    { value: 'Expired', label: t('quotation.status.Expired') },
-    { value: 'Cancelled', label: t('quotation.status.Cancelled') },
   ])
 
   return {

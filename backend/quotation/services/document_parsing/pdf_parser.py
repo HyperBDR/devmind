@@ -11,6 +11,12 @@ try:
 except ImportError:
     pymupdf = None
 
+from quotation.services.document_parsing.business_fields import (
+    PRODUCT_LINE_LABELS,
+    QUOTE_DATE_LABELS,
+    explicit_product_line,
+    known_product_line,
+)
 from quotation.services.document_parsing.excel_parser import (
     _date,
     _decimal,
@@ -24,7 +30,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.4.0"
+PARSER_VERSION = "2.5.0"
 
 
 class QuotationPdfParseError(ValueError):
@@ -99,6 +105,30 @@ def _line_value(lines: list[str], label: str) -> str:
     return ""
 
 
+def _line_value_aliases(lines: list[str], labels: tuple[str, ...]) -> str:
+    for label in labels:
+        value = _line_value(lines, label)
+        if value:
+            return value
+    return ""
+
+
+def _product_line(
+    lines: list[str],
+    items: list[ParsedQuotationItem],
+) -> tuple[str, str]:
+    explicit = _line_value_aliases(lines, PRODUCT_LINE_LABELS)
+    if explicit:
+        return explicit_product_line(explicit)
+    for item in items:
+        name, prefix = known_product_line(
+            item.name or item.description or ""
+        )
+        if name:
+            return name, prefix
+    return "", ""
+
+
 def _section_fields(lines: list[str], start_label: str) -> dict[str, str]:
     start = None
     for index, line in enumerate(lines):
@@ -134,7 +164,15 @@ def _split_row(line: str) -> list[str]:
 def _project_fields(lines: list[str]) -> dict[str, str]:
     headers = {
         "contact person": "issuer_contact_name",
+        "sales person": "issuer_contact_name",
+        "salesperson": "issuer_contact_name",
+        "sales representative": "issuer_contact_name",
+        "prepared by": "issuer_contact_name",
+        "account manager": "issuer_contact_name",
         "email": "issuer_contact_email",
+        "job title": "issuer_contact_title",
+        "position": "issuer_contact_title",
+        "title": "issuer_contact_title",
         "project": "project_name",
         "payment terms": "payment_terms",
         "currency": "currency",
@@ -354,6 +392,7 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     items.extend(_line_items(lines, "Others", "Other"))
     for line_no, item in enumerate(items, start=1):
         item.line_no = line_no
+    product_line_name, product_line = _product_line(lines, items)
 
     tax_label, vat_rate = _tax_details(lines)
     total_amount = _amount_by_label(lines, "total amount")
@@ -383,6 +422,8 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     payment_terms = project.get("payment_terms", "")
     quotation = ParsedQuotation(
         quote_no=_line_value(lines, "Quote No."),
+        product_line=product_line,
+        product_line_name=product_line_name,
         project_name=project.get("project_name", ""),
         currency=(
             project.get("currency", "USD").upper().split("/", 1)[0]
@@ -390,7 +431,7 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         ),
         payment_term_option=_payment_term_option(payment_terms),
         payment_terms=payment_terms,
-        quote_date=_date(_line_value(lines, "Date")),
+        quote_date=_date(_line_value_aliases(lines, QUOTE_DATE_LABELS)),
         expire_date=_date(_line_value(lines, "Quote Valid Till")),
         tax_label=tax_label,
         vat_rate=vat_rate,
@@ -398,7 +439,12 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
         issuer_company_name=_issuer_company(lines),
         issuer_contact_name=project.get("issuer_contact_name", ""),
         issuer_contact_email=project.get("issuer_contact_email", ""),
-        issuer_contact_title=_line_value(lines, "Title"),
+        issuer_contact_title=(
+            project.get("issuer_contact_title", "")
+            or _line_value(lines, "Job Title")
+            or _line_value(lines, "Position")
+            or _line_value(lines, "Title")
+        ),
         client_company=ship_to.get("company", ""),
         contact_person=ship_to.get("name", ""),
         email=ship_to.get("email", ""),

@@ -1787,6 +1787,14 @@ class ResaleListing(models.Model):
         null=True,
         on_delete=models.SET_NULL,
     )
+    published_price_revision = models.ForeignKey(
+        "ResaleListingPriceRevision",
+        related_name="+",
+        blank=True,
+        null=True,
+        editable=False,
+        on_delete=models.SET_NULL,
+    )
     display_name = models.CharField(max_length=255, blank=True, default="")
     currency = models.CharField(max_length=10, blank=True, default="")
     retail_input_price_per_million = models.DecimalField(
@@ -1834,6 +1842,20 @@ class ResaleListing(models.Model):
         decimal_places=6,
         blank=True,
         null=True,
+    )
+    current_price_revision = models.ForeignKey(
+        "ResaleListingPriceRevision",
+        related_name="current_for_listings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    pending_price_revision = models.ForeignKey(
+        "ResaleListingPriceRevision",
+        related_name="pending_for_listings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
     )
     publish_status = models.CharField(
         max_length=30,
@@ -1893,6 +1915,307 @@ class ResaleListing(models.Model):
         """Ensure resale listings stay linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
         super().save(*args, **kwargs)
+
+
+class ResaleListingPriceRevision(models.Model):
+    """Immutable version of one resale listing price table."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_SUBMITTED = "submitted"
+    STATUS_APPROVED = "approved"
+    STATUS_SUPERSEDED = "superseded"
+
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_SUBMITTED, "Submitted"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_SUPERSEDED, "Superseded"),
+    )
+    IMMUTABLE_STATUSES = {
+        STATUS_SUBMITTED,
+        STATUS_APPROVED,
+        STATUS_SUPERSEDED,
+    }
+    ALLOWED_STATUS_TRANSITIONS = {
+        STATUS_DRAFT: {
+            STATUS_SUBMITTED,
+            STATUS_APPROVED,
+            STATUS_SUPERSEDED,
+        },
+        STATUS_SUBMITTED: {STATUS_APPROVED, STATUS_SUPERSEDED},
+        STATUS_APPROVED: {STATUS_SUPERSEDED},
+        STATUS_SUPERSEDED: set(),
+    }
+    IMMUTABLE_FIELDS = (
+        "listing_id",
+        "version",
+        "currency",
+        "price_fingerprint",
+        "decision_snapshot",
+        "decision_fingerprint",
+        "submitted_by_id",
+        "submitted_at",
+        "created_by_id",
+    )
+    APPROVAL_FIELDS = (
+        "approved_by_id",
+        "approved_at",
+    )
+
+    listing = models.ForeignKey(
+        ResaleListing,
+        related_name="price_revisions",
+        on_delete=models.CASCADE,
+    )
+    version = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    currency = models.CharField(max_length=10)
+    price_fingerprint = models.CharField(max_length=64, db_index=True)
+    decision_snapshot = models.JSONField(blank=True, default=dict)
+    decision_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    effective_from = models.DateTimeField(blank=True, null=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="resale_listing_price_revisions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_submitted_resale_price_revisions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    submitted_at = models.DateTimeField(blank=True, null=True)
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="llm_ops_approved_resale_price_revisions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    approved_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["listing_id", "version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["listing", "version"],
+                name="uq_llm_ops_listing_price_revision_version",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.listing} / v{self.version}"
+
+    def save(self, *args, **kwargs):
+        """Prevent in-place changes after a revision leaves draft."""
+        if self.pk:
+            previous = type(self).objects.get(pk=self.pk)
+            if previous.status != self.STATUS_DRAFT:
+                changed = [
+                    field
+                    for field in self.IMMUTABLE_FIELDS
+                    if getattr(previous, field) != getattr(self, field)
+                ]
+                if changed:
+                    raise ValidationError(
+                        {
+                            field: "Submitted price revisions are immutable."
+                            for field in changed
+                        }
+                    )
+            if previous.status in {
+                self.STATUS_APPROVED,
+                self.STATUS_SUPERSEDED,
+            }:
+                changed = [
+                    field
+                    for field in self.APPROVAL_FIELDS
+                    if getattr(previous, field) != getattr(self, field)
+                ]
+                if changed:
+                    raise ValidationError(
+                        {
+                            field: "Approval evidence is immutable."
+                            for field in changed
+                        }
+                    )
+            self._validate_status_transition(previous.status)
+            if (
+                previous.status == self.STATUS_DRAFT
+                and self.status != self.STATUS_DRAFT
+            ):
+                self.validate_price_items()
+        elif self.status != self.STATUS_DRAFT:
+            raise ValidationError(
+                {"status": "New price revisions must start as draft."}
+            )
+        super().save(*args, **kwargs)
+
+    def validate_price_items(self):
+        """Validate the complete normalized price table before submission."""
+        from .price_table_validation import validate_price_table_groups
+
+        items = list(self.items.order_by("dimension", "tier_start", "id"))
+        if not items:
+            raise ValidationError(
+                {"items": "A submitted revision requires price items."}
+            )
+        payloads = [
+            {
+                "dimension": item.dimension,
+                "billing_unit": item.billing_unit,
+                "currency": self.currency,
+                "tier_type": item.tier_type,
+                "tier_start": item.tier_start,
+                "tier_end": item.tier_end,
+                "spec": item.spec,
+            }
+            for item in items
+        ]
+        try:
+            validate_price_table_groups(payloads)
+        except ValueError as exc:
+            code = getattr(exc, "code", str(exc))
+            raise ValidationError({"items": code}) from exc
+
+    def _validate_status_transition(self, previous_status):
+        """Reject illegal revision lifecycle transitions."""
+        if self.status == previous_status:
+            return
+        allowed = self.ALLOWED_STATUS_TRANSITIONS.get(previous_status, set())
+        if self.status not in allowed:
+            raise ValidationError(
+                {"status": "Invalid price revision status transition."}
+            )
+
+    def delete(self, *args, **kwargs):
+        """Prevent deletion of immutable approval evidence."""
+        if self.status in self.IMMUTABLE_STATUSES:
+            raise ValidationError(
+                "Submitted price revisions cannot be deleted."
+            )
+        return super().delete(*args, **kwargs)
+
+
+class ResaleListingPriceItem(models.Model):
+    """Normalized price tier belonging to one resale price revision."""
+
+    DIMENSION_TEXT_INPUT = ModelPriceItem.DIMENSION_TEXT_INPUT
+    DIMENSION_TEXT_OUTPUT = ModelPriceItem.DIMENSION_TEXT_OUTPUT
+    DIMENSION_CACHE_INPUT = ModelPriceItem.DIMENSION_CACHE_INPUT
+    DIMENSION_CHOICES = (
+        (DIMENSION_TEXT_INPUT, "Text Input"),
+        (DIMENSION_TEXT_OUTPUT, "Text Output"),
+        (DIMENSION_CACHE_INPUT, "Cache Input"),
+    )
+
+    UNIT_PER_1M_TOKENS = ModelPriceItem.UNIT_PER_1M_TOKENS
+    BILLING_UNIT_CHOICES = ((UNIT_PER_1M_TOKENS, "Per 1M Tokens"),)
+
+    TIER_FLAT = ModelPriceItem.TIER_FLAT
+    TIER_USAGE_RANGE = ModelPriceItem.TIER_USAGE_RANGE
+    TIER_VOLUME = ModelPriceItem.TIER_VOLUME
+    TIER_CHOICES = ModelPriceItem.TIER_CHOICES
+
+    revision = models.ForeignKey(
+        ResaleListingPriceRevision,
+        related_name="items",
+        on_delete=models.CASCADE,
+    )
+    dimension = models.CharField(max_length=50, choices=DIMENSION_CHOICES)
+    billing_unit = models.CharField(
+        max_length=50,
+        choices=BILLING_UNIT_CHOICES,
+        default=UNIT_PER_1M_TOKENS,
+    )
+    tier_type = models.CharField(
+        max_length=50,
+        choices=TIER_CHOICES,
+        default=TIER_FLAT,
+    )
+    tier_start = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        blank=True,
+        null=True,
+    )
+    tier_end = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        blank=True,
+        null=True,
+    )
+    unit_price = models.DecimalField(max_digits=14, decimal_places=6)
+    spec = models.JSONField(blank=True, default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["dimension", "tier_start", "id"]
+        indexes = [
+            models.Index(
+                fields=["revision", "dimension", "tier_start"],
+                name="llmops_resale_item_tier_idx",
+            )
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(unit_price__gte=0),
+                name="ck_llm_ops_resale_item_price_nonnegative",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.revision} / {self.dimension}"
+
+    def save(self, *args, **kwargs):
+        """Reject item changes after the parent revision is submitted."""
+        revision_ids = {self.revision_id}
+        if self.pk:
+            persisted_revision_id = type(self).objects.values_list(
+                "revision_id",
+                flat=True,
+            ).get(pk=self.pk)
+            revision_ids.add(persisted_revision_id)
+        has_immutable_revision = ResaleListingPriceRevision.objects.filter(
+            pk__in=revision_ids,
+            status__in=ResaleListingPriceRevision.IMMUTABLE_STATUSES,
+        ).exists()
+        if has_immutable_revision:
+            raise ValidationError(
+                "Items in submitted price revisions cannot be modified."
+            )
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        """Reject item deletion after the parent revision is submitted."""
+        persisted_revision_id = type(self).objects.values_list(
+            "revision_id",
+            flat=True,
+        ).get(pk=self.pk)
+        is_immutable = ResaleListingPriceRevision.objects.filter(
+            pk=persisted_revision_id,
+            status__in=ResaleListingPriceRevision.IMMUTABLE_STATUSES,
+        ).exists()
+        if is_immutable:
+            raise ValidationError(
+                "Items in submitted price revisions cannot be deleted."
+            )
+        return super().delete(*args, **kwargs)
 
 
 class ResaleListingExclusion(models.Model):
@@ -2096,6 +2419,7 @@ class UsageReconciliationRecord(models.Model):
     )
     input_tokens = models.PositiveBigIntegerField(default=0)
     output_tokens = models.PositiveBigIntegerField(default=0)
+    cache_input_tokens = models.PositiveBigIntegerField(default=0)
     audio_input_seconds = models.DecimalField(
         max_digits=14,
         decimal_places=3,
