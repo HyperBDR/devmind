@@ -887,7 +887,30 @@ def collect_billing_data(
                     current_hour=current_hour,
                 )
 
-                if previous_billing is None:
+                balance_only = bool(billing_data.get("balance_only"))
+
+                if balance_only:
+                    # Providers without a consumption history API (e.g.
+                    # DeepSeek) derive hourly cost from the balance delta
+                    # between snapshots. Top-ups make the delta negative,
+                    # which is clamped to zero.
+                    if (
+                        previous_billing is not None
+                        and previous_billing.balance is not None
+                        and balance is not None
+                        and previous_billing.period == current_period
+                    ):
+                        derived_hourly = previous_billing.balance - balance
+                        hourly_cost = (
+                            derived_hourly
+                            if derived_hourly > 0
+                            else Decimal("0")
+                        )
+                        total_cost = previous_billing.total_cost + hourly_cost
+                    else:
+                        hourly_cost = Decimal("0")
+                        total_cost = Decimal("0")
+                elif previous_billing is None:
                     hourly_cost = total_cost
                 else:
                     if previous_billing.period == current_period:
