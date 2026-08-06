@@ -78,7 +78,7 @@ class GooglePriceCatalogCollectorTests(SimpleTestCase):
         )
         self.assertEqual(
             pro["price_rows"][1]["input_token_range"],
-            "200001-",
+            "200000+",
         )
         self.assertEqual(
             pro["price_rows"][0]["cache_hit_price_per_million"],
