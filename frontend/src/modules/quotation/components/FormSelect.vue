@@ -23,6 +23,7 @@ const props = withDefaults(
     testId?: string
     placeholder?: string
     ariaLabel?: string
+    compact?: boolean
   }>(),
   {
     disabled: false,
@@ -30,6 +31,7 @@ const props = withDefaults(
     triggerClassName: '',
     panelClassName: '',
     placeholder: '请选择',
+    compact: false,
   },
 )
 
@@ -70,12 +72,16 @@ function selectOption(option: FormSelectOption) {
       :data-testid="testId"
       :aria-label="ariaLabel"
       :disabled="disabled"
-      :class="`${FORM_SELECT_CLASS} ${FORM_SELECT_DISABLED_CLASS} text-left ${triggerClassName} ${
+      :class="`${FORM_SELECT_CLASS} ${FORM_SELECT_DISABLED_CLASS} text-left ${
+        compact ? 'qmp-select-field--compact flex items-center' : ''
+      } ${triggerClassName} ${
         disabled ? 'cursor-not-allowed' : 'cursor-pointer'
       }`"
       @click="toggleOpen"
     >
-      <span class="block truncate">{{ displayLabel }}</span>
+      <span :class="compact ? 'leading-none' : 'block truncate'">
+        {{ displayLabel }}
+      </span>
     </button>
 
     <DropdownPanel
@@ -86,6 +92,7 @@ function selectOption(option: FormSelectOption) {
       <li v-for="option in options" :key="option.value">
         <DropdownOption
           :selected="option.value === currentValue"
+          :compact="compact"
           @click="selectOption(option)"
         >
           {{ option.label }}
