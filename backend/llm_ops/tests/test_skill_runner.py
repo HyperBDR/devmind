@@ -248,6 +248,36 @@ ALIYUN_PREFIXED_MODEL_HTML = """
 </table>
 """
 
+ALIYUN_MIXED_FLAT_TIERED_HTML = """
+<table>
+  <tr>
+    <th>模型 ID（Model ID）</th><th>模式</th>
+    <th>单次请求的输入 Token 数</th>
+    <th>输入单价（每百万 Token）</th>
+    <th>输出单价（每百万 Token）</th><th>免费额度</th>
+  </tr>
+  <tr>
+    <td>ZHIPU/GLM-5</td><td>非思考和思考模式</td>
+    <td>0&lt;Token≤32K</td><td>4 元</td><td>18 元</td><td>-</td>
+  </tr>
+  <tr>
+    <td>ZHIPU/GLM-5</td><td>非思考和思考模式</td>
+    <td>32K&lt;Token≤198K</td><td>6 元</td><td>22 元</td><td>-</td>
+  </tr>
+</table>
+<table>
+  <tr>
+    <th>模型 ID（Model ID）</th><th>模式</th>
+    <th>输入单价（每百万 Token）</th>
+    <th>输出单价（每百万 Token）</th><th>免费额度</th>
+  </tr>
+  <tr>
+    <td>ZHIPU/GLM-5</td><td>非思考和思考模式</td>
+    <td>6 元</td><td>22 元</td><td>无</td>
+  </tr>
+</table>
+"""
+
 
 def siliconflow_html(pricing_items):
     payload = json.dumps(
@@ -591,6 +621,76 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
             "deepseek-ai/DeepSeek-V4-Pro",
         )
 
+    def test_siliconflow_fallback_price_merges_into_tiered_table(self):
+        payload = collect_vendor_price_catalog(
+            "siliconflow",
+            {
+                "provider_name": "SiliconFlow",
+                "currency": "CNY",
+                "raw_html": siliconflow_html(
+                    [
+                        {
+                            "playgroundName": "Qwen/Qwen3.5-9B",
+                            "playgroundSort": 50000,
+                            "skuName": "Qwen/Qwen3.5-9B",
+                            "componentCode": "input-tokens",
+                            "coordinateDesc": "[0, 128k)",
+                            "price_scenario": "兜底价",
+                            "realTimePriceCnyUnit": "0.0005",
+                            "unitZhCnName": "K tokens",
+                        },
+                        {
+                            "playgroundName": "Qwen/Qwen3.5-9B",
+                            "playgroundSort": 50000,
+                            "skuName": "Qwen/Qwen3.5-9B",
+                            "componentCode": "output-tokens",
+                            "coordinateDesc": "[0, 128k)",
+                            "price_scenario": "兜底价",
+                            "realTimePriceCnyUnit": "0.004",
+                            "unitZhCnName": "K tokens",
+                        },
+                        {
+                            "playgroundName": "Qwen/Qwen3.5-9B",
+                            "playgroundSort": 50000,
+                            "skuName": "Qwen/Qwen3.5-9B",
+                            "componentCode": "input-tokens",
+                            "coordinateDesc": "[128k, +∞)",
+                            "price_scenario": "兜底价",
+                            "realTimePriceCnyUnit": "0.0015",
+                            "unitZhCnName": "K tokens",
+                        },
+                        {
+                            "playgroundName": "Qwen/Qwen3.5-9B",
+                            "playgroundSort": 50000,
+                            "skuName": "Qwen/Qwen3.5-9B",
+                            "componentCode": "output-tokens",
+                            "coordinateDesc": "[128k, +∞)",
+                            "price_scenario": "兜底价",
+                            "realTimePriceCnyUnit": "0.012",
+                            "unitZhCnName": "K tokens",
+                        },
+                    ]
+                ),
+            },
+        )
+
+        self.assertEqual(payload["total_models"], 1)
+        model = payload["models"][0]
+        self.assertEqual(model["model_id"], "Qwen/Qwen3.5-9B")
+        rows = {
+            str(row["values"].get("input_token_range")): row["values"]
+            for row in model["price_rows"]
+        }
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows["0-128000"]["input_price"], "0.5")
+        self.assertEqual(rows["0-128000"]["output_price"], "4")
+        self.assertEqual(rows["128000+"]["input_price"], "1.5")
+        self.assertEqual(rows["128000+"]["output_price"], "12")
+        self.assertEqual(
+            rows["128000+"]["output_token_range"],
+            "128000+",
+        )
+
     def test_aliyun_vendor_skill_extracts_unconfigured_page_rows(self):
         payload = run_vendor_pricing_skill(
             "aliyun",
@@ -679,6 +779,25 @@ class ModelPriceSkillRunnerTests(SimpleTestCase):
         values = payload["models"][0]["price_rows"][0]["values"]
         self.assertEqual(values["input_price"], "8")
         self.assertEqual(values["output_price"], "28")
+
+    def test_aliyun_vendor_skill_merges_flat_fallback_into_tiered(self):
+        payload = run_vendor_pricing_skill(
+            "aliyun",
+            {
+                "provider_name": "阿里云",
+                "currency": "CNY",
+                "raw_html": ALIYUN_MIXED_FLAT_TIERED_HTML,
+            },
+        )
+
+        self.assertEqual(payload["total_models"], 1)
+        rows = payload["models"][0]["price_rows"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0]["values"]["input_token_range"], "0-32000")
+        self.assertEqual(rows[0]["values"]["input_price"], "4")
+        self.assertEqual(rows[1]["values"]["input_token_range"], "32000-198000")  # noqa: E501
+        self.assertEqual(rows[1]["values"]["input_price"], "6")
+        self.assertEqual(rows[2]["values"]["input_token_range"], "198000+")
 
     def test_volcengine_vendor_skill_returns_standard_catalog_json(self):
         payload = run_vendor_pricing_skill(

@@ -404,7 +404,7 @@ def token_range_for_index(index: int, row_count: int) -> str:
     """Return the Google context-window tier for a price row."""
     if row_count < 2:
         return ""
-    return "0-200000" if index == 0 else "200001-"
+    return "0-200000" if index == 0 else "200000+"
 
 
 def upsert_model(

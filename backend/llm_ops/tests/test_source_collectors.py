@@ -646,6 +646,100 @@ class PriceCollectionSkuPersistenceTests(TestCase):
         self.assertEqual(input_item.model.sku, sku)
         self.assertEqual(input_item.unit_price, Decimal("1.000000"))
 
+    def test_siliconflow_mixed_flat_tiered_rows_persist_as_tiers(self):
+        from llm_ops.price_collectors.parsers import siliconflow
+        from llm_ops.tests.test_skill_runner import siliconflow_html
+
+        meta_model = MetaModel.objects.create(
+            code="qwen3.5-9b",
+            name="Qwen3.5 9B",
+            owner_code="qwen",
+            owner_name="Qwen",
+        )
+        models = siliconflow.extract_models(
+            siliconflow_html(
+                [
+                    {
+                        "playgroundName": "Qwen/Qwen3.5-9B",
+                        "playgroundSort": 50000,
+                        "skuName": "Qwen/Qwen3.5-9B",
+                        "componentCode": "input-tokens",
+                        "coordinateDesc": "[0, 128k)",
+                        "price_scenario": "兜底价",
+                        "realTimePriceCnyUnit": "0.0005",
+                        "unitZhCnName": "K tokens",
+                    },
+                    {
+                        "playgroundName": "Qwen/Qwen3.5-9B",
+                        "playgroundSort": 50000,
+                        "skuName": "Qwen/Qwen3.5-9B",
+                        "componentCode": "output-tokens",
+                        "coordinateDesc": "[0, 128k)",
+                        "price_scenario": "兜底价",
+                        "realTimePriceCnyUnit": "0.004",
+                        "unitZhCnName": "K tokens",
+                    },
+                    {
+                        "playgroundName": "Qwen/Qwen3.5-9B",
+                        "playgroundSort": 50000,
+                        "skuName": "Qwen/Qwen3.5-9B",
+                        "componentCode": "input-tokens",
+                        "coordinateDesc": "[128k, +∞)",
+                        "price_scenario": "兜底价",
+                        "realTimePriceCnyUnit": "0.0015",
+                        "unitZhCnName": "K tokens",
+                    },
+                    {
+                        "playgroundName": "Qwen/Qwen3.5-9B",
+                        "playgroundSort": 50000,
+                        "skuName": "Qwen/Qwen3.5-9B",
+                        "componentCode": "output-tokens",
+                        "coordinateDesc": "[128k, +∞)",
+                        "price_scenario": "兜底价",
+                        "realTimePriceCnyUnit": "0.012",
+                        "unitZhCnName": "K tokens",
+                    },
+                ]
+            )
+        )
+        self.assertEqual(len(models), 1)
+        item = siliconflow.collected_model_from_item(
+            models[0],
+            source_url=self.source.endpoint_url,
+        )
+        offering, _ = upsert_collected_offering(
+            item,
+            source=self.source,
+            source_url=self.source.endpoint_url,
+            meta_model=meta_model,
+        )
+        price_items = sync_model_price_items(
+            item,
+            source=self.source,
+            offering=offering,
+            source_url=self.source.endpoint_url,
+        )
+
+        input_items = [
+            price_item
+            for price_item in price_items
+            if price_item.dimension == ModelPriceItem.DIMENSION_TEXT_INPUT
+        ]
+        self.assertEqual(len(input_items), 2)
+        input_by_start = {}
+        for price_item in input_items:
+            input_by_start[str(price_item.tier_start)] = price_item
+        self.assertEqual(str(input_by_start["0"].tier_end), "128000")
+        self.assertEqual(str(input_by_start["0"].unit_price), "0.5")
+        self.assertIsNone(input_by_start["128000"].tier_end)
+        self.assertEqual(str(input_by_start["128000"].unit_price), "1.5")
+        output_items = [
+            price_item
+            for price_item in price_items
+            if price_item.dimension == ModelPriceItem.DIMENSION_TEXT_OUTPUT
+        ]
+        self.assertEqual(len(output_items), 2)
+
     def test_collected_price_does_not_overwrite_locked_sku(self):
         item = self.collected_item()
         offering, _ = upsert_collected_offering(
