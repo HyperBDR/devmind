@@ -38,6 +38,7 @@ import type { Quotation } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
+import { getCurrencySymbol } from '../utils/quotationPreviewModel'
 import FormSelect from './FormSelect.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
@@ -429,10 +430,8 @@ onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
 })
 
-function currencySymbol(currency: Quotation['currency']): string {
-  if (currency === 'CNY') return '¥'
-  if (currency === 'USD') return '$'
-  return '€'
+function currencySymbol(currency: Quotation['currency'] | string): string {
+  return getCurrencySymbol(currency)
 }
 
 function formatNow(): string {

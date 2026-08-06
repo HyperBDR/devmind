@@ -44,6 +44,7 @@
       "currencyCny": "¥",
       "currencyUsd": "$",
       "currencyEur": "€",
+      "currencyGbp": "£",
       "unitWan": "万元",
       "unitCount": "{count} 笔",
       "lineItemCount": "{count} 个报价明细行",
