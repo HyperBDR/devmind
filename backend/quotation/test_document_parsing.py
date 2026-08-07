@@ -1,7 +1,9 @@
 import shutil
 import tempfile
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -430,6 +432,71 @@ class StandardQuotationExcelParserTests(TestCase):
 
 
 class StandardQuotationPdfParserTests(TestCase):
+    def test_source_total_mismatch_blocks_confirmation(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+        from quotation.services.document_parsing.flexible_parser import (
+            complete_document_parse,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "OnePro Cloud Limited",
+                    "Quotation",
+                    "Date: 20-Jul-26",
+                    "Quote Valid Till: 20-Aug-26",
+                    "Ship to",
+                    "Company : Customer Sdn Bhd",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Bill to:",
+                    "Company : Customer Sdn Bhd",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Contact Person Email Project Payment Terms Currency",
+                    "Alice Chen alice@example.com Renewal CIA USD",
+                    "Software",
+                    "Item Description Qty List Price Discount Extended Price",
+                    "1 Support 1 $100.00 0% $100.00 $100.00",
+                    "Software subscription subtotal: $100.00",
+                    "VAT Amount (8%): $8.00",
+                    "Grand Total: $109.00",
+                ]
+            )
+        )
+
+        mismatch_codes = {
+            issue["code"] for issue in parsed.validation_errors
+        }
+        self.assertIn("amount_mismatch", mismatch_codes)
+        self.assertNotIn(
+            "amount_mismatch",
+            {issue["code"] for issue in parsed.validation_warnings},
+        )
+
+        completed = complete_document_parse(
+            SimpleNamespace(
+                created_at=None,
+                doc_type="pdf",
+                file_name="mismatch.pdf",
+            ),
+            Path("unused.pdf"),
+            parsed,
+            extract_content=False,
+        )
+        self.assertTrue(
+            any(
+                issue["code"] == "amount_mismatch"
+                for issue in completed.validation_errors
+            )
+        )
+        self.assertEqual(
+            completed.source_totals["computed_grand_total"],
+            "108",
+        )
+
     def test_parses_standard_text_pdf_and_validates_totals(self):
         from quotation.services.document_parsing.pdf_parser import (
             parse_standard_quotation_pdf,
@@ -859,6 +926,25 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(quote.contact_person, "Fazli Haslam")
         self.assertEqual(quote.issuer_contact_name, "Evelyn Chee")
 
+    def test_parses_extended_currency_markers_in_pdf_items(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            _parse_currency_item_line,
+            _parse_item_line,
+        )
+
+        symbol_item = _parse_item_line(
+            "1 Support 1 £1,000.00 10% £900.00 £900.00"
+        )
+        marker_item = _parse_currency_item_line(
+            "1 Support 1 RM 1,000.00 10% RM 900.00 RM 900.00",
+            "",
+        )
+
+        self.assertIsNotNone(symbol_item)
+        self.assertIsNotNone(marker_item)
+        self.assertEqual(symbol_item.extended_price, Decimal("900.00"))
+        self.assertEqual(marker_item.extended_price, Decimal("900.00"))
+
     def test_flexible_pdf_parser_bounds_malformed_long_lines(self):
         from quotation.services.document_parsing.flexible_parser import (
             _pdf_items,
@@ -1237,7 +1323,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.6.0")
+        self.assertEqual(new_result.parser_version, "2.7.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)

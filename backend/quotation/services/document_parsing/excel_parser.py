@@ -32,7 +32,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.6.0"
+PARSER_VERSION = "2.7.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -483,7 +483,7 @@ def _validate(
     )
     subtotal = Decimal(source_totals.get("subtotal_before_vat", "0"))
     if abs(extended_total - subtotal) > MONEY_TOLERANCE:
-        warnings.append(
+        errors.append(
             _issue(
                 "subtotal_before_vat",
                 "amount_mismatch",
@@ -493,7 +493,7 @@ def _validate(
     expected_grand = subtotal + Decimal(source_totals.get("vat_amount", "0"))
     source_grand = Decimal(source_totals.get("grand_total", "0"))
     if abs(expected_grand - source_grand) > MONEY_TOLERANCE:
-        warnings.append(
+        errors.append(
             _issue(
                 "grand_total",
                 "amount_mismatch",

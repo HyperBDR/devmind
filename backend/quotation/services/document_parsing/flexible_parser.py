@@ -17,7 +17,10 @@ from quotation.services.document_parsing.business_fields import (
     known_product_line,
     parse_quote_date,
 )
-from quotation.services.document_parsing.excel_parser import _decimal
+from quotation.services.document_parsing.excel_parser import (
+    _decimal,
+    _validate,
+)
 from quotation.services.document_parsing.schemas import (
     ParsedDocumentData,
     ParsedQuotation,
@@ -123,7 +126,10 @@ def _pdf_items(layout: str) -> list[ParsedQuotationItem]:
         stripped = line.strip()
         if len(stripped) > 1000:
             continue
-        if stripped.count("$") >= 3 and re.match(r"^\d+\s", stripped):
+        marker_count = len(
+            re.findall(r"(?:HK\$|RM|[$¥￥€£])", stripped, re.I)
+        )
+        if marker_count >= 3 and re.match(r"^\d+\s", stripped):
             item = _parse_currency_item_line(
                 re.sub(r"\s+", " ", stripped),
                 pending_description,
@@ -532,14 +538,34 @@ def complete_document_parse(
         Decimal("0"),
     )
     source_totals = dict(parsed.source_totals)
+    source_subtotal = Decimal(
+        source_totals.get("subtotal_before_vat", "0") or "0"
+    )
+    source_grand = Decimal(
+        source_totals.get("grand_total", "0") or "0"
+    )
+    if not source_subtotal:
+        source_subtotal = subtotal
+    if not source_grand:
+        source_grand = total or subtotal
+    source_vat = Decimal(
+        source_totals.get("vat_amount", "0") or "0"
+    )
+    computed_grand = subtotal + source_vat
     source_totals.update(
         {
-            "subtotal_before_vat": str(subtotal),
-            "vat_amount": source_totals.get("vat_amount", "0"),
-            "grand_total": str(total or subtotal),
+            "subtotal_before_vat": str(source_subtotal),
+            "grand_total": str(source_grand),
+            "computed_subtotal_before_vat": str(subtotal),
+            "computed_grand_total": str(computed_grand),
         }
     )
-    warnings = list(parsed.validation_warnings)
+    errors, warnings = _validate(quote, source_totals)
+    warnings = [
+        warning
+        for warning in parsed.validation_warnings
+        if warning.get("code") != "amount_mismatch"
+    ] + warnings
     if missing_issuer_name:
         warnings.append(
             {
@@ -581,7 +607,7 @@ def complete_document_parse(
         ),
         source_totals=source_totals,
         field_confidence=parsed.field_confidence,
-        validation_errors=[],
+        validation_errors=errors,
         validation_warnings=warnings,
         confidence=max(parsed.confidence, Decimal("0.5000")),
     )

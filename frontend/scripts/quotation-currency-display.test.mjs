@@ -23,6 +23,13 @@ const dashboard = readFileSync(
   ),
   'utf8'
 )
+const quotationCreate = readFileSync(
+  new URL(
+    '../src/modules/quotation/components/QuotationCreate.vue',
+    import.meta.url
+  ),
+  'utf8'
+)
 
 test('parsed amounts use symbols when available and short labels otherwise', () => {
   assert.match(previewModel, /export function getCurrencySymbol/)
@@ -35,4 +42,7 @@ test('parsed amounts use symbols when available and short labels otherwise', () 
   assert.match(quotationList, /getCurrencySymbol/)
   assert.match(dashboard, /currencyShortLabel/)
   assert.match(dashboard, /'RM'/)
+  assert.match(dashboard, /getCurrencySymbol/)
+  assert.match(dashboard, /'GBP'/)
+  assert.match(quotationCreate, /getCurrencySymbol\(currency\.value\)/)
 })
