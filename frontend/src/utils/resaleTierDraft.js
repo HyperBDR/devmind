@@ -78,11 +78,7 @@ export function updateResaleTierRows(rows, index, field, value) {
 
   nextRows[index] = { ...current, [field]: value }
 
-  if (
-    field === 'end' &&
-    nextRows[index + 1] &&
-    !nextRows[index + 1].flat
-  ) {
+  if (field === 'end' && nextRows[index + 1] && !nextRows[index + 1].flat) {
     nextRows[index + 1] = {
       ...nextRows[index + 1],
       start: value
