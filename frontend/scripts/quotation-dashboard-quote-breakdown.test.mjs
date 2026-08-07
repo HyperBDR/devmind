@@ -110,6 +110,8 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
     /const quoteBreakdownData = computed\(\(\) =>\s*\(analytics\.value\?\.amountBreakdown/
   )
   assert.match(dashboardSource, /getDashboardAnalytics\(currency\)/)
+  assert.match(dashboardSource, /@click="loadDashboardAnalytics"/)
+  assert.doesNotMatch(dashboardSource, /loadCurrencyDashboard/)
   assert.match(dashboardSource, /getDashboardSummary\(period\)/)
   assert.doesNotMatch(
     dashboardSource,

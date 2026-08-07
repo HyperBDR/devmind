@@ -631,6 +631,15 @@ onMounted(async () => {
       </div>
       <div class="flex shrink-0 items-center gap-3">
         <FormSelect
+          v-model="selectedPeriod"
+          :aria-label="t('quotation.pages.dashboard.monthLabel')"
+          :options="availablePeriodOptions"
+          class-name="w-28 shrink-0"
+          trigger-class-name="h-9 px-3 text-xs font-semibold text-dm-text-secondary"
+          panel-class-name="min-w-28"
+          test-id="dashboard-period"
+        />
+        <FormSelect
           v-model="dashboardCurrency"
           :aria-label="t('quotation.pages.dashboard.currencyLabel')"
           :options="availableCurrencyOptions"
@@ -639,15 +648,6 @@ onMounted(async () => {
           trigger-class-name="h-9 !px-2 text-xs font-semibold leading-none text-dm-text-secondary"
           panel-class-name="!left-0 !right-auto min-w-0 w-full py-0.5"
           test-id="dashboard-currency"
-        />
-        <FormSelect
-          v-model="selectedPeriod"
-          :aria-label="t('quotation.pages.dashboard.monthLabel')"
-          :options="availablePeriodOptions"
-          class-name="w-28 shrink-0"
-          trigger-class-name="h-9 px-3 text-xs font-semibold text-dm-text-secondary"
-          panel-class-name="min-w-28"
-          test-id="dashboard-period"
         />
         <button
           id="btn-quick-create"
@@ -940,7 +940,7 @@ onMounted(async () => {
             v-else-if="analyticsError"
             type="button"
             class="absolute inset-0 flex items-center justify-center text-sm font-medium text-dm-primary"
-            @click="loadCurrencyDashboard"
+            @click="loadDashboardAnalytics"
           >
             {{ t('quotation.pages.dashboard.retryAnalytics') }}
           </button>

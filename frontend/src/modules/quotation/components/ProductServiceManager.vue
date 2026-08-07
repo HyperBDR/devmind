@@ -224,7 +224,7 @@ const currencyOptions = [
 function formatCatalogItemPrice(
   listPrice: number,
   pricingNote?: string,
-  currency: CatalogCurrency = 'USD',
+  currency: string = 'USD',
 ) {
   if (pricingNote && listPrice <= 0) {
     return formatCatalogPrice(listPrice, pricingNote)
