@@ -247,6 +247,11 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import {
+  removeResaleTierRow,
+  updateResaleTierRows
+} from '@/utils/resaleTierDraft'
+
 const props = defineProps({
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
@@ -275,12 +280,7 @@ function setRows(key, rows) {
 }
 
 function updateRow(key, index, field, value) {
-  setRows(
-    key,
-    rowsFor(key).map((row, rowIndex) =>
-      rowIndex === index ? { ...row, [field]: value } : row
-    )
-  )
+  setRows(key, updateResaleTierRows(rowsFor(key), index, field, value))
 }
 
 function addTier(key) {
@@ -303,10 +303,7 @@ function addTier(key) {
 }
 
 function removeTier(key, index) {
-  const rows = rowsFor(key).filter((_, rowIndex) => rowIndex !== index)
-  const last = rows[rows.length - 1]
-  if (last) last.end = null
-  setRows(key, rows)
+  setRows(key, removeResaleTierRow(rowsFor(key), index))
 }
 
 function errorFor(key, index, field) {

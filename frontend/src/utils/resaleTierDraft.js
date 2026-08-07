@@ -70,6 +70,58 @@ export function hasTieredResalePrices(draft) {
   )
 }
 
+/** Keep adjacent editable usage ranges connected after a boundary edit. */
+export function updateResaleTierRows(rows, index, field, value) {
+  const nextRows = rows.map((row) => ({ ...row }))
+  const current = nextRows[index]
+  if (!current) return nextRows
+
+  nextRows[index] = { ...current, [field]: value }
+
+  if (
+    field === 'end' &&
+    nextRows[index + 1] &&
+    !nextRows[index + 1].flat
+  ) {
+    nextRows[index + 1] = {
+      ...nextRows[index + 1],
+      start: value
+    }
+  }
+
+  if (field === 'start' && index > 0 && !nextRows[index - 1].flat) {
+    nextRows[index - 1] = {
+      ...nextRows[index - 1],
+      end: value
+    }
+  }
+
+  return nextRows
+}
+
+/** Remove one tier and bridge the remaining ranges without creating a gap. */
+export function removeResaleTierRow(rows, index) {
+  const nextRows = rows.filter((_, rowIndex) => rowIndex !== index)
+  if (!nextRows.length) return nextRows
+
+  const followingRow = rows[index + 1]
+  if (index === 0 && !nextRows[0].flat) {
+    nextRows[0] = { ...nextRows[0], start: '0' }
+  } else if (followingRow && index > 0 && !nextRows[index - 1].flat) {
+    nextRows[index - 1] = {
+      ...nextRows[index - 1],
+      end: followingRow.start ?? null
+    }
+  } else {
+    const lastIndex = nextRows.length - 1
+    if (!nextRows[lastIndex].flat) {
+      nextRows[lastIndex] = { ...nextRows[lastIndex], end: null }
+    }
+  }
+
+  return nextRows
+}
+
 /** Return stable field error codes keyed by ``dimension:row:field``. */
 export function validateResalePriceDraft(draft) {
   const errors = {}
