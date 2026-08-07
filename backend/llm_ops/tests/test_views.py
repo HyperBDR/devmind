@@ -2847,6 +2847,39 @@ class LLMOpsViewTests(TestCase):
             ResaleListing.WORKFLOW_DRAFT,
         )
 
+    def test_resale_listing_bulk_draft_supports_auto_listing(self):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5",
+            code="gpt-5",
+        )
+        platform, _ = ResalePlatform.objects.get_or_create(
+            code="agione",
+            defaults={"name": "Agione"},
+        )
+
+        response = self.client.post(
+            reverse("resale-listing-bulk-draft"),
+            {
+                "items": [
+                    {
+                        "platform": platform.id,
+                        "model": model.id,
+                        "display_name": "GPT-5",
+                        "retail_input_price_per_million": "1.2",
+                        "retail_output_price_per_million": "2.4",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        listing = ResaleListing.objects.get(platform=platform, model=model)
+        self.assertIsNone(listing.channel)
+        self.assertEqual(listing.workflow_status, ResaleListing.WORKFLOW_DRAFT)
+
     def test_resale_listing_bulk_upsert_restores_removed_model(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         model = LLMModel.objects.create(
