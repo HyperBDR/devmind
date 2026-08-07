@@ -273,6 +273,17 @@ class ResalePriceRevisionAPITests(TestCase):
             ResaleListing.PRICING_FORMAT_MIXED,
         )
 
+    def test_submit_defaults_missing_settlement_rate_to_one(self):
+        self.platform.settlement_rate = None
+        self.platform.save(update_fields=["settlement_rate"])
+
+        draft = self.save_draft()
+        self.assertEqual(draft.status_code, 200, draft.data)
+
+        response = self.submit_revision(draft.data["id"])
+
+        self.assertEqual(response.status_code, 200, response.data)
+
     def test_preview_returns_cost_fee_and_interval_profitability(self):
         draft = self.save_draft()
 

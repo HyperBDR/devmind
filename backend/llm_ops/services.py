@@ -3183,7 +3183,7 @@ def calculate_tiered_profitability(
             platform_fee_rate=decimal_or_zero(platform.fee_rate),
             service_fee_rate=decimal_or_zero(platform.service_fee_rate),
             tax_rate=decimal_or_zero(platform.tax_rate),
-            settlement_rate=decimal_or_zero(platform.settlement_rate),
+            settlement_rate=decimal_or_zero(platform.settlement_rate) or ONE,
             risk_net_yield_rate=decimal_or_zero(platform.yield_warning),
         )
         analysis = analyze_tier_profit(
