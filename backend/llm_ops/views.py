@@ -1705,6 +1705,9 @@ class ResaleListingViewSet(
             "current_price_revision",
             "pending_price_revision",
             "published_price_revision",
+        ).prefetch_related(
+            "current_price_revision__items",
+            "pending_price_revision__items",
         )
         platform = self.request.query_params.get("platform")
         meta_model = self.request.query_params.get("meta_model")

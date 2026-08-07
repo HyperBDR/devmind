@@ -1121,6 +1121,7 @@
         "title": "Tiered resale prices",
         "intervalHelp": "Intervals use [start, end); leave the end blank for no upper limit.",
         "continuityHelp": "Adjacent tiers stay connected when you edit a boundary.",
+        "upstreamHelp": "Ranges follow upstream procurement; only tier prices are editable.",
         "rangePreview": "Connected range preview",
         "connected": "Adjacent tiers are connected",
         "tier": "Tier",
@@ -2831,6 +2832,9 @@
         "status": "Status",
         "actions": "Actions"
       },
+      "flat": "Flat",
+      "tiered": "Tiered",
+      "tierSummary": "{count} tiers",
       "batch": {
         "offline": "Batch offline",
         "price": "Batch reprice",
@@ -2920,6 +2924,7 @@
         "withdrawRequest": "Withdraw request"
       },
       "confirm": {
+        "title": "Confirm listing action",
         "batchOffline": "Request offline for {count} models?",
         "batchConfirm": "{action} for {count} models?",
         "batchPrice": "Open batch repricing workspace for {count} models?",

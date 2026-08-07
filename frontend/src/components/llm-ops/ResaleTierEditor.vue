@@ -42,10 +42,15 @@
               {{ t(spec.label) }}
             </h5>
             <p class="mt-0.5 text-[11px] text-slate-500">
-              {{ t('llmOps.publishingWorkspace.tiers.continuityHelp') }}
+              {{
+                boundariesLocked
+                  ? t('llmOps.publishingWorkspace.tiers.upstreamHelp')
+                  : t('llmOps.publishingWorkspace.tiers.continuityHelp')
+              }}
             </p>
           </div>
           <button
+            v-if="!boundariesLocked"
             type="button"
             class="text-xs font-semibold text-agione-700 hover:text-agione-800"
             @click="addTier(spec.key)"
@@ -146,6 +151,7 @@
                     }`"
                     class="w-28 rounded border border-slate-300 px-2 py-1 text-slate-900"
                     min="0"
+                    :disabled="boundariesLocked"
                     type="number"
                     @input="
                       updateRow(spec.key, index, 'start', $event.target.value)
@@ -167,6 +173,7 @@
                         index + 1
                       }`"
                       class="w-28 rounded border border-slate-300 px-2 py-1 text-slate-900"
+                      :disabled="boundariesLocked"
                       min="0"
                       :placeholder="
                         t('llmOps.publishingWorkspace.tiers.unbounded')
@@ -212,7 +219,11 @@
                 </td>
                 <td class="px-3 py-2 text-right">
                   <button
-                    v-if="!row.flat && rowsFor(spec.key).length > 1"
+                    v-if="
+                      !boundariesLocked &&
+                      !row.flat &&
+                      rowsFor(spec.key).length > 1
+                    "
                     type="button"
                     class="text-xs font-medium text-rose-600 hover:text-rose-700"
                     @click="removeTier(spec.key, index)"
@@ -323,6 +334,7 @@ import {
 } from '@/utils/resaleTierDraft'
 
 const props = defineProps({
+  boundariesLocked: { type: Boolean, default: false },
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
   modelValue: { type: Object, required: true },

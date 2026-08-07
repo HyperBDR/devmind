@@ -164,10 +164,6 @@ export function validateResalePriceDraft(draft) {
       }
       previousEnd = end
     })
-    const last = rows[rows.length - 1]
-    if (last && decimal(last.end) !== null) {
-      errors[`${key}:${rows.length - 1}:end`] = 'price_table_missing_terminal'
-    }
   })
   return errors
 }
@@ -191,4 +187,58 @@ export function resaleTierDraftFromItems(items = []) {
       return [key, rows]
     })
   )
+}
+
+/** Return whether two drafts expose the same upstream-controlled ranges. */
+export function resaleTierDraftRangesMatch(left = {}, right = {}) {
+  return DIMENSIONS.every(([key]) => {
+    const leftRows = Array.isArray(left?.[key]) ? left[key] : []
+    const rightRows = Array.isArray(right?.[key]) ? right[key] : []
+    if (leftRows.length !== rightRows.length) return false
+    return leftRows.every((row, index) => {
+      const other = rightRows[index]
+      return (
+        Boolean(row.flat) === Boolean(other?.flat) &&
+        comparableDecimal(row.start) === comparableDecimal(other?.start) &&
+        comparableDecimal(row.end) === comparableDecimal(other?.end)
+      )
+    })
+  })
+}
+
+/** Prefer an unapproved draft when restoring a listing for further editing. */
+export function resalePriceItemsForListing(listing = {}) {
+  const pending = Array.isArray(listing.pending_price_items)
+    ? listing.pending_price_items
+    : []
+  if (pending.length) return pending
+  return Array.isArray(listing.current_price_items)
+    ? listing.current_price_items
+    : []
+}
+
+function comparableDecimal(value) {
+  const parsed = decimal(value)
+  return parsed === null ? null : parsed.toFixed(12)
+}
+
+function comparablePriceItem(item = {}) {
+  return {
+    billing_unit: item.billing_unit || BILLING_UNIT,
+    currency: String(item.currency || '').toUpperCase(),
+    dimension: item.dimension || '',
+    tier_end: comparableDecimal(item.tier_end),
+    tier_start: comparableDecimal(item.tier_start),
+    tier_type: item.tier_type || FLAT,
+    unit_price: comparableDecimal(item.unit_price)
+  }
+}
+
+/** Compare API revision items while ignoring decimal formatting differences. */
+export function resalePriceItemsMatch(left = [], right = []) {
+  const normalize = (items) =>
+    items
+      .map(comparablePriceItem)
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right))
 }

@@ -111,6 +111,20 @@ test('accepts an unbounded final tier without a terminal error', () => {
   assert.deepEqual(errors, {})
 })
 
+test('accepts a bounded final tier copied from the upstream source', () => {
+  const errors = validateResalePriceDraft({
+    cache: [{ end: '1000000', price: '0.25', start: '0' }],
+    input: [
+      { end: '128000', price: '1', start: '0' },
+      { end: '256000', price: '0.9', start: '128000' },
+      { end: '1000000', price: '0.8', start: '256000' }
+    ],
+    output: [{ end: '1000000', price: '2', start: '0' }]
+  })
+
+  assert.deepEqual(errors, {})
+})
+
 test('locates price, overlap, and gap errors by dimension, row, and field', () => {
   const errors = validateResalePriceDraft({
     cache: [{ end: null, price: '-1', start: '0' }],

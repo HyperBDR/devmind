@@ -5,6 +5,7 @@ import {
   averageMarginRate,
   RESALE_PRICE_DIMENSION_SPECS
 } from '@/utils/resalePricing'
+import { resalePriceItemsForListing } from '@/utils/resaleTierDraft'
 
 export function useAgioneListingDisplay({
   isHiddenRow,
@@ -192,21 +193,64 @@ export function useAgioneListingDisplay({
         row.status_listing?.[spec.retailField] ||
         row.lowest_option?.[spec.costField]
       )
-    }).map((spec) => ({
-      key: spec.key,
-      label: spec.label,
-      retail: listingAmountText(
-        listingDisplayAmount(
-          row.status_listing?.[spec.retailField],
-          row.status_listing?.currency
+    }).map((spec) => {
+      const items = resalePriceItemsForListing(row.status_listing || {})
+        .filter((item) => item.dimension === spec.itemDimension)
+        .sort(
+          (left, right) =>
+            Number(left.tier_start || 0) - Number(right.tier_start || 0)
         )
-      ),
-      points: listingPointText(
-        row.status_listing?.[spec.retailField],
-        row.status_listing?.currency
-      ),
-      cost: listingAmountText(row.lowest_option?.[spec.costField])
-    }))
+      const tiered = items.some((item) => item.tier_type === 'usage_range')
+      const tierPrices = tiered
+        ? items.map((item) => ({
+            price: listingAmountText(
+              listingDisplayAmount(item.unit_price, item.currency)
+            ),
+            range: rangeLabel(item)
+          }))
+        : []
+      const tierPoints = tiered
+        ? items.map((item) => ({
+            points: listingPointText(item.unit_price, item.currency),
+            range: rangeLabel(item)
+          }))
+        : []
+      return {
+        key: spec.key,
+        label: spec.label,
+        retail: tiered
+          ? t('llmOps.listingBoard.tierSummary', { count: items.length })
+          : listingAmountText(
+              listingDisplayAmount(
+                row.status_listing?.[spec.retailField],
+                row.status_listing?.currency
+              )
+            ),
+        points: tiered
+          ? '-'
+          : listingPointText(
+              row.status_listing?.[spec.retailField],
+              row.status_listing?.currency
+            ),
+        cost: listingAmountText(row.lowest_option?.[spec.costField]),
+        tierPoints,
+        tierPrices
+      }
+    })
+  }
+
+  function rangeLabel(item) {
+    const start = formatTierBoundary(item.tier_start, '0')
+    const end = formatTierBoundary(item.tier_end, '∞')
+    return `[${start}, ${end})`
+  }
+
+  function formatTierBoundary(value, fallback) {
+    if (value === null || value === undefined || value === '') {
+      return fallback
+    }
+    const amount = Number(value)
+    return Number.isFinite(amount) ? String(Math.trunc(amount)) : fallback
   }
 
   function listingAmountText(value) {

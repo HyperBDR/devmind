@@ -273,6 +273,23 @@ class ResalePriceRevisionAPITests(TestCase):
             ResaleListing.PRICING_FORMAT_MIXED,
         )
 
+    def test_listing_exposes_pending_revision_price_items(self):
+        draft = self.save_draft()
+
+        response = self.client.get(
+            reverse("resale-listing-detail", args=[self.listing.id])
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            len(response.data["pending_price_items"]),
+            len(draft.data["price_items"]),
+        )
+        self.assertEqual(
+            response.data["pending_price_items"][0]["tier_end"],
+            "100.000000",
+        )
+
     def test_submit_defaults_missing_settlement_rate_to_one(self):
         self.platform.settlement_rate = None
         self.platform.save(update_fields=["settlement_rate"])

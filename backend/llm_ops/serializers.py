@@ -1689,6 +1689,23 @@ class ResaleListingSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    current_price_items = serializers.SerializerMethodField()
+    pending_price_items = serializers.SerializerMethodField()
+
+    def _revision_price_items(self, revision):
+        if revision is None:
+            return []
+        return ResaleListingPriceItemSerializer(
+            revision.items.all(),
+            many=True,
+            context=self.context,
+        ).data
+
+    def get_current_price_items(self, instance):
+        return self._revision_price_items(instance.current_price_revision)
+
+    def get_pending_price_items(self, instance):
+        return self._revision_price_items(instance.pending_price_revision)
 
     class Meta:
         model = ResaleListing

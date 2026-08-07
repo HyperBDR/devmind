@@ -783,6 +783,68 @@ class LLMOpsPricingServiceTests(TestCase):
             price_source=source,
         )
 
+        synced_items = sync_channel_price_items(price)
+
+        self.assertEqual(len(synced_items), len(price_specs))
+        self.assertEqual(
+            [
+                (
+                    item.dimension,
+                    item.tier_type,
+                    item.tier_start,
+                    item.tier_end,
+                    item.unit_price,
+                    item.base_price_item_id,
+                )
+                for item in sorted(
+                    synced_items,
+                    key=lambda item: (item.dimension, item.tier_start),
+                )
+            ],
+            [
+                (
+                    ModelPriceItem.DIMENSION_TEXT_INPUT,
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("0"),
+                    Decimal("128000"),
+                    Decimal("0.160000"),
+                    ModelPriceItem.objects.get(
+                        price_fingerprint="range-input-low"
+                    ).id,
+                ),
+                (
+                    ModelPriceItem.DIMENSION_TEXT_INPUT,
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("128000"),
+                    Decimal("256000"),
+                    Decimal("0.960000"),
+                    ModelPriceItem.objects.get(
+                        price_fingerprint="range-input-high"
+                    ).id,
+                ),
+                (
+                    ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("0"),
+                    Decimal("128000"),
+                    Decimal("1.600000"),
+                    ModelPriceItem.objects.get(
+                        price_fingerprint="range-output-low"
+                    ).id,
+                ),
+                (
+                    ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("128000"),
+                    Decimal("256000"),
+                    Decimal("9.600000"),
+                    ModelPriceItem.objects.get(
+                        price_fingerprint="range-output-high"
+                    ).id,
+                ),
+            ],
+        )
+
         schedule = resolve_channel_price_schedule(
             self.channel,
             self.model,
