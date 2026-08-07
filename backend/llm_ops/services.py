@@ -1145,10 +1145,10 @@ def _merge_flat_fallback_tiers(tiers: list[PriceTier]) -> list[PriceTier]:
                         billing_unit=t.billing_unit,
                         currency=t.currency,
                         unit_price=t.unit_price,
-                        tier_type=t.tier_type,
+                        tier_type=ModelPriceItem.TIER_USAGE_RANGE,
                         tier_start=max_end,
                         tier_end=None,
-                        spec=dict(t.spec),
+                        spec=with_usage_range_spec(t.spec),
                     )
                 )
             else:
