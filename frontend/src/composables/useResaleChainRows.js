@@ -20,6 +20,14 @@ export function useResaleChainRows({
   supportedSupplierIds,
   t
 }) {
+  function channelPriceItems(option, modelId, dimension) {
+    return (
+      channelPriceItemsByKey.value.get(
+        channelPriceItemKey(option.channel_id, modelId, dimension)
+      ) || []
+    )
+  }
+
   function channelPriceValue(option, modelId, dimension, fallbackValue) {
     const hasSummaryValue =
       fallbackValue !== null &&
@@ -33,9 +41,7 @@ export function useResaleChainRows({
       }
     }
 
-    const item = channelPriceItemsByKey.value.get(
-      channelPriceItemKey(option.channel_id, modelId, dimension)
-    )
+    const item = channelPriceItems(option, modelId, dimension)[0]
     if (item && item.unit_price !== null && item.unit_price !== undefined) {
       return {
         value: item.unit_price,
@@ -92,6 +98,15 @@ export function useResaleChainRows({
           'cache_input',
           option.cache_input_price_per_million
         )
+        const upstreamPriceItems = {
+          input: channelPriceItems(option, procurement.model_id, 'text_input'),
+          output: channelPriceItems(
+            option,
+            procurement.model_id,
+            'text_output'
+          ),
+          cache: channelPriceItems(option, procurement.model_id, 'cache_input')
+        }
         const inDisplay = convertToDisplay(inputCost.value, inputCost.currency)
         const outDisplay = convertToDisplay(
           outputCost.value,
@@ -177,6 +192,7 @@ export function useResaleChainRows({
           costInRaw: inDisplay ?? 0,
           costOutRaw: outDisplay ?? 0,
           costCacheInRaw: cacheInDisplay ?? 0,
+          upstreamPriceItems,
           baseCostInRaw: baseInDisplay ?? inDisplay ?? 0,
           baseCostOutRaw: baseOutDisplay ?? outDisplay ?? 0,
           baseCostCacheInRaw: baseCacheInDisplay ?? cacheInDisplay ?? 0,

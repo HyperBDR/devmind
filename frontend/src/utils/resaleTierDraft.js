@@ -9,6 +9,7 @@ const FLAT = 'flat'
 const USAGE_RANGE = 'usage_range'
 
 function decimal(value) {
+  if (value === null || value === undefined || value === '') return null
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
@@ -70,6 +71,54 @@ export function hasTieredResalePrices(draft) {
   )
 }
 
+/** Keep adjacent editable usage ranges connected after a boundary edit. */
+export function updateResaleTierRows(rows, index, field, value) {
+  const nextRows = rows.map((row) => ({ ...row }))
+  const current = nextRows[index]
+  if (!current) return nextRows
+
+  nextRows[index] = { ...current, [field]: value }
+
+  if (field === 'end' && nextRows[index + 1] && !nextRows[index + 1].flat) {
+    nextRows[index + 1] = {
+      ...nextRows[index + 1],
+      start: value
+    }
+  }
+
+  if (field === 'start' && index > 0 && !nextRows[index - 1].flat) {
+    nextRows[index - 1] = {
+      ...nextRows[index - 1],
+      end: value
+    }
+  }
+
+  return nextRows
+}
+
+/** Remove one tier and bridge the remaining ranges without creating a gap. */
+export function removeResaleTierRow(rows, index) {
+  const nextRows = rows.filter((_, rowIndex) => rowIndex !== index)
+  if (!nextRows.length) return nextRows
+
+  const followingRow = rows[index + 1]
+  if (index === 0 && !nextRows[0].flat) {
+    nextRows[0] = { ...nextRows[0], start: '0' }
+  } else if (followingRow && index > 0 && !nextRows[index - 1].flat) {
+    nextRows[index - 1] = {
+      ...nextRows[index - 1],
+      end: followingRow.start ?? null
+    }
+  } else {
+    const lastIndex = nextRows.length - 1
+    if (!nextRows[lastIndex].flat) {
+      nextRows[lastIndex] = { ...nextRows[lastIndex], end: null }
+    }
+  }
+
+  return nextRows
+}
+
 /** Return stable field error codes keyed by ``dimension:row:field``. */
 export function validateResalePriceDraft(draft) {
   const errors = {}
@@ -115,10 +164,6 @@ export function validateResalePriceDraft(draft) {
       }
       previousEnd = end
     })
-    const last = rows[rows.length - 1]
-    if (last && decimal(last.end) !== null) {
-      errors[`${key}:${rows.length - 1}:end`] = 'price_table_missing_terminal'
-    }
   })
   return errors
 }
@@ -142,4 +187,58 @@ export function resaleTierDraftFromItems(items = []) {
       return [key, rows]
     })
   )
+}
+
+/** Return whether two drafts expose the same upstream-controlled ranges. */
+export function resaleTierDraftRangesMatch(left = {}, right = {}) {
+  return DIMENSIONS.every(([key]) => {
+    const leftRows = Array.isArray(left?.[key]) ? left[key] : []
+    const rightRows = Array.isArray(right?.[key]) ? right[key] : []
+    if (leftRows.length !== rightRows.length) return false
+    return leftRows.every((row, index) => {
+      const other = rightRows[index]
+      return (
+        Boolean(row.flat) === Boolean(other?.flat) &&
+        comparableDecimal(row.start) === comparableDecimal(other?.start) &&
+        comparableDecimal(row.end) === comparableDecimal(other?.end)
+      )
+    })
+  })
+}
+
+/** Prefer an unapproved draft when restoring a listing for further editing. */
+export function resalePriceItemsForListing(listing = {}) {
+  const pending = Array.isArray(listing.pending_price_items)
+    ? listing.pending_price_items
+    : []
+  if (pending.length) return pending
+  return Array.isArray(listing.current_price_items)
+    ? listing.current_price_items
+    : []
+}
+
+function comparableDecimal(value) {
+  const parsed = decimal(value)
+  return parsed === null ? null : parsed.toFixed(12)
+}
+
+function comparablePriceItem(item = {}) {
+  return {
+    billing_unit: item.billing_unit || BILLING_UNIT,
+    currency: String(item.currency || '').toUpperCase(),
+    dimension: item.dimension || '',
+    tier_end: comparableDecimal(item.tier_end),
+    tier_start: comparableDecimal(item.tier_start),
+    tier_type: item.tier_type || FLAT,
+    unit_price: comparableDecimal(item.unit_price)
+  }
+}
+
+/** Compare API revision items while ignoring decimal formatting differences. */
+export function resalePriceItemsMatch(left = [], right = []) {
+  const normalize = (items) =>
+    items
+      .map(comparablePriceItem)
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right))
 }

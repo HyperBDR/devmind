@@ -2633,10 +2633,8 @@ def sync_resale_listing_flat_revision(
     created_by=None,
 ) -> ResaleListingPriceRevision:
     """Dual-write compatibility flat fields into a complete revision."""
-    locked_listing = (
-        ResaleListing.objects.select_for_update()
-        .select_related("pending_price_revision")
-        .get(pk=listing.pk)
+    locked_listing = ResaleListing.objects.select_for_update().get(
+        pk=listing.pk
     )
     items = _flat_resale_listing_price_items(locked_listing)
     currency = resolve_resale_listing_currency(locked_listing)
@@ -2678,13 +2676,8 @@ def approve_resale_listing_price_revision(
     listing: ResaleListing,
 ) -> ResaleListingPriceRevision:
     """Approve the exact pending revision and supersede the old current one."""
-    locked_listing = (
-        ResaleListing.objects.select_for_update()
-        .select_related(
-            "current_price_revision",
-            "pending_price_revision",
-        )
-        .get(pk=listing.pk)
+    locked_listing = ResaleListing.objects.select_for_update().get(
+        pk=listing.pk
     )
     pending = locked_listing.pending_price_revision
     if pending is None or pending.status != pending.STATUS_SUBMITTED:
@@ -2833,7 +2826,7 @@ def save_resale_listing_price_draft(
     """Atomically save a complete resale schedule as the active draft."""
     locked = (
         ResaleListing.objects.select_for_update()
-        .select_related("platform", "model", "pending_price_revision")
+        .select_related("platform", "model")
         .get(pk=listing.pk)
     )
     if locked.workflow_status == ResaleListing.WORKFLOW_ONLINE:
@@ -3190,7 +3183,7 @@ def calculate_tiered_profitability(
             platform_fee_rate=decimal_or_zero(platform.fee_rate),
             service_fee_rate=decimal_or_zero(platform.service_fee_rate),
             tax_rate=decimal_or_zero(platform.tax_rate),
-            settlement_rate=decimal_or_zero(platform.settlement_rate),
+            settlement_rate=decimal_or_zero(platform.settlement_rate) or ONE,
             risk_net_yield_rate=decimal_or_zero(platform.yield_warning),
         )
         analysis = analyze_tier_profit(
@@ -3354,7 +3347,7 @@ def submit_resale_listing_price_revision(
     """Submit a concrete draft with immutable decision evidence."""
     locked = (
         ResaleListing.objects.select_for_update()
-        .select_related("platform", "model", "channel")
+        .select_related("platform", "model")
         .get(pk=listing.pk)
     )
     revision = ResaleListingPriceRevision.objects.select_for_update().get(
@@ -3427,14 +3420,7 @@ def approve_and_publish_resale_price_revision(
     approved_by=None,
 ) -> ResaleListingPriceRevision | None:
     """Bind manual approval and publication to the pending revision."""
-    locked = (
-        ResaleListing.objects.select_for_update()
-        .select_related(
-            "current_price_revision",
-            "pending_price_revision",
-        )
-        .get(pk=listing.pk)
-    )
+    locked = ResaleListing.objects.select_for_update().get(pk=listing.pk)
     revision = locked.pending_price_revision
     if revision is None:
         return None

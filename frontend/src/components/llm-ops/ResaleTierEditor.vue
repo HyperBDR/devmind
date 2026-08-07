@@ -37,8 +37,20 @@
         <header
           class="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2"
         >
-          <h5 class="text-xs font-bold text-slate-800">{{ t(spec.label) }}</h5>
+          <div>
+            <h5 class="text-xs font-bold text-slate-800">
+              {{ t(spec.label) }}
+            </h5>
+            <p class="mt-0.5 text-[11px] text-slate-500">
+              {{
+                boundariesLocked
+                  ? t('llmOps.publishingWorkspace.tiers.upstreamHelp')
+                  : t('llmOps.publishingWorkspace.tiers.continuityHelp')
+              }}
+            </p>
+          </div>
           <button
+            v-if="!boundariesLocked"
             type="button"
             class="text-xs font-semibold text-agione-700 hover:text-agione-800"
             @click="addTier(spec.key)"
@@ -46,10 +58,60 @@
             {{ t('llmOps.publishingWorkspace.tiers.add') }}
           </button>
         </header>
+        <div class="border-b border-slate-100 bg-slate-50/70 px-3 py-3">
+          <p
+            class="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500"
+          >
+            {{ t('llmOps.publishingWorkspace.tiers.rangePreview') }}
+          </p>
+          <div
+            class="mt-2 flex min-w-max items-center"
+            role="list"
+            :aria-label="t('llmOps.publishingWorkspace.tiers.rangePreview')"
+          >
+            <template
+              v-for="(row, index) in rowsFor(spec.key)"
+              :key="`${spec.key}-preview-${index}`"
+            >
+              <div
+                class="min-w-[148px] rounded border border-slate-200 bg-white px-3 py-2 shadow-sm"
+                role="listitem"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] font-semibold text-slate-500">
+                    {{
+                      t('llmOps.publishingWorkspace.tiers.tierLabel', {
+                        value: index + 1
+                      })
+                    }}
+                  </span>
+                  <span class="text-[11px] font-semibold text-agione-700">
+                    {{ rangeLabel(row) }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs font-bold text-slate-900">
+                  {{ priceLabel(row) }}
+                </p>
+              </div>
+              <div
+                v-if="index < rowsFor(spec.key).length - 1"
+                class="flex items-center px-1"
+                :aria-label="t('llmOps.publishingWorkspace.tiers.connected')"
+                role="img"
+              >
+                <span class="h-0.5 w-5 bg-agione-300"></span>
+                <span class="-ml-0.5 text-sm font-bold text-agione-500">›</span>
+              </div>
+            </template>
+          </div>
+        </div>
         <div class="overflow-x-auto">
           <table class="min-w-full text-left text-xs">
             <thead class="bg-slate-50 text-slate-500">
               <tr>
+                <th class="w-16 px-3 py-2 font-medium">
+                  {{ t('llmOps.publishingWorkspace.tiers.tier') }}
+                </th>
                 <th class="px-3 py-2 font-medium">
                   {{ t('llmOps.publishingWorkspace.tiers.start') }}
                 </th>
@@ -70,6 +132,13 @@
                 :key="`${spec.key}-${index}`"
                 class="border-t border-slate-100"
               >
+                <td class="px-3 py-2 align-top">
+                  <span
+                    class="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-agione-50 px-1.5 text-[11px] font-bold text-agione-700"
+                  >
+                    {{ index + 1 }}
+                  </span>
+                </td>
                 <td class="px-3 py-2">
                   <span v-if="row.flat" class="text-slate-500">{{
                     t('llmOps.publishingWorkspace.tiers.allUsage')
@@ -77,8 +146,12 @@
                   <input
                     v-else
                     :value="row.start"
+                    :aria-label="`${t('llmOps.publishingWorkspace.tiers.start')} ${
+                      index + 1
+                    }`"
                     class="w-28 rounded border border-slate-300 px-2 py-1 text-slate-900"
                     min="0"
+                    :disabled="boundariesLocked"
                     type="number"
                     @input="
                       updateRow(spec.key, index, 'start', $event.target.value)
@@ -96,10 +169,11 @@
                   <template v-else>
                     <input
                       :value="row.end"
-                      :aria-label="
-                        t('llmOps.publishingWorkspace.tiers.unbounded')
-                      "
+                      :aria-label="`${t('llmOps.publishingWorkspace.tiers.end')} ${
+                        index + 1
+                      }`"
                       class="w-28 rounded border border-slate-300 px-2 py-1 text-slate-900"
+                      :disabled="boundariesLocked"
                       min="0"
                       :placeholder="
                         t('llmOps.publishingWorkspace.tiers.unbounded')
@@ -125,6 +199,9 @@
                 <td class="px-3 py-2">
                   <input
                     :value="row.price"
+                    :aria-label="`${t('llmOps.publishingWorkspace.tiers.price')} ${
+                      index + 1
+                    }`"
                     class="w-28 rounded border border-slate-300 px-2 py-1 text-slate-900"
                     min="0"
                     step="0.000001"
@@ -142,7 +219,11 @@
                 </td>
                 <td class="px-3 py-2 text-right">
                   <button
-                    v-if="!row.flat && rowsFor(spec.key).length > 1"
+                    v-if="
+                      !boundariesLocked &&
+                      !row.flat &&
+                      rowsFor(spec.key).length > 1
+                    "
                     type="button"
                     class="text-xs font-medium text-rose-600 hover:text-rose-700"
                     @click="removeTier(spec.key, index)"
@@ -247,7 +328,13 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import {
+  removeResaleTierRow,
+  updateResaleTierRows
+} from '@/utils/resaleTierDraft'
+
 const props = defineProps({
+  boundariesLocked: { type: Boolean, default: false },
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
   modelValue: { type: Object, required: true },
@@ -258,7 +345,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['preview', 'update:modelValue'])
-const { t } = useI18n()
+const { locale, t } = useI18n()
 
 const dimensions = computed(() => [
   { key: 'input', label: 'llmOps.publishingWorkspace.metrics.input' },
@@ -275,12 +362,7 @@ function setRows(key, rows) {
 }
 
 function updateRow(key, index, field, value) {
-  setRows(
-    key,
-    rowsFor(key).map((row, rowIndex) =>
-      rowIndex === index ? { ...row, [field]: value } : row
-    )
-  )
+  setRows(key, updateResaleTierRows(rowsFor(key), index, field, value))
 }
 
 function addTier(key) {
@@ -303,10 +385,7 @@ function addTier(key) {
 }
 
 function removeTier(key, index) {
-  const rows = rowsFor(key).filter((_, rowIndex) => rowIndex !== index)
-  const last = rows[rows.length - 1]
-  if (last) last.end = null
-  setRows(key, rows)
+  setRows(key, removeResaleTierRow(rowsFor(key), index))
 }
 
 function errorFor(key, index, field) {
@@ -316,6 +395,28 @@ function errorFor(key, index, field) {
 function formatPercent(value) {
   const amount = Number(value)
   return Number.isFinite(amount) ? `${(amount * 100).toFixed(2)}%` : '—'
+}
+
+function formatUsage(value) {
+  if (value === null || value === undefined || value === '') return '—'
+  const amount = Number(value)
+  return Number.isFinite(amount)
+    ? new Intl.NumberFormat(locale.value, {
+        maximumFractionDigits: 6
+      }).format(amount)
+    : String(value)
+}
+
+function rangeLabel(row) {
+  if (row.flat) return t('llmOps.publishingWorkspace.tiers.allUsage')
+  const end = row.end === null ? '∞' : formatUsage(row.end)
+  return `[${formatUsage(row.start)}, ${end})`
+}
+
+function priceLabel(row) {
+  const amount = Number(row.price)
+  const price = Number.isFinite(amount) ? amount.toFixed(6) : row.price || '—'
+  return `${props.currency} ${price} / 1M`
 }
 
 function money(value) {

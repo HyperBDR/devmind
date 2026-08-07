@@ -242,40 +242,109 @@
                 </p>
               </td>
               <td class="table-cell">
-                <div class="metric-stack">
+                <div class="metric-stack retail-metric-stack">
                   <div
                     v-for="metric in listingPriceMetrics(row)"
                     :key="`cost-${metric.key}`"
-                    class="metric-line"
+                    class="retail-metric-block metric-cost-block"
+                    :class="{
+                      'metric-tiered-block': metric.tierPrices?.length
+                    }"
                   >
-                    <span class="metric-label">{{ metric.label }}</span>
-                    <strong class="metric-value">{{ metric.cost }}</strong>
+                    <div class="retail-metric-heading metric-column-heading">
+                      <span class="metric-label">{{ metric.label }}</span>
+                      <strong class="metric-value">{{ metric.cost }}</strong>
+                    </div>
+                    <div
+                      v-if="metric.tierPrices?.length"
+                      class="metric-tier-range-list metric-tier-cost-spacer"
+                      aria-hidden="true"
+                    >
+                      <span
+                        v-for="tier in metric.tierPrices || []"
+                        :key="`${metric.key}-cost-spacer-${tier.range}`"
+                        class="metric-tier-point-row"
+                      >
+                        <span></span>
+                        <span></span>
+                      </span>
+                    </div>
                   </div>
                 </div>
               </td>
               <td class="table-cell">
-                <div class="metric-stack">
+                <div class="metric-stack retail-metric-stack">
                   <div
                     v-for="metric in listingPriceMetrics(row)"
                     :key="`retail-${metric.key}`"
-                    class="metric-line metric-line-value"
+                    class="retail-metric-block"
                   >
-                    <strong class="metric-value text-emerald-600">
-                      {{ metric.retail }}
-                    </strong>
+                    <div
+                      v-if="!metric.tierPrices?.length"
+                      class="retail-metric-heading metric-column-heading"
+                    >
+                      <span aria-hidden="true"></span>
+                      <strong
+                        v-if="!metric.tierPrices?.length"
+                        class="metric-value text-emerald-600"
+                      >
+                        {{ metric.retail }}
+                      </strong>
+                    </div>
+                    <div
+                      v-if="metric.tierPrices?.length"
+                      class="metric-tier-range-list metric-tiered-values"
+                    >
+                      <span
+                        v-for="tier in metric.tierPrices || []"
+                        :key="`${metric.key}-${tier.range}`"
+                        class="metric-tier-price-row"
+                      >
+                        <span class="metric-tier-range-chip">
+                          {{ tier.range }}
+                        </span>
+                        <strong class="metric-tier-price">
+                          {{ tier.price }}
+                        </strong>
+                      </span>
+                    </div>
                   </div>
                 </div>
               </td>
               <td class="table-cell">
-                <div class="metric-stack">
+                <div class="metric-stack retail-metric-stack">
                   <div
                     v-for="metric in listingPriceMetrics(row)"
                     :key="`point-${metric.key}`"
-                    class="metric-line metric-line-value"
+                    class="retail-metric-block"
                   >
-                    <strong class="metric-value text-agione-600">
-                      {{ metric.points }}
-                    </strong>
+                    <div
+                      v-if="!metric.tierPoints?.length"
+                      class="retail-metric-heading metric-column-heading"
+                    >
+                      <span aria-hidden="true"></span>
+                      <strong
+                        v-if="!metric.tierPoints?.length"
+                        class="metric-value text-agione-600"
+                      >
+                        {{ metric.points }}
+                      </strong>
+                    </div>
+                    <div
+                      v-if="metric.tierPoints?.length"
+                      class="metric-tier-range-list metric-tiered-values"
+                    >
+                      <span
+                        v-for="tier in metric.tierPoints || []"
+                        :key="`${metric.key}-${tier.range}`"
+                        class="metric-tier-point-row"
+                      >
+                        <span aria-hidden="true"></span>
+                        <strong class="metric-tier-points">
+                          {{ tier.points }}
+                        </strong>
+                      </span>
+                    </div>
                   </div>
                 </div>
               </td>
@@ -348,6 +417,18 @@
         </div>
       </div>
     </div>
+    <LLMOpsConfirmDialog
+      :open="Boolean(confirmationRequest)"
+      :title="t('llmOps.listingBoard.confirm.title')"
+      :message="confirmationRequest?.message || ''"
+      :confirm-label="t('common.confirm')"
+      :cancel-label="t('common.cancel')"
+      :busy-label="t('common.processing')"
+      :danger="Boolean(confirmationRequest?.danger)"
+      :busy="confirmationBusy"
+      @cancel="settleConfirmation(false)"
+      @confirm="settleConfirmation(true)"
+    />
   </section>
 </template>
 
@@ -358,6 +439,7 @@ import { ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
+import LLMOpsConfirmDialog from '@/components/llm-ops/LLMOpsConfirmDialog.vue'
 import OperationIconButton from '@/components/llm-ops/OperationIconButton.vue'
 import { useAgioneListingDisplay } from '@/composables/useAgioneListingDisplay'
 import { useAgioneListingExport } from '@/composables/useAgioneListingExport'
@@ -423,6 +505,8 @@ const { t } = useI18n()
 const { showSuccess, showError } = useToast()
 
 const savingListings = ref(false)
+const confirmationRequest = ref(null)
+const confirmationBusy = ref(false)
 
 const unusedModelId = ref('')
 const unusedChannelId = ref('')
@@ -590,19 +674,22 @@ function actionPayloadForRows(targetRows, action = null) {
 
 async function handleDirectAction(row, kind) {
   if (!props.agionePlatform) return
+  if (
+    !(await askConfirmation(workflowConfirmText(kind), {
+      danger: ['direct_offline', 'confirm_offline', 'delete'].includes(kind)
+    }))
+  ) {
+    return
+  }
   savingListings.value = true
   try {
     if (kind === 'direct_offline') {
-      if (!confirm(workflowConfirmText(kind))) return
       const response = await llmOpsApi.bulkOfflineResaleListings(
         actionPayloadForRows([row])
       )
       emitUpdatedListings(response)
       showSuccess(workflowSuccessText(kind))
     } else if (isWorkflowTransition(kind)) {
-      if (['request_offline', 'confirm_offline', 'delete'].includes(kind)) {
-        if (!confirm(workflowConfirmText(kind))) return
-      }
       const response = await llmOpsApi.bulkTransitionResaleListings(
         actionPayloadForRows([row], kind)
       )
@@ -641,7 +728,13 @@ async function handleBatchAction(kind) {
         : t('llmOps.listingBoard.confirm.batchPrice', {
             count: modelIds.length
           })
-  if (!confirm(confirmMessage)) return
+  if (
+    !(await askConfirmation(confirmMessage, {
+      danger: kind === 'offline'
+    }))
+  ) {
+    return
+  }
   if (kind === 'price') {
     emit('open-workspace', { modelId: null, kind: 'batch-price', modelIds })
     return
@@ -676,6 +769,25 @@ async function handleBatchAction(kind) {
   } finally {
     savingListings.value = false
   }
+}
+
+function askConfirmation(message, options = {}) {
+  return new Promise((resolve) => {
+    confirmationRequest.value = {
+      danger: Boolean(options.danger),
+      message,
+      resolve
+    }
+  })
+}
+
+function settleConfirmation(confirmed) {
+  const request = confirmationRequest.value
+  if (!request) return
+  confirmationBusy.value = true
+  confirmationRequest.value = null
+  request.resolve(confirmed)
+  confirmationBusy.value = false
 }
 
 function emitUpdatedListings(response) {
