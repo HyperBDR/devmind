@@ -1696,6 +1696,7 @@ class ResaleListingSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "current_price_revision",
             "pending_price_revision",
+            "pricing_format",
             "created_at",
             "updated_at",
         )

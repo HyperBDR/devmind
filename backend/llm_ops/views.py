@@ -111,6 +111,7 @@ from .services import (
     resolve_channel_model_currency,
     resolve_channel_price_schedule,
     resolve_resale_listing_currency,
+    resolve_resale_listing_unit_prices,
     save_resale_listing_price_draft,
     selected_price_item_group,
     sync_channel_price_items,
@@ -3308,11 +3309,16 @@ def _decision_listing_payload_from_listing(
     *,
     row,
     currency_context,
+    usage_context,
 ):
     retail_currency = resolve_resale_listing_currency(listing)
-    retail_input = listing.retail_input_price_per_million
-    retail_output = listing.retail_output_price_per_million
-    retail_cache_input = listing.retail_cache_input_price_per_million
+    retail_unit_prices = resolve_resale_listing_unit_prices(
+        listing,
+        usage_context,
+    )
+    retail_input = retail_unit_prices.input_per_million
+    retail_output = retail_unit_prices.output_per_million
+    retail_cache_input = retail_unit_prices.cache_input_per_million
     retail_input_display = _converted_amount(
         retail_input,
         retail_currency,
@@ -3351,6 +3357,7 @@ def _decision_listing_payload_from_listing(
         "channel_id": listing.channel_id,
         "channel_name": channel.name if channel else None,
         "channel_type": "fixed_channel" if channel else "auto_best",
+        "pricing_format": listing.pricing_format,
         "currency": (
             currency_context.display_currency
             if not requires_currency_conversion
@@ -3451,10 +3458,14 @@ def _summary_listing_rows(
                 listing.model,
                 override=override,
             )
-        retail_input = listing.retail_input_price_per_million
-        retail_output = listing.retail_output_price_per_million
-        retail_cache_input = listing.retail_cache_input_price_per_million
         retail_currency = resolve_resale_listing_currency(listing)
+        retail_unit_prices = resolve_resale_listing_unit_prices(
+            listing,
+            usage_context,
+        )
+        retail_input = retail_unit_prices.input_per_million
+        retail_output = retail_unit_prices.output_per_million
+        retail_cache_input = retail_unit_prices.cache_input_per_million
         fee_rate = listing.platform.fee_rate or Decimal("0")
         cost_input_display = _converted_amount(
             cost_input,
@@ -3526,6 +3537,7 @@ def _summary_listing_rows(
                 "channel_id": listing.channel_id,
                 "channel_name": channel.name if channel else None,
                 "channel_type": "fixed_channel" if channel else "auto_best",
+                "pricing_format": listing.pricing_format,
                 "currency": (
                     currency_context.display_currency
                     if not requires_currency_conversion
@@ -3989,6 +4001,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 listing,
                 row=row,
                 currency_context=currency_context,
+                usage_context=usage_context,
             )
             selected_platform_listing_payloads_by_model.setdefault(
                 listing.model_id,
