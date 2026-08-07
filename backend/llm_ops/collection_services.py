@@ -3607,6 +3607,9 @@ def parse_price_range(value) -> tuple[Decimal | None, Decimal | None]:
     text = str(value or "").strip()
     if not text or text in {"-", "不限"}:
         return None, None
+    unbounded = re.match(r"^([0-9.]+)\s*\+$", text)
+    if unbounded:
+        return to_decimal(unbounded.group(1)), None
     match = re.match(r"^([0-9.]+)\s*-\s*([0-9.]+)$", text)
     if not match:
         return None, None

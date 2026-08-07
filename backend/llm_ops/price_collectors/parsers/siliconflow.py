@@ -18,7 +18,10 @@ from llm_ops.skill_runner import (
     collected_catalog_to_standard_catalog,
 )
 
-from .common import filter_models_by_codes
+from .common import (
+    filter_models_by_codes,
+    merge_fallback_into_tiered_rows,
+)
 
 
 PRICING_URL = "https://siliconflow.cn/pricing"
@@ -315,6 +318,10 @@ def normalize_grouped_model(item: dict[str, Any]) -> dict[str, Any]:
             normalized["input_token_range"] = token_range
             normalized["output_token_range"] = token_range
         rows.append(normalized)
+    rows = merge_fallback_into_tiered_rows(
+        rows,
+        scope_field="billing_scope",
+    )
     return {
         "model_id": item["model_id"],
         "model_name": item["model_name"],

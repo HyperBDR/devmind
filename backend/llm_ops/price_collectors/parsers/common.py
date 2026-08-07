@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal, InvalidOperation
+from html import unescape
 from typing import Any
 
 from llm_ops.collectors import (
@@ -13,6 +15,70 @@ from llm_ops.collectors.official import (
     collect_official_pricing_catalog,
 )
 from llm_ops.skill_runner import collected_catalog_to_standard_catalog
+
+
+def merge_fallback_into_tiered_rows(
+    rows: list[dict[str, Any]],
+    *,
+    scope_field: str,
+) -> list[dict[str, Any]]:
+    """Merge flat fallback rows into tiered rows as an unbounded tail.
+
+    Official pricing pages sometimes quote a discounted context window with
+    explicit token ranges while charging a flat fallback price beyond that
+    window. Without merging, one model/scenario yields both flat and tiered
+    rows in the same table, which the price table contract rejects.
+    """
+    scoped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        scope = str(row.get(scope_field) or "").strip()
+        scoped.setdefault(scope, []).append(row)
+    merged: list[dict[str, Any]] = []
+    for scope_rows in scoped.values():
+        merged.extend(_merge_scope_rows(scope_rows))
+    return merged
+
+
+def _merge_scope_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge flat rows of one scenario into its tiered table."""
+    tiered = [
+        row
+        for row in rows
+        if row.get("input_token_range") or row.get("output_token_range")
+    ]
+    flat = [
+        row
+        for row in rows
+        if not (row.get("input_token_range") or row.get("output_token_range"))
+    ]
+    if not tiered or not flat:
+        return rows
+    input_end = max(
+        (_range_end(row.get("input_token_range")) for row in tiered),
+        default=None,
+    )
+    output_end = max(
+        (_range_end(row.get("output_token_range")) for row in tiered),
+        default=None,
+    )
+    for row in flat:
+        if input_end is not None:
+            row["input_token_range"] = f"{input_end}+"
+        if output_end is not None:
+            row["output_token_range"] = f"{output_end}+"
+    return rows
+
+
+def _range_end(value: Any) -> Decimal | None:
+    """Return the end bound of a normalized token range string."""
+    text = unescape(str(value or "")).strip()
+    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*$", text)
+    if not match:
+        return None
+    try:
+        return Decimal(match.group(1))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
 
 
 def sync_official_vendor_catalog(

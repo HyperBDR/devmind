@@ -88,6 +88,7 @@ class TestDeepSeekCloud:
         assert result["data"]["items"] == []
         assert result["data"]["account_id"] == "deepseek"
         assert result["data"]["is_available"] is False
+        assert result["data"]["balance_only"] is True
 
     @patch("cloud_billing.clouds.deepseek_provider.requests.Session.get")
     def test_get_billing_info_accepts_negative_balance(self, mock_get):

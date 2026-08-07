@@ -10,6 +10,7 @@ import requests
 from .common import (
     build_text_token_standard_catalog,
     filter_models_by_codes,
+    merge_fallback_into_tiered_rows,
     sync_official_vendor_catalog,
 )
 
@@ -145,12 +146,21 @@ def extract_models(page_html: str) -> list[dict[str, Any]]:
             )
 
     return [
-        {key: value for key, value in item.items() if not key.startswith("_")}
+        _merge_model_rows(item)
         for item in sorted(
             models.values(),
             key=lambda candidate: candidate["model_name"].lower(),
         )
     ]
+
+
+def _merge_model_rows(item: dict[str, Any]) -> dict[str, Any]:
+    """Merge flat fallback rows into tiered rows per deployment scope."""
+    merged = merge_fallback_into_tiered_rows(
+        item["price_rows"],
+        scope_field="deployment_scope",
+    )
+    return {**item, "price_rows": merged}
 
 
 def expand_rows(table_html: str) -> list[list[str]]:
