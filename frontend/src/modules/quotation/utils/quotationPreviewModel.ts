@@ -64,10 +64,35 @@ function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-export function getCurrencySymbol(currency: Quotation['currency']): string {
-  if (currency === 'USD') return '$';
-  if (currency === 'EUR') return '€';
-  return '¥';
+export function normalizeQuoteCurrency(currency: string): string {
+  const code = String(currency || '').trim().toUpperCase();
+  if (code === 'RMB' || code === '¥' || code === '￥') return 'CNY';
+  if (code === 'EURO' || code === 'EUROS' || code === '€') return 'EUR';
+  if (code === '£') return 'GBP';
+  if (code === 'RM') return 'MYR';
+  if (code === 'HK$') return 'HKD';
+  return code;
+}
+
+export function getCurrencyShortLabel(
+  currency: Quotation['currency'] | string
+): string {
+  const code = normalizeQuoteCurrency(currency);
+  if (code === 'MYR') return 'RM';
+  return code;
+}
+
+export function getCurrencySymbol(
+  currency: Quotation['currency'] | string
+): string {
+  const code = normalizeQuoteCurrency(currency);
+  if (code === 'USD') return '$';
+  if (code === 'CNY') return '¥';
+  if (code === 'EUR') return '€';
+  if (code === 'GBP') return '£';
+  if (code === 'HKD') return 'HK$';
+  if (code === 'MYR') return 'RM';
+  return code ? `${code} ` : '';
 }
 
 function withLineNumbers(items: QuotationLineItem[]): PreviewLineItem[] {

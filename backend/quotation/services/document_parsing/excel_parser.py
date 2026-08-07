@@ -14,10 +14,16 @@ except ImportError:
     CalamineWorkbook = None
 
 from quotation.services.document_parsing.business_fields import (
+    EXPIRE_DATE_LABELS,
     PRODUCT_LINE_LABELS,
     QUOTE_DATE_LABELS,
+    QUOTE_NO_LABELS,
+    REMARKS_LABELS,
     explicit_product_line,
     known_product_line,
+    normalize_currency_code,
+    parse_quote_date,
+    repair_issuer_email,
 )
 from quotation.services.document_parsing.schemas import (
     ParsedDocumentData,
@@ -26,7 +32,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.4.0"
+PARSER_VERSION = "2.7.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -88,37 +94,9 @@ def _decimal_string(value: Any) -> str:
 
 
 def _date(value: Any) -> date | None:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    raw = _text(value).strip()
-    if not raw:
-        return None
-    for candidate in (raw, raw.replace("/", "-"), raw.replace(".", "-")):
-        try:
-            return date.fromisoformat(candidate)
-        except ValueError:
-            continue
-    natural = re.sub(
-        r"(?<=\d)(st|nd|rd|th)\b",
-        "",
-        raw,
-        flags=re.IGNORECASE,
-    )
-    for date_format in (
-        "%d %B, %Y",
-        "%d %b, %Y",
-        "%d %B %Y",
-        "%d %b %Y",
-        "%d-%b-%Y",
-        "%d-%b-%y",
-    ):
-        try:
-            return datetime.strptime(natural, date_format).date()
-        except ValueError:
-            continue
-    return None
+    if isinstance(value, (date, datetime)):
+        return parse_quote_date(value)
+    return parse_quote_date(_text(value))
 
 
 def _rows_openpyxl(path: Path) -> list[list[Any]]:
@@ -240,6 +218,11 @@ def _product_line(
         )
         if name:
             return name, prefix
+    for row in rows:
+        for value in row:
+            name, prefix = known_product_line(_text(value))
+            if name:
+                return name, prefix
     return "", ""
 
 
@@ -261,6 +244,7 @@ def _section_fields(
             for key, label in (
                 ("company", "Company"),
                 ("name", "Name"),
+                ("name", "Contact"),
                 ("email", "Email"),
             ):
                 parsed = _starts_with_value(value, label)
@@ -270,6 +254,7 @@ def _section_fields(
             for key, label in (
                 ("company", "Company"),
                 ("name", "Name"),
+                ("name", "Contact"),
                 ("email", "Email"),
             ):
                 if key in result or _normalized(value) != label.lower():
@@ -318,6 +303,10 @@ def _project_fields(rows: list[list[Any]]) -> dict[str, str]:
             key = headers.get(header)
             if key and column < len(values):
                 result[key] = _text(values[column])
+        email = result.get("issuer_contact_email", "")
+        repaired = repair_issuer_email(email)
+        if repaired:
+            result["issuer_contact_email"] = repaired
         return result
     return {}
 
@@ -494,7 +483,7 @@ def _validate(
     )
     subtotal = Decimal(source_totals.get("subtotal_before_vat", "0"))
     if abs(extended_total - subtotal) > MONEY_TOLERANCE:
-        warnings.append(
+        errors.append(
             _issue(
                 "subtotal_before_vat",
                 "amount_mismatch",
@@ -504,7 +493,7 @@ def _validate(
     expected_grand = subtotal + Decimal(source_totals.get("vat_amount", "0"))
     source_grand = Decimal(source_totals.get("grand_total", "0"))
     if abs(expected_grand - source_grand) > MONEY_TOLERANCE:
-        warnings.append(
+        errors.append(
             _issue(
                 "grand_total",
                 "amount_mismatch",
@@ -515,7 +504,7 @@ def _validate(
 
 
 def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
-    quote_no = _label_value(rows, "Quote No.")
+    quote_no = _label_value_aliases(rows, QUOTE_NO_LABELS)
     ship_to = _section_fields(rows, "ship to")
     bill_to = _section_fields(rows, "bill to")
     project = _project_fields(rows)
@@ -559,16 +548,14 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
         product_line=product_line,
         product_line_name=product_line_name,
         project_name=project.get("project_name", ""),
-        currency=project.get("currency", "USD").upper() or "USD",
+        currency=normalize_currency_code(project.get("currency", "")),
         payment_term_option=_payment_term_option(payment_terms),
         payment_terms=payment_terms,
         quote_date=_date(_label_value_aliases(rows, QUOTE_DATE_LABELS)),
-        expire_date=_date(_label_value(rows, "Quote Valid Till")),
+        expire_date=_date(_label_value_aliases(rows, EXPIRE_DATE_LABELS)),
         tax_label=tax_label,
         vat_rate=vat_rate,
-        remarks_disclaimer=_label_value(
-            rows, "Additional Notes & Disclaimers"
-        ),
+        remarks_disclaimer=_label_value_aliases(rows, REMARKS_LABELS),
         issuer_company_name=issuer_company,
         issuer_contact_name=project.get("issuer_contact_name", ""),
         issuer_contact_email=project.get("issuer_contact_email", ""),

@@ -12,7 +12,13 @@ from django.db.models import (
     Subquery,
     Sum,
 )
-from django.db.models.functions import Coalesce, TruncMonth, TruncWeek
+from django.db.models.functions import (
+    Coalesce,
+    Trim,
+    TruncMonth,
+    TruncWeek,
+    Upper,
+)
 from django.utils import timezone
 
 from quotation.models import Quotation, QuotationVersion, QuoteStatus
@@ -34,7 +40,16 @@ WEEK_PERIOD_COUNT = 8
 BREAKDOWN_MIN_SHARE = Decimal("0.02")
 BREAKDOWN_MAX_ITEMS = 8
 CURRENCY_ALIASES = {
-    "CNY": ("CNY", "RMB"),
+    "CNY": ("CNY", "RMB", "¥", "￥"),
+    "EUR": ("EUR", "EURO", "EUROS", "€"),
+    "GBP": ("GBP", "£"),
+    "HKD": ("HKD", "HK$"),
+    "MYR": ("MYR", "RM"),
+}
+_CURRENCY_CANONICAL = {
+    alias: code
+    for code, aliases in CURRENCY_ALIASES.items()
+    for alias in aliases
 }
 
 
@@ -43,11 +58,26 @@ def _money(value: Decimal | None) -> str:
 
 
 def _normalize_currency(currency: str) -> str:
-    return "CNY" if currency == "RMB" else currency
+    code = (currency or "").strip().upper()
+    return _CURRENCY_CANONICAL.get(code, code)
 
 
 def _currency_values(currency: str) -> tuple[str, ...]:
     return CURRENCY_ALIASES.get(currency, (currency,))
+
+
+def _filter_by_currency(
+    queryset: QuerySet[Quotation],
+    currency: str,
+) -> QuerySet[Quotation]:
+    """Keep rows whose currency matches the selected code or alias."""
+    values = {
+        value.upper()
+        for value in _currency_values(_normalize_currency(currency))
+    }
+    return queryset.annotate(
+        currency_code=Upper(Trim("currency"))
+    ).filter(currency_code__in=values)
 
 
 def _available_currencies(queryset: QuerySet[Quotation]) -> list[str]:
@@ -58,6 +88,18 @@ def _available_currencies(queryset: QuerySet[Quotation]) -> list[str]:
         .distinct()
     )
     return sorted({_normalize_currency(currency) for currency in currencies})
+
+
+def _available_periods(
+    queryset: QuerySet[Quotation],
+    selected_period: str,
+) -> list[str]:
+    periods = {
+        value.strftime("%Y-%m")
+        for value in queryset.dates("quote_date", "month", order="DESC")
+    }
+    periods.add(selected_period)
+    return sorted(periods, reverse=True)
 
 
 def _with_first_accepted_at(
@@ -107,14 +149,26 @@ def _week_start(value: datetime) -> datetime:
 def build_dashboard_summary(
     queryset: QuerySet[Quotation],
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
+    period: str = "",
 ) -> dict[str, object]:
     """Build lightweight KPI aggregates for the quotation dashboard."""
     currency = _normalize_currency(currency)
     currency_values = _currency_values(currency)
     local_now = timezone.localtime()
     month_start = _month_start(local_now)
+    if period:
+        year, month = (int(part) for part in period.split("-"))
+        month_start = month_start.replace(year=year, month=month)
     month_end = _next_month(month_start)
     previous_month_start = _shift_month(month_start, -1)
+    month_filter = Q(
+        quote_date__gte=month_start.date(),
+        quote_date__lt=month_end.date(),
+    )
+    previous_month_filter = Q(
+        quote_date__gte=previous_month_start.date(),
+        quote_date__lt=month_start.date(),
+    )
     counts = queryset.aggregate(
         accepted_count=Count(
             "pk",
@@ -128,37 +182,18 @@ def build_dashboard_summary(
             "pk",
             filter=Q(status=QuoteStatus.DRAFT),
         ),
-        month_quote_count=Count(
-            "pk",
-            filter=Q(
-                currency__in=currency_values,
-                quote_date__gte=month_start.date(),
-                quote_date__lt=month_end.date(),
-            ),
-        ),
+        month_quote_count=Count("pk", filter=month_filter),
         previous_month_quote_count=Count(
             "pk",
-            filter=Q(
-                currency__in=currency_values,
-                quote_date__gte=previous_month_start.date(),
-                quote_date__lt=month_start.date(),
-            ),
+            filter=previous_month_filter,
         ),
         month_quote_amount=Sum(
             "grand_total",
-            filter=Q(
-                currency__in=currency_values,
-                quote_date__gte=month_start.date(),
-                quote_date__lt=month_end.date(),
-            ),
+            filter=month_filter,
         ),
         previous_month_quote_amount=Sum(
             "grand_total",
-            filter=Q(
-                currency__in=currency_values,
-                quote_date__gte=previous_month_start.date(),
-                quote_date__lt=month_start.date(),
-            ),
+            filter=previous_month_filter,
         ),
     )
     won_amount = (
@@ -182,6 +217,10 @@ def build_dashboard_summary(
     return {
         "currency": currency,
         "available_currencies": _available_currencies(queryset),
+        "available_periods": _available_periods(
+            queryset,
+            month_start.strftime("%Y-%m"),
+        ),
         "current_period": month_start.strftime("%Y-%m"),
         "previous_period": previous_month_start.strftime("%Y-%m"),
         "month_quote_count": counts["month_quote_count"],
@@ -320,6 +359,13 @@ def _merge_trend_rows(
     ]
 
 
+def _breakdown_quote_no(row: dict, display_counts: dict[str, int]) -> str:
+    display = row["source_quote_no"] or row["quote_no"]
+    if display_counts.get(display, 0) > 1:
+        return row["quote_no"]
+    return display
+
+
 def build_dashboard_analytics(
     queryset: QuerySet[Quotation],
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
@@ -327,9 +373,7 @@ def build_dashboard_analytics(
     """Build bounded chart aggregates without serializing quotation rows."""
     currency = _normalize_currency(currency)
     local_now = timezone.localtime()
-    currency_queryset = queryset.filter(
-        currency__in=_currency_values(currency)
-    )
+    currency_queryset = _filter_by_currency(queryset, currency)
     breakdown_queryset = currency_queryset.filter(
         status__in=CHART_STATUSES,
         grand_total__gt=0,
@@ -347,6 +391,7 @@ def build_dashboard_analytics(
             "id",
             "quote_no",
             "source_quote_no",
+            "currency",
             "grand_total",
             "status",
         )[:BREAKDOWN_MAX_ITEMS]
@@ -355,11 +400,16 @@ def build_dashboard_analytics(
         (row["grand_total"] for row in breakdown_rows),
         Decimal("0"),
     )
+    display_counts: dict[str, int] = {}
+    for row in breakdown_rows:
+        display = row["source_quote_no"] or row["quote_no"]
+        display_counts[display] = display_counts.get(display, 0) + 1
     breakdown = [
         {
             "quotation_id": row["id"],
-            "quote_no": row["source_quote_no"] or row["quote_no"],
+            "quote_no": _breakdown_quote_no(row, display_counts),
             "amount": _money(row["grand_total"]),
+            "currency": _normalize_currency(row["currency"]),
             "status": row["status"],
         }
         for row in breakdown_rows

@@ -629,12 +629,16 @@ def ocr_document_task(self, job_id: str):
         result.status = (
             DocumentParseStatus.NOT_QUOTATION
             if parsed.document_kind == "not_quotation"
-            else DocumentParseStatus.READY
+            else (
+                DocumentParseStatus.REVIEW_REQUIRED
+                if parsed.validation_errors
+                else DocumentParseStatus.READY
+            )
         )
         result.normalized_json = parsed.quotation.model_dump(mode="json")
         result.source_totals_json = parsed.source_totals
         result.field_confidence_json = parsed.field_confidence
-        result.validation_errors_json = []
+        result.validation_errors_json = parsed.validation_errors
         result.validation_warnings_json = [
             warning
             for warning in parsed.validation_warnings

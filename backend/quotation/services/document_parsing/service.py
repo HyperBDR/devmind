@@ -157,8 +157,6 @@ def parse_document_asset(
         parse_duration_ms = round((perf_counter() - parse_started) * 1000)
         if parsed.document_kind == "not_quotation":
             status = DocumentParseStatus.NOT_QUOTATION
-        elif parsed.validation_errors:
-            status = DocumentParseStatus.REVIEW_REQUIRED
         else:
             status = DocumentParseStatus.READY
         with transaction.atomic():
@@ -349,7 +347,10 @@ def parse_and_create_quotation(
         ):
             return confirmed, True
     result, reused_parse = parse_document_asset(asset, actor=actor)
-    if result.quotation_id:
+    if (
+        result.quotation_id
+        and result.status != DocumentParseStatus.REVIEW_REQUIRED
+    ):
         return result, True
     if result.status == DocumentParseStatus.NOT_QUOTATION:
         discard_non_quotation_import(result)
@@ -361,13 +362,9 @@ def parse_and_create_quotation(
     }
     if "ocr_required" in warning_codes:
         return result, reused_parse
-    if result.status == DocumentParseStatus.REVIEW_REQUIRED:
-        result.status = DocumentParseStatus.FAILED
-        result.error_message = "Automatic parsing validation failed"
-        result.save(update_fields=["status", "error_message", "updated_at"])
-        return result, reused_parse
     if result.status != DocumentParseStatus.READY:
-        return result, reused_parse
+        if result.status != DocumentParseStatus.REVIEW_REQUIRED:
+            return result, reused_parse
 
     from quotation.serializers import QuotationCreateSerializer
 
@@ -388,6 +385,8 @@ def parse_and_create_quotation(
             ]
         )
         return result, reused_parse
+
+    serializer.validated_data["_source_totals"] = result.source_totals_json
 
     if asset.quotation_id:
         quotation = update_imported_quotation_from_parse(
@@ -421,6 +420,7 @@ def update_imported_quotation_from_parse(
             pk=locked.asset.quotation_id
         )
         data = dict(validated_data)
+        source_totals = data.pop("_source_totals", {}) or {}
         items = data.pop("items", [])
         quotation.source_quote_no = str(data["quote_no"])
         field_names = (
@@ -450,12 +450,18 @@ def update_imported_quotation_from_parse(
         for field in field_names:
             if field in data:
                 setattr(quotation, field, data[field])
+        for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
+            if source_totals.get(field) not in (None, ""):
+                setattr(quotation, field, source_totals[field])
         quotation.status = QuoteStatus.GENERATED
         quotation.source_type = QuotationSourceType.DOCUMENT_IMPORT
         quotation.save(
             update_fields=[
                 "source_quote_no",
                 *field_names,
+                "subtotal_before_vat",
+                "vat_amount",
+                "grand_total",
                 "status",
                 "source_type",
                 "updated_at",
@@ -474,6 +480,7 @@ def update_imported_quotation_from_parse(
                 f"Reparsed {locked.asset.file_name} with "
                 f"{locked.parser_version}"
             ),
+            source_totals=source_totals,
         )
         locked.asset.parse_results.filter(
             status=DocumentParseStatus.CONFIRMED,
@@ -569,6 +576,7 @@ def confirm_document_parse_result(
             quotation,
             operator_email=data["created_by_email"],
             notes=f"Imported from {locked.asset.file_name}",
+            source_totals=data.get("_source_totals"),
         )
         locked.quotation = quotation
         locked.status = DocumentParseStatus.CONFIRMED

@@ -26,6 +26,7 @@ import {
   type DashboardSummary
 } from '../api/dashboard'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import { getCurrencySymbol } from '../utils/quotationPreviewModel'
 import FormSelect from './FormSelect.vue'
 import { ChevronRight, FileSpreadsheet } from 'lucide-vue-next'
 
@@ -52,17 +53,28 @@ const QUOTE_BREAKDOWN_COLORS = [
   '#136b73',
   '#d6a21f'
 ]
-const CURRENCY_ORDER = ['USD', 'CNY', 'EUR', 'HKD', 'MYR']
+const CURRENCY_ORDER = ['USD', 'CNY', 'EUR', 'GBP', 'MYR', 'HKD']
 
 const emit = defineEmits<{
   viewQuote: [id: string]
-  navigateToTab: [tab: string]
+  navigateToTab: [
+    payload: {
+      tab: string
+      createdFrom?: string
+      createdTo?: string
+    },
+  ]
 }>()
 
 const { t, locale } = useQuotationI18n()
 
 const trendGrain = ref<TrendGrain>('monthly')
 const dashboardCurrency = ref('USD')
+const selectedPeriod = ref(
+  `${new Date().getFullYear()}-${String(
+    new Date().getMonth() + 1
+  ).padStart(2, '0')}`
+)
 const summary = ref<DashboardSummary | null>(null)
 const analytics = ref<DashboardAnalytics | null>(null)
 const recentQuotes = ref<DashboardRecentQuotation[]>([])
@@ -72,50 +84,58 @@ const analyticsLoading = ref(true)
 const analyticsError = ref(false)
 
 function normalizeDashboardCurrency(currency: string): string {
-  return currency === 'RMB' ? 'CNY' : currency
+  const code = String(currency || '').trim().toUpperCase()
+  if (code === 'RMB' || code === '¥' || code === '￥') return 'CNY'
+  if (code === 'EURO' || code === 'EUROS' || code === '€') return 'EUR'
+  if (code === '£') return 'GBP'
+  if (code === 'RM') return 'MYR'
+  if (code === 'HK$') return 'HKD'
+  return code
 }
 
-function currencySymbol(currency: DashboardCurrency): string {
-  if (currency === 'USD') return t('quotation.common.currencyUsd')
-  if (currency === 'CNY' || currency === 'RMB') {
-    return t('quotation.common.currencyCny')
-  }
-  if (currency === 'EUR') return t('quotation.common.currencyEur')
-  if (currency === 'HKD') return 'HK$'
-  if (currency === 'MYR') return 'RM'
-  return `${currency} `
+function currencyShortLabel(currency: DashboardCurrency): string {
+  const code = normalizeDashboardCurrency(currency)
+  if (code === 'MYR') return 'RM'
+  return code
 }
 
-function formatCurrencyAmount(value: number): string {
-  const currency = summary.value?.currency || 'USD'
-  return `${currencySymbol(currency)}${value.toLocaleString()}`
+function currencyOptionLabel(currency: string): string {
+  return currencyShortLabel(currency)
 }
 
-const monthQuoteAmountLabel = computed(() =>
-  formatCurrencyAmount(summary.value?.monthQuoteAmount || 0)
+const monthQuoteDelta = computed(() => {
+  if (summary.value == null) return null
+  const monthQuoteCount = summary.value.monthQuoteCount || 0
+  if (monthQuoteCount === 0) return null
+  return monthQuoteCount - (summary.value.previousMonthQuoteCount || 0)
+})
+const monthQuoteDeltaLabel = computed(() => {
+  if (monthQuoteDelta.value == null) return '—'
+  const delta = monthQuoteDelta.value
+  return delta > 0 ? `+${delta}` : String(delta)
+})
+const monthQuoteDeltaClass = computed(() => {
+  const delta = monthQuoteDelta.value
+  if (delta == null || summaryLoading.value) return 'text-dm-text'
+  if (delta > 0) return 'text-emerald-700'
+  if (delta < 0) return 'text-dm-text-secondary'
+  return 'text-dm-text'
+})
+const availableCurrencyOptions = computed(() =>
+  CURRENCY_ORDER.map((currency) => ({
+    value: currency,
+    label: currencyOptionLabel(currency)
+  }))
 )
-const availableCurrencyOptions = computed(() => {
-  const currencies = summary.value?.availableCurrencies || []
-  const fallback = normalizeDashboardCurrency(dashboardCurrency.value)
-  const normalized = [
-    ...new Set(
-      (currencies.length ? currencies : [fallback]).map(
-        normalizeDashboardCurrency
-      )
-    )
-  ]
-  return normalized
-    .sort((left, right) => {
-      const leftIndex = CURRENCY_ORDER.indexOf(left)
-      const rightIndex = CURRENCY_ORDER.indexOf(right)
-      if (leftIndex === -1 && rightIndex === -1) {
-        return left.localeCompare(right)
-      }
-      if (leftIndex === -1) return 1
-      if (rightIndex === -1) return -1
-      return leftIndex - rightIndex
-    })
-    .map((currency) => ({ value: currency, label: currency }))
+const availablePeriodOptions = computed(() => {
+  const periods = summary.value?.availablePeriods || []
+  const normalized = [...new Set([...periods, selectedPeriod.value])]
+    .filter(Boolean)
+    .sort((left, right) => right.localeCompare(left))
+  return normalized.map((period) => ({
+    value: period,
+    label: formatSummaryPeriod(period)
+  }))
 })
 const overviewRecentQuotes = computed(() => recentQuotes.value.slice(0, 3))
 
@@ -129,27 +149,37 @@ function formatSummaryPeriod(value: string): string {
     })
   }
   return new Date(`${value}-01T00:00:00`).toLocaleString('en', {
-    month: 'long',
+    month: 'short',
     year: 'numeric'
   })
 }
 
+const selectedDashboardCurrency = computed(() =>
+  normalizeDashboardCurrency(dashboardCurrency.value)
+)
+
 const quoteBreakdownData = computed(() =>
-  (analytics.value?.amountBreakdown || []).map((quote, index) => {
-    const currency = analytics.value?.currency || 'USD'
-    const amountLabel = `${currencySymbol(currency)}${quote.amount.toLocaleString()}`
-    return {
-      key: quote.quotationId,
-      quoteNo: quote.quoteNo,
-      value: quote.amount,
-      color: QUOTE_BREAKDOWN_COLORS[index % QUOTE_BREAKDOWN_COLORS.length],
-      amountLabel,
-      currency,
-      share: 0,
-      status: quote.status,
-      label: `${quote.quoteNo} · ${amountLabel}`
-    }
-  })
+  (analytics.value?.amountBreakdown || [])
+    .filter((quote) =>
+      normalizeDashboardCurrency(
+        quote.currency || analytics.value?.currency || ''
+      ) === selectedDashboardCurrency.value
+    )
+    .map((quote, index) => {
+      const currency = selectedDashboardCurrency.value
+      const amountLabel = `${currencyShortLabel(currency)} ${quote.amount.toLocaleString()}`
+      return {
+        key: quote.quotationId,
+        quoteNo: quote.quoteNo,
+        value: quote.amount,
+        color: QUOTE_BREAKDOWN_COLORS[index % QUOTE_BREAKDOWN_COLORS.length],
+        amountLabel,
+        currency,
+        share: 0,
+        status: quote.status,
+        label: `${quote.quoteNo} · ${amountLabel}`
+      }
+    })
 )
 
 const quoteBreakdownTotal = computed(() =>
@@ -417,8 +447,10 @@ const trendLineOptions = computed<ChartOptions<'line'>>(() => ({
       callbacks: {
         label: (item: TooltipItem<'line'>) => {
           const value = Number(item.raw) || 0
-          const symbol = currencySymbol(analytics.value?.currency || 'USD')
-          return `${item.dataset.label}: ${symbol}${value.toLocaleString()}`
+          const label = currencyShortLabel(
+            analytics.value?.currency || 'USD'
+          )
+          return `${item.dataset.label}: ${label} ${value.toLocaleString()}`
         }
       }
     }
@@ -472,35 +504,75 @@ function setTrendGrain(grain: TrendGrain) {
   trendGrain.value = grain
 }
 
-async function loadCurrencyDashboard() {
+function monthDateRange(period: string) {
+  const [yearText = '', monthText = ''] = String(period || '').split('-')
+  const year = Number(yearText)
+  const month = Number(monthText)
+  if (!year || !month) return {}
+  const lastDay = new Date(year, month, 0).getDate()
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return {
+    createdFrom: `${yearText}-${pad(month)}-01`,
+    createdTo: `${yearText}-${pad(month)}-${pad(lastDay)}`,
+  }
+}
+
+function openSelectedMonthQuotes() {
+  emit('navigateToTab', {
+    tab: 'list',
+    ...monthDateRange(selectedPeriod.value),
+  })
+}
+
+let summaryRequestId = 0
+let analyticsRequestId = 0
+
+async function loadDashboardSummary() {
+  const requestId = ++summaryRequestId
+  const period = selectedPeriod.value
   summaryLoading.value = true
-  analyticsLoading.value = true
   summaryError.value = false
+  try {
+    const data = await getDashboardSummary(period)
+    if (
+      requestId !== summaryRequestId
+      || period !== selectedPeriod.value
+    ) {
+      return
+    }
+    summary.value = data
+  } catch (error) {
+    if (requestId !== summaryRequestId) return
+    summaryError.value = true
+    console.error('Unable to load dashboard summary', error)
+  } finally {
+    if (requestId === summaryRequestId) summaryLoading.value = false
+  }
+}
+
+async function loadDashboardAnalytics() {
+  const requestId = ++analyticsRequestId
+  const currency = normalizeDashboardCurrency(dashboardCurrency.value)
+  analyticsLoading.value = true
   analyticsError.value = false
-  await Promise.all([
-    getDashboardSummary(dashboardCurrency.value)
-      .then((data) => {
-        summary.value = data
-      })
-      .catch((error) => {
-        summaryError.value = true
-        console.error('Unable to load dashboard summary', error)
-      })
-      .finally(() => {
-        summaryLoading.value = false
-      }),
-    getDashboardAnalytics(dashboardCurrency.value)
-      .then((data) => {
-        analytics.value = data
-      })
-      .catch((error) => {
-        analyticsError.value = true
-        console.error('Unable to load dashboard analytics', error)
-      })
-      .finally(() => {
-        analyticsLoading.value = false
-      })
-  ])
+  analytics.value = null
+  try {
+    const data = await getDashboardAnalytics(currency)
+    if (
+      requestId !== analyticsRequestId
+      || currency !== normalizeDashboardCurrency(dashboardCurrency.value)
+      || currency !== normalizeDashboardCurrency(data.currency)
+    ) {
+      return
+    }
+    analytics.value = data
+  } catch (error) {
+    if (requestId !== analyticsRequestId) return
+    analyticsError.value = true
+    console.error('Unable to load dashboard analytics', error)
+  } finally {
+    if (requestId === analyticsRequestId) analyticsLoading.value = false
+  }
 }
 
 async function loadRecentQuotations() {
@@ -513,11 +585,31 @@ async function loadRecentQuotations() {
 }
 
 watch(dashboardCurrency, () => {
-  void loadCurrencyDashboard()
+  void loadDashboardAnalytics()
+})
+
+watch(
+  availableCurrencyOptions,
+  (options) => {
+    if (
+      options.length
+      && !options.some((option) => option.value === dashboardCurrency.value)
+    ) {
+      dashboardCurrency.value = options[0].value
+    }
+  }
+)
+
+watch(selectedPeriod, () => {
+  void loadDashboardSummary()
 })
 
 onMounted(async () => {
-  await Promise.all([loadCurrencyDashboard(), loadRecentQuotations()])
+  await Promise.all([
+    loadDashboardSummary(),
+    loadDashboardAnalytics(),
+    loadRecentQuotations()
+  ])
 })
 </script>
 
@@ -539,29 +631,30 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-3">
-        <span class="text-xs text-dm-text-tertiary">
-          {{
-            t('quotation.pages.dashboard.generatedAt', {
-              time: formatRecentQuoteTime(
-                summary?.generatedAt || analytics?.generatedAt || ''
-              )
-            })
-          }}
-        </span>
+        <FormSelect
+          v-model="selectedPeriod"
+          :aria-label="t('quotation.pages.dashboard.monthLabel')"
+          :options="availablePeriodOptions"
+          class-name="w-28 shrink-0"
+          trigger-class-name="h-9 px-3 text-xs font-semibold text-dm-text-secondary"
+          panel-class-name="min-w-28"
+          test-id="dashboard-period"
+        />
         <FormSelect
           v-model="dashboardCurrency"
           :aria-label="t('quotation.pages.dashboard.currencyLabel')"
           :options="availableCurrencyOptions"
-          class-name="w-24 shrink-0"
-          trigger-class-name="h-9 px-3 text-xs font-semibold text-dm-text-secondary"
-          panel-class-name="min-w-24"
+          compact
+          class-name="w-[4.5rem] shrink-0"
+          trigger-class-name="h-9 !px-2 text-xs font-semibold leading-none text-dm-text-secondary"
+          panel-class-name="!left-0 !right-auto min-w-0 w-full py-0.5"
           test-id="dashboard-currency"
         />
         <button
           id="btn-quick-create"
           type="button"
           class="dm-btn-primary cursor-pointer px-3 py-2 text-xs"
-          @click="emit('navigateToTab', 'create')"
+          @click="emit('navigateToTab', { tab: 'create' })"
         >
           <FileSpreadsheet class="h-4 w-4" />
           {{ t('quotation.actions.quickCreate') }}
@@ -598,7 +691,7 @@ onMounted(async () => {
           <button
             type="button"
             class="text-sm font-medium text-dm-primary"
-            @click="loadCurrencyDashboard"
+            @click="loadDashboardSummary"
           >
             {{ t('quotation.pages.dashboard.retrySummary') }}
           </button>
@@ -621,10 +714,25 @@ onMounted(async () => {
           </div>
           <div class="pl-4">
             <span class="text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.monthQuoteAmount') }}
+              {{ t('quotation.pages.dashboard.monthQuoteDelta') }}
             </span>
-            <div class="mt-1 font-mono text-2xl font-bold text-dm-text">
-              {{ summaryLoading ? '—' : monthQuoteAmountLabel }}
+            <div
+              class="mt-1 font-mono text-2xl font-bold"
+              :class="monthQuoteDeltaClass"
+            >
+              {{ summaryLoading ? '—' : monthQuoteDeltaLabel }}
+            </div>
+            <div
+              class="mt-1 min-h-4 text-xs text-dm-text-tertiary"
+            >
+              <span v-if="summaryLoading">—</span>
+              <span v-else-if="summary">
+                {{
+                  t('quotation.pages.dashboard.previousMonthCount', {
+                    count: summary.previousMonthQuoteCount || 0
+                  })
+                }}
+              </span>
             </div>
           </div>
         </div>
@@ -634,7 +742,7 @@ onMounted(async () => {
           <button
             type="button"
             class="font-medium text-dm-primary"
-            @click="emit('navigateToTab', 'list')"
+            @click="openSelectedMonthQuotes"
           >
             {{ t('quotation.pages.dashboard.viewMonthQuotes') }}
           </button>
@@ -657,7 +765,7 @@ onMounted(async () => {
           <button
             type="button"
             class="flex items-center gap-1 text-xs font-medium text-dm-primary"
-            @click="emit('navigateToTab', 'list')"
+            @click="emit('navigateToTab', { tab: 'list' })"
           >
             {{ t('quotation.actions.viewAll') }}
             <ChevronRight class="h-3.5 w-3.5" />
@@ -689,8 +797,8 @@ onMounted(async () => {
               {{ formatRecentQuoteTime(quote.updatedAt) }}
             </span>
             <strong class="text-right font-mono text-dm-text">
-              {{ currencySymbol(quote.currency)
-              }}{{ quote.grandTotal.toLocaleString() }}
+              {{ currencyShortLabel(quote.currency) }}
+              {{ quote.grandTotal.toLocaleString() }}
             </strong>
             <ChevronRight class="h-3.5 w-3.5 text-slate-400" />
           </button>
@@ -729,7 +837,21 @@ onMounted(async () => {
           class="relative flex min-h-[16rem] min-w-0 max-w-full flex-1 items-center justify-center overflow-hidden px-1 py-2"
         >
           <div
-            v-if="quoteBreakdownData.length === 0"
+            v-if="analyticsLoading"
+            class="absolute inset-0 flex items-center justify-center text-sm text-dm-text-tertiary"
+          >
+            {{ t('quotation.pages.dashboard.loading') }}
+          </div>
+          <button
+            v-else-if="analyticsError"
+            type="button"
+            class="absolute inset-0 flex items-center justify-center text-sm font-medium text-dm-primary"
+            @click="loadDashboardAnalytics"
+          >
+            {{ t('quotation.pages.dashboard.retryAnalytics') }}
+          </button>
+          <div
+            v-else-if="quoteBreakdownData.length === 0"
             class="absolute inset-0 flex items-center justify-center text-sm text-dm-text-tertiary"
           >
             {{ t('quotation.pages.dashboard.chartAmountEmpty') }}
@@ -744,6 +866,11 @@ onMounted(async () => {
             >
               <div class="relative h-80 w-[min(100%,700px)]">
                 <Pie
+                  :key="
+                    normalizeDashboardCurrency(
+                      analytics?.currency || dashboardCurrency
+                    )
+                  "
                   :data="quoteBreakdownPieData"
                   :options="quoteBreakdownPieOptions"
                   :plugins="[quotePieLeaderLabelPlugin]"
@@ -816,7 +943,7 @@ onMounted(async () => {
             v-else-if="analyticsError"
             type="button"
             class="absolute inset-0 flex items-center justify-center text-sm font-medium text-dm-primary"
-            @click="loadCurrencyDashboard"
+            @click="loadDashboardAnalytics"
           >
             {{ t('quotation.pages.dashboard.retryAnalytics') }}
           </button>
