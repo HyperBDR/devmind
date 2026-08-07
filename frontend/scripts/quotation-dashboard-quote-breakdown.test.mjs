@@ -212,6 +212,8 @@ test('dashboard month card shows count delta against previous month', () => {
   assert.match(dashboardSource, /previousMonthQuoteCount/)
   assert.match(dashboardSource, /monthQuoteDelta/)
   assert.match(dashboardSource, /previousMonthCount/)
+  assert.match(dashboardSource, /min-h-4 text-xs text-dm-text-tertiary/)
+  assert.match(dashboardSource, /<span v-if="summaryLoading">—<\/span>/)
   assert.match(
     dashboardSource,
     /const monthQuoteCount = summary\.value\.monthQuoteCount \|\| 0\s*\n\s*if \(monthQuoteCount === 0\) return null/

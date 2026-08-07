@@ -722,14 +722,16 @@ onMounted(async () => {
               {{ summaryLoading ? '—' : monthQuoteDeltaLabel }}
             </div>
             <div
-              v-if="!summaryLoading && summary"
-              class="mt-1 text-xs text-dm-text-tertiary"
+              class="mt-1 min-h-4 text-xs text-dm-text-tertiary"
             >
-              {{
-                t('quotation.pages.dashboard.previousMonthCount', {
-                  count: summary.previousMonthQuoteCount || 0
-                })
-              }}
+              <span v-if="summaryLoading">—</span>
+              <span v-else-if="summary">
+                {{
+                  t('quotation.pages.dashboard.previousMonthCount', {
+                    count: summary.previousMonthQuoteCount || 0
+                  })
+                }}
+              </span>
             </div>
           </div>
         </div>
