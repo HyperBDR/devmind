@@ -5,9 +5,13 @@ from django.test import SimpleTestCase
 from llm_ops.models import ModelPriceItem
 from llm_ops.price_table_validation import (
     PriceTableValidationError,
+    validate_price_table_groups,
     usage_range_spec,
 )
-from llm_ops.services import derive_resale_pricing_format
+from llm_ops.services import (
+    _merge_flat_fallback_tiers,
+    derive_resale_pricing_format,
+)
 from llm_ops.tier_pricing import (
     PriceSchedule,
     PriceTier,
@@ -22,6 +26,44 @@ from llm_ops.tier_pricing import (
 
 
 class TieredPricingKernelTests(SimpleTestCase):
+    def test_flat_fallback_becomes_valid_usage_range_tail(self):
+        tiers = _merge_flat_fallback_tiers(
+            [
+                self._tier("1", "0", "128000"),
+                self._tier(
+                    "2",
+                    None,
+                    None,
+                    tier_type=ModelPriceItem.TIER_FLAT,
+                ),
+            ]
+        )
+
+        validate_price_table_groups(tiers)
+
+        self.assertEqual(
+            [
+                (tier.tier_type, tier.tier_start, tier.tier_end)
+                for tier in tiers
+            ],
+            [
+                (
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("0"),
+                    Decimal("128000"),
+                ),
+                (
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("128000"),
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(
+            [tier.spec for tier in tiers],
+            [usage_range_spec(), usage_range_spec()],
+        )
+
     def test_resolve_price_tier_uses_half_open_boundaries(self):
         schedule = PriceSchedule(
             tiers=(
