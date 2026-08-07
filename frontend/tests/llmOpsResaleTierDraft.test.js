@@ -98,6 +98,19 @@ test('keeps a single unbounded usage range on the tiered API path', () => {
   )
 })
 
+test('accepts an unbounded final tier without a terminal error', () => {
+  const errors = validateResalePriceDraft({
+    cache: [{ end: null, price: '0.25', start: '0' }],
+    input: [
+      { end: '1000000', price: '1', start: '0' },
+      { end: null, price: '0.8', start: '1000000' }
+    ],
+    output: [{ end: null, price: '2', start: '0' }]
+  })
+
+  assert.deepEqual(errors, {})
+})
+
 test('locates price, overlap, and gap errors by dimension, row, and field', () => {
   const errors = validateResalePriceDraft({
     cache: [{ end: null, price: '-1', start: '0' }],
