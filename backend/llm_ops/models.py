@@ -1765,6 +1765,16 @@ class ResaleListing(models.Model):
         (WORKFLOW_DELETED, "Deleted"),
     )
 
+    PRICING_FORMAT_FLAT = "flat"
+    PRICING_FORMAT_USAGE_RANGE = "usage_range"
+    PRICING_FORMAT_MIXED = "mixed"
+
+    PRICING_FORMAT_CHOICES = (
+        (PRICING_FORMAT_FLAT, "Flat"),
+        (PRICING_FORMAT_USAGE_RANGE, "Usage Range"),
+        (PRICING_FORMAT_MIXED, "Mixed"),
+    )
+
     platform = models.ForeignKey(
         ResalePlatform,
         related_name="listings",
@@ -1870,6 +1880,12 @@ class ResaleListing(models.Model):
         db_index=True,
     )
     is_active = models.BooleanField(default=False)
+    pricing_format = models.CharField(
+        max_length=20,
+        choices=PRICING_FORMAT_CHOICES,
+        default=PRICING_FORMAT_FLAT,
+        db_index=True,
+    )
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
