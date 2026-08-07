@@ -9,6 +9,7 @@ from quotation.models import Quotation
 from quotation.serializers import (
     DashboardCurrencyQuerySerializer,
     DashboardRecentQuerySerializer,
+    DashboardSummaryQuerySerializer,
 )
 from quotation.services.dashboard import (
     build_dashboard_analytics,
@@ -30,13 +31,14 @@ class DashboardSummaryView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        serializer = DashboardCurrencyQuerySerializer(
+        serializer = DashboardSummaryQuerySerializer(
             data=request.query_params
         )
         serializer.is_valid(raise_exception=True)
         payload = build_dashboard_summary(
             _accessible_quotations(request),
             serializer.validated_data["currency"],
+            serializer.validated_data["period"],
         )
         return Response(payload)
 

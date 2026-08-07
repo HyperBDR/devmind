@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   deleteQuotation,
   getQuotation,
@@ -16,7 +16,20 @@ import { useAuthStore } from '../stores/auth'
 import type { Quotation } from '../types'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
+
+function listDateFiltersFromRoute() {
+  const createdFrom =
+    typeof route.query.created_from === 'string'
+      ? route.query.created_from
+      : undefined
+  const createdTo =
+    typeof route.query.created_to === 'string'
+      ? route.query.created_to
+      : undefined
+  return { createdFrom, createdTo }
+}
 
 const quotations = ref<Quotation[]>([])
 const loading = ref(false)
@@ -86,7 +99,11 @@ async function handleImportedQuotationCreated(_id: string) {
 }
 
 onMounted(() => {
-  void load()
+  void load({
+    page: 1,
+    pageSize: query.value.pageSize || 10,
+    ...listDateFiltersFromRoute(),
+  })
 
   const params = new URLSearchParams(window.location.search)
   if (params.get('feishu') === 'connected') {
@@ -96,6 +113,17 @@ onMounted(() => {
     window.history.replaceState({}, '', next)
   }
 })
+
+watch(
+  () => [route.query.created_from, route.query.created_to],
+  () => {
+    void load({
+      page: 1,
+      pageSize: query.value.pageSize || 10,
+      ...listDateFiltersFromRoute(),
+    })
+  },
+)
 
 function handleViewQuote(id: string) {
   void router.push(`/quotations/${id}`)
@@ -238,6 +266,8 @@ function handleUpdateQuoteStatus(
         :page-size="query.pageSize || 10"
         :total="total"
         :total-pages="totalPages"
+        :initial-created-from="query.createdFrom"
+        :initial-created-to="query.createdTo"
         :current-user="currentUser"
         @view-quote="handleViewQuote"
         @open-detail-drawer="handleOpenDetailDrawer"

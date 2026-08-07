@@ -89,6 +89,15 @@ select:not([multiple]),
   border-radius: 6px;
 }
 
+.qmp-select-field.qmp-select-field--compact {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  padding-right: 1.25rem !important;
+  background-position: right 0.28rem center;
+  background-size: 0.75rem 0.75rem;
+  overflow: visible;
+}
+
 select:not([multiple]):hover,
 .qmp-select-field:hover,
 .qmp-combobox-field:hover {

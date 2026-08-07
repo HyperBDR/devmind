@@ -471,7 +471,9 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   region.value = editingQuote.region || ''
   industry.value = editingQuote.industry || ''
   salesperson.value = editingQuote.salesperson
-  currency.value = editingQuote.currency
+  currency.value = ['CNY', 'USD', 'EUR'].includes(editingQuote.currency)
+    ? editingQuote.currency as 'CNY' | 'USD' | 'EUR'
+    : 'USD'
   const loadedPaymentTermOption =
     editingQuote.paymentTermOption || inferPaymentTermOption(editingQuote.paymentTerms || '')
   paymentTermOption.value = loadedPaymentTermOption
