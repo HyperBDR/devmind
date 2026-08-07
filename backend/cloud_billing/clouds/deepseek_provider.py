@@ -157,7 +157,13 @@ class DeepSeekCloud(BaseCloudProvider):
         self,
         period: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Return the current balance in the common billing response shape."""
+        """Return the current balance in the common billing response shape.
+
+        DeepSeek's public API exposes only the account balance; there is no
+        consumption history endpoint. The collection task derives a cost
+        history from balance deltas between snapshots when the response is
+        marked with ``balance_only``.
+        """
         del period
         try:
             balance, currency, debug = self._request_balance()
@@ -172,6 +178,7 @@ class DeepSeekCloud(BaseCloudProvider):
                     "account_id": self.get_account_id(),
                     "service_costs": {},
                     "items": [],
+                    "balance_only": True,
                 },
                 "error": None,
             }

@@ -896,6 +896,122 @@ class TestCollectBillingData:
 
     @patch("cloud_billing.tasks.check_alert_for_provider.delay")
     @patch("cloud_billing.tasks.ProviderService")
+    def test_balance_only_provider_derives_hourly_cost_from_balance_delta(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        """Derive DeepSeek consumption history from balance deltas."""
+        cloud_provider.provider_type = "deepseek"
+        cloud_provider.save(update_fields=["provider_type"])
+        current_period = timezone.now().strftime("%Y-%m")
+        previous_hour = max(timezone.now().hour - 1, 0)
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=current_period,
+            hour=previous_hour,
+            total_cost=Decimal("0.00"),
+            balance=Decimal("500.00"),
+            hourly_cost=Decimal("0.00"),
+            currency="CNY",
+            service_costs={},
+            account_id="deepseek",
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "success",
+            "data": {
+                "total_cost": 0.0,
+                "balance": 480.00,
+                "is_available": True,
+                "balance_only": True,
+                "currency": "CNY",
+                "account_id": "deepseek",
+                "service_costs": {},
+            },
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(
+            provider_id=cloud_provider.id,
+            user_id=1,
+        )
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="deepseek",
+            period=current_period,
+            hour=timezone.now().hour,
+        )
+        assert record.hourly_cost == Decimal("20.00")
+        assert record.total_cost == Decimal("20.00")
+        assert record.balance == Decimal("480.00")
+        mock_check_alert_delay.assert_called_once_with(
+            cloud_provider.id,
+            cloud_provider.provider_type,
+        )
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
+    def test_balance_only_provider_clamps_top_up_to_zero_consumption(
+        self,
+        mock_provider_service_class,
+        mock_check_alert_delay,
+        cloud_provider,
+    ):
+        """Do not report negative consumption when the balance increases."""
+        cloud_provider.provider_type = "deepseek"
+        cloud_provider.save(update_fields=["provider_type"])
+        current_period = timezone.now().strftime("%Y-%m")
+        previous_hour = max(timezone.now().hour - 1, 0)
+        BillingData.objects.create(
+            provider=cloud_provider,
+            period=current_period,
+            hour=previous_hour,
+            total_cost=Decimal("0.00"),
+            balance=Decimal("500.00"),
+            hourly_cost=Decimal("0.00"),
+            currency="CNY",
+            service_costs={},
+            account_id="deepseek",
+        )
+
+        mock_provider_service = MagicMock()
+        mock_provider_service.get_billing_info.return_value = {
+            "status": "success",
+            "data": {
+                "total_cost": 0.0,
+                "balance": 620.00,
+                "is_available": True,
+                "balance_only": True,
+                "currency": "CNY",
+                "account_id": "deepseek",
+                "service_costs": {},
+            },
+        }
+        mock_provider_service_class.return_value = mock_provider_service
+
+        result = collect_billing_data(
+            provider_id=cloud_provider.id,
+            user_id=1,
+        )
+
+        assert len(result["success"]) == 1
+        record = BillingData.objects.get(
+            provider=cloud_provider,
+            account_id="deepseek",
+            period=current_period,
+            hour=timezone.now().hour,
+        )
+        assert record.hourly_cost == Decimal("0.00")
+        assert record.total_cost == Decimal("0.00")
+        assert record.balance == Decimal("620.00")
+
+    @patch("cloud_billing.tasks.check_alert_for_provider.delay")
+    @patch("cloud_billing.tasks.ProviderService")
     def test_failed_sync_tracks_consecutive_failures(
         self,
         mock_provider_service_class,
