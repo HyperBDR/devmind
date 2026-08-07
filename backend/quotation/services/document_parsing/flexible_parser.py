@@ -12,9 +12,10 @@ from pypdf import PdfReader
 
 from quotation.models import DocumentAsset
 from quotation.services.document_parsing.business_fields import (
+    EXPIRE_DATE_LABELS,
     PRODUCT_LINE_LABELS,
-    explicit_product_line,
     known_product_line,
+    parse_quote_date,
 )
 from quotation.services.document_parsing.excel_parser import _decimal
 from quotation.services.document_parsing.schemas import (
@@ -28,13 +29,19 @@ def _document_date(asset: DocumentAsset) -> date:
     stem = Path(asset.file_name).stem
     patterns = (
         (r"(?<!\d)(20\d{6})(?!\d)", "%Y%m%d"),
+        (r"(?<!\d)(\d{8})(?!\d)", "%d%m%Y"),
         (r"(?<!\d)(\d{2}[.-]\d{2}[.-]\d{2})(?!\d)", "%d.%m.%y"),
     )
     for pattern, date_format in patterns:
         match = re.search(pattern, stem)
         if not match:
             continue
-        raw = match.group(1).replace("-", ".")
+        raw = match.group(1)
+        if date_format != "%d%m%Y":
+            raw = raw.replace("-", ".")
+        parsed = parse_quote_date(raw)
+        if parsed is not None:
+            return parsed
         try:
             return datetime.strptime(raw, date_format).date()
         except ValueError:
@@ -79,20 +86,19 @@ def _pdf_label(layout: str, pattern: str) -> str:
 def _pdf_date(layout: str, label: str) -> date | None:
     raw = _pdf_label(
         layout,
-        rf"{re.escape(label)}\s*:?\s*([0-9A-Za-z.-]+)",
+        rf"{re.escape(label)}\s*:?\s*(.+)",
     )
-    for date_format in (
-        "%d.%m.%y",
-        "%d-%b-%y",
-        "%d-%b-%Y",
-        "%d-%m-%Y",
-        "%Y-%m-%d",
-    ):
-        try:
-            return datetime.strptime(raw, date_format).date()
-        except ValueError:
-            continue
-    return None
+    if not raw:
+        return None
+    raw = re.split(
+        r"\s+(?:Quote\s+No\.?|Quotation\s+No\.?|"
+        r"Quote\s+Valid\s+Till|Valid\s+Till|Valid\s+Until|"
+        r"Ship\s+to|Bill\s+to)\s*:",
+        raw,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    return parse_quote_date(raw)
 
 
 def _pdf_product_line(layout: str) -> tuple[str, str]:
@@ -432,9 +438,11 @@ def complete_document_parse(
             quotation_evidence or _pdf_has_quotation_marker(layout)
         )
         quote.quote_date = quote.quote_date or _pdf_date(layout, "Date")
-        quote.expire_date = quote.expire_date or _pdf_date(
-            layout, "Quote Valid Till"
-        )
+        if not quote.expire_date:
+            for label in EXPIRE_DATE_LABELS:
+                quote.expire_date = _pdf_date(layout, label)
+                if quote.expire_date:
+                    break
         if not quotation_evidence and layout.strip():
             return _not_quotation_result(parsed)
         if not quote.items:

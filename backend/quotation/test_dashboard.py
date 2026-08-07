@@ -30,9 +30,11 @@ class QuotationDashboardTests(TestCase):
         owner: str = "owner@example.com",
         quote_date=None,
         status: str = QuoteStatus.GENERATED,
+        source_quote_no: str = "",
     ) -> Quotation:
         return Quotation.objects.create(
             quote_no=quote_no,
+            source_quote_no=source_quote_no,
             status=status,
             project_name=f"Project {quote_no}",
             currency=currency,
@@ -157,10 +159,71 @@ class QuotationDashboardTests(TestCase):
         assert response.data["previous_period"] == previous_month.strftime(
             "%Y-%m"
         )
-        assert response.data["month_quote_count"] == 2
+        assert response.data["month_quote_count"] == 3
         assert response.data["previous_month_quote_count"] == 1
-        assert response.data["month_quote_amount"] == "200.00"
+        assert response.data["month_quote_amount"] == "1100.00"
         assert response.data["previous_month_quote_amount"] == "80.00"
+
+    def test_summary_uses_selected_calendar_month(self):
+        self._quote(
+            "Q-JUNE",
+            amount="60.00",
+            quote_date="2026-06-15",
+        )
+        self._quote(
+            "Q-JULY-1",
+            amount="125.00",
+            quote_date="2026-07-01",
+        )
+        self._quote(
+            "Q-JULY-2",
+            amount="75.00",
+            quote_date="2026-07-31",
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary"
+            "?currency=USD&period=2026-07"
+        )
+
+        assert response.status_code == 200
+        assert response.data["current_period"] == "2026-07"
+        assert response.data["previous_period"] == "2026-06"
+        assert response.data["month_quote_count"] == 2
+        assert response.data["month_quote_amount"] == "200.00"
+        assert response.data["previous_month_quote_count"] == 1
+        assert response.data["previous_month_quote_amount"] == "60.00"
+        assert response.data["available_periods"] == [
+            "2026-07",
+            "2026-06",
+        ]
+
+    def test_summary_month_stats_ignore_currency(self):
+        self._quote(
+            "Q-CNY-JULY",
+            amount="180.00",
+            currency="CNY",
+            quote_date="2026-07-13",
+        )
+        self._quote(
+            "Q-MYR-AUG",
+            amount="90.00",
+            currency="MYR",
+            quote_date="2026-08-03",
+        )
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/summary"
+            "?currency=CNY&period=2026-08"
+        )
+
+        assert response.status_code == 200
+        assert response.data["month_quote_count"] == 1
+        assert response.data["month_quote_amount"] == "90.00"
+        assert response.data["available_periods"] == [
+            "2026-08",
+            "2026-07",
+        ]
 
     def test_cny_dashboard_merges_rmb_alias_without_duplicate_option(self):
         current_month = timezone.localdate().replace(day=1)
@@ -195,8 +258,8 @@ class QuotationDashboardTests(TestCase):
         assert summary.status_code == 200
         assert summary.data["currency"] == "CNY"
         assert summary.data["available_currencies"] == ["CNY", "HKD"]
-        assert summary.data["month_quote_count"] == 2
-        assert summary.data["month_quote_amount"] == "500.00"
+        assert summary.data["month_quote_count"] == 3
+        assert summary.data["month_quote_amount"] == "1400.00"
         assert summary.data["month_won_amount"] == "300.00"
         assert analytics.status_code == 200
         assert analytics.data["currency"] == "CNY"
@@ -205,6 +268,70 @@ class QuotationDashboardTests(TestCase):
         assert {
             row["quote_no"] for row in analytics.data["amount_breakdown"]
         } == {"Q-CNY-CURRENT", "Q-RMB-ACCEPTED"}
+        assert {
+            row["currency"] for row in analytics.data["amount_breakdown"]
+        } == {"CNY"}
+
+    def test_analytics_breakdown_ignores_month_and_keeps_currency(self):
+        current_month = timezone.localdate().replace(day=1)
+        previous_month = (current_month - timedelta(days=1)).replace(day=1)
+        self._quote(
+            "Q-CNY-CURRENT",
+            amount="200.00",
+            currency="CNY",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-CNY-PREVIOUS",
+            amount="900.00",
+            currency="CNY",
+            quote_date=previous_month,
+        )
+        self._quote(
+            "Q-USD-CURRENT",
+            amount="300.00",
+            currency="USD",
+            quote_date=current_month,
+        )
+        self._quote(
+            "Q-IMP-1",
+            amount="80.00",
+            currency="CNY",
+            quote_date=current_month,
+            source_quote_no="Motion260326",
+        )
+        self._quote(
+            "Q-IMP-2",
+            amount="120.00",
+            currency="CNY",
+            quote_date=current_month,
+            source_quote_no="Motion260326",
+        )
+        period = current_month.strftime("%Y-%m")
+
+        response = self.api.get(
+            "/api/v1/quotation/dashboard/analytics"
+            f"?currency=CNY&period={period}"
+        )
+
+        assert response.status_code == 200
+        quote_nos = [
+            row["quote_no"] for row in response.data["amount_breakdown"]
+        ]
+        assert "Q-CNY-PREVIOUS" in quote_nos
+        assert "Q-USD-CURRENT" not in quote_nos
+        assert "Q-CNY-CURRENT" in quote_nos
+        assert len(quote_nos) == len(set(quote_nos))
+        assert {
+            row["currency"] for row in response.data["amount_breakdown"]
+        } == {"CNY"}
+        assert response.data["breakdown_total_amount"] == "1300.00"
+        assert set(quote_nos) == {
+            "Q-CNY-CURRENT",
+            "Q-CNY-PREVIOUS",
+            "Q-IMP-1",
+            "Q-IMP-2",
+        }
 
     def test_rmb_dashboard_request_is_normalized_to_cny(self):
         current_month = timezone.localdate().replace(day=1)
@@ -287,6 +414,42 @@ class QuotationDashboardTests(TestCase):
         assert "Q-CNY" not in quote_numbers
         assert response.data["breakdown_omitted_count"] == 5
 
+    def test_eur_dashboard_merges_euro_aliases_and_excludes_hkd(self):
+        self._quote(
+            "Q-EUR",
+            amount="3704.00",
+            currency="EUR",
+        )
+        self._quote(
+            "Q-EURO",
+            amount="148.16",
+            currency="EURO",
+        )
+        self._quote(
+            "Q-EURO-SYMBOL",
+            amount="703.76",
+            currency="€",
+        )
+        self._quote(
+            "Q-HKD",
+            amount="22668.50",
+            currency="HKD",
+        )
+
+        analytics = self.api.get(
+            "/api/v1/quotation/dashboard/analytics?currency=EUR"
+        )
+
+        assert analytics.status_code == 200
+        assert analytics.data["currency"] == "EUR"
+        assert analytics.data["breakdown_total_amount"] == "4555.92"
+        assert {
+            row["quote_no"] for row in analytics.data["amount_breakdown"]
+        } == {"Q-EUR", "Q-EURO", "Q-EURO-SYMBOL"}
+        assert {
+            row["currency"] for row in analytics.data["amount_breakdown"]
+        } == {"EUR"}
+
     def test_recent_returns_updated_projection_and_honors_access(self):
         recently_updated = self._quote("Q-OLDER", amount="8143.75")
         self._quote("Q-NEWEST")
@@ -355,6 +518,10 @@ class QuotationDashboardTests(TestCase):
         invalid_limit = self.api.get(
             "/api/v1/quotation/dashboard/recent?limit=1000"
         )
+        invalid_period = self.api.get(
+            "/api/v1/quotation/dashboard/summary?period=2026-13"
+        )
 
         assert invalid_currency.status_code == 400
         assert invalid_limit.status_code == 400
+        assert invalid_period.status_code == 400

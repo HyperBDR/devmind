@@ -75,6 +75,45 @@ const TAB_ROUTES: Record<string, string> = {
   audit: '/quotation/audit',
 }
 
+type ListDateFilters = {
+  createdFrom?: string
+  createdTo?: string
+}
+
+function listDateFiltersFromRoute(
+  query: typeof route.query,
+): ListDateFilters {
+  const createdFrom =
+    typeof query.created_from === 'string' ? query.created_from : undefined
+  const createdTo =
+    typeof query.created_to === 'string' ? query.created_to : undefined
+  return { createdFrom, createdTo }
+}
+
+function listRouteLocation(listFilters?: ListDateFilters) {
+  const createdFrom = listFilters?.createdFrom
+  const createdTo = listFilters?.createdTo
+  if (!createdFrom && !createdTo) {
+    return { path: TAB_ROUTES.list }
+  }
+  return {
+    path: TAB_ROUTES.list,
+    query: {
+      ...(createdFrom ? { created_from: createdFrom } : {}),
+      ...(createdTo ? { created_to: createdTo } : {}),
+    },
+  }
+}
+
+function applyListDateFilters(listFilters?: ListDateFilters) {
+  quotationListQuery.value = {
+    page: 1,
+    pageSize: quotationListQuery.value.pageSize || 10,
+    createdFrom: listFilters?.createdFrom,
+    createdTo: listFilters?.createdTo,
+  }
+}
+
 function tabFromRoutePath(path: string): string {
   if (path.startsWith('/quotation/details/')) return 'details'
   if (path.startsWith('/quotation/list')) return 'list'
@@ -99,6 +138,10 @@ function syncTabFromRoute() {
 
   if (nextTab !== 'details') {
     selectedQuotationId.value = null
+  }
+
+  if (nextTab === 'list') {
+    applyListDateFilters(listDateFiltersFromRoute(route.query))
   }
 
   if (nextTab === 'create') {
@@ -454,13 +497,20 @@ function navClass(tab: string) {
     : 'text-dm-text-secondary hover:bg-[#f5f5f5] hover:text-dm-text border-l-[3px] border-l-transparent pl-[9px]'
 }
 
-function goTab(tab: string) {
+function goTab(tab: string, listFilters?: ListDateFilters) {
   selectedQuotationId.value = null
   drawerQuoteId.value = null
   if (tab === 'create') editingQuoteId.value = null
+  if (tab === 'list') {
+    applyListDateFilters(listFilters)
+  }
 
   if (auth.embeddedAuth) {
     currentTab.value = tab
+    if (tab === 'list') {
+      router.push(listRouteLocation(listFilters))
+      return
+    }
     const target = TAB_ROUTES[tab]
     if (target) {
       router.push(target)
@@ -469,6 +519,9 @@ function goTab(tab: string) {
   }
 
   currentTab.value = tab
+  if (tab === 'list') {
+    void refreshQuotations(quotationListQuery.value)
+  }
 }
 
 async function handleDeleteQuote(id: string) {
@@ -765,8 +818,19 @@ function handleBackToList() {
   currentTab.value = 'list'
 }
 
-function handleNavigateToTab(tab: string) {
-  goTab(tab)
+function handleNavigateToTab(
+  payload:
+    | string
+    | { tab: string; createdFrom?: string; createdTo?: string },
+) {
+  if (typeof payload === 'string') {
+    goTab(payload)
+    return
+  }
+  goTab(payload.tab, {
+    createdFrom: payload.createdFrom,
+    createdTo: payload.createdTo,
+  })
 }
 
 function reloadPage() {
@@ -993,6 +1057,8 @@ function reloadPage() {
             :page-size="quotationListQuery.pageSize || 10"
             :total="quotationListTotal"
             :total-pages="quotationListTotalPages"
+            :initial-created-from="quotationListQuery.createdFrom"
+            :initial-created-to="quotationListQuery.createdTo"
             :current-user="auth.currentUser"
             @view-quote="handleViewQuoteDetails"
             @open-detail-drawer="handleOpenDetailDrawer"

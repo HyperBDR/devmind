@@ -4,9 +4,17 @@ import { apiRequest } from './client'
 export type DashboardTrendGrain = 'weekly' | 'monthly'
 export type DashboardCurrency = string
 
+function normalizeAnalyticsCurrency(currency: string): string {
+  const code = String(currency || '').trim().toUpperCase()
+  if (code === 'RMB') return 'CNY'
+  if (code === 'EURO' || code === 'EUROS' || code === '€') return 'EUR'
+  return code || currency
+}
+
 export interface DashboardSummary {
   currency: DashboardCurrency
   availableCurrencies: string[]
+  availablePeriods: string[]
   currentPeriod: string
   previousPeriod: string
   monthQuoteCount: number
@@ -27,6 +35,7 @@ export interface DashboardBreakdownItem {
   quotationId: string
   quoteNo: string
   amount: number
+  currency: DashboardCurrency
   status: Quotation['status']
 }
 
@@ -65,6 +74,7 @@ export interface DashboardRecentQuotation {
 interface ApiSummary {
   currency: DashboardCurrency
   available_currencies: string[]
+  available_periods: string[]
   current_period: string
   previous_period: string
   month_quote_count: number
@@ -96,6 +106,7 @@ interface ApiAnalytics {
     quotation_id: string
     quote_no: string
     amount: string
+    currency: DashboardCurrency
     status: string
   }>
   breakdown_total_amount: string
@@ -133,19 +144,25 @@ function mapStatus(value: string): Quotation['status'] {
   return API_TO_STATUS[value.toLowerCase()] || 'Draft'
 }
 
-function currencyQuery(currency: string): string {
-  return `currency=${encodeURIComponent(currency)}`
+function dashboardQuery(currency: string, period = ''): string {
+  const params = new URLSearchParams({ currency })
+  if (period) params.set('period', period)
+  return params.toString()
 }
 
 export async function getDashboardSummary(
-  currency = 'USD'
+  period = ''
 ): Promise<DashboardSummary> {
+  const params = new URLSearchParams()
+  if (period) params.set('period', period)
+  const query = params.toString()
   const data = await apiRequest<ApiSummary>(
-    `/dashboard/summary?${currencyQuery(currency)}`
+    query ? `/dashboard/summary?${query}` : '/dashboard/summary'
   )
   return {
     currency: data.currency,
     availableCurrencies: data.available_currencies,
+    availablePeriods: data.available_periods,
     currentPeriod: data.current_period,
     previousPeriod: data.previous_period,
     monthQuoteCount: data.month_quote_count,
@@ -167,7 +184,7 @@ export async function getDashboardAnalytics(
   currency = 'USD'
 ): Promise<DashboardAnalytics> {
   const data = await apiRequest<ApiAnalytics>(
-    `/dashboard/analytics?${currencyQuery(currency)}`
+    `/dashboard/analytics?${dashboardQuery(currency)}`
   )
   const mapTrend = (row: ApiTrendPoint): DashboardTrendPoint => ({
     period: row.period,
@@ -183,6 +200,7 @@ export async function getDashboardAnalytics(
       quotationId: row.quotation_id,
       quoteNo: row.quote_no,
       amount: Number(row.amount || 0),
+      currency: normalizeAnalyticsCurrency(row.currency),
       status: mapStatus(row.status)
     })),
     breakdownTotalAmount: Number(data.breakdown_total_amount || 0),

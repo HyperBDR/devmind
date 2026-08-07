@@ -38,6 +38,7 @@ import type { Quotation } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
+import { getCurrencySymbol } from '../utils/quotationPreviewModel'
 import FormSelect from './FormSelect.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
@@ -52,6 +53,8 @@ const props = defineProps<{
   pageSize: 10 | 20 | 50
   total: number
   totalPages: number
+  initialCreatedFrom?: string
+  initialCreatedTo?: string
   currentUser?: {
     name: string
     title: string
@@ -200,8 +203,8 @@ let activeColumnResize: {
 const searchText = ref('')
 const selectedProductLine = ref('ALL')
 const selectedSource = ref('ALL')
-const createdFrom = ref('')
-const createdTo = ref('')
+const createdFrom = ref(props.initialCreatedFrom || '')
+const createdTo = ref(props.initialCreatedTo || '')
 const syncingFeishu = ref(false)
 const deleteConfirmId = ref<string | null>(null)
 const uploadingQuoteId = ref<string | null>(null)
@@ -223,6 +226,25 @@ const pendingFeishuOpen = ref<{
 let reconcileTimer: number | undefined
 let searchTimer: number | undefined
 let suppressFilterWatch = false
+
+watch(
+  () => [props.initialCreatedFrom, props.initialCreatedTo] as const,
+  async ([nextFrom, nextTo]) => {
+    const createdFromValue = nextFrom || ''
+    const createdToValue = nextTo || ''
+    if (
+      createdFrom.value === createdFromValue
+      && createdTo.value === createdToValue
+    ) {
+      return
+    }
+    suppressFilterWatch = true
+    createdFrom.value = createdFromValue
+    createdTo.value = createdToValue
+    await nextTick()
+    suppressFilterWatch = false
+  },
+)
 
 function scheduleFeishuLinkReconcile() {
   window.clearTimeout(reconcileTimer)
@@ -410,12 +432,15 @@ function handleRowKeydown(quote: Quotation, event: KeyboardEvent) {
   openQuoteDetails(quote)
 }
 
-onMounted(() => {
+onMounted(async () => {
+  suppressFilterWatch = true
   document.addEventListener('mousedown', handleOutsideClick)
   window.addEventListener('scroll', closeActionMenu, true)
   window.addEventListener('resize', closeActionMenu)
   document.addEventListener('visibilitychange', handlePageVisible)
   window.addEventListener('focus', handlePageVisible)
+  await nextTick()
+  suppressFilterWatch = false
 })
 
 onBeforeUnmount(() => {
@@ -429,10 +454,8 @@ onBeforeUnmount(() => {
   window.clearTimeout(searchTimer)
 })
 
-function currencySymbol(currency: Quotation['currency']): string {
-  if (currency === 'CNY') return '¥'
-  if (currency === 'USD') return '$'
-  return '€'
+function currencySymbol(currency: Quotation['currency'] | string): string {
+  return getCurrencySymbol(currency)
 }
 
 function formatNow(): string {

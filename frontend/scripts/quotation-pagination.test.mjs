@@ -225,6 +225,16 @@ test('deleting the last row moves back one page', () => {
   assert.match(quotationListPage, /currentPage - 1/)
 })
 
+test('dashboard month navigation keeps quote-date filters in the list route', () => {
+  assert.match(quotationApp, /created_from/)
+  assert.match(quotationApp, /created_to/)
+  assert.match(quotationApp, /listRouteLocation/)
+  assert.match(quotationApp, /listDateFiltersFromRoute/)
+  assert.match(quotationListPage, /route\.query\.created_from/)
+  assert.match(quotationListPage, /route\.query\.created_to/)
+  assert.match(quotationListPage, /initial-created-from="query.createdFrom"/)
+})
+
 test('detail and edit pages request quotations by ID', () => {
   assert.match(
     quotationDetailPage,
