@@ -5,11 +5,17 @@ from django.test import SimpleTestCase
 from llm_ops.models import ModelPriceItem
 from llm_ops.price_table_validation import (
     PriceTableValidationError,
+    validate_price_table_groups,
     usage_range_spec,
+)
+from llm_ops.services import (
+    _merge_flat_fallback_tiers,
+    derive_resale_pricing_format,
 )
 from llm_ops.tier_pricing import (
     PriceSchedule,
     PriceTier,
+    PriceTierNotFoundError,
     RevenuePolicy,
     UsageContext,
     analyze_tier_profit,
@@ -20,6 +26,44 @@ from llm_ops.tier_pricing import (
 
 
 class TieredPricingKernelTests(SimpleTestCase):
+    def test_flat_fallback_becomes_valid_usage_range_tail(self):
+        tiers = _merge_flat_fallback_tiers(
+            [
+                self._tier("1", "0", "128000"),
+                self._tier(
+                    "2",
+                    None,
+                    None,
+                    tier_type=ModelPriceItem.TIER_FLAT,
+                ),
+            ]
+        )
+
+        validate_price_table_groups(tiers)
+
+        self.assertEqual(
+            [
+                (tier.tier_type, tier.tier_start, tier.tier_end)
+                for tier in tiers
+            ],
+            [
+                (
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("0"),
+                    Decimal("128000"),
+                ),
+                (
+                    ModelPriceItem.TIER_USAGE_RANGE,
+                    Decimal("128000"),
+                    None,
+                ),
+            ],
+        )
+        self.assertEqual(
+            [tier.spec for tier in tiers],
+            [usage_range_spec(), usage_range_spec()],
+        )
+
     def test_resolve_price_tier_uses_half_open_boundaries(self):
         schedule = PriceSchedule(
             tiers=(
@@ -202,6 +246,101 @@ class TieredPricingKernelTests(SimpleTestCase):
         interval = analysis.intervals[0]
         self.assertEqual(interval.net_yield_rate, Decimal("0.100000"))
         self.assertTrue(interval.is_risk)
+
+    def test_usage_above_top_tier_bills_at_top_tier_rate(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._tier("1", "0", "1000"),
+                self._tier("2", "1000", "5000"),
+                self._tier("4", "5000", None),
+            )
+        )
+
+        prices = resolve_usage_unit_prices(
+            schedule,
+            UsageContext(input_tokens=10_000_000, output_tokens=1),
+        )
+
+        self.assertEqual(prices.input_per_million, Decimal("4"))
+
+    def test_usage_above_bounded_top_tier_bills_at_top_tier_rate(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._tier("1", "0", "1000"),
+                self._tier("2", "1000", "5000"),
+                self._tier("4", "5000", "10000"),
+            )
+        )
+
+        prices = resolve_usage_unit_prices(
+            schedule,
+            UsageContext(input_tokens=10_000_000, output_tokens=1),
+        )
+
+        self.assertEqual(prices.input_per_million, Decimal("4"))
+        with self.assertRaises(PriceTierNotFoundError):
+            resolve_price_tier(
+                schedule,
+                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+                usage=Decimal("10_000_000"),
+            )
+
+    def test_derive_resale_pricing_format_classifies_flat_schedule(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._tier(
+                    "1",
+                    None,
+                    None,
+                    tier_type=ModelPriceItem.TIER_FLAT,
+                ),
+                self._tier(
+                    "2",
+                    None,
+                    None,
+                    dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                    tier_type=ModelPriceItem.TIER_FLAT,
+                ),
+            )
+        )
+
+        self.assertEqual(derive_resale_pricing_format(schedule), "flat")
+
+    def test_derive_resale_pricing_format_classifies_usage_range_schedule(
+        self,
+    ):
+        schedule = PriceSchedule(
+            tiers=(
+                self._tier("1", "0", None),
+                self._tier(
+                    "2",
+                    "0",
+                    None,
+                    dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                ),
+            )
+        )
+
+        self.assertEqual(
+            derive_resale_pricing_format(schedule),
+            "usage_range",
+        )
+
+    def test_derive_resale_pricing_format_classifies_mixed_schedule(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._tier("1", "0", None),
+                self._tier(
+                    "2",
+                    None,
+                    None,
+                    dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                    tier_type=ModelPriceItem.TIER_FLAT,
+                ),
+            )
+        )
+
+        self.assertEqual(derive_resale_pricing_format(schedule), "mixed")
 
     @staticmethod
     def _tier(

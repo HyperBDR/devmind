@@ -35,6 +35,7 @@ import { buildDescriptionHistoryOptions } from '../utils/descriptionCatalog'
 import {
   DEFAULT_ISSUER_COMPANY_NAME,
   DEFAULT_REMARKS_DISCLAIMER,
+  getCurrencySymbol,
 } from '../utils/quotationPreviewModel'
 import {
   DEFAULT_TAX_LABEL,
@@ -144,7 +145,7 @@ const billingEmail = ref('')
 const region = ref('')
 const industry = ref('')
 const salesperson = ref(MOCK_SALESPERSONS[0])
-const currency = ref<'CNY' | 'USD' | 'EUR'>('USD')
+const currency = ref<string>('USD')
 const paymentTermOption = ref<PaymentTermOption>(DEFAULT_PAYMENT_TERM_OPTION)
 const paymentTermsCustom = ref('')
 const vatRateInput = ref('')
@@ -820,9 +821,7 @@ const othersSubtotal = computed(() => quotationTotals.value.othersSubtotal)
 const subtotalBeforeVat = computed(() => quotationTotals.value.subtotalBeforeVat)
 const vatAmount = computed(() => quotationTotals.value.vatAmount)
 const grandTotal = computed(() => quotationTotals.value.grandTotal)
-const currencySymbol = computed(() =>
-  currency.value === 'CNY' ? '¥' : currency.value === 'USD' ? '$' : '€',
-)
+const currencySymbol = computed(() => getCurrencySymbol(currency.value))
 
 function handleResizeStart(event: PointerEvent) {
   event.preventDefault()

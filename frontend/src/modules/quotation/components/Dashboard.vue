@@ -26,6 +26,7 @@ import {
   type DashboardSummary
 } from '../api/dashboard'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import { getCurrencySymbol } from '../utils/quotationPreviewModel'
 import FormSelect from './FormSelect.vue'
 import { ChevronRight, FileSpreadsheet } from 'lucide-vue-next'
 

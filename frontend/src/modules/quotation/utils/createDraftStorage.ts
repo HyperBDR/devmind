@@ -24,7 +24,7 @@ export interface CreateQuoteDraft {
   region: string;
   industry: string;
   salesperson: string;
-  currency: 'CNY' | 'USD' | 'EUR';
+  currency: string;
   paymentTermOption: PaymentTermOption;
   paymentTermsCustom: string;
   vatRateInput: string;

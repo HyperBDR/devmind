@@ -5,7 +5,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -17,6 +17,7 @@ from .common import (
 
 PRICING_URL = "https://bigmodel.cn/pricing"
 DEFAULT_CURRENCY = "CNY"
+TRUSTED_SCRIPT_HOSTS = {"bigmodel.cn", "static.bigmodel.cn"}
 
 
 class ZhipuPriceCatalogCollector:
@@ -100,7 +101,7 @@ def fetch_text(url: str) -> str:
 
 
 def fetch_linked_pricing_scripts(url: str, content: str) -> list[str]:
-    """Fetch same-origin JS bundles that contain BigModel pricing rows."""
+    """Fetch trusted BigModel JS bundles that contain pricing rows."""
     scripts = []
     for path in re.findall(
         r'<script[^>]+src=["\']([^"\']+\.js)["\']',
@@ -108,7 +109,11 @@ def fetch_linked_pricing_scripts(url: str, content: str) -> list[str]:
         flags=re.IGNORECASE,
     ):
         script_url = urljoin(url, path)
-        if not script_url.startswith("https://bigmodel.cn/"):
+        parsed_url = urlparse(script_url)
+        if (
+            parsed_url.scheme != "https"
+            or parsed_url.hostname not in TRUSTED_SCRIPT_HOSTS
+        ):
             continue
         try:
             response = requests.get(

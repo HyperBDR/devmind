@@ -123,10 +123,13 @@ def attach_quotation_document_summaries(
         sync_status=ReplicaSyncStatus.SYNCED,
         revoked_at__isnull=True,
     ).exclude(remote_file_token="")
-    confirmed_parse = DocumentParseResult.objects.filter(
+    linked_parse = DocumentParseResult.objects.filter(
         asset_id=OuterRef("pk"),
         quotation_id=OuterRef("quotation_id"),
-        status=DocumentParseStatus.CONFIRMED,
+        status__in=(
+            DocumentParseStatus.CONFIRMED,
+            DocumentParseStatus.REVIEW_REQUIRED,
+        ),
     )
     documents = (
         DocumentAsset.objects.filter(
@@ -135,7 +138,7 @@ def attach_quotation_document_summaries(
         )
         .annotate(
             has_active_replica=Exists(active_replica),
-            has_confirmed_parse=Exists(confirmed_parse),
+            has_confirmed_parse=Exists(linked_parse),
         )
         .only(
             "id",

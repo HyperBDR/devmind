@@ -5,6 +5,9 @@ import {
   buildFlatResalePriceItems,
   hasTieredResalePrices,
   normalizeResalePriceDraft,
+  removeResaleTierRow,
+  shouldRestoreSavedResalePriceDraft,
+  updateResaleTierRows,
   validateResalePriceDraft
 } from '../src/utils/resaleTierDraft.js'
 
@@ -96,6 +99,33 @@ test('keeps a single unbounded usage range on the tiered API path', () => {
   )
 })
 
+test('accepts an unbounded final tier without a terminal error', () => {
+  const errors = validateResalePriceDraft({
+    cache: [{ end: null, price: '0.25', start: '0' }],
+    input: [
+      { end: '1000000', price: '1', start: '0' },
+      { end: null, price: '0.8', start: '1000000' }
+    ],
+    output: [{ end: null, price: '2', start: '0' }]
+  })
+
+  assert.deepEqual(errors, {})
+})
+
+test('accepts a bounded final tier copied from the upstream source', () => {
+  const errors = validateResalePriceDraft({
+    cache: [{ end: '1000000', price: '0.25', start: '0' }],
+    input: [
+      { end: '128000', price: '1', start: '0' },
+      { end: '256000', price: '0.9', start: '128000' },
+      { end: '1000000', price: '0.8', start: '256000' }
+    ],
+    output: [{ end: '1000000', price: '2', start: '0' }]
+  })
+
+  assert.deepEqual(errors, {})
+})
+
 test('locates price, overlap, and gap errors by dimension, row, and field', () => {
   const errors = validateResalePriceDraft({
     cache: [{ end: null, price: '-1', start: '0' }],
@@ -112,4 +142,87 @@ test('locates price, overlap, and gap errors by dimension, row, and field', () =
   assert.equal(errors['cache:0:price'], 'price_table.invalid_price')
   assert.equal(errors['input:1:start'], 'price_table_overlap')
   assert.equal(errors['output:1:start'], 'price_table_gap')
+})
+
+test('keeps the next tier start connected when the current end changes', () => {
+  const rows = [
+    { end: '100', price: '1', start: '0' },
+    { end: null, price: '2', start: '100' }
+  ]
+
+  assert.deepEqual(updateResaleTierRows(rows, 0, 'end', '250'), [
+    { end: '250', price: '1', start: '0' },
+    { end: null, price: '2', start: '250' }
+  ])
+})
+
+test('keeps the previous tier end connected when the current start changes', () => {
+  const rows = [
+    { end: '100', price: '1', start: '0' },
+    { end: null, price: '2', start: '100' }
+  ]
+
+  assert.deepEqual(updateResaleTierRows(rows, 1, 'start', '250'), [
+    { end: '250', price: '1', start: '0' },
+    { end: null, price: '2', start: '250' }
+  ])
+})
+
+test('bridges adjacent ranges when a middle tier is removed', () => {
+  const rows = [
+    { end: '100', price: '1', start: '0' },
+    { end: '200', price: '0.8', start: '100' },
+    { end: null, price: '0.6', start: '200' }
+  ]
+
+  assert.deepEqual(removeResaleTierRow(rows, 1), [
+    { end: '200', price: '1', start: '0' },
+    { end: null, price: '0.6', start: '200' }
+  ])
+})
+
+test('restores a saved pending draft when upstream ranges have changed', () => {
+  const savedDraft = {
+    cache: [{ end: null, flat: true, price: '0.25', start: null }],
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '0.8', start: '100' }
+    ],
+    output: [{ end: null, flat: true, price: '2', start: null }]
+  }
+  const upstreamDraft = {
+    cache: [{ end: null, flat: true, price: '0.20', start: null }],
+    input: [{ end: null, flat: true, price: '0.9', start: null }],
+    output: [{ end: null, flat: true, price: '1.8', start: null }]
+  }
+
+  assert.equal(
+    shouldRestoreSavedResalePriceDraft(
+      { pending_price_items: [{ id: 1 }] },
+      savedDraft,
+      upstreamDraft
+    ),
+    true
+  )
+})
+
+test('uses upstream ranges for a published price when boundaries changed', () => {
+  const savedDraft = {
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '0.8', start: '100' }
+    ]
+  }
+  const upstreamDraft = {
+    input: [{ end: null, flat: true, price: '0.9', start: null }]
+  }
+
+  assert.equal(
+    shouldRestoreSavedResalePriceDraft(
+      { current_price_items: [{ id: 1 }], pending_price_items: [] },
+      savedDraft,
+      upstreamDraft
+    ),
+    false
+  )
 })

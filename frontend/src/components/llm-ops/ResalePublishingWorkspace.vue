@@ -512,6 +512,7 @@
               :currency="currencyLabel"
               :errors="tierErrorsFor(row)"
               :model-value="tierDraftFor(row)"
+              :boundaries-locked="true"
               :preview="tierPreviewFor(row)"
               :preview-error="tierPreviewErrorFor(row)"
               :preview-loading="tierPreviewLoadingFor(row)"
@@ -577,7 +578,10 @@ import {
   buildFlatResalePriceItems,
   hasTieredResalePrices,
   normalizeResalePriceDraft,
+  resalePriceItemsForListing,
+  resalePriceItemsMatch,
   resaleTierDraftFromItems,
+  shouldRestoreSavedResalePriceDraft,
   validateResalePriceDraft
 } from '@/utils/resaleTierDraft'
 import { errorMessage, extract } from '@/utils/llmOpsPagination'
@@ -808,7 +812,8 @@ watch(
     () => props.initialAutoListing,
     () => metaModelRows.value.length,
     () => props.models.length,
-    () => props.listings.length
+    () => props.listings.length,
+    () => props.channelPriceItems.length
   ],
   () => {
     // ponytail: defer until v-model binds and computed deps are ready
@@ -857,7 +862,19 @@ function updateChainState(row, patch) {
 function tierDraftFor(row) {
   const state = getChainState(row.uniqueId)
   if (state.tierDraft) return state.tierDraft
-  return resaleTierDraftFromItems(
+  return upstreamTierDraftFor(row)
+}
+
+function displayDraftFromItems(items) {
+  const displayItems = (items || []).map((item) => ({
+    ...item,
+    unit_price: convertToDisplay(item.unit_price, item.currency)
+  }))
+  return resaleTierDraftFromItems(displayItems)
+}
+
+function upstreamTierDraftFor(row) {
+  const fallback = resaleTierDraftFromItems(
     buildFlatResalePriceItems(
       {
         cache: row.priceCacheInRaw,
@@ -867,6 +884,54 @@ function tierDraftFor(row) {
       currencyLabel.value
     )
   )
+  const dimensionKeys = ['input', 'output', 'cache']
+  const draft = {}
+  dimensionKeys.forEach((key) => {
+    const items = row.upstreamPriceItems?.[key] || []
+    if (!items.length) {
+      draft[key] = fallback[key]
+      return
+    }
+    const tiered = items.some((item) => item.tier_type === 'usage_range')
+    draft[key] = items.map((item) => ({
+      end: tiered
+        ? item.tier_end === null
+          ? null
+          : String(item.tier_end)
+        : null,
+      flat: !tiered,
+      price: formatEditablePrice(
+        priceFromMargin(
+          convertToDisplay(item.unit_price, item.currency) ?? 0,
+          row.margin
+        )
+      ),
+      start: tiered
+        ? item.tier_start === null
+          ? '0'
+          : String(item.tier_start)
+        : null
+    }))
+  })
+  return draft
+}
+
+function listingDraftFor(row, listing) {
+  const savedItems = resalePriceItemsForListing(listing)
+  if (!savedItems.length) return null
+  return displayDraftFromItems(savedItems)
+}
+
+function initialTierDraftFor(row, listing) {
+  const upstreamDraft = upstreamTierDraftFor(row)
+  const savedDraft = listingDraftFor(row, listing)
+  if (
+    savedDraft &&
+    shouldRestoreSavedResalePriceDraft(listing, savedDraft, upstreamDraft)
+  ) {
+    return savedDraft
+  }
+  return upstreamDraft
 }
 
 function tierErrorsFor(row) {
@@ -1062,7 +1127,9 @@ function hydrateInitialListings(initialModelId) {
           priceCacheIn !== null && priceCacheIn !== undefined
             ? formatEditablePrice(priceCacheIn)
             : row.priceCacheInRaw,
-        margin: marginFromListingPrices(row, priceIn, priceOut, priceCacheIn)
+        margin: marginFromListingPrices(row, priceIn, priceOut, priceCacheIn),
+        tierDraft: initialTierDraftFor(row, listing),
+        tierErrors: {}
       }
     })
   chainState.value = nextState
@@ -1222,6 +1289,8 @@ function listingForRow(row) {
 function baselineForRow(row) {
   const listing = listingForRow(row)
   if (!listing) return null
+  const savedDraft = listingDraftFor(row, listing)
+  if (savedDraft) return { tierDraft: savedDraft }
   return {
     priceIn: comparablePrice(
       convertToDisplay(listing.retail_input_price_per_million, listing.currency)
@@ -1243,12 +1312,15 @@ function baselineForRow(row) {
 }
 
 function listingRowHasChanges(row) {
-  const tierDraft = getChainState(row.uniqueId).tierDraft
-  if (hasTieredResalePrices(tierDraft)) {
-    return true
-  }
+  const tierDraft = tierDraftFor(row)
   const baseline = baselineForRow(row)
   if (!baseline) return true
+  if (baseline.tierDraft) {
+    return !resalePriceItemsMatch(
+      normalizeResalePriceDraft(tierDraft, currencyLabel.value),
+      normalizeResalePriceDraft(baseline.tierDraft, currencyLabel.value)
+    )
+  }
   return (
     comparablePrice(row.priceInRaw) !== baseline.priceIn ||
     comparablePrice(row.priceOutRaw) !== baseline.priceOut ||

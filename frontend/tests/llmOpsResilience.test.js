@@ -7,6 +7,13 @@ import {
   dataGroupsForSection,
   toolbarForSection
 } from '../src/utils/llmOpsSectionData.js'
+import {
+  normalizeResalePriceDraft,
+  resalePriceItemsForListing,
+  resalePriceItemsMatch,
+  resaleTierDraftRangesMatch,
+  resaleTierDraftFromItems
+} from '../src/utils/resaleTierDraft.js'
 
 const globalConfigSource = readFileSync(
   new URL('../src/components/llm-ops/GlobalConfigPanel.vue', import.meta.url),
@@ -18,6 +25,13 @@ const llmOpsPageSource = readFileSync(
 )
 const modelWorkbenchSource = readFileSync(
   new URL('../src/components/llm-ops/ModelWorkbenchPanel.vue', import.meta.url),
+  'utf8'
+)
+const listingBoardSource = readFileSync(
+  new URL(
+    '../src/components/llm-ops/AgioneListingStatusBoard.vue',
+    import.meta.url
+  ),
   'utf8'
 )
 const metaModelManagementSource = readFileSync(
@@ -152,5 +166,109 @@ test('limits platform selection refreshes to platform-aware sections', () => {
   assert.match(
     resalePublishingSource,
     /if \(!\['monitor', 'reseller'\]\.includes\(activeSection\.value\)\) return/
+  )
+})
+
+test('uses an in-page confirmation dialog for listing actions', () => {
+  assert.doesNotMatch(listingBoardSource, /\b(?:window\.)?confirm\s*\(/)
+  assert.match(listingBoardSource, /LLMOpsConfirmDialog/)
+  assert.match(listingBoardSource, /askConfirmation\(/)
+})
+
+test('keeps tier ranges readable in the listing table', () => {
+  assert.match(listingBoardSource, /metric-tier-range-list/)
+  assert.match(listingBoardSource, /metric\.tierPrices\?\.length/)
+  assert.match(listingBoardSource, /metric\.tierPoints\?\.length/)
+  assert.match(
+    listingBoardSource,
+    /v-for="tier in metric\.tierPrices \|\| \[\]"/
+  )
+  assert.match(
+    listingBoardSource,
+    /v-for="tier in metric\.tierPoints \|\| \[\]"/
+  )
+  assert.match(listingBoardSource, /tier\.price/)
+  assert.doesNotMatch(listingBoardSource, /metric\.shape/)
+})
+
+test('restores saved resale tiers from the active listing revision', () => {
+  const items = [
+    {
+      billing_unit: 'per_1m_tokens',
+      currency: 'CNY',
+      dimension: 'text_input',
+      tier_end: '1000000.000000',
+      tier_start: '0.000000',
+      tier_type: 'usage_range',
+      unit_price: '3.46'
+    },
+    {
+      billing_unit: 'per_1m_tokens',
+      currency: 'CNY',
+      dimension: 'text_input',
+      tier_end: null,
+      tier_start: '1000000.000000',
+      tier_type: 'usage_range',
+      unit_price: '3.20'
+    }
+  ]
+  const listing = {
+    current_price_items: [],
+    pending_price_items: items
+  }
+
+  const draft = resaleTierDraftFromItems(resalePriceItemsForListing(listing))
+
+  assert.equal(draft.input.length, 2)
+  assert.equal(
+    resalePriceItemsMatch(normalizeResalePriceDraft(draft, 'CNY'), items),
+    true
+  )
+})
+
+test('keeps downstream ranges controlled by the upstream price shape', () => {
+  const upstreamItems = [
+    {
+      dimension: 'text_input',
+      tier_end: '1000000',
+      tier_start: '0',
+      tier_type: 'usage_range',
+      unit_price: '1'
+    },
+    {
+      dimension: 'text_input',
+      tier_end: null,
+      tier_start: '1000000',
+      tier_type: 'usage_range',
+      unit_price: '0.8'
+    },
+    {
+      dimension: 'text_output',
+      tier_end: null,
+      tier_start: null,
+      tier_type: 'flat',
+      unit_price: '2'
+    }
+  ]
+  const upstreamDraft = resaleTierDraftFromItems(upstreamItems)
+  const savedDraft = {
+    ...upstreamDraft,
+    input: upstreamDraft.input.map((row, index) => ({
+      ...row,
+      price: index ? '3.2' : '3.46'
+    }))
+  }
+  const changedBoundaryDraft = {
+    ...savedDraft,
+    input: [
+      { ...savedDraft.input[0], end: '900000' },
+      { ...savedDraft.input[1], start: '900000' }
+    ]
+  }
+
+  assert.equal(resaleTierDraftRangesMatch(savedDraft, upstreamDraft), true)
+  assert.equal(
+    resaleTierDraftRangesMatch(changedBoundaryDraft, upstreamDraft),
+    false
   )
 })

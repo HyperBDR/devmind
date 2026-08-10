@@ -1128,6 +1128,12 @@
       "tiers": {
         "title": "阶梯挂售价",
         "intervalHelp": "区间采用 [起始, 结束)；结束留空表示无上限。",
+        "continuityHelp": "修改边界时，相邻阶梯会自动接续。",
+        "upstreamHelp": "区间跟随上游采购价，只可修改每段挂售价。",
+        "rangePreview": "区间接续预览",
+        "connected": "相邻阶梯已接续",
+        "tier": "阶梯",
+        "tierLabel": "阶梯 {value}",
         "add": "新增阶梯",
         "start": "起始用量",
         "end": "结束用量",
@@ -1254,7 +1260,7 @@
         "autoApproveMaxMargin": "例如：20",
         "code": "例如：agione-main",
         "feeRate": "例如：3",
-        "metadata": "例如：{\"tenant_id\":\"tenant-001\",\"channel\":\"direct\"}",
+        "metadata": "例如：{'{'}\"tenant_id\":\"tenant-001\",\"channel\":\"direct\"{'}'}",
         "name": "例如：Agione 主平台",
         "notes": "例如：积分倍率来源、结算周期、接口适配状态",
         "optionalRate": "留空表示未配置",
@@ -2834,6 +2840,9 @@
         "status": "状态",
         "actions": "操作"
       },
+      "flat": "Flat",
+      "tiered": "阶梯",
+      "tierSummary": "{count} 段",
       "batch": {
         "offline": "批量下架",
         "price": "批量改价",
@@ -2923,6 +2932,7 @@
         "withdrawRequest": "撤回申请"
       },
       "confirm": {
+        "title": "确认挂售操作",
         "batchOffline": "确认批量发起下架 {count} 个模型？",
         "batchConfirm": "{action} {count} 个模型？",
         "batchPrice": "确认对 {count} 个模型进入批量改价工作台？",

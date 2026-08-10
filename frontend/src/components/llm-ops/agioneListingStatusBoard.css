@@ -709,6 +709,7 @@
 
 .agione-listing-status-board .listing-table {
   table-layout: fixed;
+  min-width: 1364px;
 }
 
 .agione-listing-status-board .listing-table .table-head,
@@ -753,41 +754,43 @@
 }
 
 .agione-listing-status-board .select-col {
-  width: 3%;
+  width: 48px;
 }
 
 .agione-listing-status-board .platform-col {
-  width: 7%;
+  width: 100px;
 }
 
 .agione-listing-status-board .model-col {
-  width: 16%;
+  width: 170px;
 }
 
 .agione-listing-status-board .source-col {
-  width: 12%;
+  width: 96px;
 }
 
-.agione-listing-status-board .cost-col,
+.agione-listing-status-board .cost-col {
+  width: 210px;
+}
+
 .agione-listing-status-board .retail-col {
-  width: 12%;
+  width: 270px;
 }
 
 .agione-listing-status-board .point-col {
-  width: 8%;
+  width: 130px;
 }
 
 .agione-listing-status-board .margin-col {
-  width: 8%;
+  width: 90px;
 }
 
 .agione-listing-status-board .status-col {
-  width: 8%;
+  width: 110px;
 }
 
 .agione-listing-status-board .action-col {
-  width: 12%;
-  min-width: 9.25rem;
+  width: 140px;
 }
 
 .agione-listing-status-board .metric-stack {
@@ -825,7 +828,7 @@
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0;
-  text-align: left;
+  text-align: center;
   text-transform: uppercase;
 }
 
@@ -837,6 +840,157 @@
   white-space: nowrap;
   color: #0f172a;
   font-weight: 700;
+}
+
+.agione-listing-status-board .metric-range-summary {
+  max-width: 12rem;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 10px;
+  line-height: 1.35;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agione-listing-status-board .retail-metric-stack {
+  align-items: stretch;
+  gap: 0;
+  justify-items: stretch;
+  text-align: center;
+}
+
+.agione-listing-status-board .retail-metric-block {
+  border-bottom: 1px solid #eef2f7;
+  padding: 0.35rem 0;
+  text-align: center;
+}
+
+.agione-listing-status-board .retail-metric-block:last-child {
+  border-bottom: 0;
+}
+
+.agione-listing-status-board .retail-metric-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.agione-listing-status-board .metric-column-heading {
+  min-height: 1.25rem;
+}
+
+.agione-listing-status-board .metric-cost-block {
+  background: transparent;
+  min-height: 1.95rem;
+  position: relative;
+}
+
+.agione-listing-status-board .metric-cost-block
+  .metric-column-heading {
+  bottom: 0.35rem;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0.35rem;
+}
+
+.agione-listing-status-board .metric-cost-block.metric-tiered-block
+  .metric-tier-cost-spacer {
+  margin-top: 0;
+}
+
+.agione-listing-status-board .retail-shape-badge {
+  justify-self: start;
+  border: 1px solid #d8d2f0;
+  border-radius: 9999px;
+  background: #ece9f9;
+  padding: 0.125rem 0.375rem;
+  color: #4a3eb0;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.agione-listing-status-board .retail-shape-badge-tiered {
+  border-color: #b3a8e2;
+  background: #e4e0f7;
+}
+
+.agione-listing-status-board .metric-tier-range-list {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.agione-listing-status-board .metric-tiered-values {
+  margin-top: 0;
+}
+
+.agione-listing-status-board .metric-tier-price-row {
+  display: grid;
+  grid-template-columns: max-content max-content;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.agione-listing-status-board .metric-tier-point-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  justify-items: center;
+  gap: 0.5rem;
+  min-height: 1.375rem;
+  min-width: 0;
+}
+
+.agione-listing-status-board .metric-tier-cost-spacer
+  .metric-tier-point-row {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  justify-items: stretch;
+}
+
+.agione-listing-status-board .metric-tier-range-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.375rem;
+  border: 1px solid #d8d2f0;
+  border-radius: 4px;
+  background: #f8fafc;
+  padding: 0.125rem 0.375rem;
+  color: #4a3eb0;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.agione-listing-status-board .metric-tier-price {
+  color: #059669;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.agione-listing-status-board .metric-tier-points {
+  color: #5548c8;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 
 .agione-listing-status-board .metric-label + .metric-value {

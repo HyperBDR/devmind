@@ -208,11 +208,15 @@ def resolve_usage_price_tier(
     metric_value = ZERO
     if any(tier.tier_type != ModelPriceItem.TIER_FLAT for tier in tiers):
         metric_value = _decimal_or_zero(usage.input_tokens)
-    return resolve_price_tier(
-        schedule,
-        dimension=dimension,
-        usage=metric_value,
-    )
+    try:
+        return resolve_price_tier(
+            schedule,
+            dimension=dimension,
+            usage=metric_value,
+        )
+    except PriceTierNotFoundError:
+        # Usage above the highest defined tier bills at the top tier rate.
+        return tiers[-1]
 
 
 def resolve_usage_unit_prices(

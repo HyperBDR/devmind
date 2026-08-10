@@ -1111,6 +1111,51 @@ def resolve_channel_price_schedule(
     return _flat_schedule_from_unit_prices(unit_prices, currency=currency)
 
 
+def _merge_flat_fallback_tiers(tiers: list[PriceTier]) -> list[PriceTier]:
+    """Merge flat fallback tiers into tiered tables as an unbounded tail.
+
+    Some models store both explicit usage-range tiers (e.g. 0-128000) and a
+    flat fallback price for usage beyond that window. The price table
+    contract forbids mixing flat and tiered rows, so we convert flat
+    fallbacks into an unbounded tier ``[max_end, None)``.
+    """
+    by_dim: dict[str, list[PriceTier]] = {}
+    for tier in tiers:
+        by_dim.setdefault(tier.dimension, []).append(tier)
+
+    merged: list[PriceTier] = []
+    for dim_tiers in by_dim.values():
+        tiered = [t for t in dim_tiers if t.tier_type != "flat"]
+        flat = [t for t in dim_tiers if t.tier_type == "flat"]
+        if not tiered or not flat:
+            merged.extend(dim_tiers)
+            continue
+
+        max_end = max(
+            (t.tier_end for t in tiered if t.tier_end is not None),
+            default=None,
+        )
+        for t in tiered:
+            merged.append(t)
+        for t in flat:
+            if max_end is not None:
+                merged.append(
+                    PriceTier(
+                        dimension=t.dimension,
+                        billing_unit=t.billing_unit,
+                        currency=t.currency,
+                        unit_price=t.unit_price,
+                        tier_type=ModelPriceItem.TIER_USAGE_RANGE,
+                        tier_start=max_end,
+                        tier_end=None,
+                        spec=with_usage_range_spec(t.spec),
+                    )
+                )
+            else:
+                merged.append(t)
+    return merged
+
+
 def _schedule_from_source_items(
     channel: ProcurementChannel,
     model: LLMModel,
@@ -1229,7 +1274,8 @@ def _schedule_from_source_items(
                 spec={},
             )
         )
-    schedule = PriceSchedule(tiers=tuple(tiers))
+    merged_tiers = _merge_flat_fallback_tiers(tiers)
+    schedule = PriceSchedule(tiers=tuple(merged_tiers))
     validate_price_table_groups(schedule.tiers)
     return schedule
 
@@ -2536,6 +2582,27 @@ def create_resale_listing_price_revision(
     return revision
 
 
+def derive_resale_pricing_format(schedule: PriceSchedule) -> str:
+    """Classify a resale schedule as flat / usage_range / mixed."""
+    tier_types = {tier.tier_type for tier in schedule.tiers}
+    if not tier_types:
+        return ResaleListing.PRICING_FORMAT_FLAT
+    if tier_types == {ModelPriceItem.TIER_FLAT}:
+        return ResaleListing.PRICING_FORMAT_FLAT
+    if ModelPriceItem.TIER_FLAT in tier_types:
+        return ResaleListing.PRICING_FORMAT_MIXED
+    return ResaleListing.PRICING_FORMAT_USAGE_RANGE
+
+
+def resolve_resale_listing_unit_prices(
+    listing: ResaleListing,
+    usage: UsageContext,
+) -> UnitPrices:
+    """Resolve retail unit prices from the effective resale schedule."""
+    schedule = resale_listing_price_schedule(listing)
+    return resolve_usage_unit_prices(schedule, usage)
+
+
 def _flat_resale_listing_price_items(listing: ResaleListing) -> list[dict]:
     """Build normalized flat items from compatibility listing columns."""
     items = [
@@ -2566,10 +2633,8 @@ def sync_resale_listing_flat_revision(
     created_by=None,
 ) -> ResaleListingPriceRevision:
     """Dual-write compatibility flat fields into a complete revision."""
-    locked_listing = (
-        ResaleListing.objects.select_for_update()
-        .select_related("pending_price_revision")
-        .get(pk=listing.pk)
+    locked_listing = ResaleListing.objects.select_for_update().get(
+        pk=listing.pk
     )
     items = _flat_resale_listing_price_items(locked_listing)
     currency = resolve_resale_listing_currency(locked_listing)
@@ -2611,13 +2676,8 @@ def approve_resale_listing_price_revision(
     listing: ResaleListing,
 ) -> ResaleListingPriceRevision:
     """Approve the exact pending revision and supersede the old current one."""
-    locked_listing = (
-        ResaleListing.objects.select_for_update()
-        .select_related(
-            "current_price_revision",
-            "pending_price_revision",
-        )
-        .get(pk=listing.pk)
+    locked_listing = ResaleListing.objects.select_for_update().get(
+        pk=listing.pk
     )
     pending = locked_listing.pending_price_revision
     if pending is None or pending.status != pending.STATUS_SUBMITTED:
@@ -2687,7 +2747,8 @@ def _normalize_resale_price_schedule(items) -> PriceSchedule:
                 spec=spec,
             )
         )
-    schedule = PriceSchedule(tiers=tuple(tiers))
+    merged_tiers = _merge_flat_fallback_tiers(tiers)
+    schedule = PriceSchedule(tiers=tuple(merged_tiers))
     validate_price_table_groups(schedule.tiers)
     return schedule
 
@@ -2765,7 +2826,7 @@ def save_resale_listing_price_draft(
     """Atomically save a complete resale schedule as the active draft."""
     locked = (
         ResaleListing.objects.select_for_update()
-        .select_related("platform", "model", "pending_price_revision")
+        .select_related("platform", "model")
         .get(pk=listing.pk)
     )
     if locked.workflow_status == ResaleListing.WORKFLOW_ONLINE:
@@ -2853,6 +2914,7 @@ def save_resale_listing_price_draft(
         normalized,
         normalized_currency,
     )
+    locked.pricing_format = derive_resale_pricing_format(normalized)
     locked.pending_price_revision = revision
     locked.save()
     listing.pending_price_revision_id = revision.id
@@ -3121,7 +3183,7 @@ def calculate_tiered_profitability(
             platform_fee_rate=decimal_or_zero(platform.fee_rate),
             service_fee_rate=decimal_or_zero(platform.service_fee_rate),
             tax_rate=decimal_or_zero(platform.tax_rate),
-            settlement_rate=decimal_or_zero(platform.settlement_rate),
+            settlement_rate=decimal_or_zero(platform.settlement_rate) or ONE,
             risk_net_yield_rate=decimal_or_zero(platform.yield_warning),
         )
         analysis = analyze_tier_profit(
@@ -3285,7 +3347,7 @@ def submit_resale_listing_price_revision(
     """Submit a concrete draft with immutable decision evidence."""
     locked = (
         ResaleListing.objects.select_for_update()
-        .select_related("platform", "model", "channel")
+        .select_related("platform", "model")
         .get(pk=listing.pk)
     )
     revision = ResaleListingPriceRevision.objects.select_for_update().get(
@@ -3358,14 +3420,7 @@ def approve_and_publish_resale_price_revision(
     approved_by=None,
 ) -> ResaleListingPriceRevision | None:
     """Bind manual approval and publication to the pending revision."""
-    locked = (
-        ResaleListing.objects.select_for_update()
-        .select_related(
-            "current_price_revision",
-            "pending_price_revision",
-        )
-        .get(pk=listing.pk)
-    )
+    locked = ResaleListing.objects.select_for_update().get(pk=listing.pk)
     revision = locked.pending_price_revision
     if revision is None:
         return None

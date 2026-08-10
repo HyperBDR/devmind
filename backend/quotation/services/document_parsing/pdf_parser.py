@@ -37,7 +37,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.9.0"
+PARSER_VERSION = "2.10.0"
 
 
 class QuotationPdfParseError(ValueError):
@@ -461,7 +461,7 @@ def _parse_currency_item_line(
     line: str,
     pending_description: str,
 ) -> ParsedQuotationItem | None:
-    parts = re.split(r"\s*[$¥€]\s*", line)
+    parts = re.split(r"\s*(?:HK\$|RM|[$¥￥€£])\s*", line)
     if len(parts) != 4:
         return None
     prefix = parts[0].strip().split()
@@ -506,8 +506,11 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
             extended_price=_decimal(cells[6]),
         )
     match = re.match(
-        r"^(\d+)\s+(.+?)\s+([0-9.,]+)\s+([$¥€]?[0-9.,]+)\s+"
-        r"([0-9.]+%?)\s+([$¥€]?[0-9.,]+)\s+([$¥€]?[0-9.,]+)$",
+        r"^(\d+)\s+(.+?)\s+([0-9.,]+)\s+"
+        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)\s+"
+        r"([0-9.]+%?)\s+"
+        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)\s+"
+        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)$",
         line,
     )
     if not match:
@@ -569,7 +572,7 @@ def _amount_by_label(lines: list[str], label: str) -> Decimal:
         if target in line.lower():
             value = line.split(":", 1)[-1] if ":" in line else line
             matches = re.findall(
-                r"(?:[$¥€]|RM)?\s*([\d,]+(?:\.\d+)?)",
+                r"(?:HK\$|[$¥￥€£]|RM)?\s*([\d,]+(?:\.\d+)?)",
                 value,
                 flags=re.IGNORECASE,
             )
@@ -588,7 +591,8 @@ def _tax_details(lines: list[str]) -> tuple[str, Decimal]:
         if match:
             return match.group(1).strip(), Decimal(match.group(2))
         match = re.search(
-            r"(.+?)\s+\(([0-9.]+)%\)\s+(?:[$¥€]|RM)",
+            r"(.+?)\s+\(([0-9.]+)%\)\s+"
+            r"(?:HK\$|[$¥￥€£]|RM)",
             line,
             flags=re.IGNORECASE,
         )

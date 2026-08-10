@@ -997,6 +997,22 @@
   display: none;
 }
 
+@media (max-width: 1023px) {
+  .resale-publishing-workspace .performance-sidebar {
+    overflow: visible;
+  }
+
+  .resale-publishing-workspace .performance-sidebar-body {
+    flex: none;
+    overflow: visible;
+  }
+
+  .resale-publishing-workspace .perf-metric-section {
+    flex: none;
+    min-height: 0;
+  }
+}
+
 @media (min-width: 1024px) {
   .resale-publishing-workspace .publishing-workbench-grid {
     grid-template-columns: var(--performance-sidebar-width, 380px) minmax(

@@ -150,6 +150,43 @@ class ResalePriceRevisionAPITests(TestCase):
             format="json",
         )
 
+    def flat_items(self):
+        return [
+            {
+                "dimension": ModelPriceItem.DIMENSION_TEXT_INPUT,
+                "billing_unit": ModelPriceItem.UNIT_PER_1M_TOKENS,
+                "currency": "USD",
+                "unit_price": "2",
+                "tier_type": ModelPriceItem.TIER_FLAT,
+                "tier_start": None,
+                "tier_end": None,
+                "spec": {},
+            },
+            {
+                "dimension": ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                "billing_unit": ModelPriceItem.UNIT_PER_1M_TOKENS,
+                "currency": "USD",
+                "unit_price": "4",
+                "tier_type": ModelPriceItem.TIER_FLAT,
+                "tier_start": None,
+                "tier_end": None,
+                "spec": {},
+            },
+        ]
+
+    def mixed_items(self):
+        tiered_input = [
+            item
+            for item in self.retail_items()
+            if item["dimension"] == ModelPriceItem.DIMENSION_TEXT_INPUT
+        ]
+        flat_output = [
+            item
+            for item in self.flat_items()
+            if item["dimension"] == ModelPriceItem.DIMENSION_TEXT_OUTPUT
+        ]
+        return tiered_input + flat_output
+
     def submit_revision(self, revision_id):
         return self.client.post(
             reverse(
@@ -197,6 +234,72 @@ class ResalePriceRevisionAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data["code"], "price_table_gap")
+
+    def test_listing_defaults_to_flat_pricing_format(self):
+        listing = ResaleListing.objects.get(pk=self.listing.pk)
+
+        self.assertEqual(
+            listing.pricing_format,
+            ResaleListing.PRICING_FORMAT_FLAT,
+        )
+
+    def test_saving_tiered_draft_sets_usage_range_format(self):
+        response = self.save_draft()
+        self.assertEqual(response.status_code, 200, response.data)
+
+        listing = ResaleListing.objects.get(pk=self.listing.pk)
+        self.assertEqual(
+            listing.pricing_format,
+            ResaleListing.PRICING_FORMAT_USAGE_RANGE,
+        )
+
+    def test_saving_flat_draft_sets_flat_format(self):
+        response = self.save_draft(items=self.flat_items())
+        self.assertEqual(response.status_code, 200, response.data)
+
+        listing = ResaleListing.objects.get(pk=self.listing.pk)
+        self.assertEqual(
+            listing.pricing_format,
+            ResaleListing.PRICING_FORMAT_FLAT,
+        )
+
+    def test_saving_mixed_draft_sets_mixed_format(self):
+        response = self.save_draft(items=self.mixed_items())
+        self.assertEqual(response.status_code, 200, response.data)
+
+        listing = ResaleListing.objects.get(pk=self.listing.pk)
+        self.assertEqual(
+            listing.pricing_format,
+            ResaleListing.PRICING_FORMAT_MIXED,
+        )
+
+    def test_listing_exposes_pending_revision_price_items(self):
+        draft = self.save_draft()
+
+        response = self.client.get(
+            reverse("resale-listing-detail", args=[self.listing.id])
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            len(response.data["pending_price_items"]),
+            len(draft.data["price_items"]),
+        )
+        self.assertEqual(
+            response.data["pending_price_items"][0]["tier_end"],
+            "100.000000",
+        )
+
+    def test_submit_defaults_missing_settlement_rate_to_one(self):
+        self.platform.settlement_rate = None
+        self.platform.save(update_fields=["settlement_rate"])
+
+        draft = self.save_draft()
+        self.assertEqual(draft.status_code, 200, draft.data)
+
+        response = self.submit_revision(draft.data["id"])
+
+        self.assertEqual(response.status_code, 200, response.data)
 
     def test_preview_returns_cost_fee_and_interval_profitability(self):
         draft = self.save_draft()

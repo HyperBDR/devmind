@@ -37,7 +37,18 @@ export function useResaleWorkspaceOptions({ form, props, t }) {
     ;(props.channelPriceItems || []).forEach((item) => {
       if (!item?.channel || !item?.model || !item?.dimension) return
       const key = channelPriceItemKey(item.channel, item.model, item.dimension)
-      map.set(key, item)
+      const items = map.get(key) || []
+      items.push(item)
+      map.set(key, items)
+    })
+    map.forEach((items) => {
+      items.sort((left, right) => {
+        const leftStart = Number(left.tier_start ?? 0)
+        const rightStart = Number(right.tier_start ?? 0)
+        const leftId = Number(left.id || 0)
+        const rightId = Number(right.id || 0)
+        return leftStart - rightStart || leftId - rightId
+      })
     })
     return map
   })

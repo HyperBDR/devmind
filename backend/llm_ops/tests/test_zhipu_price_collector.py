@@ -1,4 +1,5 @@
 import json
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase
 
@@ -75,6 +76,21 @@ newModel:{model:[{
 }]}
 """
 
+ZHIPU_CDN_SCRIPT_URL = (
+    "https://static.bigmodel.cn/"
+    "wd-paas-front/js/app.a4a9eb95.js"
+)
+
+ZHIPU_CDN_SHELL_HTML = f"""
+<!DOCTYPE html>
+<html>
+  <body>
+    <div id="app"></div>
+    <script src="{ZHIPU_CDN_SCRIPT_URL}"></script>
+  </body>
+</html>
+"""
+
 
 class ZhipuPriceCatalogCollectorTests(SimpleTestCase):
     def test_extract_models_from_structured_pricing_json(self):
@@ -120,6 +136,35 @@ class ZhipuPriceCatalogCollectorTests(SimpleTestCase):
         self.assertEqual(payload["provider"]["currency"], "CNY")
         self.assertEqual(payload["total_models"], 0)
         self.assertEqual(payload["models"], [])
+
+    @patch("llm_ops.price_collectors.parsers.zhipu.requests.get")
+    def test_collects_models_from_trusted_bigmodel_cdn_bundle(
+        self,
+        mocked_get,
+    ):
+        page_response = Mock()
+        page_response.text = ZHIPU_CDN_SHELL_HTML
+        page_response.encoding = "utf-8"
+        bundle_response = Mock()
+        bundle_response.text = ZHIPU_BUNDLE_MODEL_LIST
+        bundle_response.encoding = "utf-8"
+        mocked_get.side_effect = [page_response, bundle_response]
+
+        payload = collect_vendor_price_catalog(
+            "zhipu",
+            {"source_url": "https://bigmodel.cn/pricing"},
+        )
+
+        self.assertEqual(payload["total_models"], 1)
+        self.assertEqual(payload["models"][0]["model_id"], "glm-5.2")
+        requested_urls = [call.args[0] for call in mocked_get.call_args_list]
+        self.assertEqual(
+            requested_urls,
+            [
+                "https://bigmodel.cn/pricing",
+                ZHIPU_CDN_SCRIPT_URL,
+            ],
+        )
 
     def test_collect_vendor_price_catalog_returns_zhipu_payload(self):
         payload = collect_vendor_price_catalog(
