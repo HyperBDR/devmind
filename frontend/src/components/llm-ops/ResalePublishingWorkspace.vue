@@ -581,7 +581,7 @@ import {
   resalePriceItemsForListing,
   resalePriceItemsMatch,
   resaleTierDraftFromItems,
-  resaleTierDraftRangesMatch,
+  shouldRestoreSavedResalePriceDraft,
   validateResalePriceDraft
 } from '@/utils/resaleTierDraft'
 import { errorMessage, extract } from '@/utils/llmOpsPagination'
@@ -925,7 +925,10 @@ function listingDraftFor(row, listing) {
 function initialTierDraftFor(row, listing) {
   const upstreamDraft = upstreamTierDraftFor(row)
   const savedDraft = listingDraftFor(row, listing)
-  if (savedDraft && resaleTierDraftRangesMatch(savedDraft, upstreamDraft)) {
+  if (
+    savedDraft &&
+    shouldRestoreSavedResalePriceDraft(listing, savedDraft, upstreamDraft)
+  ) {
     return savedDraft
   }
   return upstreamDraft

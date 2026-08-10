@@ -6,6 +6,7 @@ import {
   hasTieredResalePrices,
   normalizeResalePriceDraft,
   removeResaleTierRow,
+  shouldRestoreSavedResalePriceDraft,
   updateResaleTierRows,
   validateResalePriceDraft
 } from '../src/utils/resaleTierDraft.js'
@@ -178,4 +179,50 @@ test('bridges adjacent ranges when a middle tier is removed', () => {
     { end: '200', price: '1', start: '0' },
     { end: null, price: '0.6', start: '200' }
   ])
+})
+
+test('restores a saved pending draft when upstream ranges have changed', () => {
+  const savedDraft = {
+    cache: [{ end: null, flat: true, price: '0.25', start: null }],
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '0.8', start: '100' }
+    ],
+    output: [{ end: null, flat: true, price: '2', start: null }]
+  }
+  const upstreamDraft = {
+    cache: [{ end: null, flat: true, price: '0.20', start: null }],
+    input: [{ end: null, flat: true, price: '0.9', start: null }],
+    output: [{ end: null, flat: true, price: '1.8', start: null }]
+  }
+
+  assert.equal(
+    shouldRestoreSavedResalePriceDraft(
+      { pending_price_items: [{ id: 1 }] },
+      savedDraft,
+      upstreamDraft
+    ),
+    true
+  )
+})
+
+test('uses upstream ranges for a published price when boundaries changed', () => {
+  const savedDraft = {
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '0.8', start: '100' }
+    ]
+  }
+  const upstreamDraft = {
+    input: [{ end: null, flat: true, price: '0.9', start: null }]
+  }
+
+  assert.equal(
+    shouldRestoreSavedResalePriceDraft(
+      { current_price_items: [{ id: 1 }], pending_price_items: [] },
+      savedDraft,
+      upstreamDraft
+    ),
+    false
+  )
 })
