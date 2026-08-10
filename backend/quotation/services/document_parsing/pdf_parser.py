@@ -12,10 +12,17 @@ except ImportError:
     pymupdf = None
 
 from quotation.services.document_parsing.business_fields import (
+    EXPIRE_DATE_LABELS,
     PRODUCT_LINE_LABELS,
     QUOTE_DATE_LABELS,
+    QUOTE_NO_LABELS,
+    REMARKS_LABELS,
     explicit_product_line,
+    find_issuer_email,
     known_product_line,
+    normalize_currency_code,
+    split_salesperson_after_email,
+    strip_repeated_field_label,
 )
 from quotation.services.document_parsing.excel_parser import (
     _date,
@@ -30,7 +37,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_pdf"
-PARSER_VERSION = "2.7.0"
+PARSER_VERSION = "2.10.0"
 
 
 class QuotationPdfParseError(ValueError):
@@ -95,7 +102,8 @@ def _line_value(lines: list[str], label: str) -> str:
         match = pattern.search(line)
         if match:
             value = re.split(
-                r"\s+(?:Quote\s+No\.?|Quote\s+Valid\s+Till|"
+                r"\s+(?:Quote\s+No\.?|Quotation\s+No\.?|"
+                r"Quote\s+Valid\s+Till|Valid\s+Till|Valid\s+Until|"
                 r"Ship\s+to|Bill\s+to|Date)\s*:",
                 match.group(1),
                 maxsplit=1,
@@ -126,6 +134,10 @@ def _product_line(
         )
         if name:
             return name, prefix
+    for line in lines:
+        name, prefix = known_product_line(line)
+        if name:
+            return name, prefix
     return "", ""
 
 
@@ -147,6 +159,7 @@ def _section_fields(lines: list[str], start_label: str) -> dict[str, str]:
         for key, label in (
             ("company", "Company"),
             ("name", "Name"),
+            ("name", "Contact"),
             ("email", "Email"),
         ):
             value = _line_value([line], label)
@@ -202,19 +215,25 @@ def _project_fields(lines: list[str]) -> dict[str, str]:
             if key and column < len(values):
                 result[key] = values[column]
         if len(result) >= 3:
+            email = result.get("issuer_contact_email", "")
+            repaired = find_issuer_email(email)
+            if repaired:
+                result["issuer_contact_email"] = repaired[0]
             return result
         value_line = lines[index + 1]
-        email_match = re.search(
-            r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}",
-            value_line,
-            flags=re.IGNORECASE,
-        )
-        if email_match is None:
-            return result
-        issuer_name = value_line[: email_match.start()].strip()
-        trailing = value_line[email_match.end() :].strip().split()
-        if len(trailing) < 2:
-            return result
+        email_span = find_issuer_email(value_line)
+        if email_span is None:
+            continue
+        email, email_start, email_end = email_span
+        issuer_name = value_line[:email_start].strip()
+        trailing = value_line[email_end:].strip().split()
+        if not issuer_name:
+            issuer_name, trailing = split_salesperson_after_email(
+                email,
+                trailing,
+            )
+        if len(trailing) < 1:
+            continue
         currency = ""
         if "currency" in lower_line:
             currency = trailing.pop()
@@ -228,12 +247,12 @@ def _project_fields(lines: list[str]) -> dict[str, str]:
             trailing = trailing[:-2]
         elif trailing and trailing[-1].upper() == "CIA":
             payment_terms = trailing.pop()
-        if not trailing:
-            return result
+        if not trailing or not issuer_name:
+            continue
         result.update(
             {
                 "issuer_contact_name": issuer_name,
-                "issuer_contact_email": email_match.group(0),
+                "issuer_contact_email": email,
                 "project_name": " ".join(trailing),
             }
         )
@@ -323,7 +342,12 @@ def _signature_title(lines: list[str]) -> str:
         )
         if match is None:
             continue
-        title = match.group(1).strip()
+        title = strip_repeated_field_label(
+            match.group(1).strip(),
+            "Job Title",
+            "Position",
+            "Title",
+        )
         if re.match(
             r"^(?:Email|E-mail|Name)\s*:",
             title,
@@ -336,6 +360,12 @@ def _signature_title(lines: list[str]) -> str:
             maxsplit=1,
             flags=re.IGNORECASE,
         )[0].strip()
+        title = strip_repeated_field_label(
+            title,
+            "Job Title",
+            "Position",
+            "Title",
+        )
         if title and "@" not in title:
             return title
     return ""
@@ -348,16 +378,32 @@ def _issuer_signature_fields(
     excluded_emails: set[str],
 ) -> dict[str, str]:
     """Recover a paired issuer contact from the document tail."""
-    email_pattern = r"[A-Z0-9._%+-]+@oneprocloud\.com"
     tail_size = max(12, len(lines) // 3)
     tail_start = max(0, len(lines) - tail_size)
     for index in range(len(lines) - 1, tail_start - 1, -1):
-        email_match = re.search(
-            rf"(?:^|\s)(?:Email|E-mail)\s*:\s*({email_pattern})",
+        email = ""
+        labeled = re.search(
+            r"(?:^|[\s:])(?:Email|E-mail)\s*:\s*(.*)$",
             lines[index],
             flags=re.IGNORECASE,
         )
-        if email_match is None:
+        if labeled is not None:
+            found = find_issuer_email(labeled.group(1))
+            if found:
+                email = found[0]
+        if (
+            not email
+            and index > 0
+            and re.search(
+                r"(?:Email|E-mail)\s*:\s*$",
+                lines[index - 1],
+                flags=re.IGNORECASE,
+            )
+        ):
+            found = find_issuer_email(lines[index])
+            if found:
+                email = found[0]
+        if not email.casefold().endswith("@oneprocloud.com"):
             continue
         window_start = max(tail_start, index - 4)
         window_end = min(len(lines), index + 2)
@@ -365,7 +411,7 @@ def _issuer_signature_fields(
         for line in reversed(window):
             candidate = {
                 "issuer_contact_name": _signature_name(line),
-                "issuer_contact_email": email_match.group(1),
+                "issuer_contact_email": email,
             }
             if not _valid_issuer_candidate(
                 candidate,
@@ -415,7 +461,7 @@ def _parse_currency_item_line(
     line: str,
     pending_description: str,
 ) -> ParsedQuotationItem | None:
-    parts = re.split(r"\s*[$¥€]\s*", line)
+    parts = re.split(r"\s*(?:HK\$|RM|[$¥￥€£])\s*", line)
     if len(parts) != 4:
         return None
     prefix = parts[0].strip().split()
@@ -460,8 +506,11 @@ def _parse_item_line(line: str) -> ParsedQuotationItem | None:
             extended_price=_decimal(cells[6]),
         )
     match = re.match(
-        r"^(\d+)\s+(.+?)\s+([0-9.,]+)\s+([$¥€]?[0-9.,]+)\s+"
-        r"([0-9.]+%?)\s+([$¥€]?[0-9.,]+)\s+([$¥€]?[0-9.,]+)$",
+        r"^(\d+)\s+(.+?)\s+([0-9.,]+)\s+"
+        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)\s+"
+        r"([0-9.]+%?)\s+"
+        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)\s+"
+        r"((?:HK\$|RM|[$¥￥€£])?[0-9.,]+)$",
         line,
     )
     if not match:
@@ -523,7 +572,7 @@ def _amount_by_label(lines: list[str], label: str) -> Decimal:
         if target in line.lower():
             value = line.split(":", 1)[-1] if ":" in line else line
             matches = re.findall(
-                r"(?:[$¥€]|RM)?\s*([\d,]+(?:\.\d+)?)",
+                r"(?:HK\$|[$¥￥€£]|RM)?\s*([\d,]+(?:\.\d+)?)",
                 value,
                 flags=re.IGNORECASE,
             )
@@ -542,7 +591,8 @@ def _tax_details(lines: list[str]) -> tuple[str, Decimal]:
         if match:
             return match.group(1).strip(), Decimal(match.group(2))
         match = re.search(
-            r"(.+?)\s+\(([0-9.]+)%\)\s+(?:[$¥€]|RM)",
+            r"(.+?)\s+\(([0-9.]+)%\)\s+"
+            r"(?:HK\$|[$¥￥€£]|RM)",
             line,
             flags=re.IGNORECASE,
         )
@@ -561,10 +611,11 @@ def _issuer_company(lines: list[str]) -> str:
 
 
 def _remarks(lines: list[str]) -> str:
+    targets = {label.lower().rstrip(":") for label in REMARKS_LABELS}
     for index, line in enumerate(lines[:-1]):
-        if line.lower().rstrip(":") == "additional notes & disclaimers":
+        if line.lower().rstrip(":") in targets:
             return lines[index + 1]
-    return ""
+    return _line_value_aliases(lines, REMARKS_LABELS)
 
 
 def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
@@ -629,18 +680,15 @@ def parse_quotation_pdf_text(text: str) -> ParsedDocumentData:
     }
     payment_terms = project.get("payment_terms", "")
     quotation = ParsedQuotation(
-        quote_no=_line_value(lines, "Quote No."),
+        quote_no=_line_value_aliases(lines, QUOTE_NO_LABELS),
         product_line=product_line,
         product_line_name=product_line_name,
         project_name=project.get("project_name", ""),
-        currency=(
-            project.get("currency", "USD").upper().split("/", 1)[0]
-            or "USD"
-        ),
+        currency=normalize_currency_code(project.get("currency", "")),
         payment_term_option=_payment_term_option(payment_terms),
         payment_terms=payment_terms,
         quote_date=_date(_line_value_aliases(lines, QUOTE_DATE_LABELS)),
-        expire_date=_date(_line_value(lines, "Quote Valid Till")),
+        expire_date=_date(_line_value_aliases(lines, EXPIRE_DATE_LABELS)),
         tax_label=tax_label,
         vat_rate=vat_rate,
         remarks_disclaimer=_remarks(lines),

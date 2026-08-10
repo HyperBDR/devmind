@@ -109,7 +109,38 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
     dashboardSource,
     /const quoteBreakdownData = computed\(\(\) =>\s*\(analytics\.value\?\.amountBreakdown/
   )
-  assert.match(dashboardSource, /getDashboardAnalytics/)
+  assert.match(dashboardSource, /getDashboardAnalytics\(currency\)/)
+  assert.match(dashboardSource, /@click="loadDashboardAnalytics"/)
+  assert.doesNotMatch(dashboardSource, /loadCurrencyDashboard/)
+  assert.match(dashboardSource, /getDashboardSummary\(period\)/)
+  assert.doesNotMatch(
+    dashboardSource,
+    /getDashboardSummary\(currency/
+  )
+  assert.match(dashboardSource, /selectedDashboardCurrency/)
+  assert.match(dashboardSource, /quote\.currency/)
+  assert.match(dashboardSource, /v-if="analyticsLoading"/)
+  assert.match(dashboardSource, /:key=/)
+  assert.match(
+    dashboardSource,
+    /analytics\?\.currency \|\| dashboardCurrency/
+  )
+  assert.doesNotMatch(
+    dashboardSource,
+    /getDashboardAnalytics\(currency, period\)/
+  )
+  assert.match(
+    dashboardSource,
+    /watch\(dashboardCurrency, \(\) => \{\s*void loadDashboardAnalytics\(\)/
+  )
+  assert.match(
+    dashboardSource,
+    /id="dashboard-overview-header"[\s\S]*test-id="dashboard-currency"[\s\S]*id="chart-quote-amount"/
+  )
+  assert.doesNotMatch(
+    dashboardSource,
+    /id="chart-quote-amount"[\s\S]*test-id="dashboard-currency"/
+  )
   assert.doesNotMatch(dashboardSource, /const chartQuotes/)
   assert.doesNotMatch(dashboardSource, /selectedBreakdownCurrency/)
   assert.doesNotMatch(dashboardSource, /quoteBreakdownCurrencies/)
@@ -173,6 +204,27 @@ test('dashboard pie labels use balanced reference-style leader lines', () => {
   assert.doesNotMatch(dashboardSource, /formatShare/)
   assert.doesNotMatch(dashboardSource, /chartAmountPieTooltip/)
   assert.match(dashboardSource, /:plugins="\[quotePieLeaderLabelPlugin\]"/)
+})
+
+test('dashboard month card shows count delta against previous month', () => {
+  assert.match(dashboardSource, /monthQuoteDeltaLabel/)
+  assert.match(dashboardSource, /monthQuoteDeltaClass/)
+  assert.match(dashboardSource, /previousMonthQuoteCount/)
+  assert.match(dashboardSource, /monthQuoteDelta/)
+  assert.match(dashboardSource, /previousMonthCount/)
+  assert.match(dashboardSource, /min-h-4 text-xs text-dm-text-tertiary/)
+  assert.match(dashboardSource, /<span v-if="summaryLoading">—<\/span>/)
+  assert.match(
+    dashboardSource,
+    /const monthQuoteCount = summary\.value\.monthQuoteCount \|\| 0\s*\n\s*if \(monthQuoteCount === 0\) return null/
+  )
+  assert.doesNotMatch(dashboardSource, /monthQuoteAmountLabel/)
+  assert.doesNotMatch(
+    dashboardSource,
+    /quotation\.pages\.dashboard\.monthQuoteAmount/
+  )
+  assert.match(enLocale, /"monthQuoteDelta": "vs last month"/)
+  assert.match(enLocale, /"previousMonthCount": "Last month: \{count\} quotes"/)
 })
 
 test('dashboard recent overview uses stable update metadata without status', () => {

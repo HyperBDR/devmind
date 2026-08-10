@@ -1,7 +1,9 @@
 import shutil
 import tempfile
+from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -430,6 +432,71 @@ class StandardQuotationExcelParserTests(TestCase):
 
 
 class StandardQuotationPdfParserTests(TestCase):
+    def test_source_total_mismatch_blocks_confirmation(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+        from quotation.services.document_parsing.flexible_parser import (
+            complete_document_parse,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "OnePro Cloud Limited",
+                    "Quotation",
+                    "Date: 20-Jul-26",
+                    "Quote Valid Till: 20-Aug-26",
+                    "Ship to",
+                    "Company : Customer Sdn Bhd",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Bill to:",
+                    "Company : Customer Sdn Bhd",
+                    "Name : Customer Contact",
+                    "Email : customer@example.com",
+                    "Contact Person Email Project Payment Terms Currency",
+                    "Alice Chen alice@example.com Renewal CIA USD",
+                    "Software",
+                    "Item Description Qty List Price Discount Extended Price",
+                    "1 Support 1 $100.00 0% $100.00 $100.00",
+                    "Software subscription subtotal: $100.00",
+                    "VAT Amount (8%): $8.00",
+                    "Grand Total: $109.00",
+                ]
+            )
+        )
+
+        mismatch_codes = {
+            issue["code"] for issue in parsed.validation_errors
+        }
+        self.assertIn("amount_mismatch", mismatch_codes)
+        self.assertNotIn(
+            "amount_mismatch",
+            {issue["code"] for issue in parsed.validation_warnings},
+        )
+
+        completed = complete_document_parse(
+            SimpleNamespace(
+                created_at=None,
+                doc_type="pdf",
+                file_name="mismatch.pdf",
+            ),
+            Path("unused.pdf"),
+            parsed,
+            extract_content=False,
+        )
+        self.assertTrue(
+            any(
+                issue["code"] == "amount_mismatch"
+                for issue in completed.validation_errors
+            )
+        )
+        self.assertEqual(
+            completed.source_totals["computed_grand_total"],
+            "108",
+        )
+
     def test_parses_standard_text_pdf_and_validates_totals(self):
         from quotation.services.document_parsing.pdf_parser import (
             parse_standard_quotation_pdf,
@@ -527,6 +594,8 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(quote.product_line_name, "HyperMotion")
         self.assertEqual(quote.project_name, "Watsons")
         self.assertEqual(quote.currency, "HKD")
+        self.assertEqual(quote.quote_date.isoformat(), "2026-05-14")
+        self.assertEqual(quote.expire_date.isoformat(), "2026-06-30")
         self.assertEqual(len(quote.items), 2)
         self.assertEqual(parsed.source_totals["grand_total"], "45088.00")
         self.assertEqual(parsed.validation_errors, [])
@@ -592,6 +661,104 @@ class StandardQuotationPdfParserTests(TestCase):
             "evelyn.chee@oneprocloud.com",
         )
         self.assertEqual(quote.issuer_contact_title, "")
+
+    def test_parses_salesperson_when_email_is_truncated(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Quotation",
+                    "Ship to",
+                    "Company : TM Digital Innovation Sdn Bhd",
+                    "Name : FARID Wajdi Yahaya",
+                    "Email : farid@credence.tech",
+                    "Bill to:",
+                    "Company : TM Digital Innovation Sdn Bhd",
+                    "Name : FARID Wajdi Yahaya",
+                    "Email : farid@credence.tech",
+                    "Contact Person Email Project Payment Terms Currency",
+                    (
+                        "evelyn.chee@oneproclo Evelyn Chee "
+                        "HyperBDR Licenses For Perbadanan Kelantan "
+                        "Berhad (PKB)_1VMs CIA USD/MYR"
+                    ),
+                    "HyperBDR Backup & DR License",
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.issuer_contact_name, "Evelyn Chee")
+        self.assertEqual(
+            quote.issuer_contact_email,
+            "evelyn.chee@oneprocloud.com",
+        )
+        self.assertEqual(quote.product_line_name, "HyperBDR")
+        self.assertEqual(quote.product_line, "BDR")
+        self.assertEqual(
+            quote.project_name,
+            (
+                "HyperBDR Licenses For Perbadanan Kelantan "
+                "Berhad (PKB)_1VMs"
+            ),
+        )
+        self.assertEqual(quote.payment_terms, "CIA")
+        self.assertEqual(quote.currency, "USD")
+
+    def test_parses_three_part_salesperson_from_email_local_part(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Contact Person Email Project Payment Terms Currency",
+                    (
+                        "farid.wajdi.yahaya@oneproclo "
+                        "FARID Wajdi Yahaya HyperBDR Renewal CIA MYR"
+                    ),
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.issuer_contact_name, "FARID Wajdi Yahaya")
+        self.assertEqual(
+            quote.issuer_contact_email,
+            "farid.wajdi.yahaya@oneprocloud.com",
+        )
+        self.assertEqual(quote.project_name, "HyperBDR Renewal")
+        self.assertEqual(quote.payment_terms, "CIA")
+        self.assertEqual(quote.currency, "MYR")
+
+    def test_strips_duplicated_signature_title_prefix(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "Contact Person Email Project Payment Terms Currency",
+                    (
+                        "Evelyn Chee evelyn.chee@oneprocloud.com "
+                        "Disaster Recovery for Felcra CIA MYR"
+                    ),
+                    "Name : Name : Evelyn Chee",
+                    "Title : Title : Head of Business, APAC",
+                    "Email : Email : evelyn.chee@oneprocloud.com",
+                ]
+            )
+        )
+
+        self.assertEqual(
+            parsed.quotation.issuer_contact_title,
+            "Head of Business, APAC",
+        )
 
     def test_signature_fallback_excludes_customer_contacts(self):
         from quotation.services.document_parsing.pdf_parser import (
@@ -724,6 +891,59 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(quote.issuer_contact_email, "alex@example.com")
         self.assertEqual(quote.issuer_contact_title, "Sales Director")
         self.assertEqual(quote.quote_date.isoformat(), "2026-08-03")
+
+    def test_parses_dotted_eu_dates_currency_aliases_and_valid_till(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
+        )
+
+        parsed = parse_quotation_pdf_text(
+            "\n".join(
+                [
+                    "OnePro Cloud Limited",
+                    "Quotation",
+                    "Date: 23.04.2025",
+                    "Quotation No.: E_23042025",
+                    "Ship to",
+                    "Company : Sdn Bhd Valid Till: 22.05.2025",
+                    "Contact : Fazli Haslam",
+                    "Email : fazli@example.com",
+                    "Contact Person Email Project Payment Terms Currency",
+                    (
+                        "Evelyn Chee evelyn.chee@oneprocloud.com "
+                        "Petrochemical Renewal CIA EURO"
+                    ),
+                    "Total Amount: € 3,704.00",
+                ]
+            )
+        )
+
+        quote = parsed.quotation
+        self.assertEqual(quote.quote_no, "E_23042025")
+        self.assertEqual(quote.quote_date.isoformat(), "2025-04-23")
+        self.assertEqual(quote.expire_date.isoformat(), "2025-05-22")
+        self.assertEqual(quote.currency, "EUR")
+        self.assertEqual(quote.contact_person, "Fazli Haslam")
+        self.assertEqual(quote.issuer_contact_name, "Evelyn Chee")
+
+    def test_parses_extended_currency_markers_in_pdf_items(self):
+        from quotation.services.document_parsing.pdf_parser import (
+            _parse_currency_item_line,
+            _parse_item_line,
+        )
+
+        symbol_item = _parse_item_line(
+            "1 Support 1 £1,000.00 10% £900.00 £900.00"
+        )
+        marker_item = _parse_currency_item_line(
+            "1 Support 1 RM 1,000.00 10% RM 900.00 RM 900.00",
+            "",
+        )
+
+        self.assertIsNotNone(symbol_item)
+        self.assertIsNotNone(marker_item)
+        self.assertEqual(symbol_item.extended_price, Decimal("900.00"))
+        self.assertEqual(marker_item.extended_price, Decimal("900.00"))
 
     def test_flexible_pdf_parser_bounds_malformed_long_lines(self):
         from quotation.services.document_parsing.flexible_parser import (
@@ -1103,7 +1323,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.4.0")
+        self.assertEqual(new_result.parser_version, "2.7.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)

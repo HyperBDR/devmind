@@ -158,6 +158,10 @@ def build_quotation(
         [type("I", (), item)() for item in items_data],
         Decimal(str(data.get("vat_rate", 0))),
     )
+    source_totals = data.get("_source_totals") or {}
+    for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
+        if source_totals.get(field) not in (None, ""):
+            totals[field] = round_money(Decimal(str(source_totals[field])))
     quotation = Quotation(
         quote_no=data["quote_no"],
         source_quote_no=data.get("source_quote_no") or "",
@@ -232,6 +236,7 @@ def create_version_snapshot(
     quotation: Quotation,
     operator_email: str | None,
     notes: str,
+    source_totals: dict[str, Any] | None = None,
 ) -> QuotationVersion:
     """Persist a full quote snapshot as the next version row."""
     with transaction.atomic():
@@ -240,6 +245,11 @@ def create_version_snapshot(
         totals = calculate_totals(
             line_items, Decimal(str(locked.vat_rate or 0))
         )
+        for field in ("subtotal_before_vat", "vat_amount", "grand_total"):
+            if source_totals and source_totals.get(field) not in (None, ""):
+                totals[field] = round_money(
+                    Decimal(str(source_totals[field]))
+                )
         for key, value in totals.items():
             setattr(locked, key, value)
         locked.save(update_fields=[*totals.keys(), "updated_at"])

@@ -49,7 +49,7 @@ export interface QuoteVersion {
   industry: string;
   salesperson: string;
   createdByEmail?: string;
-  currency: 'CNY' | 'USD' | 'EUR';
+  currency: string;
   paymentTermOption?: PaymentTermOption;
   paymentTerms: string;
   quoteDate?: string;
@@ -100,7 +100,7 @@ export interface Quotation {
   industry: string;
   salesperson: string;
   createdByEmail?: string;
-  currency: 'CNY' | 'USD' | 'EUR';
+  currency: string;
   paymentTermOption?: PaymentTermOption;
   paymentTerms: string;
   quoteDate?: string;

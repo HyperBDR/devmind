@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import quote, urlparse
 
@@ -29,6 +30,28 @@ class DashboardCurrencyQuerySerializer(serializers.Serializer):
         default="USD",
         required=False,
     )
+
+
+class DashboardSummaryQuerySerializer(DashboardCurrencyQuerySerializer):
+    """Validate optional currency plus selected calendar month."""
+
+    period = serializers.RegexField(
+        regex=r"^\d{4}-(?:0[1-9]|1[0-2])$",
+        allow_blank=True,
+        default="",
+        required=False,
+    )
+
+    def validate_period(self, value):
+        """Reject year values that cannot form a calendar date."""
+        if value:
+            try:
+                date.fromisoformat(f"{value}-01")
+            except ValueError as exc:
+                raise serializers.ValidationError(
+                    "must be a valid calendar month"
+                ) from exc
+        return value
 
 
 class DashboardRecentQuerySerializer(serializers.Serializer):
