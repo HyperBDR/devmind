@@ -206,6 +206,19 @@ export function resaleTierDraftRangesMatch(left = {}, right = {}) {
   })
 }
 
+/** Restore explicit draft work even when upstream boundaries changed later. */
+export function shouldRestoreSavedResalePriceDraft(
+  listing = {},
+  savedDraft = {},
+  upstreamDraft = {}
+) {
+  const pendingItems = Array.isArray(listing.pending_price_items)
+    ? listing.pending_price_items
+    : []
+  if (pendingItems.length) return true
+  return resaleTierDraftRangesMatch(savedDraft, upstreamDraft)
+}
+
 /** Prefer an unapproved draft when restoring a listing for further editing. */
 export function resalePriceItemsForListing(listing = {}) {
   const pending = Array.isArray(listing.pending_price_items)
