@@ -1,4 +1,5 @@
 import type { Quotation, QuotationLineItem, QuoteVersion } from '../types';
+import type { LineItemDescriptionHistory } from '../utils/descriptionCatalog';
 import { apiRequest } from './client';
 
 interface ApiQuotationItem {
@@ -135,6 +136,18 @@ interface ApiQuotationFormContextItem {
   issuer_contact_email: string;
   created_by_email?: string | null;
   created_at: string;
+}
+
+interface ApiLineItemDescriptionHistory {
+  type: 'Software' | 'Other';
+  description: string;
+  list_price: number | string;
+  currency: Quotation['currency'];
+}
+
+export interface QuotationFormContextResult {
+  quotations: Quotation[];
+  lineItemHistory: LineItemDescriptionHistory[];
 }
 
 export interface QuotationListParams {
@@ -588,11 +601,27 @@ export async function getQuotation(quoteId: string): Promise<Quotation> {
   return mapApiQuotation(data);
 }
 
-export async function getQuotationFormContext(): Promise<Quotation[]> {
+export async function getQuotationFormContext(
+  page = 1,
+  pageSize = 20,
+): Promise<QuotationFormContextResult & { hasMore: boolean; page: number }> {
   const data = await apiRequest<{
     items: ApiQuotationFormContextItem[];
-  }>('/quotations/form-context');
-  return data.items.map(mapApiQuotationFormContextItem);
+    line_item_history: ApiLineItemDescriptionHistory[];
+    page: number;
+    has_more: boolean;
+  }>(`/quotations/form-context?page=${page}&page_size=${pageSize}`);
+  return {
+    quotations: data.items.map(mapApiQuotationFormContextItem),
+    lineItemHistory: (data.line_item_history || []).map((item) => ({
+      type: item.type,
+      description: item.description,
+      listPrice: toNumber(item.list_price),
+      currency: item.currency,
+    })),
+    hasMore: data.has_more,
+    page: data.page,
+  };
 }
 
 export async function createQuotation(quote: Quotation): Promise<Quotation> {

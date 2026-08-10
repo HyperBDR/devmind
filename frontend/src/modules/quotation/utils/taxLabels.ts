@@ -34,14 +34,8 @@ export function getTaxLabelHistory(userEmail?: string): string[] {
 
 export function getTaxLabelHistoryFromQuotations(
   quotations: TaxLabelSource[],
-  userEmail?: string,
 ): string[] {
-  const normalizedEmail = userEmail?.trim().toLowerCase();
-  const scoped = normalizedEmail
-    ? quotations.filter(q => (q.createdByEmail || '').trim().toLowerCase() === normalizedEmail)
-    : quotations;
-
-  const fromQuotes = [...scoped]
+  const fromQuotes = [...quotations]
     .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
     .map(q => normalizeTaxLabel(q.taxLabel || ''))
     .filter(Boolean);
@@ -54,7 +48,7 @@ export function getMergedTaxLabelHistory(
   quotations: TaxLabelSource[],
 ): string[] {
   const merged = [
-    ...getTaxLabelHistoryFromQuotations(quotations, userEmail),
+    ...getTaxLabelHistoryFromQuotations(quotations),
     ...getTaxLabelHistory(userEmail),
   ];
   const unique = Array.from(new Set(merged.map(label => normalizeTaxLabel(label)).filter(Boolean)));

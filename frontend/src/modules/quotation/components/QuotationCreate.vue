@@ -31,7 +31,10 @@ import SignaturePicker from './SignaturePicker.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import HistoryTextInput, { type NormalizedHistoryOption } from './HistoryTextInput.vue'
 import FormSelect from './FormSelect.vue'
-import { buildDescriptionHistoryOptions } from '../utils/descriptionCatalog'
+import {
+  buildDescriptionHistoryOptions,
+  type LineItemDescriptionHistory,
+} from '../utils/descriptionCatalog'
 import {
   DEFAULT_ISSUER_COMPANY_NAME,
   DEFAULT_REMARKS_DISCLAIMER,
@@ -99,6 +102,9 @@ const props = withDefaults(
     discounts: DiscountOption[]
     quotations: Quotation[]
     historyQuotations?: Quotation[]
+    lineItemHistory?: LineItemDescriptionHistory[]
+    historyHasMore?: boolean
+    historyLoading?: boolean
     editingQuote?: Quotation | null
     currentUser?: {
       name: string
@@ -110,6 +116,9 @@ const props = withDefaults(
   }>(),
   {
     historyQuotations: undefined,
+    lineItemHistory: () => [],
+    historyHasMore: false,
+    historyLoading: false,
     editingQuote: null,
   },
 )
@@ -119,6 +128,7 @@ const emit = defineEmits<{
   navigateToTab: [tab: string]
   addProductLine: [option: ProductLineOption]
   deleteProductLine: [productLine: QuoteProductLine]
+  loadHistoryMore: []
 }>()
 
 const { t } = useQuotationI18n()
@@ -784,6 +794,7 @@ function descriptionOptionsFor(itemType: QuotationLineItem['type']) {
     props.services,
     historySourceQuotations.value,
     currency.value,
+    props.lineItemHistory,
   )
 }
 
@@ -1334,6 +1345,9 @@ const itemErrorEntries = computed(() =>
                   :error="errors.clientCompany"
                   @update:model-value="handleClientCompanyInput"
                   @select-option="handleClientCompanySelect"
+                  :has-more="historyHasMore"
+                  :loading-more="historyLoading"
+                  @load-more="$emit('loadHistoryMore')"
                 />
               </div>
 
@@ -1357,6 +1371,9 @@ const itemErrorEntries = computed(() =>
                   :error="errors.contactPerson"
                   @update:model-value="handleContactPersonInput"
                   @select-option="handleContactPersonSelect"
+                  :has-more="historyHasMore"
+                  :loading-more="historyLoading"
+                  @load-more="$emit('loadHistoryMore')"
                 />
               </div>
 
@@ -1381,6 +1398,9 @@ const itemErrorEntries = computed(() =>
                   :error="errors.email"
                   @update:model-value="handleEmailInput"
                   @select-option="handleEmailSelect"
+                  :has-more="historyHasMore"
+                  :loading-more="historyLoading"
+                  @load-more="$emit('loadHistoryMore')"
                 />
               </div>
 
@@ -1423,6 +1443,9 @@ const itemErrorEntries = computed(() =>
                     :placeholder="t('quotation.pages.create.billToCompanyPlaceholder')"
                     @update:model-value="handleBillingCompanyInput"
                     @select-option="handleBillingCompanySelect"
+                    :has-more="historyHasMore"
+                    :loading-more="historyLoading"
+                    @load-more="$emit('loadHistoryMore')"
                   />
                 </div>
                 <div>
@@ -1443,6 +1466,9 @@ const itemErrorEntries = computed(() =>
                     :placeholder="t('quotation.pages.create.billToContactPlaceholder')"
                     @update:model-value="handleBillingContactInput"
                     @select-option="handleBillingContactSelect"
+                    :has-more="historyHasMore"
+                    :loading-more="historyLoading"
+                    @load-more="$emit('loadHistoryMore')"
                   />
                 </div>
                 <div>
@@ -1464,6 +1490,9 @@ const itemErrorEntries = computed(() =>
                     :placeholder="t('quotation.pages.create.billToEmailPlaceholder')"
                     @update:model-value="handleBillingEmailInput"
                     @select-option="handleBillingEmailSelect"
+                    :has-more="historyHasMore"
+                    :loading-more="historyLoading"
+                    @load-more="$emit('loadHistoryMore')"
                   />
                 </div>
               </div>
@@ -1678,6 +1707,9 @@ const itemErrorEntries = computed(() =>
                           })
                       "
                       @select-option="(option) => handleDescriptionSelect(item, option)"
+                      :has-more="historyHasMore"
+                      :loading-more="historyLoading"
+                      @load-more="$emit('loadHistoryMore')"
                     />
                   </div>
 

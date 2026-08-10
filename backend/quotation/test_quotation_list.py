@@ -22,6 +22,7 @@ from quotation.models import (
 
 class QuotationListAPITests(TestCase):
     url = "/api/v1/quotation/quotations"
+    form_context_url = "/api/v1/quotation/quotations/form-context"
 
     def setUp(self):
         self.user = User.objects.create_user(
@@ -85,6 +86,40 @@ class QuotationListAPITests(TestCase):
                 created_at=now + timedelta(seconds=index),
             )
             for index in range(count)
+        ]
+
+    def test_form_context_returns_all_imported_quotes(self):
+        imported = self._quote(
+            1,
+            owner="other@example.com",
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+        )
+        QuotationItem.objects.create(
+            quotation=imported,
+            line_no=1,
+            type="Software",
+            description="Parsed HyperBDR License",
+            list_price=35,
+        )
+        self._quote(
+            2,
+            owner="other@example.com",
+            source_type=QuotationSourceType.MANUAL,
+        )
+
+        response = self.api.get(self.form_context_url)
+
+        assert response.status_code == 200
+        assert [item["id"] for item in response.data["items"]] == [
+            imported.id
+        ]
+        assert response.data["line_item_history"] == [
+            {
+                "type": "Software",
+                "description": "Parsed HyperBDR License",
+                "list_price": "35.00",
+                "currency": "USD",
+            }
         ]
 
     def test_default_page_size_and_stable_second_page(self):

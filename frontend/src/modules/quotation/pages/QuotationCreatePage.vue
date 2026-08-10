@@ -27,6 +27,7 @@ import {
 } from '../api/quotations'
 import { useAuthStore } from '../stores/auth'
 import { clearCreateQuoteDraft } from '../utils/createDraftStorage'
+import type { LineItemDescriptionHistory } from '../utils/descriptionCatalog'
 import { loadProductLineOptions, saveCustomProductLineOptions } from '../utils/quotationNumbering'
 
 const route = useRoute()
@@ -37,6 +38,10 @@ const products = ref<Product[]>([...MOCK_PRODUCTS])
 const services = ref<Service[]>([...MOCK_SERVICES])
 const discounts = ref<DiscountOption[]>([...MOCK_DISCOUNTS])
 const quotations = ref<Quotation[]>([])
+const lineItemHistory = ref<LineItemDescriptionHistory[]>([])
+const historyPage = ref(0)
+const historyHasMore = ref(false)
+const historyLoading = ref(false)
 const productLineOptions = ref<ProductLineOption[]>(loadProductLineOptions())
 
 const editingQuote = computed(() => {
@@ -55,11 +60,34 @@ onMounted(async () => {
       getQuotationFormContext(),
       editId ? getQuotation(editId) : Promise.resolve(null),
     ])
-    quotations.value = detail ? [detail, ...context] : context
+    quotations.value = detail
+      ? [detail, ...context.quotations]
+      : context.quotations
+    lineItemHistory.value = context.lineItemHistory
+    historyPage.value = context.page
+    historyHasMore.value = context.hasMore
   } catch {
     quotations.value = []
+    lineItemHistory.value = []
   }
 })
+
+async function loadMoreHistory() {
+  if (historyLoading.value || !historyHasMore.value) return
+  historyLoading.value = true
+  try {
+    const context = await getQuotationFormContext(historyPage.value + 1)
+    quotations.value = [...quotations.value, ...context.quotations]
+    lineItemHistory.value = [
+      ...lineItemHistory.value,
+      ...context.lineItemHistory,
+    ]
+    historyPage.value = context.page
+    historyHasMore.value = context.hasMore
+  } finally {
+    historyLoading.value = false
+  }
+}
 
 async function handleSaveQuote(quote: Quotation) {
   if (editingQuote.value) {
@@ -95,6 +123,9 @@ function handleDeleteProductLine(productLine: QuoteProductLine) {
     :discounts="discounts"
     :quotations="quotations"
     :history-quotations="quotations"
+    :line-item-history="lineItemHistory"
+    :history-has-more="historyHasMore"
+    :history-loading="historyLoading"
     :editing-quote="editingQuote"
     :current-user="currentUser"
     :product-line-options="productLineOptions"
@@ -102,5 +133,6 @@ function handleDeleteProductLine(productLine: QuoteProductLine) {
     @navigate-to-tab="handleNavigateToTab"
     @add-product-line="handleAddProductLine"
     @delete-product-line="handleDeleteProductLine"
+    @load-history-more="loadMoreHistory"
   />
 </template>
