@@ -111,3 +111,51 @@ def test_fetch_users_logs_error_when_initial_page_fails():
 
     assert records == []
     mock_logger.error.assert_called_once()
+
+
+def test_incomplete_read_is_a_transient_request_error():
+    """Incomplete response bodies should be eligible for retry."""
+    error = requests.exceptions.ChunkedEncodingError(
+        "Connection broken: IncompleteRead"
+    )
+
+    assert etl._is_transient_request_error(error)
+
+
+@patch.object(etl, "API_REQUEST_MAX_ATTEMPTS", 2)
+def test_incident_sync_retries_transient_first_page_failure():
+    """Incident sync should retry a transient initial page failure."""
+    request_counts: dict[int, int] = {}
+
+    def get_incident_page(*args, **kwargs):
+        first_row = kwargs["params"]["sysparm_first_row"]
+        request_counts[first_row] = request_counts.get(first_row, 0) + 1
+        if first_row == 1 and request_counts[first_row] == 1:
+            raise requests.ReadTimeout("read timed out")
+        return _build_response([])
+
+    with (
+        patch("sals.services.etl.login_api", return_value="token"),
+        patch(
+            "sals.services.etl.sync_companies_from_api",
+            return_value={"status": "ok"},
+        ),
+        patch(
+            "sals.services.etl._get_excluded_company_sys_ids",
+            return_value=[],
+        ),
+        patch.object(etl.Company.objects, "all", return_value=[]),
+        patch.object(etl.Incident.objects, "count", return_value=0),
+        patch(
+            "sals.services.etl.sync_users_from_api",
+            return_value={"status": "ok"},
+        ),
+        patch("sals.services.etl.requests.get", side_effect=get_incident_page),
+        patch("sals.services.etl.logger") as mock_logger,
+    ):
+        result = etl.sync_from_api(full_sync=False)
+
+    assert result["status"] == "ok"
+    assert request_counts[1] == 2
+    mock_logger.warning.assert_called()
+    mock_logger.error.assert_not_called()
