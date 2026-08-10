@@ -201,7 +201,14 @@ def _build_headers(token: str) -> Dict[str, str]:
 
 def _is_transient_request_error(exc: Exception) -> bool:
     """Return whether a request failure looks transient."""
-    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+    if isinstance(
+        exc,
+        (
+            requests.ConnectionError,
+            requests.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        ),
+    ):
         return True
 
     detail = str(exc).lower()
@@ -618,24 +625,22 @@ def sync_from_api(full_sync: bool = True) -> Dict[str, Any]:
 
     def _fetch_page(fr: int) -> tuple[int, list]:
         """Fetch a single page; returns (first_row, records)."""
-        try:
-            params = {
-                "sysparm_first_row": fr,
-                "sysparm_rowcount": batch_size,
-                "sysparm_display_value": "true",
-            }
-            # 添加排除公司的查询条件
-            query = _build_query_param()
-            if query:
-                params["sysparm_query"] = query
-            resp = requests.get(
-                url, headers=headers, params=params,
-                timeout=60, verify=False,
-            )
-        except Exception as e:
-            logger.error(
-                "Request exception first_row=%s: %s", fr, e,
-            )
+        params = {
+            "sysparm_first_row": fr,
+            "sysparm_rowcount": batch_size,
+            "sysparm_display_value": "true",
+        }
+        query = _build_query_param()
+        if query:
+            params["sysparm_query"] = query
+        resp = _request_with_retry(
+            url=url,
+            headers=headers,
+            params=params,
+            context=f"Request exception first_row={fr}",
+            partial_ok=False,
+        )
+        if resp is None:
             return fr, []
         if resp.status_code != 200:
             logger.error(
