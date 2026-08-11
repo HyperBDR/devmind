@@ -4,7 +4,11 @@ from django.db.models import Q, QuerySet
 from rest_framework import status
 from rest_framework.response import Response
 
-from quotation.models import DocumentAsset, Quotation
+from quotation.models import (
+    DocumentAsset,
+    Quotation,
+    QuotationSourceType,
+)
 from quotation.permissions import (
     can_delete_any_quotation_document,
     can_view_all_quotations,
@@ -36,6 +40,8 @@ def can_access_quotation(
 ) -> bool:
     if quotation is None:
         return False
+    if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
+        return True
     if can_view_all_quotations(user):
         return True
     owner = (quotation.created_by_email or "").lower()
@@ -49,7 +55,10 @@ def filter_accessible_quotations(
 ):
     if can_view_all_quotations(user):
         return qs
-    return qs.filter(created_by_email__iexact=user_display_email(user))
+    return qs.filter(
+        Q(source_type=QuotationSourceType.DOCUMENT_IMPORT)
+        | Q(created_by_email__iexact=user_display_email(user))
+    )
 
 
 def get_accessible_quotation(
@@ -76,7 +85,8 @@ def filter_accessible_documents(
         return qs
     email = user_display_email(user)
     return qs.filter(
-        Q(created_by_email__iexact=email)
+        Q(quotation__source_type=QuotationSourceType.DOCUMENT_IMPORT)
+        | Q(created_by_email__iexact=email)
         | Q(quotation__created_by_email__iexact=email)
     )
 

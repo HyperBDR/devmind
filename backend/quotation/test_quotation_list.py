@@ -306,21 +306,30 @@ class QuotationListAPITests(TestCase):
             product_line="Private",
             product_line_name="Private Line",
         )
+        imported = self._quote(
+            3,
+            owner="other@example.com",
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+            product_line="Parsed",
+            product_line_name="Parsed Line",
+        )
 
         owner_response = self.api.get(self.url)
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
         staff_response = self.api.get(self.url)
 
-        assert [row["id"] for row in owner_response.data["items"]] == [
-            own.id
-        ]
         assert "Private Line" not in owner_response.data["facets"][
             "product_lines"
         ]
+        assert {row["id"] for row in owner_response.data["items"]} == {
+            own.id,
+            imported.id,
+        }
         assert {row["id"] for row in staff_response.data["items"]} == {
             own.id,
             other.id,
+            imported.id,
         }
         assert "Private Line" in staff_response.data["facets"][
             "product_lines"
