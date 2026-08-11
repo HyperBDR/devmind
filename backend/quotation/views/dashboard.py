@@ -39,6 +39,8 @@ class DashboardSummaryView(APIView):
             _accessible_quotations(request),
             serializer.validated_data["currency"],
             serializer.validated_data["period"],
+            serializer.validated_data.get("date_from", ""),
+            serializer.validated_data.get("date_to", ""),
         )
         return Response(payload)
 
@@ -56,6 +58,8 @@ class DashboardAnalyticsView(APIView):
         payload = build_dashboard_analytics(
             _accessible_quotations(request),
             serializer.validated_data["currency"],
+            serializer.validated_data.get("date_from", ""),
+            serializer.validated_data.get("date_to", ""),
         )
         return Response(payload)
 

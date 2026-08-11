@@ -41,7 +41,7 @@ ChartJS.register(
   Tooltip
 )
 
-type TrendGrain = 'weekly' | 'monthly'
+type TrendGrain = 'monthly'
 
 const QUOTE_BREAKDOWN_COLORS = [
   '#2b9da3',
@@ -68,13 +68,25 @@ const emit = defineEmits<{
 
 const { t, locale } = useQuotationI18n()
 
-const trendGrain = ref<TrendGrain>('monthly')
+const trendGrain: TrendGrain = 'monthly'
 const dashboardCurrency = ref('USD')
-const selectedPeriod = ref(
-  `${new Date().getFullYear()}-${String(
-    new Date().getMonth() + 1
+const currentMonth = new Date()
+const selectedDateTo = ref(
+  `${currentMonth.getFullYear()}-${String(
+    currentMonth.getMonth() + 1
   ).padStart(2, '0')}`
 )
+const selectedDateFrom = ref((() => {
+  const start = new Date(
+    currentMonth.getFullYear(),
+    currentMonth.getMonth() - 5,
+    1
+  )
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(
+    2,
+    '0'
+  )}`
+})())
 const summary = ref<DashboardSummary | null>(null)
 const analytics = ref<DashboardAnalytics | null>(null)
 const recentQuotes = ref<DashboardRecentQuotation[]>([])
@@ -127,17 +139,17 @@ const availableCurrencyOptions = computed(() =>
     label: currencyOptionLabel(currency)
   }))
 )
-const availablePeriodOptions = computed(() => {
-  const periods = summary.value?.availablePeriods || []
-  const normalized = [...new Set([...periods, selectedPeriod.value])]
-    .filter(Boolean)
-    .sort((left, right) => right.localeCompare(left))
-  return normalized.map((period) => ({
-    value: period,
-    label: formatSummaryPeriod(period)
-  }))
-})
 const overviewRecentQuotes = computed(() => recentQuotes.value.slice(0, 3))
+
+const selectedDateRangeLabel = computed(() => {
+  if (!selectedDateFrom.value || !selectedDateTo.value) return ''
+  if (selectedDateFrom.value === selectedDateTo.value) {
+    return formatSummaryPeriod(selectedDateFrom.value)
+  }
+  return `${formatSummaryPeriod(selectedDateFrom.value)} – ${formatSummaryPeriod(
+    selectedDateTo.value
+  )}`
+})
 
 function formatSummaryPeriod(value: string): string {
   const [year = '', month = ''] = String(value || '').split('-')
@@ -370,51 +382,36 @@ function formatPeriodLabel(period: string, grain: TrendGrain): string {
 }
 
 const trendPeriods = computed(() =>
-  (analytics.value?.trends[trendGrain.value] || []).map((row) => ({
+  (analytics.value?.trends[trendGrain] || []).map((row) => ({
     key: row.period,
-    label: formatPeriodLabel(row.period, trendGrain.value)
+    label: formatPeriodLabel(row.period, trendGrain)
   }))
 )
 
 const trendSeries = computed(() => {
-  const rows = analytics.value?.trends[trendGrain.value] || []
+  const rows = analytics.value?.trends[trendGrain] || []
   return {
-    created: rows.map((row) => row.createdAmount),
-    won: rows.map((row) => row.wonAmount)
+    quote: rows.map((row) => row.quoteAmount)
   }
 })
 
 const hasTrendData = computed(
-  () =>
-    trendSeries.value.created.some((value) => value > 0) ||
-    trendSeries.value.won.some((value) => value > 0)
+  () => trendSeries.value.quote.some((value) => value > 0)
 )
 
 const trendLineData = computed<ChartData<'line'>>(() => ({
   labels: trendPeriods.value.map((period) => period.label),
   datasets: [
     {
-      label: t('quotation.pages.dashboard.chartTrendCreated'),
-      data: trendSeries.value.created,
+      label: t('quotation.pages.dashboard.chartTrendQuoteValue'),
+      data: trendSeries.value.quote,
       borderColor: '#1677ff',
-      backgroundColor: 'rgba(22, 119, 255, 0.12)',
-      fill: true,
-      tension: 0.35,
+      backgroundColor: '#1677ff',
+      fill: false,
+      tension: 0,
       pointRadius: 3,
       pointHoverRadius: 5,
       borderWidth: 2
-    },
-    {
-      label: t('quotation.pages.dashboard.chartTrendWon'),
-      data: trendSeries.value.won,
-      borderColor: '#389e0d',
-      backgroundColor: 'rgba(56, 158, 13, 0.08)',
-      fill: false,
-      tension: 0.35,
-      pointRadius: 3,
-      pointHoverRadius: 5,
-      borderWidth: 2,
-      borderDash: [5, 4]
     }
   ]
 }))
@@ -447,9 +444,7 @@ const trendLineOptions = computed<ChartOptions<'line'>>(() => ({
       callbacks: {
         label: (item: TooltipItem<'line'>) => {
           const value = Number(item.raw) || 0
-          const label = currencyShortLabel(
-            analytics.value?.currency || 'USD'
-          )
+          const label = currencyShortLabel(analytics.value?.currency || 'USD')
           return `${item.dataset.label}: ${label} ${value.toLocaleString()}`
         }
       }
@@ -500,27 +495,22 @@ function formatRecentQuoteTime(value: string): string {
   return `${month}/${day} ${hour}:${minute}`
 }
 
-function setTrendGrain(grain: TrendGrain) {
-  trendGrain.value = grain
-}
-
-function monthDateRange(period: string) {
-  const [yearText = '', monthText = ''] = String(period || '').split('-')
-  const year = Number(yearText)
-  const month = Number(monthText)
-  if (!year || !month) return {}
-  const lastDay = new Date(year, month, 0).getDate()
+function selectedDateRange() {
+  if (!selectedDateFrom.value || !selectedDateTo.value) return {}
+  const [yearText = '', monthText = ''] = selectedDateFrom.value.split('-')
+  const [toYear = '', toMonth = ''] = selectedDateTo.value.split('-')
+  const lastDay = new Date(Number(toYear), Number(toMonth), 0).getDate()
   const pad = (value: number) => String(value).padStart(2, '0')
   return {
-    createdFrom: `${yearText}-${pad(month)}-01`,
-    createdTo: `${yearText}-${pad(month)}-${pad(lastDay)}`,
+    createdFrom: `${yearText}-${pad(Number(monthText))}-01`,
+    createdTo: `${toYear}-${pad(Number(toMonth))}-${pad(lastDay)}`,
   }
 }
 
-function openSelectedMonthQuotes() {
+function openSelectedRangeQuotes() {
   emit('navigateToTab', {
     tab: 'list',
-    ...monthDateRange(selectedPeriod.value),
+    ...selectedDateRange(),
   })
 }
 
@@ -529,14 +519,23 @@ let analyticsRequestId = 0
 
 async function loadDashboardSummary() {
   const requestId = ++summaryRequestId
-  const period = selectedPeriod.value
   summaryLoading.value = true
   summaryError.value = false
   try {
-    const data = await getDashboardSummary(period)
+    const dateFrom = selectedDateFrom.value
+    const dateTo = selectedDateTo.value
+    const currency = normalizeDashboardCurrency(dashboardCurrency.value)
+    const data = await getDashboardSummary(
+      '',
+      dateFrom,
+      dateTo,
+      currency
+    )
     if (
       requestId !== summaryRequestId
-      || period !== selectedPeriod.value
+      || dateFrom !== selectedDateFrom.value
+      || dateTo !== selectedDateTo.value
+      || currency !== normalizeDashboardCurrency(dashboardCurrency.value)
     ) {
       return
     }
@@ -553,14 +552,18 @@ async function loadDashboardSummary() {
 async function loadDashboardAnalytics() {
   const requestId = ++analyticsRequestId
   const currency = normalizeDashboardCurrency(dashboardCurrency.value)
+  const dateFrom = selectedDateFrom.value
+  const dateTo = selectedDateTo.value
   analyticsLoading.value = true
   analyticsError.value = false
   analytics.value = null
   try {
-    const data = await getDashboardAnalytics(currency)
+    const data = await getDashboardAnalytics(currency, dateFrom, dateTo)
     if (
       requestId !== analyticsRequestId
       || currency !== normalizeDashboardCurrency(dashboardCurrency.value)
+      || dateFrom !== selectedDateFrom.value
+      || dateTo !== selectedDateTo.value
       || currency !== normalizeDashboardCurrency(data.currency)
     ) {
       return
@@ -585,6 +588,7 @@ async function loadRecentQuotations() {
 }
 
 watch(dashboardCurrency, () => {
+  void loadDashboardSummary()
   void loadDashboardAnalytics()
 })
 
@@ -600,8 +604,17 @@ watch(
   }
 )
 
-watch(selectedPeriod, () => {
+watch([selectedDateFrom, selectedDateTo], () => {
+  if (
+    selectedDateFrom.value
+    && selectedDateTo.value
+    && selectedDateFrom.value > selectedDateTo.value
+  ) {
+    selectedDateTo.value = selectedDateFrom.value
+    return
+  }
   void loadDashboardSummary()
+  void loadDashboardAnalytics()
 })
 
 onMounted(async () => {
@@ -631,15 +644,33 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-3">
-        <FormSelect
-          v-model="selectedPeriod"
-          :aria-label="t('quotation.pages.dashboard.monthLabel')"
-          :options="availablePeriodOptions"
-          class-name="w-28 shrink-0"
-          trigger-class-name="h-9 px-3 text-xs font-semibold text-dm-text-secondary"
-          panel-class-name="min-w-28"
-          test-id="dashboard-period"
-        />
+        <label class="flex items-center">
+          <span class="sr-only">
+            {{ t('quotation.pages.dashboard.dateFromLabel') }}
+          </span>
+          <input
+            v-model="selectedDateFrom"
+            type="month"
+            :max="selectedDateTo"
+            class="h-9 w-[8.8rem] rounded-lg border border-dm-border bg-white px-2.5 text-xs font-semibold text-dm-text-secondary outline-none transition focus:border-dm-primary focus:ring-2 focus:ring-blue-100"
+            :aria-label="t('quotation.pages.dashboard.dateFromLabel')"
+            data-testid="dashboard-date-from"
+          />
+        </label>
+        <span class="text-xs text-dm-text-tertiary">→</span>
+        <label class="flex items-center">
+          <span class="sr-only">
+            {{ t('quotation.pages.dashboard.dateToLabel') }}
+          </span>
+          <input
+            v-model="selectedDateTo"
+            type="month"
+            :min="selectedDateFrom"
+            class="h-9 w-[8.8rem] rounded-lg border border-dm-border bg-white px-2.5 text-xs font-semibold text-dm-text-secondary outline-none transition focus:border-dm-primary focus:ring-2 focus:ring-blue-100"
+            :aria-label="t('quotation.pages.dashboard.dateToLabel')"
+            data-testid="dashboard-date-to"
+          />
+        </label>
         <FormSelect
           v-model="dashboardCurrency"
           :aria-label="t('quotation.pages.dashboard.currencyLabel')"
@@ -673,14 +704,14 @@ onMounted(async () => {
         <div class="flex items-start justify-between gap-3">
           <div>
             <h3 class="text-sm font-semibold text-dm-text">
-              {{ t('quotation.pages.dashboard.monthSummaryTitle') }}
+            {{ t('quotation.pages.dashboard.rangeSummaryTitle') }}
             </h3>
           </div>
           <span
-            v-if="summary?.currentPeriod"
+            v-if="selectedDateRangeLabel"
             class="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-600"
           >
-            {{ formatSummaryPeriod(summary.currentPeriod) }}
+            {{ selectedDateRangeLabel }}
           </span>
         </div>
 
@@ -703,7 +734,7 @@ onMounted(async () => {
         >
           <div class="pr-4">
             <span class="text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.monthQuoteCount') }}
+              {{ t('quotation.pages.dashboard.rangeQuoteCount') }}
             </span>
             <div class="mt-1 font-mono text-2xl font-bold text-dm-text">
               {{ summaryLoading ? '—' : summary?.monthQuoteCount || 0 }}
@@ -714,7 +745,7 @@ onMounted(async () => {
           </div>
           <div class="pl-4">
             <span class="text-xs text-dm-text-tertiary">
-              {{ t('quotation.pages.dashboard.monthQuoteDelta') }}
+              {{ t('quotation.pages.dashboard.rangeQuoteDelta') }}
             </span>
             <div
               class="mt-1 font-mono text-2xl font-bold"
@@ -728,7 +759,7 @@ onMounted(async () => {
               <span v-if="summaryLoading">—</span>
               <span v-else-if="summary">
                 {{
-                  t('quotation.pages.dashboard.previousMonthCount', {
+                  t('quotation.pages.dashboard.previousPeriodCount', {
                     count: summary.previousMonthQuoteCount || 0
                   })
                 }}
@@ -742,9 +773,9 @@ onMounted(async () => {
           <button
             type="button"
             class="font-medium text-dm-primary"
-            @click="openSelectedMonthQuotes"
+            @click="openSelectedRangeQuotes"
           >
-            {{ t('quotation.pages.dashboard.viewMonthQuotes') }}
+            {{ t('quotation.pages.dashboard.viewRangeQuotes') }}
           </button>
         </div>
       </div>
@@ -831,6 +862,20 @@ onMounted(async () => {
               {{ t('quotation.pages.dashboard.chartAmountSubtitle') }}
             </p>
           </div>
+          <div class="shrink-0 text-right text-[11px] leading-4">
+            <div class="text-dm-text-tertiary">
+              {{ t('quotation.pages.dashboard.filterDateRange') }}
+            </div>
+            <div class="font-semibold text-dm-text-secondary">
+              {{ selectedDateRangeLabel }}
+            </div>
+            <div class="mt-1 text-dm-text-tertiary">
+              {{ t('quotation.pages.dashboard.filterCurrency') }}
+              <span class="font-semibold text-dm-text-secondary">
+                {{ currencyShortLabel(dashboardCurrency) }}
+              </span>
+            </div>
+          </div>
         </div>
 
         <div
@@ -893,42 +938,22 @@ onMounted(async () => {
               {{ t('quotation.pages.dashboard.chartTrendTitle') }}
             </h3>
             <p class="mt-0.5 text-sm text-dm-text-tertiary">
-              {{
-                trendGrain === 'monthly'
-                  ? t('quotation.pages.dashboard.chartTrendSubtitleMonthly')
-                  : t('quotation.pages.dashboard.chartTrendSubtitleWeekly')
-              }}
+              {{ t('quotation.pages.dashboard.chartTrendSubtitleMonthly') }}
             </p>
           </div>
-          <div
-            class="inline-flex shrink-0 rounded-lg border border-dm-border bg-[#fafafa] p-0.5"
-            role="group"
-            :aria-label="t('quotation.pages.dashboard.chartTrendToggleAria')"
-          >
-            <button
-              type="button"
-              class="rounded-md px-2.5 py-1 text-xs font-semibold transition"
-              :class="
-                trendGrain === 'weekly'
-                  ? 'bg-white text-dm-text shadow-xs'
-                  : 'text-dm-text-tertiary hover:text-dm-text-secondary'
-              "
-              @click="setTrendGrain('weekly')"
-            >
-              {{ t('quotation.pages.dashboard.chartTrendToggleWeekly') }}
-            </button>
-            <button
-              type="button"
-              class="rounded-md px-2.5 py-1 text-xs font-semibold transition"
-              :class="
-                trendGrain === 'monthly'
-                  ? 'bg-white text-dm-text shadow-xs'
-                  : 'text-dm-text-tertiary hover:text-dm-text-secondary'
-              "
-              @click="setTrendGrain('monthly')"
-            >
-              {{ t('quotation.pages.dashboard.chartTrendToggleMonthly') }}
-            </button>
+          <div class="shrink-0 text-right text-[11px] leading-4">
+            <div class="text-dm-text-tertiary">
+              {{ t('quotation.pages.dashboard.filterDateRange') }}
+            </div>
+            <div class="font-semibold text-dm-text-secondary">
+              {{ selectedDateRangeLabel }}
+            </div>
+            <div class="mt-1 text-dm-text-tertiary">
+              {{ t('quotation.pages.dashboard.filterCurrency') }}
+              <span class="font-semibold text-dm-text-secondary">
+                {{ currencyShortLabel(dashboardCurrency) }}
+              </span>
+            </div>
           </div>
         </div>
 

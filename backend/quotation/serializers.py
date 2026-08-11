@@ -31,6 +31,37 @@ class DashboardCurrencyQuerySerializer(serializers.Serializer):
         required=False,
     )
 
+    date_from = serializers.RegexField(
+        regex=r"^\d{4}-\d{2}$",
+        allow_blank=True,
+        default="",
+        required=False,
+    )
+    date_to = serializers.RegexField(
+        regex=r"^\d{4}-\d{2}$",
+        allow_blank=True,
+        default="",
+        required=False,
+    )
+
+    def validate(self, attrs):
+        """Validate an optional inclusive calendar-month range."""
+        for field in ("date_from", "date_to"):
+            value = attrs.get(field, "")
+            if value:
+                try:
+                    date.fromisoformat(f"{value}-01")
+                except ValueError as exc:
+                    raise serializers.ValidationError(
+                        {field: "must be a valid calendar month"}
+                    ) from exc
+        if attrs.get("date_from") and attrs.get("date_to"):
+            if attrs["date_from"] > attrs["date_to"]:
+                raise serializers.ValidationError(
+                    {"date_to": "must not be before date_from"}
+                )
+        return attrs
+
 
 class DashboardSummaryQuerySerializer(DashboardCurrencyQuerySerializer):
     """Validate optional currency plus selected calendar month."""
