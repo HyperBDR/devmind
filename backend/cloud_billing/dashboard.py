@@ -1188,7 +1188,10 @@ def _build_fallback_exchange_rate_info() -> dict[str, object]:
     }
 
 
-def _build_exchange_rate_info() -> dict[str, object]:
+def _build_exchange_rate_info(
+    *,
+    allow_remote: bool = True,
+) -> dict[str, object]:
     api_key = os.getenv('EXCHANGE_RATE_API_KEY', '').strip()
     if not api_key:
         return _build_fallback_exchange_rate_info()
@@ -1198,6 +1201,8 @@ def _build_exchange_rate_info() -> dict[str, object]:
     cached_value = _cache_get_safely(cache_key)
     if cached_value:
         return cached_value
+    if not allow_remote:
+        return _build_fallback_exchange_rate_info()
 
     request_url = EXCHANGE_RATE_API_URL.format(api_key=api_key)
     timeout = int(os.getenv('EXCHANGE_RATE_API_TIMEOUT', '10'))

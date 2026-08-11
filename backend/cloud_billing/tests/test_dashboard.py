@@ -75,6 +75,24 @@ class ExchangeRateInfoTests(SimpleTestCase):
         self.assertEqual(result['exchange_rate'], 7.15)
         self.assertEqual(result['rate_source_url'], '')
 
+    @patch('cloud_billing.dashboard.requests.get')
+    @patch('cloud_billing.dashboard._cache_get_safely', return_value=None)
+    def test_cached_only_lookup_never_waits_for_remote_api(
+        self,
+        _mock_cache_get,
+        mock_get,
+    ):
+        with patch.dict(
+            'os.environ',
+            {'EXCHANGE_RATE_API_KEY': 'test-api-key'},
+            clear=True,
+        ):
+            result = _build_exchange_rate_info(allow_remote=False)
+
+        self.assertEqual(result['rate_source_label'], 'Internal baseline rate')
+        self.assertEqual(result['exchange_rate'], 7.15)
+        mock_get.assert_not_called()
+
 
 class PaymentTypeTests(SimpleTestCase):
     def test_yunce_is_classified_as_an_llm_provider(self):

@@ -461,10 +461,6 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  priceItems: {
-    type: Array,
-    default: () => []
-  },
   listings: {
     type: Array,
     required: true
@@ -516,7 +512,6 @@ const rows = useAgioneListingRows({
   agionePlatformRef: toRef(props, 'agionePlatform'),
   providersRef: toRef(props, 'providers'),
   modelsRef: toRef(props, 'models'),
-  priceItemsRef: toRef(props, 'priceItems'),
   listingsRef: toRef(props, 'listings'),
   summaryRef: toRef(props, 'summary'),
   displayCurrencyRef: toRef(props, 'displayCurrency'),

@@ -141,7 +141,6 @@
                 :agione-platform="agionePlatform"
                 :providers="providers"
                 :models="models"
-                :price-items="modelPriceItems"
                 :listings="listings"
                 :summary="summary"
                 :platform-count="activeResalePlatforms.length"
