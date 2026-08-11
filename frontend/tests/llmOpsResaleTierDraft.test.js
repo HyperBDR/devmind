@@ -2,11 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  addResaleTierCard,
+  buildResaleTierCards,
   buildFlatResalePriceItems,
+  buildResaleTierDraftFromCards,
   hasTieredResalePrices,
   normalizeResalePriceDraft,
+  removeResaleTierCard,
   removeResaleTierRow,
+  selectPreferredChannelPriceItems,
   shouldRestoreSavedResalePriceDraft,
+  updateResaleTierCard,
   updateResaleTierRows,
   validateResalePriceDraft
 } from '../src/utils/resaleTierDraft.js'
@@ -225,4 +231,143 @@ test('uses upstream ranges for a published price when boundaries changed', () =>
     ),
     false
   )
+})
+
+test('selects one coherent channel price variant before displaying tiers', () => {
+  const items = [
+    {
+      dimension: 'text_input',
+      id: 4,
+      spec: { deployment_scope: '国际' },
+      tier_end: '100',
+      tier_start: '0'
+    },
+    {
+      dimension: 'text_output',
+      id: 5,
+      spec: { deployment_scope: '国际' },
+      tier_end: '100',
+      tier_start: '0'
+    },
+    {
+      dimension: 'cache_input',
+      id: 6,
+      spec: { deployment_scope: '国际' },
+      tier_end: '100',
+      tier_start: '0'
+    },
+    {
+      dimension: 'text_input',
+      id: 1,
+      spec: {},
+      tier_end: '100',
+      tier_start: '0'
+    },
+    {
+      dimension: 'text_output',
+      id: 2,
+      spec: {},
+      tier_end: '100',
+      tier_start: '0'
+    },
+    {
+      dimension: 'cache_input',
+      id: 3,
+      spec: {},
+      tier_end: '100',
+      tier_start: '0'
+    }
+  ]
+
+  assert.deepEqual(
+    selectPreferredChannelPriceItems(items).map((item) => item.id),
+    [1, 2, 3]
+  )
+})
+
+test('builds one shared card for each aligned input output and cache tier', () => {
+  const cards = buildResaleTierCards({
+    cache: [
+      { end: '100', flat: false, price: '0.1', start: '0' },
+      { end: null, flat: false, price: '0.2', start: '100' }
+    ],
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '2', start: '100' }
+    ],
+    output: [
+      { end: '100', flat: false, price: '3', start: '0' },
+      { end: null, flat: false, price: '4', start: '100' }
+    ]
+  })
+
+  assert.deepEqual(cards, [
+    {
+      end: '100',
+      flat: false,
+      prices: { cache: '0.1', input: '1', output: '3' },
+      start: '0'
+    },
+    {
+      end: null,
+      flat: false,
+      prices: { cache: '0.2', input: '2', output: '4' },
+      start: '100'
+    }
+  ])
+})
+
+test('uses the union of dimension boundaries in the shared tier cards', () => {
+  const cards = buildResaleTierCards({
+    cache: [
+      { end: '200', flat: false, price: '0.1', start: '0' },
+      { end: null, flat: false, price: '0.2', start: '200' }
+    ],
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '2', start: '100' }
+    ],
+    output: [{ end: null, flat: true, price: '3', start: null }]
+  })
+
+  assert.deepEqual(
+    cards.map((card) => [card.start, card.end, card.prices]),
+    [
+      ['0', '100', { cache: '0.1', input: '1', output: '3' }],
+      ['100', '200', { cache: '0.1', input: '2', output: '3' }],
+      ['200', null, { cache: '0.2', input: '2', output: '3' }]
+    ]
+  )
+})
+
+test('adds edits and removes shared tiers across all price dimensions', () => {
+  const flatCards = buildResaleTierCards({
+    cache: [{ end: null, flat: true, price: '0.1', start: null }],
+    input: [{ end: null, flat: true, price: '1', start: null }],
+    output: [{ end: null, flat: true, price: '3', start: null }]
+  })
+  const added = addResaleTierCard(flatCards)
+  const updated = updateResaleTierCard(added, 0, 'end', '250')
+  const removed = removeResaleTierCard(updated, 0)
+  const draft = buildResaleTierDraftFromCards(removed)
+
+  assert.deepEqual(
+    added.map((card) => [card.start, card.end]),
+    [
+      ['0', '1000000'],
+      ['1000000', null]
+    ]
+  )
+  assert.deepEqual(
+    updated.map((card) => [card.start, card.end]),
+    [
+      ['0', '250'],
+      ['250', null]
+    ]
+  )
+  assert.deepEqual(draft, {
+    cache: [{ end: null, flat: false, price: '0.1', start: '0' }],
+    input: [{ end: null, flat: false, price: '1', start: '0' }],
+    output: [{ end: null, flat: false, price: '3', start: '0' }]
+  })
 })
