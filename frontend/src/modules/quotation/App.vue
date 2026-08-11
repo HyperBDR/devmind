@@ -38,9 +38,12 @@ import {
   loadProductLineOptions,
   saveCustomProductLineOptions,
 } from './utils/quotationNumbering'
-import { filterQuotationsByUser, ensureQuoteOwnership } from './utils/quoteOwnership'
+import { ensureQuoteOwnership } from './utils/quoteOwnership'
 import { clearCreateQuoteDraft } from './utils/createDraftStorage'
-import { upsertDescriptionsToCatalog } from './utils/descriptionCatalog'
+import {
+  upsertDescriptionsToCatalog,
+  type LineItemDescriptionHistory,
+} from './utils/descriptionCatalog'
 import { PAYMENT_TERM_OPTIONS } from './utils/paymentTerms'
 import {
   getCatalog,
@@ -166,6 +169,10 @@ const activeQuote = ref<Quotation | null>(null)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
+const lineItemDescriptionHistory = ref<LineItemDescriptionHistory[]>([])
+const quotationFormContextPage = ref(0)
+const quotationFormContextHasMore = ref(false)
+const quotationFormContextLoading = ref(false)
 let quotationListRequestId = 0
 
 function shouldUseStoredCatalog() {
@@ -379,16 +386,40 @@ async function loadEditingQuote(id: string | null) {
   }
 }
 
-async function loadQuotationFormContext() {
+async function loadQuotationFormContext(reset = true) {
+  if (quotationFormContextLoading.value) return
+  const nextPage = reset ? 1 : quotationFormContextPage.value + 1
+  if (!reset && !quotationFormContextHasMore.value) return
+  quotationFormContextLoading.value = true
   try {
-    quotationFormContext.value = await getQuotationFormContext()
+    const context = await getQuotationFormContext(nextPage)
+    quotationFormContext.value = reset
+      ? context.quotations
+      : [...quotationFormContext.value, ...context.quotations]
+    lineItemDescriptionHistory.value = reset
+      ? context.lineItemHistory
+      : [
+          ...lineItemDescriptionHistory.value,
+          ...context.lineItemHistory,
+        ]
+    quotationFormContextPage.value = context.page
+    quotationFormContextHasMore.value = context.hasMore
   } catch (error) {
-    quotationFormContext.value = []
+    if (reset) {
+      quotationFormContext.value = []
+      lineItemDescriptionHistory.value = []
+    }
     triggerToast(
       error instanceof Error ? error.message : t('quotation.app.loadFailed'),
       'error',
     )
+  } finally {
+    quotationFormContextLoading.value = false
   }
+}
+
+function loadMoreQuotationFormContext() {
+  void loadQuotationFormContext(false)
 }
 
 async function loadCurrentQuotationTab() {
@@ -467,19 +498,13 @@ async function handleLogout() {
   drawerQuoteId.value = null
   editingQuote.value = null
   quotationFormContext.value = []
+  lineItemDescriptionHistory.value = []
+  quotationFormContextPage.value = 0
+  quotationFormContextHasMore.value = false
   currentTab.value = 'dashboard'
   selectedQuotationId.value = null
   editingQuoteId.value = null
 }
-
-const userQuotations = computed(() =>
-  auth.currentUser
-    ? filterQuotationsByUser(
-        quotationFormContext.value,
-        auth.currentUser,
-      )
-    : [],
-)
 
 const userInitials = computed(() => {
   if (!auth.currentUser) return ''
@@ -1084,7 +1109,10 @@ function reloadPage() {
           :services="services"
           :discounts="discounts"
           :quotations="quotationFormContext"
-          :history-quotations="userQuotations"
+          :history-quotations="quotationFormContext"
+          :line-item-history="lineItemDescriptionHistory"
+          :history-has-more="quotationFormContextHasMore"
+          :history-loading="quotationFormContextLoading"
           :editing-quote="editingQuote"
           :current-user="auth.currentUser"
           :product-line-options="productLineOptions"
@@ -1092,6 +1120,7 @@ function reloadPage() {
           @navigate-to-tab="handleNavigateToTab"
           @add-product-line="handleAddProductLine"
           @delete-product-line="handleDeleteProductLine"
+          @load-history-more="loadMoreQuotationFormContext"
         />
 
         <QuotationDetails

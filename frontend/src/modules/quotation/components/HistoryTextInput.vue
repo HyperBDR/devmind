@@ -38,6 +38,8 @@ const props = withDefaults(
     error?: string
     helperText?: string
     testId?: string
+    hasMore?: boolean
+    loadingMore?: boolean
   }>(),
   {
     type: 'text',
@@ -45,6 +47,8 @@ const props = withDefaults(
     rows: 2,
     className: '',
     inputClassName: '',
+    hasMore: false,
+    loadingMore: false,
   },
 )
 
@@ -52,6 +56,7 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   change: [value: string]
   selectOption: [option: NormalizedHistoryOption]
+  loadMore: []
 }>()
 
 const open = ref(false)
@@ -126,6 +131,14 @@ function toggleChevron() {
   }
   openDropdown()
 }
+
+function handleDropdownScroll(event: Event) {
+  if (props.loadingMore || !props.hasMore) return
+  const element = event.currentTarget as HTMLElement
+  if (element.scrollTop + element.clientHeight >= element.scrollHeight - 24) {
+    emit('loadMore')
+  }
+}
 </script>
 
 <template>
@@ -160,7 +173,11 @@ function toggleChevron() {
       @click="toggleChevron"
     />
 
-    <DropdownPanel v-if="showDropdown" :test-id="testId ? `${testId}-history` : undefined">
+    <DropdownPanel
+      v-if="showDropdown"
+      :test-id="testId ? `${testId}-history` : undefined"
+      @scroll.passive="handleDropdownScroll"
+    >
       <li v-for="option in filteredOptions" :key="option.key">
         <DropdownOption
           :selected="option.value === currentValue.trim()"

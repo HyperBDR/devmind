@@ -10,7 +10,7 @@
     "typecheck": "vue-tsc --noEmit",
     "test:quotation": "node --test scripts/quotation-*.test.mjs",
     "preview": "vite preview",
-    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore",
+    "lint": "eslint . --ext .js,.jsx,.cjs,.mjs --fix",
     "test:unit": "node --test tests/*.test.js",
     "sync:provider-icons": "node scripts/sync-lobehub-provider-icons.mjs",
     "generate-favicons": "node scripts/generate-favicons.mjs",

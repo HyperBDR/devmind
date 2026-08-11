@@ -24,12 +24,18 @@ from quotation.models import Quotation, QuotationSourceType, QuoteStatus
 from quotation.permissions import user_display_email
 from quotation.serializers import (
     QuotationCreateSerializer,
+    QuotationFormContextQuerySerializer,
     QuotationFormContextSerializer,
     QuotationGenerateSerializer,
+    QuotationLineItemHistorySerializer,
     QuotationListQuerySerializer,
     QuotationListSerializer,
     QuotationSerializer,
     QuotationUpdateSerializer,
+)
+from quotation.services.form_context import (
+    build_line_item_description_history,
+    parsed_quotation_queryset,
 )
 from quotation.services.quotation_queries import (
     annotate_quotation_list,
@@ -258,20 +264,42 @@ class QuotationListCreateView(APIView):
 
 
 class QuotationFormContextView(APIView):
-    """Return narrow quotation history used by the create form."""
+    """Return paginated parsed quotation history used by the create form."""
 
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        queryset = filter_accessible_quotations(
-            request.user,
-            Quotation.objects.all(),
-        ).order_by("-created_at", "-id")
+        query_serializer = QuotationFormContextQuerySerializer(
+            data=request.query_params,
+        )
+        query_serializer.is_valid(raise_exception=True)
+        page = query_serializer.validated_data["page"]
+        page_size = int(query_serializer.validated_data["page_size"])
+        queryset = parsed_quotation_queryset().order_by(
+            "-created_at",
+            "-id",
+        )
+        total = queryset.count()
+        page_start = (page - 1) * page_size
+        page_queryset = queryset[page_start : page_start + page_size]
         items = QuotationFormContextSerializer(
-            queryset,
+            page_queryset,
             many=True,
         ).data
-        return Response({"items": items})
+        line_item_history = QuotationLineItemHistorySerializer(
+            build_line_item_description_history(page_queryset),
+            many=True,
+        ).data
+        return Response(
+            {
+                "items": items,
+                "line_item_history": line_item_history,
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "has_more": page_start + page_size < total,
+            }
+        )
 
 
 class QuotationDetailView(APIView):

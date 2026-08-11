@@ -110,6 +110,17 @@ class QuotationListQuerySerializer(serializers.Serializer):
         return attrs
 
 
+class QuotationFormContextQuerySerializer(serializers.Serializer):
+    """Validate paginated parsed quotation history requests."""
+
+    page = serializers.IntegerField(default=1, min_value=1, required=False)
+    page_size = serializers.ChoiceField(
+        choices=(20, 50, 100),
+        default=20,
+        required=False,
+    )
+
+
 class CatalogObjectListField(serializers.ListField):
     child = serializers.DictField()
 
@@ -371,6 +382,18 @@ class QuotationFormContextSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+class QuotationLineItemHistorySerializer(serializers.Serializer):
+    """Serialize parsed line-item history used by the create form."""
+
+    type = serializers.CharField()
+    description = serializers.CharField()
+    list_price = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+    )
+    currency = serializers.CharField()
 
 
 class QuotationSerializer(serializers.ModelSerializer):

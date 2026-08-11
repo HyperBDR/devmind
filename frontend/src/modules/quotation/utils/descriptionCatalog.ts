@@ -17,6 +17,13 @@ export interface DescriptionHistoryOption {
   }
 }
 
+export interface LineItemDescriptionHistory {
+  type: ItemType
+  description: string
+  listPrice: number
+  currency: Quotation['currency']
+}
+
 function normalize(value: string): string {
   return value.trim().toLowerCase()
 }
@@ -42,6 +49,7 @@ export function buildDescriptionHistoryOptions(
   services: Service[],
   quotations: Array<Pick<Quotation, 'items' | 'createdAt' | 'currency'>>,
   currency: Quotation['currency'] = 'USD',
+  lineItemHistory: LineItemDescriptionHistory[] = [],
 ): DescriptionHistoryOption[] {
   const options: DescriptionHistoryOption[] = []
   const seen = new Set<string>()
@@ -92,6 +100,27 @@ export function buildDescriptionHistoryOptions(
         : service.pricingNote)
     })
   }
+
+  lineItemHistory
+    .filter((item) =>
+      item.currency === currency
+      && (isSoftwareType(itemType)
+        ? item.type === 'Software'
+        : item.type !== 'Software'),
+    )
+    .forEach((item) => {
+      pushOption(
+        item.description,
+        {
+          listPrice: item.listPrice,
+          currency: item.currency,
+          source: 'quote',
+        },
+        item.listPrice
+          ? `${item.currency} ${item.listPrice.toLocaleString('en-US')}`
+          : undefined,
+      )
+    })
 
   const quoteItems = quotations
     .slice()
