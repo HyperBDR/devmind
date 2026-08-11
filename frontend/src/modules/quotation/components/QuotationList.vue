@@ -8,6 +8,7 @@ import {
   watch,
 } from 'vue'
 import {
+  Columns3,
   Download,
   ExternalLink,
   FileSpreadsheet,
@@ -38,7 +39,10 @@ import type { Quotation } from '../types'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import { clearedFeishuFields } from '../utils/feishuLinkState'
 import { buildQuotationExportFileName } from '../utils/quotationFileName'
-import { getCurrencySymbol } from '../utils/quotationPreviewModel'
+import {
+  getCurrencyShortLabel,
+  getCurrencySymbol,
+} from '../utils/quotationPreviewModel'
 import FormSelect from './FormSelect.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
@@ -48,6 +52,7 @@ type FeishuUploadFormat = 'excel' | 'pdf'
 const props = defineProps<{
   quotations: Quotation[]
   productLines: string[]
+  currencies?: string[]
   loading?: boolean
   page: number
   pageSize: 10 | 20 | 50
@@ -94,6 +99,19 @@ const sourceFilterOptions = computed(() => [
   },
 ])
 
+const currencyFilterOptions = computed(() => [
+  { value: 'ALL', label: t('quotation.pages.list.currencyAll') },
+  ...Array.from(new Set(
+    (props.currencies || props.quotations.map((quote) => quote.currency)),
+  ))
+    .filter(Boolean)
+    .sort()
+    .map((currency) => ({
+      value: currency,
+      label: getCurrencyShortLabel(currency),
+    })),
+])
+
 const pageSizeOptions = [10, 20, 50].map((value) => ({
   value: String(value),
   label: String(value),
@@ -108,14 +126,14 @@ const columnConfig = {
     align: 'left',
   },
   project: {
-    defaultWidth: 260,
+    defaultWidth: 360,
     minWidth: 180,
     maxWidth: 720,
     labelKey: 'quotation.pages.list.tableProjectName',
     align: 'left',
   },
   customer: {
-    defaultWidth: 200,
+    defaultWidth: 300,
     minWidth: 160,
     maxWidth: 600,
     labelKey: 'quotation.pages.list.tableCustomer',
@@ -141,6 +159,13 @@ const columnConfig = {
     maxWidth: 280,
     labelKey: 'quotation.pages.list.tableTotal',
     align: 'right',
+  },
+  currency: {
+    defaultWidth: 92,
+    minWidth: 80,
+    maxWidth: 160,
+    labelKey: 'quotation.pages.list.tableCurrency',
+    align: 'center',
   },
   source: {
     defaultWidth: 170,
@@ -170,6 +195,7 @@ const columnWidths = ref<Record<ResizableColumnKey, number>>({
   contact: columnConfig.contact.defaultWidth,
   salesperson: columnConfig.salesperson.defaultWidth,
   total: columnConfig.total.defaultWidth,
+  currency: columnConfig.currency.defaultWidth,
   source: columnConfig.source.defaultWidth,
   quoteDate: columnConfig.quoteDate.defaultWidth,
 })
@@ -182,13 +208,38 @@ const resizableColumns = computed(() =>
   })),
 )
 
-const tableWidth = computed(
+const defaultColumnKeys: ResizableColumnKey[] = [
+  'quoteNo',
+  'project',
+  'customer',
+  'total',
+]
+const visibleColumnKeys = ref<ResizableColumnKey[]>([...defaultColumnKeys])
+const columnsOpen = ref(false)
+const visibleColumns = computed(() =>
+  resizableColumns.value.filter((column) =>
+    visibleColumnKeys.value.includes(column.key),
+  ),
+)
+const visibleTableWidth = computed(
   () =>
-    Object.values(columnWidths.value).reduce(
-      (total, width) => total + width,
+    visibleColumns.value.reduce(
+      (total, column) => total + columnWidths.value[column.key],
       ACTIONS_COLUMN_WIDTH,
     ),
 )
+const tableUsesHorizontalScroll = computed(
+  () => visibleColumnKeys.value.length > defaultColumnKeys.length,
+)
+
+function tableColumnWidth(key: ResizableColumnKey | 'actions'): string {
+  const width = key === 'actions'
+    ? ACTIONS_COLUMN_WIDTH
+    : columnWidths.value[key]
+  return tableUsesHorizontalScroll.value
+    ? `${width}px`
+    : `${(width / visibleTableWidth.value) * 100}%`
+}
 
 let activeColumnResize: {
   key: ResizableColumnKey
@@ -203,6 +254,7 @@ let activeColumnResize: {
 const searchText = ref('')
 const selectedProductLine = ref('ALL')
 const selectedSource = ref('ALL')
+const selectedCurrency = ref('ALL')
 const createdFrom = ref(props.initialCreatedFrom || '')
 const createdTo = ref(props.initialCreatedTo || '')
 const syncingFeishu = ref(false)
@@ -349,6 +401,9 @@ function handleOutsideClick(event: MouseEvent) {
   if (!target?.closest('[data-action-menu]')) {
     closeActionMenu()
   }
+  if (!target?.closest('[data-column-picker]')) {
+    columnsOpen.value = false
+  }
 }
 
 function clampColumnWidth(key: ResizableColumnKey, width: number): number {
@@ -492,11 +547,19 @@ function feishuDocumentId(
     : quote.feishuPdfDocumentId
 }
 
+function feishuDocumentUrl(
+  quote: Quotation,
+  format: FeishuUploadFormat,
+): string | undefined {
+  return format === 'excel' ? quote.feishuExcelUrl : quote.feishuPdfUrl
+}
+
 async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
   const documentId = feishuDocumentId(quote, format)
   if (!documentId) return
   closeActionMenu()
-  const popup = window.open('about:blank', '_blank')
+  const cachedUrl = feishuDocumentUrl(quote, format)
+  const popup = cachedUrl ? window.open(cachedUrl, '_blank') : null
   if (popup) popup.opener = null
   try {
     const result = await checkFeishuFileAccess(documentId)
@@ -727,6 +790,8 @@ function listQuery(
       selectedSource.value === 'ALL'
         ? undefined
         : (selectedSource.value as 'manual' | 'document_import'),
+    currency:
+      selectedCurrency.value === 'ALL' ? undefined : selectedCurrency.value,
     createdFrom: createdFrom.value || undefined,
     createdTo: createdTo.value || undefined,
   }
@@ -748,6 +813,7 @@ async function handleResetFilters() {
   searchText.value = ''
   selectedProductLine.value = 'ALL'
   selectedSource.value = 'ALL'
+  selectedCurrency.value = 'ALL'
   createdFrom.value = ''
   createdTo.value = ''
   await nextTick()
@@ -767,6 +833,7 @@ watch(
   [
     selectedProductLine,
     selectedSource,
+    selectedCurrency,
     createdFrom,
     createdTo,
   ],
@@ -841,6 +908,7 @@ const hasActiveFilters = computed(
     searchText.value.trim() !== '' ||
     selectedProductLine.value !== 'ALL' ||
     selectedSource.value !== 'ALL' ||
+    selectedCurrency.value !== 'ALL' ||
     createdFrom.value !== '' ||
     createdTo.value !== '',
 )
@@ -896,7 +964,7 @@ function displayQuoteDate(quote: Quotation): string {
       aria-label="Quote filters"
       class="rounded-xl border border-dm-border-light bg-white p-2 shadow-xs"
     >
-      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(180px,1.15fr)_minmax(100px,0.55fr)_minmax(120px,0.65fr)_minmax(180px,1fr)_auto]">
+      <div class="grid grid-cols-1 items-end gap-2 md:grid-cols-2 xl:grid-cols-[minmax(0,1.35fr)_repeat(3,minmax(0,.7fr))_minmax(0,1.4fr)]">
           <div class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.keywordLabel') }}
@@ -946,6 +1014,18 @@ function displayQuoteDate(quote: Quotation): string {
             />
           </div>
 
+          <div class="min-w-0" data-currency-filter>
+            <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
+              {{ t('quotation.pages.list.currencyLabel') }}
+            </label>
+            <FormSelect
+              v-model="selectedCurrency"
+              class-name="w-full"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
+              :options="currencyFilterOptions"
+            />
+          </div>
+
           <div data-filter-date-range class="min-w-0">
             <label class="mb-1 block truncate text-xs font-medium text-dm-text-tertiary">
               {{ t('quotation.pages.list.dateRangeLabel') }}
@@ -964,9 +1044,49 @@ function displayQuoteDate(quote: Quotation): string {
             </div>
           </div>
 
-          <div class="flex items-center gap-1 md:col-span-2 xl:col-span-1">
-            <div class="flex h-9 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
-              {{ t('quotation.pages.list.filterResultsCount', { count: total }) }}
+      </div>
+      <div class="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+        <div class="flex h-9 min-w-20 items-center justify-center whitespace-nowrap rounded-lg bg-slate-50 px-2.5 text-xs font-semibold text-dm-text-tertiary">
+          {{ t('quotation.pages.list.filterResultsCount', { count: total }) }}
+        </div>
+        <div class="flex flex-wrap items-center justify-end gap-1">
+            <div class="relative" data-column-picker>
+              <button
+                type="button"
+                class="inline-flex h-9 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-dm-border-light bg-white px-2.5 text-xs font-semibold text-dm-text transition hover:bg-slate-50 focus:outline-hidden focus:ring-2 focus:ring-blue-200"
+                @click.stop="columnsOpen = !columnsOpen"
+              >
+                <Columns3 class="h-3.5 w-3.5" />
+                {{ t('quotation.pages.list.visibleColumns') }}
+              </button>
+              <div
+                v-if="columnsOpen"
+                class="absolute right-0 top-10 z-30 w-56 rounded-lg border border-dm-border-light bg-white p-2 shadow-xl"
+              >
+                <p class="px-2 py-1 text-xs font-bold text-dm-text">
+                  {{ t('quotation.pages.list.visibleColumns') }}
+                </p>
+                <label
+                  v-for="column in resizableColumns"
+                  :key="column.key"
+                  class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-dm-text-secondary hover:bg-slate-50"
+                >
+                  <input
+                    v-model="visibleColumnKeys"
+                    type="checkbox"
+                    :value="column.key"
+                    class="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
+                  />
+                  {{ column.label }}
+                </label>
+                <button
+                  type="button"
+                  class="mt-1 w-full border-t border-slate-100 px-2 pt-2 text-left text-xs font-semibold text-blue-600 hover:text-blue-700"
+                  @click="visibleColumnKeys = [...defaultColumnKeys]"
+                >
+                  {{ t('quotation.pages.list.resetColumns') }}
+                </button>
+              </div>
             </div>
             <button
               type="button"
@@ -997,7 +1117,7 @@ function displayQuoteDate(quote: Quotation): string {
               <RotateCcw class="h-3.5 w-3.5" />
               {{ t('quotation.actions.resetFilters') }}
             </button>
-          </div>
+        </div>
       </div>
     </div>
 
@@ -1007,29 +1127,32 @@ function displayQuoteDate(quote: Quotation): string {
     >
       <div class="flex flex-1 overflow-hidden rounded-t-xl">
         <div
-          class="flex-1 overflow-x-auto"
+          class="flex-1"
+          :class="tableUsesHorizontalScroll ? 'overflow-x-auto' : 'overflow-hidden'"
           data-quotation-table-scroller
         >
         <table
           class="w-full table-fixed border-collapse text-left"
           :class="{ 'h-full': pageSize === 10 && quotations.length === 10 }"
-          :style="{ minWidth: `${tableWidth}px` }"
+          :style="tableUsesHorizontalScroll
+            ? { width: `${visibleTableWidth}px`, minWidth: `${visibleTableWidth}px` }
+            : { width: '100%' }"
         >
           <colgroup>
             <col
-              v-for="column in resizableColumns"
+              v-for="column in visibleColumns"
               :key="column.key"
               :data-column-key="column.key"
-              :style="{ width: `${columnWidths[column.key]}px` }"
+              :style="{ width: tableColumnWidth(column.key) }"
             />
-            <col :style="{ width: `${ACTIONS_COLUMN_WIDTH}px` }" />
+            <col :style="{ width: tableColumnWidth('actions') }" />
           </colgroup>
           <thead>
             <tr
               class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-bold tracking-wider"
             >
               <th
-                v-for="column in resizableColumns"
+                v-for="column in visibleColumns"
                 :key="column.key"
                 :data-column-header="column.key"
                 class="relative px-3 py-1.5"
@@ -1082,7 +1205,7 @@ function displayQuoteDate(quote: Quotation): string {
           <tbody class="divide-y divide-slate-100 text-sm">
             <tr v-if="loading">
               <td
-                :colspan="resizableColumns.length + 1"
+                :colspan="visibleColumns.length + 1"
                 class="py-12 text-center text-dm-text-tertiary"
               >
                 {{ t('quotation.pages.list.syncing') }}
@@ -1090,7 +1213,7 @@ function displayQuoteDate(quote: Quotation): string {
             </tr>
             <tr v-else-if="quotations.length === 0">
               <td
-                :colspan="resizableColumns.length + 1"
+                :colspan="visibleColumns.length + 1"
                 class="py-12 text-center text-dm-text-tertiary"
               >
                 {{ t('quotation.pages.list.emptyResults') }}
@@ -1114,7 +1237,7 @@ function displayQuoteDate(quote: Quotation): string {
               @keydown.enter="handleRowKeydown(quote, $event)"
               @keydown.space="handleRowKeydown(quote, $event)"
             >
-              <td class="px-3 py-1">
+              <td v-if="visibleColumnKeys.includes('quoteNo')" class="px-3 py-1">
                 <p
                   class="block truncate whitespace-nowrap font-mono font-semibold text-slate-700 transition group-hover:text-blue-700"
                   :title="quote.quoteNo"
@@ -1128,7 +1251,7 @@ function displayQuoteDate(quote: Quotation): string {
                   {{ exportProgressLabel(quote.id) }}
                 </p>
               </td>
-              <td class="px-3 py-1">
+              <td v-if="visibleColumnKeys.includes('project')" class="px-3 py-1">
                 <div class="min-w-0">
                   <p
                     class="truncate whitespace-nowrap font-semibold text-dm-text"
@@ -1145,7 +1268,7 @@ function displayQuoteDate(quote: Quotation): string {
                   </p>
                 </div>
               </td>
-              <td class="px-3 py-1">
+              <td v-if="visibleColumnKeys.includes('customer')" class="px-3 py-1">
                 <div class="min-w-0">
                   <p
                     class="truncate whitespace-nowrap font-medium text-dm-text"
@@ -1156,18 +1279,22 @@ function displayQuoteDate(quote: Quotation): string {
                 </div>
               </td>
               <td
+                v-if="visibleColumnKeys.includes('contact')"
                 class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium"
                 :title="displayContact(quote) === '—' ? undefined : displayContact(quote)"
               >
                 {{ displayContact(quote) }}
               </td>
-              <td class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium">
+              <td v-if="visibleColumnKeys.includes('salesperson')" class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium">
                 {{ quote.salesperson || '—' }}
               </td>
-              <td class="px-3 py-1 text-right font-bold text-dm-text font-mono">
+              <td v-if="visibleColumnKeys.includes('total')" class="px-3 py-1 text-right font-bold text-dm-text font-mono">
                 {{ displayTotal(quote) }}
               </td>
-              <td class="px-3 py-1 text-center">
+              <td v-if="visibleColumnKeys.includes('currency')" class="px-3 py-1 text-center font-mono text-xs font-semibold text-dm-text-secondary">
+                {{ quote.currency }}
+              </td>
+              <td v-if="visibleColumnKeys.includes('source')" class="px-3 py-1 text-center">
                 <span
                   v-if="quote.sourceType === 'document_import'"
                   class="inline-flex whitespace-nowrap rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-semibold text-fuchsia-800 ring-1 ring-inset ring-fuchsia-300"
@@ -1181,7 +1308,7 @@ function displayQuoteDate(quote: Quotation): string {
                   {{ t('quotation.pages.list.sourceLocalCreated') }}
                 </span>
               </td>
-              <td class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary">
+              <td v-if="visibleColumnKeys.includes('quoteDate')" class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary">
                 {{ displayQuoteDate(quote) }}
               </td>
               <td class="px-3 py-1">

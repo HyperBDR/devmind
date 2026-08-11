@@ -157,6 +157,7 @@ export interface QuotationListParams {
   status?: Quotation['status'];
   productLine?: string;
   sourceType?: 'manual' | 'document_import';
+  currency?: string;
   createdFrom?: string;
   createdTo?: string;
 }
@@ -164,6 +165,7 @@ export interface QuotationListParams {
 export interface QuotationListResult {
   items: Quotation[];
   productLines: string[];
+  currencies: string[];
   total: number;
   page: number;
   pageSize: 10 | 20 | 50;
@@ -574,6 +576,7 @@ export async function listQuotations(
     query.set('product_line_name', params.productLine);
   }
   if (params.sourceType) query.set('source_type', params.sourceType);
+  if (params.currency) query.set('currency', params.currency);
   if (params.createdFrom) query.set('created_from', params.createdFrom);
   if (params.createdTo) query.set('created_to', params.createdTo);
   const data = await apiRequest<{
@@ -584,11 +587,13 @@ export async function listQuotations(
     total_pages: number;
     facets?: {
       product_lines?: string[];
+      currencies?: string[];
     };
   }>(`/quotations?${query.toString()}`);
   return {
     items: data.items.map(mapApiQuotationListItem),
     productLines: data.facets?.product_lines || [],
+    currencies: data.facets?.currencies || [],
     total: data.total,
     page: data.page,
     pageSize: data.page_size,
