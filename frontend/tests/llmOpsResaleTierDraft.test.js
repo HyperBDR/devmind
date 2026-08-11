@@ -371,3 +371,30 @@ test('adds edits and removes shared tiers across all price dimensions', () => {
     output: [{ end: null, flat: false, price: '3', start: '0' }]
   })
 })
+
+test('rejects shared boundaries that would collapse adjacent tiers', () => {
+  const cards = [
+    {
+      end: '100',
+      flat: false,
+      prices: { cache: '0.1', input: '1', output: '3' },
+      start: '0'
+    },
+    {
+      end: '200',
+      flat: false,
+      prices: { cache: '0.2', input: '2', output: '4' },
+      start: '100'
+    },
+    {
+      end: null,
+      flat: false,
+      prices: { cache: '0.3', input: '3', output: '5' },
+      start: '200'
+    }
+  ]
+
+  assert.deepEqual(updateResaleTierCard(cards, 0, 'end', ''), cards)
+  assert.deepEqual(updateResaleTierCard(cards, 0, 'end', '0'), cards)
+  assert.deepEqual(updateResaleTierCard(cards, 0, 'end', '200'), cards)
+})

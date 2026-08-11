@@ -75,18 +75,21 @@ export function selectPreferredChannelPriceItems(items = []) {
     group.push(item)
     groups.set(key, group)
   })
-  const ranked = [...groups.entries()].sort(([leftKey, left], [rightKey, right]) => {
-    const leftDimensions = new Set(left.map((item) => item.dimension)).size
-    const rightDimensions = new Set(right.map((item) => item.dimension)).size
-    const dimensionScore = rightDimensions - leftDimensions
-    if (dimensionScore) return dimensionScore
-    const emptySpecScore = Number(rightKey === '{}') - Number(leftKey === '{}')
-    if (emptySpecScore) return emptySpecScore
-    if (right.length !== left.length) return right.length - left.length
-    const leftId = Math.min(...left.map((item) => Number(item.id || 0)))
-    const rightId = Math.min(...right.map((item) => Number(item.id || 0)))
-    return leftId - rightId
-  })
+  const ranked = [...groups.entries()].sort(
+    ([leftKey, left], [rightKey, right]) => {
+      const leftDimensions = new Set(left.map((item) => item.dimension)).size
+      const rightDimensions = new Set(right.map((item) => item.dimension)).size
+      const dimensionScore = rightDimensions - leftDimensions
+      if (dimensionScore) return dimensionScore
+      const emptySpecScore =
+        Number(rightKey === '{}') - Number(leftKey === '{}')
+      if (emptySpecScore) return emptySpecScore
+      if (right.length !== left.length) return right.length - left.length
+      const leftId = Math.min(...left.map((item) => Number(item.id || 0)))
+      const rightId = Math.min(...right.map((item) => Number(item.id || 0)))
+      return leftId - rightId
+    }
+  )
   const selected = ranked[0]?.[1] || []
   const boundaries = new Set()
   return selected.filter((item) => {
@@ -216,6 +219,17 @@ export function updateResaleTierCard(cards = [], index, field, value) {
   if (DIMENSIONS.some(([key]) => key === field)) {
     card.prices[field] = value
     return nextCards
+  }
+  if (field === 'end') {
+    const amount = decimal(value)
+    const start = decimal(card.start)
+    const nextCard = nextCards[index + 1]
+    const nextEnd = decimal(nextCard?.end)
+    if (nextCard && amount === null) return nextCards
+    if (amount !== null && start !== null && amount <= start) return nextCards
+    if (amount !== null && nextEnd !== null && amount >= nextEnd) {
+      return nextCards
+    }
   }
   card[field] = value
   if (field === 'end' && nextCards[index + 1]) {

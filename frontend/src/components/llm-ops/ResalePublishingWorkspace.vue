@@ -512,7 +512,6 @@
               :currency="currencyLabel"
               :errors="tierErrorsFor(row)"
               :model-value="tierDraftFor(row)"
-              :boundaries-locked="true"
               :preview="tierPreviewFor(row)"
               :preview-error="tierPreviewErrorFor(row)"
               :preview-loading="tierPreviewLoadingFor(row)"
