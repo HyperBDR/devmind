@@ -11,7 +11,10 @@ import {
   fetchFirstPage,
   fetchList
 } from '@/utils/llmOpsPagination'
-import { dataGroupsForSection } from '@/utils/llmOpsSectionData'
+import {
+  dataGroupsForResalePublishing,
+  dataGroupsForSection
+} from '@/utils/llmOpsSectionData'
 import { userFacingApiError } from '@/utils/llmOpsErrors'
 
 const PRICE_HISTORY_PAGE_SIZE = 120
@@ -202,22 +205,25 @@ export function useLLMOpsData() {
   }
 
   function preloadResalePublishingData() {
-    const tasks = [refreshChannelPricingData(), refreshSummary()]
-    if (!asArray(metaModels.value).length) {
-      tasks.push(
-        fetchList(llmOpsApi.listMetaModels).then((items) => {
-          metaModels.value = asArray(items)
-        })
-      )
+    const groupValues = {
+      channels,
+      listings,
+      metaModels,
+      modelPrices: modelPriceItems
     }
-    if (!asArray(modelPriceItems.value).length) {
-      tasks.push(refreshModelPriceItems())
-    }
-    if (!asArray(listings.value).length) {
-      tasks.push(refreshResaleListings())
-    }
+    const tasks = dataGroupsForResalePublishing()
+      .filter((group) => {
+        if (group === 'channelPricing') {
+          return (
+            !asArray(channelPrices.value).length ||
+            !asArray(channelPriceItems.value).length
+          )
+        }
+        return !asArray(groupValues[group]?.value).length
+      })
+      .map((group) => loadDataGroup(group, 'reseller', {}))
 
-    Promise.all(tasks).catch((error) => {
+    return Promise.all(tasks).catch((error) => {
       showError(errorMessage(error, t('llmOps.dataErrors.loadPublishing')))
     })
   }
