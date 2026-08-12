@@ -144,17 +144,27 @@ function mapStatus(value: string): Quotation['status'] {
   return API_TO_STATUS[value.toLowerCase()] || 'Draft'
 }
 
-function dashboardQuery(currency: string, period = ''): string {
+function dashboardQuery(
+  currency: string,
+  dateFrom = '',
+  dateTo = ''
+): string {
   const params = new URLSearchParams({ currency })
-  if (period) params.set('period', period)
+  if (dateFrom) params.set('date_from', dateFrom)
+  if (dateTo) params.set('date_to', dateTo)
   return params.toString()
 }
 
 export async function getDashboardSummary(
-  period = ''
+  period = '',
+  dateFrom = '',
+  dateTo = '',
+  currency = 'USD'
 ): Promise<DashboardSummary> {
-  const params = new URLSearchParams()
+  const params = new URLSearchParams({ currency })
   if (period) params.set('period', period)
+  if (dateFrom) params.set('date_from', dateFrom)
+  if (dateTo) params.set('date_to', dateTo)
   const query = params.toString()
   const data = await apiRequest<ApiSummary>(
     query ? `/dashboard/summary?${query}` : '/dashboard/summary'
@@ -181,10 +191,12 @@ export async function getDashboardSummary(
 }
 
 export async function getDashboardAnalytics(
-  currency = 'USD'
+  currency = 'USD',
+  dateFrom = '',
+  dateTo = ''
 ): Promise<DashboardAnalytics> {
   const data = await apiRequest<ApiAnalytics>(
-    `/dashboard/analytics?${dashboardQuery(currency)}`
+    `/dashboard/analytics?${dashboardQuery(currency, dateFrom, dateTo)}`
   )
   const mapTrend = (row: ApiTrendPoint): DashboardTrendPoint => ({
     period: row.period,

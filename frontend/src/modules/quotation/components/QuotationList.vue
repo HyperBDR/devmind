@@ -222,15 +222,17 @@ const visibleColumns = computed(() =>
     visibleColumnKeys.value.includes(column.key),
   ),
 )
-const visibleTableWidth = computed(() =>
-  visibleColumns.value.reduce(
-    (total, column) => total + columnWidths.value[column.key],
-    ACTIONS_COLUMN_WIDTH,
-  ),
+const visibleTableWidth = computed(
+  () =>
+    visibleColumns.value.reduce(
+      (total, column) => total + columnWidths.value[column.key],
+      ACTIONS_COLUMN_WIDTH,
+    ),
 )
 const tableUsesHorizontalScroll = computed(
   () => visibleColumnKeys.value.length > defaultColumnKeys.length,
 )
+
 function tableColumnWidth(key: ResizableColumnKey | 'actions'): string {
   const width = key === 'actions'
     ? ACTIONS_COLUMN_WIDTH
@@ -239,14 +241,6 @@ function tableColumnWidth(key: ResizableColumnKey | 'actions'): string {
     ? `${width}px`
     : `${(width / visibleTableWidth.value) * 100}%`
 }
-
-const tableWidth = computed(
-  () =>
-    Object.values(columnWidths.value).reduce(
-      (total, width) => total + width,
-      ACTIONS_COLUMN_WIDTH,
-    ),
-)
 
 let activeColumnResize: {
   key: ResizableColumnKey
@@ -580,9 +574,10 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
   if (!documentId) return
   closeActionMenu()
   const cachedUrl = feishuDocumentUrl(quote, format)
-  if (cachedUrl) {
-    window.open(cachedUrl, '_blank', 'noopener,noreferrer')
-  }
+  const popup = cachedUrl
+    ? window.open(cachedUrl, '_blank', 'noopener,noreferrer')
+    : null
+  if (popup) popup.opener = null
   try {
     const result = await checkFeishuFileAccess(documentId)
     if (!result.exists) {
@@ -602,7 +597,11 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
     const directUrl = String(result.url || '').trim()
     if (!result.direct_access_allowed && result.content_url) {
       const contentUrl = result.content_url
-      if (!cachedUrl) window.open(contentUrl, '_blank', 'noopener,noreferrer')
+      if (popup) {
+        popup.location.replace(contentUrl)
+      } else {
+        window.open(contentUrl, '_blank', 'noopener,noreferrer')
+      }
       return
     }
     if (!result.direct_access_allowed || !directUrl) {
@@ -613,10 +612,13 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
       format,
       documentId,
     }
-    if (!cachedUrl) {
+    if (popup) {
+      popup.location.replace(directUrl)
+    } else {
       window.open(directUrl, '_blank', 'noopener,noreferrer')
     }
   } catch (err: unknown) {
+    popup?.close()
     emit(
       'toast',
       err instanceof Error
@@ -1118,13 +1120,13 @@ function displayQuoteDate(quote: Quotation): string {
                     v-model="visibleColumnKeys"
                     type="checkbox"
                     :value="column.key"
-                    class="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
+                    class="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-200"
                   />
                   {{ column.label }}
                 </label>
                 <button
                   type="button"
-                  class="mt-1 w-full border-t border-slate-100 px-2 pt-2 text-left text-xs font-semibold text-blue-600"
+                  class="mt-1 w-full border-t border-slate-100 px-2 pt-2 text-left text-xs font-semibold text-blue-600 hover:text-blue-700"
                   @click="visibleColumnKeys = [...defaultColumnKeys]"
                 >
                   {{ t('quotation.pages.list.resetColumns') }}
@@ -1188,14 +1190,14 @@ function displayQuoteDate(quote: Quotation): string {
               :data-column-key="column.key"
               :style="{ width: tableColumnWidth(column.key) }"
             />
-            <col :style="{ width: `${ACTIONS_COLUMN_WIDTH}px` }" />
+            <col :style="{ width: tableColumnWidth('actions') }" />
           </colgroup>
           <thead>
             <tr
               class="bg-[#fafafa] border-b border-dm-border-light text-dm-text-tertiary text-xs font-bold tracking-wider"
             >
               <th
-              v-for="column in visibleColumns"
+                v-for="column in visibleColumns"
                 :key="column.key"
                 :data-column-header="column.key"
                 class="relative px-3 py-1.5"
@@ -1342,7 +1344,7 @@ function displayQuoteDate(quote: Quotation): string {
               </td>
               <td
                 v-if="visibleColumnKeys.includes('currency')"
-                class="px-3 py-1 text-center"
+                class="px-3 py-1 text-center font-mono text-xs font-semibold text-dm-text-secondary"
               >
                 {{ getCurrencyShortLabel(quote.currency) }}
               </td>

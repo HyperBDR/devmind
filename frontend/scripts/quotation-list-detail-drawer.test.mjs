@@ -99,6 +99,9 @@ test('quotation columns expose pointer and keyboard resize controls', () => {
   assert.match(list, /resizeColumnBy\(column\.key, -COLUMN_RESIZE_STEP\)/)
   assert.match(list, /resizeColumnBy\(column\.key, COLUMN_RESIZE_STEP\)/)
   assert.match(list, /visibleTableWidth/)
+  assert.match(list, /:style="tableUsesHorizontalScroll/)
+  assert.match(list, /data-quotation-table-scroller/)
+  assert.match(list, /tableUsesHorizontalScroll \? 'overflow-x-auto' : 'overflow-hidden'/)
   assert.doesNotMatch(list, /data-quotation-top-scrollbar/)
 })
 

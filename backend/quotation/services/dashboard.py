@@ -141,6 +141,35 @@ def _shift_month(value: datetime, offset: int) -> datetime:
     )
 
 
+def _dashboard_range(
+    date_from: str = "",
+    date_to: str = "",
+) -> tuple[datetime, datetime]:
+    """Return the selected inclusive month range as datetime bounds."""
+    local_now = timezone.localtime()
+    start = _month_start(local_now)
+    if date_from:
+        year, month = (int(part) for part in date_from.split("-"))
+        start = start.replace(year=year, month=month)
+    end_month = date_to or date_from
+    if not end_month:
+        end = _next_month(start)
+    else:
+        year, month = (int(part) for part in end_month.split("-"))
+        end = _next_month(start.replace(year=year, month=month))
+    return start, end
+
+
+def _month_starts(start: datetime, end: datetime) -> list[datetime]:
+    """Build every month start in the selected range."""
+    values = []
+    current = start
+    while current < end:
+        values.append(current)
+        current = _next_month(current)
+    return values
+
+
 def _week_start(value: datetime) -> datetime:
     midnight = value.replace(hour=0, minute=0, second=0, microsecond=0)
     return midnight - timedelta(days=midnight.weekday())
@@ -150,26 +179,34 @@ def build_dashboard_summary(
     queryset: QuerySet[Quotation],
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
     period: str = "",
+    date_from: str = "",
+    date_to: str = "",
 ) -> dict[str, object]:
     """Build lightweight KPI aggregates for the quotation dashboard."""
     currency = _normalize_currency(currency)
     currency_values = _currency_values(currency)
+    currency_queryset = _filter_by_currency(queryset, currency)
     local_now = timezone.localtime()
-    month_start = _month_start(local_now)
-    if period:
-        year, month = (int(part) for part in period.split("-"))
-        month_start = month_start.replace(year=year, month=month)
-    month_end = _next_month(month_start)
-    previous_month_start = _shift_month(month_start, -1)
+    if period and not date_from:
+        date_from = period
+        date_to = period
+    month_start, month_end = _dashboard_range(date_from, date_to)
+    range_months = max(
+        (month_end.year - month_start.year) * 12
+        + month_end.month - month_start.month,
+        1,
+    )
+    previous_month_start = _shift_month(month_start, -range_months)
+    previous_month_end = _shift_month(previous_month_start, range_months)
     month_filter = Q(
         quote_date__gte=month_start.date(),
         quote_date__lt=month_end.date(),
     )
     previous_month_filter = Q(
         quote_date__gte=previous_month_start.date(),
-        quote_date__lt=month_start.date(),
+        quote_date__lt=previous_month_end.date(),
     )
-    counts = queryset.aggregate(
+    counts = currency_queryset.aggregate(
         accepted_count=Count(
             "pk",
             filter=Q(status=QuoteStatus.ACCEPTED),
@@ -198,7 +235,7 @@ def build_dashboard_summary(
     )
     won_amount = (
         _with_first_accepted_at(
-            queryset.filter(
+            currency_queryset.filter(
                 currency__in=currency_values,
                 status=QuoteStatus.ACCEPTED,
             )
@@ -369,14 +406,24 @@ def _breakdown_quote_no(row: dict, display_counts: dict[str, int]) -> str:
 def build_dashboard_analytics(
     queryset: QuerySet[Quotation],
     currency: str = DEFAULT_DASHBOARD_CURRENCY,
+    date_from: str = "",
+    date_to: str = "",
 ) -> dict[str, object]:
     """Build bounded chart aggregates without serializing quotation rows."""
     currency = _normalize_currency(currency)
     local_now = timezone.localtime()
+    if date_from or date_to:
+        range_start, range_end = _dashboard_range(date_from, date_to)
+    else:
+        range_end = _month_start(local_now)
+        range_start = _shift_month(range_end, -(MONTH_PERIOD_COUNT - 1))
+        range_end = _next_month(range_end)
     currency_queryset = _filter_by_currency(queryset, currency)
     breakdown_queryset = currency_queryset.filter(
         status__in=CHART_STATUSES,
         grand_total__gt=0,
+        quote_date__gte=range_start.date(),
+        quote_date__lt=range_end.date(),
     )
     breakdown_totals = breakdown_queryset.aggregate(
         amount=Sum("grand_total"),
@@ -414,14 +461,10 @@ def build_dashboard_analytics(
         }
         for row in breakdown_rows
     ]
-    month_start = _month_start(local_now)
-    month_starts = [
-        _shift_month(month_start, offset)
-        for offset in range(-(MONTH_PERIOD_COUNT - 1), 1)
-    ]
-    week_start = _week_start(local_now)
+    month_starts = _month_starts(range_start, range_end)
+    week_end = _week_start(range_end - timedelta(microseconds=1))
     week_starts = [
-        week_start - timedelta(weeks=offset)
+        week_end - timedelta(weeks=offset)
         for offset in range(WEEK_PERIOD_COUNT - 1, -1, -1)
     ]
     return {

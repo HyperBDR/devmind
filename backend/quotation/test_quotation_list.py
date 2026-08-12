@@ -149,6 +149,16 @@ class QuotationListAPITests(TestCase):
             quote.id for quote in expected[10:]
         ]
 
+    def test_list_facets_include_currencies_across_all_pages(self):
+        self._quote(1)
+        cny = self._quote(2)
+        Quotation.objects.filter(pk=cny.pk).update(currency="CNY")
+
+        response = self.api.get(self.url)
+
+        assert response.status_code == 200
+        assert response.data["facets"]["currencies"] == ["CNY", "USD"]
+
     def test_allowed_page_sizes(self):
         self._create_quotes(55)
 

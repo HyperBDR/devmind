@@ -40,6 +40,7 @@ from quotation.services.form_context import (
 from quotation.services.quotation_queries import (
     annotate_quotation_list,
     attach_quotation_document_summaries,
+    quotation_currency_facets,
     filter_quotation_list,
     quotation_product_line_facets,
     quotation_currency_facets,
