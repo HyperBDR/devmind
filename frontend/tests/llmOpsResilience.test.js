@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import { userFacingApiError } from '../src/utils/llmOpsErrors.js'
 import {
+  dataGroupsForResalePublishing,
   dataGroupsForSection,
   toolbarForSection
 } from '../src/utils/llmOpsSectionData.js'
@@ -95,6 +96,34 @@ test('loads only the data groups required by each section', () => {
   assert.ok(dataGroupsForSection('modelWorkbench').includes('records'))
   assert.ok(!dataGroupsForSection('taskLogs').includes('summary'))
   assert.ok(!dataGroupsForSection('audit').includes('models'))
+  assert.deepEqual(dataGroupsForSection('reseller'), [
+    'platforms',
+    'providers',
+    'models',
+    'listings',
+    'summary'
+  ])
+})
+
+test('loads publishing-only data when the resale workspace opens', () => {
+  assert.deepEqual(dataGroupsForResalePublishing(), [
+    'metaModels',
+    'channels',
+    'channelPricing',
+    'modelPrices',
+    'listings'
+  ])
+})
+
+test('does not pass unused model price items to the listing status board', () => {
+  const boardUsage = llmOpsPageSource.match(
+    /<AgioneListingStatusBoard[\s\S]*?\/>/
+  )?.[0]
+
+  assert.ok(boardUsage)
+  assert.doesNotMatch(boardUsage, /:price-items=/)
+  assert.doesNotMatch(listingBoardSource, /\bpriceItems\b/)
+  assert.doesNotMatch(listingBoardSource, /\bpriceItemsRef\b/)
 })
 
 test('shows page toolbar controls only where they are meaningful', () => {

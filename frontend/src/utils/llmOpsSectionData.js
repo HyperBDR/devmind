@@ -33,17 +33,7 @@ const SECTION_DATA_GROUPS = {
     'modelPrices'
   ],
   reconciler: ['channels', 'models', 'records'],
-  reseller: [
-    'platforms',
-    'providers',
-    'metaModels',
-    'models',
-    'channels',
-    'channelPricing',
-    'modelPrices',
-    'listings',
-    'summary'
-  ],
+  reseller: ['platforms', 'providers', 'models', 'listings', 'summary'],
   taskLogs: ['sources', 'runs'],
   workflow: ['platforms']
 }
@@ -69,6 +59,18 @@ const GLOBAL_REFRESH_SECTIONS = new Set([
   'reconciler',
   'reseller'
 ])
+
+const RESALE_PUBLISHING_DATA_GROUPS = [
+  'metaModels',
+  'channels',
+  'channelPricing',
+  'modelPrices',
+  'listings'
+]
+
+export function dataGroupsForResalePublishing() {
+  return [...RESALE_PUBLISHING_DATA_GROUPS]
+}
 
 export function dataGroupsForSection(section) {
   return [...(SECTION_DATA_GROUPS[section] || [])]

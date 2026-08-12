@@ -2,7 +2,7 @@ from decimal import Decimal
 from unittest import mock
 
 from django.db import connection
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 
 from llm_ops.models import (
@@ -23,6 +23,7 @@ from llm_ops.models import (
 )
 from llm_ops.price_table_validation import usage_range_spec
 from llm_ops.services import (
+    build_currency_conversion_context,
     calculate_channel_model_cost,
     import_manual_model_prices,
     match_meta_model_by_alias_or_name,
@@ -37,6 +38,25 @@ from llm_ops.services import (
     sync_dependent_channel_price_items_for_price_items,
 )
 from llm_ops.tier_pricing import TieredPriceNotSupportedError
+
+
+class CurrencyConversionContextTests(SimpleTestCase):
+    @mock.patch("llm_ops.services._build_exchange_rate_info")
+    def test_builds_context_without_remote_exchange_rate_lookup(
+        self,
+        mock_exchange_rate_info,
+    ):
+        mock_exchange_rate_info.return_value = {
+            "exchange_rate": 7.23,
+            "rate_source_label": "ExchangeRate API",
+            "rate_source_url": "https://www.exchangerate-api.com/",
+            "rate_collected_at": "2026-08-11T00:00:00+00:00",
+        }
+
+        context = build_currency_conversion_context("CNY")
+
+        self.assertEqual(context.usd_to_cny_rate, Decimal("7.23"))
+        mock_exchange_rate_info.assert_called_once_with(allow_remote=False)
 
 
 class LLMOpsPricingServiceTests(TestCase):

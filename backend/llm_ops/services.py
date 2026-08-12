@@ -554,7 +554,7 @@ def build_currency_conversion_context(
     if target_currency not in SUPPORTED_DISPLAY_CURRENCIES:
         target_currency = "CNY"
 
-    exchange_info = _build_exchange_rate_info()
+    exchange_info = _build_exchange_rate_info(allow_remote=False)
     rate = decimal_or_zero(exchange_info.get("exchange_rate")) or ONE
     return CurrencyConversionContext(
         display_currency=target_currency,
