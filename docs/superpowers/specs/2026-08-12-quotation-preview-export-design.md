@@ -27,9 +27,10 @@ quotation rendering. In particular, it must not modify:
 - database schemas or migrations;
 - Dockerfiles, Compose files, images, dependencies, or container topology.
 
-Production edits are limited to the quotation renderer and its renderer tests,
-plus the backend copy of the existing logo asset. Any required change outside
-that boundary stops implementation for renewed approval.
+Production edits are limited to the quotation renderer, the renderer call in
+`export_pipeline.py`, their renderer tests, and the backend copy of the
+existing logo asset. Any required change outside that boundary stops
+implementation for renewed approval.
 
 ## Rendering Architecture
 
