@@ -106,6 +106,11 @@ const props = withDefaults(
     historyHasMore?: boolean
     historyLoading?: boolean
     editingQuote?: Quotation | null
+    customerPrefill?: {
+      company: string
+      contact: string
+      email: string
+    } | null
     currentUser?: {
       name: string
       title: string
@@ -120,6 +125,7 @@ const props = withDefaults(
     historyHasMore: false,
     historyLoading: false,
     editingQuote: null,
+    customerPrefill: null,
   },
 )
 
@@ -355,6 +361,16 @@ function applyCustomerRecord(record: CustomerHistoryRecord) {
   email.value = record.email
 }
 
+function applyCustomerPrefill(prefill: NonNullable<typeof props.customerPrefill>) {
+  if (props.editingQuote) return
+  clientCompany.value = prefill.company
+  contactPerson.value = prefill.contact
+  email.value = prefill.email
+  billingCompany.value = prefill.company
+  billingContact.value = prefill.contact
+  billingEmail.value = prefill.email
+}
+
 function applyBillingRecord(record: BillingHistoryRecord) {
   billingCompany.value = record.billingCompany
   billingContact.value = record.billingContact
@@ -461,6 +477,14 @@ watch(
       props.currentUser?.email,
       historySourceQuotations.value,
     )
+  },
+  { immediate: true },
+)
+
+watch(
+  () => props.customerPrefill,
+  (prefill) => {
+    if (prefill) applyCustomerPrefill(prefill)
   },
   { immediate: true },
 )
@@ -644,9 +668,17 @@ function initCreateForm() {
   const draft = loadCreateQuoteDraft(props.currentUser?.email)
   if (draft) {
     applyCreateDraft(draft)
+    if (props.customerPrefill) {
+      window.setTimeout(() => {
+        applyCustomerPrefill(props.customerPrefill as NonNullable<typeof props.customerPrefill>)
+      }, 0)
+    }
     return
   }
   resetCreateForm()
+  if (props.customerPrefill) {
+    applyCustomerPrefill(props.customerPrefill)
+  }
 }
 
 onBeforeUnmount(() => {
@@ -1149,6 +1181,7 @@ const itemErrorEntries = computed(() =>
                       :model-value="productLine"
                       :disabled="!!editingQuote && quoteNoMode === 'auto'"
                       :options="productLineSelectOptions"
+                      panel-class-name="qmp-dropdown-panel--product-line"
                       @update:model-value="onProductLineSelect"
                     />
                     <button
@@ -1331,6 +1364,7 @@ const itemErrorEntries = computed(() =>
                 </label>
                 <HistoryTextInput
                   test-id="customer-company-input"
+                  panel-class-name="qmp-dropdown-panel--customer-company"
                   :model-value="clientCompany"
                   :options="
                     customerCompanyOptions.map((record) => ({
@@ -1431,6 +1465,7 @@ const itemErrorEntries = computed(() =>
                   </label>
                   <HistoryTextInput
                     test-id="billing-company-input"
+                    panel-class-name="qmp-dropdown-panel--customer-company"
                     :model-value="billingCompany"
                     :options="
                       billingCompanyOptions.map((record) => ({

@@ -628,6 +628,18 @@
                 <span>{{ t('quotation.create') }}</span>
               </router-link>
               <router-link
+                to="/quotation/customers"
+                class="nav-item nav-item-child"
+                :class="isActive('/quotation/customers') ? 'nav-item-active' : ''"
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/customers')"
+              >
+                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 21v-2a4 4 0 00-4-4H6a4 4 0 00-4 4v2m6-6a4 4 0 100-8 4 4 0 000 8zm8-3a4 4 0 100-8 4 4 0 000 8zm0 0v6m3-3h-6" />
+                </svg>
+                <span>{{ t('quotation.customerCenter.menuLabel') }}</span>
+              </router-link>
+              <router-link
                 to="/quotation/catalog"
                 class="nav-item nav-item-child"
                 :class="

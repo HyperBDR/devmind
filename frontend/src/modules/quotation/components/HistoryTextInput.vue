@@ -35,6 +35,7 @@ const props = withDefaults(
     rows?: number
     className?: string
     inputClassName?: string
+    panelClassName?: string
     error?: string
     helperText?: string
     testId?: string
@@ -47,6 +48,7 @@ const props = withDefaults(
     rows: 2,
     className: '',
     inputClassName: '',
+    panelClassName: '',
     hasMore: false,
     loadingMore: false,
   },
@@ -176,6 +178,7 @@ function handleDropdownScroll(event: Event) {
     <DropdownPanel
       v-if="showDropdown"
       :test-id="testId ? `${testId}-history` : undefined"
+      :class-name="panelClassName || 'qmp-dropdown-panel--history'"
       @scroll.passive="handleDropdownScroll"
     >
       <li v-for="option in filteredOptions" :key="option.key">
