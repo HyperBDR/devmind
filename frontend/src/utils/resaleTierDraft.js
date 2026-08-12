@@ -7,6 +7,11 @@ const DIMENSIONS = [
 const BILLING_UNIT = 'per_1m_tokens'
 const FLAT = 'flat'
 const USAGE_RANGE = 'usage_range'
+const USAGE_RANGE_SPEC = {
+  aggregation_period: 'request',
+  tier_charge_mode: 'matched_tier',
+  tier_metric: 'request_input_tokens'
+}
 
 function decimal(value) {
   if (value === null || value === undefined || value === '') return null
@@ -288,6 +293,42 @@ export function normalizeResalePriceDraft(draft, currency) {
       itemForRow(row, dimension, currency, USAGE_RANGE)
     )
   })
+}
+
+/** Convert a manual text price schedule into the source price item contract. */
+export function buildManualPriceItems(draft) {
+  return DIMENSIONS.flatMap(([key, dimension]) => {
+    const rows = Array.isArray(draft?.[key]) ? draft[key] : []
+    const hasPrice = rows.some((row) => decimal(row.price) !== null)
+    if (!hasPrice) return []
+    const tierType = isFlatRows(rows) ? FLAT : USAGE_RANGE
+    return sortRows(rows).map((row) => {
+      const item = itemForRow(row, dimension, '', tierType)
+      delete item.currency
+      if (tierType === USAGE_RANGE) item.spec = { ...USAGE_RANGE_SPEC }
+      return item
+    })
+  })
+}
+
+/** Validate only dimensions selected for one manual price schedule. */
+export function validateManualPriceDraft(draft) {
+  const selectedDraft = Object.fromEntries(
+    DIMENSIONS.flatMap(([key]) => {
+      const rows = Array.isArray(draft?.[key]) ? draft[key] : []
+      return rows.some((row) => decimal(row.price) !== null)
+        ? [[key, rows]]
+        : []
+    })
+  )
+  if (!Object.keys(selectedDraft).length) {
+    return { 'input:0:price': 'price_table.items_required' }
+  }
+  const errors = validateResalePriceDraft(selectedDraft)
+  DIMENSIONS.forEach(([key]) => {
+    if (!selectedDraft[key]) delete errors[`${key}:0:price`]
+  })
+  return errors
 }
 
 /** Return whether a draft uses the tiered API representation. */

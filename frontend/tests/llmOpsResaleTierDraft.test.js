@@ -5,6 +5,7 @@ import {
   addResaleTierCard,
   buildResaleTierCards,
   buildFlatResalePriceItems,
+  buildManualPriceItems,
   buildResaleTierDraftFromCards,
   hasTieredResalePrices,
   normalizeResalePriceDraft,
@@ -14,6 +15,7 @@ import {
   shouldRestoreSavedResalePriceDraft,
   updateResaleTierCard,
   updateResaleTierRows,
+  validateManualPriceDraft,
   validateResalePriceDraft
 } from '../src/utils/resaleTierDraft.js'
 
@@ -56,6 +58,77 @@ test('builds a flat resale price table for input, output, and cache', () => {
       }
     ]
   )
+})
+
+test('builds manual tier items without mixing legacy row fields', () => {
+  const items = buildManualPriceItems({
+    cache: [
+      { end: '1000000', flat: false, price: '', start: '0' },
+      { end: null, flat: false, price: '', start: '1000000' }
+    ],
+    input: [
+      { end: '1000000', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '0.8', start: '1000000' }
+    ],
+    output: [
+      { end: '1000000', flat: false, price: '3', start: '0' },
+      { end: null, flat: false, price: '2.5', start: '1000000' }
+    ]
+  })
+
+  assert.deepEqual(
+    items.map((item) => [
+      item.dimension,
+      item.billing_unit,
+      item.unit_price,
+      item.tier_start,
+      item.tier_end,
+      item.tier_type
+    ]),
+    [
+      ['text_input', 'per_1m_tokens', '1', '0', '1000000', 'usage_range'],
+      ['text_input', 'per_1m_tokens', '0.8', '1000000', null, 'usage_range'],
+      ['text_output', 'per_1m_tokens', '3', '0', '1000000', 'usage_range'],
+      ['text_output', 'per_1m_tokens', '2.5', '1000000', null, 'usage_range']
+    ]
+  )
+  assert.equal(
+    items.some((item) => 'currency' in item),
+    false
+  )
+  assert.deepEqual(items[0].spec, {
+    aggregation_period: 'request',
+    tier_charge_mode: 'matched_tier',
+    tier_metric: 'request_input_tokens'
+  })
+})
+
+test('validates only manual dimensions that contain a price', () => {
+  const valid = validateManualPriceDraft({
+    cache: [
+      { end: '100', flat: false, price: '', start: '0' },
+      { end: null, flat: false, price: '', start: '100' }
+    ],
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '0.8', start: '100' }
+    ],
+    output: [
+      { end: '100', flat: false, price: '3', start: '0' },
+      { end: null, flat: false, price: '2.5', start: '100' }
+    ]
+  })
+  const partial = validateManualPriceDraft({
+    cache: [],
+    input: [
+      { end: '100', flat: false, price: '1', start: '0' },
+      { end: null, flat: false, price: '', start: '100' }
+    ],
+    output: []
+  })
+
+  assert.deepEqual(valid, {})
+  assert.equal(partial['input:1:price'], 'price_table.invalid_price')
 })
 
 test('normalizes tier rows in stable dimension and boundary order', () => {

@@ -44,6 +44,7 @@ from .price_table_validation import (
     PriceTableValidationError,
     price_table_variant_key,
     validate_price_table,
+    validate_price_table_groups,
 )
 from .services import (
     SUPPORTED_DISPLAY_CURRENCIES,
@@ -2052,6 +2053,42 @@ class YunceCollectionRequestSerializer(serializers.Serializer):
     base_url = serializers.URLField(required=False)
 
 
+class ManualPriceItemInputSerializer(serializers.Serializer):
+    """Validate one normalized source price item from manual entry."""
+
+    dimension = serializers.ChoiceField(
+        choices=ModelPriceItem.DIMENSION_CHOICES,
+    )
+    billing_unit = serializers.ChoiceField(
+        choices=ModelPriceItem.BILLING_UNIT_CHOICES,
+    )
+    unit_price = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        min_value=Decimal("0"),
+    )
+    tier_type = serializers.ChoiceField(
+        choices=(
+            ModelPriceItem.TIER_FLAT,
+            ModelPriceItem.TIER_USAGE_RANGE,
+        ),
+        default=ModelPriceItem.TIER_FLAT,
+    )
+    tier_start = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        allow_null=True,
+        required=False,
+    )
+    tier_end = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        allow_null=True,
+        required=False,
+    )
+    spec = serializers.JSONField(required=False, default=dict)
+
+
 class ManualPriceImportRowSerializer(serializers.Serializer):
     """Validate one manually imported model pricing row."""
 
@@ -2116,6 +2153,10 @@ class ManualPriceImportRowSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    price_items = ManualPriceItemInputSerializer(
+        many=True,
+        required=False,
+    )
 
     def validate_currency(self, value):
         return validate_currency_code(value, required=False)
@@ -2132,7 +2173,37 @@ class ManualPriceImportRowSerializer(serializers.Serializer):
             "video_output_price_per_second",
         )
         validate_non_negative_prices(attrs, price_fields)
-        if not any(attrs.get(field) is not None for field in price_fields):
+        has_legacy_prices = any(
+            attrs.get(field) is not None for field in price_fields
+        )
+        price_items = attrs.get("price_items") or []
+        if has_legacy_prices and price_items:
+            raise serializers.ValidationError(
+                {
+                    "price_items": (
+                        "Cannot combine price_items with legacy price fields."
+                    )
+                }
+            )
+        if price_items:
+            try:
+                validate_price_table_groups(price_items)
+            except PriceTableValidationError as exc:
+                raise serializers.ValidationError(
+                    {
+                        "price_items": {
+                            "code": serializers.ErrorDetail(
+                                exc.code,
+                                code=exc.code,
+                            ),
+                            "message": serializers.ErrorDetail(
+                                exc.message,
+                                code=exc.code,
+                            ),
+                        }
+                    }
+                ) from exc
+        if not has_legacy_prices and not price_items:
             raise serializers.ValidationError(
                 "At least one price field is required."
             )

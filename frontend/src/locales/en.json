@@ -2568,6 +2568,10 @@
         "custom": "Select meta model",
         "existing": "Select existing model"
       },
+      "priceMode": {
+        "flat": "Flat price",
+        "tiered": "Tiered price"
+      },
       "fields": {
         "currency": "Currency",
         "metaModel": "Meta model",
@@ -2658,9 +2662,15 @@
         "customModelName": "Enter a custom model name.",
         "customModelProvider": "Select the model provider for the custom model.",
         "noSource": "Missing price source.",
+        "invalidTierBoundary": "Tier boundaries must exceed their starts and keep adjacent ranges connected.",
+        "invalidTierPrice": "Enter a tier price greater than or equal to 0.",
         "price": "Enter at least one price dimension.",
         "selectExistingModel": "Select an existing model.",
-        "selectMetaModel": "Select a meta model."
+        "selectMetaModel": "Select a meta model.",
+        "tierGap": "Adjacent tiers cannot leave a range gap.",
+        "tierOverlap": "Adjacent tiers cannot overlap.",
+        "tierTable": "Correct the tier ranges or prices.",
+        "tierZeroStart": "The first tier must start at 0 tokens."
       },
       "groups": {
         "currentProvider": "Default model provider",
