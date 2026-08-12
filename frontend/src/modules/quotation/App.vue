@@ -33,6 +33,7 @@ import QuotationDetailsDrawer from './components/QuotationDetailsDrawer.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
+import CustomerCenter from './components/CustomerCenter.vue'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from './utils/feishuLinkState'
 import {
   loadProductLineOptions,
@@ -76,6 +77,7 @@ const TAB_ROUTES: Record<string, string> = {
   create: '/quotation/create',
   catalog: '/quotation/catalog',
   audit: '/quotation/audit',
+  customers: '/quotation/customers',
 }
 
 type ListDateFilters = {
@@ -142,6 +144,7 @@ function tabFromRoutePath(path: string): string {
   if (path.startsWith('/quotation/imports')) return 'list'
   if (path.startsWith('/quotation/catalog')) return 'catalog'
   if (path.startsWith('/quotation/audit')) return 'audit'
+  if (path.startsWith('/quotation/customers')) return 'customers'
   return 'dashboard'
 }
 
@@ -331,6 +334,11 @@ const editingQuoteId = ref<string | null>(
     ? route.query.edit
     : null,
 )
+const customerPrefill = ref<{
+  company: string
+  contact: string
+  email: string
+} | null>(null)
 
 const toastMessage = ref<string | null>(null)
 const toastType = ref<'success' | 'info' | 'error'>('success')
@@ -461,6 +469,9 @@ async function loadCurrentQuotationTab() {
     }
     await Promise.all(tasks)
   }
+  if (currentTab.value === 'customers') {
+    await loadQuotationFormContext()
+  }
 }
 
 onMounted(async () => {
@@ -568,6 +579,23 @@ function goTab(tab: string, listFilters?: ListDateFilters) {
   if (tab === 'list') {
     void refreshQuotations(quotationListQuery.value)
   }
+}
+
+function handleCustomerQuote(payload: {
+  company: string
+  name: string
+  email: string
+} | undefined) {
+  if (!payload) {
+    goTab('create')
+    return
+  }
+  customerPrefill.value = {
+    company: payload.company,
+    contact: payload.name,
+    email: payload.email,
+  }
+  goTab('create')
 }
 
 async function handleDeleteQuote(id: string) {
@@ -693,7 +721,12 @@ async function handleFeishuUploadDone(_id: string) {
 
 async function handleImportedQuotationCreated(id: string) {
   await refreshQuotations()
+  await loadQuotationFormContext()
   selectedQuotationId.value = id
+}
+
+async function handleRefreshCustomers() {
+  await loadQuotationFormContext()
 }
 
 async function handleReconcileFeishuLinks() {
@@ -1040,6 +1073,7 @@ function reloadPage() {
             <template v-else-if="currentTab === 'details'">报价方案单据详情预览</template>
             <template v-else-if="currentTab === 'catalog'">商务目录要素及政策配置</template>
             <template v-else-if="currentTab === 'audit'">{{ t('quotation.pages.audit.title') }}</template>
+            <template v-else-if="currentTab === 'customers'">客户中心</template>
           </span>
         </div>
 
@@ -1136,6 +1170,7 @@ function reloadPage() {
           :history-has-more="quotationFormContextHasMore"
           :history-loading="quotationFormContextLoading"
           :editing-quote="editingQuote"
+          :customer-prefill="customerPrefill"
           :current-user="auth.currentUser"
           :product-line-options="productLineOptions"
           @save-quote="handleSaveQuotation"
@@ -1169,6 +1204,14 @@ function reloadPage() {
         />
 
         <AuditLogPage v-if="currentTab === 'audit'" />
+
+        <CustomerCenter
+          v-if="currentTab === 'customers'"
+          :quotations="quotationFormContext"
+          @navigate-to-create="handleCustomerQuote"
+          @toast="triggerToast"
+          @refresh="handleRefreshCustomers"
+        />
       </main>
 
       <QuotationDetailsDrawer
