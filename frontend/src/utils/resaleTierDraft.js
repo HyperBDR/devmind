@@ -31,6 +31,232 @@ function isFlatRows(rows) {
   return rows.length === 1 && (rows[0].flat || rows[0].start === null)
 }
 
+function stableObjectKey(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableObjectKey).join(',')}]`
+  }
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableObjectKey(value[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function tierBoundaryKey(item) {
+  return [
+    item.dimension,
+    item.billing_unit,
+    item.currency,
+    item.tier_type,
+    comparableDecimal(item.tier_start),
+    comparableDecimal(item.tier_end)
+  ].join(':')
+}
+
+function priceAtUsage(rows, usage) {
+  const flatRow = rows.find((row) => row.flat || row.start === null)
+  if (flatRow) return String(flatRow.price ?? '')
+  const match = sortRows(rows).find((row) => {
+    const start = decimal(row.start)
+    const end = decimal(row.end)
+    return start !== null && start <= usage && (end === null || usage < end)
+  })
+  return String(match?.price ?? '')
+}
+
+/** Keep one complete pricing variant when stale current specs overlap. */
+export function selectPreferredChannelPriceItems(items = []) {
+  const groups = new Map()
+  items.forEach((item) => {
+    const key = stableObjectKey(item?.spec || {})
+    const group = groups.get(key) || []
+    group.push(item)
+    groups.set(key, group)
+  })
+  const ranked = [...groups.entries()].sort(
+    ([leftKey, left], [rightKey, right]) => {
+      const leftDimensions = new Set(left.map((item) => item.dimension)).size
+      const rightDimensions = new Set(right.map((item) => item.dimension)).size
+      const dimensionScore = rightDimensions - leftDimensions
+      if (dimensionScore) return dimensionScore
+      const emptySpecScore =
+        Number(rightKey === '{}') - Number(leftKey === '{}')
+      if (emptySpecScore) return emptySpecScore
+      if (right.length !== left.length) return right.length - left.length
+      const leftId = Math.min(...left.map((item) => Number(item.id || 0)))
+      const rightId = Math.min(...right.map((item) => Number(item.id || 0)))
+      return leftId - rightId
+    }
+  )
+  const selected = ranked[0]?.[1] || []
+  const boundaries = new Set()
+  return selected.filter((item) => {
+    const key = tierBoundaryKey(item)
+    if (boundaries.has(key)) return false
+    boundaries.add(key)
+    return true
+  })
+}
+
+/** Merge dimension-specific ranges into AGIOne-style shared tier cards. */
+export function buildResaleTierCards(draft = {}) {
+  const rowsByKey = Object.fromEntries(
+    DIMENSIONS.map(([key]) => [
+      key,
+      Array.isArray(draft?.[key]) ? draft[key] : []
+    ])
+  )
+  const hasTieredRows = DIMENSIONS.some(([key]) =>
+    rowsByKey[key].some((row) => !row.flat && row.start !== null)
+  )
+  if (!hasTieredRows) {
+    return [
+      {
+        end: null,
+        flat: true,
+        prices: Object.fromEntries(
+          DIMENSIONS.map(([key]) => [
+            key,
+            String(rowsByKey[key][0]?.price ?? '')
+          ])
+        ),
+        start: null
+      }
+    ]
+  }
+
+  const boundaries = new Set([0])
+  let hasUnboundedTier = false
+  DIMENSIONS.forEach(([key]) => {
+    rowsByKey[key].forEach((row) => {
+      if (row.flat || row.start === null) return
+      const start = decimal(row.start)
+      const end = decimal(row.end)
+      if (start !== null) boundaries.add(start)
+      if (end === null) hasUnboundedTier = true
+      else boundaries.add(end)
+    })
+  })
+  const sortedBoundaries = [...boundaries].sort((left, right) => left - right)
+  const intervals = sortedBoundaries.slice(0, -1).map((start, index) => ({
+    end: sortedBoundaries[index + 1],
+    start
+  }))
+  if (hasUnboundedTier) {
+    intervals.push({ end: null, start: sortedBoundaries.at(-1) })
+  }
+
+  return intervals.map(({ end, start }) => ({
+    end: end === null ? null : String(end),
+    flat: false,
+    prices: Object.fromEntries(
+      DIMENSIONS.map(([key]) => [key, priceAtUsage(rowsByKey[key], start)])
+    ),
+    start: String(start)
+  }))
+}
+
+/** Convert shared tier cards back to the editable dimension draft. */
+export function buildResaleTierDraftFromCards(cards = []) {
+  return Object.fromEntries(
+    DIMENSIONS.map(([key]) => [
+      key,
+      cards.map((card) => ({
+        end: card.flat ? null : stringValue(card.end),
+        flat: Boolean(card.flat),
+        price: String(card.prices?.[key] ?? ''),
+        start: card.flat ? null : stringValue(card.start)
+      }))
+    ])
+  )
+}
+
+/** Add a shared tier while keeping the terminal range unbounded. */
+export function addResaleTierCard(cards = [], step = 1000000) {
+  const nextCards = cards.map((card) => ({
+    ...card,
+    prices: { ...card.prices }
+  }))
+  if (!nextCards.length) return nextCards
+  if (nextCards.length === 1 && nextCards[0].flat) {
+    const prices = { ...nextCards[0].prices }
+    return [
+      { end: String(step), flat: false, prices, start: '0' },
+      { end: null, flat: false, prices: { ...prices }, start: String(step) }
+    ]
+  }
+  const last = nextCards.at(-1)
+  if (last.end !== null) {
+    nextCards.push({
+      end: null,
+      flat: false,
+      prices: { ...last.prices },
+      start: String(last.end)
+    })
+    return nextCards
+  }
+  const split = String((decimal(last.start) || 0) + step)
+  nextCards[nextCards.length - 1] = { ...last, end: split }
+  nextCards.push({
+    end: null,
+    flat: false,
+    prices: { ...last.prices },
+    start: split
+  })
+  return nextCards
+}
+
+/** Update one shared boundary or price and preserve adjacent continuity. */
+export function updateResaleTierCard(cards = [], index, field, value) {
+  const nextCards = cards.map((card) => ({
+    ...card,
+    prices: { ...card.prices }
+  }))
+  const card = nextCards[index]
+  if (!card) return nextCards
+  if (DIMENSIONS.some(([key]) => key === field)) {
+    card.prices[field] = value
+    return nextCards
+  }
+  if (field === 'end') {
+    const amount = decimal(value)
+    const start = decimal(card.start)
+    const nextCard = nextCards[index + 1]
+    const nextEnd = decimal(nextCard?.end)
+    if (nextCard && amount === null) return nextCards
+    if (amount !== null && start !== null && amount <= start) return nextCards
+    if (amount !== null && nextEnd !== null && amount >= nextEnd) {
+      return nextCards
+    }
+  }
+  card[field] = value
+  if (field === 'end' && nextCards[index + 1]) {
+    nextCards[index + 1].start = value
+  }
+  if (field === 'start' && nextCards[index - 1]) {
+    nextCards[index - 1].end = value
+  }
+  return nextCards
+}
+
+/** Remove a shared tier and bridge the remaining interval cards. */
+export function removeResaleTierCard(cards = [], index) {
+  const nextCards = cards
+    .filter((_, cardIndex) => cardIndex !== index)
+    .map((card) => ({ ...card, prices: { ...card.prices } }))
+  if (!nextCards.length) return nextCards
+  if (index === 0) {
+    nextCards[0].start = '0'
+  } else if (index < cards.length - 1) {
+    nextCards[index - 1].end = cards[index].end
+  } else {
+    nextCards[nextCards.length - 1].end = null
+  }
+  return nextCards
+}
+
 function itemForRow(row, dimension, currency, tierType) {
   return {
     billing_unit: BILLING_UNIT,
