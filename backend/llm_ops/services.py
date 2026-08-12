@@ -941,40 +941,18 @@ def sync_manual_model_price_items(
     """Replace current manual price items for one model/source pair."""
     currency = normalize_currency(row.get("currency") or default_currency)
     now = timezone.now()
-    payloads = []
-    for field, (dimension, billing_unit) in MANUAL_MODEL_PRICE_FIELDS.items():
-        if field not in row or row.get(field) is None:
-            continue
-        payloads.append(
-            {
-                "provider": provider,
-                "model": model,
-                "meta_model": model.meta_model,
-                "source": source,
-                "price_role": price_role_for_source(
-                    source,
-                    meta_model=model.meta_model,
-                ),
-                "dimension": dimension,
-                "billing_unit": billing_unit,
-                "currency": currency,
-                "unit_price": row[field],
-                "tier_type": ModelPriceItem.TIER_FLAT,
-                "tier_start": None,
-                "tier_end": None,
-                "spec": {
-                    "import_mode": "manual_table",
-                    "row_index": row_index,
-                    "source_field": field,
-                },
-                "source_url": row.get("source_url") or source.endpoint_url,
-                "raw_payload": json_safe_payload(row),
-                "is_current": True,
-            }
-        )
+    payloads = manual_model_price_item_payloads(
+        source=source,
+        provider=provider,
+        model=model,
+        row=row,
+        row_index=row_index,
+        currency=currency,
+    )
     if not payloads:
         return {"current_items": [], "deactivated_item_ids": []}
 
+    validate_price_table_groups(payloads)
     current_queryset = ModelPriceItem.objects.filter(
         model=model,
         source=source,
@@ -993,8 +971,16 @@ def sync_manual_model_price_items(
                     "currency": payload["currency"],
                     "unit_price": str(payload["unit_price"]),
                     "tier_type": payload["tier_type"],
-                    "tier_start": "",
-                    "tier_end": "",
+                    "tier_start": (
+                        str(payload["tier_start"])
+                        if payload["tier_start"] is not None
+                        else ""
+                    ),
+                    "tier_end": (
+                        str(payload["tier_end"])
+                        if payload["tier_end"] is not None
+                        else ""
+                    ),
                     "spec": payload["spec"],
                 }
             )
@@ -1028,6 +1014,92 @@ def sync_manual_model_price_items(
     return {
         "current_items": current_items,
         "deactivated_item_ids": sorted(old_current_ids - current_item_ids),
+    }
+
+
+def manual_model_price_item_payloads(
+    *,
+    source: PriceCollectionSource,
+    provider: LLMProvider,
+    model: LLMModel,
+    row: dict,
+    row_index: int,
+    currency: str,
+) -> list[dict]:
+    """Build normalized manual item payloads from new or legacy inputs."""
+    normalized_items = row.get("price_items") or []
+    if normalized_items:
+        return [
+            manual_model_price_item_payload(
+                source=source,
+                provider=provider,
+                model=model,
+                row=row,
+                currency=currency,
+                item=item,
+            )
+            for item in normalized_items
+        ]
+
+    payloads = []
+    for field, (dimension, billing_unit) in MANUAL_MODEL_PRICE_FIELDS.items():
+        if field not in row or row.get(field) is None:
+            continue
+        payloads.append(
+            manual_model_price_item_payload(
+                source=source,
+                provider=provider,
+                model=model,
+                row=row,
+                currency=currency,
+                item={
+                    "dimension": dimension,
+                    "billing_unit": billing_unit,
+                    "unit_price": row[field],
+                    "tier_type": ModelPriceItem.TIER_FLAT,
+                    "tier_start": None,
+                    "tier_end": None,
+                    "spec": {
+                        "import_mode": "manual_table",
+                        "row_index": row_index,
+                        "source_field": field,
+                    },
+                },
+            )
+        )
+    return payloads
+
+
+def manual_model_price_item_payload(
+    *,
+    source: PriceCollectionSource,
+    provider: LLMProvider,
+    model: LLMModel,
+    row: dict,
+    currency: str,
+    item: dict,
+) -> dict:
+    """Add common persistence metadata to one manual normalized item."""
+    return {
+        "provider": provider,
+        "model": model,
+        "meta_model": model.meta_model,
+        "source": source,
+        "price_role": price_role_for_source(
+            source,
+            meta_model=model.meta_model,
+        ),
+        "dimension": item["dimension"],
+        "billing_unit": item["billing_unit"],
+        "currency": currency,
+        "unit_price": item["unit_price"],
+        "tier_type": item.get("tier_type") or ModelPriceItem.TIER_FLAT,
+        "tier_start": item.get("tier_start"),
+        "tier_end": item.get("tier_end"),
+        "spec": item.get("spec") or {},
+        "source_url": row.get("source_url") or source.endpoint_url,
+        "raw_payload": json_safe_payload(row),
+        "is_current": True,
     }
 
 

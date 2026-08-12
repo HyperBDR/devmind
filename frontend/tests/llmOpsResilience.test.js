@@ -220,6 +220,26 @@ test('keeps tier ranges readable in the listing table', () => {
   assert.doesNotMatch(listingBoardSource, /metric\.shape/)
 })
 
+test('manual and resale price entry compose the same tier editor', () => {
+  const manualSource = readFileSync(
+    new URL(
+      '../src/components/llm-ops/ManualPriceEntryModal.vue',
+      import.meta.url
+    ),
+    'utf8'
+  )
+  const resaleSource = readFileSync(
+    new URL('../src/components/llm-ops/ResaleTierEditor.vue', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(manualSource, /<TierPriceEditor/)
+  assert.match(resaleSource, /<TierPriceEditor/)
+  assert.match(manualSource, /buildManualPriceItems/)
+  assert.doesNotMatch(manualSource, /<ResaleTierCard/)
+  assert.doesNotMatch(resaleSource, /<ResaleTierCard/)
+})
+
 test('restores saved resale tiers from the active listing revision', () => {
   const items = [
     {

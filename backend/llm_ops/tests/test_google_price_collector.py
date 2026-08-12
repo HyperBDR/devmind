@@ -1,7 +1,20 @@
-from django.test import SimpleTestCase
+from decimal import Decimal
 
+from django.test import SimpleTestCase, TestCase
+
+from llm_ops.collection_services import (
+    sync_model_price_items,
+    upsert_collected_offering,
+)
+from llm_ops.models import (
+    LLMProvider,
+    MetaModel,
+    ModelPriceItem,
+    PriceCollectionSource,
+)
 from llm_ops.price_collectors import collect_vendor_price_catalog
 from llm_ops.price_collectors.parsers.google import extract_models
+from llm_ops.skill_runner import standard_catalog_to_collected_catalog
 
 
 GOOGLE_PRICING_HTML = """
@@ -123,3 +136,76 @@ class GooglePriceCatalogCollectorTests(SimpleTestCase):
             payload["models"][0]["model_id"],
             "gemini-2.0-flash",
         )
+
+
+class GooglePriceCatalogPersistenceTests(TestCase):
+    def test_standard_context_tiers_persist_as_usage_ranges(self):
+        provider = LLMProvider.objects.create(
+            name="Google",
+            code="google",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Google Gemini Official",
+            slug="google-official",
+            provider=provider,
+            source_category=(
+                PriceCollectionSource.SOURCE_CATEGORY_OFFICIAL_PROVIDER
+            ),
+            endpoint_url="https://example.com/google-pricing",
+            currency="USD",
+            is_enabled=True,
+            updates_model_prices=True,
+        )
+        meta_model = MetaModel.objects.create(
+            code="gemini-2.5-pro",
+            name="Gemini 2.5 Pro",
+            owner_code="google",
+            owner_name="Google",
+        )
+        payload = collect_vendor_price_catalog(
+            "google",
+            {
+                "raw_html": GOOGLE_PRICING_HTML,
+                "source_url": source.endpoint_url,
+                "provider_name": provider.name,
+                "model_codes": [meta_model.code],
+            },
+        )
+        item = standard_catalog_to_collected_catalog(payload).models[0]
+        offering, _ = upsert_collected_offering(
+            item,
+            source=source,
+            source_url=source.endpoint_url,
+            meta_model=meta_model,
+        )
+
+        price_items = sync_model_price_items(
+            item,
+            source=source,
+            offering=offering,
+            source_url=source.endpoint_url,
+        )
+
+        input_items = sorted(
+            (
+                price_item
+                for price_item in price_items
+                if price_item.dimension
+                == ModelPriceItem.DIMENSION_TEXT_INPUT
+            ),
+            key=lambda price_item: price_item.tier_start,
+        )
+        self.assertEqual(len(input_items), 2)
+        self.assertEqual(
+            [price_item.tier_type for price_item in input_items],
+            [
+                ModelPriceItem.TIER_USAGE_RANGE,
+                ModelPriceItem.TIER_USAGE_RANGE,
+            ],
+        )
+        self.assertEqual(input_items[0].tier_start, Decimal("0"))
+        self.assertEqual(input_items[0].tier_end, Decimal("200000"))
+        self.assertEqual(input_items[0].unit_price, Decimal("1.25"))
+        self.assertEqual(input_items[1].tier_start, Decimal("200000"))
+        self.assertIsNone(input_items[1].tier_end)
+        self.assertEqual(input_items[1].unit_price, Decimal("2.50"))
