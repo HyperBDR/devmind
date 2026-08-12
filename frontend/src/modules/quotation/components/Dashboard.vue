@@ -139,6 +139,28 @@ const availableCurrencyOptions = computed(() =>
     label: currencyOptionLabel(currency)
   }))
 )
+const availableMonthOptions = computed(() => {
+  const options = []
+  const now = new Date()
+  for (let offset = 0; offset < 60; offset += 1) {
+    const month = new Date(now.getFullYear(), now.getMonth() - offset, 1)
+    const value = `${month.getFullYear()}-${String(
+      month.getMonth() + 1
+    ).padStart(2, '0')}`
+    options.push({ value, label: formatSummaryPeriod(value) })
+  }
+  return options
+})
+const dateFromOptions = computed(() =>
+  availableMonthOptions.value.filter(
+    (option) => !selectedDateTo.value || option.value <= selectedDateTo.value
+  )
+)
+const dateToOptions = computed(() =>
+  availableMonthOptions.value.filter(
+    (option) => !selectedDateFrom.value || option.value >= selectedDateFrom.value
+  )
+)
 const overviewRecentQuotes = computed(() => recentQuotes.value.slice(0, 3))
 
 const selectedDateRangeLabel = computed(() => {
@@ -644,33 +666,25 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex shrink-0 items-center gap-3">
-        <label class="flex items-center">
-          <span class="sr-only">
-            {{ t('quotation.pages.dashboard.dateFromLabel') }}
-          </span>
-          <input
-            v-model="selectedDateFrom"
-            type="month"
-            :max="selectedDateTo"
-            class="h-9 w-[8.8rem] rounded-lg border border-dm-border bg-white px-2.5 text-xs font-semibold text-dm-text-secondary outline-none transition focus:border-dm-primary focus:ring-2 focus:ring-blue-100"
-            :aria-label="t('quotation.pages.dashboard.dateFromLabel')"
-            data-testid="dashboard-date-from"
-          />
-        </label>
+        <FormSelect
+          v-model="selectedDateFrom"
+          :aria-label="t('quotation.pages.dashboard.dateFromLabel')"
+          :options="dateFromOptions"
+          class-name="w-[8.8rem] shrink-0"
+          trigger-class-name="h-9 px-2.5 text-xs font-semibold text-dm-text-secondary"
+          panel-class-name="min-w-full max-h-64 overflow-y-auto"
+          test-id="dashboard-date-from"
+        />
         <span class="text-xs text-dm-text-tertiary">→</span>
-        <label class="flex items-center">
-          <span class="sr-only">
-            {{ t('quotation.pages.dashboard.dateToLabel') }}
-          </span>
-          <input
-            v-model="selectedDateTo"
-            type="month"
-            :min="selectedDateFrom"
-            class="h-9 w-[8.8rem] rounded-lg border border-dm-border bg-white px-2.5 text-xs font-semibold text-dm-text-secondary outline-none transition focus:border-dm-primary focus:ring-2 focus:ring-blue-100"
-            :aria-label="t('quotation.pages.dashboard.dateToLabel')"
-            data-testid="dashboard-date-to"
-          />
-        </label>
+        <FormSelect
+          v-model="selectedDateTo"
+          :aria-label="t('quotation.pages.dashboard.dateToLabel')"
+          :options="dateToOptions"
+          class-name="w-[8.8rem] shrink-0"
+          trigger-class-name="h-9 px-2.5 text-xs font-semibold text-dm-text-secondary"
+          panel-class-name="min-w-full max-h-64 overflow-y-auto"
+          test-id="dashboard-date-to"
+        />
         <FormSelect
           v-model="dashboardCurrency"
           :aria-label="t('quotation.pages.dashboard.currencyLabel')"
