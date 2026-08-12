@@ -15,6 +15,22 @@ images.
 - Existing API, worker, database, and Docker images remain in place.
 - The current bind-mounted backend source is the only runtime change.
 
+## Non-goals
+
+The implementation must not change behavior outside locally created
+quotation rendering. In particular, it must not modify:
+
+- quotation create, edit, delete, list, permissions, or audit behavior;
+- Feishu authentication, folder browsing, upload, retry, or open-link logic;
+- export job models, API contracts, idempotency, queues, or replica routing;
+- document-import parsing or original-file preservation;
+- database schemas or migrations;
+- Dockerfiles, Compose files, images, dependencies, or container topology.
+
+Production edits are limited to the quotation renderer and its renderer tests,
+plus the backend copy of the existing logo asset. Any required change outside
+that boundary stops implementation for renewed approval.
+
 ## Rendering Architecture
 
 Excel is the only server-side layout implementation. The renderer maps the
