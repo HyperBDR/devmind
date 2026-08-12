@@ -4,6 +4,7 @@ import type { Quotation } from '../types'
 import oneProLogoUrl from '../assets/onepro-logo.png'
 import {
   buildQuotationPreviewModel,
+  getCurrencySymbol,
   type PreviewLineItem,
   type PreviewUser,
 } from '../utils/quotationPreviewModel'
@@ -56,7 +57,10 @@ const titleSpacerClass = computed(() => (props.scale === 'compact' ? 'h-20' : 'h
 
 function money(value: number): string {
   if (!value) return ''
-  return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })
+  return `${getCurrencySymbol(model.value.currency)}${Number(value).toLocaleString(
+    undefined,
+    { maximumFractionDigits: 2 },
+  )}`
 }
 
 function percent(value: number): string {

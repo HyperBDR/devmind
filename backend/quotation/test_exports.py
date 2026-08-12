@@ -1,4 +1,7 @@
+import base64
 from datetime import date, timedelta
+from io import BytesIO
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
@@ -8,6 +11,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models.deletion import RestrictedError
 from django.test import TestCase, override_settings
+from openpyxl import load_workbook
 from quotation.metrics import export_metrics_snapshot
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
@@ -30,6 +34,7 @@ from quotation.models import (
     SyncJobStatus,
 )
 from quotation.services.export_archive import (
+    mark_upload_failed,
     sync_export_asset,
     update_export_upload_tracking,
 )
@@ -40,6 +45,7 @@ from quotation.services.export_renderer import (
     PdfConversionError,
     build_default_template_bytes,
     ensure_default_template,
+    render_quotation_xlsx,
 )
 from quotation.services.feishu_client import FeishuAPIError
 from quotation.services.quotation_service import build_quotation_snapshot
@@ -99,6 +105,24 @@ class QuotationExportFixture(TestCase):
 
 
 class QuotationExportApiTests(QuotationExportFixture):
+
+    def test_ip_allowlist_failure_explains_how_to_fix_feishu_upload(self):
+        job, _created = create_export_job(
+            quotation=self.quotation,
+            formats=["xlsx"],
+            actor=self.user,
+            quotation_version_no=1,
+            archive_to_feishu=True,
+        )
+        error = FeishuAPIError("IP is not allowed", code=99991401)
+
+        mark_upload_failed(job.id, error)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, ExportJobStatus.UPLOAD_FAILED)
+        self.assertEqual(job.error_code, "feishu_99991401")
+        self.assertIn("public IPv4", job.error_message)
+        self.assertIn("IP allowlist", job.error_message)
 
     @patch("quotation.tasks.render_quotation_export_task.apply_async")
     def test_create_export_pins_versions_and_enqueues_after_commit(
@@ -748,7 +772,94 @@ class QuotationExportApiTests(QuotationExportFixture):
 
 
 class QuotationExportTaskTests(QuotationExportFixture):
-    def create_job(self, formats, *, archive_to_feishu=False):
+    def test_preview_excel_matches_compact_preview_layout(self):
+        template = ensure_default_template()
+        logo_bytes = (
+            Path(__file__).resolve().parent / "assets" / "onepro-logo.png"
+        ).read_bytes()
+        snapshot = {
+            **self.version.snapshot_json,
+            "issuer_company_name": "OnePro Cloud Limited",
+            "issuer_signature": (
+                "data:image/png;base64,"
+                + base64.b64encode(logo_bytes).decode("ascii")
+            ),
+            "items": [
+                *[
+                    {
+                        "type": "Software",
+                        "description": f"Software item {index}",
+                        "qty": 1,
+                        "list_price": 60000,
+                        "discount_percent": 0,
+                        "net_unit_price": 60000,
+                        "extended_price": 60000,
+                    }
+                    for index in range(1, 5)
+                ],
+                *[
+                    {
+                        "type": "Other",
+                        "description": f"Other item {index}",
+                        "qty": 1,
+                        "list_price": 10,
+                        "discount_percent": 0,
+                        "net_unit_price": 10,
+                        "extended_price": 10,
+                    }
+                    for index in range(1, 7)
+                ],
+            ],
+        }
+
+        content = render_quotation_xlsx(template, snapshot)
+
+        workbook = load_workbook(BytesIO(content))
+        sheet = workbook["Quotation"]
+        self.assertEqual(
+            [sheet.column_dimensions[column].width for column in "ABCDEFG"],
+            [12, 24, 8, 12, 10, 17, 17],
+        )
+        self.assertEqual(sheet["A1"].value, None)
+        self.assertEqual(sheet["A2"].value, "OnePro Cloud Limited")
+        self.assertEqual(sheet["A3"].value, "Quotation")
+        self.assertEqual(sheet["F5"].value, "Date:")
+        self.assertEqual(sheet["A6"].value, "Ship to")
+        self.assertEqual(sheet["A11"].value, "Bill to:")
+        self.assertEqual(sheet["A16"].value, "Contact Person")
+        self.assertEqual(sheet["A19"].value, "Software")
+        self.assertEqual(sheet["A20"].value, "Item")
+        self.assertEqual(
+            [sheet.cell(row, 2).value for row in range(21, 25)],
+            [f"Software item {index}" for index in range(1, 5)],
+        )
+        self.assertEqual(sheet["C21"].value, 1)
+        self.assertEqual(sheet["C21"].number_format, "0")
+        self.assertEqual(sheet["D21"].value, 60000)
+        self.assertEqual(sheet["D21"].number_format, "#,##0")
+        self.assertEqual(sheet["E21"].value, 0)
+        self.assertEqual(sheet["E21"].number_format, '0"%"')
+        self.assertEqual(sheet["E25"].value, "Software subscription subtotal:")
+        self.assertEqual(sheet["A27"].value, "Others")
+        self.assertEqual(sheet["A28"].value, "Item")
+        self.assertEqual(
+            [sheet.cell(row, 2).value for row in range(29, 35)],
+            [f"Other item {index}" for index in range(1, 7)],
+        )
+        self.assertEqual(len(sheet._images), 2)
+        self.assertEqual(
+            [type(image.anchor).__name__ for image in sheet._images],
+            ["TwoCellAnchor", "TwoCellAnchor"],
+        )
+        workbook.close()
+
+    def create_job(
+        self,
+        formats,
+        *,
+        archive_to_feishu=False,
+        archive_folder_token="",
+    ):
         with patch("quotation.tasks.render_quotation_export_task.apply_async"):
             job, _ = create_export_job(
                 quotation=self.quotation,
@@ -756,6 +867,7 @@ class QuotationExportTaskTests(QuotationExportFixture):
                 actor=self.user,
                 quotation_version_no=1,
                 archive_to_feishu=archive_to_feishu,
+                archive_folder_token=archive_folder_token,
             )
         return job
 
@@ -812,6 +924,33 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(
             resolve_document_path(excel_asset.storage_key).read_bytes(),
             source_bytes,
+        )
+
+    @patch(
+        "quotation.services.export_pipeline.convert_xlsx_to_pdf",
+        return_value=b"%PDF-preview",
+    )
+    @patch(
+        "quotation.services.export_pipeline.render_quotation_xlsx",
+        return_value=b"PK\x03\x04-preview-layout",
+    )
+    def test_local_pdf_converts_the_exact_preview_excel(
+        self,
+        render_xlsx,
+        convert_pdf,
+    ):
+        job = self.create_job(["xlsx", "pdf"])
+
+        result = render_quotation_export_task.run(job.id)
+
+        self.assertEqual(result["status"], ExportJobStatus.COMPLETED)
+        render_xlsx.assert_called_once_with(
+            job.template,
+            job.quotation_version.snapshot_json,
+        )
+        convert_pdf.assert_called_once_with(
+            b"PK\x03\x04-preview-layout",
+            job_id=job.id,
         )
 
     def test_imported_first_revision_fails_when_source_file_is_missing(self):
@@ -1088,9 +1227,10 @@ class QuotationExportTaskTests(QuotationExportFixture):
         result = render_quotation_export_task.run(job.id)
 
         job.refresh_from_db()
-        self.assertEqual(result["status"], "render_failed")
-        self.assertEqual(job.status, "render_failed")
+        self.assertEqual(result["status"], ExportJobStatus.RENDER_FAILED)
+        self.assertEqual(job.status, ExportJobStatus.RENDER_FAILED)
         self.assertEqual(job.error_code, "renderer_version_unsupported")
+        self.assertEqual(job.renderer_version, "openpyxl-libreoffice-v1")
         self.assertEqual(job.assets.count(), 0)
 
     @override_settings(QUOTATION_RENDERER_VERSION="openpyxl-libreoffice-v1")
@@ -1338,6 +1478,32 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(replica.sync_status, "synced")
         self.assertEqual(replica.content_hash, asset.content_hash)
         upload.assert_called_once()
+
+    @patch(
+        "quotation.services.storage_control.FeishuStorageProvider.upload",
+        return_value={"file_token": "remote-file", "url": "https://x"},
+    )
+    def test_replica_task_uses_selected_archive_folder(self, upload):
+        self.create_storage_route()
+        job = self.create_job(
+            ["xlsx"],
+            archive_to_feishu=True,
+            archive_folder_token="selected-folder",
+        )
+        render_quotation_export_task.run(job.id)
+        asset = job.assets.get()
+
+        sync_document_replica_task.run(job.id, asset.id)
+
+        upload.assert_called_once()
+        self.assertEqual(
+            upload.call_args.kwargs["folder_token"],
+            "selected-folder",
+        )
+        self.assertEqual(
+            DocumentReplica.objects.get(asset=asset).folder_token,
+            "selected-folder",
+        )
 
     @patch(
         "quotation.services.storage_control.FeishuStorageProvider.upload",

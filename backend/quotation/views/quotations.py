@@ -43,6 +43,7 @@ from quotation.services.quotation_queries import (
     quotation_currency_facets,
     filter_quotation_list,
     quotation_product_line_facets,
+    quotation_currency_facets,
 )
 from quotation.services.quotation_service import (
     build_quotation,

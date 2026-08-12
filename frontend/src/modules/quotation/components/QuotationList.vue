@@ -8,8 +8,8 @@ import {
   watch,
 } from 'vue'
 import {
-  Columns3,
   Download,
+  Columns3,
   ExternalLink,
   FileSpreadsheet,
   FileText,
@@ -43,6 +43,7 @@ import {
   getCurrencyShortLabel,
   getCurrencySymbol,
 } from '../utils/quotationPreviewModel'
+import FeishuFolderPickerModal from './FeishuFolderPickerModal.vue'
 import FormSelect from './FormSelect.vue'
 import BaseDatePicker from '@/components/ui/BaseDatePicker.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
@@ -264,6 +265,11 @@ const exportProgressByQuote = ref<Record<string, QuotationExportStatus>>({})
 const failedUploadByQuote = ref<
   Record<string, { jobId: string; format: FeishuUploadFormat }>
 >({})
+const folderPickerOpen = ref(false)
+const pendingFeishuUpload = ref<{
+  quote: Quotation
+  format: FeishuUploadFormat
+} | null>(null)
 const actionMenu = ref<{
   quoteId: string
   type: 'upload' | 'download'
@@ -535,7 +541,16 @@ function exportProgressLabel(quoteId: string): string {
 function openFeishuUploadPicker(quote: Quotation, format: FeishuUploadFormat) {
   if (quote.status === 'Cancelled') return
   closeActionMenu()
-  void handleUploadToFeishu(quote, format)
+  pendingFeishuUpload.value = { quote, format }
+  folderPickerOpen.value = true
+}
+
+function handleFeishuFolderSelected(folder: { token: string; name: string }) {
+  const pending = pendingFeishuUpload.value
+  folderPickerOpen.value = false
+  pendingFeishuUpload.value = null
+  if (!pending) return
+  void handleUploadToFeishu(pending.quote, pending.format, folder.token)
 }
 
 function feishuDocumentId(
@@ -559,12 +574,13 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
   if (!documentId) return
   closeActionMenu()
   const cachedUrl = feishuDocumentUrl(quote, format)
-  const popup = cachedUrl ? window.open(cachedUrl, '_blank') : null
+  const popup = cachedUrl
+    ? window.open(cachedUrl, '_blank', 'noopener,noreferrer')
+    : null
   if (popup) popup.opener = null
   try {
     const result = await checkFeishuFileAccess(documentId)
     if (!result.exists) {
-      popup?.close()
       pendingFeishuOpen.value = null
       emit('updateQuoteStatus', quote.id, clearedFeishuFields(format))
       scheduleFeishuLinkReconcile()
@@ -579,8 +595,16 @@ async function openFeishuFile(quote: Quotation, format: FeishuUploadFormat) {
       return
     }
     const directUrl = String(result.url || '').trim()
+    if (!result.direct_access_allowed && result.content_url) {
+      const contentUrl = result.content_url
+      if (popup) {
+        popup.location.replace(contentUrl)
+      } else {
+        window.open(contentUrl, '_blank', 'noopener,noreferrer')
+      }
+      return
+    }
     if (!result.direct_access_allowed || !directUrl) {
-      popup?.close()
       throw new Error(t('quotation.pages.list.toastFeishuOpenFailed'))
     }
     pendingFeishuOpen.value = {
@@ -687,6 +711,7 @@ async function handleDownloadLocal(
 async function handleUploadToFeishu(
   quote: Quotation,
   format: FeishuUploadFormat = 'excel',
+  folderToken = '',
 ) {
   if (quote.status === 'Cancelled') return
   uploadingQuoteId.value = quote.id
@@ -696,6 +721,7 @@ async function handleUploadToFeishu(
       onProgress: (progressJob) => {
         updateExportProgress(quote.id, progressJob.status)
       },
+      archiveFolderToken: folderToken,
     })
     if (job.status === 'upload_failed') {
       failedUploadByQuote.value[quote.id] = {
@@ -708,6 +734,16 @@ async function handleUploadToFeishu(
         'error',
       )
       return
+    }
+    const uploadedAsset = job.assets.find(
+      (asset) => asset.format === exportFormat,
+    )
+    if (uploadedAsset) {
+      emit('updateQuoteStatus', quote.id, {
+        ...(format === 'excel'
+          ? { feishuExcelDocumentId: uploadedAsset.id }
+          : { feishuPdfDocumentId: uploadedAsset.id }),
+      })
     }
     delete failedUploadByQuote.value[quote.id]
     emit('feishuUploadDone', quote.id)
@@ -752,6 +788,16 @@ async function retryFailedUpload(quote: Quotation) {
       )
       return
     }
+    const uploadedAsset = job.assets.find(
+      (asset) => asset.format === failedUpload.format,
+    )
+    if (uploadedAsset) {
+      emit('updateQuoteStatus', quote.id, {
+        ...(failedUpload.format === 'excel'
+          ? { feishuExcelDocumentId: uploadedAsset.id }
+          : { feishuPdfDocumentId: uploadedAsset.id }),
+      })
+    }
     delete failedUploadByQuote.value[quote.id]
     emit('feishuUploadDone', quote.id)
     emit(
@@ -790,8 +836,7 @@ function listQuery(
       selectedSource.value === 'ALL'
         ? undefined
         : (selectedSource.value as 'manual' | 'document_import'),
-    currency:
-      selectedCurrency.value === 'ALL' ? undefined : selectedCurrency.value,
+    currency: selectedCurrency.value === 'ALL' ? undefined : selectedCurrency.value,
     createdFrom: createdFrom.value || undefined,
     createdTo: createdTo.value || undefined,
   }
@@ -829,7 +874,7 @@ watch(searchText, () => {
   }, 300)
 })
 
-watch(
+  watch(
   [
     selectedProductLine,
     selectedSource,
@@ -1285,16 +1330,28 @@ function displayQuoteDate(quote: Quotation): string {
               >
                 {{ displayContact(quote) }}
               </td>
-              <td v-if="visibleColumnKeys.includes('salesperson')" class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium">
+              <td
+                v-if="visibleColumnKeys.includes('salesperson')"
+                class="truncate whitespace-nowrap px-3 py-1 text-dm-text-secondary font-medium"
+              >
                 {{ quote.salesperson || '—' }}
               </td>
-              <td v-if="visibleColumnKeys.includes('total')" class="px-3 py-1 text-right font-bold text-dm-text font-mono">
+              <td
+                v-if="visibleColumnKeys.includes('total')"
+                class="px-3 py-1 text-right font-bold text-dm-text font-mono"
+              >
                 {{ displayTotal(quote) }}
               </td>
-              <td v-if="visibleColumnKeys.includes('currency')" class="px-3 py-1 text-center font-mono text-xs font-semibold text-dm-text-secondary">
-                {{ quote.currency }}
+              <td
+                v-if="visibleColumnKeys.includes('currency')"
+                class="px-3 py-1 text-center font-mono text-xs font-semibold text-dm-text-secondary"
+              >
+                {{ getCurrencyShortLabel(quote.currency) }}
               </td>
-              <td v-if="visibleColumnKeys.includes('source')" class="px-3 py-1 text-center">
+              <td
+                v-if="visibleColumnKeys.includes('source')"
+                class="px-3 py-1 text-center"
+              >
                 <span
                   v-if="quote.sourceType === 'document_import'"
                   class="inline-flex whitespace-nowrap rounded-full bg-fuchsia-100 px-2 py-0.5 text-xs font-semibold text-fuchsia-800 ring-1 ring-inset ring-fuchsia-300"
@@ -1308,7 +1365,10 @@ function displayQuoteDate(quote: Quotation): string {
                   {{ t('quotation.pages.list.sourceLocalCreated') }}
                 </span>
               </td>
-              <td v-if="visibleColumnKeys.includes('quoteDate')" class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary">
+              <td
+                v-if="visibleColumnKeys.includes('quoteDate')"
+                class="whitespace-nowrap px-3 py-1 font-mono text-dm-text-tertiary"
+              >
                 {{ displayQuoteDate(quote) }}
               </td>
               <td class="px-3 py-1">
@@ -1392,19 +1452,37 @@ function displayQuoteDate(quote: Quotation): string {
                   <button
                     v-if="feishuDocumentId(quote, 'excel')"
                     :title="t('quotation.actions.openFeishuExcel')"
-                    class="p-1 rounded-sm transition duration-100 text-dm-text-tertiary hover:text-emerald-600 hover:bg-emerald-50 cursor-pointer"
+                    :class="[
+                      'p-1 rounded-sm transition duration-100 cursor-pointer',
+                      quote.sourceType === 'document_import'
+                        ? 'text-dm-text-tertiary hover:text-emerald-600 hover:bg-emerald-50'
+                        : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50',
+                    ]"
                     @click="void openFeishuFile(quote, 'excel')"
                   >
-                    <ExternalLink class="w-4 h-4" />
+                    <ExternalLink
+                      v-if="quote.sourceType === 'document_import'"
+                      class="w-4 h-4"
+                    />
+                    <FileSpreadsheet v-else class="w-4 h-4" />
                   </button>
 
                   <button
                     v-if="feishuDocumentId(quote, 'pdf')"
                     :title="t('quotation.actions.openFeishuPdf')"
-                    class="p-1 rounded-sm transition duration-100 text-dm-text-tertiary hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer"
+                    :class="[
+                      'p-1 rounded-sm transition duration-100 cursor-pointer',
+                      quote.sourceType === 'document_import'
+                        ? 'text-dm-text-tertiary hover:text-indigo-600 hover:bg-indigo-50'
+                        : 'text-red-600 hover:text-red-700 hover:bg-red-50',
+                    ]"
                     @click="void openFeishuFile(quote, 'pdf')"
                   >
-                    <ExternalLink class="w-4 h-4" />
+                    <ExternalLink
+                      v-if="quote.sourceType === 'document_import'"
+                      class="w-4 h-4"
+                    />
+                    <FileText v-else class="w-4 h-4" />
                   </button>
 
                   <button
@@ -1656,6 +1734,14 @@ function displayQuoteDate(quote: Quotation): string {
         </template>
       </div>
     </Teleport>
+
+    <FeishuFolderPickerModal
+      :open="folderPickerOpen"
+      intent="upload"
+      @update:open="folderPickerOpen = $event"
+      @select="handleFeishuFolderSelected"
+      @toast="(message, type) => emit('toast', message, type)"
+    />
 
   </div>
 </template>

@@ -234,7 +234,7 @@ def render_export_job(job_id: str) -> dict:
             return {"job_id": job.id, "status": job.status}
         if job.renderer_version != CURRENT_RENDERER_VERSION:
             raise TemplateValidationError(
-                "Pinned quotation renderer is no longer supported",
+                "Pinned quotation renderer version is unsupported",
                 code="renderer_version_unsupported",
             )
         job.status = ExportJobStatus.RENDERING_EXCEL

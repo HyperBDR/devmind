@@ -494,7 +494,7 @@ class StandardQuotationPdfParserTests(TestCase):
         )
         self.assertEqual(
             completed.source_totals["computed_grand_total"],
-            "108",
+            "108.00",
         )
 
     def test_parses_standard_text_pdf_and_validates_totals(self):

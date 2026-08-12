@@ -383,6 +383,11 @@ class ExportJob(TimeStampedModel):
     renderer_version = models.CharField(max_length=80)
     formats = models.JSONField(default=list)
     archive_to_feishu = models.BooleanField(default=False)
+    archive_folder_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
     idempotency_key = models.CharField(
         max_length=64,
         unique=True,

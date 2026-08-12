@@ -99,6 +99,13 @@ function selectCurrentFolder() {
   close()
 }
 
+function selectFolder(folder: FeishuFileItem) {
+  const token = feishuFolderOpenToken(folder)
+  if (!token) return
+  emit('select', { token, name: folder.name })
+  close()
+}
+
 watch(
   () => props.open,
   (open) => {
@@ -188,6 +195,15 @@ watch(
               {{ folder.name }}
             </span>
             <ChevronRight class="h-4 w-4 shrink-0 text-dm-text-tertiary" />
+            <span
+              role="button"
+              tabindex="0"
+              class="shrink-0 rounded-md border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+              @click.stop="selectFolder(folder)"
+              @keydown.enter.stop="selectFolder(folder)"
+            >
+              {{ confirmLabel }}
+            </span>
           </button>
         </div>
       </div>

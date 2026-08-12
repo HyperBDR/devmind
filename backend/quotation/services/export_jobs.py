@@ -74,6 +74,7 @@ def _idempotency_key(
     version: QuotationVersion,
     template: QuotationTemplate,
     formats: list[str],
+    archive_folder_token: str = "",
 ) -> str:
     material = "|".join(
         [
@@ -83,6 +84,7 @@ def _idempotency_key(
             str(template.version),
             renderer_version(),
             ",".join(formats),
+            archive_folder_token,
         ]
     )
     return sha256(material.encode("utf-8")).hexdigest()
@@ -119,6 +121,7 @@ def create_export_job(
     quotation_version_no: int | None = None,
     template_id: str | None = None,
     archive_to_feishu: bool = False,
+    archive_folder_token: str = "",
     request=None,
 ) -> tuple[ExportJob, bool]:
     normalized_formats = sorted(set(formats))
@@ -144,6 +147,7 @@ def create_export_job(
             version=version,
             template=template,
             formats=normalized_formats,
+            archive_folder_token=archive_folder_token,
         )
         job, created = ExportJob.objects.get_or_create(
             idempotency_key=key,
@@ -156,6 +160,7 @@ def create_export_job(
                 "renderer_version": renderer_version(),
                 "formats": normalized_formats,
                 "archive_to_feishu": archive_to_feishu,
+                "archive_folder_token": archive_folder_token,
                 "requested_by": actor,
                 "request_id": request_id,
                 "trace_id": trace_id,

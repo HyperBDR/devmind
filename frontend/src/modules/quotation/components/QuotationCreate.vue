@@ -1149,6 +1149,7 @@ const itemErrorEntries = computed(() =>
                       :model-value="productLine"
                       :disabled="!!editingQuote && quoteNoMode === 'auto'"
                       :options="productLineSelectOptions"
+                      panel-class-name="qmp-dropdown-panel--product-line"
                       @update:model-value="onProductLineSelect"
                     />
                     <button
@@ -1331,6 +1332,7 @@ const itemErrorEntries = computed(() =>
                 </label>
                 <HistoryTextInput
                   test-id="customer-company-input"
+                  panel-class-name="qmp-dropdown-panel--customer-company"
                   :model-value="clientCompany"
                   :options="
                     customerCompanyOptions.map((record) => ({
@@ -1431,6 +1433,7 @@ const itemErrorEntries = computed(() =>
                   </label>
                   <HistoryTextInput
                     test-id="billing-company-input"
+                    panel-class-name="qmp-dropdown-panel--customer-company"
                     :model-value="billingCompany"
                     :options="
                       billingCompanyOptions.map((record) => ({

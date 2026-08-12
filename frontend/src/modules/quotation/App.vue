@@ -93,10 +93,10 @@ function listDateFiltersFromRoute(
   return { createdFrom, createdTo }
 }
 
-function listRouteLocation(listFilters?: ListDateFilters) {
+function listRouteLocation(listFilters?: ListDateFilters, page = 1) {
   const createdFrom = listFilters?.createdFrom
   const createdTo = listFilters?.createdTo
-  if (!createdFrom && !createdTo) {
+  if (!createdFrom && !createdTo && page <= 1) {
     return { path: TAB_ROUTES.list }
   }
   return {
@@ -104,17 +104,35 @@ function listRouteLocation(listFilters?: ListDateFilters) {
     query: {
       ...(createdFrom ? { created_from: createdFrom } : {}),
       ...(createdTo ? { created_to: createdTo } : {}),
+      ...(page > 1 ? { page: String(page) } : {}),
     },
   }
 }
 
 function applyListDateFilters(listFilters?: ListDateFilters) {
+  const routePage = Number(route.query.page)
+  const page = Number.isInteger(routePage) && routePage > 0 ? routePage : 1
   quotationListQuery.value = {
-    page: 1,
+    page,
     pageSize: quotationListQuery.value.pageSize || 10,
     createdFrom: listFilters?.createdFrom,
     createdTo: listFilters?.createdTo,
   }
+}
+
+async function handleQuotationListQueryChange(query: QuotationListParams) {
+  if (currentTab.value === 'list') {
+    await router.replace(
+      listRouteLocation(
+        {
+          createdFrom: query.createdFrom,
+          createdTo: query.createdTo,
+        },
+        query.page || 1,
+      ),
+    )
+  }
+  await refreshQuotations(query)
 }
 
 function tabFromRoutePath(path: string): string {
@@ -1097,7 +1115,7 @@ function reloadPage() {
             @reconcile-feishu-links="handleReconcileFeishuLinks"
             @edit-quote="handleEditQuote"
             @toast="triggerToast"
-            @query-change="refreshQuotations"
+            @query-change="handleQuotationListQueryChange"
           />
 
           <ImportedDocumentsPage

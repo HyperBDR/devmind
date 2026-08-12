@@ -134,7 +134,9 @@ test('quotation metadata has hover details and Feishu opens instead of downloadi
   assert.match(quotationList, /:title="quote\.projectName"/)
   assert.match(quotationList, /:title="quote\.clientCompany"/)
   assert.match(quotationList, /:title="displayContact\(quote\)/)
-  assert.match(quotationList, /popup\.location\.replace\(directUrl\)/)
+  assert.match(quotationList, /cachedUrl/)
+  assert.match(quotationList, /window\.open\(cachedUrl, '_blank', 'noopener,noreferrer'\)/)
+  assert.doesNotMatch(quotationList, /about:blank/)
   assert.doesNotMatch(quotationList, /downloadRemoteDocument/)
 })
 
@@ -168,7 +170,11 @@ test('imported quotation downloads expose revision formats', () => {
   )
   assert.match(
     quotationList,
-    /openFeishuFile\(quote, 'excel'\)[\s\S]*?<ExternalLink/,
+    /@click="void openFeishuFile\(quote, 'excel'\)"\s*>\s*<ExternalLink\s+v-if="quote\.sourceType === 'document_import'"[\s\S]*?<FileSpreadsheet\s+v-else/,
+  )
+  assert.match(
+    quotationList,
+    /@click="void openFeishuFile\(quote, 'pdf'\)"\s*>\s*<ExternalLink\s+v-if="quote\.sourceType === 'document_import'"[\s\S]*?<FileText\s+v-else/,
   )
   assert.match(
     exportsApi,
