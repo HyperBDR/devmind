@@ -91,6 +91,7 @@ class QuotationListQuerySerializer(serializers.Serializer):
         choices=Quotation._meta.get_field("source_type").choices,
         required=False,
     )
+    currency = serializers.CharField(max_length=12, required=False)
     created_from = serializers.DateField(required=False)
     created_to = serializers.DateField(required=False)
     page = serializers.IntegerField(default=1, min_value=1, required=False)

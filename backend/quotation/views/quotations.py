@@ -40,6 +40,7 @@ from quotation.services.form_context import (
 from quotation.services.quotation_queries import (
     annotate_quotation_list,
     attach_quotation_document_summaries,
+    quotation_currency_facets,
     filter_quotation_list,
     quotation_product_line_facets,
 )
@@ -224,6 +225,7 @@ class QuotationListCreateView(APIView):
             Quotation.objects.all(),
         )
         product_lines = quotation_product_line_facets(queryset, filters)
+        currencies = quotation_currency_facets(queryset)
         queryset = filter_quotation_list(queryset, filters)
         total = queryset.count()
         page_start = (page - 1) * page_size
@@ -242,7 +244,10 @@ class QuotationListCreateView(APIView):
                 "page": page,
                 "page_size": page_size,
                 "total_pages": total_pages,
-                "facets": {"product_lines": product_lines},
+                "facets": {
+                    "product_lines": product_lines,
+                    "currencies": currencies,
+                },
             }
         )
 

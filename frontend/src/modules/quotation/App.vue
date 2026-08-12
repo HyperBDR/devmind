@@ -165,6 +165,7 @@ const quotationListQuery = ref<QuotationListParams>({
 const quotationListTotal = ref(0)
 const quotationListTotalPages = ref(0)
 const quotationListProductLines = ref<string[]>([])
+const quotationListCurrencies = ref<string[]>([])
 const activeQuote = ref<Quotation | null>(null)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
@@ -335,6 +336,7 @@ async function refreshQuotations(
     if (requestId !== quotationListRequestId) return
     quotations.value = result.items
     quotationListProductLines.value = result.productLines
+    quotationListCurrencies.value = result.currencies
     quotationListTotal.value = result.total
     quotationListTotalPages.value = result.totalPages
     quotationListQuery.value = {
@@ -349,6 +351,7 @@ async function refreshQuotations(
     triggerToast(message, 'error')
     quotations.value = []
     quotationListProductLines.value = []
+    quotationListCurrencies.value = []
     quotationListTotal.value = 0
     quotationListTotalPages.value = 0
   } finally {
@@ -1077,6 +1080,7 @@ function reloadPage() {
           <QuotationList
             :quotations="quotations"
             :product-lines="quotationListProductLines"
+            :currencies="quotationListCurrencies"
             :loading="quotationListLoading"
             :page="quotationListQuery.page || 1"
             :page-size="quotationListQuery.pageSize || 10"

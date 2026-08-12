@@ -188,8 +188,8 @@ test('details drawer copy distinguishes local and imported quotations', () => {
 })
 
 test('list column widths reserve stable space for longer headers and actions', () => {
-  assert.match(quotationList, /project:\s*\{[\s\S]*?defaultWidth:\s*260/)
-  assert.match(quotationList, /customer:\s*\{[\s\S]*?defaultWidth:\s*200/)
+  assert.match(quotationList, /project:\s*\{[\s\S]*?defaultWidth:\s*360/)
+  assert.match(quotationList, /customer:\s*\{[\s\S]*?defaultWidth:\s*300/)
   assert.match(quotationList, /contact:\s*\{[\s\S]*?defaultWidth:\s*180/)
   assert.match(quotationList, /salesperson:\s*\{[\s\S]*?defaultWidth:\s*170/)
   assert.match(quotationList, /source:\s*\{[\s\S]*?defaultWidth:\s*170/)

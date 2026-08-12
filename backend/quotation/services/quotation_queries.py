@@ -34,6 +34,18 @@ SEARCH_FIELDS = (
 PRODUCT_LINE_FACET_LIMIT = 100
 
 
+def quotation_currency_facets(
+    queryset: QuerySet[Quotation],
+) -> list[str]:
+    """Return all non-empty currencies from accessible quotations."""
+    return list(
+        queryset.exclude(currency="")
+        .values_list("currency", flat=True)
+        .order_by("currency")
+        .distinct()
+    )
+
+
 def filter_quotation_list(
     queryset: QuerySet[Quotation],
     filters: dict,
@@ -46,7 +58,7 @@ def filter_quotation_list(
             search_query |= Q(**{f"{field}__icontains": search})
         queryset = queryset.filter(search_query)
 
-    for field in ("status", "product_line", "source_type"):
+    for field in ("status", "product_line", "source_type", "currency"):
         value = filters.get(field)
         if value:
             queryset = queryset.filter(**{field: value})
