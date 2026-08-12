@@ -109,10 +109,13 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
     dashboardSource,
     /const quoteBreakdownData = computed\(\(\) =>\s*\(analytics\.value\?\.amountBreakdown/
   )
-  assert.match(dashboardSource, /getDashboardAnalytics\(currency\)/)
+  assert.match(
+    dashboardSource,
+    /getDashboardAnalytics\(currency, dateFrom, dateTo\)/
+  )
   assert.match(dashboardSource, /@click="loadDashboardAnalytics"/)
   assert.doesNotMatch(dashboardSource, /loadCurrencyDashboard/)
-  assert.match(dashboardSource, /getDashboardSummary\(period\)/)
+  assert.match(dashboardSource, /getDashboardSummary\(/)
   assert.doesNotMatch(
     dashboardSource,
     /getDashboardSummary\(currency/
@@ -131,7 +134,7 @@ test('dashboard quote breakdown uses one centered server-filtered pie', () => {
   )
   assert.match(
     dashboardSource,
-    /watch\(dashboardCurrency, \(\) => \{\s*void loadDashboardAnalytics\(\)/
+    /watch\(dashboardCurrency, \(\) => \{\s*void loadDashboardSummary\(\)\s*void loadDashboardAnalytics\(\)/
   )
   assert.match(
     dashboardSource,
@@ -211,7 +214,7 @@ test('dashboard month card shows count delta against previous month', () => {
   assert.match(dashboardSource, /monthQuoteDeltaClass/)
   assert.match(dashboardSource, /previousMonthQuoteCount/)
   assert.match(dashboardSource, /monthQuoteDelta/)
-  assert.match(dashboardSource, /previousMonthCount/)
+  assert.match(dashboardSource, /previousPeriodCount/)
   assert.match(dashboardSource, /min-h-4 text-xs text-dm-text-tertiary/)
   assert.match(dashboardSource, /<span v-if="summaryLoading">—<\/span>/)
   assert.match(
@@ -223,8 +226,11 @@ test('dashboard month card shows count delta against previous month', () => {
     dashboardSource,
     /quotation\.pages\.dashboard\.monthQuoteAmount/
   )
-  assert.match(enLocale, /"monthQuoteDelta": "vs last month"/)
-  assert.match(enLocale, /"previousMonthCount": "Last month: \{count\} quotes"/)
+  assert.match(enLocale, /"rangeQuoteDelta": "vs previous period"/)
+  assert.match(
+    enLocale,
+    /"previousPeriodCount": "Previous period: \{count\} quotes"/
+  )
 })
 
 test('dashboard recent overview uses stable update metadata without status', () => {

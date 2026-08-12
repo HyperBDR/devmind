@@ -83,9 +83,9 @@ class QuotationDashboardTests(TestCase):
 
         assert response.status_code == 200
         assert response.data["month_won_amount"] == "44000.00"
-        assert response.data["success_rate_numerator"] == 2
-        assert response.data["success_rate_denominator"] == 3
-        assert response.data["success_rate"] == 67
+        assert response.data["success_rate_numerator"] == 1
+        assert response.data["success_rate_denominator"] == 2
+        assert response.data["success_rate"] == 50
         assert response.data["follow_up_count"] == 1
         assert response.data["draft_count"] == 1
         assert response.data["available_currencies"] == ["CNY", "USD"]
@@ -159,9 +159,9 @@ class QuotationDashboardTests(TestCase):
         assert response.data["previous_period"] == previous_month.strftime(
             "%Y-%m"
         )
-        assert response.data["month_quote_count"] == 3
+        assert response.data["month_quote_count"] == 2
         assert response.data["previous_month_quote_count"] == 1
-        assert response.data["month_quote_amount"] == "1100.00"
+        assert response.data["month_quote_amount"] == "200.00"
         assert response.data["previous_month_quote_amount"] == "80.00"
 
     def test_summary_uses_selected_calendar_month(self):
@@ -218,8 +218,8 @@ class QuotationDashboardTests(TestCase):
         )
 
         assert response.status_code == 200
-        assert response.data["month_quote_count"] == 1
-        assert response.data["month_quote_amount"] == "90.00"
+        assert response.data["month_quote_count"] == 0
+        assert response.data["month_quote_amount"] == "0.00"
         assert response.data["available_periods"] == [
             "2026-08",
             "2026-07",
@@ -258,8 +258,8 @@ class QuotationDashboardTests(TestCase):
         assert summary.status_code == 200
         assert summary.data["currency"] == "CNY"
         assert summary.data["available_currencies"] == ["CNY", "HKD"]
-        assert summary.data["month_quote_count"] == 3
-        assert summary.data["month_quote_amount"] == "1400.00"
+        assert summary.data["month_quote_count"] == 2
+        assert summary.data["month_quote_amount"] == "500.00"
         assert summary.data["month_won_amount"] == "300.00"
         assert analytics.status_code == 200
         assert analytics.data["currency"] == "CNY"
@@ -272,7 +272,7 @@ class QuotationDashboardTests(TestCase):
             row["currency"] for row in analytics.data["amount_breakdown"]
         } == {"CNY"}
 
-    def test_analytics_breakdown_ignores_month_and_keeps_currency(self):
+    def test_analytics_breakdown_uses_range_and_keeps_currency(self):
         current_month = timezone.localdate().replace(day=1)
         previous_month = (current_month - timedelta(days=1)).replace(day=1)
         self._quote(
@@ -311,24 +311,23 @@ class QuotationDashboardTests(TestCase):
 
         response = self.api.get(
             "/api/v1/quotation/dashboard/analytics"
-            f"?currency=CNY&period={period}"
+            f"?currency=CNY&date_from={period}&date_to={period}"
         )
 
         assert response.status_code == 200
         quote_nos = [
             row["quote_no"] for row in response.data["amount_breakdown"]
         ]
-        assert "Q-CNY-PREVIOUS" in quote_nos
+        assert "Q-CNY-PREVIOUS" not in quote_nos
         assert "Q-USD-CURRENT" not in quote_nos
         assert "Q-CNY-CURRENT" in quote_nos
         assert len(quote_nos) == len(set(quote_nos))
         assert {
             row["currency"] for row in response.data["amount_breakdown"]
         } == {"CNY"}
-        assert response.data["breakdown_total_amount"] == "1300.00"
+        assert response.data["breakdown_total_amount"] == "400.00"
         assert set(quote_nos) == {
             "Q-CNY-CURRENT",
-            "Q-CNY-PREVIOUS",
             "Q-IMP-1",
             "Q-IMP-2",
         }
@@ -388,18 +387,22 @@ class QuotationDashboardTests(TestCase):
         assert len(response.data["amount_breakdown"]) == 8
         assert len(response.data["trends"]["monthly"]) == 6
         assert len(response.data["trends"]["weekly"]) == 8
-        assert Decimal(
-            response.data["trends"]["monthly"][-1]["created_amount"]
-        ) > 0
-        assert Decimal(
-            response.data["trends"]["monthly"][-1]["won_amount"]
-        ) == Decimal("300.00")
-        assert Decimal(
-            response.data["trends"]["weekly"][-1]["created_amount"]
-        ) > 0
-        assert Decimal(
-            response.data["trends"]["weekly"][-1]["won_amount"]
-        ) == Decimal("300.00")
+        assert any(
+            Decimal(row["created_amount"]) > 0
+            for row in response.data["trends"]["monthly"]
+        )
+        assert any(
+            Decimal(row["won_amount"]) == Decimal("300.00")
+            for row in response.data["trends"]["monthly"]
+        )
+        assert any(
+            Decimal(row["created_amount"]) > 0
+            for row in response.data["trends"]["weekly"]
+        )
+        assert any(
+            Decimal(row["won_amount"]) == Decimal("300.00")
+            for row in response.data["trends"]["weekly"]
+        )
         july = next(
             row
             for row in response.data["trends"]["monthly"]
