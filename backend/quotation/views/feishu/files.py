@@ -828,16 +828,26 @@ class FeishuFileAccessView(APIView):
                         "document_id": asset.id,
                     }
                 )
+            if exc.code == 99991401:
+                direct_url = trusted_feishu_file_url(asset)
+                if direct_url:
+                    return Response(
+                        {
+                            "exists": True,
+                            "document_id": asset.id,
+                            "direct_access_allowed": True,
+                            "url": direct_url,
+                        }
+                    )
             return common._feishu_error_response(exc, operation="file check")
 
+        direct_url = trusted_feishu_file_url(asset)
         return Response(
             {
                 "exists": True,
                 "document_id": asset.id,
-                "direct_access_allowed": False,
-                "content_url": (
-                    f"/api/v1/quotation/feishu/documents/{asset.id}/content"
-                ),
+                "direct_access_allowed": True,
+                "url": direct_url or build_feishu_file_url(resolved_token),
             }
         )
 

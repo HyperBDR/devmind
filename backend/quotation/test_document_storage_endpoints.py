@@ -683,6 +683,26 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(response.data["folder_token"], "selected_folder")
         self.assertEqual(upload_folders, ["selected_folder"])
 
+    def test_folder_listing_failure_keeps_configured_root_available(self):
+        from quotation.services.feishu_client import FeishuAPIError
+
+        class FakeClient:
+            def list_folder_files(self, *args, **kwargs):
+                raise FeishuAPIError("folder listing unavailable")
+
+        with patch(
+            "quotation.views.feishu.common._system_drive_context",
+            return_value=(FakeClient(), "access-token", "folder_token"),
+        ):
+            response = self.api.get("/api/v1/quotation/feishu/folder")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["folder_token"], "folder_token")
+        self.assertEqual(response.data["root_folder_token"], "folder_token")
+        self.assertTrue(response.data["is_root"])
+        self.assertFalse(response.data["listing_available"])
+        self.assertEqual(response.data["files"], [])
+
     def test_other_user_cannot_access_quote_documents_by_id(self):
         quote = self.create_quote()
         upload = self.api.post(
@@ -1009,7 +1029,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(allowed.content, b"remote-data")
         self.assertEqual(fake_client.calls, 1)
 
-    def test_remote_access_uses_document_id_and_hides_direct_link(self):
+    def test_remote_access_uses_document_id_and_returns_direct_link(self):
         quote = self.create_quote()
         asset = DocumentAsset.objects.create(
             quotation=quote,
@@ -1047,9 +1067,9 @@ class DocumentStorageEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["exists"])
-        self.assertFalse(response.data["direct_access_allowed"])
+        self.assertTrue(response.data["direct_access_allowed"])
+        self.assertEqual(response.data["url"], asset.feishu_url)
         self.assertNotIn("file_token", response.data)
-        self.assertNotIn("url", response.data)
 
         invalid_batch = self.api.post(
             "/api/v1/quotation/feishu/files/access/batch",
@@ -1088,7 +1108,7 @@ class DocumentStorageEndpointTests(TestCase):
             connection=connection,
             mount=mount,
             remote_file_token="replica_remote_token",
-            remote_url="https://tenant.feishu.cn/file/replica_remote_token",
+            remote_url="https://tenant.feishu.cn/share/replica_remote_token",
             folder_token="folder_token",
             sync_status=ReplicaSyncStatus.SYNCED,
         )
@@ -1139,6 +1159,10 @@ class DocumentStorageEndpointTests(TestCase):
 
         self.assertEqual(access.status_code, 200)
         self.assertTrue(access.data["exists"])
+        self.assertEqual(
+            access.data["url"],
+            "https://tenant.feishu.cn/share/replica_remote_token",
+        )
         self.assertEqual(fake.checked_token, "replica_remote_token")
         self.assertEqual(content.status_code, 200)
         self.assertEqual(content.content, b"replica-content")

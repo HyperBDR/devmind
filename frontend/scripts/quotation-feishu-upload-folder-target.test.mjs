@@ -10,12 +10,17 @@ const enLocale = readFileSync(
   new URL('../src/modules/quotation/locales/en.json', import.meta.url),
   'utf8',
 )
+const archiveApi = readFileSync(
+  new URL('../src/modules/quotation/api/exports.ts', import.meta.url),
+  'utf8',
+)
 
-test('Feishu upload uses the backend configured archive mount', () => {
+test('Feishu upload lets the user choose a managed archive folder', () => {
   assert.match(source, /archiveQuotationFile\(quote\.id, exportFormat/)
-  assert.doesNotMatch(source, /FeishuFolderPickerModal/)
-  assert.doesNotMatch(source, /uploadFolderPicker/)
-  assert.doesNotMatch(source, /handleUploadFolderSelected/)
-  assert.doesNotMatch(source, /folderToken/)
+  assert.match(source, /FeishuFolderPickerModal/)
+  assert.match(source, /folderPickerOpen/)
+  assert.match(source, /handleFeishuFolderSelected/)
+  assert.match(source, /archiveFolderToken/)
+  assert.match(archiveApi, /archive_folder_token: options\.archiveFolderToken/)
   assert.match(enLocale, /"toastUploadFailed": "Upload to Feishu failed\. Check the archive folder configuration"/)
 })

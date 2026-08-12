@@ -154,7 +154,7 @@ class QuotationAuditEventTests(TestCase):
             self.user.email,
         )
 
-    def test_document_download_history_is_not_user_facing(self):
+    def test_document_download_history_is_user_facing(self):
         quotation = Quotation.objects.create(
             quote_no="Q-AUDIT-TARGET-001",
             project_name="Audit target",
@@ -189,7 +189,7 @@ class QuotationAuditEventTests(TestCase):
         response = self.api.get("/api/v1/quotation/audit-events")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.data["total"], 0)
+        self.assertEqual(response.data["total"], 1)
 
     def test_audit_endpoint_is_read_only(self):
         response = self.api.post(

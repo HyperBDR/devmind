@@ -470,6 +470,7 @@ def create_replica(
     request,
     asset: DocumentAsset,
     route: StorageRoute,
+    folder_token: str = "",
 ) -> DocumentReplica:
     """Create or retry one idempotent managed remote document replica."""
     content = resolve_document_path(asset.storage_key).read_bytes()
@@ -480,19 +481,21 @@ def create_replica(
         version = max(asset.quotation.version_current or 1, 1)
     else:
         version = 1
+    target_folder = folder_token or route.mount.root_folder_token
     replica, _ = DocumentReplica.objects.get_or_create(
         asset=asset,
         connection=route.connection,
         version=version,
         defaults={
             "mount": route.mount,
-            "folder_token": route.mount.root_folder_token,
+            "folder_token": target_folder,
         },
     )
     if (
         replica.sync_status == ReplicaSyncStatus.SYNCED
         and replica.content_hash == content_hash
         and replica.remote_file_token
+        and replica.folder_token == target_folder
         and replica.revoked_at is None
     ):
         return replica
@@ -509,7 +512,10 @@ def create_replica(
         trace_id=context["trace_id"],
     )
     replica.sync_status = ReplicaSyncStatus.SYNCING
-    replica.save(update_fields=["sync_status", "updated_at"])
+    replica.folder_token = target_folder
+    replica.save(
+        update_fields=["folder_token", "sync_status", "updated_at"]
+    )
     record_audit_event(
         request=request,
         module="replica",
@@ -528,6 +534,7 @@ def create_replica(
             route.mount,
             file_name=asset.file_name,
             content=content,
+            folder_token=target_folder,
         )
         token = str(uploaded.get("file_token") or uploaded.get("token") or "")
         if not token:

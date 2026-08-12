@@ -38,6 +38,7 @@ export interface QuotationExportJob {
   renderer_version: string
   formats: QuotationExportFormat[]
   archive_to_feishu: boolean
+  archive_folder_token?: string | null
   error_code?: string | null
   error_message?: string | null
   assets: QuotationExportAsset[]
@@ -54,6 +55,7 @@ interface CreateQuotationExportResponse {
 interface QuotationExportProgressOptions {
   onProgress?: (job: QuotationExportJob) => void
   quotationVersion?: number
+  archiveFolderToken?: string
 }
 
 const TERMINAL_STATUSES = new Set<QuotationExportStatus>([
@@ -73,6 +75,7 @@ export function createQuotationExport(
     quotationVersion?: number
     templateId?: string
     archiveToFeishu?: boolean
+    archiveFolderToken?: string
   } = {},
 ): Promise<CreateQuotationExportResponse> {
   return apiRequest<CreateQuotationExportResponse>(
@@ -84,6 +87,7 @@ export function createQuotationExport(
         quotation_version: options.quotationVersion,
         template_id: options.templateId,
         archive_to_feishu: options.archiveToFeishu ?? false,
+        archive_folder_token: options.archiveFolderToken || undefined,
       }),
     },
   )
@@ -176,6 +180,7 @@ export async function archiveQuotationFile(
 ): Promise<QuotationExportJob> {
   const created = await createQuotationExport(quotationId, [format], {
     archiveToFeishu: true,
+    archiveFolderToken: options.archiveFolderToken,
   })
   const job = await waitForQuotationExport(created.job_id, options)
   if (job.status === 'render_failed') {

@@ -20,6 +20,7 @@ from quotation.services.export_renderer import (
     TemplateValidationError,
     register_template_version,
 )
+from quotation.views.feishu import common as feishu_common
 from rest_framework import serializers, status
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
@@ -113,6 +114,11 @@ class ExportCreateSerializer(serializers.Serializer):
         required=False,
         default=False,
     )
+    archive_folder_token = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
 
 
 def export_job_data(job: ExportJob) -> dict:
@@ -138,6 +144,7 @@ def export_job_data(job: ExportJob) -> dict:
         "renderer_version": job.renderer_version,
         "formats": job.formats,
         "archive_to_feishu": job.archive_to_feishu,
+        "archive_folder_token": job.archive_folder_token or None,
         "error_code": job.error_code or None,
         "error_message": job.error_message or None,
         "assets": assets,
@@ -162,6 +169,28 @@ class QuotationExportCreateView(APIView):
             return forbidden_response()
         serializer = ExportCreateSerializer(data=request.data or {})
         serializer.is_valid(raise_exception=True)
+        archive_folder_token = serializer.validated_data.get(
+            "archive_folder_token",
+            "",
+        )
+        if serializer.validated_data["archive_to_feishu"]:
+            try:
+                client, access_token, root_folder_token = (
+                    feishu_common._system_drive_context()
+                )
+                archive_folder_token = feishu_common._managed_folder_token(
+                    client=client,
+                    access_token=access_token,
+                    requested_token=archive_folder_token or root_folder_token,
+                )
+            except PermissionError as exc:
+                raise serializers.ValidationError(
+                    {"archive_folder_token": str(exc)}
+                ) from exc
+            except Exception as exc:
+                raise serializers.ValidationError(
+                    {"archive_folder_token": "Unable to validate upload folder"}
+                ) from exc
         set_request_audit_target(
             request,
             target_id=quotation.id,
@@ -175,6 +204,7 @@ class QuotationExportCreateView(APIView):
                 quotation_version_no=serializer.validated_data.get("quotation_version"),
                 template_id=serializer.validated_data.get("template_id"),
                 archive_to_feishu=serializer.validated_data["archive_to_feishu"],
+                archive_folder_token=archive_folder_token,
                 request=request,
             )
         except ExportRequestError as exc:

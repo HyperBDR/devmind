@@ -26,6 +26,8 @@ TRANSIENT_FEISHU_CODES = {
     99991663,
 }
 
+FEISHU_IP_ALLOWLIST_ERROR = 99991401
+
 
 def prepare_export_upload_tracking(
     job: ExportJob,
@@ -174,6 +176,7 @@ def sync_export_asset(export_job_id: str, asset_id: str) -> dict:
         request=_task_request(job),
         asset=asset,
         route=route,
+        folder_token=job.archive_folder_token,
     )
     assets = list(
         job.assets.select_related(
@@ -207,12 +210,19 @@ def sync_export_asset(export_job_id: str, asset_id: str) -> dict:
 def mark_upload_failed(job_id: str, exc: Exception) -> str:
     raw_code = getattr(exc, "code", None)
     code = f"feishu_{raw_code}" if raw_code is not None else "upload_failed"
+    if raw_code == FEISHU_IP_ALLOWLIST_ERROR:
+        error_message = (
+            "Feishu rejected the server IP. Add the server public IPv4 "
+            "address to the Feishu app IP allowlist, then retry the upload."
+        )
+    else:
+        error_message = "Remote quotation archiving failed"
     ExportJob.objects.filter(pk=job_id).exclude(
         status=ExportJobStatus.COMPLETED
     ).update(
         status=ExportJobStatus.UPLOAD_FAILED,
         error_code=code[:100],
-        error_message="Remote quotation archiving failed",
+        error_message=error_message,
         finished_at=timezone.now(),
     )
     return code

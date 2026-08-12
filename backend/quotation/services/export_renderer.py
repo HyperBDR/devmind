@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import copy
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -20,6 +21,7 @@ from django.conf import settings
 from django.db import IntegrityError, transaction
 from openpyxl import Workbook, load_workbook
 from openpyxl.drawing.image import Image as SpreadsheetImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, TwoCellAnchor
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import (
     absolute_coordinate,
@@ -43,7 +45,7 @@ from quotation.services.storage import (
 LEGACY_DEFAULT_TEMPLATE_NAME = "DevMind standard quotation"
 DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
-CURRENT_RENDERER_VERSION = "openpyxl-libreoffice-v5-original-import"
+CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v5"
 DEFAULT_WORKSHEET = "Quotation"
 REQUIRED_TEMPLATE_NAMES = {
     "billing_company",
@@ -703,102 +705,535 @@ def _signature_image(data_url: str) -> SpreadsheetImage | None:
     return image
 
 
+def _image_anchor(
+    *,
+    row: int,
+    column: int,
+    width: int,
+    height: int,
+) -> TwoCellAnchor:
+    """Return an image anchor supported by Excel-compatible web viewers."""
+    emu_per_pixel = 9525
+    return TwoCellAnchor(
+        editAs="oneCell",
+        _from=AnchorMarker(row=row, col=column),
+        to=AnchorMarker(
+            row=row,
+            col=column,
+            rowOff=height * emu_per_pixel,
+            colOff=width * emu_per_pixel,
+        ),
+    )
+
+
 def render_quotation_xlsx(
     template: QuotationTemplate,
     snapshot: dict,
 ) -> bytes:
-    """Render one immutable quotation snapshot into a validated XLSX."""
-    path = template_path(template)
-    workbook = load_workbook(path)
-    scalar_values = {
-        "issuer_company_name": snapshot.get("issuer_company_name", ""),
-        "quote_no": snapshot.get("quote_no", ""),
-        "quote_date": snapshot.get("quote_date", ""),
-        "expire_date": snapshot.get("expire_date", ""),
-        "client_company": snapshot.get("client_company", ""),
-        "contact_person": snapshot.get("contact_person", ""),
-        "email": snapshot.get("email", ""),
-        "billing_company": snapshot.get("billing_company", ""),
-        "billing_contact": snapshot.get("billing_contact", ""),
-        "billing_email": snapshot.get("billing_email", ""),
-        "project_name": snapshot.get("project_name", ""),
-        "payment_terms": snapshot.get("payment_terms", ""),
-        "currency": snapshot.get("currency", ""),
-        "tax_label": snapshot.get("tax_label", ""),
-        "vat_rate": f"{snapshot.get('vat_rate') or '0'}%",
-        "remarks_disclaimer": snapshot.get("remarks_disclaimer", ""),
-        "issuer_contact_name": snapshot.get("issuer_contact_name", ""),
-        "issuer_contact_email": snapshot.get("issuer_contact_email", ""),
-    }
-    for name, value in scalar_values.items():
-        definition = workbook.defined_names.get(name)
-        if name in OPTIONAL_TEMPLATE_NAMES and definition is None:
-            continue
-        sheet, coordinate = _defined_cell(workbook, name)
-        sheet[coordinate] = value
+    """Render the spreadsheet using the live quotation preview layout."""
+    del template
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = DEFAULT_WORKSHEET
+    sheet.sheet_view.showGridLines = False
+    widths = (12, 24, 8, 12, 10, 17, 17)
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
 
-    item_sheet, item_coordinate = _defined_cell(
-        workbook,
-        "line_items_start",
-    )
-    item_start_row = item_sheet[item_coordinate].row
-    items = list(snapshot.get("items") or [])
-    render_items = items or [{}]
-    extra_rows = max(len(render_items) - 1, 0)
-    if extra_rows:
-        _insert_rows_preserving_layout(
-            workbook,
-            item_sheet,
-            item_start_row + 1,
-            extra_rows,
-        )
-        for offset in range(1, extra_rows + 1):
-            _copy_row_style(
-                item_sheet,
-                item_start_row,
-                item_start_row + offset,
+    thin = Side(style="thin", color="CBD5E1")
+    dark = Side(style="thin", color="0F172A")
+    cell_border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    dark_border = Border(left=dark, right=dark, top=dark, bottom=dark)
+    bottom_border = Border(bottom=dark)
+    header_fill = PatternFill("solid", fgColor="E2E8F0")
+    muted_fill = PatternFill("solid", fgColor="F8FAFC")
+    no_fill = PatternFill(fill_type=None)
+    font = Font(name="Arial", size=10, color="0F172A")
+    bold = Font(name="Arial", size=10, bold=True, color="0F172A")
+
+    def style_range(row: int, start: int = 1, end: int = 7, **kwargs):
+        for column in range(start, end + 1):
+            cell = sheet.cell(row=row, column=column)
+            cell.font = kwargs.get("font", font)
+            cell.fill = kwargs.get("fill", no_fill)
+            cell.border = kwargs.get("border", Border())
+            cell.alignment = kwargs.get(
+                "alignment",
+                Alignment(vertical="center", wrap_text=True),
             )
 
-    signature = _signature_image(snapshot.get("issuer_signature", ""))
-    if signature is not None:
-        signature_sheet, signature_coordinate = _defined_cell(
-            workbook,
-            "issuer_signature",
+    def merged(row: int, start: int, end: int, value="", **kwargs):
+        sheet.merge_cells(
+            start_row=row,
+            start_column=start,
+            end_row=row,
+            end_column=end,
         )
-        signature_cell = signature_sheet[signature_coordinate]
-        signature.anchor = signature_sheet.cell(
-            row=signature_cell.row,
-            column=signature_cell.column,
-        ).coordinate
-        signature_sheet.add_image(signature)
+        cell = sheet.cell(row=row, column=start, value=value)
+        style_range(row, start, end, **kwargs)
+        cell.font = kwargs.get("font", font)
+        cell.alignment = kwargs.get(
+            "alignment", Alignment(vertical="center", wrap_text=True)
+        )
+        return cell
 
-    columns = (
-        "line_no",
-        "description",
-        "qty",
-        "list_price",
-        "discount_percent",
-        "net_unit_price",
-        "extended_price",
+    def value(key: str, fallback=""):
+        result = snapshot.get(key)
+        return fallback if result in (None, "") else result
+
+    def number_text(value_):
+        if value_ in (None, ""):
+            return ""
+        return format(Decimal(str(value_)).normalize(), "f")
+
+    def numeric_value(value_):
+        if value_ in (None, ""):
+            return None
+        rounded = Decimal(str(value_)).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        if rounded == rounded.to_integral():
+            return int(rounded)
+        return float(rounded)
+
+    def numeric_format(value_, *, grouped=False, suffix=""):
+        rounded = Decimal(str(value_ or 0)).quantize(
+            Decimal("0.01"),
+            rounding=ROUND_HALF_UP,
+        )
+        places = max(-rounded.normalize().as_tuple().exponent, 0)
+        pattern = "#,##0" if grouped else "0"
+        if places:
+            pattern += "." + ("0" * places)
+        if suffix:
+            pattern += f'"{suffix}"'
+        return pattern
+
+    def money(value_):
+        if value_ in (None, "", 0, 0.0):
+            return None
+        amount = Decimal(str(value_))
+        if not amount:
+            return None
+        return numeric_value(amount)
+
+    for row in range(1, 100):
+        sheet.row_dimensions[row].height = 18
+
+    logo_path = Path(__file__).resolve().parent.parent / "assets" / (
+        "onepro-logo.png"
     )
-    for offset, item in enumerate(render_items):
-        row = item_start_row + offset
-        values = dict(item)
-        values["description"] = item.get("description") or item.get("name") or ""
-        for column, key in enumerate(columns, 1):
-            item_sheet.cell(row=row, column=column, value=values.get(key, ""))
+    logo = SpreadsheetImage(logo_path)
+    logo_ratio = logo.height / logo.width
+    logo.width = 132
+    logo.height = round(132 * logo_ratio)
+    logo.anchor = _image_anchor(
+        row=0,
+        column=0,
+        width=logo.width,
+        height=logo.height,
+    )
+    sheet.add_image(logo)
 
-    for name in ("subtotal_before_vat", "vat_amount", "grand_total"):
-        sheet, coordinate = _defined_cell(workbook, name)
-        original = sheet[coordinate]
-        original.value = snapshot.get(name, "0")
-    item_sheet.print_area = f"A1:G{item_sheet.max_row}"
+    sheet.row_dimensions[1].height = 60
+    sheet.row_dimensions[2].height = 24
+    sheet.row_dimensions[3].height = 28
+    sheet.row_dimensions[4].height = 15
+    merged(1, 1, 7, "")
+    merged(
+        2,
+        1,
+        7,
+        value("issuer_company_name"),
+        font=Font(name="Arial", size=18, bold=True, color="0F172A"),
+        alignment=Alignment(horizontal="center", vertical="center"),
+    )
+    merged(
+        3,
+        1,
+        7,
+        "Quotation",
+        font=Font(
+            name="Arial",
+            size=22,
+            bold=True,
+            underline="single",
+            color="0F172A",
+        ),
+        alignment=Alignment(horizontal="center", vertical="center"),
+    )
+    merged(4, 1, 7, "")
 
+    right_details = (
+        (5, "Date:", value("quote_date")),
+        (6, "Quote No.:", value("quote_no")),
+        (7, "Quote Valid Till:", value("expire_date")),
+    )
+    for row, label, content in right_details:
+        sheet.cell(row, 6, label)
+        sheet.cell(row, 7, content)
+        style_range(
+            row,
+            6,
+            6,
+            font=bold,
+            alignment=Alignment(horizontal="right", vertical="center"),
+        )
+        style_range(
+            row,
+            7,
+            7,
+            border=bottom_border,
+            alignment=Alignment(horizontal="right", vertical="center"),
+        )
+
+    merged(
+        6,
+        1,
+        2,
+        "Ship to",
+        font=bold,
+        fill=header_fill,
+        border=dark_border,
+        alignment=Alignment(horizontal="center", vertical="center"),
+    )
+    customer_details = (
+        (7, "Company :", value("client_company")),
+        (8, "Name :", value("contact_person")),
+        (9, "Email :", value("email")),
+    )
+    for row, label, content in customer_details:
+        merged(
+            row,
+            1,
+            2,
+            f"{label} {content}",
+            border=dark_border,
+        )
+    merged(10, 1, 7, "")
+    sheet.row_dimensions[10].height = 9
+    merged(
+        11,
+        1,
+        2,
+        "Bill to:",
+        font=bold,
+        fill=header_fill,
+        border=dark_border,
+        alignment=Alignment(horizontal="center", vertical="center"),
+    )
+    billing_details = (
+        (12, "Company :", value("billing_company", value("client_company"))),
+        (13, "Name :", value("billing_contact", value("contact_person"))),
+        (14, "Email :", value("billing_email", value("email"))),
+    )
+    for row, label, content in billing_details:
+        merged(
+            row,
+            1,
+            2,
+            f"{label} {content}",
+            border=dark_border,
+        )
+    merged(15, 1, 7, "")
+    sheet.row_dimensions[15].height = 12
+
+    meta_headers = (
+        "Contact Person",
+        "Email",
+        "Project",
+        "Payment Terms",
+        "Currency",
+    )
+    meta_values = [
+        value("issuer_contact_name", value("contact_person")),
+        value("issuer_contact_email", value("email")),
+        value("project_name", "-"),
+        value("payment_terms", "-"),
+        value("currency"),
+    ]
+    meta_positions = ((1, 1), (2, 2), (3, 5), (6, 6), (7, 7))
+    meta_font = Font(name="Arial", size=9, bold=True, color="0F172A")
+    for content, (start, end) in zip(meta_headers, meta_positions):
+        merged(
+            16,
+            start,
+            end,
+            content,
+            font=meta_font,
+            fill=header_fill,
+            border=cell_border,
+        )
+    sheet.cell(17, 1, meta_values[0])
+    sheet.cell(17, 2, meta_values[1])
+    merged(17, 3, 5, meta_values[2])
+    sheet.cell(17, 6, meta_values[3])
+    sheet.cell(17, 7, meta_values[4])
+    style_range(17, border=cell_border)
+    for cell in sheet[17]:
+        cell.alignment = Alignment(vertical="center", wrap_text=True)
+    merged(18, 1, 7, "")
+    sheet.row_dimensions[18].height = 15
+
+    items = list(snapshot.get("items") or [])
+    groups = (
+        (
+            "Software",
+            [item for item in items if item.get("type") == "Software"],
+            3,
+            snapshot.get("software_subtotal"),
+        ),
+        (
+            "Others",
+            [item for item in items if item.get("type") != "Software"],
+            5,
+            snapshot.get("others_subtotal"),
+        ),
+    )
+    row = 19
+    headers = (
+        "Item",
+        "Description",
+        "Qty",
+        "List Price",
+        "Discount (%)",
+        "Discounted Price",
+        "Extended Price",
+    )
+    for section, section_items, minimum, subtotal in groups:
+        merged(
+            row,
+            1,
+            7,
+            section,
+            font=Font(name="Arial", size=11, bold=True),
+            fill=header_fill,
+            border=cell_border,
+        )
+        row += 1
+        for column, header in enumerate(headers, 1):
+            sheet.cell(row, column, header)
+        style_range(
+            row,
+            font=bold,
+            fill=muted_fill,
+            border=cell_border,
+            alignment=Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            ),
+        )
+        row += 1
+        rows = section_items + [
+            {} for _ in range(max(minimum - len(section_items), 0))
+        ]
+        for index, item in enumerate(rows, 1):
+            description = item.get("description") or item.get("name") or ""
+            values = [
+                index if description else "",
+                description,
+                numeric_value(item.get("qty")) if description else None,
+                money(item.get("list_price")) if description else None,
+                (
+                    numeric_value(item.get("discount_percent") or 0)
+                    if description
+                    else None
+                ),
+                money(item.get("net_unit_price")) if description else None,
+                money(item.get("extended_price")) if description else None,
+            ]
+            for column, content in enumerate(values, 1):
+                sheet.cell(row, column, content)
+            style_range(row, border=cell_border)
+            sheet.row_dimensions[row].height = 24
+            for column in (1, 3, 5):
+                sheet.cell(row, column).alignment = Alignment(
+                    horizontal="center",
+                    vertical="center",
+                    wrap_text=True,
+                )
+            sheet.cell(row, 3).number_format = numeric_format(
+                item.get("qty"),
+            )
+            sheet.cell(row, 5).number_format = numeric_format(
+                item.get("discount_percent"),
+                suffix="%",
+            )
+            for column in (4, 6, 7):
+                sheet.cell(row, column).alignment = Alignment(
+                    horizontal="right",
+                    vertical="center",
+                )
+            for column, field in (
+                (4, "list_price"),
+                (6, "net_unit_price"),
+                (7, "extended_price"),
+            ):
+                sheet.cell(row, column).number_format = numeric_format(
+                    item.get(field),
+                    grouped=True,
+                )
+            row += 1
+        for column in range(1, 5):
+            sheet.cell(row, column).border = Border()
+        sheet.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
+        subtotal_label = (
+            "Software subscription subtotal:"
+            if section == "Software"
+            else "Others Subtotal:"
+        )
+        sheet.cell(row, 5, subtotal_label)
+        sheet.cell(row, 7, money(subtotal))
+        sheet.cell(row, 7).number_format = numeric_format(
+            subtotal,
+            grouped=True,
+        )
+        style_range(
+            row,
+            5,
+            7,
+            font=bold,
+            border=cell_border,
+            alignment=Alignment(horizontal="right", vertical="center"),
+        )
+        row += 1
+        merged(row, 1, 7, "")
+        sheet.row_dimensions[row].height = 15
+        row += 1
+
+    totals = (
+        (
+            f"Subtotal before {value('tax_label')}:",
+            snapshot.get("subtotal_before_vat"),
+        ),
+        (
+            f"{value('tax_label')} Amount "
+            f"({number_text(value('vat_rate', 0))}%):",
+            snapshot.get("vat_amount"),
+        ),
+        ("Grand Total:", snapshot.get("grand_total")),
+    )
+    for label, amount in totals:
+        sheet.merge_cells(start_row=row, start_column=5, end_row=row, end_column=6)
+        sheet.cell(row, 5, label)
+        sheet.cell(row, 7, money(amount))
+        sheet.cell(row, 7).number_format = numeric_format(
+            amount,
+            grouped=True,
+        )
+        style_range(
+            row,
+            5,
+            7,
+            font=bold,
+            border=cell_border,
+            alignment=Alignment(horizontal="right", vertical="center"),
+        )
+        row += 1
+    merged(row, 1, 7, "")
+    sheet.row_dimensions[row].height = 9
+    row += 1
+    merged(row, 1, 7, "Additional Notes & Disclaimers:", font=bold)
+    row += 1
+    merged(
+        row,
+        1,
+        7,
+        value("remarks_disclaimer"),
+        font=Font(name="Arial", size=9, color="334155"),
+        border=cell_border,
+        fill=muted_fill,
+        alignment=Alignment(vertical="top", wrap_text=True),
+    )
+    notes_lines = str(value("remarks_disclaimer")).count("\n") + 1
+    sheet.row_dimensions[row].height = max(30, notes_lines * 12)
+    row += 1
+    merged(
+        row,
+        1,
+        7,
+        "To indicate Customer acceptance of this quotation, please sign "
+        "below and return one copy of this quotation to OnePro Cloud.",
+    )
+    sheet.row_dimensions[row].height = 24
+    row += 1
+    merged(row, 1, 7, "")
+    sheet.row_dimensions[row].height = 24
+    row += 1
+    merged(row, 1, 3, "")
+    merged(row, 4, 4, "")
+    merged(row, 5, 7, value("issuer_company_name"), font=bold)
+    row += 1
+    signature_row = row
+    merged(
+        row,
+        1,
+        3,
+        "________________________",
+        alignment=Alignment(vertical="bottom"),
+    )
+    merged(
+        row,
+        5,
+        7,
+        "________________________",
+        alignment=Alignment(vertical="bottom"),
+    )
+    sheet.row_dimensions[row].height = 30
+    signature = _signature_image(str(value("issuer_signature")))
+    if signature is not None:
+        signature.anchor = _image_anchor(
+            row=signature_row - 1,
+            column=4,
+            width=signature.width,
+            height=signature.height,
+        )
+        sheet.add_image(signature)
+    row += 1
+    merged(row, 1, 3, "Name :")
+    merged(
+        row,
+        5,
+        7,
+        f"Name : {value('issuer_contact_name', value('contact_person'))}",
+    )
+    row += 1
+    merged(row, 1, 3, "Title :")
+    merged(
+        row,
+        5,
+        7,
+        f"Title : {value('issuer_contact_title', 'Sales Manager')}",
+    )
+    row += 1
+    merged(row, 1, 3, "Email :")
+    merged(
+        row,
+        5,
+        7,
+        f"Email : {value('issuer_contact_email', value('email'))}",
+    )
+    sheet.print_area = f"A1:G{row}"
+    sheet.page_setup.orientation = "portrait"
+    sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    workbook.properties.created = datetime(2000, 1, 1)
+    workbook.properties.modified = datetime(2000, 1, 1)
+    content = _save_workbook_deterministic(workbook)
+    workbook.close()
+    generated = load_workbook(BytesIO(content), read_only=True)
     try:
-        content = _save_workbook_deterministic(workbook)
+        if DEFAULT_WORKSHEET not in generated.sheetnames:
+            raise TemplateValidationError(
+                "Generated quotation worksheet is missing",
+                code="generated_worksheet_missing",
+            )
     finally:
-        workbook.close()
-    validate_template_bytes(content)
+        generated.close()
     return content
 
 

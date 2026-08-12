@@ -11,10 +11,12 @@ from quotation.services.feishu_client import (
 
 from . import common
 
+
 class FeishuFolderView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        root_folder_token = ""
         try:
             client, access_token, root_folder_token = (
                 common._system_drive_context()
@@ -35,6 +37,19 @@ class FeishuFolderView(APIView):
         except PermissionError:
             return forbidden_response()
         except FeishuAPIError as exc:
+            if root_folder_token:
+                return Response(
+                    {
+                        "folder_token": root_folder_token,
+                        "folder_name": common.ARCHIVE_FOLDER_LABEL,
+                        "root_folder_token": root_folder_token,
+                        "is_root": True,
+                        "files": [],
+                        "has_more": False,
+                        "next_page_token": None,
+                        "listing_available": False,
+                    }
+                )
             return common._feishu_error_response(
                 exc, operation="folder listing"
             )
@@ -61,6 +76,7 @@ class FeishuFolderView(APIView):
                 "files": files,
                 "has_more": bool(data.get("has_more")),
                 "next_page_token": data.get("next_page_token"),
+                "listing_available": True,
             }
         )
 

@@ -134,6 +134,42 @@ select option {
   scrollbar-width: thin;
 }
 
+.qmp-dropdown-panel--product-line {
+  right: auto !important;
+  width: max-content !important;
+  min-width: 100%;
+  max-width: min(28rem, calc(100vw - 2rem));
+}
+
+.qmp-dropdown-panel--product-line .qmp-dropdown-option {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.qmp-dropdown-panel--customer-company {
+  right: auto !important;
+  width: max-content !important;
+  min-width: 100%;
+  max-width: min(42rem, calc(100vw - 2rem));
+}
+
+.qmp-dropdown-panel--customer-company .qmp-dropdown-option {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.qmp-dropdown-panel--history {
+  right: auto !important;
+  width: max-content !important;
+  min-width: 100%;
+  max-width: min(42rem, calc(100vw - 2rem));
+}
+
+.qmp-dropdown-panel--history .qmp-dropdown-option {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .qmp-dropdown-panel::-webkit-scrollbar {
   width: 6px;
 }
