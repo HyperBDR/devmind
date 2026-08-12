@@ -30,6 +30,7 @@ from llm_ops.models import (
     UsageReconciliationRecord,
 )
 from llm_ops.services import sync_channel_price_items
+from llm_ops.price_table_validation import usage_range_spec
 
 
 class LLMOpsViewTests(TestCase):
@@ -864,6 +865,61 @@ class LLMOpsViewTests(TestCase):
             AuditLog.objects.filter(target_id=str(source.id)).count(),
             1,
         )
+
+    @patch("llm_ops.views.import_manual_model_prices")
+    def test_manual_price_import_passes_normalized_tiers(self, mock_import):
+        provider = LLMProvider.objects.create(name="OpenAI", code="openai")
+        source = PriceCollectionSource.objects.create(
+            name="OpenAI Manual Tier Sheet",
+            slug="openai-manual-tier-sheet",
+            provider=provider,
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_MANUAL,
+            currency="USD",
+        )
+        mock_import.return_value = {
+            "created_models": 0,
+            "updated_models": 1,
+            "created_price_items": 2,
+        }
+
+        response = self.client.post(
+            reverse("llm-ops-manual-price-import"),
+            {
+                "source": source.id,
+                "rows": [
+                    {
+                        "model_code": "gpt-5",
+                        "price_items": [
+                            {
+                                "dimension": "text_input",
+                                "billing_unit": "per_1m_tokens",
+                                "unit_price": "1",
+                                "tier_type": "usage_range",
+                                "tier_start": "0",
+                                "tier_end": "128000",
+                                "spec": usage_range_spec(),
+                            },
+                            {
+                                "dimension": "text_input",
+                                "billing_unit": "per_1m_tokens",
+                                "unit_price": "2",
+                                "tier_type": "usage_range",
+                                "tier_start": "128000",
+                                "tier_end": None,
+                                "spec": usage_range_spec(),
+                            },
+                        ],
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        _, kwargs = mock_import.call_args
+        items = kwargs["rows"][0]["price_items"]
+        self.assertEqual(items[0]["tier_start"], Decimal("0"))
+        self.assertEqual(items[1]["tier_end"], None)
 
     @patch("llm_ops.views.import_manual_model_prices")
     def test_manual_price_import_accepts_source_without_provider(

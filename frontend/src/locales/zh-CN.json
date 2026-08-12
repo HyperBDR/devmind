@@ -2576,6 +2576,10 @@
         "custom": "选择元模型",
         "existing": "选择已有模型"
       },
+      "priceMode": {
+        "flat": "固定价格",
+        "tiered": "阶梯价格"
+      },
       "fields": {
         "currency": "币种",
         "metaModel": "元模型",
@@ -2666,9 +2670,15 @@
         "customModelName": "请填写自定义模型名称。",
         "customModelProvider": "请选择自定义模型的模型厂商。",
         "noSource": "缺少价格源。",
+        "invalidTierBoundary": "阶梯边界必须大于起始值，并保持相邻区间连续。",
+        "invalidTierPrice": "请输入大于或等于 0 的阶梯价格。",
         "price": "至少填写一个价格维度。",
         "selectExistingModel": "请选择一个已有模型。",
-        "selectMetaModel": "请选择一个元模型。"
+        "selectMetaModel": "请选择一个元模型。",
+        "tierGap": "相邻阶梯之间不能留有区间缺口。",
+        "tierOverlap": "相邻阶梯之间不能出现区间重叠。",
+        "tierTable": "请修正阶梯价格中的区间或价格。",
+        "tierZeroStart": "第一档必须从 0 Token 开始。"
       },
       "groups": {
         "currentProvider": "默认模型厂商",

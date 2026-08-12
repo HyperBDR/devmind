@@ -1163,6 +1163,89 @@ class LLMOpsPricingServiceTests(TestCase):
         self.assertEqual(item.model, self.model)
         self.assertEqual(item.dimension, ModelPriceItem.DIMENSION_TEXT_INPUT)
 
+    def test_manual_import_persists_and_resyncs_usage_range_items(self):
+        source = PriceCollectionSource.objects.create(
+            provider=self.provider,
+            name="Supplier Tier Sheet",
+            slug="supplier-tier-sheet",
+            source_category=PriceCollectionSource.SOURCE_CATEGORY_SUPPLIER,
+            currency="USD",
+            updates_model_prices=False,
+        )
+        price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            price_source=source,
+            settlement_ratio=Decimal("0.8"),
+        )
+        tier_spec = usage_range_spec()
+        rows = []
+        for dimension, first, second in (
+            ("text_input", "1", "2"),
+            ("text_output", "3", "4"),
+            ("cache_input", "0.5", "1"),
+        ):
+            rows.extend(
+                [
+                    {
+                        "dimension": dimension,
+                        "billing_unit": "per_1m_tokens",
+                        "unit_price": Decimal(first),
+                        "tier_type": "usage_range",
+                        "tier_start": Decimal("0"),
+                        "tier_end": Decimal("128000"),
+                        "spec": tier_spec,
+                    },
+                    {
+                        "dimension": dimension,
+                        "billing_unit": "per_1m_tokens",
+                        "unit_price": Decimal(second),
+                        "tier_type": "usage_range",
+                        "tier_start": Decimal("128000"),
+                        "tier_end": None,
+                        "spec": tier_spec,
+                    },
+                ]
+            )
+
+        result = import_manual_model_prices(
+            source=source,
+            provider=self.provider,
+            rows=[
+                {
+                    "model_code": "gpt-4o",
+                    "model_name": "GPT-4o",
+                    "currency": "USD",
+                    "price_items": rows,
+                }
+            ],
+            default_currency="USD",
+            updates_model_prices=False,
+        )
+
+        source_items = ModelPriceItem.objects.filter(
+            source=source,
+            is_current=True,
+        ).order_by("dimension", "tier_start")
+        channel_items = ChannelPriceItem.objects.filter(
+            channel=price.channel,
+            model=price.model,
+            is_current=True,
+        ).order_by("dimension", "tier_start")
+        self.assertEqual(source_items.count(), 6)
+        self.assertEqual(channel_items.count(), 6)
+        self.assertEqual(
+            list(source_items.values_list("tier_start", "tier_end"))[:2],
+            [
+                (Decimal("0"), Decimal("128000")),
+                (Decimal("128000"), None),
+            ],
+        )
+        self.assertEqual(
+            result["channel_price_sync"]["channel_model_prices"],
+            1,
+        )
+
     def test_manual_import_reports_incremental_refresh_records(self):
         source = PriceCollectionSource.objects.create(
             provider=self.provider,

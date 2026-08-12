@@ -18,6 +18,7 @@ from llm_ops.models import (
     ResalePlatform,
     SourceSkuOffering,
 )
+from llm_ops.price_table_validation import usage_range_spec
 from llm_ops.serializers import (
     LLMModelSerializer,
     LLMOpsGlobalConfigSerializer,
@@ -646,6 +647,105 @@ class LLMModelSerializerTests(TestCase):
 
 
 class ManualPriceImportRequestSerializerTests(TestCase):
+    def test_accepts_normalized_usage_range_price_items(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "provider": provider.id,
+                "source_name": "Manual Tier Sheet",
+                "currency": "CNY",
+                "rows": [
+                    {
+                        "model_code": "deepseek-v4",
+                        "price_items": self.usage_range_items(),
+                    }
+                ],
+            }
+        )
+
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        items = serializer.validated_data["rows"][0]["price_items"]
+        self.assertEqual(items[0]["unit_price"], Decimal("1.250000"))
+
+    def test_rejects_manual_price_items_with_a_gap(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        items = self.usage_range_items()
+        items[1]["tier_start"] = "256000"
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "provider": provider.id,
+                "source_name": "Manual Tier Sheet",
+                "rows": [
+                    {
+                        "model_code": "deepseek-v4",
+                        "price_items": items,
+                    }
+                ],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        error = serializer.errors["rows"][0]["price_items"]["code"]
+        self.assertEqual(str(error), "price_table_gap")
+
+    def test_rejects_mixed_legacy_and_normalized_manual_prices(self):
+        provider = LLMProvider.objects.create(
+            name="DeepSeek",
+            code="deepseek",
+        )
+        serializer = ManualPriceImportRequestSerializer(
+            data={
+                "provider": provider.id,
+                "source_name": "Manual Tier Sheet",
+                "rows": [
+                    {
+                        "model_code": "deepseek-v4",
+                        "input_price_per_million": "1.25",
+                        "price_items": [
+                            {
+                                "dimension": "text_input",
+                                "billing_unit": "per_1m_tokens",
+                                "unit_price": "1.25",
+                                "tier_type": "flat",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertFalse(serializer.is_valid())
+        self.assertIn("price_items", serializer.errors["rows"][0])
+
+    @staticmethod
+    def usage_range_items():
+        return [
+            {
+                "dimension": "text_input",
+                "billing_unit": "per_1m_tokens",
+                "unit_price": "1.25",
+                "tier_type": "usage_range",
+                "tier_start": "0",
+                "tier_end": "128000",
+                "spec": usage_range_spec(),
+            },
+            {
+                "dimension": "text_input",
+                "billing_unit": "per_1m_tokens",
+                "unit_price": "2.50",
+                "tier_type": "usage_range",
+                "tier_start": "128000",
+                "tier_end": None,
+                "spec": usage_range_spec(),
+            },
+        ]
+
     def test_accepts_model_provider_different_from_source_provider(self):
         source_provider = LLMProvider.objects.create(
             name="Alibaba Cloud",

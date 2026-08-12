@@ -5,7 +5,7 @@
     @click.self="close"
   >
     <form
-      class="max-h-[calc(100vh-3rem)] w-full max-w-3xl overflow-hidden rounded-xl bg-white shadow-2xl"
+      class="max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-hidden rounded-xl bg-white shadow-2xl"
       @submit.prevent="submit"
     >
       <div class="modal-header">
@@ -169,9 +169,36 @@
             </label>
           </div>
 
-          <div class="price-grid">
+          <div v-if="supportsTokenPricing" class="mode-tabs mt-4">
+            <button
+              class="mode-tab"
+              :class="{ active: priceMode === 'flat' }"
+              type="button"
+              @click="setPriceMode('flat')"
+            >
+              {{ t('llmOps.manualPriceEntry.priceMode.flat') }}
+            </button>
+            <button
+              class="mode-tab"
+              :class="{ active: priceMode === 'tiered' }"
+              type="button"
+              @click="setPriceMode('tiered')"
+            >
+              {{ t('llmOps.manualPriceEntry.priceMode.tiered') }}
+            </button>
+          </div>
+
+          <TierPriceEditor
+            v-if="priceMode === 'tiered' && supportsTokenPricing"
+            v-model="tierDraft"
+            class="mt-4"
+            :currency="form.currency"
+            :errors="tierErrors"
+          />
+
+          <div v-if="visibleFlatPriceFields.length" class="price-grid">
             <label
-              v-for="field in activePriceFields"
+              v-for="field in visibleFlatPriceFields"
               :key="field.key"
               class="field-group"
             >
@@ -229,8 +256,16 @@ import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
+import TierPriceEditor from '@/components/llm-ops/TierPriceEditor.vue'
 import { userFacingApiError } from '@/utils/llmOpsErrors'
 import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
+import {
+  addResaleTierCard,
+  buildManualPriceItems,
+  buildResaleTierCards,
+  buildResaleTierDraftFromCards,
+  validateManualPriceDraft
+} from '@/utils/resaleTierDraft'
 
 const props = defineProps({
   open: {
@@ -261,53 +296,71 @@ const { t } = useI18n()
 
 const saving = ref(false)
 const modelMode = ref('existing')
+const priceMode = ref('flat')
 const form = ref(defaults())
+const tierDraft = ref(defaultTierDraft())
 
 const priceFields = computed(() => [
   {
     key: 'input_price_per_million',
+    billingUnit: 'per_1m_tokens',
+    dimension: 'text_input',
     label: t('llmOps.manualPriceEntry.priceFields.textInput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.textInput.help'),
     modalities: ['text', 'multimodal']
   },
   {
     key: 'output_price_per_million',
+    billingUnit: 'per_1m_tokens',
+    dimension: 'text_output',
     label: t('llmOps.manualPriceEntry.priceFields.textOutput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.textOutput.help'),
     modalities: ['text', 'multimodal']
   },
   {
     key: 'cache_input_price_per_million',
+    billingUnit: 'per_1m_tokens',
+    dimension: 'cache_input',
     label: t('llmOps.manualPriceEntry.priceFields.cacheInput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.cacheInput.help'),
     modalities: ['text', 'multimodal']
   },
   {
     key: 'image_output_price_per_image',
+    billingUnit: 'per_image',
+    dimension: 'image_output',
     label: t('llmOps.manualPriceEntry.priceFields.imageOutput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.imageOutput.help'),
     modalities: ['multimodal']
   },
   {
     key: 'audio_input_price_per_second',
+    billingUnit: 'per_second',
+    dimension: 'audio_input',
     label: t('llmOps.manualPriceEntry.priceFields.audioInput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.audioInput.help'),
     modalities: ['audio']
   },
   {
     key: 'audio_output_price_per_second',
+    billingUnit: 'per_second',
+    dimension: 'audio_output',
     label: t('llmOps.manualPriceEntry.priceFields.audioOutput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.audioOutput.help'),
     modalities: ['audio']
   },
   {
     key: 'video_input_price_per_second',
+    billingUnit: 'per_second',
+    dimension: 'video_input',
     label: t('llmOps.manualPriceEntry.priceFields.videoInput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.videoInput.help'),
     modalities: ['video']
   },
   {
     key: 'video_output_price_per_second',
+    billingUnit: 'per_second',
+    dimension: 'video_output',
     label: t('llmOps.manualPriceEntry.priceFields.videoOutput.label'),
     help: t('llmOps.manualPriceEntry.priceFields.videoOutput.help'),
     modalities: ['video']
@@ -382,6 +435,28 @@ const activePriceFields = computed(() =>
   )
 )
 
+const tokenPriceFieldKeys = new Set([
+  'input_price_per_million',
+  'output_price_per_million',
+  'cache_input_price_per_million'
+])
+
+const supportsTokenPricing = computed(() =>
+  ['text', 'multimodal'].includes(currentPriceModality.value)
+)
+
+const visibleFlatPriceFields = computed(() => {
+  if (priceMode.value === 'flat') return activePriceFields.value
+  return activePriceFields.value.filter(
+    (field) => !tokenPriceFieldKeys.has(field.key)
+  )
+})
+
+const tierErrors = computed(() => {
+  if (priceMode.value !== 'tiered') return {}
+  return translateTierErrors(validateManualPriceDraft(tierDraft.value))
+})
+
 const sourceCategoryLabel = computed(() => {
   const labels = {
     official_provider: t('llmOps.manualPriceEntry.categories.officialProvider'),
@@ -455,6 +530,9 @@ const validationMessage = computed(() => {
     }
   }
   if (!hasAnyPrice()) return t('llmOps.manualPriceEntry.validation.price')
+  if (priceMode.value === 'tiered' && Object.keys(tierErrors.value).length) {
+    return t('llmOps.manualPriceEntry.validation.tierTable')
+  }
   return ''
 })
 
@@ -463,12 +541,16 @@ watch(
   (open) => {
     if (open) {
       modelMode.value = isManualSource.value ? 'custom' : 'existing'
+      priceMode.value = 'flat'
       form.value = defaults()
+      tierDraft.value = defaultTierDraft()
     }
   }
 )
 
 watch(currentPriceModality, () => {
+  priceMode.value = 'flat'
+  tierDraft.value = defaultTierDraft()
   clearInactivePrices()
 })
 
@@ -487,6 +569,31 @@ function defaults() {
     video_input_price_per_second: '',
     video_output_price_per_second: ''
   }
+}
+
+function defaultTierDraft() {
+  return {
+    cache: [{ end: null, flat: true, price: '', start: null }],
+    input: [{ end: null, flat: true, price: '', start: null }],
+    output: [{ end: null, flat: true, price: '', start: null }]
+  }
+}
+
+function setPriceMode(mode) {
+  priceMode.value = mode
+  if (mode !== 'tiered') return
+  const flatDraft = {
+    cache: [flatTierRow(form.value.cache_input_price_per_million)],
+    input: [flatTierRow(form.value.input_price_per_million)],
+    output: [flatTierRow(form.value.output_price_per_million)]
+  }
+  tierDraft.value = buildResaleTierDraftFromCards(
+    addResaleTierCard(buildResaleTierCards(flatDraft))
+  )
+}
+
+function flatTierRow(price) {
+  return { end: null, flat: true, price: String(price || ''), start: null }
 }
 
 function close() {
@@ -560,6 +667,13 @@ function buildImportRow(model) {
   if (model.provider_name) {
     row.provider_name = model.provider_name
   }
+  if (priceMode.value === 'tiered' && supportsTokenPricing.value) {
+    row.price_items = [
+      ...buildManualPriceItems(tierDraft.value),
+      ...buildSupplementalPriceItems()
+    ]
+    return row
+  }
   activePriceFields.value.forEach((field) => {
     const value = normalizePrice(form.value[field.key])
     if (value !== null) row[field.key] = value
@@ -568,8 +682,55 @@ function buildImportRow(model) {
 }
 
 function hasAnyPrice() {
+  if (priceMode.value === 'tiered' && supportsTokenPricing.value) {
+    return (
+      buildManualPriceItems(tierDraft.value).length > 0 ||
+      buildSupplementalPriceItems().length > 0
+    )
+  }
   return activePriceFields.value.some(
     (field) => normalizePrice(form.value[field.key]) !== null
+  )
+}
+
+function buildSupplementalPriceItems() {
+  return visibleFlatPriceFields.value.flatMap((field) => {
+    const value = normalizePrice(form.value[field.key])
+    if (value === null) return []
+    return [
+      {
+        billing_unit: field.billingUnit,
+        dimension: field.dimension,
+        spec: {},
+        tier_end: null,
+        tier_start: null,
+        tier_type: 'flat',
+        unit_price: value
+      }
+    ]
+  })
+}
+
+function translateTierErrors(errors) {
+  const labels = {
+    'price_table.items_required': t('llmOps.manualPriceEntry.validation.price'),
+    'price_table.invalid_price': t(
+      'llmOps.manualPriceEntry.validation.invalidTierPrice'
+    ),
+    price_table_gap: t('llmOps.manualPriceEntry.validation.tierGap'),
+    price_table_invalid_boundary: t(
+      'llmOps.manualPriceEntry.validation.invalidTierBoundary'
+    ),
+    price_table_missing_terminal: t(
+      'llmOps.manualPriceEntry.validation.invalidTierBoundary'
+    ),
+    price_table_missing_zero_start: t(
+      'llmOps.manualPriceEntry.validation.tierZeroStart'
+    ),
+    price_table_overlap: t('llmOps.manualPriceEntry.validation.tierOverlap')
+  }
+  return Object.fromEntries(
+    Object.entries(errors).map(([key, value]) => [key, labels[value] || value])
   )
 }
 
