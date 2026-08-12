@@ -1127,6 +1127,13 @@
       },
       "tiers": {
         "title": "阶梯挂售价",
+        "sharedScheduleHelp": "一个阶梯共用同一 Token 区间，分别设置输入、输出与缓存命中售价。",
+        "priceEntry": "价格录入",
+        "cardCount": "共 {count} 个阶梯",
+        "collapse": "收起阶梯",
+        "expand": "展开阶梯",
+        "customerPreview": "用户端展示样例",
+        "to": "至",
         "intervalHelp": "区间采用 [起始, 结束)；结束留空表示无上限。",
         "continuityHelp": "修改边界时，相邻阶梯会自动接续。",
         "upstreamHelp": "区间跟随上游采购价，只可修改每段挂售价。",

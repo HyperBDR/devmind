@@ -1119,6 +1119,13 @@
       },
       "tiers": {
         "title": "Tiered resale prices",
+        "sharedScheduleHelp": "Each tier shares one token range, with separate input, output, and cache-hit prices.",
+        "priceEntry": "Price entry",
+        "cardCount": "{count} tiers",
+        "collapse": "Collapse tier",
+        "expand": "Expand tier",
+        "customerPreview": "Customer preview",
+        "to": "to",
         "intervalHelp": "Intervals use [start, end); leave the end blank for no upper limit.",
         "continuityHelp": "Adjacent tiers stay connected when you edit a boundary.",
         "upstreamHelp": "Ranges follow upstream procurement; only tier prices are editable.",

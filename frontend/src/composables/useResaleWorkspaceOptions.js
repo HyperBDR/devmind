@@ -2,6 +2,7 @@ import { computed } from 'vue'
 
 import { channelPriceItemKey } from '@/composables/useResaleChainRows'
 import { resolveCanonicalMetaOwner } from '@/utils/llmOpsMeta'
+import { selectPreferredChannelPriceItems } from '@/utils/resaleTierDraft'
 
 export function useResaleWorkspaceOptions({ form, props, t }) {
   const metaModelRows = computed(() =>
@@ -34,12 +35,25 @@ export function useResaleWorkspaceOptions({ form, props, t }) {
 
   const channelPriceItemsByKey = computed(() => {
     const map = new Map()
+    const variants = new Map()
     ;(props.channelPriceItems || []).forEach((item) => {
       if (!item?.channel || !item?.model || !item?.dimension) return
-      const key = channelPriceItemKey(item.channel, item.model, item.dimension)
-      const items = map.get(key) || []
+      const key = [item.channel, item.model].map(String).join(':')
+      const items = variants.get(key) || []
       items.push(item)
-      map.set(key, items)
+      variants.set(key, items)
+    })
+    variants.forEach((items) => {
+      selectPreferredChannelPriceItems(items).forEach((item) => {
+        const key = channelPriceItemKey(
+          item.channel,
+          item.model,
+          item.dimension
+        )
+        const dimensionItems = map.get(key) || []
+        dimensionItems.push(item)
+        map.set(key, dimensionItems)
+      })
     })
     map.forEach((items) => {
       items.sort((left, right) => {
