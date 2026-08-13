@@ -1,18 +1,11 @@
 const SECTION_DATA_GROUPS = {
   audit: ['channels'],
   channelMatrix: ['channels', 'summary'],
-  channels: [
-    'channels',
-    'providers',
-    'metaModels',
-    'models',
-    'channelPricing',
-    'modelPrices'
-  ],
+  channels: ['channels'],
   collectionHealth: ['sources', 'runs'],
   globalConfig: ['sources'],
   listingRisk: ['summary'],
-  metaModels: ['providers', 'metaModels', 'models', 'modelPrices'],
+  metaModels: ['providers'],
   modelWorkbench: [
     'models',
     'channels',
@@ -24,14 +17,7 @@ const SECTION_DATA_GROUPS = {
   ],
   monitor: ['platforms', 'summary'],
   priceChanges: ['modelPrices', 'priceHistory'],
-  providers: [
-    'sources',
-    'runs',
-    'providers',
-    'metaModels',
-    'models',
-    'modelPrices'
-  ],
+  providers: ['sources', 'runs', 'providers'],
   reconciler: ['channels', 'models', 'records'],
   reseller: ['platforms', 'providers', 'models', 'listings', 'summary'],
   taskLogs: ['sources', 'runs'],
@@ -68,8 +54,20 @@ const RESALE_PUBLISHING_DATA_GROUPS = [
   'listings'
 ]
 
+const CHANNEL_MODEL_DATA_GROUPS = [
+  'providers',
+  'metaModels',
+  'models',
+  'channelPricing',
+  'modelPrices'
+]
+
 export function dataGroupsForResalePublishing() {
   return [...RESALE_PUBLISHING_DATA_GROUPS]
+}
+
+export function dataGroupsForChannelModelManagement() {
+  return [...CHANNEL_MODEL_DATA_GROUPS]
 }
 
 export function dataGroupsForSection(section) {

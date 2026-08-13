@@ -140,10 +140,11 @@
               <td class="table-cell">
                 <div class="inline-flex items-center justify-center gap-2">
                   <OperationIconButton
+                    :disabled="Boolean(openingChannelId)"
                     icon="config"
                     :label="t('llmOps.channelManagement.actions.manageModels')"
                     tone="primary"
-                    @click="selectedChannelForModels = channel"
+                    @click="openChannelModelManagement(channel)"
                   />
                   <OperationIconButton
                     icon="edit"
@@ -292,6 +293,10 @@ const props = defineProps({
     type: Array,
     default: () => []
   },
+  prepareModelManagement: {
+    type: Function,
+    default: null
+  },
   displayCurrency: {
     type: String,
     default: 'CNY'
@@ -313,6 +318,7 @@ const deleteTarget = ref(null)
 const searchKeyword = ref('')
 const statusFilter = ref('all')
 const deletingChannelId = ref(null)
+const openingChannelId = ref(null)
 
 const statusFilterOptions = computed(() => [
   { label: t('llmOps.channelManagement.filters.allStatus'), value: 'all' },
@@ -364,6 +370,21 @@ function handleChannelSaved() {
 function handleChannelModelsSaved() {
   selectedChannelForModels.value = null
   emit('refresh')
+}
+
+async function openChannelModelManagement(channel) {
+  if (openingChannelId.value) return
+  openingChannelId.value = channel.id
+  try {
+    if (props.prepareModelManagement) {
+      await props.prepareModelManagement()
+    }
+    selectedChannelForModels.value = channel
+  } catch (error) {
+    showError(errorMessage(error, t('llmOps.dataErrors.refreshChannels')))
+  } finally {
+    openingChannelId.value = null
+  }
 }
 
 function openDeleteConfirm(channel) {

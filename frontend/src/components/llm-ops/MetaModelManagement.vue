@@ -417,21 +417,9 @@ import {
 } from '@/utils/llmOpsPagination'
 
 const props = defineProps({
-  metaModels: {
-    type: Array,
-    required: true
-  },
   providers: {
     type: Array,
     required: true
-  },
-  models: {
-    type: Array,
-    required: true
-  },
-  priceItems: {
-    type: Array,
-    default: () => []
   }
 })
 

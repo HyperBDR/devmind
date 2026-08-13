@@ -2466,18 +2466,25 @@
       }
     },
     "sourcePriceDrawer": {
+      "catalogLabel": "Price source catalog",
       "title": "Meta Model Prices Under Supplier",
+      "subtitle": "Complete prices by region, specification, and token range without collapsing tiers.",
       "searchPlaceholder": "Search meta model, provider, or code",
+      "allUsage": "All usage",
+      "defaultScope": "Mainland China / default",
+      "priceItemCount": "{count} current price items",
+      "tierCount": "{count} tiers",
       "actions": {
         "close": "Close",
         "delete": "Delete",
         "deleting": "Deleting"
       },
       "summary": {
-        "currency": "Default currency",
-        "currentItems": "Total meta models",
-        "metaModels": "Meta models on page",
-        "status": "Status"
+        "catalogModelCount": "Parsed catalog models",
+        "collectedSkuCount": "Synced SKUs",
+        "coveredMetaModelCount": "Covered meta models",
+        "currentPriceItemCount": "Current price items",
+        "skippedModelCount": "Skipped models"
       },
       "pagination": {
         "pageSize": "Per page",
@@ -2488,6 +2495,7 @@
         "enabled": "Active"
       },
       "info": {
+        "latestRun": "Latest sync",
         "owner": "Source owner",
         "priceUrl": "Price URL",
         "updateMode": "Update mode"
@@ -2499,7 +2507,8 @@
       },
       "empty": {
         "noPrice": "No price",
-        "noRows": "This price source has no model price records yet."
+        "noRows": "This price source has no model price records yet.",
+        "noSearchResults": "No matching meta model. Try a name, code, or SKU."
       },
       "fallback": {
         "unbound": "Unbound",

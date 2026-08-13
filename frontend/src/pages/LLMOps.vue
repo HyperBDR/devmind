@@ -216,23 +216,15 @@
               v-else-if="activeSection === 'providers'"
               :focus-source-id="operationTargetSourceId"
               :providers="providers"
-              :meta-models="metaModels"
-              :models="models"
               :sources="providerCollectionSources"
               :collection-runs="collectionRuns"
-              :price-items="modelPriceItems"
-              :display-currency="displayCurrency"
-              :exchange-rate="exchangeRate"
               @refresh="refreshProviderManagementData"
               @manual-price-saved="handleManualPriceSaved"
             />
 
             <MetaModelManagement
               v-else-if="activeSection === 'metaModels'"
-              :meta-models="metaModels"
               :providers="providers"
-              :models="models"
-              :price-items="modelPriceItems"
               @refresh="refreshMetaModelManagementData"
             />
 
@@ -248,6 +240,7 @@
               :price-items="modelPriceItems"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
+              :prepare-model-management="preloadChannelModelData"
               @refresh="refreshChannelManagementData"
             />
 
@@ -304,32 +297,21 @@ import '@/components/llm-ops/llmOpsSelects.css'
 import '@/components/llm-ops/llmOpsTables.css'
 import '@/components/llm-ops/llmOpsShell.css'
 
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
-import AgioneListingStatusBoard from '@/components/llm-ops/AgioneListingStatusBoard.vue'
-import AuditLogPanel from '@/components/llm-ops/AuditLogPanel.vue'
-import ChannelManagement from '@/components/llm-ops/ChannelManagement.vue'
-import ChannelPriceMatrixPanel from '@/components/llm-ops/ChannelPriceMatrixPanel.vue'
-import CollectionHealthPanel from '@/components/llm-ops/CollectionHealthPanel.vue'
-import CollectionRunLogPanel from '@/components/llm-ops/CollectionRunLogPanel.vue'
-import GlobalConfigPanel from '@/components/llm-ops/GlobalConfigPanel.vue'
-import ListingRiskPanel from '@/components/llm-ops/ListingRiskPanel.vue'
 import LLMOpsErrorState from '@/components/llm-ops/LLMOpsErrorState.vue'
 import LLMOpsHeader from '@/components/llm-ops/LLMOpsHeader.vue'
-import LLMOpsMonitorDashboard from '@/components/llm-ops/LLMOpsMonitorDashboard.vue'
 import LLMOpsSidebar from '@/components/llm-ops/LLMOpsSidebar.vue'
-import ModelWorkbenchPanel from '@/components/llm-ops/ModelWorkbenchPanel.vue'
-import MetaModelManagement from '@/components/llm-ops/MetaModelManagement.vue'
-import PriceChangePanel from '@/components/llm-ops/PriceChangePanel.vue'
-import ProviderManagement from '@/components/llm-ops/ProviderManagement.vue'
-import ReconciliationPanel from '@/components/llm-ops/ReconciliationPanel.vue'
-import ResalePlatformModal from '@/components/llm-ops/ResalePlatformModal.vue'
-import ResalePublishingDrawer from '@/components/llm-ops/ResalePublishingDrawer.vue'
-import ResalePublishingWorkspace from '@/components/llm-ops/ResalePublishingWorkspace.vue'
-import ResaleWorkflowConfigPanel from '@/components/llm-ops/ResaleWorkflowConfigPanel.vue'
 import { useLLMOpsData } from '@/composables/useLLMOpsData'
 import { useLLMOpsMonitor } from '@/composables/useLLMOpsMonitor'
 import {
@@ -338,6 +320,69 @@ import {
 } from '@/composables/useLLMOpsNavigation'
 import { useLLMOpsResalePublishing } from '@/composables/useLLMOpsResalePublishing'
 import { parseLLMOpsOperationTarget } from '@/utils/llmOpsOperationEntry'
+
+const asyncPanel = (loader) =>
+  defineAsyncComponent({
+    loader,
+    loadingComponent: BaseLoading,
+    delay: 120,
+    timeout: 30000
+  })
+
+const AgioneListingStatusBoard = asyncPanel(
+  () => import('@/components/llm-ops/AgioneListingStatusBoard.vue')
+)
+const AuditLogPanel = asyncPanel(
+  () => import('@/components/llm-ops/AuditLogPanel.vue')
+)
+const ChannelManagement = asyncPanel(
+  () => import('@/components/llm-ops/ChannelManagement.vue')
+)
+const ChannelPriceMatrixPanel = asyncPanel(
+  () => import('@/components/llm-ops/ChannelPriceMatrixPanel.vue')
+)
+const CollectionHealthPanel = asyncPanel(
+  () => import('@/components/llm-ops/CollectionHealthPanel.vue')
+)
+const CollectionRunLogPanel = asyncPanel(
+  () => import('@/components/llm-ops/CollectionRunLogPanel.vue')
+)
+const GlobalConfigPanel = asyncPanel(
+  () => import('@/components/llm-ops/GlobalConfigPanel.vue')
+)
+const ListingRiskPanel = asyncPanel(
+  () => import('@/components/llm-ops/ListingRiskPanel.vue')
+)
+const LLMOpsMonitorDashboard = asyncPanel(
+  () => import('@/components/llm-ops/LLMOpsMonitorDashboard.vue')
+)
+const ModelWorkbenchPanel = asyncPanel(
+  () => import('@/components/llm-ops/ModelWorkbenchPanel.vue')
+)
+const MetaModelManagement = asyncPanel(
+  () => import('@/components/llm-ops/MetaModelManagement.vue')
+)
+const PriceChangePanel = asyncPanel(
+  () => import('@/components/llm-ops/PriceChangePanel.vue')
+)
+const ProviderManagement = asyncPanel(
+  () => import('@/components/llm-ops/ProviderManagement.vue')
+)
+const ReconciliationPanel = asyncPanel(
+  () => import('@/components/llm-ops/ReconciliationPanel.vue')
+)
+const ResalePlatformModal = asyncPanel(
+  () => import('@/components/llm-ops/ResalePlatformModal.vue')
+)
+const ResalePublishingDrawer = asyncPanel(
+  () => import('@/components/llm-ops/ResalePublishingDrawer.vue')
+)
+const ResalePublishingWorkspace = asyncPanel(
+  () => import('@/components/llm-ops/ResalePublishingWorkspace.vue')
+)
+const ResaleWorkflowConfigPanel = asyncPanel(
+  () => import('@/components/llm-ops/ResaleWorkflowConfigPanel.vue')
+)
 
 const { t } = useI18n()
 
@@ -373,6 +418,7 @@ const {
   normalizeDisplayCurrency,
   pageError,
   pointConversion,
+  preloadChannelModelData,
   preloadResalePublishingData,
   procurementRows,
   providerCollectionSources,

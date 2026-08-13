@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import { userFacingApiError } from '../src/utils/llmOpsErrors.js'
 import {
+  dataGroupsForChannelModelManagement,
   dataGroupsForResalePublishing,
   dataGroupsForSection,
   toolbarForSection
@@ -113,6 +114,21 @@ test('loads publishing-only data when the resale workspace opens', () => {
     'modelPrices',
     'listings'
   ])
+})
+
+test('loads channel model data only when opening its management drawer', () => {
+  assert.deepEqual(dataGroupsForSection('channels'), ['channels'])
+  assert.deepEqual(dataGroupsForChannelModelManagement(), [
+    'providers',
+    'metaModels',
+    'models',
+    'channelPricing',
+    'modelPrices'
+  ])
+  assert.match(
+    llmOpsPageSource,
+    /:prepare-model-management="preloadChannelModelData"/
+  )
 })
 
 test('does not pass unused model price items to the listing status board', () => {
