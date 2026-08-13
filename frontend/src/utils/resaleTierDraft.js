@@ -178,6 +178,24 @@ export function buildResaleTierDraftFromCards(cards = []) {
   )
 }
 
+/** Apply a uniform margin to every price in a flat or tiered cost schedule. */
+export function applyResaleTierMargin(draft = {}, margin) {
+  const marginValue = Number(margin)
+  const multiplier = 1 + (Number.isFinite(marginValue) ? marginValue : 0) / 100
+
+  return Object.fromEntries(
+    DIMENSIONS.map(([key]) => [
+      key,
+      (Array.isArray(draft?.[key]) ? draft[key] : []).map((row) => {
+        const cost = decimal(row.price)
+        const price =
+          cost === null ? '' : Number((cost * multiplier).toFixed(2))
+        return { ...row, price: String(price) }
+      })
+    ])
+  )
+}
+
 /** Add a shared tier while keeping the terminal range unbounded. */
 export function addResaleTierCard(cards = [], step = 1000000) {
   const nextCards = cards.map((card) => ({

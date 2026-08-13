@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  applyResaleTierMargin,
   addResaleTierCard,
   buildResaleTierCards,
   buildFlatResalePriceItems,
@@ -176,6 +177,35 @@ test('keeps a single unbounded usage range on the tiered API path', () => {
     normalizeResalePriceDraft(draft, 'USD').map((item) => item.tier_type),
     ['usage_range', 'usage_range', 'usage_range']
   )
+})
+
+test('applies one margin to every upstream price tier without flattening it', () => {
+  const costs = {
+    cache: [
+      { end: '1000000', flat: false, price: '0.4', start: '0' },
+      { end: null, flat: false, price: '0.2', start: '1000000' }
+    ],
+    input: [
+      { end: '1000000', flat: false, price: '4', start: '0' },
+      { end: null, flat: false, price: '2', start: '1000000' }
+    ],
+    output: [
+      { end: '1000000', flat: false, price: '16', start: '0' },
+      { end: null, flat: false, price: '8', start: '1000000' }
+    ]
+  }
+
+  const prices = applyResaleTierMargin(costs, 31.7)
+
+  assert.equal(hasTieredResalePrices(prices), true)
+  assert.deepEqual(prices.input, [
+    { end: '1000000', flat: false, price: '5.27', start: '0' },
+    { end: null, flat: false, price: '2.63', start: '1000000' }
+  ])
+  assert.deepEqual(prices.output, [
+    { end: '1000000', flat: false, price: '21.07', start: '0' },
+    { end: null, flat: false, price: '10.54', start: '1000000' }
+  ])
 })
 
 test('accepts an unbounded final tier without a terminal error', () => {
