@@ -882,6 +882,10 @@ class ModelPriceItem(models.Model):
             "id",
         ]
         indexes = [
+            models.Index(
+                fields=["source", "is_current", "meta_model"],
+                name="llmops_pi_src_cur_meta_idx",
+            ),
             models.Index(fields=["meta_model", "dimension", "is_current"]),
             models.Index(fields=["sku", "dimension", "is_current"]),
             models.Index(fields=["offering", "dimension", "is_current"]),

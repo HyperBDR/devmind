@@ -384,8 +384,8 @@
     />
     <SourcePriceDrawer
       :source="selectedProvider?.primary_source || null"
-      :models="[]"
-      :price-items="selectedProviderPriceItems"
+      :catalog="selectedProviderCatalog"
+      :search="selectedProviderSearch"
       :deleting="
         String(deletingSourceId || '') ===
         String(selectedProvider?.primary_source?.id || '')
@@ -394,6 +394,7 @@
       :page="selectedProviderPage"
       :page-size="selectedProviderPageSize"
       :total-items="selectedProviderTotal"
+      @search="handleSelectedProviderSearch"
       @close="selectedProvider = null"
       @delete="deleteSource"
       @page-change="loadSelectedProviderPriceItems"
@@ -431,14 +432,6 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  metaModels: {
-    type: Array,
-    default: () => []
-  },
-  models: {
-    type: Array,
-    required: true
-  },
   sources: {
     type: Array,
     required: true
@@ -446,18 +439,6 @@ const props = defineProps({
   collectionRuns: {
     type: Array,
     default: () => []
-  },
-  priceItems: {
-    type: Array,
-    default: () => []
-  },
-  displayCurrency: {
-    type: String,
-    default: 'CNY'
-  },
-  exchangeRate: {
-    type: Number,
-    default: 7.15
   }
 })
 
@@ -488,18 +469,16 @@ const selectedProviderLoading = ref(false)
 const selectedProviderPage = ref(1)
 const selectedProviderPageSize = ref(10)
 const selectedProviderTotal = ref(0)
-const selectedProviderPriceItems = ref([])
+const selectedProviderCatalog = ref({ results: [], summary: {} })
+const selectedProviderSearch = ref('')
+let selectedProviderRequestId = 0
 const openedFocusSourceId = ref(null)
 const localPriceEntryMetaModels = ref([])
 const localPriceEntryModels = ref([])
 
-const priceEntryMetaModels = computed(() =>
-  props.metaModels.length ? props.metaModels : localPriceEntryMetaModels.value
-)
+const priceEntryMetaModels = computed(() => localPriceEntryMetaModels.value)
 
-const priceEntryModels = computed(() =>
-  props.models.length ? props.models : localPriceEntryModels.value
-)
+const priceEntryModels = computed(() => localPriceEntryModels.value)
 
 const {
   filteredSourceProviderRows,
@@ -609,9 +588,11 @@ function handlePriceEntrySaved(payload) {
 }
 
 async function openSourceDetail(provider) {
+  selectedProviderRequestId += 1
   selectedProvider.value = provider
   selectedProviderPage.value = 1
-  selectedProviderPriceItems.value = []
+  selectedProviderCatalog.value = { results: [], summary: {} }
+  selectedProviderSearch.value = ''
   selectedProviderTotal.value = 0
   await loadSelectedProviderPriceItems(1)
 }
@@ -621,23 +602,31 @@ async function loadSelectedProviderPriceItems(
 ) {
   const source = selectedProvider.value?.primary_source
   if (!source?.id) return
+  const requestId = ++selectedProviderRequestId
   selectedProviderLoading.value = true
   try {
-    const response = await llmOpsApi.listModelPriceItems({
-      source: source.id,
-      is_current: 'true',
-      group_by: 'meta_model',
-      page,
-      page_size: selectedProviderPageSize.value
-    })
+    const response = await llmOpsApi.getCollectionSourcePriceCatalog(
+      source.id,
+      {
+        page,
+        page_size: selectedProviderPageSize.value,
+        search: selectedProviderSearch.value || undefined
+      }
+    )
+    if (requestId !== selectedProviderRequestId) return
     const payload = paginationPayload(response)
-    selectedProviderPriceItems.value = paginationResults(payload)
+    selectedProviderCatalog.value = {
+      results: paginationResults(payload),
+      summary: payload?.summary || {},
+      latest_run: payload?.latest_run || null
+    }
     selectedProviderTotal.value = Number(
-      payload?.count || selectedProviderPriceItems.value.length
+      payload?.count || selectedProviderCatalog.value.results.length
     )
     selectedProviderPage.value = page
   } catch (error) {
-    selectedProviderPriceItems.value = []
+    if (requestId !== selectedProviderRequestId) return
+    selectedProviderCatalog.value = { results: [], summary: {} }
     selectedProviderTotal.value = 0
     showError(
       errorMessage(
@@ -646,8 +635,16 @@ async function loadSelectedProviderPriceItems(
       )
     )
   } finally {
-    selectedProviderLoading.value = false
+    if (requestId === selectedProviderRequestId) {
+      selectedProviderLoading.value = false
+    }
   }
+}
+
+async function handleSelectedProviderSearch(value) {
+  selectedProviderSearch.value = value
+  selectedProviderPage.value = 1
+  await loadSelectedProviderPriceItems(1)
 }
 
 async function handleSelectedProviderPageSizeChange(pageSize) {

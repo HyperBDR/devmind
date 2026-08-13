@@ -19,6 +19,13 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/collection-sources/`, paramsOrEmpty(params))
   },
 
+  getCollectionSourcePriceCatalog(id, params) {
+    return apiClient.get(
+      `${base}/collection-sources/${id}/price-catalog/`,
+      paramsOrEmpty(params)
+    )
+  },
+
   listOfficialProviderSourceOptions() {
     return apiClient.get(
       `${base}/collection-sources/official-provider-options/`

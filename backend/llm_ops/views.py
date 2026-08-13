@@ -238,6 +238,100 @@ class AuditModelViewSetMixin:
         instance.delete()
 
 
+def compact_source_price_item(item):
+    """Serialize only fields required by the source catalogue drawer."""
+    return {
+        "id": item.id,
+        "sku_code": (
+            item.sku.canonical_sku_code if item.sku_id else ""
+        ),
+        "sku_name": item.sku.display_name if item.sku_id else "",
+        "dimension": item.dimension,
+        "billing_unit": item.billing_unit,
+        "currency": item.currency,
+        "unit_price": format(item.unit_price, "f"),
+        "tier_type": item.tier_type,
+        "tier_start": (
+            format(item.tier_start, "f")
+            if item.tier_start is not None
+            else None
+        ),
+        "tier_end": (
+            format(item.tier_end, "f")
+            if item.tier_end is not None
+            else None
+        ),
+        "spec": item.spec or {},
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def compact_source_price_catalog_row(meta_model, price_items):
+    """Build one meta-model row for the compact source catalogue."""
+    sku_codes = sorted(
+        {
+            item["sku_code"]
+            for item in price_items
+            if item.get("sku_code")
+        }
+    )
+    updated_values = [
+        item["updated_at"]
+        for item in price_items
+        if item.get("updated_at")
+    ]
+    return {
+        "meta_model_id": meta_model.id,
+        "meta_model_code": meta_model.code,
+        "meta_model_name": meta_model.name,
+        "owner_code": meta_model.owner_code,
+        "owner_name": meta_model.owner_name,
+        "modality": meta_model.modality,
+        "sku_codes": sku_codes,
+        "price_item_count": len(price_items),
+        "updated_at": max(updated_values, default=""),
+        "price_items": price_items,
+    }
+
+
+def source_price_catalog_summary(source, current_items):
+    """Return source coverage counters and the latest collection run."""
+    latest_run = (
+        PriceCollectionRun.objects.filter(source=source)
+        .order_by("-started_at", "-id")
+        .first()
+    )
+    metadata = latest_run.metadata if latest_run else {}
+    price_stats = current_items.aggregate(
+        covered_meta_model_count=Count("meta_model_id", distinct=True),
+        current_price_item_count=Count("id"),
+    )
+    summary = {
+        "catalog_model_count": int(metadata.get("total_models") or 0),
+        "collected_sku_count": (
+            int(latest_run.collected_count) if latest_run else 0
+        ),
+        "covered_meta_model_count": price_stats["covered_meta_model_count"],
+        "current_price_item_count": price_stats["current_price_item_count"],
+        "skipped_model_count": (
+            int(latest_run.skipped_count) if latest_run else 0
+        ),
+    }
+    latest_run_payload = None
+    if latest_run:
+        latest_run_payload = {
+            "id": latest_run.id,
+            "status": latest_run.status,
+            "started_at": latest_run.started_at.isoformat(),
+            "finished_at": (
+                latest_run.finished_at.isoformat()
+                if latest_run.finished_at
+                else None
+            ),
+        }
+    return summary, latest_run_payload
+
+
 class PriceCollectionSourceViewSet(
     AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
@@ -249,6 +343,11 @@ class PriceCollectionSourceViewSet(
     serializer_class = PriceCollectionSourceSerializer
 
     def get_queryset(self):
+        if self.action == "price_catalog":
+            return PriceCollectionSource.objects.select_related(
+                "provider",
+                "channel",
+            )
         price_items_by_source = (
             ModelPriceItem.objects.filter(source=OuterRef("pk"))
             .order_by()
@@ -384,6 +483,97 @@ class PriceCollectionSourceViewSet(
             {"results": supported_auto_sync_source_options()},
             status=status.HTTP_200_OK,
         )
+
+    @action(
+        detail=True,
+        methods=["get"],
+        url_path="price-catalog",
+        url_name="price-catalog",
+    )
+    def price_catalog(self, request, pk=None):
+        """Return a compact, searchable price catalogue for one source."""
+        source = self.get_object()
+        current_items = ModelPriceItem.objects.filter(
+            source=source,
+            is_current=True,
+        )
+        meta_models = MetaModel.objects.filter(
+            id__in=current_items.values("meta_model_id"),
+        )
+        search = str(request.query_params.get("search") or "").strip()
+        if search:
+            matching_sku_meta_models = current_items.filter(
+                Q(sku__display_name__icontains=search)
+                | Q(sku__canonical_sku_code__icontains=search)
+            ).values("meta_model_id")
+            meta_models = meta_models.filter(
+                Q(name__icontains=search)
+                | Q(code__icontains=search)
+                | Q(owner_name__icontains=search)
+                | Q(owner_code__icontains=search)
+                | Q(id__in=matching_sku_meta_models)
+            )
+        meta_models = meta_models.distinct().order_by("name", "code", "id")
+        page = self.paginate_queryset(meta_models)
+        selected_meta_models = page if page is not None else meta_models
+        selected_ids = [meta_model.id for meta_model in selected_meta_models]
+        page_items = list(
+            current_items.filter(meta_model_id__in=selected_ids)
+            .select_related("sku")
+            .only(
+                "id",
+                "meta_model_id",
+                "sku__canonical_sku_code",
+                "sku__display_name",
+                "dimension",
+                "billing_unit",
+                "currency",
+                "unit_price",
+                "tier_type",
+                "tier_start",
+                "tier_end",
+                "spec",
+                "updated_at",
+            )
+            .order_by(
+                "meta_model_id",
+                "sku__display_name",
+                "dimension",
+                "tier_start",
+                "id",
+            )
+        )
+        items_by_meta_model = {}
+        for item in page_items:
+            items_by_meta_model.setdefault(item.meta_model_id, []).append(
+                compact_source_price_item(item)
+            )
+        results = [
+            compact_source_price_catalog_row(
+                meta_model,
+                items_by_meta_model.get(meta_model.id, []),
+            )
+            for meta_model in selected_meta_models
+        ]
+        summary, latest_run = source_price_catalog_summary(
+            source,
+            current_items,
+        )
+        if page is None:
+            return Response(
+                {
+                    "count": len(results),
+                    "next": None,
+                    "previous": None,
+                    "results": results,
+                    "summary": summary,
+                    "latest_run": latest_run,
+                }
+            )
+        response = self.get_paginated_response(results)
+        response.data["summary"] = summary
+        response.data["latest_run"] = latest_run
+        return response
 
     @action(
         detail=False,
