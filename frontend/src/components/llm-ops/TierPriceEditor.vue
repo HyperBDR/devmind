@@ -36,6 +36,7 @@
         :expanded="expandedIndex === index"
         :index="index"
         :locked="boundariesLocked"
+        :point-label="pointLabel"
         @remove="removeCard(index)"
         @toggle="toggleCard(index)"
         @update:end="updateCard(index, 'end', $event)"
@@ -75,7 +76,8 @@ const props = defineProps({
   boundariesLocked: { type: Boolean, default: false },
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
-  modelValue: { type: Object, required: true }
+  modelValue: { type: Object, required: true },
+  pointLabel: { type: Function, default: () => '—' }
 })
 
 const emit = defineEmits(['update:modelValue'])
