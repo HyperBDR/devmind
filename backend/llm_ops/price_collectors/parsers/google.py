@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from html import unescape
 from typing import Any
-import re
 
 import requests
 
@@ -11,7 +11,6 @@ from .common import (
     filter_models_by_codes,
     sync_official_vendor_catalog,
 )
-
 
 PRICING_URL = (
     "https://cloud.google.com/gemini-enterprise-agent-platform/"
@@ -154,6 +153,7 @@ def models_from_table(
 ) -> list[dict[str, Any]]:
     """Build Google model price items from one table."""
     rows = expand_rows(table_html)
+    token_ranges = token_ranges_from_header(rows)
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
         if len(row) < 3 or is_header_row(row):
@@ -181,6 +181,7 @@ def models_from_table(
             },
         )
         item["_prices"][price_kind] = prices
+        item["_token_ranges"] = token_ranges
 
     models = []
     for item in grouped.values():
@@ -281,6 +282,37 @@ def is_header_row(row: list[str]) -> bool:
     return "model" in joined and ("price" in joined or "input" in joined)
 
 
+def token_ranges_from_header(rows: list[list[str]]) -> list[str]:
+    """Return input-context ranges declared by a Google table header."""
+    for row in rows:
+        if not is_header_row(row):
+            continue
+        ranges = [token_range_from_header_cell(cell) for cell in row[2:]]
+        ranges = [token_range for token_range in ranges if token_range]
+        if len(ranges) >= 2:
+            return ranges
+    return []
+
+
+def token_range_from_header_cell(value: str) -> str:
+    """Convert a Google context-tier header cell to a standard range."""
+    text = normalize_label(value)
+    if "cached" in text:
+        return ""
+    match = re.search(r"(?:<=|=<|≤)\s*(\d+(?:\.\d+)?)\s*k", text)
+    if match:
+        return f"0-{tokens_from_thousands(match.group(1))}"
+    match = re.search(r"(?:>|&gt;)\s*(\d+(?:\.\d+)?)\s*k", text)
+    if match:
+        return f"{tokens_from_thousands(match.group(1))}+"
+    return ""
+
+
+def tokens_from_thousands(value: str) -> int:
+    """Convert a compact token count in thousands to an integer."""
+    return int(float(value) * 1000)
+
+
 def model_id_from_name(value: str) -> str:
     """Normalize a Google model display name into a model ID."""
     text = display_name_from_cell(value).lower()
@@ -361,7 +393,11 @@ def build_model(item: dict[str, Any]) -> dict[str, Any]:
         cache_price = cache_hit_price(input_prices, index)
         if cache_price:
             row["cache_hit_price_per_million"] = cache_price
-        token_range = token_range_for_index(index, row_count)
+        token_range = token_range_for_index(
+            index,
+            row_count,
+            list(item.get("_token_ranges") or []),
+        )
         if token_range:
             row["input_token_range"] = token_range
             row["output_token_range"] = token_range
@@ -400,8 +436,14 @@ def cache_hit_price(input_prices: list[str], index: int) -> str:
     return ""
 
 
-def token_range_for_index(index: int, row_count: int) -> str:
+def token_range_for_index(
+    index: int,
+    row_count: int,
+    token_ranges: list[str],
+) -> str:
     """Return the Google context-window tier for a price row."""
+    if index < len(token_ranges):
+        return token_ranges[index]
     if row_count < 2:
         return ""
     return "0-200000" if index == 0 else "200000+"

@@ -10,9 +10,9 @@ import requests
 from .common import (
     build_text_token_standard_catalog,
     filter_models_by_codes,
+    merge_fallback_into_tiered_rows,
     sync_official_vendor_catalog,
 )
-
 
 PAGE_DATA_URL = (
     "https://bce.bdstatic.com/p3m/bce-doc/online/qianfan/doc/qianfan/s/"
@@ -139,7 +139,7 @@ def extract_models(html: str) -> list[dict[str, Any]]:
                 )
 
     return [
-        {key: value for key, value in item.items() if not key.startswith("_")}
+        finalize_model(item)
         for item in sorted(
             models.values(),
             key=lambda candidate: candidate["model_name"].lower(),
@@ -323,9 +323,13 @@ def merge_price(
     service_clean = service.replace(" ", "")
     pricing_context = f"{service_clean} {subitem_clean}".strip()
     subitem_kind = subitem_kind_from_text(subitem_clean, pricing_context)
+    token_range = token_range_from_service(service_clean)
+    tier_row = tier_row_for_range(model, token_range)
     score = subitem_score(pricing_context)
     if subitem_clean.startswith("命中缓存"):
         model["cache_hit_price_per_million"] = normalized_price
+        if tier_row is not None:
+            tier_row["cache_hit_price_per_million"] = normalized_price
         return
     if subitem_kind == "input" and should_replace_price(
         current_price=model["input_price_per_million"],
@@ -335,6 +339,8 @@ def merge_price(
     ):
         model["input_price_per_million"] = normalized_price
         model["_meta"]["input_score"] = score
+    if subitem_kind == "input" and tier_row is not None:
+        tier_row["input_price_per_million"] = normalized_price
     if subitem_kind == "output" and should_replace_price(
         current_price=model["output_price_per_million"],
         current_score=model["_meta"]["output_score"],
@@ -343,6 +349,8 @@ def merge_price(
     ):
         model["output_price_per_million"] = normalized_price
         model["_meta"]["output_score"] = score
+    if subitem_kind == "output" and tier_row is not None:
+        tier_row["output_price_per_million"] = normalized_price
     notes = ["Extracted from Baidu Qianfan official pricing table."]
     if model["cache_hit_price_per_million"] is not None:
         notes.append(
@@ -350,6 +358,83 @@ def merge_price(
             f"{model['cache_hit_price_per_million']} CNY/1M tokens"
         )
     model["notes"] = "; ".join(notes)
+
+
+def token_range_from_service(value: str) -> str:
+    """Normalize a Baidu input-token service condition to a range."""
+    text = (
+        str(value or "")
+        .lower()
+        .replace("，", ",")
+        .replace("：", ":")
+        .replace("［", "[")
+        .replace("］", "]")
+        .replace("（", "(")
+        .replace("）", ")")
+    )
+    unbounded = re.search(
+        r"输入token数\s*[:：]?\s*(?:>|&gt;)\s*"
+        r"([0-9.]+)\s*k?",
+        text,
+    )
+    if unbounded:
+        start = token_boundary(unbounded.group(1))
+        return f"{start}+" if start else ""
+    match = re.search(
+        r"输入token数\s*[:：]?\s*[\[(]\s*([0-9.]+)\s*k?"
+        r"\s*,\s*([0-9.]+)\s*k?\s*[\])]",
+        text,
+    )
+    if not match:
+        return ""
+    start = token_boundary(match.group(1))
+    end = token_boundary(match.group(2))
+    if not start or not end:
+        return ""
+    return f"{start}-{end}"
+
+
+def token_boundary(value: str) -> str:
+    """Convert a Baidu thousand-token boundary to a raw token count."""
+    try:
+        amount = Decimal(str(value)) * Decimal("1000")
+    except (InvalidOperation, TypeError, ValueError):
+        return ""
+    return format_decimal(amount)
+
+
+def tier_row_for_range(
+    model: dict[str, Any],
+    token_range: str,
+) -> dict[str, Any] | None:
+    """Return the aggregate price row for one explicit token range."""
+    if not token_range:
+        return None
+    rows = model.setdefault("_price_rows", {})
+    return rows.setdefault(
+        token_range,
+        {
+            "input_token_range": token_range,
+            "output_token_range": token_range,
+            "currency": DEFAULT_CURRENCY,
+        },
+    )
+
+
+def finalize_model(model: dict[str, Any]) -> dict[str, Any]:
+    """Expose explicit Baidu context tiers without leaking parser metadata."""
+    result = {
+        key: value
+        for key, value in model.items()
+        if not key.startswith("_")
+    }
+    rows = list((model.get("_price_rows") or {}).values())
+    if rows:
+        result["price_rows"] = merge_fallback_into_tiered_rows(
+            rows,
+            scope_field="billing_scope",
+        )
+    return result
 
 
 def subitem_kind_from_text(subitem: str, pricing_context: str = "") -> str:
