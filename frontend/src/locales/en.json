@@ -1133,6 +1133,7 @@
         "connected": "Adjacent tiers are connected",
         "tier": "Tier",
         "tierLabel": "Tier {value}",
+        "finalPoint": "Final points {point}",
         "add": "Add tier",
         "start": "Usage start",
         "end": "Usage end",

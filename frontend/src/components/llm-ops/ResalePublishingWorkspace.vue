@@ -351,7 +351,20 @@
               </div>
             </div>
 
-            <div class="pricing-matrix">
+            <ResaleTierEditor
+              v-if="hasTieredDraft(row)"
+              :currency="currencyLabel"
+              :errors="tierErrorsFor(row)"
+              :model-value="tierDraftFor(row)"
+              :point-label="formatCredit"
+              :preview="tierPreviewFor(row)"
+              :preview-error="tierPreviewErrorFor(row)"
+              :preview-loading="tierPreviewLoadingFor(row)"
+              :previous-preview="previousTierPreviewFor(row)"
+              @preview="requestTierPreview(row)"
+              @update:model-value="updateTierDraft(row, $event)"
+            />
+            <div v-else class="pricing-matrix">
               <div class="pricing-matrix-head pricing-matrix-label" />
               <div class="pricing-matrix-head">
                 {{ t('llmOps.publishingWorkspace.pricing.cost') }}
@@ -508,17 +521,6 @@
                 </div>
               </template>
             </div>
-            <ResaleTierEditor
-              :currency="currencyLabel"
-              :errors="tierErrorsFor(row)"
-              :model-value="tierDraftFor(row)"
-              :preview="tierPreviewFor(row)"
-              :preview-error="tierPreviewErrorFor(row)"
-              :preview-loading="tierPreviewLoadingFor(row)"
-              :previous-preview="previousTierPreviewFor(row)"
-              @preview="requestTierPreview(row)"
-              @update:model-value="updateTierDraft(row, $event)"
-            />
             <div class="pricing-axis-block compact-pricing-axis">
               <BulletChart
                 :min="marginAxisRangeFor(row).min"
@@ -574,6 +576,7 @@ import { useResaleWorkspaceOptions } from '@/composables/useResaleWorkspaceOptio
 import { useResizableSidebar } from '@/composables/useResizableSidebar'
 import { RESALE_PRICE_DIMENSION_SPECS } from '@/utils/resalePricing'
 import {
+  applyResaleTierMargin,
   buildFlatResalePriceItems,
   hasTieredResalePrices,
   normalizeResalePriceDraft,
@@ -864,6 +867,10 @@ function tierDraftFor(row) {
   return upstreamTierDraftFor(row)
 }
 
+function hasTieredDraft(row) {
+  return hasTieredResalePrices(tierDraftFor(row))
+}
+
 function displayDraftFromItems(items) {
   const displayItems = (items || []).map((item) => ({
     ...item,
@@ -872,13 +879,13 @@ function displayDraftFromItems(items) {
   return resaleTierDraftFromItems(displayItems)
 }
 
-function upstreamTierDraftFor(row) {
+function upstreamCostDraftFor(row) {
   const fallback = resaleTierDraftFromItems(
     buildFlatResalePriceItems(
       {
-        cache: row.priceCacheInRaw,
-        input: row.priceInRaw,
-        output: row.priceOutRaw
+        cache: row.costCacheInRaw,
+        input: row.costInRaw,
+        output: row.costOutRaw
       },
       currencyLabel.value
     )
@@ -900,10 +907,7 @@ function upstreamTierDraftFor(row) {
         : null,
       flat: !tiered,
       price: formatEditablePrice(
-        priceFromMargin(
-          convertToDisplay(item.unit_price, item.currency) ?? 0,
-          row.margin
-        )
+        convertToDisplay(item.unit_price, item.currency) ?? 0
       ),
       start: tiered
         ? item.tier_start === null
@@ -913,6 +917,10 @@ function upstreamTierDraftFor(row) {
     }))
   })
   return draft
+}
+
+function upstreamTierDraftFor(row) {
+  return applyResaleTierMargin(upstreamCostDraftFor(row), row.margin)
 }
 
 function listingDraftFor(row, listing) {
@@ -939,11 +947,7 @@ function tierErrorsFor(row) {
 
 function updateTierDraft(row, tierDraft) {
   const errors = validateResalePriceDraft(tierDraft)
-  const flatValues = {
-    priceCacheInRaw: tierDraft.cache?.[0]?.price ?? row.priceCacheInRaw,
-    priceInRaw: tierDraft.input?.[0]?.price ?? row.priceInRaw,
-    priceOutRaw: tierDraft.output?.[0]?.price ?? row.priceOutRaw
-  }
+  const flatValues = tierSummaryValues(tierDraft, row)
   flatValues.margin = normalizeMargin(
     marginFromRowPrices(row, flatValues) ?? row.margin
   )
@@ -955,6 +959,26 @@ function updateTierDraft(row, tierDraft) {
     tierPreviewError: ''
   })
   emitChange()
+}
+
+function tierSummaryValues(tierDraft, row) {
+  return {
+    priceCacheInRaw: tierDraft.cache?.[0]?.price ?? row.priceCacheInRaw,
+    priceInRaw: tierDraft.input?.[0]?.price ?? row.priceInRaw,
+    priceOutRaw: tierDraft.output?.[0]?.price ?? row.priceOutRaw
+  }
+}
+
+function tierMarginPatch(row, margin) {
+  const tierDraft = applyResaleTierMargin(upstreamCostDraftFor(row), margin)
+  return {
+    ...tierSummaryValues(tierDraft, row),
+    margin,
+    tierDraft,
+    tierErrors: validateResalePriceDraft(tierDraft),
+    tierPreview: null,
+    tierPreviewError: ''
+  }
 }
 
 function tierPreviewFor(row) {
@@ -1160,6 +1184,10 @@ function onMarginInput(row, event) {
   }
   const value = Number(rawValue)
   const margin = Number.isFinite(value) ? value : 0
+  if (hasTieredDraft(row)) {
+    updateChainState(row, tierMarginPatch(row, normalizeMargin(margin)))
+    return
+  }
   const patch = pricePatchForMargin(row, margin, {
     clampToReference: false
   })
@@ -1169,6 +1197,13 @@ function onMarginInput(row, event) {
 function onMarginCommit(row, event) {
   const value = Number(event?.target?.value)
   const margin = Number.isFinite(value) ? value : row.margin
+  if (hasTieredDraft(row)) {
+    const nextMargin = normalizeMargin(margin)
+    updateChainState(row, tierMarginPatch(row, nextMargin))
+    if (event?.target) event.target.value = nextMargin
+    emitChange()
+    return
+  }
   const patch = pricePatchForMargin(row, margin)
   updateChainState(row, patch)
   if (event?.target) event.target.value = patch.margin
@@ -1256,6 +1291,11 @@ const { marketAvg } = useResaleMarketAverages({
 
 function onMarginAxisChange(row, rawMargin) {
   const nextMargin = normalizeMargin(rawMargin)
+  if (hasTieredDraft(row)) {
+    updateChainState(row, tierMarginPatch(row, nextMargin))
+    emitChange()
+    return
+  }
   updateChainState(row, pricePatchForMargin(row, nextMargin))
   emitChange()
 }

@@ -110,6 +110,13 @@
           :value="card.prices?.[dimension.key]"
           @input="$emit('update:price', dimension.key, $event.target.value)"
         />
+        <span class="mt-1.5 block text-[11px] font-semibold text-agione-700">
+          {{
+            t('llmOps.publishingWorkspace.tiers.finalPoint', {
+              point: pointLabel(card.prices?.[dimension.key])
+            })
+          }}
+        </span>
         <span
           v-if="errors[dimension.key]"
           class="mt-1.5 block text-xs text-rose-600"
@@ -134,7 +141,8 @@ const props = defineProps({
   errors: { type: Object, default: () => ({}) },
   expanded: { type: Boolean, default: false },
   index: { type: Number, required: true },
-  locked: { type: Boolean, default: false }
+  locked: { type: Boolean, default: false },
+  pointLabel: { type: Function, default: () => '—' }
 })
 
 const emit = defineEmits(['remove', 'toggle', 'update:end', 'update:price'])

@@ -39,6 +39,21 @@ const llmOpsPageSource = readFileSync(
   new URL('../src/pages/LLMOps.vue', import.meta.url),
   'utf8'
 )
+const resaleTierEditorSource = readFileSync(
+  new URL('../src/components/llm-ops/ResaleTierEditor.vue', import.meta.url),
+  'utf8'
+)
+const resaleWorkspaceSource = readFileSync(
+  new URL(
+    '../src/components/llm-ops/ResalePublishingWorkspace.vue',
+    import.meta.url
+  ),
+  'utf8'
+)
+const resaleTierCardSource = readFileSync(
+  new URL('../src/components/llm-ops/ResaleTierCard.vue', import.meta.url),
+  'utf8'
+)
 
 test('searches the complete source catalogue through the API', () => {
   assert.match(apiSource, /price-catalog/)
@@ -245,4 +260,11 @@ test('keeps every channel price tier when summarizing one dimension', () => {
     ]
   )
   assert.equal(channelPriceItemLabel(items[3]), '[32,000, 96,000) Input')
+})
+
+test('shows final point values for every resale tier price', () => {
+  assert.match(resaleTierEditorSource, /:point-label="pointLabel"/)
+  assert.match(resaleTierCardSource, /tiers\.finalPoint/)
+  assert.match(resaleTierCardSource, /pointLabel\(card\.prices/)
+  assert.match(resaleWorkspaceSource, /:point-label="formatCredit"/)
 })
