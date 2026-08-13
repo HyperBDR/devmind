@@ -1,7 +1,6 @@
 from decimal import Decimal
 
 from django.test import SimpleTestCase, TestCase
-
 from llm_ops.collection_services import (
     sync_model_price_items,
     upsert_collected_offering,
@@ -15,7 +14,6 @@ from llm_ops.models import (
 from llm_ops.price_collectors import collect_vendor_price_catalog
 from llm_ops.price_collectors.parsers.google import extract_models
 from llm_ops.skill_runner import standard_catalog_to_collected_catalog
-
 
 GOOGLE_PRICING_HTML = """
 <h3>Gemini 2.5</h3>
@@ -75,7 +73,45 @@ GOOGLE_PRICING_HTML = """
 """
 
 
+GOOGLE_128K_PRICING_HTML = """
+<h3>Gemini 2.0</h3>
+<table>
+  <tr>
+    <th>Model</th>
+    <th>Type</th>
+    <th>Price ( =&lt; 128K input tokens)</th>
+    <th>Price ( &gt; 128K input tokens)</th>
+  </tr>
+  <tr>
+    <td rowspan="2">Gemini 2.0 Flash</td>
+    <td>Input (text)</td>
+    <td>$1.25</td>
+    <td>$2.50</td>
+  </tr>
+  <tr>
+    <td>Output (text)</td>
+    <td>$5.00</td>
+    <td>$10.00</td>
+  </tr>
+</table>
+"""
+
+
 class GooglePriceCatalogCollectorTests(SimpleTestCase):
+    def test_extract_models_uses_context_boundary_from_table_header(self):
+        models = extract_models(GOOGLE_128K_PRICING_HTML)
+
+        pro = next(
+            item
+            for item in models
+            if item["model_id"] == "gemini-2.0-flash"
+        )
+
+        self.assertEqual(
+            [row["input_token_range"] for row in pro["price_rows"]],
+            ["0-128000", "128000+"],
+        )
+
     def test_extract_models_preserves_standard_context_tiers(self):
         models = extract_models(GOOGLE_PRICING_HTML)
 
@@ -190,8 +226,7 @@ class GooglePriceCatalogPersistenceTests(TestCase):
             (
                 price_item
                 for price_item in price_items
-                if price_item.dimension
-                == ModelPriceItem.DIMENSION_TEXT_INPUT
+                if price_item.dimension == ModelPriceItem.DIMENSION_TEXT_INPUT
             ),
             key=lambda price_item: price_item.tier_start,
         )
