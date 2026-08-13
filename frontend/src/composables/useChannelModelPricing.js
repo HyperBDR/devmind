@@ -1,3 +1,8 @@
+import {
+  channelPriceItemLabel,
+  channelPriceSummaryRows
+} from '@/utils/channelPriceCatalog'
+
 export function useChannelModelPricing({
   customPriceFields,
   normalizeSearch,
@@ -58,11 +63,9 @@ export function useChannelModelPricing({
   function compactCostSummary(row) {
     if (row?.priceItems?.length) {
       return priceSummaryText(
-        sortPriceItems(row.priceItems).map((item) => ({
-          label: priceItemDisplayLabel(item.dimension),
-          value: item.unit_price,
-          currency: item.currency
-        }))
+        channelPriceSummaryRows(row.priceItems),
+        null,
+        Number.POSITIVE_INFINITY
       )
     }
     const previewItems = draftPricePreview(row?.draft, row?.model)
@@ -83,7 +86,7 @@ export function useChannelModelPricing({
   function upstreamPriceSummary(model) {
     const rows = providerPriceSummary(model)
     if (!rows.length) return '-'
-    return priceSummaryText(rows, model)
+    return priceSummaryText(rows, model, Number.POSITIVE_INFINITY)
   }
 
   function priceSummaryText(rows, model = null, limit = 3) {
@@ -226,13 +229,7 @@ export function useChannelModelPricing({
   function providerPriceSummary(model) {
     const itemRows = providerPriceItemsForModel(model)
     if (itemRows.length) {
-      return compactPriceRows(
-        itemRows.map((item) => [
-          providerPriceItemLabel(item.dimension),
-          item.unit_price,
-          item.currency
-        ])
-      )
+      return channelPriceSummaryRows(itemRows)
     }
 
     if (model.modality === 'video') {
@@ -352,25 +349,6 @@ export function useChannelModelPricing({
     return `${String(score).padStart(3, '0')}-${item?.tier_start || ''}-${dimension}`
   }
 
-  function providerPriceItemLabel(dimension) {
-    const labels = {
-      text_input: 'Input',
-      text_output: 'Output',
-      cache_input: 'Cache',
-      image_input: 'Image In',
-      image_output: 'Image Out',
-      audio_input: 'Audio In',
-      audio_output: 'Audio Out',
-      video_input: 'Video In',
-      video_output: 'Video Out'
-    }
-    return labels[dimension] || dimensionLabel(dimension)
-  }
-
-  function priceItemDisplayLabel(dimension) {
-    return providerPriceItemLabel(dimension)
-  }
-
   function previewPriceLabel(label) {
     const normalized = String(label || '').trim()
     const labels = {
@@ -463,14 +441,6 @@ export function useChannelModelPricing({
         }
       })
       .filter((item) => item.value !== null)
-  }
-
-  function compactPriceRows(rows) {
-    return rows
-      .filter(
-        ([, value]) => value !== null && value !== undefined && value !== ''
-      )
-      .map(([label, value, currency]) => ({ label, value, currency }))
   }
 
   function dimensionLabel(dimension) {
@@ -587,6 +557,7 @@ export function useChannelModelPricing({
   return {
     batchPendingDraftPriceSummary,
     batchUpstreamPriceSummary,
+    channelPriceItemLabel,
     channelRowSourceLabel,
     compactCostSummary,
     comparisonTitle,

@@ -635,7 +635,7 @@
                         :class="comparisonTone(item.comparison_status)"
                         :title="comparisonTitle(item)"
                       >
-                        {{ dimensionLabel(item.dimension) }}
+                        {{ channelPriceItemLabel(item) }}
                         {{ moneyOrStatus(item.unit_price, item.currency) }}
                       </span>
                     </div>
@@ -1016,11 +1016,11 @@ const {
 const {
   batchPendingDraftPriceSummary,
   batchUpstreamPriceSummary,
+  channelPriceItemLabel,
   channelRowSourceLabel,
   compactCostSummary,
   comparisonTitle,
   comparisonTone,
-  dimensionLabel,
   hasKnownSourceCategory,
   modalityLabel,
   moneyOrStatus,
