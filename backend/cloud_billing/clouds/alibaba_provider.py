@@ -140,10 +140,13 @@ class AlibabaCloud(BaseCloudProvider):
 
     def _build_client(self, endpoint: str) -> Client:
         """Build a BSS client for the given endpoint."""
+        timeout_ms = self.config.timeout * 1000
         config = Config(
             access_key_id=self.config.api_key,
             access_key_secret=self.config.api_secret,
+            connect_timeout=timeout_ms,
             endpoint=endpoint,
+            read_timeout=timeout_ms,
         )
         return Client(config)
 
@@ -224,7 +227,7 @@ class AlibabaCloud(BaseCloudProvider):
         return self.client.query_bill(request)
 
     def _calculate_total_cost(
-        self, response: Dict[str, Any]
+        self, response: Any
     ) -> Tuple[float, str, Dict[str, float]]:
         """Calculate total cost and service breakdown from API response.
 
@@ -794,7 +797,7 @@ class AlibabaCloud(BaseCloudProvider):
                     continue
 
                 items_list = data.items or []
-                merged = {}
+                merged: Dict[str, Dict[str, Any]] = {}
                 for item in items_list:
                     product = getattr(
                         item, "product_name", "Unknown"

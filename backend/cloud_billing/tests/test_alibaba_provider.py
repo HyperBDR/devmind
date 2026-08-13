@@ -198,6 +198,27 @@ class TestAlibabaCloud:
         assert len(result["items"]) == 1
 
 
+class TestAlibabaClientConfiguration:
+    """Tests for Alibaba BSS client configuration."""
+
+    @patch("cloud_billing.clouds.alibaba_provider.Client")
+    def test_bss_client_uses_configured_timeout(self, mock_client):
+        """BSS requests should honor the provider timeout setting."""
+        config = AlibabaConfig(
+            api_key="test-ak",
+            api_secret="test-sk",
+            region="ap-southeast-1",
+            timeout=47,
+        )
+
+        client = AlibabaCloud(config).client
+
+        assert client is mock_client.return_value
+        sdk_config = mock_client.call_args.args[0]
+        assert sdk_config.connect_timeout == 47_000
+        assert sdk_config.read_timeout == 47_000
+
+
 class TestAlibabaOwnerExtraction:
     """Tests for owner extraction from Alibaba Cloud tags."""
 
