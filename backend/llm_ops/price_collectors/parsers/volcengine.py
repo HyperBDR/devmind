@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import requests
@@ -11,7 +12,6 @@ from .common import (
     filter_models_by_codes,
     sync_official_vendor_catalog,
 )
-
 
 PRICING_URL = "https://www.volcengine.com/docs/82379/1544106?lang=zh"
 DEFAULT_CURRENCY = "CNY"
@@ -222,7 +222,7 @@ def build_row(
         notes_parts.append(f"cache_hit_input={cache_hit_price} CNY/1M tokens")
     if extra_note:
         notes_parts.append(extra_note)
-    return {
+    row = {
         "model_id": model_name,
         "model_name": model_name,
         "aliases": [model_name],
@@ -231,8 +231,14 @@ def build_row(
         "cache_hit_price_per_million": cache_hit_price,
         "currency": DEFAULT_CURRENCY,
         "notes": "; ".join(notes_parts),
+        "_section_name": section_name,
         "_section_priority": 2 if section_name == "online_inference" else 1,
     }
+    token_range = token_range_from_condition(condition)
+    if token_range:
+        row["input_token_range"] = token_range
+        row["output_token_range"] = token_range
+    return row
 
 
 def decode_insert(raw: str) -> str:
@@ -289,15 +295,93 @@ def parse_price(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def token_range_from_condition(value: str) -> str:
+    """Normalize a VolcEngine input-length condition to a token range."""
+    text = normalize_whitespace(value).lower()
+    unbounded = re.search(
+        r"(?:输入长度|input\s*length)\s*(?:>|&gt;)\s*"
+        r"([0-9]+(?:\.[0-9]+)?)\s*k?",
+        text,
+    )
+    if unbounded:
+        start = token_boundary(unbounded.group(1))
+        return f"{start}+" if start else ""
+    match = re.search(
+        r"(?:输入长度|input\s*length)\s*[\[(]"
+        r"\s*([0-9]+(?:\.[0-9]+)?)\s*k?"
+        r"\s*,\s*([0-9]+(?:\.[0-9]+)?)\s*k?"
+        r"\s*[\])]",
+        text,
+    )
+    if not match:
+        return ""
+    start = token_boundary(match.group(1))
+    end = token_boundary(match.group(2))
+    if not start or not end:
+        return ""
+    return f"{start}-{end}"
+
+
+def token_boundary(value: str) -> str:
+    """Convert one VolcEngine token boundary in thousands to raw tokens."""
+    try:
+        amount = Decimal(str(value)) * Decimal("1000")
+    except (InvalidOperation, TypeError, ValueError):
+        return ""
+    return format(amount.normalize(), "f")
+
+
 def upsert_model(
     models: dict[str, dict[str, Any]],
     item: dict[str, Any],
 ) -> None:
-    """Keep the preferred row for one VolcEngine model."""
+    """Merge VolcEngine rows while retaining distinct token-length tiers."""
     key = item["model_name"].strip().lower()
     existing = models.get(key)
-    if existing is None or candidate_score(item) > candidate_score(existing):
+    if existing is None:
         models[key] = item
+        return
+    if same_price_scenario(existing, item):
+        if candidate_score(item) > candidate_score(existing):
+            models[key] = item
+        return
+    existing_rows = existing.setdefault(
+        "price_rows",
+        [price_row_from_item(existing)],
+    )
+    existing_rows.append(price_row_from_item(item))
+    if candidate_score(item) > candidate_score(existing):
+        for key, value in item.items():
+            if key not in {"price_rows", "_section_priority"}:
+                existing[key] = value
+
+
+def same_price_scenario(
+    first: dict[str, Any],
+    second: dict[str, Any],
+) -> bool:
+    """Return whether two rows describe the same pricing scenario."""
+    if first.get("_section_name") != second.get("_section_name"):
+        return True
+    return (
+        first.get("input_token_range", "")
+        == second.get("input_token_range", "")
+        and first.get("output_token_range", "")
+        == second.get("output_token_range", "")
+    )
+
+
+def price_row_from_item(item: dict[str, Any]) -> dict[str, Any]:
+    """Return one normalized price row from a parsed VolcEngine item."""
+    keys = (
+        "input_price_per_million",
+        "output_price_per_million",
+        "cache_hit_price_per_million",
+        "input_token_range",
+        "output_token_range",
+        "currency",
+    )
+    return {key: item[key] for key in keys if item.get(key) is not None}
 
 
 def candidate_score(item: dict[str, Any]) -> tuple[int, int, float]:

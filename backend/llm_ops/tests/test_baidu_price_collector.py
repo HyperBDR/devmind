@@ -1,8 +1,9 @@
 from django.test import SimpleTestCase
-
+from llm_ops.collection_services import parse_price_range, price_item_payload
+from llm_ops.models import ModelPriceItem
 from llm_ops.price_collectors import collect_vendor_price_catalog
 from llm_ops.price_collectors.parsers.baidu import extract_models
-
+from llm_ops.price_table_validation import validate_price_table_groups
 
 BAIDU_PRICING_HTML = """
 <table>
@@ -50,7 +51,95 @@ BAIDU_CACHE_PRICING_HTML = """
 """
 
 
+BAIDU_TIERED_PRICING_HTML = """
+<table>
+  <tr>
+    <th>模型名称</th><th>版本</th><th>服务</th><th>计费项</th>
+    <th>在线价格</th><th>预留</th><th>预留</th><th>预留</th>
+    <th>单位</th>
+  </tr>
+  <tr><td>文本</td><td>ERNIE-X1-Turbo</td>
+    <td>推理服务 输入Token数：[0,128K]</td><td>输入</td>
+    <td>0.001</td><td>-</td><td>-</td><td>-</td><td>千Token</td></tr>
+  <tr><td>文本</td><td>ERNIE-X1-Turbo</td>
+    <td>推理服务 输入Token数：[0,128K]</td><td>输出</td>
+    <td>0.004</td><td>-</td><td>-</td><td>-</td><td>千Token</td></tr>
+  <tr><td>文本</td><td>ERNIE-X1-Turbo</td>
+    <td>推理服务 输入Token数：(128K,256K]</td><td>输入</td>
+    <td>0.002</td><td>-</td><td>-</td><td>-</td><td>千Token</td></tr>
+  <tr><td>文本</td><td>ERNIE-X1-Turbo</td>
+    <td>推理服务 输入Token数：(128K,256K]</td><td>输出</td>
+    <td>0.008</td><td>-</td><td>-</td><td>-</td><td>千Token</td></tr>
+</table>
+"""
+
+
+BAIDU_COMPLETE_TIERED_PRICING_HTML = BAIDU_TIERED_PRICING_HTML.replace(
+    "</table>",
+    """
+  <tr><td>文本</td><td>ERNIE-X1-Turbo</td>
+    <td>推理服务 输入Token数：>256K</td><td>输入</td>
+    <td>0.003</td><td>-</td><td>-</td><td>-</td><td>千Token</td></tr>
+  <tr><td>文本</td><td>ERNIE-X1-Turbo</td>
+    <td>推理服务 输入Token数：>256K</td><td>输出</td>
+    <td>0.012</td><td>-</td><td>-</td><td>-</td><td>千Token</td></tr>
+</table>""",
+)
+
+
 class BaiduPriceCatalogCollectorTests(SimpleTestCase):
+    def test_extract_models_preserves_official_input_token_tiers(self):
+        models = extract_models(BAIDU_TIERED_PRICING_HTML)
+
+        rows = models[0]["price_rows"]
+
+        self.assertEqual(
+            [row["input_token_range"] for row in rows],
+            ["0-128000", "128000-256000"],
+        )
+        self.assertEqual(
+            [row["output_price_per_million"] for row in rows],
+            ["4", "8"],
+        )
+
+    def test_extract_models_preserves_unbounded_official_tier(self):
+        models = extract_models(BAIDU_COMPLETE_TIERED_PRICING_HTML)
+
+        rows = models[0]["price_rows"]
+
+        self.assertEqual(
+            [row["input_token_range"] for row in rows],
+            ["0-128000", "128000-256000", "256000+"],
+        )
+
+        payloads = []
+        for row in rows:
+            tier_start, tier_end = parse_price_range(
+                row["input_token_range"]
+            )
+            payloads.append(
+                price_item_payload(
+                    {},
+                    dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+                    billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                    unit_price=row["input_price_per_million"],
+                    tier_start=tier_start,
+                    tier_end=tier_end,
+                )
+            )
+            payloads.append(
+                price_item_payload(
+                    {},
+                    dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                    billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                    unit_price=row["output_price_per_million"],
+                    tier_start=tier_start,
+                    tier_end=tier_end,
+                )
+            )
+
+        validate_price_table_groups(payloads)
+
     def test_extract_models_from_qianfan_pricing_table(self):
         models = extract_models(BAIDU_PRICING_HTML)
 
