@@ -12,6 +12,7 @@ import {
   fetchList
 } from '@/utils/llmOpsPagination'
 import {
+  dataGroupsForChannelModelManagement,
   dataGroupsForResalePublishing,
   dataGroupsForSection
 } from '@/utils/llmOpsSectionData'
@@ -228,6 +229,28 @@ export function useLLMOpsData() {
     })
   }
 
+  function preloadChannelModelData() {
+    const groupValues = {
+      metaModels,
+      modelPrices: modelPriceItems,
+      models,
+      providers
+    }
+    const tasks = dataGroupsForChannelModelManagement()
+      .filter((group) => {
+        if (group === 'channelPricing') {
+          return (
+            !asArray(channelPrices.value).length ||
+            !asArray(channelPriceItems.value).length
+          )
+        }
+        return !asArray(groupValues[group]?.value).length
+      })
+      .map((group) => loadDataGroup(group, 'channels', {}))
+
+    return Promise.all(tasks)
+  }
+
   async function refreshReconciliationRecords() {
     records.value = asArray(
       await fetchFirstPage(llmOpsApi.listReconciliationRecords, {
@@ -289,18 +312,14 @@ export function useLLMOpsData() {
 
   async function refreshProviderManagementData() {
     try {
-      const [sourceData, runData, providerData, summaryRes] = await Promise.all(
-        [
-          fetchList(llmOpsApi.listCollectionSources),
-          fetchRecentCollectionRuns(),
-          fetchList(llmOpsApi.listProviders),
-          llmOpsApi.getSummary(summaryParams())
-        ]
-      )
+      const [sourceData, runData, providerData] = await Promise.all([
+        fetchList(llmOpsApi.listCollectionSources),
+        fetchRecentCollectionRuns(),
+        fetchList(llmOpsApi.listProviders)
+      ])
       sources.value = asArray(sourceData)
       collectionRuns.value = asArray(runData)
       providers.value = asArray(providerData)
-      summary.value = normalizeSummary(extract(summaryRes))
     } catch (error) {
       showError(errorMessage(error, t('llmOps.dataErrors.refreshProviders')))
     }
@@ -308,14 +327,12 @@ export function useLLMOpsData() {
 
   async function refreshMetaModelManagementData() {
     try {
-      const [providerData, metaModelData, summaryRes] = await Promise.all([
+      const [providerData, metaModelData] = await Promise.all([
         fetchList(llmOpsApi.listProviders),
-        fetchList(llmOpsApi.listMetaModels),
-        llmOpsApi.getSummary(summaryParams())
+        fetchList(llmOpsApi.listMetaModels)
       ])
       providers.value = asArray(providerData)
       metaModels.value = asArray(metaModelData)
-      summary.value = normalizeSummary(extract(summaryRes))
     } catch (error) {
       showError(errorMessage(error, t('llmOps.dataErrors.refreshMetaModels')))
     }
@@ -323,13 +340,11 @@ export function useLLMOpsData() {
 
   async function refreshChannelManagementData() {
     try {
-      const [channelData, summaryRes] = await Promise.all([
+      const [channelData] = await Promise.all([
         fetchList(llmOpsApi.listChannels),
-        llmOpsApi.getSummary(summaryParams()),
         refreshChannelPricingData()
       ])
       channels.value = asArray(channelData)
-      summary.value = normalizeSummary(extract(summaryRes))
       refreshResaleListings().catch((error) => {
         showError(errorMessage(error, t('llmOps.dataErrors.refreshListings')))
       })
@@ -419,6 +434,7 @@ export function useLLMOpsData() {
     normalizeDisplayCurrency,
     pageError,
     pointConversion,
+    preloadChannelModelData,
     preloadResalePublishingData,
     procurementRows,
     providerCollectionSources,

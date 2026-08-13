@@ -2474,18 +2474,25 @@
       }
     },
     "sourcePriceDrawer": {
+      "catalogLabel": "价格源目录",
       "title": "供货商下的元模型价格",
+      "subtitle": "按地区、规格和 Token 区间展示完整价格，不折叠阶梯。",
       "searchPlaceholder": "搜索元模型、厂商或 code",
+      "allUsage": "全部用量",
+      "defaultScope": "中国内地 / 默认",
+      "priceItemCount": "{count} 条当前价格项",
+      "tierCount": "{count} 个阶梯",
       "actions": {
         "close": "关闭",
         "delete": "删除",
         "deleting": "删除中"
       },
       "summary": {
-        "currency": "默认币种",
-        "currentItems": "全部元模型",
-        "metaModels": "本页元模型",
-        "status": "状态"
+        "catalogModelCount": "官方解析模型",
+        "collectedSkuCount": "成功同步 SKU",
+        "coveredMetaModelCount": "覆盖元模型",
+        "currentPriceItemCount": "当前价格项",
+        "skippedModelCount": "跳过模型"
       },
       "pagination": {
         "pageSize": "每页",
@@ -2496,6 +2503,7 @@
         "enabled": "启用"
       },
       "info": {
+        "latestRun": "最近同步",
         "owner": "来源归属",
         "priceUrl": "价格地址",
         "updateMode": "更新方式"
@@ -2507,7 +2515,8 @@
       },
       "empty": {
         "noPrice": "暂无价格",
-        "noRows": "当前价格源还没有模型价格记录。"
+        "noRows": "当前价格源还没有模型价格记录。",
+        "noSearchResults": "没有匹配的元模型，请尝试名称、code 或 SKU。"
       },
       "fallback": {
         "unbound": "未绑定",

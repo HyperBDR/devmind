@@ -186,6 +186,167 @@ class LLMOpsViewTests(TestCase):
             {"gpt-4o"},
         )
 
+    def test_source_price_catalog_searches_before_meta_model_pagination(self):
+        provider = LLMProvider.objects.create(
+            name="Alibaba Cloud",
+            code="aliyun",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Alibaba Cloud Official",
+            slug="aliyun-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            currency="CNY",
+        )
+        for index in range(12):
+            meta_model = MetaModel.objects.create(
+                code=f"model-{index:02d}",
+                name=f"Model {index:02d}",
+                owner_code="alibaba",
+                owner_name="Alibaba",
+            )
+            ModelPriceItem.objects.create(
+                provider=provider,
+                meta_model=meta_model,
+                source=source,
+                dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="CNY",
+                unit_price=Decimal("1"),
+                price_fingerprint=f"model-{index:02d}-input",
+            )
+        target = MetaModel.objects.create(
+            code="qwen3.8-max",
+            name="Qwen3.8 Max",
+            owner_code="alibaba",
+            owner_name="Alibaba",
+        )
+        ModelPriceItem.objects.create(
+            provider=provider,
+            meta_model=target,
+            source=source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="CNY",
+            unit_price=Decimal("12"),
+            price_fingerprint="qwen3.8-max-input",
+        )
+
+        response = self.client.get(
+            reverse(
+                "collection-source-price-catalog",
+                kwargs={"pk": source.id},
+            ),
+            {"search": "qwen3.8-max", "page": 1, "page_size": 10},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(
+            response.data["results"][0]["meta_model_code"],
+            "qwen3.8-max",
+        )
+
+    def test_source_price_catalog_returns_compact_tier_schedules_and_stats(
+        self,
+    ):
+        provider = LLMProvider.objects.create(
+            name="Alibaba Cloud",
+            code="aliyun",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Alibaba Cloud Official",
+            slug="aliyun-official",
+            provider=provider,
+            source_type=PriceCollectionSource.SOURCE_TYPE_CUSTOM,
+            currency="CNY",
+        )
+        meta_model = MetaModel.objects.create(
+            code="qwen3.8-max",
+            name="Qwen3.8 Max",
+            owner_code="alibaba",
+            owner_name="Alibaba",
+        )
+        tier_spec = {
+            **usage_range_spec(),
+            "region": "global",
+            "deployment_scope": "Global",
+        }
+        for dimension, price in (
+            (ModelPriceItem.DIMENSION_TEXT_INPUT, "12"),
+            (ModelPriceItem.DIMENSION_TEXT_OUTPUT, "36"),
+            (ModelPriceItem.DIMENSION_CACHE_INPUT, "1.2"),
+        ):
+            ModelPriceItem.objects.create(
+                provider=provider,
+                meta_model=meta_model,
+                source=source,
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="CNY",
+                unit_price=Decimal(price),
+                tier_type=ModelPriceItem.TIER_USAGE_RANGE,
+                tier_start=Decimal("0"),
+                tier_end=Decimal("1000000"),
+                spec=tier_spec,
+                raw_payload={"large": "payload that must not be returned"},
+                price_fingerprint=f"qwen3.8-max-{dimension}",
+            )
+        PriceCollectionRun.objects.create(
+            source=source,
+            status=PriceCollectionRun.STATUS_SUCCEEDED,
+            collected_count=131,
+            skipped_count=70,
+            metadata={"total_models": 201},
+        )
+
+        response = self.client.get(
+            reverse(
+                "collection-source-price-catalog",
+                kwargs={"pk": source.id},
+            ),
+            {"page_size": 10},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["summary"],
+            {
+                "catalog_model_count": 201,
+                "collected_sku_count": 131,
+                "covered_meta_model_count": 1,
+                "current_price_item_count": 3,
+                "skipped_model_count": 70,
+            },
+        )
+        row = response.data["results"][0]
+        self.assertEqual(row["meta_model_code"], "qwen3.8-max")
+        self.assertEqual(row["price_item_count"], 3)
+        self.assertEqual(
+            {item["dimension"] for item in row["price_items"]},
+            {"text_input", "text_output", "cache_input"},
+        )
+        self.assertTrue(
+            all(
+                item["tier_type"] == "usage_range"
+                for item in row["price_items"]
+            )
+        )
+        self.assertTrue(
+            all(
+                item["tier_start"] == "0.000000"
+                for item in row["price_items"]
+            )
+        )
+        self.assertTrue(
+            all(
+                item["tier_end"] == "1000000.000000"
+                for item in row["price_items"]
+            )
+        )
+        self.assertNotIn("raw_payload", row["price_items"][0])
+        self.assertNotIn("source_name", row["price_items"][0])
+
     def test_resale_listing_list_filters_by_platform_and_status(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")
         meta_model = MetaModel.objects.create(
