@@ -356,6 +356,7 @@
               :currency="currencyLabel"
               :errors="tierErrorsFor(row)"
               :model-value="tierDraftFor(row)"
+              :point-label="formatCredit"
               :preview="tierPreviewFor(row)"
               :preview-error="tierPreviewErrorFor(row)"
               :preview-loading="tierPreviewLoadingFor(row)"

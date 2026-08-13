@@ -1141,6 +1141,7 @@
         "connected": "相邻阶梯已接续",
         "tier": "阶梯",
         "tierLabel": "阶梯 {value}",
+        "finalPoint": "最终积分 {point}",
         "add": "新增阶梯",
         "start": "起始用量",
         "end": "结束用量",

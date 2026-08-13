@@ -50,6 +50,7 @@
       :currency="currency"
       :errors="errors"
       :model-value="modelValue"
+      :point-label="pointLabel"
       @update:model-value="$emit('update:modelValue', $event)"
     />
 
@@ -125,6 +126,7 @@ const props = defineProps({
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
   modelValue: { type: Object, required: true },
+  pointLabel: { type: Function, default: () => '—' },
   previousPreview: { type: Object, default: null },
   preview: { type: Object, default: null },
   previewError: { type: String, default: '' },
