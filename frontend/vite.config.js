@@ -8,6 +8,10 @@ const packageJson = JSON.parse(
 )
 
 const appVersion = process.env.VITE_APP_VERSION || packageJson.version
+const proxyTarget =
+  process.env.VITE_PROXY_TARGET ||
+  process.env.VITE_API_BASE_URL ||
+  'http://localhost:8000'
 
 export default defineConfig({
   plugins: [vue()],
@@ -60,7 +64,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
+        target: proxyTarget,
         changeOrigin: true,
         secure: false,
         configure:
@@ -79,7 +83,7 @@ export default defineConfig({
             : undefined
       },
       '/accounts': {
-        target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
+        target: proxyTarget,
         changeOrigin: true,
         secure: false
       }
