@@ -6,6 +6,10 @@ import {
   buildSourcePriceSchedules,
   tierRangeLabel
 } from '../src/utils/sourcePriceCatalog.js'
+import {
+  channelPriceItemLabel,
+  channelPriceSummaryRows
+} from '../src/utils/channelPriceCatalog.js'
 
 const providerManagementSource = readFileSync(
   new URL('../src/components/llm-ops/ProviderManagement.vue', import.meta.url),
@@ -208,4 +212,37 @@ test('labels flat and usage-range prices explicitly', () => {
     }),
     '[0, ∞)'
   )
+})
+
+test('keeps every channel price tier when summarizing one dimension', () => {
+  const items = [
+    ['text_input', '3', '0', '32000'],
+    ['text_output', '14', '0', '32000'],
+    ['cache_input', '0.3', '0', '32000'],
+    ['text_input', '4', '32000', '96000'],
+    ['text_output', '16', '32000', '96000'],
+    ['cache_input', '0.4', '32000', '96000']
+  ].map(([dimension, unit_price, tier_start, tier_end]) => ({
+    dimension,
+    unit_price,
+    currency: 'CNY',
+    tier_type: 'usage_range',
+    tier_start,
+    tier_end
+  }))
+
+  const rows = channelPriceSummaryRows(items)
+
+  assert.deepEqual(
+    rows.map((item) => item.label),
+    [
+      '[0, 32,000) Input',
+      '[0, 32,000) Output',
+      '[0, 32,000) Cache',
+      '[32,000, 96,000) Input',
+      '[32,000, 96,000) Output',
+      '[32,000, 96,000) Cache'
+    ]
+  )
+  assert.equal(channelPriceItemLabel(items[3]), '[32,000, 96,000) Input')
 })
