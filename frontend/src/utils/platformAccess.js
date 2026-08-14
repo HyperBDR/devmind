@@ -3,12 +3,7 @@ export const FEATURE_DEFINITIONS = [
     key: 'workspace',
     labelKey: 'platforms.workspace',
     defaultPath: '/dashboard',
-    matchers: [
-      '/dashboard',
-      '/settings',
-      '/cloud-billing',
-      '/data-collector'
-    ]
+    matchers: ['/dashboard', '/settings', '/cloud-billing', '/data-collector']
   },
   {
     key: 'operations_console',
@@ -143,16 +138,14 @@ export function getAvailablePlatforms(user, t) {
 
   return FEATURE_DEFINITIONS.filter(
     (item) => platformMap.has(item.key) && item.platformVisible !== false
-  ).map(
-    (item) => {
-      const resolved = platformMap.get(item.key)
-      return {
-        key: item.key,
-        label: t ? t(item.labelKey) : item.key,
-        defaultPath: resolved?.default_path || item.defaultPath
-      }
+  ).map((item) => {
+    const resolved = platformMap.get(item.key)
+    return {
+      key: item.key,
+      label: t ? t(item.labelKey) : item.key,
+      defaultPath: resolved?.default_path || item.defaultPath
     }
-  )
+  })
 }
 
 export function getLandingPath(user) {

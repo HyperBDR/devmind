@@ -1,5 +1,4 @@
 import api from './index'
-import { extractResponseData, extractErrorMessage } from '@/utils/api'
 
 export const articlesApi = {
   // Get articles list with pagination, search and filters

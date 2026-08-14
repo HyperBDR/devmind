@@ -18,7 +18,7 @@ const quotationList = await readFile(
   'utf8',
 )
 const quotationListPage = await readFile(
-  new URL('../src/modules/quotation/pages/QuotationListPage.vue', import.meta.url),
+  new URL('../src/modules/quotation/App.vue', import.meta.url),
   'utf8',
 )
 const exportsApi = await readFile(
@@ -68,7 +68,7 @@ test('archive sync imports Excel and PDF files into normal quotations', () => {
 test('imported document controls stay mounted while their panel is hidden', () => {
   assert.match(
     quotationListPage,
-    /<div class="hidden" aria-hidden="true">\s*<ImportedDocumentsPage/,
+    /<ImportedDocumentsPage\s+embedded/,
   )
   assert.match(quotationListPage, /@quotation-created="handleImportedQuotationCreated"/)
   assert.doesNotMatch(quotationListPage, /v-if="false"/)

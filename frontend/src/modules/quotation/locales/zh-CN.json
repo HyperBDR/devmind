@@ -64,7 +64,7 @@
         "mixed": "解析 + 手动"
       }
     },
-    "common": {
+      "common": {
       "view": "查看",
       "edit": "编辑",
       "delete": "删除",
@@ -72,7 +72,8 @@
       "upload": "上传",
       "cancel": "取消",
       "confirm": "确认",
-      "refresh": "刷新",
+        "refresh": "刷新",
+        "refreshing": "刷新中…",
       "reset": "重置",
       "save": "保存",
       "back": "返回",
@@ -904,6 +905,35 @@
           "product_line": "产品线",
           "payment_term": "付款条款"
         }
+      },
+      "permissions": {
+        "menuLabel": "权限管理",
+        "title": "查看权限",
+        "subtitle": "管理员可以给普通用户授权查看指定的飞书目录或文件。本页面不修改上传权限。",
+        "loadFailed": "无法加载查看权限设置。",
+        "selectRequired": "请选择用户以及允许其查看的内容。",
+        "grantSuccess": "查看权限已授予。",
+        "grantFailed": "无法授予查看权限。",
+        "revokeConfirm": "确定撤销这条查看权限吗？",
+        "revokeSuccess": "查看权限已撤销。",
+        "revokeFailed": "无法撤销查看权限。",
+        "addTitle": "新增查看授权",
+        "userLabel": "授权用户",
+        "selectUser": "请选择用户",
+        "scopeLabel": "授权范围",
+        "folder": "目录",
+        "document": "文件",
+        "targetLabel": "选择内容",
+        "selectTarget": "请选择内容",
+        "grant": "授予查看",
+        "currentTitle": "当前查看授权",
+        "empty": "暂无查看授权",
+        "userColumn": "用户",
+        "scopeColumn": "范围",
+        "targetColumn": "内容",
+        "grantedByColumn": "授权人",
+        "actionsColumn": "操作",
+        "revoke": "撤销"
       }
     },
     "app": {

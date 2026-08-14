@@ -65,10 +65,7 @@ export function averageMarginRate(pairs = []) {
 
 export function referenceRetailPrice(
   cost,
-  {
-    feeRate = 0,
-    serviceFeeRate = 0
-  } = {}
+  { feeRate = 0, serviceFeeRate = 0 } = {}
 ) {
   const costValue = Number(cost)
   const feeRateValue = Number(feeRate)

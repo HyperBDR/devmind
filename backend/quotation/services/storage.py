@@ -35,13 +35,15 @@ def template_storage_key(template_id: str) -> str:
 
 
 def storage_root() -> Path:
-    return Path(settings.QUOTATION_STORAGE).resolve()
+    return Path(settings.QUOTATION_STORAGE).absolute()
 
 
 def resolve_document_path(storage_key: str) -> Path:
     root = storage_root()
-    path = (root / str(storage_key)).resolve()
-    if path != root and root not in path.parents:
+    path = (root / str(storage_key)).absolute()
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    if resolved_path != resolved_root and resolved_root not in resolved_path.parents:
         raise ValueError("document path is outside quotation storage")
     return path
 

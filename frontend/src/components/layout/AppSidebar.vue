@@ -693,6 +693,51 @@
                 </svg>
                 <span>{{ t('quotation.audit') }}</span>
               </router-link>
+              <router-link
+                v-if="quotationViewPermissionAdmin"
+                to="/quotation/permissions"
+                class="nav-item nav-item-child"
+                :class="
+                  isActive('/quotation/permissions') ? 'nav-item-active' : ''
+                "
+                @click="isMobile && $emit('close')"
+                @mouseenter="preloadRoute('/quotation/permissions')"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622C17.176 19.29 21 14.591 21 9c0-1.042-.133-2.052-.382-3.016z"
+                  />
+                </svg>
+                <span>{{ t('quotation.pages.permissions.menuLabel') }}</span>
+              </router-link>
+              <div
+                v-else-if="quotationViewPermissionLoading"
+                class="nav-item nav-item-child pointer-events-none invisible select-none"
+                aria-hidden="true"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622C17.176 19.29 21 14.591 21 9c0-1.042-.133-2.052-.382-3.016z"
+                  />
+                </svg>
+                <span>{{ t('quotation.pages.permissions.menuLabel') }}</span>
+              </div>
             </div>
           </Transition>
         </div>
@@ -747,6 +792,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/store/user'
 import { getCurrentPlatformKey } from '@/utils/platformAccess'
+import {
+  useQuotationViewPermissionAccess,
+} from '@/modules/quotation/composables/useQuotationViewPermissionAccess'
 import quoteDeskLogo from '@/assets/quote-desk-logo.svg'
 
 defineProps({
@@ -779,6 +827,10 @@ const homePath = computed(() =>
 const cloudBillingMenuOpen = ref(true)
 const dataCollectorMenuOpen = ref(true)
 const quotationMenuOpen = ref(true)
+const quotationViewPermissionAccess = useQuotationViewPermissionAccess()
+const quotationViewPermissionAdmin = quotationViewPermissionAccess.isAdmin
+const quotationViewPermissionLoading =
+  quotationViewPermissionAccess.isLoading
 
 // Load expanded state from localStorage
 const loadExpandedState = () => {
@@ -874,6 +926,16 @@ watch(
     }
   },
   { immediate: true }
+)
+
+watch(
+  [() => isQuotationPlatform.value, () => userStore.user?.id],
+  () => {
+    if (isQuotationPlatform.value) {
+      void quotationViewPermissionAccess.ensure()
+    }
+  },
+  { immediate: true },
 )
 
 // Preload route component on link hover for faster navigation

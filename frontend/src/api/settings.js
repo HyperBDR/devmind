@@ -43,10 +43,10 @@ export const settingsApi = {
       const currentValue = promptConfigSetting.value || {}
       const updatedValue = {
         // Only update fields that are explicitly provided in preferences
-        language: preferences.hasOwnProperty('language')
+        language: Object.prototype.hasOwnProperty.call(preferences, 'language')
           ? preferences.language
           : currentValue.language,
-        scene: preferences.hasOwnProperty('scene')
+        scene: Object.prototype.hasOwnProperty.call(preferences, 'scene')
           ? preferences.scene
           : currentValue.scene
       }

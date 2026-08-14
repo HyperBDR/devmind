@@ -9,6 +9,8 @@ from quotation.models import (
     FeishuConnection,
     Quotation,
     QuotationItem,
+    QuotationMembership,
+    QuotationViewPermission,
     QuotationTemplate,
     QuotationVersion,
     StorageConnection,
@@ -26,6 +28,8 @@ from quotation.services.storage_control import (
 
 admin.site.register(Quotation)
 admin.site.register(QuotationItem)
+admin.site.register(QuotationMembership)
+admin.site.register(QuotationViewPermission)
 admin.site.register(QuotationVersion)
 admin.site.register(QuotationTemplate)
 admin.site.register(ExportJob)
