@@ -1,5 +1,5 @@
 .meta-model-management .panel {
-  @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+  @apply rounded-xl border border-slate-200 bg-white shadow-sm;
 }
 
 .meta-model-management .panel-title {
@@ -19,15 +19,19 @@
 }
 
 .meta-model-management .source-summary-strip {
-  @apply grid gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 shadow-sm sm:grid-cols-3;
+  @apply grid gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 shadow-sm sm:grid-cols-3;
 }
 
 .meta-model-management .source-summary-item {
-  @apply flex min-w-0 items-center gap-3 bg-white px-4 py-3;
+  @apply flex min-w-0 flex-col items-start gap-1 bg-white px-5 py-4;
 }
 
 .meta-model-management .table-toolbar {
   @apply flex flex-col gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between;
+}
+
+.meta-model-management .catalog-toolbar {
+  @apply gap-5 px-5 py-5;
 }
 
 .meta-model-management .meta-library-toolbar {
@@ -99,7 +103,7 @@
 }
 
 .meta-model-management .empty-state {
-  @apply flex flex-col items-center gap-3 px-4 py-10 text-center;
+  @apply flex flex-col items-center gap-3 px-4 py-10 text-center sm:col-span-2 xl:col-span-3;
 }
 
 .meta-model-management .empty-title {
@@ -237,11 +241,11 @@
 }
 
 .meta-model-management .vendor-list {
-  @apply divide-y divide-slate-100;
+  @apply bg-slate-50 p-3;
 }
 
 .meta-model-management .vendor-list-header {
-  @apply grid grid-cols-[minmax(10rem,1fr)_7rem_6rem] items-center gap-3 bg-slate-50 px-4 py-2.5 text-center text-xs font-semibold uppercase tracking-wide text-slate-500;
+  @apply hidden;
 }
 
 .meta-model-management .vendor-list-header span:first-child {
@@ -249,11 +253,24 @@
 }
 
 .meta-model-management .vendor-row {
-  @apply grid w-full grid-cols-[minmax(10rem,1fr)_7rem_6rem] items-center gap-3 px-4 py-3 text-left transition hover:bg-slate-50;
+  @apply grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-left transition;
+}
+
+.meta-model-management .owner-card-grid {
+  @apply grid gap-3 sm:grid-cols-2 xl:grid-cols-3;
+}
+
+.meta-model-management .owner-card {
+  @apply rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+  @apply hover:border-indigo-200 hover:bg-indigo-50/30 hover:shadow-md;
+}
+
+.meta-model-management .owner-card:focus-visible {
+  @apply outline-none ring-2 ring-indigo-500 ring-offset-2;
 }
 
 .meta-model-management .vendor-row.active {
-  @apply bg-indigo-50;
+  @apply border-indigo-300 bg-indigo-50 shadow-none;
 }
 
 .meta-model-management .vendor-name-cell {
@@ -280,12 +297,24 @@
   @apply min-w-0 text-center;
 }
 
+.meta-model-management .owner-card-metric {
+  @apply col-span-2 flex items-end justify-between border-t border-slate-100 pt-3 text-left;
+}
+
 .meta-model-management .metric-value {
   @apply font-mono text-sm font-semibold tabular-nums text-slate-900;
 }
 
+.meta-model-management .owner-card-value {
+  @apply text-xl leading-none;
+}
+
 .meta-model-management .metric-label {
-  @apply mt-1 text-[11px] font-medium uppercase text-slate-400;
+  @apply mt-1 text-[11px] font-medium uppercase tracking-wide text-slate-400;
+}
+
+.meta-model-management .owner-card-action {
+  @apply col-span-2 flex items-center justify-between border-t border-slate-100 pt-3;
 }
 
 .meta-model-management .meta-model-main {

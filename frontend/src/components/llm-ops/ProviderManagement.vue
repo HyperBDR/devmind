@@ -16,9 +16,9 @@
       </div>
     </div>
 
-    <div class="panel overflow-hidden p-0">
-      <div class="table-toolbar">
-        <div>
+    <div class="panel source-catalog overflow-hidden p-0">
+      <div class="table-toolbar catalog-toolbar">
+        <div class="toolbar-copy">
           <h3 class="panel-title">
             {{ t('llmOps.providerManagement.title') }}
           </h3>
@@ -75,7 +75,7 @@
         </div>
       </div>
 
-      <div class="table-toolbar border-t border-slate-100">
+      <div class="table-toolbar catalog-filter-bar border-t border-slate-100">
         <div class="grid w-full gap-3 md:grid-cols-[minmax(0,1fr)_10rem_10rem]">
           <input
             v-model="sourceSearch"
@@ -105,7 +105,7 @@
         </div>
       </div>
 
-      <div class="overflow-hidden">
+      <div class="overflow-x-auto">
         <table class="data-table provider-table">
           <colgroup>
             <col class="source-name-col" />
@@ -137,14 +137,14 @@
             <tr
               v-for="provider in filteredSourceProviderRows"
               :key="provider.id"
-              class="cursor-pointer"
+              class="source-table-row cursor-pointer"
               @click="openSourceDetail(provider)"
             >
-              <td class="table-cell">
-                <p class="truncate font-medium text-slate-900">
+              <td class="table-cell source-identity-cell">
+                <p class="source-name truncate">
                   {{ provider.name }}
                 </p>
-                <p class="mt-1 truncate font-mono text-xs text-slate-400">
+                <p class="source-code mt-1 truncate">
                   {{ provider.code }}
                 </p>
               </td>
@@ -158,7 +158,7 @@
               </td>
 
               <td class="table-cell">
-                <p class="font-medium text-slate-900">
+                <p class="source-model-count">
                   {{
                     t('llmOps.providerManagement.modelsCount', {
                       count: provider.covered_model_count
