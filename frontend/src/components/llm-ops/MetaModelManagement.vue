@@ -17,8 +17,8 @@
     </div>
 
     <div class="grid gap-4">
-      <article class="panel min-w-0 overflow-hidden p-0">
-        <div class="table-toolbar">
+      <article class="panel model-library min-w-0 overflow-hidden p-0">
+        <div class="table-toolbar catalog-toolbar">
           <div class="toolbar-copy">
             <h3 class="panel-title">
               {{ t('llmOps.metaModelManagement.title') }}
@@ -69,16 +69,11 @@
             </span>
           </div>
         </div>
-        <div class="vendor-list">
-          <div class="vendor-list-header">
-            <span>{{ t('llmOps.metaModelManagement.table.vendor') }}</span>
-            <span>{{ t('llmOps.metaModelManagement.table.metaModels') }}</span>
-            <span>{{ t('llmOps.metaModelManagement.table.actions') }}</span>
-          </div>
+        <div class="vendor-list owner-card-grid">
           <button
             v-for="row in filteredVendorRows"
             :key="row.id || row.code"
-            class="vendor-row"
+            class="vendor-row owner-card"
             type="button"
             :class="{ active: vendorRowActive(row) }"
             @click="openVendorModelsDrawer(row)"
@@ -94,12 +89,15 @@
                 </p>
               </div>
             </div>
-            <div class="metric-stack">
-              <p class="metric-value">
+            <div class="metric-stack owner-card-metric">
+              <p class="metric-label">
+                {{ t('llmOps.metaModelManagement.table.metaModels') }}
+              </p>
+              <p class="metric-value owner-card-value">
                 {{ row.meta_model_count }}
               </p>
             </div>
-            <span class="link-btn text-center">
+            <span class="link-btn owner-card-action">
               {{ t('llmOps.metaModelManagement.actions.viewModels') }}
             </span>
           </button>
