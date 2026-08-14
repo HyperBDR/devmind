@@ -437,8 +437,8 @@
   @apply min-w-0 space-y-1;
 }
 
-.channel-model-drawer .price-cell p,
-.channel-model-drawer .price-cell span {
+.channel-model-drawer .price-cell > p,
+.channel-model-drawer .price-cell > span {
   @apply grid min-w-0 grid-cols-[2.25rem_minmax(0,1fr)] items-start gap-2 text-xs;
 }
 
@@ -454,8 +454,48 @@
   -webkit-line-clamp: 2;
 }
 
-.channel-model-drawer .price-cell span strong {
+.channel-model-drawer .price-cell > span strong {
   @apply font-medium text-slate-600;
+}
+
+.channel-model-drawer .price-tier-list {
+  @apply grid gap-1.5;
+}
+
+.channel-model-drawer .price-tier {
+  @apply rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5;
+}
+
+.channel-model-drawer .price-tier-range {
+  @apply mb-1 block font-mono text-[11px] font-semibold text-slate-500;
+}
+
+.channel-model-drawer .price-tier-line {
+  @apply grid grid-cols-[2.25rem_minmax(0,1fr)] items-start gap-2 text-xs leading-5;
+}
+
+.channel-model-drawer .price-tier-line > em {
+  @apply not-italic text-slate-400;
+}
+
+.channel-model-drawer .price-tier-values {
+  @apply flex flex-wrap gap-x-2 gap-y-0.5;
+}
+
+.channel-model-drawer .price-tier-value {
+  @apply inline-flex items-baseline gap-1 font-mono text-[11px] text-slate-600;
+}
+
+.channel-model-drawer .price-tier-value em {
+  @apply not-italic text-slate-400;
+}
+
+.channel-model-drawer .price-tier-value strong {
+  @apply font-semibold text-slate-700;
+}
+
+.channel-model-drawer .price-tier-missing {
+  @apply min-w-0 font-medium text-slate-600;
 }
 
 .channel-model-drawer .ability-cell {
