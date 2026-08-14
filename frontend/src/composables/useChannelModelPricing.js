@@ -573,6 +573,7 @@ export function useChannelModelPricing({
     modelSourceCategory,
     performanceSummaryItems,
     priceText,
+    priceNumberText,
     providerPriceItemsForModel,
     providerPriceSummary,
     purchaseSourceLabel,
