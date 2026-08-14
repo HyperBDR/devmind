@@ -818,14 +818,73 @@
                         <em>{{ t('llmOps.channelModelDrawer.rule') }}</em>
                         <strong>{{ priceRuleSummary(row) }}</strong>
                       </p>
-                      <span>
-                        <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
-                        <strong>{{ compactCostSummary(row) }}</strong>
-                      </span>
-                      <span>
-                        <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
-                        <strong>{{ upstreamPriceSummary(row.model) }}</strong>
-                      </span>
+                      <template v-if="priceTierComparisonRows(row).length">
+                        <div class="price-tier-list">
+                          <div
+                            v-for="tier in priceTierComparisonRows(row)"
+                            :key="tier.rangeLabel"
+                            class="price-tier"
+                          >
+                            <span class="price-tier-range">
+                              {{ tier.rangeLabel }}
+                            </span>
+                            <div class="price-tier-line">
+                              <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
+                              <div
+                                v-if="tier.costPrices.length"
+                                class="price-tier-values"
+                              >
+                                <span
+                                  v-for="price in tier.costPrices"
+                                  :key="price.label"
+                                  class="price-tier-value"
+                                >
+                                  <em>{{ price.label }}</em>
+                                  <strong>
+                                    {{ priceNumberText(price, row.model, 2) }}
+                                  </strong>
+                                </span>
+                              </div>
+                              <strong v-else class="price-tier-missing">
+                                {{ compactCostSummary(row) }}
+                              </strong>
+                            </div>
+                            <div class="price-tier-line">
+                              <em>
+                                {{ t('llmOps.channelModelDrawer.upstream') }}
+                              </em>
+                              <div
+                                v-if="tier.upstreamPrices.length"
+                                class="price-tier-values"
+                              >
+                                <span
+                                  v-for="price in tier.upstreamPrices"
+                                  :key="price.label"
+                                  class="price-tier-value"
+                                >
+                                  <em>{{ price.label }}</em>
+                                  <strong>
+                                    {{ priceNumberText(price, row.model, 2) }}
+                                  </strong>
+                                </span>
+                              </div>
+                              <strong v-else class="price-tier-missing">
+                                {{ upstreamPriceSummary(row.model) }}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <span>
+                          <em>{{ t('llmOps.channelModelDrawer.cost') }}</em>
+                          <strong>{{ compactCostSummary(row) }}</strong>
+                        </span>
+                        <span>
+                          <em>{{ t('llmOps.channelModelDrawer.upstream') }}</em>
+                          <strong>{{ upstreamPriceSummary(row.model) }}</strong>
+                        </span>
+                      </template>
                     </div>
                   </td>
                   <td class="table-cell">
@@ -903,6 +962,7 @@ import { useChannelModelNewDraft } from '@/composables/useChannelModelNewDraft'
 import { useChannelModelPricing } from '@/composables/useChannelModelPricing'
 import { useChannelModelRows } from '@/composables/useChannelModelRows'
 import { useChannelModelSelection } from '@/composables/useChannelModelSelection'
+import { channelPriceTierRows } from '@/utils/channelPriceCatalog'
 import { asArray } from '@/utils/llmOpsPagination'
 
 import CompactSelect from './CompactSelect.vue'
@@ -1027,6 +1087,8 @@ const {
   modelSourceCategory,
   performanceSummaryItems,
   priceText,
+  priceNumberText,
+  providerPriceItemsForModel,
   providerPriceSummary,
   purchaseSourceLabel,
   sortPriceItems,
@@ -1323,6 +1385,25 @@ function snapshotDrafts(source) {
       serializeDraft(draft)
     ])
   )
+}
+
+function priceTierComparisonRows(row) {
+  const tiers = new Map()
+  const append = (items, key) => {
+    channelPriceTierRows(items).forEach((tier) => {
+      const comparison = tiers.get(tier.rangeLabel) || {
+        costPrices: [],
+        rangeLabel: tier.rangeLabel,
+        upstreamPrices: []
+      }
+      comparison[key] = tier.prices
+      tiers.set(tier.rangeLabel, comparison)
+    })
+  }
+
+  append(row?.priceItems || [], 'costPrices')
+  append(providerPriceItemsForModel(row?.model), 'upstreamPrices')
+  return Array.from(tiers.values())
 }
 
 function toggleModelDropdown() {

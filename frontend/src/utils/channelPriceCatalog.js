@@ -11,6 +11,34 @@ export function channelPriceSummaryRows(priceItems = []) {
     }))
 }
 
+export function channelPriceTierRows(priceItems = []) {
+  const tiers = new Map()
+
+  priceItems
+    .slice()
+    .sort(channelPriceItemSort)
+    .forEach((item) => {
+      const key = [
+        item.tier_type || 'flat',
+        item.tier_start || '',
+        item.tier_end || ''
+      ].join(':')
+      const tier = tiers.get(key) || {
+        prices: [],
+        rangeLabel: tierRangeLabel(item)
+      }
+
+      tier.prices.push({
+        currency: item.currency,
+        label: priceDimensionLabel(item.dimension),
+        value: item.unit_price
+      })
+      tiers.set(key, tier)
+    })
+
+  return Array.from(tiers.values())
+}
+
 export function channelPriceItemLabel(item = {}) {
   const label = priceDimensionLabel(item.dimension)
   if (item.tier_type !== 'usage_range') return label

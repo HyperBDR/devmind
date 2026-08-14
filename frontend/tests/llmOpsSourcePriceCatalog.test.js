@@ -8,7 +8,8 @@ import {
 } from '../src/utils/sourcePriceCatalog.js'
 import {
   channelPriceItemLabel,
-  channelPriceSummaryRows
+  channelPriceSummaryRows,
+  channelPriceTierRows
 } from '../src/utils/channelPriceCatalog.js'
 
 const providerManagementSource = readFileSync(
@@ -33,6 +34,10 @@ const dataComposableSource = readFileSync(
 )
 const channelManagementSource = readFileSync(
   new URL('../src/components/llm-ops/ChannelManagement.vue', import.meta.url),
+  'utf8'
+)
+const channelModelDrawerSource = readFileSync(
+  new URL('../src/components/llm-ops/ChannelModelDrawer.vue', import.meta.url),
   'utf8'
 )
 const llmOpsPageSource = readFileSync(
@@ -260,6 +265,49 @@ test('keeps every channel price tier when summarizing one dimension', () => {
     ]
   )
   assert.equal(channelPriceItemLabel(items[3]), '[32,000, 96,000) Input')
+})
+
+test('groups channel prices by usage tier for side-by-side display', () => {
+  const items = [
+    ['text_input', '3', '0', '32000'],
+    ['text_output', '14', '0', '32000'],
+    ['cache_input', '0.3', '0', '32000'],
+    ['text_input', '4', '32000', null],
+    ['text_output', '16', '32000', null],
+    ['cache_input', '0.4', '32000', null]
+  ].map(([dimension, unit_price, tier_start, tier_end]) => ({
+    dimension,
+    unit_price,
+    currency: 'CNY',
+    tier_type: 'usage_range',
+    tier_start,
+    tier_end
+  }))
+
+  assert.deepEqual(channelPriceTierRows(items), [
+    {
+      prices: [
+        { currency: 'CNY', label: 'Input', value: '3' },
+        { currency: 'CNY', label: 'Output', value: '14' },
+        { currency: 'CNY', label: 'Cache', value: '0.3' }
+      ],
+      rangeLabel: '[0, 32,000)'
+    },
+    {
+      prices: [
+        { currency: 'CNY', label: 'Input', value: '4' },
+        { currency: 'CNY', label: 'Output', value: '16' },
+        { currency: 'CNY', label: 'Cache', value: '0.4' }
+      ],
+      rangeLabel: '[32,000, ∞)'
+    }
+  ])
+})
+
+test('renders configured channel prices as grouped tier comparisons', () => {
+  assert.match(channelModelDrawerSource, /price-tier-list/)
+  assert.match(channelModelDrawerSource, /priceTierComparisonRows\(row\)/)
+  assert.match(channelModelDrawerSource, /price-tier-values/)
 })
 
 test('shows final point values for every resale tier price', () => {
