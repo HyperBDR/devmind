@@ -4,18 +4,18 @@ function hasValue(value) {
 
 const rawFieldAliases = {
   amount: 'amount',
-  '付款金额': 'amount',
-  '充值金额': 'amount',
+  付款金额: 'amount',
+  充值金额: 'amount',
   currency: 'currency',
-  '币种': 'currency',
+  币种: 'currency',
   current_balance: 'current_balance',
-  '当前余额': 'current_balance',
-  '提交时余额': 'current_balance',
+  当前余额: 'current_balance',
+  提交时余额: 'current_balance',
   balance_threshold: 'balance_threshold',
-  '余额阈值': 'balance_threshold',
+  余额阈值: 'balance_threshold',
   days_remaining_threshold: 'days_remaining_threshold',
-  '剩余天数阈值': 'days_remaining_threshold',
-  '预计使用天数阈值': 'days_remaining_threshold'
+  剩余天数阈值: 'days_remaining_threshold',
+  预计使用天数阈值: 'days_remaining_threshold'
 }
 
 function normalizeRawFieldName(value) {

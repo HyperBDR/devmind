@@ -54,10 +54,9 @@ test('uses a dash for unavailable approval snapshot values', () => {
 
 test('parses supported key-value recharge text for failed records', () => {
   const snapshot = getRechargeApprovalSnapshot({
-    raw_recharge_info: [
-      '充值云账号：acct-188',
-      '付款金额：200.00 CNY'
-    ].join('\n')
+    raw_recharge_info: ['充值云账号：acct-188', '付款金额：200.00 CNY'].join(
+      '\n'
+    )
   })
 
   assert.equal(snapshot.rechargeAmount, '200.00 CNY')

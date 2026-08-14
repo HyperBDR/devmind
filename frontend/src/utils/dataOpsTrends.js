@@ -1,5 +1,7 @@
 function parseCurrentMonth(currentMonth) {
-  const [year, month] = String(currentMonth || '').split('-').map(Number)
+  const [year, month] = String(currentMonth || '')
+    .split('-')
+    .map(Number)
   if (!year || month < 1 || month > 12) return null
   return { month, year }
 }
@@ -17,7 +19,7 @@ function quarterDescriptor(index) {
   return {
     key: `${year}-Q${quarter}`,
     label: `${year} Q${quarter}`,
-    year,
+    year
   }
 }
 
@@ -28,23 +30,20 @@ function yearDescriptor(year) {
 
 function numericRangeDescriptors(period, count, current) {
   if (period === 'year') {
-    return Array.from(
-      { length: count },
-      (_, index) => yearDescriptor(current.year - count + index)
+    return Array.from({ length: count }, (_, index) =>
+      yearDescriptor(current.year - count + index)
     )
   }
   if (period === 'quarter') {
     const quarter = Math.floor((current.month - 1) / 3)
     const currentIndex = current.year * 4 + quarter
-    return Array.from(
-      { length: count },
-      (_, index) => quarterDescriptor(currentIndex - count + index)
+    return Array.from({ length: count }, (_, index) =>
+      quarterDescriptor(currentIndex - count + index)
     )
   }
   const currentIndex = current.year * 12 + current.month - 1
-  return Array.from(
-    { length: count },
-    (_, index) => monthDescriptor(currentIndex - count + index)
+  return Array.from({ length: count }, (_, index) =>
+    monthDescriptor(currentIndex - count + index)
   )
 }
 
@@ -52,14 +51,12 @@ function yearToDateDescriptors(period, current) {
   if (period === 'year') return []
   if (period === 'quarter') {
     const currentQuarter = Math.floor((current.month - 1) / 3)
-    return Array.from(
-      { length: currentQuarter },
-      (_, index) => quarterDescriptor(current.year * 4 + index)
+    return Array.from({ length: currentQuarter }, (_, index) =>
+      quarterDescriptor(current.year * 4 + index)
     )
   }
-  return Array.from(
-    { length: current.month - 1 },
-    (_, index) => monthDescriptor(current.year * 12 + index)
+  return Array.from({ length: current.month - 1 }, (_, index) =>
+    monthDescriptor(current.year * 12 + index)
   )
 }
 
@@ -90,10 +87,7 @@ function amountMap(items, valueKey, options) {
     if ((item.currency || '') !== options.currency) continue
     const key = periodKey(item.month, options.period)
     if (!key) continue
-    amounts.set(
-      key,
-      (amounts.get(key) || 0) + Number(item[valueKey] || 0)
-    )
+    amounts.set(key, (amounts.get(key) || 0) + Number(item[valueKey] || 0))
   }
   return amounts
 }
@@ -101,22 +95,16 @@ function amountMap(items, valueKey, options) {
 function addDeltas(rows) {
   return rows.map((row, index) => {
     const previous = rows[index - 1]?.amount
-    const delta = previous
-      ? ((row.amount - previous) / previous) * 100
-      : null
+    const delta = previous ? ((row.amount - previous) / previous) * 100 : null
     return { ...row, delta }
   })
 }
 
-export function buildAmountTrendRows(
-  items,
-  options,
-  valueKey = 'amount'
-) {
+export function buildAmountTrendRows(items, options, valueKey = 'amount') {
   const amounts = amountMap(items, valueKey, options)
   const rows = completePeriodDescriptors(options).map((period) => ({
     ...period,
-    amount: amounts.get(period.key) || 0,
+    amount: amounts.get(period.key) || 0
   }))
   return addDeltas(rows)
 }
@@ -131,7 +119,7 @@ export function buildCashTrendRows(receivedItems, expenseItems, options) {
       ...period,
       expense: expenseAmount,
       net: receivedAmount - expenseAmount,
-      received: receivedAmount,
+      received: receivedAmount
     }
   })
 }

@@ -1,5 +1,4 @@
 import api from './index'
-import { extractResponseData, extractErrorMessage } from '@/utils/api'
 
 export const githubApi = {
   // Get GitHub trending records list with pagination and filters

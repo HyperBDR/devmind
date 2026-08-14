@@ -32,6 +32,7 @@ import QuotationDetails from './components/QuotationDetails.vue'
 import QuotationDetailsDrawer from './components/QuotationDetailsDrawer.vue'
 import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
+import ViewPermissionPage from './components/ViewPermissionPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
 import CustomerCenter from './components/CustomerCenter.vue'
 import { isFeishuLinkOnlyUpdate, reconcileFeishuQuotationLinks } from './utils/feishuLinkState'
@@ -65,8 +66,14 @@ import {
 } from './api/quotations'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
+import {
+  useQuotationViewPermissionAccess,
+} from './composables/useQuotationViewPermissionAccess'
 
 const auth = useAuthStore()
+const viewPermissionAccess = useQuotationViewPermissionAccess()
+const isViewPermissionAdmin = viewPermissionAccess.isAdmin
+const isViewPermissionLoading = viewPermissionAccess.isLoading
 const { t, quoteStatusLabel } = useQuotationI18n()
 const route = useRoute()
 const router = useRouter()
@@ -77,6 +84,7 @@ const TAB_ROUTES: Record<string, string> = {
   create: '/quotation/create',
   catalog: '/quotation/catalog',
   audit: '/quotation/audit',
+  permissions: '/quotation/permissions',
   customers: '/quotation/customers',
 }
 
@@ -144,6 +152,7 @@ function tabFromRoutePath(path: string): string {
   if (path.startsWith('/quotation/imports')) return 'list'
   if (path.startsWith('/quotation/catalog')) return 'catalog'
   if (path.startsWith('/quotation/audit')) return 'audit'
+  if (path.startsWith('/quotation/permissions')) return 'permissions'
   if (path.startsWith('/quotation/customers')) return 'customers'
   return 'dashboard'
 }
@@ -474,6 +483,13 @@ async function loadCurrentQuotationTab() {
   }
 }
 
+async function loadViewPermissionAccess() {
+  const allowed = await viewPermissionAccess.ensure()
+  if (!allowed && currentTab.value === 'permissions') {
+    await router.replace('/quotation/dashboard')
+  }
+}
+
 onMounted(async () => {
   await auth.bootstrap()
   if (auth.isAuthenticated) {
@@ -483,6 +499,7 @@ onMounted(async () => {
     ]
     await Promise.all(tasks)
   }
+  await loadViewPermissionAccess()
 
   const params = new URLSearchParams(window.location.search)
   if (params.get('feishu') === 'connected') {
@@ -514,6 +531,7 @@ async function handleLoginSuccess() {
   const tasks: Promise<unknown>[] = [
     hydrateUserCatalog(),
     loadCurrentQuotationTab(),
+    loadViewPermissionAccess(),
   ]
   await Promise.all(tasks)
   triggerToast(t('quotation.app.welcomeBack', { name: me.name }), 'success')
@@ -1045,6 +1063,7 @@ function reloadPage() {
           <ScrollText class="h-4 w-4 shrink-0" />
           <span>{{ t('quotation.pages.audit.menuLabel') }}</span>
         </button>
+
       </nav>
 
       <div class="flex items-center gap-3 border-t border-dm-border-light px-4 py-3">
@@ -1078,6 +1097,7 @@ function reloadPage() {
             <template v-else-if="currentTab === 'details'">报价方案单据详情预览</template>
             <template v-else-if="currentTab === 'catalog'">商务目录要素及政策配置</template>
             <template v-else-if="currentTab === 'audit'">{{ t('quotation.pages.audit.title') }}</template>
+            <template v-else-if="currentTab === 'permissions'">{{ t('quotation.pages.permissions.title') }}</template>
             <template v-else-if="currentTab === 'customers'">客户中心</template>
           </span>
         </div>
@@ -1210,6 +1230,22 @@ function reloadPage() {
         />
 
         <AuditLogPage v-if="currentTab === 'audit'" />
+
+        <ViewPermissionPage
+          v-if="currentTab === 'permissions' && isViewPermissionAdmin"
+        />
+
+        <section
+          v-else-if="currentTab === 'permissions' && isViewPermissionLoading"
+          class="min-h-[420px] rounded-dm bg-white p-6"
+          aria-live="polite"
+        >
+          <div class="flex min-h-[360px] items-center justify-center">
+            <div class="text-sm text-dm-text-secondary">
+              {{ t('quotation.common.loading') }}
+            </div>
+          </div>
+        </section>
 
         <CustomerCenter
           v-if="currentTab === 'customers'"

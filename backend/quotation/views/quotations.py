@@ -281,7 +281,10 @@ class QuotationFormContextView(APIView):
         query_serializer.is_valid(raise_exception=True)
         page = query_serializer.validated_data["page"]
         page_size = int(query_serializer.validated_data["page_size"])
-        queryset = parsed_quotation_queryset().order_by(
+        queryset = filter_accessible_quotations(
+            request.user,
+            parsed_quotation_queryset(),
+        ).order_by(
             "-created_at",
             "-id",
         )
