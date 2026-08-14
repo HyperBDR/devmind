@@ -10,13 +10,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RemoveField(
-            model_name='host',
-            name='data_source',
-        ),
-        migrations.RemoveField(
-            model_name='host',
-            name='tenant',
+        migrations.DeleteModel(
+            name='Host',
         ),
         migrations.RemoveConstraint(
             model_name='license',
@@ -65,8 +60,5 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='tenant',
             constraint=models.UniqueConstraint(fields=('data_source', 'source_tenant_id'), name='hyperbdr_dash_tenant_src_uniq'),
-        ),
-        migrations.DeleteModel(
-            name='Host',
         ),
     ]
