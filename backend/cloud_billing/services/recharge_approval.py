@@ -348,17 +348,30 @@ def _feishu_list_approval_instances(
 ) -> List[str]:
     base = approval_base_url.rstrip("/")
     url = f"{base}/approval/openapi/v2/instance/list"
-    payload = {
-        "approval_code": approval_code,
-        "start_time": start_time_ms,
-        "end_time": end_time_ms,
-        "limit": limit,
-    }
-    data = _feishu_api_request(url, payload, token)
-    if not data:
-        return []
-    codes = data.get("data", {}).get("instance_code_list", []) or []
-    return [str(c).strip() for c in codes if str(c or "").strip()]
+    codes: List[str] = []
+    offset = 0
+    while True:
+        payload = {
+            "approval_code": approval_code,
+            "start_time": start_time_ms,
+            "end_time": end_time_ms,
+            "limit": limit,
+            "offset": offset,
+        }
+        data = _feishu_api_request(url, payload, token)
+        if not data:
+            break
+        page_data = data.get("data", {}) or {}
+        page_codes = page_data.get("instance_code_list", []) or []
+        codes.extend(
+            str(code).strip()
+            for code in page_codes
+            if str(code or "").strip()
+        )
+        if not page_data.get("has_more") or not page_codes:
+            break
+        offset += limit
+    return codes
 
 
 def _feishu_get_instance(

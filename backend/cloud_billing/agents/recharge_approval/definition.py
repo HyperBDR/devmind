@@ -806,6 +806,25 @@ def _execute_local(
             base_url,
             excluded_instance_codes,
         )
+        if existing:
+            instance_code = str(existing.get("instance_code") or "").strip()
+            existing_record = (
+                RechargeApprovalRecord.objects.filter(
+                    feishu_instance_code=instance_code,
+                ).first()
+                if instance_code
+                else None
+            )
+            if existing_record is not None and existing_record.id != record.id:
+                recharge_account = str(
+                    parsed_payload.get("recharge_account") or "未知"
+                ).strip()
+                raise RuntimeError(
+                    "充值账号 "
+                    f"{recharge_account} 已有一笔正在审批中的充值申请；"
+                    f"实例号：{instance_code}；"
+                    f"本地记录：{existing_record.id}。"
+                )
 
         # Step 5: get schema + build form
         logger.info("[LocalExecutor] Step 5/6: Fetching approval definition and building form")
