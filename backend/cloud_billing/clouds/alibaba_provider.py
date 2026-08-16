@@ -143,6 +143,8 @@ class AlibabaCloud(BaseCloudProvider):
         config = Config(
             access_key_id=self.config.api_key,
             access_key_secret=self.config.api_secret,
+            connect_timeout=self.config.timeout,
+            read_timeout=self.config.timeout,
             endpoint=endpoint,
         )
         return Client(config)
