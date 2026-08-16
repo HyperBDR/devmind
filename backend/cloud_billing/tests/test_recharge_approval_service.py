@@ -1789,6 +1789,125 @@ def test_local_recharge_executor_excludes_only_recovered_instance(
     assert result["instance_code"] == "ins_blocking"
 
 
+def test_feishu_instance_list_fetches_all_pages(monkeypatch):
+    calls = []
+
+    def fake_api_request(url, payload, token):
+        calls.append(payload)
+        if payload.get("offset", 0) == 0:
+            return {
+                "data": {
+                    "instance_code_list": ["ins_first"],
+                    "has_more": True,
+                }
+            }
+        return {
+            "data": {
+                "instance_code_list": ["ins_second"],
+                "has_more": False,
+            }
+        }
+
+    monkeypatch.setattr(
+        recharge_service,
+        "_feishu_api_request",
+        fake_api_request,
+    )
+
+    instance_codes = recharge_service._feishu_list_approval_instances(
+        "token",
+        "approval-188",
+        100,
+        200,
+    )
+
+    assert instance_codes == ["ins_first", "ins_second"]
+    assert [payload.get("offset", 0) for payload in calls] == [0, 100]
+
+
+def test_local_executor_rejects_already_tracked_duplicate_instance(
+    monkeypatch,
+):
+    from cloud_billing.agents.recharge_approval import definition
+
+    record = SimpleNamespace(
+        id=2,
+        trace_id=uuid.uuid4(),
+        request_payload={},
+        response_payload={},
+        feishu_instance_code=None,
+        feishu_approval_code=None,
+        status=RechargeApprovalRecord.STATUS_PENDING,
+        status_message="",
+        latest_stage="",
+        context_payload={},
+        submitted_at=None,
+        submitter_identifier="",
+        resolved_submitter_user_id="",
+        submitter_user_label="",
+        triggered_by=None,
+        trigger_source="manual",
+        trigger_reason="",
+        STATUS_FAILED=RechargeApprovalRecord.STATUS_FAILED,
+        save=lambda **kwargs: None,
+    )
+
+    def fake_filter(**kwargs):
+        assert kwargs == {"feishu_instance_code": "ins_existing"}
+        return SimpleNamespace(first=lambda: SimpleNamespace(id=1))
+
+    monkeypatch.setattr(
+        definition.RechargeApprovalRecord,
+        "objects",
+        SimpleNamespace(filter=fake_filter),
+    )
+    monkeypatch.setattr(
+        definition,
+        "create_recharge_approval_event",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setenv("FEISHU_APPROVAL_CODE", "approval-188")
+    monkeypatch.setattr(definition, "_local_feishu_token", lambda: "token")
+    monkeypatch.setattr(
+        definition,
+        "_parse_recharge_info",
+        lambda *args, **kwargs: {
+            "cloud_type": "智谱",
+            "recharge_account": "acct-188",
+        },
+    )
+    monkeypatch.setattr(
+        definition,
+        "_detect_duplicate",
+        lambda *args, **kwargs: {
+            "instance_code": "ins_existing",
+            "serial_number": "SN-188",
+            "status": "PENDING",
+        },
+    )
+    monkeypatch.setattr(definition, "_local_get_approval", lambda *args: {})
+    monkeypatch.setattr(definition, "_parse_schema", lambda *args: [])
+    monkeypatch.setattr(definition, "_schema_by_name", lambda *args: {})
+    monkeypatch.setattr(
+        definition,
+        "_build_form_payload",
+        lambda *args: [],
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="已有一笔正在审批中的充值申请",
+    ):
+        definition._execute_local(
+            record=record,
+            raw_recharge_info='{"recharge_account": "acct-188"}',
+            submitter_user_label="Finance Bot",
+            resolved_submitter_user_id="ou_123",
+        )
+
+    assert record.feishu_instance_code is None
+
+
 def test_recharge_approval_script_defaults_history_lookback_to_ninety_days(tmp_path):
     module = _load_skill_module(
         "submit_recharge_approval_default_lookback",
