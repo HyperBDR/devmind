@@ -92,6 +92,135 @@
         </div>
       </div>
 
+      <div class="panel overflow-hidden p-0">
+        <div class="table-toolbar">
+          <div>
+            <h3 class="panel-title">
+              {{ t('llmOps.modelWorkbenchPanel.contractRelations.title') }}
+            </h3>
+            <p class="mt-1 text-xs text-slate-500">
+              {{
+                t('llmOps.modelWorkbenchPanel.contractRelations.description')
+              }}
+            </p>
+          </div>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="table-head">
+                  {{ t('llmOps.modelWorkbenchPanel.columns.channel') }}
+                </th>
+                <th class="table-head">
+                  {{
+                    t('llmOps.modelWorkbenchPanel.contractRelations.offering')
+                  }}
+                </th>
+                <th class="table-head">
+                  {{ t('llmOps.modelWorkbenchPanel.contractRelations.sales') }}
+                </th>
+                <th class="table-head">
+                  {{
+                    t('llmOps.modelWorkbenchPanel.contractRelations.current')
+                  }}
+                </th>
+                <th class="table-head">
+                  {{ t('llmOps.modelWorkbenchPanel.contractRelations.future') }}
+                </th>
+                <th class="table-head">
+                  {{ t('llmOps.modelWorkbenchPanel.contractRelations.rules') }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="offering in selectedOfferings" :key="offering.id">
+                <td class="table-cell">
+                  {{ offering.channel_name || channelName(offering.channel) }}
+                </td>
+                <td class="table-cell">
+                  <div class="font-medium text-slate-800">
+                    {{ offering.display_name }}
+                  </div>
+                  <div class="font-mono text-[11px] text-slate-500">
+                    {{ offering.offering_key }}
+                  </div>
+                </td>
+                <td class="table-cell">
+                  <div class="flex flex-col gap-2 text-xs">
+                    <label
+                      class="inline-flex items-center gap-2"
+                      :title="
+                        t(
+                          'llmOps.modelWorkbenchPanel.contractRelations.salesTip'
+                        )
+                      "
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="offering.is_sales_enabled"
+                        :disabled="updatingOfferingId === offering.id"
+                        @change="
+                          toggleOffering(
+                            offering,
+                            'is_sales_enabled',
+                            $event.target.checked
+                          )
+                        "
+                      />
+                      {{
+                        t('llmOps.modelWorkbenchPanel.contractRelations.direct')
+                      }}
+                    </label>
+                    <label
+                      class="inline-flex items-center gap-2"
+                      :title="
+                        t(
+                          'llmOps.modelWorkbenchPanel.contractRelations.cacheTip'
+                        )
+                      "
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="offering.is_cache_sales_enabled"
+                        :disabled="updatingOfferingId === offering.id"
+                        @change="
+                          toggleOffering(
+                            offering,
+                            'is_cache_sales_enabled',
+                            $event.target.checked
+                          )
+                        "
+                      />
+                      {{
+                        t('llmOps.modelWorkbenchPanel.contractRelations.cache')
+                      }}
+                    </label>
+                  </div>
+                </td>
+                <td class="table-cell text-xs">
+                  {{ versionSummary(currentVersionFor(offering.id)) }}
+                </td>
+                <td class="table-cell text-xs">
+                  {{ versionSummary(futureVersionFor(offering.id)) }}
+                </td>
+                <td
+                  class="table-cell max-w-md text-xs"
+                  :title="ruleSummary(currentVersionFor(offering.id))"
+                >
+                  {{ ruleSummary(currentVersionFor(offering.id)) }}
+                </td>
+              </tr>
+              <tr v-if="!selectedOfferings.length">
+                <td class="table-cell text-slate-500" colspan="6">
+                  {{ t('llmOps.modelWorkbenchPanel.contractRelations.empty') }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="grid gap-4 xl:grid-cols-2">
         <div class="panel overflow-hidden p-0">
           <div class="table-toolbar">
@@ -157,6 +286,14 @@
 import { computed, defineComponent, h, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { llmOpsApi } from '@/api/llmOps'
+import { useToast } from '@/composables/useToast'
+import {
+  currentContractVersion,
+  futureContractVersion,
+  offeringsForModel
+} from '@/utils/channelContractRelations'
+import { userFacingApiError } from '@/utils/llmOpsErrors'
 import CompactSelect from './CompactSelect.vue'
 
 const MiniTable = defineComponent({
@@ -218,16 +355,21 @@ const props = defineProps({
   summary: { type: Object, default: () => ({}) },
   models: { type: Array, default: () => [] },
   channels: { type: Array, default: () => [] },
+  channelOfferings: { type: Array, default: () => [] },
   priceItems: { type: Array, default: () => [] },
   channelPriceItems: { type: Array, default: () => [] },
+  channelPriceVersions: { type: Array, default: () => [] },
   focusModelId: { type: [Number, String], default: null },
   listings: { type: Array, default: () => [] },
   records: { type: Array, default: () => [] }
 })
 
+const emit = defineEmits(['refresh'])
 const { t } = useI18n()
+const { showError, showSuccess } = useToast()
 const catalogScope = ref('all')
 const selectedModelId = ref('')
+const updatingOfferingId = ref(null)
 
 const catalogScopeOptions = computed(() => [
   {
@@ -252,6 +394,7 @@ const officialColumns = computed(() => [
 
 const channelColumns = computed(() => [
   t('llmOps.modelWorkbenchPanel.columns.channel'),
+  t('llmOps.modelWorkbenchPanel.columns.offering'),
   t('llmOps.modelWorkbenchPanel.columns.dimension'),
   t('llmOps.modelWorkbenchPanel.columns.price')
 ])
@@ -265,6 +408,8 @@ const listingColumns = computed(() => [
 const reconciliationColumns = computed(() => [
   t('llmOps.modelWorkbenchPanel.columns.date'),
   t('llmOps.modelWorkbenchPanel.columns.channel'),
+  t('llmOps.modelWorkbenchPanel.columns.offering'),
+  t('llmOps.modelWorkbenchPanel.columns.version'),
   t('llmOps.modelWorkbenchPanel.columns.variance')
 ])
 
@@ -345,6 +490,21 @@ const anomalyRecords = computed(() =>
   modelRecords.value.filter((record) => record.status !== 'perfect')
 )
 
+const selectedVersions = computed(() =>
+  props.channelPriceVersions.filter(
+    (version) => String(version.model) === String(selectedModelId.value)
+  )
+)
+
+const selectedOfferings = computed(() => {
+  return offeringsForModel({
+    offerings: props.channelOfferings,
+    versions: selectedVersions.value,
+    priceItems: props.channelPriceItems,
+    modelId: selectedModelId.value
+  })
+})
+
 const officialRows = computed(() =>
   props.priceItems
     .filter((item) => String(item.model) === String(selectedModelId.value))
@@ -362,6 +522,7 @@ const channelRows = computed(() =>
     .slice(0, 12)
     .map((item) => [
       item.channel_name || channelName(item.channel),
+      item.offering_name || item.offering_key || '-',
       dimensionLabel(item.dimension),
       money(item.unit_price, item.currency)
     ])
@@ -386,6 +547,8 @@ const reconciliationRows = computed(() =>
     .map((record) => [
       record.date,
       record.channel_name || channelName(record.channel),
+      record.offering_name || record.offering_key || '-',
+      record.price_version_number ? `v${record.price_version_number}` : '-',
       `${money(record.discrepancy, '')} · ${record.status}`
     ])
 )
@@ -395,6 +558,63 @@ function channelName(channelId) {
     props.channels.find((channel) => String(channel.id) === String(channelId))
       ?.name || '-'
   )
+}
+
+function currentVersionFor(offeringId) {
+  return currentContractVersion(selectedVersions.value, offeringId)
+}
+
+function futureVersionFor(offeringId) {
+  return futureContractVersion(selectedVersions.value, offeringId)
+}
+
+function versionSummary(version) {
+  if (!version) return '-'
+  const effective = version.effective_from
+    ? new Date(version.effective_from).toLocaleString()
+    : '-'
+  return `v${version.version} · ${version.status} · ${effective}`
+}
+
+function ruleSummary(version) {
+  if (!version) return '-'
+  const prices = (version.price_items || []).map((item) => {
+    const windows = item.spec?.time_windows || []
+    const windowLabel = windows.length
+      ? windows.map((window) => `${window.start}-${window.end}`).join(', ')
+      : t('llmOps.modelWorkbenchPanel.contractRelations.allTime')
+    return `${dimensionLabel(item.dimension)} ${item.unit_price} ${
+      item.currency
+    } · ${windowLabel}`
+  })
+  const discount =
+    version.discount_type === 'none'
+      ? ''
+      : ` · ${version.discount_basis}/${version.discount_type} ${
+          version.discount_value
+        }`
+  const exchange = version.contract_exchange_rate
+    ? ` · FX ${version.contract_exchange_rate} (${version.contract_currency})`
+    : ''
+  return `${prices.join(' | ')}${discount}${exchange}`
+}
+
+async function toggleOffering(offering, field, value) {
+  updatingOfferingId.value = offering.id
+  try {
+    await llmOpsApi.updateChannelOffering(offering.id, { [field]: value })
+    showSuccess(t('llmOps.modelWorkbenchPanel.contractRelations.updated'))
+    emit('refresh')
+  } catch (error) {
+    showError(
+      userFacingApiError(
+        error,
+        t('llmOps.modelWorkbenchPanel.contractRelations.updateFailed')
+      )
+    )
+  } finally {
+    updatingOfferingId.value = null
+  }
 }
 
 function channelDisplayName(value) {

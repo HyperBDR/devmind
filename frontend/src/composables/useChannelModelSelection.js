@@ -95,7 +95,6 @@ export function useChannelModelSelection({
 
   const availableModelOptions = computed(() => {
     const keyword = normalizeSearch(modelSearch.value)
-    const limit = keyword ? 80 : 24
     return availableModelGroups.value
       .map((option) => {
         const haystack = modelOptionSearchText(option)
@@ -107,7 +106,6 @@ export function useChannelModelSelection({
       .filter((item) => item.score > 0)
       .sort((left, right) => right.score - left.score)
       .map((item) => item.option)
-      .slice(0, limit)
   })
 
   const selectedModelOptions = computed(() =>

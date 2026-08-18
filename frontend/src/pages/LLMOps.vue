@@ -173,10 +173,13 @@
               :summary="summary"
               :models="models"
               :channels="channels"
+              :channel-offerings="channelOfferings"
               :price-items="modelPriceItems"
               :channel-price-items="channelPriceItems"
+              :channel-price-versions="channelPriceVersions"
               :listings="listings"
               :records="records"
+              @refresh="refreshAll(activeSection)"
             />
 
             <ListingRiskPanel
@@ -399,9 +402,11 @@ const {
 } = useLLMOpsNavigation()
 
 const {
+  channelOfferings,
   channelPriceHistory,
   channelPriceItems,
   channelPrices,
+  channelPriceVersions,
   channels,
   collectionRuns,
   displayCurrency,

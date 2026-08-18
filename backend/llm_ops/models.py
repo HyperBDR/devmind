@@ -1,3 +1,6 @@
+from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator
@@ -1257,6 +1260,358 @@ class ProcurementChannel(models.Model):
         return self.name
 
 
+class ChannelOffering(models.Model):
+    """Contract identity for one upstream procurement offering."""
+
+    STATUS_ACTIVE = "active"
+    STATUS_INACTIVE = "inactive"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_INACTIVE, "Inactive"),
+    )
+
+    channel = models.ForeignKey(
+        ProcurementChannel,
+        related_name="offerings",
+        on_delete=models.CASCADE,
+    )
+    meta_model = models.ForeignKey(
+        MetaModel,
+        related_name="procurement_offerings",
+        on_delete=models.CASCADE,
+    )
+    model = models.ForeignKey(
+        LLMModel,
+        related_name="procurement_offerings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    source_offering = models.ForeignKey(
+        SourceSkuOffering,
+        related_name="channel_offerings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    offering_key = models.CharField(max_length=255)
+    display_name = models.CharField(max_length=255)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+        db_index=True,
+    )
+    source_metadata = models.JSONField(blank=True, default=dict)
+    is_default = models.BooleanField(default=False, db_index=True)
+    is_sales_enabled = models.BooleanField(default=False, db_index=True)
+    is_cache_sales_enabled = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["channel__name", "meta_model__name", "display_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["channel", "offering_key"],
+                name="uq_llm_ops_channel_offering_key",
+            ),
+            models.UniqueConstraint(
+                fields=["channel", "meta_model"],
+                condition=models.Q(is_default=True),
+                name="uq_llm_ops_default_channel_offering",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.channel.name} / {self.display_name}"
+
+    def clean(self):
+        """Ensure optional model and source SKU use the same meta model."""
+        super().clean()
+        errors = {}
+        if self.model_id and self.model.meta_model_id != self.meta_model_id:
+            errors["model"] = "Model must belong to the offering meta model."
+        if (
+            self.source_offering_id
+            and self.source_offering.sku.meta_model_id != self.meta_model_id
+        ):
+            errors["source_offering"] = (
+                "Source offering must belong to the offering meta model."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Validate offering identity before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+def _ensure_channel_offering(instance, kwargs):
+    """Attach the legacy default offering and validate explicit offerings."""
+    if not instance.channel_id or not instance.model_id:
+        return
+
+    meta_model_id = instance.model.meta_model_id
+    if instance.offering_id:
+        offering = instance.offering
+        errors = {}
+        if offering.channel_id != instance.channel_id:
+            errors["offering"] = "Offering must belong to the same channel."
+        if offering.meta_model_id != meta_model_id:
+            errors["offering"] = (
+                "Offering must belong to the model meta model."
+            )
+        if errors:
+            raise ValidationError(errors)
+        return
+
+    offering, _created = ChannelOffering.objects.get_or_create(
+        channel_id=instance.channel_id,
+        meta_model_id=meta_model_id,
+        is_default=True,
+        defaults={
+            "offering_key": f"default-{meta_model_id}",
+            "display_name": instance.model.meta_model.name,
+        },
+    )
+    instance.offering = offering
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None:
+        kwargs["update_fields"] = list(set(update_fields) | {"offering"})
+
+
+class ChannelPriceVersion(models.Model):
+    """Effective-dated procurement contract price revision."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_SCHEDULED = "scheduled"
+    STATUS_ACTIVE = "active"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_SCHEDULED, "Scheduled"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_EXPIRED, "Expired"),
+    )
+
+    BASIS_LIST_PRICE = "list_price"
+    BASIS_CONTRACT_PRICE = "contract_price"
+    DISCOUNT_BASIS_CHOICES = (
+        (BASIS_LIST_PRICE, "List Price"),
+        (BASIS_CONTRACT_PRICE, "Contract Price"),
+    )
+
+    DISCOUNT_NONE = "none"
+    DISCOUNT_RATIO = "ratio"
+    DISCOUNT_FIXED = "fixed"
+    DISCOUNT_TYPE_CHOICES = (
+        (DISCOUNT_NONE, "None"),
+        (DISCOUNT_RATIO, "Ratio"),
+        (DISCOUNT_FIXED, "Fixed Price"),
+    )
+
+    ROUND_HALF_UP = "half_up"
+    ROUND_UP = "up"
+    ROUND_DOWN = "down"
+    ROUNDING_MODE_CHOICES = (
+        (ROUND_HALF_UP, "Half Up"),
+        (ROUND_UP, "Up"),
+        (ROUND_DOWN, "Down"),
+    )
+
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="price_versions",
+        on_delete=models.CASCADE,
+    )
+    model = models.ForeignKey(
+        LLMModel,
+        related_name="channel_price_versions",
+        on_delete=models.CASCADE,
+    )
+    meta_model = models.ForeignKey(
+        MetaModel,
+        related_name="channel_price_versions",
+        on_delete=models.CASCADE,
+    )
+    version = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    effective_from = models.DateTimeField(blank=True, null=True, db_index=True)
+    effective_to = models.DateTimeField(blank=True, null=True, db_index=True)
+    timezone = models.CharField(max_length=64, default="UTC")
+    discount_basis = models.CharField(
+        max_length=30,
+        choices=DISCOUNT_BASIS_CHOICES,
+        default=BASIS_CONTRACT_PRICE,
+    )
+    discount_type = models.CharField(
+        max_length=20,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default=DISCOUNT_NONE,
+    )
+    discount_value = models.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        blank=True,
+        null=True,
+    )
+    discount_dimensions = models.JSONField(blank=True, default=list)
+    rounding_mode = models.CharField(
+        max_length=20,
+        choices=ROUNDING_MODE_CHOICES,
+        default=ROUND_HALF_UP,
+    )
+    rounding_places = models.PositiveSmallIntegerField(
+        default=6,
+        validators=[MaxValueValidator(12)],
+    )
+    contract_currency = models.CharField(max_length=10, blank=True, default="")
+    contract_exchange_rate = models.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        blank=True,
+        null=True,
+    )
+    exchange_rate_effective_from = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    exchange_rate_effective_to = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    source_evidence = models.JSONField(blank=True, default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_channel_price_versions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="updated_channel_price_versions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["offering", "model", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["offering", "model", "version"],
+                name="uq_llm_ops_channel_price_version",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["offering", "model", "status", "effective_from"],
+                name="llmops_price_ver_effective_idx",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.offering} / {self.model.name} / v{self.version}"
+
+    def clean(self):
+        """Validate identity, effective dates, discount, and exchange rate."""
+        super().clean()
+        errors = {}
+        if self.model_id and self.meta_model_id:
+            if self.model.meta_model_id != self.meta_model_id:
+                errors["meta_model"] = "Meta model must match the model."
+        if self.offering_id and self.model_id:
+            if self.offering.meta_model_id != self.model.meta_model_id:
+                errors["offering"] = (
+                    "Offering must belong to the model meta model."
+                )
+        if self.status != self.STATUS_DRAFT and self.effective_from is None:
+            errors["effective_from"] = (
+                "Non-draft versions require an effective start."
+            )
+        if (
+            self.effective_from
+            and self.effective_to
+            and self.effective_to <= self.effective_from
+        ):
+            errors["effective_to"] = (
+                "Effective end must be after effective start."
+            )
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError:
+            errors["timezone"] = "Unknown IANA timezone."
+        if self.discount_type == self.DISCOUNT_RATIO:
+            if self.discount_value is None or not (
+                Decimal("0") <= self.discount_value <= Decimal("1")
+            ):
+                errors["discount_value"] = (
+                    "Ratio discounts must be between 0 and 1."
+                )
+        elif self.discount_type == self.DISCOUNT_FIXED:
+            if self.discount_value is None or self.discount_value < 0:
+                errors["discount_value"] = (
+                    "Fixed prices must be non-negative."
+                )
+        elif self.discount_value is not None:
+            errors["discount_value"] = (
+                "Discount value requires ratio or fixed discount type."
+            )
+        valid_dimensions = {
+            value for value, _label in ModelPriceItem.DIMENSION_CHOICES
+        }
+        if not isinstance(self.discount_dimensions, list) or any(
+            value not in valid_dimensions
+            for value in self.discount_dimensions
+        ):
+            errors["discount_dimensions"] = (
+                "Discount dimensions must contain valid price dimensions."
+            )
+        if (
+            self.contract_exchange_rate is not None
+            and self.contract_exchange_rate <= 0
+        ):
+            errors["contract_exchange_rate"] = (
+                "Contract exchange rate must be greater than zero."
+            )
+        if self.contract_exchange_rate is not None and not (
+            self.contract_currency or ""
+        ).strip():
+            errors["contract_currency"] = (
+                "Contract currency is required for a contract exchange rate."
+            )
+        if (
+            self.exchange_rate_effective_from
+            and self.exchange_rate_effective_to
+            and self.exchange_rate_effective_to
+            <= self.exchange_rate_effective_from
+        ):
+            errors["exchange_rate_effective_to"] = (
+                "Exchange rate end must be after its start."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Keep the canonical model link and validate the contract."""
+        _ensure_meta_model_from_model(self, kwargs)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 class ChannelModelPrice(models.Model):
     """Per-channel listing and price overrides for one model."""
 
@@ -1273,6 +1628,13 @@ class ChannelModelPrice(models.Model):
     meta_model = models.ForeignKey(
         MetaModel,
         related_name="channel_offerings",
+        on_delete=models.CASCADE,
+    )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="model_prices",
+        blank=True,
+        null=True,
         on_delete=models.CASCADE,
     )
     price_source = models.ForeignKey(
@@ -1338,8 +1700,8 @@ class ChannelModelPrice(models.Model):
         ordering = ["channel__name", "model__name", "id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["channel", "model"],
-                name="uq_llm_ops_channel_model_price",
+                fields=["channel", "model", "offering"],
+                name="uq_llm_ops_channel_model_offering_price",
             )
         ]
 
@@ -1349,6 +1711,7 @@ class ChannelModelPrice(models.Model):
     def save(self, *args, **kwargs):
         """Ensure channel model prices stay linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
+        _ensure_channel_offering(self, kwargs)
         super().save(*args, **kwargs)
 
 
@@ -1392,6 +1755,13 @@ class ChannelPriceItem(models.Model):
         related_name="channel_price_items",
         on_delete=models.CASCADE,
     )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="price_items",
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
+    )
     base_price_item = models.ForeignKey(
         ModelPriceItem,
         related_name="channel_price_items",
@@ -1405,6 +1775,13 @@ class ChannelPriceItem(models.Model):
         blank=True,
         null=True,
         on_delete=models.SET_NULL,
+    )
+    price_version = models.ForeignKey(
+        ChannelPriceVersion,
+        related_name="price_items",
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
     )
     dimension = models.CharField(
         max_length=50,
@@ -1489,12 +1866,13 @@ class ChannelPriceItem(models.Model):
                 fields=[
                     "channel",
                     "model",
+                    "offering",
                     "dimension",
                     "billing_unit",
                     "currency",
                     "price_fingerprint",
                 ],
-                name="uq_llm_ops_channel_price_item_fingerprint",
+                name="uq_llm_ops_channel_offer_price_item_fp",
             )
         ]
 
@@ -1504,6 +1882,7 @@ class ChannelPriceItem(models.Model):
     def save(self, *args, **kwargs):
         """Ensure channel price items stay linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
+        _ensure_channel_offering(self, kwargs)
         super().save(*args, **kwargs)
 
 
@@ -1523,6 +1902,13 @@ class ChannelModelPriceHistory(models.Model):
     meta_model = models.ForeignKey(
         MetaModel,
         related_name="channel_price_history",
+        on_delete=models.CASCADE,
+    )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="model_price_history",
+        blank=True,
+        null=True,
         on_delete=models.CASCADE,
     )
     price_source = models.ForeignKey(
@@ -1591,8 +1977,13 @@ class ChannelModelPriceHistory(models.Model):
         ordering = ["-effective_from", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["channel", "model", "price_fingerprint"],
-                name="uq_llm_ops_channel_price_history_fingerprint",
+                fields=[
+                    "channel",
+                    "model",
+                    "offering",
+                    "price_fingerprint",
+                ],
+                name="uq_llm_ops_offering_price_history_fingerprint",
             )
         ]
 
@@ -1602,6 +1993,7 @@ class ChannelModelPriceHistory(models.Model):
     def save(self, *args, **kwargs):
         """Ensure channel price history stays linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
+        _ensure_channel_offering(self, kwargs)
         super().save(*args, **kwargs)
 
 
@@ -2437,6 +2829,22 @@ class UsageReconciliationRecord(models.Model):
         related_name="reconciliation_records",
         on_delete=models.CASCADE,
     )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="reconciliation_records",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    price_version = models.ForeignKey(
+        ChannelPriceVersion,
+        related_name="reconciliation_records",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    business_occurred_at = models.DateTimeField(blank=True, null=True)
+    business_timezone = models.CharField(max_length=64, blank=True, default="")
     input_tokens = models.PositiveBigIntegerField(default=0)
     output_tokens = models.PositiveBigIntegerField(default=0)
     cache_input_tokens = models.PositiveBigIntegerField(default=0)
@@ -2470,6 +2878,25 @@ class UsageReconciliationRecord(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_PERFECT,
         db_index=True,
+    )
+    price_rule_snapshot = models.JSONField(blank=True, default=dict)
+    unit_price_snapshot = models.JSONField(blank=True, default=dict)
+    exchange_rate_snapshot = models.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        blank=True,
+        null=True,
+    )
+    exchange_rate_source = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+    )
+    final_price_snapshot = models.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        blank=True,
+        null=True,
     )
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

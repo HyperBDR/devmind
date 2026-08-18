@@ -1518,14 +1518,33 @@
     },
     "modelWorkbenchPanel": {
       "channelPrices": "渠道采购价",
+      "contractRelations": {
+        "allTime": "全时段",
+        "cache": "缓存销售",
+        "cacheTip": "控制缓存 Token 价格是否可销售；关闭后仍保留成本数据。",
+        "current": "当前合同",
+        "description": "元模型 → 渠道 → 货源 → 当前及未来合同规则。销售开关不会删除采购成本数据。",
+        "direct": "直接销售",
+        "empty": "当前模型尚未关联采购货源。",
+        "future": "未来合同",
+        "offering": "货源 / 上游 SKU",
+        "rules": "价格规则",
+        "sales": "销售可用性",
+        "salesTip": "销售可用性独立于内部成本采集和比价。",
+        "title": "采购价格合同关系",
+        "updateFailed": "更新货源销售可用性失败。",
+        "updated": "货源销售可用性已更新。"
+      },
       "columns": {
         "channel": "渠道",
         "date": "日期",
         "dimension": "维度",
+        "offering": "货源",
         "platform": "平台",
         "price": "价格",
         "source": "来源",
         "status": "状态",
+        "version": "价格版本",
         "variance": "差异"
       },
       "dimension": {

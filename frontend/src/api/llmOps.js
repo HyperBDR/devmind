@@ -183,6 +183,37 @@ export const llmOpsApi = {
     return apiClient.delete(`${base}/channels/${id}/`)
   },
 
+  listChannelOfferings(params) {
+    return apiClient.get(`${base}/channel-offerings/`, paramsOrEmpty(params))
+  },
+
+  createChannelOffering(payload) {
+    return apiClient.post(`${base}/channel-offerings/`, payload)
+  },
+
+  updateChannelOffering(id, payload) {
+    return apiClient.patch(`${base}/channel-offerings/${id}/`, payload)
+  },
+
+  deleteChannelOffering(id) {
+    return apiClient.delete(`${base}/channel-offerings/${id}/`)
+  },
+
+  listChannelPriceVersions(params) {
+    return apiClient.get(
+      `${base}/channel-price-versions/`,
+      paramsOrEmpty(params)
+    )
+  },
+
+  createChannelPriceVersion(payload) {
+    return apiClient.post(`${base}/channel-price-versions/`, payload)
+  },
+
+  updateChannelPriceVersion(id, payload) {
+    return apiClient.patch(`${base}/channel-price-versions/${id}/`, payload)
+  },
+
   listChannelModelPrices(params) {
     return apiClient.get(`${base}/channel-model-prices/`, paramsOrEmpty(params))
   },

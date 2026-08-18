@@ -28,7 +28,11 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRequiredFeature
 
-from .audit import record_audit_log, snapshot_instance
+from .audit import (
+    record_audit_log,
+    snapshot_channel_price_version,
+    snapshot_instance,
+)
 from .collection_services import (
     SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
     ensure_supported_official_provider_source,
@@ -52,7 +56,9 @@ from .models import (
     AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     ChannelPriceItem,
+    ChannelPriceVersion,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
     LLMModel,
@@ -75,7 +81,9 @@ from .serializers import (
     AuditLogSerializer,
     ChannelModelPriceHistorySerializer,
     ChannelModelPriceSerializer,
+    ChannelOfferingSerializer,
     ChannelPriceItemSerializer,
+    ChannelPriceVersionSerializer,
     CollectedModelPriceHistorySerializer,
     CollectedModelPriceSnapshotSerializer,
     LLMModelSerializer,
@@ -205,6 +213,10 @@ class AuditModelViewSetMixin:
 
     audit_category = None
 
+    def get_audit_snapshot(self, instance):
+        """Return the safe audit snapshot for one model instance."""
+        return snapshot_instance(instance)
+
     def perform_create(self, serializer):
         instance = serializer.save()
         record_audit_log(
@@ -213,13 +225,13 @@ class AuditModelViewSetMixin:
             category=self.audit_category,
             target=instance,
             summary=f"Created {instance}",
-            after=snapshot_instance(instance),
+            after=self.get_audit_snapshot(instance),
         )
 
     def perform_update(self, serializer):
-        before = snapshot_instance(serializer.instance)
+        before = self.get_audit_snapshot(serializer.instance)
         instance = serializer.save()
-        after = snapshot_instance(instance)
+        after = self.get_audit_snapshot(instance)
         record_audit_log(
             request=self.request,
             action=AuditLog.ACTION_UPDATE,
@@ -231,7 +243,7 @@ class AuditModelViewSetMixin:
         )
 
     def perform_destroy(self, instance):
-        before = snapshot_instance(instance)
+        before = self.get_audit_snapshot(instance)
         target_repr = str(instance)
         record_audit_log(
             request=self.request,
@@ -1525,17 +1537,21 @@ class ChannelModelPriceViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "offering",
             "price_source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
         if channel:
             queryset = queryset.filter(channel_id=channel)
         if meta_model:
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
         return queryset.order_by("channel__name", "model__name", "id")
 
     def perform_create(self, serializer):
@@ -1607,14 +1623,21 @@ class ChannelModelPriceViewSet(
         prices = []
         with transaction.atomic():
             for item in items:
-                existing = (
-                    ChannelModelPrice.objects.select_for_update()
-                    .filter(
+                existing_queryset = (
+                    ChannelModelPrice.objects.select_for_update().filter(
                         channel_id=item.get("channel"),
                         model_id=item.get("model"),
                     )
-                    .first()
                 )
+                if item.get("offering") is not None:
+                    existing_queryset = existing_queryset.filter(
+                        offering_id=item.get("offering")
+                    )
+                else:
+                    existing_queryset = existing_queryset.filter(
+                        offering__is_default=True
+                    )
+                existing = existing_queryset.first()
                 before = snapshot_instance(existing)
                 serializer = self.get_serializer(
                     existing,
@@ -1623,14 +1646,28 @@ class ChannelModelPriceViewSet(
                 )
                 serializer.is_valid(raise_exception=True)
                 data = serializer.validated_data
+                offering = data.get("offering")
+                if offering is None:
+                    offering, _created = ChannelOffering.objects.get_or_create(
+                        channel=data["channel"],
+                        meta_model=data["model"].meta_model,
+                        is_default=True,
+                        defaults={
+                            "offering_key": (
+                                f"default-{data['model'].meta_model_id}"
+                            ),
+                            "display_name": data["model"].meta_model.name,
+                        },
+                    )
                 lookup = {
                     "channel": data["channel"],
                     "model": data["model"],
+                    "offering": offering,
                 }
                 defaults = {
                     key: value
                     for key, value in data.items()
-                    if key not in {"channel", "model"}
+                    if key not in {"channel", "model", "offering"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
                 price, created = ChannelModelPrice.objects.update_or_create(
@@ -1712,11 +1749,13 @@ class ChannelModelPriceHistoryViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "offering",
             "price_source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
         is_current = self.request.query_params.get("is_current")
         if channel:
             queryset = queryset.filter(channel_id=channel)
@@ -1724,9 +1763,106 @@ class ChannelModelPriceHistoryViewSet(
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
         if is_current in {"true", "false"}:
             queryset = queryset.filter(is_current=is_current == "true")
         return queryset.order_by("-effective_from", "-id")
+
+
+class ChannelOfferingViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
+    """CRUD API for procurement offering identities and sales controls."""
+
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
+    serializer_class = ChannelOfferingSerializer
+
+    def get_queryset(self):
+        queryset = ChannelOffering.objects.select_related(
+            "channel",
+            "meta_model",
+            "model",
+            "source_offering",
+            "source_offering__sku",
+        )
+        channel = self.request.query_params.get("channel")
+        meta_model = self.request.query_params.get("meta_model")
+        status_value = self.request.query_params.get("status")
+        is_sales_enabled = self.request.query_params.get(
+            "is_sales_enabled"
+        )
+        if channel:
+            queryset = queryset.filter(channel_id=channel)
+        if meta_model:
+            queryset = queryset.filter(meta_model_id=meta_model)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        if is_sales_enabled in {"true", "false"}:
+            queryset = queryset.filter(
+                is_sales_enabled=is_sales_enabled == "true"
+            )
+        return queryset.order_by(
+            "channel__name",
+            "meta_model__name",
+            "display_name",
+            "id",
+        )
+
+
+class ChannelPriceVersionViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
+    """CRUD API for effective-dated procurement price contracts."""
+
+    audit_category = AuditLog.CATEGORY_PRICING
+    serializer_class = ChannelPriceVersionSerializer
+
+    def get_audit_snapshot(self, instance):
+        """Capture contract fields and nested normalized price rules."""
+        return snapshot_channel_price_version(instance)
+
+    def perform_destroy(self, instance):
+        if instance.status != ChannelPriceVersion.STATUS_DRAFT:
+            raise ValidationError(
+                "Published price versions are immutable."
+            )
+        super().perform_destroy(instance)
+
+    def get_queryset(self):
+        queryset = ChannelPriceVersion.objects.select_related(
+            "offering",
+            "offering__channel",
+            "meta_model",
+            "model",
+            "created_by",
+            "updated_by",
+        ).prefetch_related("price_items")
+        channel = self.request.query_params.get("channel")
+        offering = self.request.query_params.get("offering")
+        meta_model = self.request.query_params.get("meta_model")
+        model = self.request.query_params.get("model")
+        status_value = self.request.query_params.get("status")
+        if channel:
+            queryset = queryset.filter(offering__channel_id=channel)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
+        if meta_model:
+            queryset = queryset.filter(meta_model_id=meta_model)
+        if model:
+            queryset = queryset.filter(model_id=model)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        return queryset.order_by(
+            "offering__channel__name",
+            "offering__display_name",
+            "model__name",
+            "-version",
+        )
 
 
 class ChannelPriceItemViewSet(
@@ -1745,24 +1881,51 @@ class ChannelPriceItemViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "offering",
+            "price_version",
             "base_price_item",
             "source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
+        price_version = self.request.query_params.get("price_version")
         dimension = self.request.query_params.get("dimension")
         is_current = self.request.query_params.get("is_current")
+        is_effective = self.request.query_params.get("is_effective")
         if channel:
             queryset = queryset.filter(channel_id=channel)
         if meta_model:
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
+        if price_version:
+            queryset = queryset.filter(price_version_id=price_version)
         if dimension:
             queryset = queryset.filter(dimension=dimension)
         if is_current in {"true", "false"}:
             queryset = queryset.filter(is_current=is_current == "true")
+        if is_effective == "true":
+            now = timezone.now()
+            queryset = queryset.filter(
+                Q(price_version__isnull=False) | Q(is_current=True)
+            ).filter(
+                Q(price_version__isnull=True)
+                | Q(
+                    price_version__status__in=(
+                        ChannelPriceVersion.STATUS_ACTIVE,
+                        ChannelPriceVersion.STATUS_SCHEDULED,
+                    ),
+                    price_version__effective_from__lte=now,
+                )
+            ).filter(
+                Q(price_version__isnull=True)
+                | Q(price_version__effective_to__isnull=True)
+                | Q(price_version__effective_to__gt=now)
+            )
         return queryset.order_by(
             "channel__name",
             "model__name",
@@ -1770,6 +1933,17 @@ class ChannelPriceItemViewSet(
             "tier_start",
             "id",
         )
+
+    def perform_destroy(self, instance):
+        if (
+            instance.price_version_id
+            and instance.price_version.status
+            != ChannelPriceVersion.STATUS_DRAFT
+        ):
+            raise ValidationError(
+                "Published price version items are immutable."
+            )
+        super().perform_destroy(instance)
 
 
 class ResalePlatformViewSet(
@@ -2773,9 +2947,13 @@ class UsageReconciliationRecordViewSet(
             "channel",
             "model",
             "model__provider",
+            "offering",
+            "price_version",
         )
         channel = self.request.query_params.get("channel")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
+        price_version = self.request.query_params.get("price_version")
         status_value = self.request.query_params.get("status")
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
@@ -2784,6 +2962,10 @@ class UsageReconciliationRecordViewSet(
             queryset = queryset.filter(channel_id=channel)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
+        if price_version:
+            queryset = queryset.filter(price_version_id=price_version)
         if status_value:
             queryset = queryset.filter(status=status_value)
         if date_from:

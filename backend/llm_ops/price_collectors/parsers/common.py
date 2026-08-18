@@ -280,6 +280,7 @@ def normalize_text_token_values(row: dict[str, Any]) -> dict[str, str]:
         "region",
         "market",
         "billing_scope",
+        "usage_condition_mode",
     ):
         value = str(row.get(key) or "").strip()
         if value:

@@ -128,6 +128,8 @@ def fetch_linked_pricing_scripts(url: str, content: str) -> list[str]:
         except requests.RequestException:
             continue
         response.encoding = response.encoding or "utf-8"
+        if str(response.encoding).lower() in {"iso-8859-1", "latin-1"}:
+            response.encoding = "utf-8"
         scripts.append(response.text or "")
     return scripts
 
@@ -381,10 +383,37 @@ def extract_models_from_js_model_lists(content: str) -> list[dict[str, Any]]:
     """Extract model prices from BigModel Vue bundle modelList arrays."""
     models = []
     for fragment in extract_balanced_values(str(content or ""), "modelList"):
-        for item in js_objects_from_array(fragment):
-            model = model_from_js_object(item)
-            if model:
-                models.append(model)
+        models.extend(models_from_js_array(fragment))
+    return models
+
+
+def models_from_js_array(fragment: str) -> list[dict[str, Any]]:
+    """Build models while retaining unnamed continuation price rows."""
+    models = []
+    current = None
+    for item in js_objects_from_array(fragment):
+        model_name = js_string_field(item, "name")
+        if model_name:
+            current = model_from_js_object(item) or None
+            if current is not None:
+                current["price_rows"] = []
+                models.append(current)
+        if current is None:
+            continue
+        current["price_rows"].extend(price_rows_from_js_object(item))
+
+    for model in models:
+        rows = model.get("price_rows") or []
+        if any(row.get("output_token_range") for row in rows):
+            for row in rows:
+                row["usage_condition_mode"] = "multi_metric"
+        has_tiers = len(rows) > 1 or any(
+            row.get("input_token_range")
+            or row.get("output_token_range")
+            for row in rows
+        )
+        if not has_tiers:
+            model.pop("price_rows", None)
     return models
 
 
@@ -407,17 +436,107 @@ def js_objects_from_array(fragment: str) -> list[str]:
 def model_from_js_object(fragment: str) -> dict[str, Any]:
     """Build one model from a BigModel JavaScript pricing row."""
     model_name = js_string_field(fragment, "name")
-    input_prices = js_string_array_field(fragment, "inPrice")
-    output_prices = js_string_array_field(fragment, "outPrice")
-    if not model_name or not input_prices or not output_prices:
+    rows = price_rows_from_js_object(fragment)
+    if not model_name or not rows:
         return {}
-    return model_from_mapping(
+    model = model_from_mapping(
         {
             "model": model_name,
-            "input": input_prices[0],
-            "output": output_prices[0],
+            "input": rows[0]["input_price_per_million"],
+            "output": rows[0]["output_price_per_million"],
         }
     )
+    if not model:
+        return {}
+    return model
+
+
+def price_rows_from_js_object(fragment: str) -> list[dict[str, str]]:
+    """Return every price row and usage condition from one JS object."""
+    input_prices = js_string_array_field(fragment, "inPrice")
+    output_prices = js_string_array_field(fragment, "outPrice")
+    cache_prices = js_string_array_field(fragment, "hit")
+    if not input_prices or not output_prices:
+        return []
+
+    labels = js_string_array_field(fragment, "upDownText")
+    row_count = max(len(input_prices), len(output_prices))
+    rows = []
+    for index in range(row_count):
+        input_price = parse_price(array_value(input_prices, index))
+        output_price = parse_price(array_value(output_prices, index))
+        if input_price is None or output_price is None:
+            continue
+        row = {
+            "input_price_per_million": input_price,
+            "output_price_per_million": output_price,
+        }
+        cache_price = parse_price(array_value(cache_prices, index))
+        if cache_price is not None:
+            row["cache_hit_price_per_million"] = cache_price
+        relevant_labels = labels
+        if row_count > 1 and len(labels) == row_count:
+            relevant_labels = [labels[index]]
+        row.update(usage_ranges_from_labels(relevant_labels))
+        rows.append(row)
+    return rows
+
+
+def array_value(values: list[str], index: int) -> str:
+    """Return an indexed JS array value with a one-value fallback."""
+    if index < len(values):
+        return values[index]
+    if len(values) == 1:
+        return values[0]
+    return ""
+
+
+def usage_ranges_from_labels(labels: list[str]) -> dict[str, str]:
+    """Normalize BigModel context labels to absolute token ranges."""
+    ranges = {}
+    for index, label in enumerate(labels):
+        token_range = token_range_from_label(label)
+        if not token_range:
+            continue
+        normalized = str(label or "").lower()
+        if "输出" in normalized or "output" in normalized:
+            key = "output_token_range"
+        elif "输入" in normalized or "input" in normalized or index == 0:
+            key = "input_token_range"
+        else:
+            key = "output_token_range"
+        ranges[key] = token_range
+    return ranges
+
+
+def token_range_from_label(label: str) -> str:
+    """Parse BigModel's K-token bracket notation into token counts."""
+    match = re.search(r"\[\s*([^\])]+)\)", str(label or ""))
+    if not match:
+        return ""
+    body = match.group(1).strip()
+    if body.endswith("+"):
+        start = token_count_from_k(body[:-1])
+        return f"{start}+" if start is not None else ""
+    parts = [part.strip() for part in body.split(",", 1)]
+    if len(parts) != 2:
+        return ""
+    start = token_count_from_k(parts[0])
+    end = token_count_from_k(parts[1])
+    if start is None or end is None:
+        return ""
+    return f"{start}-{end}"
+
+
+def token_count_from_k(value: str) -> str | None:
+    """Convert one BigModel K-token boundary to an integer token count."""
+    try:
+        amount = Decimal(str(value).strip()) * Decimal("1000")
+    except (InvalidOperation, ValueError):
+        return None
+    if amount < 0 or amount != amount.to_integral_value():
+        return None
+    return format_decimal(amount)
 
 
 def js_string_field(fragment: str, key: str) -> str:
