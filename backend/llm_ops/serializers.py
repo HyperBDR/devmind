@@ -2368,6 +2368,11 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    price_version_number = serializers.IntegerField(
+        source="price_version.version",
+        read_only=True,
+        allow_null=True,
+    )
     expected_amount = serializers.DecimalField(
         max_digits=14,
         decimal_places=6,

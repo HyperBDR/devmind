@@ -1508,14 +1508,33 @@
     },
     "modelWorkbenchPanel": {
       "channelPrices": "Channel procurement prices",
+      "contractRelations": {
+        "allTime": "All time",
+        "cache": "Cache sales",
+        "cacheTip": "Controls whether cached-token pricing may be sold; cost data remains available when disabled.",
+        "current": "Current contract",
+        "description": "Meta model → channel → offering → current and future contract rules. Sales controls do not remove procurement cost data.",
+        "direct": "Direct sales",
+        "empty": "No procurement offering is linked to this model yet.",
+        "future": "Future contract",
+        "offering": "Offering / upstream SKU",
+        "rules": "Price rules",
+        "sales": "Sales availability",
+        "salesTip": "Controls sales availability independently from internal cost collection and comparison.",
+        "title": "Procurement contract relationships",
+        "updateFailed": "Failed to update offering sales availability.",
+        "updated": "Offering sales availability updated."
+      },
       "columns": {
         "channel": "Channel",
         "date": "Date",
         "dimension": "Dimension",
+        "offering": "Offering",
         "platform": "Platform",
         "price": "Price",
         "source": "Source",
         "status": "Status",
+        "version": "Price version",
         "variance": "Variance"
       },
       "dimension": {

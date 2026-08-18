@@ -36,8 +36,10 @@ export function useLLMOpsData() {
   const metaModels = ref([])
   const models = ref([])
   const channels = ref([])
+  const channelOfferings = ref([])
   const channelPrices = ref([])
   const channelPriceItems = ref([])
+  const channelPriceVersions = ref([])
   const channelPriceHistory = ref([])
   const modelPriceItems = ref([])
   const resalePlatforms = ref([])
@@ -164,14 +166,18 @@ export function useLLMOpsData() {
   }
 
   async function refreshChannelPricingData() {
-    const [prices, items] = await Promise.all([
+    const [offerings, prices, items, versions] = await Promise.all([
+      fetchList(llmOpsApi.listChannelOfferings),
       fetchList(llmOpsApi.listChannelModelPrices),
       fetchList(llmOpsApi.listChannelPriceItems, {
         is_current: 'true'
-      })
+      }),
+      fetchList(llmOpsApi.listChannelPriceVersions)
     ])
+    channelOfferings.value = asArray(offerings)
     channelPrices.value = asArray(prices)
     channelPriceItems.value = asArray(items)
+    channelPriceVersions.value = asArray(versions)
   }
 
   async function refreshModelPriceItems() {
@@ -217,7 +223,9 @@ export function useLLMOpsData() {
         if (group === 'channelPricing') {
           return (
             !asArray(channelPrices.value).length ||
-            !asArray(channelPriceItems.value).length
+            !asArray(channelPriceItems.value).length ||
+            !asArray(channelOfferings.value).length ||
+            !asArray(channelPriceVersions.value).length
           )
         }
         return !asArray(groupValues[group]?.value).length
@@ -241,7 +249,9 @@ export function useLLMOpsData() {
         if (group === 'channelPricing') {
           return (
             !asArray(channelPrices.value).length ||
-            !asArray(channelPriceItems.value).length
+            !asArray(channelPriceItems.value).length ||
+            !asArray(channelOfferings.value).length ||
+            !asArray(channelPriceVersions.value).length
           )
         }
         return !asArray(groupValues[group]?.value).length
@@ -415,9 +425,11 @@ export function useLLMOpsData() {
   }
 
   return {
+    channelOfferings,
     channelPriceHistory,
     channelPriceItems,
     channelPrices,
+    channelPriceVersions,
     channels,
     collectionRuns,
     displayCurrency,
