@@ -13,7 +13,7 @@ def _uuid() -> str:
 
 
 class QuoteStatus(models.TextChoices):
-    """Persisted quote lifecycle shared by manual and Feishu-imported quotes."""
+    """Persisted lifecycle for manual and Feishu-imported quotes."""
 
     DRAFT = "draft", "draft"
     GENERATED = "generated", "generated"
@@ -285,6 +285,168 @@ class QuotationViewPermission(TimeStampedModel):
     def __str__(self):
         target = self.folder_name or self.document_id or "unknown"
         return f"{self.user_id}:{self.target_type}:{target}"
+
+
+class QuotationUploadPermission(TimeStampedModel):
+    """Administrator-granted upload access to one Feishu folder."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quotation_upload_permissions",
+    )
+    folder_token = models.CharField(max_length=255)
+    folder_name = models.CharField(max_length=255, blank=True, default="")
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="granted_quotation_upload_permissions",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = "quotation_upload_permissions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "folder_token"],
+                condition=models.Q(is_active=True),
+                name="quotation_active_folder_upload_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["user", "is_active", "expires_at"],
+                name="quotation_upload_user_active",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.folder_name or self.folder_token}"
+
+
+class QuotationAccessRequestType(models.TextChoices):
+    """Access types that a quotation user may request."""
+
+    FOLDER_VIEW = "folder_view", "Folder view"
+    DOCUMENT_VIEW = "document_view", "Document view"
+    FOLDER_UPLOAD = "folder_upload", "Folder upload"
+
+
+class QuotationAccessRequestStatus(models.TextChoices):
+    """Lifecycle states for one quotation access request."""
+
+    PENDING = "pending", "Pending"
+    APPROVED = "approved", "Approved"
+    REJECTED = "rejected", "Rejected"
+    REVOKED = "revoked", "Revoked"
+    EXPIRED = "expired", "Expired"
+
+
+class QuotationAccessRequest(TimeStampedModel):
+    """A user request resolved into the canonical permission models."""
+
+    applicant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="quotation_access_requests",
+    )
+    request_type = models.CharField(
+        max_length=30,
+        choices=QuotationAccessRequestType.choices,
+    )
+    folder_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    folder_name = models.CharField(max_length=255, blank=True, default="")
+    document = models.ForeignKey(
+        "quotation.DocumentAsset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="quotation_access_requests",
+    )
+    document_id_snapshot = models.CharField(
+        max_length=36,
+        blank=True,
+        default="",
+    )
+    document_name = models.CharField(max_length=255, blank=True, default="")
+    reason = models.TextField()
+    status = models.CharField(
+        max_length=20,
+        choices=QuotationAccessRequestStatus.choices,
+        default=QuotationAccessRequestStatus.PENDING,
+        db_index=True,
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_quotation_access_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.TextField(blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    expired_at = models.DateTimeField(null=True, blank=True)
+    view_permission = models.ForeignKey(
+        QuotationViewPermission,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_access_requests",
+    )
+    upload_permission = models.ForeignKey(
+        QuotationUploadPermission,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="approved_access_requests",
+    )
+
+    class Meta:
+        db_table = "quotation_access_requests"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["applicant", "status", "-created_at"],
+                name="quotation_request_app_status",
+            ),
+            models.Index(
+                fields=["status", "-created_at"],
+                name="quotation_request_status_time",
+            ),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["applicant", "request_type", "folder_token"],
+                condition=(
+                    models.Q(status=QuotationAccessRequestStatus.PENDING)
+                    & ~models.Q(folder_token="")
+                ),
+                name="quotation_pending_folder_request_unique",
+            ),
+            models.UniqueConstraint(
+                fields=[
+                    "applicant",
+                    "request_type",
+                    "document_id_snapshot",
+                ],
+                condition=(
+                    models.Q(status=QuotationAccessRequestStatus.PENDING)
+                    & ~models.Q(document_id_snapshot="")
+                ),
+                name="quotation_pending_document_request_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.applicant_id}:{self.request_type}:{self.status}"
 
 
 class QuotationQuerySet(models.QuerySet):

@@ -243,9 +243,13 @@ export function getFeishuSyncJob(jobId: string): Promise<FeishuSyncJob> {
   );
 }
 
-export function listFeishuFolder(folderToken?: string): Promise<FeishuFolderListing> {
+export function listFeishuFolder(
+  folderToken?: string,
+  intent?: 'upload' | 'import',
+): Promise<FeishuFolderListing> {
   const params = new URLSearchParams();
   if (folderToken) params.set('folder_token', folderToken);
+  if (intent) params.set('intent', intent);
   const query = params.toString() ? `?${params}` : '';
   return apiRequest<FeishuFolderListing>(`/feishu/folder${query}`);
 }

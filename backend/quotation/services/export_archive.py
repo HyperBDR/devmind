@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 from django.db import transaction
 from django.utils import timezone
+
+from quotation.access import UploadAuthorizationError, can_upload_to_folder
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
     DocumentAsset,
@@ -156,7 +158,11 @@ def sync_export_asset(export_job_id: str, asset_id: str) -> dict:
     ).get(pk=export_job_id)
     with transaction.atomic():
         Quotation.objects.select_for_update().get(pk=quotation_id)
-        job = ExportJob.objects.select_for_update().get(pk=export_job_id)
+        job = (
+            ExportJob.objects.select_for_update()
+            .select_related("requested_by")
+            .get(pk=export_job_id)
+        )
         asset = DocumentAsset.objects.select_related(
             "quotation",
             "quotation_version",
@@ -168,6 +174,13 @@ def sync_export_asset(export_job_id: str, asset_id: str) -> dict:
             job.status = ExportJobStatus.UPLOADING
             job.finished_at = None
             job.save(update_fields=["status", "finished_at", "updated_at"])
+        if job.requested_by_id and not can_upload_to_folder(
+            job.requested_by,
+            job.archive_folder_token,
+        ):
+            raise UploadAuthorizationError(
+                "Directory upload permission is no longer active"
+            )
     route = StorageRouter().resolve(
         scope_key=job.quotation.product_line,
         document_type=asset.doc_type,

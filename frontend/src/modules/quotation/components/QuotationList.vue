@@ -24,8 +24,11 @@ import {
 import {
   checkFeishuFileAccess,
   getFeishuSyncJob,
+  isFeishuFolderItem,
+  listFeishuFolder,
   syncFeishuArchiveFolder,
 } from '../api/feishu'
+import { getAccessRequestContext } from '../api/accessRequests'
 import {
   archiveQuotationFile,
   exportQuotationFile,
@@ -259,6 +262,12 @@ const selectedCurrency = ref('ALL')
 const createdFrom = ref(props.initialCreatedFrom || '')
 const createdTo = ref(props.initialCreatedTo || '')
 const syncingFeishu = ref(false)
+const uploadAccessLoading = ref(false)
+const uploadAccessChecked = ref(false)
+const hasUploadAccess = ref(false)
+const uploadUnavailable = computed(
+  () => uploadAccessLoading.value || !hasUploadAccess.value,
+)
 const deleteConfirmId = ref<string | null>(null)
 const uploadingQuoteId = ref<string | null>(null)
 const exportProgressByQuote = ref<Record<string, QuotationExportStatus>>({})
@@ -342,6 +351,26 @@ function handlePageVisible() {
   if (document.visibilityState !== 'visible') return
   scheduleFeishuLinkReconcile()
   void verifyPendingFeishuOpen()
+  void loadUploadAccess()
+}
+
+async function loadUploadAccess() {
+  if (uploadAccessLoading.value) return
+  uploadAccessLoading.value = true
+  try {
+    const context = await getAccessRequestContext()
+    if (context.is_admin) {
+      hasUploadAccess.value = true
+      return
+    }
+    const listing = await listFeishuFolder(undefined, 'upload')
+    hasUploadAccess.value = listing.files.some(isFeishuFolderItem)
+  } catch {
+    hasUploadAccess.value = false
+  } finally {
+    uploadAccessChecked.value = true
+    uploadAccessLoading.value = false
+  }
 }
 
 const ACTION_MENU_WIDTH = 240
@@ -500,6 +529,7 @@ onMounted(async () => {
   window.addEventListener('resize', closeActionMenu)
   document.addEventListener('visibilitychange', handlePageVisible)
   window.addEventListener('focus', handlePageVisible)
+  void loadUploadAccess()
   await nextTick()
   suppressFilterWatch = false
 })
@@ -539,7 +569,12 @@ function exportProgressLabel(quoteId: string): string {
 }
 
 function openFeishuUploadPicker(quote: Quotation, format: FeishuUploadFormat) {
-  if (quote.status === 'Cancelled') return
+  if (quote.status === 'Cancelled' || !hasUploadAccess.value) {
+    if (!hasUploadAccess.value) {
+      emit('toast', t('quotation.pages.list.uploadAccessRequired'), 'info')
+    }
+    return
+  }
   closeActionMenu()
   pendingFeishuUpload.value = { quote, format }
   folderPickerOpen.value = true
@@ -1004,6 +1039,18 @@ function displayQuoteDate(quote: Quotation): string {
     class="flex h-full min-h-[calc(100dvh-7.0625rem)] flex-col gap-3"
   >
     <div
+      v-if="uploadAccessChecked && !hasUploadAccess"
+      class="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <span>{{ t('quotation.pages.list.uploadAccessRequired') }}</span>
+      <RouterLink
+        to="/quotation/permissions"
+        class="shrink-0 font-semibold text-amber-900 underline underline-offset-2"
+      >
+        {{ t('quotation.pages.list.requestUploadAccess') }}
+      </RouterLink>
+    </div>
+    <div
       id="filter-panel"
       data-filter-toolbar
       aria-label="Quote filters"
@@ -1400,11 +1447,13 @@ function displayQuoteDate(quote: Quotation): string {
                       :title="
                         quote.status === 'Cancelled'
                           ? t('quotation.pages.list.uploadDisabled')
-                          : t('quotation.pages.list.uploadFeishu')
+                          : uploadUnavailable
+                            ? t('quotation.pages.list.uploadAccessRequired')
+                            : t('quotation.pages.list.uploadFeishu')
                       "
-                      :disabled="quote.status === 'Cancelled' || uploadingQuoteId === quote.id"
+                      :disabled="quote.status === 'Cancelled' || uploadingQuoteId === quote.id || uploadUnavailable"
                       :class="`p-1 rounded-sm transition duration-100 ${
-                        quote.status === 'Cancelled' || uploadingQuoteId === quote.id
+                        quote.status === 'Cancelled' || uploadingQuoteId === quote.id || uploadUnavailable
                           ? 'text-slate-300 cursor-not-allowed'
                           : 'text-dm-text-tertiary hover:text-indigo-600 hover:bg-indigo-50 cursor-pointer'
                       }`"
@@ -1442,7 +1491,7 @@ function displayQuoteDate(quote: Quotation): string {
                     v-if="failedUploadByQuote[quote.id]"
                     type="button"
                     :title="t('quotation.pages.list.retryUpload')"
-                    :disabled="uploadingQuoteId === quote.id"
+                    :disabled="uploadingQuoteId === quote.id || uploadUnavailable"
                     class="cursor-pointer rounded-sm p-1 text-amber-600 transition duration-100 hover:bg-amber-50 hover:text-amber-700 disabled:cursor-not-allowed disabled:text-slate-300"
                     @click="void retryFailedUpload(quote)"
                   >

@@ -1,4 +1,9 @@
 from django.urls import path
+
+from quotation.views.access_requests import (
+    QuotationAccessRequestDecisionView,
+    QuotationAccessRequestView,
+)
 from quotation.views.audit import AuditEventExportView, AuditEventListView
 from quotation.views.catalog import (
     CatalogBootstrapView,
@@ -56,6 +61,10 @@ from quotation.views.quotations import (
     QuotationGenerateView,
     QuotationListCreateView,
 )
+from quotation.views.upload_permissions import (
+    QuotationUploadPermissionDetailView,
+    QuotationUploadPermissionView,
+)
 from quotation.views.view_permissions import (
     QuotationViewPermissionRevokeView,
     QuotationViewPermissionView,
@@ -75,10 +84,23 @@ urlpatterns = [
         "memberships/<int:membership_id>",
         QuotationMembershipDetailView.as_view(),
     ),
+    path("access-requests", QuotationAccessRequestView.as_view()),
+    path(
+        "access-requests/<int:request_id>/decision",
+        QuotationAccessRequestDecisionView.as_view(),
+    ),
     path("view-permissions", QuotationViewPermissionView.as_view()),
     path(
         "view-permissions/<int:permission_id>",
         QuotationViewPermissionRevokeView.as_view(),
+    ),
+    path(
+        "upload-permissions",
+        QuotationUploadPermissionView.as_view(),
+    ),
+    path(
+        "upload-permissions/<int:permission_id>",
+        QuotationUploadPermissionDetailView.as_view(),
     ),
     path("catalog", UserQuotationCatalogView.as_view()),
     path("catalog/import-legacy", LegacyCatalogImportView.as_view()),
