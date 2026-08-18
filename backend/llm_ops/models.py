@@ -1,3 +1,6 @@
+from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator
@@ -1382,6 +1385,216 @@ def _ensure_channel_offering(instance, kwargs):
         kwargs["update_fields"] = list(set(update_fields) | {"offering"})
 
 
+class ChannelPriceVersion(models.Model):
+    """Effective-dated procurement contract price revision."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_SCHEDULED = "scheduled"
+    STATUS_ACTIVE = "active"
+    STATUS_EXPIRED = "expired"
+    STATUS_CHOICES = (
+        (STATUS_DRAFT, "Draft"),
+        (STATUS_SCHEDULED, "Scheduled"),
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_EXPIRED, "Expired"),
+    )
+
+    BASIS_LIST_PRICE = "list_price"
+    BASIS_CONTRACT_PRICE = "contract_price"
+    DISCOUNT_BASIS_CHOICES = (
+        (BASIS_LIST_PRICE, "List Price"),
+        (BASIS_CONTRACT_PRICE, "Contract Price"),
+    )
+
+    DISCOUNT_NONE = "none"
+    DISCOUNT_RATIO = "ratio"
+    DISCOUNT_FIXED = "fixed"
+    DISCOUNT_TYPE_CHOICES = (
+        (DISCOUNT_NONE, "None"),
+        (DISCOUNT_RATIO, "Ratio"),
+        (DISCOUNT_FIXED, "Fixed Price"),
+    )
+
+    ROUND_HALF_UP = "half_up"
+    ROUND_UP = "up"
+    ROUND_DOWN = "down"
+    ROUNDING_MODE_CHOICES = (
+        (ROUND_HALF_UP, "Half Up"),
+        (ROUND_UP, "Up"),
+        (ROUND_DOWN, "Down"),
+    )
+
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="price_versions",
+        on_delete=models.CASCADE,
+    )
+    model = models.ForeignKey(
+        LLMModel,
+        related_name="channel_price_versions",
+        on_delete=models.CASCADE,
+    )
+    meta_model = models.ForeignKey(
+        MetaModel,
+        related_name="channel_price_versions",
+        on_delete=models.CASCADE,
+    )
+    version = models.PositiveIntegerField()
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_index=True,
+    )
+    effective_from = models.DateTimeField(blank=True, null=True, db_index=True)
+    effective_to = models.DateTimeField(blank=True, null=True, db_index=True)
+    timezone = models.CharField(max_length=64, default="UTC")
+    discount_basis = models.CharField(
+        max_length=30,
+        choices=DISCOUNT_BASIS_CHOICES,
+        default=BASIS_CONTRACT_PRICE,
+    )
+    discount_type = models.CharField(
+        max_length=20,
+        choices=DISCOUNT_TYPE_CHOICES,
+        default=DISCOUNT_NONE,
+    )
+    discount_value = models.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        blank=True,
+        null=True,
+    )
+    rounding_mode = models.CharField(
+        max_length=20,
+        choices=ROUNDING_MODE_CHOICES,
+        default=ROUND_HALF_UP,
+    )
+    rounding_places = models.PositiveSmallIntegerField(
+        default=6,
+        validators=[MaxValueValidator(12)],
+    )
+    contract_currency = models.CharField(max_length=10, blank=True, default="")
+    contract_exchange_rate = models.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        blank=True,
+        null=True,
+    )
+    exchange_rate_effective_from = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    exchange_rate_effective_to = models.DateTimeField(
+        blank=True,
+        null=True,
+    )
+    source_evidence = models.JSONField(blank=True, default=dict)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_channel_price_versions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="updated_channel_price_versions",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["offering", "model", "-version"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["offering", "model", "version"],
+                name="uq_llm_ops_channel_price_version",
+            )
+        ]
+        indexes = [
+            models.Index(
+                fields=["offering", "model", "status", "effective_from"],
+                name="llmops_price_ver_effective_idx",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.offering} / {self.model.name} / v{self.version}"
+
+    def clean(self):
+        """Validate identity, effective dates, discount, and exchange rate."""
+        super().clean()
+        errors = {}
+        if self.model_id and self.meta_model_id:
+            if self.model.meta_model_id != self.meta_model_id:
+                errors["meta_model"] = "Meta model must match the model."
+        if self.offering_id and self.model_id:
+            if self.offering.meta_model_id != self.model.meta_model_id:
+                errors["offering"] = (
+                    "Offering must belong to the model meta model."
+                )
+        if self.status != self.STATUS_DRAFT and self.effective_from is None:
+            errors["effective_from"] = (
+                "Non-draft versions require an effective start."
+            )
+        if (
+            self.effective_from
+            and self.effective_to
+            and self.effective_to <= self.effective_from
+        ):
+            errors["effective_to"] = (
+                "Effective end must be after effective start."
+            )
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError:
+            errors["timezone"] = "Unknown IANA timezone."
+        if self.discount_type == self.DISCOUNT_RATIO:
+            if self.discount_value is None or not (
+                Decimal("0") <= self.discount_value <= Decimal("1")
+            ):
+                errors["discount_value"] = (
+                    "Ratio discounts must be between 0 and 1."
+                )
+        elif self.discount_type == self.DISCOUNT_FIXED:
+            if self.discount_value is None or self.discount_value < 0:
+                errors["discount_value"] = (
+                    "Fixed prices must be non-negative."
+                )
+        elif self.discount_value is not None:
+            errors["discount_value"] = (
+                "Discount value requires ratio or fixed discount type."
+            )
+        if (
+            self.contract_exchange_rate is not None
+            and self.contract_exchange_rate <= 0
+        ):
+            errors["contract_exchange_rate"] = (
+                "Contract exchange rate must be greater than zero."
+            )
+        if (
+            self.exchange_rate_effective_from
+            and self.exchange_rate_effective_to
+            and self.exchange_rate_effective_to
+            <= self.exchange_rate_effective_from
+        ):
+            errors["exchange_rate_effective_to"] = (
+                "Exchange rate end must be after its start."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Keep the canonical model link and validate the contract."""
+        _ensure_meta_model_from_model(self, kwargs)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
 class ChannelModelPrice(models.Model):
     """Per-channel listing and price overrides for one model."""
 
@@ -1545,6 +1758,13 @@ class ChannelPriceItem(models.Model):
         blank=True,
         null=True,
         on_delete=models.SET_NULL,
+    )
+    price_version = models.ForeignKey(
+        ChannelPriceVersion,
+        related_name="price_items",
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
     )
     dimension = models.CharField(
         max_length=50,
@@ -2592,6 +2812,22 @@ class UsageReconciliationRecord(models.Model):
         related_name="reconciliation_records",
         on_delete=models.CASCADE,
     )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="reconciliation_records",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    price_version = models.ForeignKey(
+        ChannelPriceVersion,
+        related_name="reconciliation_records",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    business_occurred_at = models.DateTimeField(blank=True, null=True)
+    business_timezone = models.CharField(max_length=64, blank=True, default="")
     input_tokens = models.PositiveBigIntegerField(default=0)
     output_tokens = models.PositiveBigIntegerField(default=0)
     cache_input_tokens = models.PositiveBigIntegerField(default=0)
@@ -2625,6 +2861,25 @@ class UsageReconciliationRecord(models.Model):
         choices=STATUS_CHOICES,
         default=STATUS_PERFECT,
         db_index=True,
+    )
+    price_rule_snapshot = models.JSONField(blank=True, default=dict)
+    unit_price_snapshot = models.JSONField(blank=True, default=dict)
+    exchange_rate_snapshot = models.DecimalField(
+        max_digits=18,
+        decimal_places=8,
+        blank=True,
+        null=True,
+    )
+    exchange_rate_source = models.CharField(
+        max_length=30,
+        blank=True,
+        default="",
+    )
+    final_price_snapshot = models.DecimalField(
+        max_digits=14,
+        decimal_places=6,
+        blank=True,
+        null=True,
     )
     notes = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)

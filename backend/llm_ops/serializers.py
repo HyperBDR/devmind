@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import time
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from django.db import transaction
 from django.utils.text import slugify
 from rest_framework import serializers
 
@@ -21,6 +24,7 @@ from .models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
     ChannelOffering,
+    ChannelPriceVersion,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
     LLMOpsGlobalConfig,
@@ -52,8 +56,10 @@ from .services import (
     calculate_channel_model_cost,
     normalize_currency,
     price_role_for_source,
+    resolve_channel_contract_cost,
     stable_fingerprint,
 )
+from .tier_pricing import UsageContext
 from .workflow_config import validate_resale_workflow_config
 
 
@@ -1594,6 +1600,280 @@ class ChannelOfferingSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class ChannelContractPriceItemSerializer(serializers.Serializer):
+    """Nested normalized price rule for one procurement price version."""
+
+    id = serializers.IntegerField(read_only=True)
+    dimension = serializers.ChoiceField(
+        choices=ModelPriceItem.DIMENSION_CHOICES,
+    )
+    billing_unit = serializers.ChoiceField(
+        choices=ModelPriceItem.BILLING_UNIT_CHOICES,
+    )
+    currency = serializers.CharField(max_length=10)
+    unit_price = serializers.DecimalField(max_digits=14, decimal_places=6)
+    tier_type = serializers.ChoiceField(
+        choices=ModelPriceItem.TIER_CHOICES,
+        default=ModelPriceItem.TIER_FLAT,
+    )
+    tier_start = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        allow_null=True,
+        required=False,
+    )
+    tier_end = serializers.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        allow_null=True,
+        required=False,
+    )
+    spec = serializers.JSONField(required=False, default=dict)
+
+    def validate_currency(self, value):
+        return validate_currency_code(value, required=True)
+
+    def validate_unit_price(self, value):
+        if value < 0:
+            raise serializers.ValidationError("unit_price must be >= 0.")
+        return value
+
+    def validate_spec(self, value):
+        windows = (
+            value.get("time_windows") if isinstance(value, dict) else None
+        )
+        if windows is None:
+            return value
+        if not isinstance(windows, list) or not windows:
+            raise serializers.ValidationError(
+                "time_windows must be a non-empty list."
+            )
+        for window in windows:
+            self._validate_time_window(window)
+        return value
+
+    @staticmethod
+    def _validate_time_window(window):
+        if not isinstance(window, dict):
+            raise serializers.ValidationError(
+                "Each time window must be an object."
+            )
+        weekdays = window.get("weekdays")
+        if (
+            not isinstance(weekdays, list)
+            or not weekdays
+            or any(
+                not isinstance(day, int) or day not in range(7)
+                for day in weekdays
+            )
+        ):
+            raise serializers.ValidationError(
+                "weekdays must contain integers from 0 through 6."
+            )
+        try:
+            start = time.fromisoformat(str(window.get("start")))
+            end = time.fromisoformat(str(window.get("end")))
+        except ValueError as exc:
+            raise serializers.ValidationError(
+                "start and end must use HH:MM time format."
+            ) from exc
+        if start == end:
+            raise serializers.ValidationError(
+                "Time window start and end must differ."
+            )
+
+
+class ChannelPriceVersionSerializer(serializers.ModelSerializer):
+    """Create and inspect effective-dated procurement price versions."""
+
+    channel = serializers.IntegerField(
+        source="offering.channel_id",
+        read_only=True,
+    )
+    channel_name = serializers.CharField(
+        source="offering.channel.name",
+        read_only=True,
+    )
+    offering_key = serializers.CharField(
+        source="offering.offering_key",
+        read_only=True,
+    )
+    offering_name = serializers.CharField(
+        source="offering.display_name",
+        read_only=True,
+    )
+    model_name = serializers.CharField(source="model.name", read_only=True)
+    meta_model_name = serializers.CharField(
+        source="meta_model.name",
+        read_only=True,
+    )
+    price_items = ChannelContractPriceItemSerializer(many=True)
+
+    class Meta:
+        model = ChannelPriceVersion
+        fields = "__all__"
+        read_only_fields = (
+            "meta_model",
+            "created_by",
+            "updated_by",
+            "created_at",
+            "updated_at",
+        )
+
+    def validate(self, attrs):
+        offering = attrs.get(
+            "offering",
+            getattr(self.instance, "offering", None),
+        )
+        model = attrs.get("model", getattr(self.instance, "model", None))
+        if (
+            offering
+            and model
+            and offering.meta_model_id != model.meta_model_id
+        ):
+            raise serializers.ValidationError(
+                {"offering": "Offering must belong to the model meta model."}
+            )
+        status_value = attrs.get(
+            "status",
+            getattr(self.instance, "status", ChannelPriceVersion.STATUS_DRAFT),
+        )
+        effective_from = attrs.get(
+            "effective_from",
+            getattr(self.instance, "effective_from", None),
+        )
+        effective_to = attrs.get(
+            "effective_to",
+            getattr(self.instance, "effective_to", None),
+        )
+        if (
+            status_value != ChannelPriceVersion.STATUS_DRAFT
+            and effective_from is None
+        ):
+            raise serializers.ValidationError(
+                {
+                    "effective_from": (
+                        "Non-draft versions require an effective start."
+                    )
+                }
+            )
+        if (
+            effective_from
+            and effective_to
+            and effective_to <= effective_from
+        ):
+            raise serializers.ValidationError(
+                {
+                    "effective_to": (
+                        "Effective end must be after effective start."
+                    )
+                }
+            )
+        discount_type = attrs.get(
+            "discount_type",
+            getattr(
+                self.instance,
+                "discount_type",
+                ChannelPriceVersion.DISCOUNT_NONE,
+            ),
+        )
+        discount_value = attrs.get(
+            "discount_value",
+            getattr(self.instance, "discount_value", None),
+        )
+        if discount_type == ChannelPriceVersion.DISCOUNT_RATIO:
+            if discount_value is None or not (
+                Decimal("0") <= discount_value <= Decimal("1")
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "discount_value": (
+                            "Ratio discounts must be between 0 and 1."
+                        )
+                    }
+                )
+        elif discount_type == ChannelPriceVersion.DISCOUNT_FIXED:
+            if discount_value is None or discount_value < 0:
+                raise serializers.ValidationError(
+                    {"discount_value": "Fixed prices must be non-negative."}
+                )
+        elif discount_value is not None:
+            raise serializers.ValidationError(
+                {
+                    "discount_value": (
+                        "Discount value requires ratio or fixed discount type."
+                    )
+                }
+            )
+        return attrs
+
+    def validate_timezone(self, value):
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise serializers.ValidationError(
+                "Unknown IANA timezone."
+            ) from exc
+        return value
+
+    def validate_contract_currency(self, value):
+        return validate_currency_code(value, required=False)
+
+    @transaction.atomic
+    def create(self, validated_data):
+        price_items = validated_data.pop("price_items")
+        model = validated_data["model"]
+        user = self._request_user()
+        version = ChannelPriceVersion.objects.create(
+            **validated_data,
+            meta_model=model.meta_model,
+            created_by=user,
+            updated_by=user,
+        )
+        self._replace_price_items(version, price_items)
+        return version
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        price_items = validated_data.pop("price_items", None)
+        validated_data["updated_by"] = self._request_user()
+        version = super().update(instance, validated_data)
+        if price_items is not None:
+            self._replace_price_items(version, price_items)
+        return version
+
+    def _replace_price_items(self, version, price_items):
+        version.price_items.all().delete()
+        for row in price_items:
+            fingerprint = stable_fingerprint(
+                {
+                    "version_id": version.id,
+                    **{
+                        key: str(value)
+                        for key, value in row.items()
+                        if key != "spec"
+                    },
+                    "spec": row.get("spec") or {},
+                }
+            )
+            ChannelPriceItem.objects.create(
+                channel=version.offering.channel,
+                model=version.model,
+                meta_model=version.meta_model,
+                offering=version.offering,
+                price_version=version,
+                price_fingerprint=fingerprint,
+                price_source_type=ChannelPriceItem.SOURCE_MANUAL,
+                **row,
+            )
+
+    def _request_user(self):
+        request = self.context.get("request")
+        if request and request.user.is_authenticated:
+            return request.user
+        return None
+
+
 class ChannelModelPriceHistorySerializer(serializers.ModelSerializer):
     """Serializer for historical channel/model price versions."""
 
@@ -2078,6 +2358,16 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
         source="model.provider.name",
         read_only=True,
     )
+    offering_key = serializers.CharField(
+        source="offering.offering_key",
+        read_only=True,
+        allow_null=True,
+    )
+    offering_name = serializers.CharField(
+        source="offering.display_name",
+        read_only=True,
+        allow_null=True,
+    )
     expected_amount = serializers.DecimalField(
         max_digits=14,
         decimal_places=6,
@@ -2103,6 +2393,7 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
         fields = "__all__"
         extra_kwargs = {
             "meta_model": {"required": False},
+            "price_version": {"required": False},
         }
         read_only_fields = (
             "created_at",
@@ -2111,7 +2402,34 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
             "discrepancy",
             "discrepancy_percent",
             "status",
+            "price_version",
+            "price_rule_snapshot",
+            "unit_price_snapshot",
+            "exchange_rate_snapshot",
+            "exchange_rate_source",
+            "final_price_snapshot",
         )
+
+    def validate(self, attrs):
+        channel = attrs.get("channel", getattr(self.instance, "channel", None))
+        model = attrs.get("model", getattr(self.instance, "model", None))
+        offering = attrs.get(
+            "offering",
+            getattr(self.instance, "offering", None),
+        )
+        if offering and channel and offering.channel_id != channel.id:
+            raise serializers.ValidationError(
+                {"offering": "Offering must belong to the same channel."}
+            )
+        if (
+            offering
+            and model
+            and offering.meta_model_id != model.meta_model_id
+        ):
+            raise serializers.ValidationError(
+                {"offering": "Offering must belong to the model meta model."}
+            )
+        return attrs
 
     def _apply_calculation(self, attrs):
         channel = attrs.get("channel")
@@ -2120,9 +2438,7 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
             return attrs
         attrs["meta_model"] = model.meta_model
 
-        expected = calculate_channel_model_cost(
-            channel,
-            model,
+        usage = UsageContext(
             input_tokens=attrs.get("input_tokens") or 0,
             output_tokens=attrs.get("output_tokens") or 0,
             cache_input_tokens=attrs.get("cache_input_tokens") or 0,
@@ -2130,8 +2446,57 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
             audio_output_seconds=attrs.get("audio_output_seconds") or 0,
             video_input_seconds=attrs.get("video_input_seconds") or 0,
             video_output_seconds=attrs.get("video_output_seconds") or 0,
-            video_resolution=attrs.get("video_resolution") or "",
+            occurred_at=attrs.get("business_occurred_at"),
+            timezone=attrs.get("business_timezone") or "UTC",
         )
+        resolution = resolve_channel_contract_cost(
+            channel,
+            model,
+            usage=usage,
+            offering=attrs.get("offering"),
+        )
+        if resolution is not None:
+            expected = resolution.total
+            attrs["offering"] = resolution.offering
+            attrs["price_version"] = resolution.price_version
+            attrs["price_rule_snapshot"] = {
+                "price_version": resolution.price_version.version,
+                "discount_basis": (
+                    resolution.price_version.discount_basis
+                ),
+                "discount_type": resolution.price_version.discount_type,
+                "discount_value": (
+                    str(resolution.price_version.discount_value)
+                    if resolution.price_version.discount_value is not None
+                    else None
+                ),
+                "rounding_mode": resolution.price_version.rounding_mode,
+                "rounding_places": resolution.price_version.rounding_places,
+                "rules": resolution.price_rules,
+            }
+            attrs["unit_price_snapshot"] = resolution.unit_prices
+            attrs["exchange_rate_snapshot"] = resolution.exchange_rate
+            attrs["exchange_rate_source"] = (
+                resolution.exchange_rate_source
+            )
+            attrs["final_price_snapshot"] = expected
+        else:
+            expected = calculate_channel_model_cost(
+                channel,
+                model,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cache_input_tokens=usage.cache_input_tokens,
+                audio_input_seconds=usage.audio_input_seconds,
+                audio_output_seconds=usage.audio_output_seconds,
+                video_input_seconds=usage.video_input_seconds,
+                video_output_seconds=usage.video_output_seconds,
+                video_resolution=attrs.get("video_resolution") or "",
+                offering=attrs.get("offering"),
+                occurred_at=usage.occurred_at,
+                business_timezone=usage.timezone,
+            )
+            attrs["final_price_snapshot"] = expected
         charged = attrs.get("charged_amount") or Decimal("0")
         discrepancy = expected - charged
         discrepancy_percent = Decimal("0")

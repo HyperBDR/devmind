@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
-from decimal import Decimal
+from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP, ROUND_UP
 import hashlib
 import json
+import logging
 import re
 
 from cloud_billing.dashboard import _build_exchange_rate_info
@@ -20,7 +21,9 @@ from .meta_model_lookup import (
 from .models import (
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     ChannelPriceItem,
+    ChannelPriceVersion,
     LLMModel,
     LLMProvider,
     MetaModel,
@@ -55,6 +58,7 @@ from .tier_pricing import (
 ZERO = Decimal("0")
 ONE = Decimal("1")
 SUPPORTED_DISPLAY_CURRENCIES = {"USD", "CNY"}
+logger = logging.getLogger(__name__)
 MANUAL_MODEL_PRICE_FIELDS = {
     "input_price_per_million": (
         ModelPriceItem.DIMENSION_TEXT_INPUT,
@@ -115,6 +119,19 @@ class CurrencyConversionContext:
     rate_source_label: str
     rate_source_url: str
     rate_collected_at: str
+
+
+@dataclass(frozen=True)
+class ChannelCostResolution:
+    """Auditable result of resolving one procurement contract price."""
+
+    total: Decimal
+    offering: ChannelOffering
+    price_version: ChannelPriceVersion
+    unit_prices: dict[str, str]
+    price_rules: list[dict]
+    exchange_rate: Decimal
+    exchange_rate_source: str
 
 
 class TieredPriceScheduleRequired(ValueError):
@@ -1722,6 +1739,200 @@ def calculate_usage_cost(
     ).quantize(Decimal("0.000001"))
 
 
+def resolve_channel_contract_cost(
+    channel: ProcurementChannel,
+    model: LLMModel,
+    *,
+    usage: UsageContext,
+    offering: ChannelOffering | None = None,
+) -> ChannelCostResolution | None:
+    """Resolve the effective offering version with auditable price details."""
+    if offering is None:
+        offering = ChannelOffering.objects.filter(
+            channel=channel,
+            meta_model=model.meta_model,
+            is_default=True,
+        ).first()
+    if offering is None:
+        return None
+    if offering.channel_id != channel.id:
+        raise ValueError("Offering must belong to the selected channel.")
+    if offering.meta_model_id != model.meta_model_id:
+        raise ValueError("Offering must belong to the model meta model.")
+
+    business_time = usage.occurred_at or timezone.now()
+    versions = (
+        ChannelPriceVersion.objects.filter(
+            offering=offering,
+            model=model,
+            status__in=(
+                ChannelPriceVersion.STATUS_ACTIVE,
+                ChannelPriceVersion.STATUS_SCHEDULED,
+            ),
+            effective_from__lte=business_time,
+        )
+        .filter(
+            Q(effective_to__isnull=True)
+            | Q(effective_to__gt=business_time)
+        )
+        .prefetch_related("price_items")
+        .order_by("-version", "-id")
+    )
+    resolutions = []
+    for version in versions:
+        resolution = _resolve_channel_price_version_cost(
+            version,
+            usage=usage,
+            business_time=business_time,
+        )
+        if resolution is not None:
+            resolutions.append(resolution)
+    if not resolutions:
+        return None
+    if len(resolutions) > 1:
+        logger.warning(
+            "Multiple channel price versions matched offering=%s model=%s; "
+            "using conservative highest resolved cost.",
+            offering.id,
+            model.id,
+        )
+    return max(resolutions, key=lambda item: item.total)
+
+
+def _resolve_channel_price_version_cost(
+    version: ChannelPriceVersion,
+    *,
+    usage: UsageContext,
+    business_time: datetime,
+) -> ChannelCostResolution | None:
+    """Apply rules, discount, rounding, and exchange to one version."""
+    items = list(version.price_items.all())
+    if not items:
+        return None
+    exchange_rate, exchange_source = _version_exchange_rate(
+        version,
+        items=items,
+        business_time=business_time,
+    )
+    rounding = {
+        ChannelPriceVersion.ROUND_HALF_UP: ROUND_HALF_UP,
+        ChannelPriceVersion.ROUND_UP: ROUND_UP,
+        ChannelPriceVersion.ROUND_DOWN: ROUND_DOWN,
+    }[version.rounding_mode]
+    quantum = Decimal("1").scaleb(-version.rounding_places)
+    tiers = []
+    rules = []
+    for item in items:
+        price = item.unit_price
+        if version.discount_type == ChannelPriceVersion.DISCOUNT_RATIO:
+            price *= version.discount_value or ZERO
+        elif version.discount_type == ChannelPriceVersion.DISCOUNT_FIXED:
+            price = version.discount_value or ZERO
+        price = (price * exchange_rate).quantize(quantum, rounding=rounding)
+        spec = {
+            **dict(item.spec or {}),
+            "timezone": version.timezone,
+        }
+        tiers.append(
+            PriceTier(
+                dimension=item.dimension,
+                billing_unit=item.billing_unit,
+                currency=version.contract_currency or item.currency,
+                unit_price=price,
+                tier_type=item.tier_type,
+                tier_start=item.tier_start,
+                tier_end=item.tier_end,
+                spec=spec,
+            )
+        )
+        rules.append(
+            {
+                "price_item_id": item.id,
+                "dimension": item.dimension,
+                "billing_unit": item.billing_unit,
+                "source_currency": item.currency,
+                "source_unit_price": str(item.unit_price),
+                "resolved_unit_price": str(price),
+                "tier_type": item.tier_type,
+                "tier_start": (
+                    str(item.tier_start)
+                    if item.tier_start is not None
+                    else None
+                ),
+                "tier_end": (
+                    str(item.tier_end) if item.tier_end is not None else None
+                ),
+                "spec": spec,
+            }
+        )
+    schedule = PriceSchedule(tiers=tuple(tiers))
+    total = calculate_price_schedule_usage_cost(schedule, usage)
+    unit_prices = resolve_usage_unit_prices(schedule, usage)
+    return ChannelCostResolution(
+        total=total,
+        offering=version.offering,
+        price_version=version,
+        unit_prices={
+            ModelPriceItem.DIMENSION_TEXT_INPUT: decimal_to_string(
+                unit_prices.input_per_million
+            ),
+            ModelPriceItem.DIMENSION_TEXT_OUTPUT: decimal_to_string(
+                unit_prices.output_per_million
+            ),
+            ModelPriceItem.DIMENSION_CACHE_INPUT: decimal_to_string(
+                unit_prices.cache_input_per_million
+            ),
+            ModelPriceItem.DIMENSION_IMAGE_OUTPUT: decimal_to_string(
+                unit_prices.image_output_per_image
+            ),
+            ModelPriceItem.DIMENSION_AUDIO_INPUT: decimal_to_string(
+                unit_prices.audio_input_per_second
+            ),
+            ModelPriceItem.DIMENSION_AUDIO_OUTPUT: decimal_to_string(
+                unit_prices.audio_output_per_second
+            ),
+            ModelPriceItem.DIMENSION_VIDEO_INPUT: decimal_to_string(
+                unit_prices.video_input_per_second
+            ),
+            ModelPriceItem.DIMENSION_VIDEO_OUTPUT: decimal_to_string(
+                unit_prices.video_output_per_second
+            ),
+        },
+        price_rules=rules,
+        exchange_rate=exchange_rate,
+        exchange_rate_source=exchange_source,
+    )
+
+
+def _version_exchange_rate(
+    version: ChannelPriceVersion,
+    *,
+    items: list[ChannelPriceItem],
+    business_time: datetime,
+) -> tuple[Decimal, str]:
+    """Prefer an effective contract rate, then the platform default rate."""
+    rate = version.contract_exchange_rate
+    starts = version.exchange_rate_effective_from
+    ends = version.exchange_rate_effective_to
+    if (
+        rate is not None
+        and (starts is None or starts <= business_time)
+        and (ends is None or business_time < ends)
+    ):
+        return rate, "contract"
+
+    source_currency = normalize_currency(items[0].currency)
+    target_currency = normalize_currency(version.contract_currency)
+    if not target_currency or source_currency == target_currency:
+        return ONE, "platform_default"
+    context = build_currency_conversion_context(target_currency)
+    if source_currency == "USD" and target_currency == "CNY":
+        return context.usd_to_cny_rate, "platform_default"
+    if source_currency == "CNY" and target_currency == "USD":
+        return ONE / context.usd_to_cny_rate, "platform_default"
+    return ONE, "platform_default"
+
+
 def calculate_channel_model_cost(
     channel: ProcurementChannel,
     model: LLMModel,
@@ -1734,8 +1945,30 @@ def calculate_channel_model_cost(
     video_input_seconds: Decimal | int | str = 0,
     video_output_seconds: Decimal | int | str = 0,
     video_resolution: str = "",
+    offering: ChannelOffering | None = None,
+    occurred_at: datetime | None = None,
+    business_timezone: str = "UTC",
 ) -> Decimal:
     """Resolve channel prices and calculate expected usage cost."""
+    usage = UsageContext(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_input_tokens=cache_input_tokens,
+        audio_input_seconds=audio_input_seconds,
+        audio_output_seconds=audio_output_seconds,
+        video_input_seconds=video_input_seconds,
+        video_output_seconds=video_output_seconds,
+        occurred_at=occurred_at,
+        timezone=business_timezone,
+    )
+    contract = resolve_channel_contract_cost(
+        channel,
+        model,
+        usage=usage,
+        offering=offering,
+    )
+    if contract is not None:
+        return contract.total
     schedule = resolve_channel_price_schedule(
         channel,
         model,
@@ -1743,15 +1976,7 @@ def calculate_channel_model_cost(
     )
     return calculate_price_schedule_usage_cost(
         schedule,
-        UsageContext(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_input_tokens=cache_input_tokens,
-            audio_input_seconds=audio_input_seconds,
-            audio_output_seconds=audio_output_seconds,
-            video_input_seconds=video_input_seconds,
-            video_output_seconds=video_output_seconds,
-        ),
+        usage,
     )
 
 

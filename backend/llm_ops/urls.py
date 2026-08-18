@@ -7,6 +7,7 @@ from .views import (
     ChannelModelPriceViewSet,
     ChannelOfferingViewSet,
     ChannelPriceItemViewSet,
+    ChannelPriceVersionViewSet,
     CollectedModelPriceHistoryViewSet,
     CollectedModelPriceSnapshotViewSet,
     LLMOpsGlobalConfigAPIView,
@@ -63,6 +64,11 @@ router.register(
     r"channel-offerings",
     ChannelOfferingViewSet,
     basename="channel-offering",
+)
+router.register(
+    r"channel-price-versions",
+    ChannelPriceVersionViewSet,
+    basename="channel-price-version",
 )
 router.register(
     r"channel-model-prices",

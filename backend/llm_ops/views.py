@@ -54,6 +54,7 @@ from .models import (
     ChannelModelPriceHistory,
     ChannelOffering,
     ChannelPriceItem,
+    ChannelPriceVersion,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
     LLMModel,
@@ -78,6 +79,7 @@ from .serializers import (
     ChannelModelPriceSerializer,
     ChannelOfferingSerializer,
     ChannelPriceItemSerializer,
+    ChannelPriceVersionSerializer,
     CollectedModelPriceHistorySerializer,
     CollectedModelPriceSnapshotSerializer,
     LLMModelSerializer,
@@ -1795,6 +1797,48 @@ class ChannelOfferingViewSet(
         )
 
 
+class ChannelPriceVersionViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
+    """CRUD API for effective-dated procurement price contracts."""
+
+    audit_category = AuditLog.CATEGORY_PRICING
+    serializer_class = ChannelPriceVersionSerializer
+
+    def get_queryset(self):
+        queryset = ChannelPriceVersion.objects.select_related(
+            "offering",
+            "offering__channel",
+            "meta_model",
+            "model",
+            "created_by",
+            "updated_by",
+        ).prefetch_related("price_items")
+        channel = self.request.query_params.get("channel")
+        offering = self.request.query_params.get("offering")
+        meta_model = self.request.query_params.get("meta_model")
+        model = self.request.query_params.get("model")
+        status_value = self.request.query_params.get("status")
+        if channel:
+            queryset = queryset.filter(offering__channel_id=channel)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
+        if meta_model:
+            queryset = queryset.filter(meta_model_id=meta_model)
+        if model:
+            queryset = queryset.filter(model_id=model)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        return queryset.order_by(
+            "offering__channel__name",
+            "offering__display_name",
+            "model__name",
+            "-version",
+        )
+
+
 class ChannelPriceItemViewSet(
     AuditModelViewSetMixin,
     LLMOpsPermissionMixin,
@@ -1812,6 +1856,7 @@ class ChannelPriceItemViewSet(
             "model",
             "model__provider",
             "offering",
+            "price_version",
             "base_price_item",
             "source",
         )
@@ -1819,6 +1864,7 @@ class ChannelPriceItemViewSet(
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
         offering = self.request.query_params.get("offering")
+        price_version = self.request.query_params.get("price_version")
         dimension = self.request.query_params.get("dimension")
         is_current = self.request.query_params.get("is_current")
         if channel:
@@ -1829,6 +1875,8 @@ class ChannelPriceItemViewSet(
             queryset = queryset.filter(model_id=model)
         if offering:
             queryset = queryset.filter(offering_id=offering)
+        if price_version:
+            queryset = queryset.filter(price_version_id=price_version)
         if dimension:
             queryset = queryset.filter(dimension=dimension)
         if is_current in {"true", "false"}:
@@ -2843,9 +2891,13 @@ class UsageReconciliationRecordViewSet(
             "channel",
             "model",
             "model__provider",
+            "offering",
+            "price_version",
         )
         channel = self.request.query_params.get("channel")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
+        price_version = self.request.query_params.get("price_version")
         status_value = self.request.query_params.get("status")
         date_from = self.request.query_params.get("date_from")
         date_to = self.request.query_params.get("date_to")
@@ -2854,6 +2906,10 @@ class UsageReconciliationRecordViewSet(
             queryset = queryset.filter(channel_id=channel)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
+        if price_version:
+            queryset = queryset.filter(price_version_id=price_version)
         if status_value:
             queryset = queryset.filter(status=status_value)
         if date_from:

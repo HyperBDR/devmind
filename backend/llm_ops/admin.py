@@ -6,6 +6,7 @@ from .models import (
     ChannelModelPriceHistory,
     ChannelOffering,
     ChannelPriceItem,
+    ChannelPriceVersion,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
     LLMOpsGlobalConfig,
@@ -285,6 +286,26 @@ class ChannelModelPriceHistoryAdmin(admin.ModelAdmin):
         "model__name",
         "model__code",
         "price_source__name",
+    )
+
+
+@admin.register(ChannelPriceVersion)
+class ChannelPriceVersionAdmin(admin.ModelAdmin):
+    list_display = (
+        "offering",
+        "model",
+        "version",
+        "status",
+        "effective_from",
+        "effective_to",
+        "discount_type",
+        "contract_currency",
+    )
+    list_filter = ("status", "discount_type", "contract_currency")
+    search_fields = (
+        "offering__display_name",
+        "offering__offering_key",
+        "model__name",
     )
 
 
