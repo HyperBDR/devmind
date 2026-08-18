@@ -274,7 +274,9 @@
       <section class="reset-modal">
         <div class="modal-header">
           <div>
-            <p class="modal-eyebrow">Official Price Reset</p>
+            <p class="modal-eyebrow">
+              {{ t('llmOps.providerManagement.officialReset.eyebrow') }}
+            </p>
             <h3 class="modal-title">
               {{ t('llmOps.providerManagement.officialReset.title') }}
             </h3>

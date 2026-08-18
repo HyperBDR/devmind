@@ -1,5 +1,7 @@
+import logging
 from decimal import Decimal
 
+import requests
 from django.db import transaction
 from django.db.models import (
     Count,
@@ -15,10 +17,12 @@ from django.db.models import (
 )
 from django.db.models.fields.json import KeyTextTransform
 from django.db.models.functions import Coalesce, NullIf
+from django.utils import timezone
 from django.utils.text import slugify
 from drf_spectacular.utils import extend_schema
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -127,6 +131,8 @@ from .workflow_config import (
     merge_resale_workflow_config,
     validate_resale_workflow_config,
 )
+
+logger = logging.getLogger(__name__)
 
 FEATURE_KEY = "llm_ops"
 DEFAULT_INPUT_TOKENS = 10_000_000
@@ -1533,32 +1539,59 @@ class ChannelModelPriceViewSet(
         return queryset.order_by("channel__name", "model__name", "id")
 
     def perform_create(self, serializer):
-        price = serializer.save()
-        record_channel_model_price_history(price)
-        sync_channel_price_items(price)
-        record_audit_log(
-            request=self.request,
-            action=AuditLog.ACTION_CREATE,
-            category=AuditLog.CATEGORY_PRICING,
-            target=price,
-            summary=f"Created channel model price {price}",
-            after=snapshot_instance(price),
-        )
+        with transaction.atomic():
+            price = serializer.save()
+            record_channel_model_price_history(price)
+            sync_channel_price_items(price)
+            record_audit_log(
+                request=self.request,
+                action=AuditLog.ACTION_CREATE,
+                category=AuditLog.CATEGORY_PRICING,
+                target=price,
+                summary=f"Created channel model price {price}",
+                after=snapshot_instance(price),
+            )
 
     def perform_update(self, serializer):
         before = snapshot_instance(serializer.instance)
-        price = serializer.save()
-        record_channel_model_price_history(price)
-        sync_channel_price_items(price)
-        record_audit_log(
-            request=self.request,
-            action=AuditLog.ACTION_UPDATE,
-            category=AuditLog.CATEGORY_PRICING,
-            target=price,
-            summary=f"Updated channel model price {price}",
-            before=before,
-            after=snapshot_instance(price),
-        )
+        with transaction.atomic():
+            price = serializer.save()
+            record_channel_model_price_history(price)
+            sync_channel_price_items(price)
+            record_audit_log(
+                request=self.request,
+                action=AuditLog.ACTION_UPDATE,
+                category=AuditLog.CATEGORY_PRICING,
+                target=price,
+                summary=f"Updated channel model price {price}",
+                before=before,
+                after=snapshot_instance(price),
+            )
+
+    def perform_destroy(self, instance):
+        before = snapshot_instance(instance)
+        target_repr = str(instance)
+        now = timezone.now()
+        with transaction.atomic():
+            ChannelPriceItem.objects.filter(
+                channel=instance.channel,
+                model=instance.model,
+                is_current=True,
+            ).update(is_current=False, effective_to=now)
+            ChannelModelPriceHistory.objects.filter(
+                channel=instance.channel,
+                model=instance.model,
+                is_current=True,
+            ).update(is_current=False, effective_to=now)
+            instance.delete()
+            record_audit_log(
+                request=self.request,
+                action=AuditLog.ACTION_DELETE,
+                category=AuditLog.CATEGORY_PRICING,
+                target="llm_ops.ChannelModelPrice",
+                summary=f"Deleted channel model price {target_repr}",
+                before=before,
+            )
 
     @action(detail=False, methods=["post"], url_path="bulk-upsert")
     def bulk_upsert(self, request):
@@ -1574,10 +1607,14 @@ class ChannelModelPriceViewSet(
         prices = []
         with transaction.atomic():
             for item in items:
-                existing = ChannelModelPrice.objects.filter(
-                    channel_id=item.get("channel"),
-                    model_id=item.get("model"),
-                ).first()
+                existing = (
+                    ChannelModelPrice.objects.select_for_update()
+                    .filter(
+                        channel_id=item.get("channel"),
+                        model_id=item.get("model"),
+                    )
+                    .first()
+                )
                 before = snapshot_instance(existing)
                 serializer = self.get_serializer(
                     existing,
@@ -2147,7 +2184,10 @@ class ResaleListingViewSet(
                     if key not in {"platform", "model", "channel"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
-                defaults.update(_listing_submit_status(existing))
+                try:
+                    defaults.update(_listing_submit_status(existing))
+                except ValueError as exc:
+                    raise ValidationError({"detail": str(exc)}) from exc
                 listing, created = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
@@ -2220,7 +2260,10 @@ class ResaleListingViewSet(
                     if key not in {"platform", "model", "channel"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
-                defaults.update(_listing_draft_status(existing))
+                try:
+                    defaults.update(_listing_draft_status(existing))
+                except ValueError as exc:
+                    raise ValidationError({"detail": str(exc)}) from exc
                 listing, created = ResaleListing.objects.update_or_create(
                     **lookup,
                     defaults=defaults,
@@ -3181,16 +3224,19 @@ def _empty_margin(*, requires_currency_conversion: bool) -> dict:
 
 
 def _select_best_option(options: list[dict]):
+    """Return the cheapest comparable option, or None when currencies differ.
+
+    Options with a usable display-currency conversion are comparable; when
+    every option still needs conversion their raw costs mix currencies and
+    cannot be compared, so no best channel is recommended.
+    """
     comparable_options = [
         item
         for item in options
         if not item.get("requires_currency_conversion")
     ]
     if not comparable_options:
-        return sorted(
-            options,
-            key=lambda item: item["estimated_cost"],
-        )[0]
+        return None
     return sorted(
         comparable_options,
         key=lambda item: item["estimated_cost"],
@@ -3861,15 +3907,22 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         responses={200: {"type": "object"}},
     )
     def get(self, request):
-        input_tokens = int(
-            request.query_params.get("input_tokens") or DEFAULT_INPUT_TOKENS
-        )
-        output_tokens = int(
-            request.query_params.get("output_tokens") or DEFAULT_OUTPUT_TOKENS
-        )
-        cache_input_tokens = int(
-            request.query_params.get("cache_input_tokens") or 0
-        )
+        try:
+            input_tokens = int(
+                request.query_params.get("input_tokens")
+                or DEFAULT_INPUT_TOKENS
+            )
+            output_tokens = int(
+                request.query_params.get("output_tokens")
+                or DEFAULT_OUTPUT_TOKENS
+            )
+            cache_input_tokens = int(
+                request.query_params.get("cache_input_tokens") or 0
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                {"detail": "input_tokens/output_tokens must be integers."}
+            ) from exc
         usage_context = UsageContext(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -4519,9 +4572,24 @@ class YunceCollectionAPIView(LLMOpsPermissionMixin, APIView):
                 summary="Collected Yunce model prices",
                 metadata=result,
             )
-        except Exception as exc:
+        except ValueError as exc:
             return Response(
                 {"detail": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except requests.RequestException as exc:
+            logger.warning(
+                "Yunce collection failed: %s",
+                exc,
+                exc_info=True,
+            )
+            return Response(
+                {
+                    "detail": (
+                        "Failed to reach the Yunce platform. "
+                        "Check the base URL and network."
+                    )
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(result)

@@ -40,7 +40,7 @@
             @input="emitEnd($event.target.value)"
           />
           <span class="whitespace-nowrap text-[11px] text-slate-500">
-            K Tokens
+            {{ t('llmOps.resaleTier.thousandTokensUnit') }}
           </span>
         </div>
         <span v-else class="font-mono text-sm font-bold text-slate-700">
@@ -142,7 +142,7 @@ const props = defineProps({
   expanded: { type: Boolean, default: false },
   index: { type: Number, required: true },
   locked: { type: Boolean, default: false },
-  pointLabel: { type: Function, default: () => '—' }
+  pointLabel: { type: Function, default: () => () => '' }
 })
 
 const emit = defineEmits(['remove', 'toggle', 'update:end', 'update:price'])
