@@ -52,6 +52,7 @@ from .models import (
     AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     ChannelPriceItem,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
@@ -75,6 +76,7 @@ from .serializers import (
     AuditLogSerializer,
     ChannelModelPriceHistorySerializer,
     ChannelModelPriceSerializer,
+    ChannelOfferingSerializer,
     ChannelPriceItemSerializer,
     CollectedModelPriceHistorySerializer,
     CollectedModelPriceSnapshotSerializer,
@@ -1525,17 +1527,21 @@ class ChannelModelPriceViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "offering",
             "price_source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
         if channel:
             queryset = queryset.filter(channel_id=channel)
         if meta_model:
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
         return queryset.order_by("channel__name", "model__name", "id")
 
     def perform_create(self, serializer):
@@ -1623,14 +1629,28 @@ class ChannelModelPriceViewSet(
                 )
                 serializer.is_valid(raise_exception=True)
                 data = serializer.validated_data
+                offering = data.get("offering")
+                if offering is None:
+                    offering, _created = ChannelOffering.objects.get_or_create(
+                        channel=data["channel"],
+                        meta_model=data["model"].meta_model,
+                        is_default=True,
+                        defaults={
+                            "offering_key": (
+                                f"default-{data['model'].meta_model_id}"
+                            ),
+                            "display_name": data["model"].meta_model.name,
+                        },
+                    )
                 lookup = {
                     "channel": data["channel"],
                     "model": data["model"],
+                    "offering": offering,
                 }
                 defaults = {
                     key: value
                     for key, value in data.items()
-                    if key not in {"channel", "model"}
+                    if key not in {"channel", "model", "offering"}
                 }
                 defaults["meta_model"] = data["model"].meta_model
                 price, created = ChannelModelPrice.objects.update_or_create(
@@ -1712,11 +1732,13 @@ class ChannelModelPriceHistoryViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "offering",
             "price_source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
         is_current = self.request.query_params.get("is_current")
         if channel:
             queryset = queryset.filter(channel_id=channel)
@@ -1724,9 +1746,53 @@ class ChannelModelPriceHistoryViewSet(
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
         if is_current in {"true", "false"}:
             queryset = queryset.filter(is_current=is_current == "true")
         return queryset.order_by("-effective_from", "-id")
+
+
+class ChannelOfferingViewSet(
+    AuditModelViewSetMixin,
+    LLMOpsPermissionMixin,
+    viewsets.ModelViewSet,
+):
+    """CRUD API for procurement offering identities and sales controls."""
+
+    audit_category = AuditLog.CATEGORY_CONFIGURATION
+    serializer_class = ChannelOfferingSerializer
+
+    def get_queryset(self):
+        queryset = ChannelOffering.objects.select_related(
+            "channel",
+            "meta_model",
+            "model",
+            "source_offering",
+            "source_offering__sku",
+        )
+        channel = self.request.query_params.get("channel")
+        meta_model = self.request.query_params.get("meta_model")
+        status_value = self.request.query_params.get("status")
+        is_sales_enabled = self.request.query_params.get(
+            "is_sales_enabled"
+        )
+        if channel:
+            queryset = queryset.filter(channel_id=channel)
+        if meta_model:
+            queryset = queryset.filter(meta_model_id=meta_model)
+        if status_value:
+            queryset = queryset.filter(status=status_value)
+        if is_sales_enabled in {"true", "false"}:
+            queryset = queryset.filter(
+                is_sales_enabled=is_sales_enabled == "true"
+            )
+        return queryset.order_by(
+            "channel__name",
+            "meta_model__name",
+            "display_name",
+            "id",
+        )
 
 
 class ChannelPriceItemViewSet(
@@ -1745,12 +1811,14 @@ class ChannelPriceItemViewSet(
             "meta_model",
             "model",
             "model__provider",
+            "offering",
             "base_price_item",
             "source",
         )
         channel = self.request.query_params.get("channel")
         meta_model = self.request.query_params.get("meta_model")
         model = self.request.query_params.get("model")
+        offering = self.request.query_params.get("offering")
         dimension = self.request.query_params.get("dimension")
         is_current = self.request.query_params.get("is_current")
         if channel:
@@ -1759,6 +1827,8 @@ class ChannelPriceItemViewSet(
             queryset = queryset.filter(meta_model_id=meta_model)
         if model:
             queryset = queryset.filter(model_id=model)
+        if offering:
+            queryset = queryset.filter(offering_id=offering)
         if dimension:
             queryset = queryset.filter(dimension=dimension)
         if is_current in {"true", "false"}:

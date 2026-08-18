@@ -1257,6 +1257,131 @@ class ProcurementChannel(models.Model):
         return self.name
 
 
+class ChannelOffering(models.Model):
+    """Contract identity for one upstream procurement offering."""
+
+    STATUS_ACTIVE = "active"
+    STATUS_INACTIVE = "inactive"
+    STATUS_CHOICES = (
+        (STATUS_ACTIVE, "Active"),
+        (STATUS_INACTIVE, "Inactive"),
+    )
+
+    channel = models.ForeignKey(
+        ProcurementChannel,
+        related_name="offerings",
+        on_delete=models.CASCADE,
+    )
+    meta_model = models.ForeignKey(
+        MetaModel,
+        related_name="procurement_offerings",
+        on_delete=models.CASCADE,
+    )
+    model = models.ForeignKey(
+        LLMModel,
+        related_name="procurement_offerings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    source_offering = models.ForeignKey(
+        SourceSkuOffering,
+        related_name="channel_offerings",
+        blank=True,
+        null=True,
+        on_delete=models.SET_NULL,
+    )
+    offering_key = models.CharField(max_length=255)
+    display_name = models.CharField(max_length=255)
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_ACTIVE,
+        db_index=True,
+    )
+    source_metadata = models.JSONField(blank=True, default=dict)
+    is_default = models.BooleanField(default=False, db_index=True)
+    is_sales_enabled = models.BooleanField(default=False, db_index=True)
+    is_cache_sales_enabled = models.BooleanField(
+        default=False,
+        db_index=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["channel__name", "meta_model__name", "display_name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["channel", "offering_key"],
+                name="uq_llm_ops_channel_offering_key",
+            ),
+            models.UniqueConstraint(
+                fields=["channel", "meta_model"],
+                condition=models.Q(is_default=True),
+                name="uq_llm_ops_default_channel_offering",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.channel.name} / {self.display_name}"
+
+    def clean(self):
+        """Ensure optional model and source SKU use the same meta model."""
+        super().clean()
+        errors = {}
+        if self.model_id and self.model.meta_model_id != self.meta_model_id:
+            errors["model"] = "Model must belong to the offering meta model."
+        if (
+            self.source_offering_id
+            and self.source_offering.sku.meta_model_id != self.meta_model_id
+        ):
+            errors["source_offering"] = (
+                "Source offering must belong to the offering meta model."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Validate offering identity before saving."""
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+def _ensure_channel_offering(instance, kwargs):
+    """Attach the legacy default offering and validate explicit offerings."""
+    if not instance.channel_id or not instance.model_id:
+        return
+
+    meta_model_id = instance.model.meta_model_id
+    if instance.offering_id:
+        offering = instance.offering
+        errors = {}
+        if offering.channel_id != instance.channel_id:
+            errors["offering"] = "Offering must belong to the same channel."
+        if offering.meta_model_id != meta_model_id:
+            errors["offering"] = (
+                "Offering must belong to the model meta model."
+            )
+        if errors:
+            raise ValidationError(errors)
+        return
+
+    offering, _created = ChannelOffering.objects.get_or_create(
+        channel_id=instance.channel_id,
+        meta_model_id=meta_model_id,
+        is_default=True,
+        defaults={
+            "offering_key": f"default-{meta_model_id}",
+            "display_name": instance.model.meta_model.name,
+        },
+    )
+    instance.offering = offering
+    update_fields = kwargs.get("update_fields")
+    if update_fields is not None:
+        kwargs["update_fields"] = list(set(update_fields) | {"offering"})
+
+
 class ChannelModelPrice(models.Model):
     """Per-channel listing and price overrides for one model."""
 
@@ -1273,6 +1398,13 @@ class ChannelModelPrice(models.Model):
     meta_model = models.ForeignKey(
         MetaModel,
         related_name="channel_offerings",
+        on_delete=models.CASCADE,
+    )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="model_prices",
+        blank=True,
+        null=True,
         on_delete=models.CASCADE,
     )
     price_source = models.ForeignKey(
@@ -1338,8 +1470,8 @@ class ChannelModelPrice(models.Model):
         ordering = ["channel__name", "model__name", "id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["channel", "model"],
-                name="uq_llm_ops_channel_model_price",
+                fields=["channel", "model", "offering"],
+                name="uq_llm_ops_channel_model_offering_price",
             )
         ]
 
@@ -1349,6 +1481,7 @@ class ChannelModelPrice(models.Model):
     def save(self, *args, **kwargs):
         """Ensure channel model prices stay linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
+        _ensure_channel_offering(self, kwargs)
         super().save(*args, **kwargs)
 
 
@@ -1390,6 +1523,13 @@ class ChannelPriceItem(models.Model):
     meta_model = models.ForeignKey(
         MetaModel,
         related_name="channel_price_items",
+        on_delete=models.CASCADE,
+    )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="price_items",
+        blank=True,
+        null=True,
         on_delete=models.CASCADE,
     )
     base_price_item = models.ForeignKey(
@@ -1489,12 +1629,13 @@ class ChannelPriceItem(models.Model):
                 fields=[
                     "channel",
                     "model",
+                    "offering",
                     "dimension",
                     "billing_unit",
                     "currency",
                     "price_fingerprint",
                 ],
-                name="uq_llm_ops_channel_price_item_fingerprint",
+                name="uq_llm_ops_channel_offer_price_item_fp",
             )
         ]
 
@@ -1504,6 +1645,7 @@ class ChannelPriceItem(models.Model):
     def save(self, *args, **kwargs):
         """Ensure channel price items stay linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
+        _ensure_channel_offering(self, kwargs)
         super().save(*args, **kwargs)
 
 
@@ -1523,6 +1665,13 @@ class ChannelModelPriceHistory(models.Model):
     meta_model = models.ForeignKey(
         MetaModel,
         related_name="channel_price_history",
+        on_delete=models.CASCADE,
+    )
+    offering = models.ForeignKey(
+        ChannelOffering,
+        related_name="model_price_history",
+        blank=True,
+        null=True,
         on_delete=models.CASCADE,
     )
     price_source = models.ForeignKey(
@@ -1591,8 +1740,13 @@ class ChannelModelPriceHistory(models.Model):
         ordering = ["-effective_from", "-id"]
         constraints = [
             models.UniqueConstraint(
-                fields=["channel", "model", "price_fingerprint"],
-                name="uq_llm_ops_channel_price_history_fingerprint",
+                fields=[
+                    "channel",
+                    "model",
+                    "offering",
+                    "price_fingerprint",
+                ],
+                name="uq_llm_ops_offering_price_history_fingerprint",
             )
         ]
 
@@ -1602,6 +1756,7 @@ class ChannelModelPriceHistory(models.Model):
     def save(self, *args, **kwargs):
         """Ensure channel price history stays linked to canonical models."""
         _ensure_meta_model_from_model(self, kwargs)
+        _ensure_channel_offering(self, kwargs)
         super().save(*args, **kwargs)
 
 

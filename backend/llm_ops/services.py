@@ -1814,6 +1814,7 @@ def record_channel_model_price_history(
     existing = ChannelModelPriceHistory.objects.filter(
         channel=price.channel,
         model=price.model,
+        offering=price.offering,
         price_fingerprint=fingerprint,
     ).first()
     if existing:
@@ -1823,6 +1824,7 @@ def record_channel_model_price_history(
     ChannelModelPriceHistory.objects.filter(
         channel=price.channel,
         model=price.model,
+        offering=price.offering,
         is_current=True,
     ).update(
         is_current=False,
@@ -1832,6 +1834,7 @@ def record_channel_model_price_history(
         channel=price.channel,
         model=price.model,
         meta_model=price.meta_model,
+        offering=price.offering,
         price_source=price.price_source,
         is_listed=price.is_listed,
         settlement_ratio=price.settlement_ratio,
@@ -1862,6 +1865,7 @@ def sync_channel_price_items(
     ChannelPriceItem.objects.filter(
         channel=price.channel,
         model=price.model,
+        offering=price.offering,
         is_current=True,
     ).update(is_current=False, effective_to=now)
 
@@ -1871,6 +1875,7 @@ def sync_channel_price_items(
             {
                 "channel_id": price.channel_id,
                 "model_id": price.model_id,
+                "offering_id": price.offering_id,
                 "dimension": payload["dimension"],
                 "billing_unit": payload["billing_unit"],
                 "currency": payload["currency"],
@@ -1887,6 +1892,7 @@ def sync_channel_price_items(
         item, _ = ChannelPriceItem.objects.update_or_create(
             channel=price.channel,
             model=price.model,
+            offering=price.offering,
             dimension=payload["dimension"],
             billing_unit=payload["billing_unit"],
             currency=payload["currency"],

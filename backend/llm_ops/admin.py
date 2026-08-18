@@ -4,6 +4,7 @@ from .models import (
     AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     ChannelPriceItem,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
@@ -236,6 +237,33 @@ class ChannelModelPriceAdmin(admin.ModelAdmin):
         "model__name",
         "model__code",
         "price_source__name",
+    )
+
+
+@admin.register(ChannelOffering)
+class ChannelOfferingAdmin(admin.ModelAdmin):
+    list_display = (
+        "channel",
+        "meta_model",
+        "offering_key",
+        "display_name",
+        "status",
+        "is_default",
+        "is_sales_enabled",
+        "is_cache_sales_enabled",
+    )
+    list_filter = (
+        "channel",
+        "status",
+        "is_default",
+        "is_sales_enabled",
+        "is_cache_sales_enabled",
+    )
+    search_fields = (
+        "channel__name",
+        "meta_model__name",
+        "offering_key",
+        "display_name",
     )
 
 

@@ -5,6 +5,7 @@ from .views import (
     AuditLogViewSet,
     ChannelModelPriceHistoryViewSet,
     ChannelModelPriceViewSet,
+    ChannelOfferingViewSet,
     ChannelPriceItemViewSet,
     CollectedModelPriceHistoryViewSet,
     CollectedModelPriceSnapshotViewSet,
@@ -58,6 +59,11 @@ router.register(
     basename="model-price-item",
 )
 router.register(r"channels", ProcurementChannelViewSet, basename="channel")
+router.register(
+    r"channel-offerings",
+    ChannelOfferingViewSet,
+    basename="channel-offering",
+)
 router.register(
     r"channel-model-prices",
     ChannelModelPriceViewSet,

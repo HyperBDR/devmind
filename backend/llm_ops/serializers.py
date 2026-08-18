@@ -20,6 +20,7 @@ from .models import (
     AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     CollectedModelPriceHistory,
     CollectedModelPriceSnapshot,
     LLMOpsGlobalConfig,
@@ -1438,6 +1439,14 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    offering_key = serializers.CharField(
+        source="offering.offering_key",
+        read_only=True,
+    )
+    offering_name = serializers.CharField(
+        source="offering.display_name",
+        read_only=True,
+    )
 
     class Meta:
         model = ChannelModelPrice
@@ -1445,7 +1454,9 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
         read_only_fields = ("created_at", "updated_at")
         extra_kwargs = {
             "meta_model": {"required": False},
+            "offering": {"required": False, "allow_null": True},
         }
+        validators = []
 
     def validate(self, attrs):
         if "currency" in attrs:
@@ -1467,6 +1478,53 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
             "custom_video_output_price_per_second",
         )
         validate_non_negative_prices(attrs, price_fields)
+        channel = attrs.get("channel", getattr(self.instance, "channel", None))
+        model = attrs.get("model", getattr(self.instance, "model", None))
+        offering = attrs.get(
+            "offering",
+            getattr(self.instance, "offering", None),
+        )
+        if offering and channel and offering.channel_id != channel.id:
+            raise serializers.ValidationError(
+                {"offering": "Offering must belong to the same channel."}
+            )
+        if (
+            offering
+            and model
+            and offering.meta_model_id != model.meta_model_id
+        ):
+            raise serializers.ValidationError(
+                {
+                    "offering": (
+                        "Offering must belong to the model meta model."
+                    )
+                }
+            )
+        if channel and model:
+            unique_offering = offering
+            if unique_offering is None:
+                unique_offering = ChannelOffering.objects.filter(
+                    channel=channel,
+                    meta_model=model.meta_model,
+                    is_default=True,
+                ).first()
+            if unique_offering is not None:
+                duplicate = ChannelModelPrice.objects.filter(
+                    channel=channel,
+                    model=model,
+                    offering=unique_offering,
+                )
+                if self.instance is not None:
+                    duplicate = duplicate.exclude(pk=self.instance.pk)
+                if duplicate.exists():
+                    raise serializers.ValidationError(
+                        {
+                            "offering": (
+                                "This model price already exists for the "
+                                "offering."
+                            )
+                        }
+                    )
         return attrs
 
     def create(self, validated_data):
@@ -1477,6 +1535,63 @@ class ChannelModelPriceSerializer(serializers.ModelSerializer):
         model = validated_data.get("model", instance.model)
         validated_data["meta_model"] = model.meta_model
         return super().update(instance, validated_data)
+
+
+class ChannelOfferingSerializer(serializers.ModelSerializer):
+    """Serializer for independently managed procurement offerings."""
+
+    channel_name = serializers.CharField(
+        source="channel.name",
+        read_only=True,
+    )
+    meta_model_name = serializers.CharField(
+        source="meta_model.name",
+        read_only=True,
+    )
+    meta_model_code = serializers.CharField(
+        source="meta_model.code",
+        read_only=True,
+    )
+    model_name = serializers.CharField(
+        source="model.name",
+        read_only=True,
+        allow_null=True,
+    )
+    source_offering_name = serializers.CharField(
+        source="source_offering.exposed_model_name",
+        read_only=True,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = ChannelOffering
+        fields = "__all__"
+        read_only_fields = ("created_at", "updated_at")
+
+    def validate(self, attrs):
+        meta_model = attrs.get(
+            "meta_model",
+            getattr(self.instance, "meta_model", None),
+        )
+        model = attrs.get("model", getattr(self.instance, "model", None))
+        source_offering = attrs.get(
+            "source_offering",
+            getattr(self.instance, "source_offering", None),
+        )
+        errors = {}
+        if model and meta_model and model.meta_model_id != meta_model.id:
+            errors["model"] = "Model must belong to the offering meta model."
+        if (
+            source_offering
+            and meta_model
+            and source_offering.sku.meta_model_id != meta_model.id
+        ):
+            errors["source_offering"] = (
+                "Source offering must belong to the offering meta model."
+            )
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
 
 
 class ChannelModelPriceHistorySerializer(serializers.ModelSerializer):
@@ -1504,6 +1619,14 @@ class ChannelModelPriceHistorySerializer(serializers.ModelSerializer):
         source="price_source.name",
         read_only=True,
         allow_null=True,
+    )
+    offering_key = serializers.CharField(
+        source="offering.offering_key",
+        read_only=True,
+    )
+    offering_name = serializers.CharField(
+        source="offering.display_name",
+        read_only=True,
     )
 
     class Meta:
@@ -1548,13 +1671,23 @@ class ChannelPriceItemSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    offering_key = serializers.CharField(
+        source="offering.offering_key",
+        read_only=True,
+    )
+    offering_name = serializers.CharField(
+        source="offering.display_name",
+        read_only=True,
+    )
 
     class Meta:
         model = ChannelPriceItem
         fields = "__all__"
         extra_kwargs = {
             "meta_model": {"required": False},
+            "offering": {"required": False, "allow_null": True},
         }
+        validators = []
         read_only_fields = (
             "effective_from",
             "effective_to",
