@@ -50,8 +50,8 @@ class TestAlibabaCloud:
             provider._build_client("business.aliyuncs.com")
 
         sdk_config = client_class.call_args.args[0]
-        assert sdk_config.connect_timeout == 45
-        assert sdk_config.read_timeout == 45
+        assert sdk_config.connect_timeout == 45_000
+        assert sdk_config.read_timeout == 45_000
 
     def test_extract_cash_balance_returns_cash_plus_credit(self):
         """Balance should be cash + credit for international accounts."""
