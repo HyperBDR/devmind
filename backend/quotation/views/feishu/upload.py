@@ -9,13 +9,22 @@ from djangorestframework_camel_case.parser import (
     CamelCaseJSONParser,
     CamelCaseMultiPartParser,
 )
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
 from quotation.access import (
     DocumentAction,
     filter_accessible_documents,
     get_accessible_quotation,
 )
 from quotation.audit import set_request_audit_target
-from quotation.models import DocumentAsset, Quotation, QuotationSourceType, QuoteStatus
+from quotation.models import (
+    DocumentAsset,
+    Quotation,
+    QuotationSourceType,
+    QuoteStatus,
+)
 from quotation.permissions import user_display_email
 from quotation.serializers import build_feishu_file_url
 from quotation.services.feishu_client import FeishuAPIError
@@ -23,7 +32,7 @@ from quotation.services.quotation_service import create_version_snapshot
 from quotation.services.storage import (
     delete_document,
     document_storage_key,
-    write_document,
+    write_document_stream,
 )
 from quotation.services.storage_control import (
     StorageRouter,
@@ -31,9 +40,6 @@ from quotation.services.storage_control import (
     register_uploaded_replica,
 )
 from quotation.services.upload_validation import validate_quotation_upload
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
 
 from . import common
 
@@ -54,13 +60,13 @@ class FeishuUploadView(APIView):
             validate_quotation_upload(upload)
         except ValueError as exc:
             return Response({"detail": str(exc)}, status=400)
-        content = upload.read()
-        if not content:
-            return Response({"detail": "Empty file"}, status=400)
+        upload_size = int(upload.size)
 
         file_name = upload.name or f"upload-{uuid4().hex}.bin"
         set_request_audit_target(request, target_label=file_name)
-        conflict_action = str(request.data.get("conflict_action") or "").strip().lower()
+        conflict_action = (
+            str(request.data.get("conflict_action") or "").strip().lower()
+        )
         if conflict_action not in {"", "reuse", "rename"}:
             return Response(
                 {"detail": "conflict_action must be reuse or rename"},
@@ -77,7 +83,11 @@ class FeishuUploadView(APIView):
                 return denied
             if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
                 return Response(
-                    {"detail": ("document-imported quotations cannot be uploaded")},
+                    {
+                        "detail": (
+                            "document-imported quotations cannot be uploaded"
+                        )
+                    },
                     status=409,
                 )
             set_request_audit_target(
@@ -93,9 +103,9 @@ class FeishuUploadView(APIView):
                 storage_connection,
                 _storage_mount,
             ) = common._system_drive_context_details()
-            requested_folder = request.data.get("folder_token") or request.data.get(
-                "folder"
-            )
+            requested_folder = request.data.get(
+                "folder_token"
+            ) or request.data.get("folder")
             folder_token = common._managed_folder_token(
                 client=client,
                 access_token=access_token,
@@ -122,7 +132,7 @@ class FeishuUploadView(APIView):
                         "code": "feishu_name_conflict",
                         "folder_token": folder_token,
                         "file_name": file_name,
-                        "size_bytes": len(content),
+                        "size_bytes": upload_size,
                         "existing": {
                             "file_token": existing.get("token"),
                             "file_name": existing.get("name") or file_name,
@@ -130,7 +140,9 @@ class FeishuUploadView(APIView):
                             "url": existing.get("url"),
                         },
                         "suggested_file_name": (
-                            common._suggest_unique_file_name(file_name, existing_names)
+                            common._suggest_unique_file_name(
+                                file_name, existing_names
+                            )
                         ),
                         "actions": ["reuse", "rename", "cancel"],
                     },
@@ -162,16 +174,20 @@ class FeishuUploadView(APIView):
                     access_token,
                     folder_token=folder_token,
                     file_name=file_name,
-                    content=content,
+                    content=upload,
                 )
-                uploaded_token = str(data.get("file_token") or data.get("token") or "")
+                uploaded_token = str(
+                    data.get("file_token") or data.get("token") or ""
+                )
                 if uploaded_token and not data.get("url"):
-                    uploaded_meta = common._find_file_by_token_or_name_in_folder(
-                        client=client,
-                        access_token=access_token,
-                        folder_token=folder_token,
-                        file_token=uploaded_token,
-                        file_name=file_name,
+                    uploaded_meta = (
+                        common._find_file_by_token_or_name_in_folder(
+                            client=client,
+                            access_token=access_token,
+                            folder_token=folder_token,
+                            file_token=uploaded_token,
+                            file_name=file_name,
+                        )
                     )
                     if uploaded_meta and uploaded_meta.get("url"):
                         data["url"] = uploaded_meta.get("url")
@@ -214,34 +230,44 @@ class FeishuUploadView(APIView):
                             feishu_file_token=file_token,
                         ).select_related("quotation"),
                     )
-                    existing_asset = matching_assets.order_by("-created_at").first()
+                    existing_asset = matching_assets.order_by(
+                        "-created_at"
+                    ).first()
                     if existing_asset:
                         recorded_asset_id = existing_asset.id
-                        for duplicate in matching_assets.exclude(pk=existing_asset.pk):
+                        for duplicate in matching_assets.exclude(
+                            pk=existing_asset.pk
+                        ):
                             delete_document(duplicate.storage_key)
                             duplicate.delete()
                         local_storage_key = document_storage_key(
                             existing_asset.id,
                             quotation_id,
                         )
-                        write_document(content, local_storage_key)
+                        write_document_stream(upload, local_storage_key)
                         document_values = {
                             "file_name": file_name,
                             "mime_type": upload.content_type
                             or "application/octet-stream",
                             "storage_key": local_storage_key,
-                            "size_bytes": len(content),
+                            "size_bytes": upload_size,
                             "feishu_url": feishu_url,
-                            "created_by_email": user_display_email(request.user),
+                            "created_by_email": user_display_email(
+                                request.user
+                            ),
                         }
                         for field, value in document_values.items():
                             setattr(existing_asset, field, value)
-                        existing_asset.save(update_fields=[*document_values.keys()])
+                        existing_asset.save(
+                            update_fields=[*document_values.keys()]
+                        )
                     else:
                         asset_id = str(uuid4())
                         recorded_asset_id = asset_id
-                        local_storage_key = document_storage_key(asset_id, quotation_id)
-                        write_document(content, local_storage_key)
+                        local_storage_key = document_storage_key(
+                            asset_id, quotation_id
+                        )
+                        write_document_stream(upload, local_storage_key)
                         DocumentAsset.objects.create(
                             id=asset_id,
                             quotation_id=quotation_id,
@@ -249,17 +275,20 @@ class FeishuUploadView(APIView):
                             source="feishu_upload",
                             feishu_file_token=file_token,
                             file_name=file_name,
-                            mime_type=upload.content_type or "application/octet-stream",
+                            mime_type=upload.content_type
+                            or "application/octet-stream",
                             storage_key=local_storage_key,
-                            size_bytes=len(content),
+                            size_bytes=upload_size,
                             feishu_url=feishu_url,
                             created_by_email=user_display_email(request.user),
                         )
                 else:
                     asset_id = str(uuid4())
                     recorded_asset_id = asset_id
-                    local_storage_key = document_storage_key(asset_id, quotation_id)
-                    write_document(content, local_storage_key)
+                    local_storage_key = document_storage_key(
+                        asset_id, quotation_id
+                    )
+                    write_document_stream(upload, local_storage_key)
                     DocumentAsset.objects.create(
                         id=asset_id,
                         quotation_id=quotation_id,
@@ -267,9 +296,10 @@ class FeishuUploadView(APIView):
                         source="feishu_upload",
                         feishu_file_token=file_token,
                         file_name=file_name,
-                        mime_type=upload.content_type or "application/octet-stream",
+                        mime_type=upload.content_type
+                        or "application/octet-stream",
                         storage_key=local_storage_key,
-                        size_bytes=len(content),
+                        size_bytes=upload_size,
                         feishu_url=feishu_url,
                         created_by_email=user_display_email(request.user),
                     )
@@ -277,7 +307,9 @@ class FeishuUploadView(APIView):
                     if quotation:
                         if quotation.status != QuoteStatus.UPLOADED:
                             quotation.status = QuoteStatus.UPLOADED
-                            quotation.save(update_fields=["status", "updated_at"])
+                            quotation.save(
+                                update_fields=["status", "updated_at"]
+                            )
                         create_version_snapshot(
                             quotation,
                             operator_email=user_display_email(request.user),
@@ -307,7 +339,7 @@ class FeishuUploadView(APIView):
             "folder_token": folder_token,
             "file_token": file_token,
             "url": feishu_url,
-            "size_bytes": len(content),
+            "size_bytes": upload_size,
             "reused_existing": reused_existing,
             "direct_access_allowed": True,
         }

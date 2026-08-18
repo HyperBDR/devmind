@@ -26,9 +26,45 @@ class QuotationSettingsTests(SimpleTestCase):
             50 * 1024 * 1024,
         )
         self.assertEqual(
+            settings.QUOTATION_UPLOAD_CHUNK_BYTES,
+            1024 * 1024,
+        )
+        self.assertEqual(
             settings.QUOTATION_ALLOWED_EXTENSIONS,
             (".xlsx", ".pdf"),
         )
+        self.assertEqual(
+            settings.QUOTATION_ALLOWED_CURRENCIES,
+            ("USD", "CNY", "EUR", "GBP", "MYR", "HKD"),
+        )
+        self.assertEqual(settings.QUOTATION_MAX_ITEMS, 200)
+        self.assertEqual(settings.QUOTATION_XLSX_MAX_ENTRIES, 2048)
+        self.assertEqual(
+            settings.QUOTATION_XLSX_MAX_ENTRY_BYTES,
+            64 * 1024 * 1024,
+        )
+        self.assertEqual(
+            settings.QUOTATION_XLSX_MAX_EXPANDED_BYTES,
+            128 * 1024 * 1024,
+        )
+        self.assertEqual(
+            settings.QUOTATION_XLSX_MAX_COMPRESSION_RATIO,
+            200,
+        )
+        self.assertEqual(settings.QUOTATION_XLSX_MAX_WORKSHEETS, 20)
+        self.assertEqual(settings.QUOTATION_XLSX_MAX_ROWS, 5000)
+        self.assertEqual(settings.QUOTATION_XLSX_MAX_COLUMNS, 200)
+        self.assertEqual(settings.QUOTATION_XLSX_PARSED_COLUMNS, 20)
+        self.assertEqual(
+            settings.QUOTATION_XLSX_MAX_SHARED_STRINGS_BYTES,
+            32 * 1024 * 1024,
+        )
+        self.assertEqual(settings.QUOTATION_XLSX_MAX_SHARED_STRINGS, 100000)
+        self.assertEqual(
+            settings.QUOTATION_PARSE_SOFT_TIME_LIMIT_SECONDS,
+            90,
+        )
+        self.assertEqual(settings.QUOTATION_PARSE_TIME_LIMIT_SECONDS, 120)
         self.assertEqual(
             settings.QUOTATION_MAX_TEMPLATE_BYTES,
             6 * 1024 * 1024,
