@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from openpyxl import Workbook, load_workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
@@ -26,6 +26,8 @@ from quotation.models import (
     SyncJobStatus,
 )
 from quotation.services.document_parsing.excel_parser import (
+    QuotationExcelParseError,
+    _rows_openpyxl,
     parse_standard_quotation_excel,
 )
 from quotation.services.storage import document_storage_key, write_document
@@ -240,9 +242,7 @@ def split_cell_quotation_workbook() -> bytes:
 def _minimal_pdf(lines: list[str]) -> bytes:
     def escape_pdf_text(value: str) -> str:
         return (
-            value.replace("\\", "\\\\")
-            .replace("(", "\\(")
-            .replace(")", "\\)")
+            value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
         )
 
     content_lines = ["BT", "/F1 10 Tf", "72 760 Td"]
@@ -332,6 +332,72 @@ def standard_quotation_pdf(
             "Title : Sales Manager",
         ]
     )
+
+
+class ExcelParserResourceLimitTests(SimpleTestCase):
+    @override_settings(QUOTATION_XLSX_MAX_ROWS=2)
+    def test_rejects_worksheet_row_limit_before_materializing_rows(self):
+        workbook = Workbook()
+        workbook.active.cell(3, 1, "too many rows")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rows.xlsx"
+            workbook.save(path)
+
+            with self.assertRaisesMessage(
+                QuotationExcelParseError,
+                "Excel worksheet is too large",
+            ):
+                _rows_openpyxl(path)
+
+    @override_settings(QUOTATION_XLSX_MAX_COLUMNS=2)
+    def test_rejects_worksheet_column_limit_before_materializing_rows(self):
+        workbook = Workbook()
+        workbook.active.cell(1, 3, "too many columns")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "columns.xlsx"
+            workbook.save(path)
+
+            with self.assertRaisesMessage(
+                QuotationExcelParseError,
+                "Excel worksheet is too large",
+            ):
+                _rows_openpyxl(path)
+
+    @override_settings(QUOTATION_XLSX_MAX_COLUMNS=2)
+    def test_calamine_path_rejects_worksheet_column_limit(self):
+        from quotation.services.document_parsing import excel_parser
+
+        class FakeSheet:
+            """Return a sheet wider than the configured limit."""
+
+            def to_python(self, **kwargs):
+                """Materialize one deliberately oversized row."""
+                return [["one", "two", "three"]]
+
+        class FakeWorkbook:
+            """Provide the minimal calamine workbook interface."""
+
+            sheet_names = ["Quotation"]
+
+            @classmethod
+            def from_path(cls, path):
+                """Return an in-memory workbook without reading a file."""
+                return cls()
+
+            def get_sheet_by_name(self, name):
+                """Return the configured fake worksheet."""
+                return FakeSheet()
+
+        with patch.object(
+            excel_parser,
+            "CalamineWorkbook",
+            FakeWorkbook,
+        ):
+            with self.assertRaisesMessage(
+                QuotationExcelParseError,
+                "Excel worksheet is too large",
+            ):
+                excel_parser._rows_calamine(Path("unused.xlsx"))
 
 
 class StandardQuotationExcelParserTests(TestCase):
@@ -433,11 +499,11 @@ class StandardQuotationExcelParserTests(TestCase):
 
 class StandardQuotationPdfParserTests(TestCase):
     def test_source_total_mismatch_blocks_confirmation(self):
-        from quotation.services.document_parsing.pdf_parser import (
-            parse_quotation_pdf_text,
-        )
         from quotation.services.document_parsing.flexible_parser import (
             complete_document_parse,
+        )
+        from quotation.services.document_parsing.pdf_parser import (
+            parse_quotation_pdf_text,
         )
 
         parsed = parse_quotation_pdf_text(
@@ -467,9 +533,7 @@ class StandardQuotationPdfParserTests(TestCase):
             )
         )
 
-        mismatch_codes = {
-            issue["code"] for issue in parsed.validation_errors
-        }
+        mismatch_codes = {issue["code"] for issue in parsed.validation_errors}
         self.assertIn("amount_mismatch", mismatch_codes)
         self.assertNotIn(
             "amount_mismatch",
@@ -563,10 +627,7 @@ class StandardQuotationPdfParserTests(TestCase):
                 "Name : Jacky Lee",
                 "Email : jackylee@asl.com.hk",
                 "Contact Person Email Project Payment Terms Currency",
-                (
-                    "Carrie Chen carrie.chen@oneprocloud.com "
-                    "Watsons CIA HKD"
-                ),
+                ("Carrie Chen carrie.chen@oneprocloud.com " "Watsons CIA HKD"),
                 "Software",
                 "Item Description Qty List Price Discount Extended Price",
                 "HyperMotion License",
@@ -700,10 +761,7 @@ class StandardQuotationPdfParserTests(TestCase):
         self.assertEqual(quote.product_line, "BDR")
         self.assertEqual(
             quote.project_name,
-            (
-                "HyperBDR Licenses For Perbadanan Kelantan "
-                "Berhad (PKB)_1VMs"
-            ),
+            ("HyperBDR Licenses For Perbadanan Kelantan " "Berhad (PKB)_1VMs"),
         )
         self.assertEqual(quote.payment_terms, "CIA")
         self.assertEqual(quote.currency, "USD")
@@ -1323,7 +1381,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.7.0")
+        self.assertEqual(new_result.parser_version, "2.8.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)
@@ -1434,7 +1492,9 @@ class DocumentParseEndpointTests(TestCase):
             },
         )
 
-    def test_changed_document_with_same_quote_number_creates_separate_quote(self):
+    def test_changed_document_with_same_quote_number_creates_separate_quote(
+        self,
+    ):
         from quotation.services.document_parsing.service import (
             parse_and_create_quotation,
         )
@@ -1808,9 +1868,7 @@ class DocumentParseEndpointTests(TestCase):
             queue="quotation_sync",
         )
 
-        detail = self.api.get(
-            f"/api/v1/quotation/feishu/sync-jobs/{job.id}"
-        )
+        detail = self.api.get(f"/api/v1/quotation/feishu/sync-jobs/{job.id}")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.data["status"], "queued")
         cache.delete("quotation:feishu:archive-folder-sync")

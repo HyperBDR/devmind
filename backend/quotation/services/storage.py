@@ -21,10 +21,14 @@ def _uuid(value: str) -> str:
     try:
         return str(UUID(str(value)))
     except (TypeError, ValueError, AttributeError) as exc:
-        raise ValueError("document storage path segments must be UUIDs") from exc
+        raise ValueError(
+            "document storage path segments must be UUIDs"
+        ) from exc
 
 
-def document_storage_key(document_id: str, quotation_id: str | None = None) -> str:
+def document_storage_key(
+    document_id: str, quotation_id: str | None = None
+) -> str:
     document_uuid = _uuid(document_id)
     record_uuid = _uuid(quotation_id) if quotation_id else document_uuid
     return f"documents/{record_uuid}/{document_uuid}"
@@ -51,6 +55,42 @@ def write_document(content: bytes, storage_key: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
     return path
+
+
+def write_document_stream(stream, storage_key: str) -> tuple[Path, int]:
+    """Atomically persist a seekable upload without a full-file copy."""
+    path = resolve_document_path(storage_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = None
+    original_position = stream.tell()
+    written_bytes = 0
+    try:
+        stream.seek(0)
+        with NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            chunks = getattr(stream, "chunks", None)
+            if callable(chunks):
+                iterator = chunks(
+                    chunk_size=settings.QUOTATION_UPLOAD_CHUNK_BYTES,
+                )
+            else:
+                iterator = iter(
+                    lambda: stream.read(
+                        settings.QUOTATION_UPLOAD_CHUNK_BYTES,
+                    ),
+                    b"",
+                )
+            for chunk in iterator:
+                temporary.write(chunk)
+                written_bytes += len(chunk)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        stream.seek(original_position)
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
+    return path, written_bytes
 
 
 def write_document_atomic(content: bytes, storage_key: str) -> Path:
