@@ -119,10 +119,48 @@ AUDIT_FIELD_ALLOWLIST: dict[str, tuple[str, ...]] = {
         "latency_ms",
         "notes",
     ),
+    "llm_ops.ChannelOffering": (
+        "channel_id",
+        "meta_model_id",
+        "model_id",
+        "source_offering_id",
+        "offering_key",
+        "display_name",
+        "status",
+        "source_metadata",
+        "is_default",
+        "is_sales_enabled",
+        "is_cache_sales_enabled",
+    ),
+    "llm_ops.ChannelPriceVersion": (
+        "offering_id",
+        "model_id",
+        "meta_model_id",
+        "version",
+        "status",
+        "effective_from",
+        "effective_to",
+        "timezone",
+        "discount_basis",
+        "discount_type",
+        "discount_value",
+        "discount_dimensions",
+        "rounding_mode",
+        "rounding_places",
+        "contract_currency",
+        "contract_exchange_rate",
+        "exchange_rate_effective_from",
+        "exchange_rate_effective_to",
+        "source_evidence",
+        "created_by_id",
+        "updated_by_id",
+    ),
     "llm_ops.ChannelPriceItem": (
         "channel_id",
         "model_id",
         "meta_model_id",
+        "offering_id",
+        "price_version_id",
         "base_price_item_id",
         "source_id",
         "dimension",
@@ -218,6 +256,30 @@ def snapshot_instance(instance: models.Model | None) -> dict[str, Any]:
         except AttributeError:
             continue
         payload[field_name] = serialize_value(value)
+    return payload
+
+
+def snapshot_channel_price_version(instance) -> dict[str, Any]:
+    """Include normalized price rules in a contract version snapshot."""
+    payload = snapshot_instance(instance)
+    payload["price_items"] = [
+        {
+            "dimension": item.dimension,
+            "billing_unit": item.billing_unit,
+            "currency": item.currency,
+            "unit_price": serialize_value(item.unit_price),
+            "tier_type": item.tier_type,
+            "tier_start": serialize_value(item.tier_start),
+            "tier_end": serialize_value(item.tier_end),
+            "spec": item.spec or {},
+            "price_fingerprint": item.price_fingerprint,
+        }
+        for item in instance.price_items.order_by(
+            "dimension",
+            "tier_start",
+            "id",
+        )
+    ]
     return payload
 
 
@@ -335,7 +397,10 @@ def user_agent(request) -> str:
     """Return the user agent with a bounded size."""
     if request is None:
         return ""
-    return (getattr(request, "META", {}).get("HTTP_USER_AGENT", "") or "")[:500]
+    user_agent = (
+        getattr(request, "META", {}).get("HTTP_USER_AGENT", "") or ""
+    )
+    return user_agent[:500]
 
 
 def serialize_value(value):

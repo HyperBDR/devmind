@@ -170,7 +170,7 @@ export function useLLMOpsData() {
       fetchList(llmOpsApi.listChannelOfferings),
       fetchList(llmOpsApi.listChannelModelPrices),
       fetchList(llmOpsApi.listChannelPriceItems, {
-        is_current: 'true'
+        is_effective: 'true'
       }),
       fetchList(llmOpsApi.listChannelPriceVersions)
     ])

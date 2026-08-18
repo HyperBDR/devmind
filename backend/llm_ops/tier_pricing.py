@@ -218,14 +218,31 @@ def resolve_usage_price_tier(
         if tier.spec.get("usage_conditions") or tier.spec.get("time_windows")
     )
     if conditional_tiers:
-        matches = tuple(
+        conditional_matches = tuple(
             tier
             for tier in conditional_tiers
             if _usage_matches_tier(usage, tier)
         )
+        matches = tuple(
+            tier
+            for tier in tiers
+            if _usage_matches_tier(usage, tier)
+        )
         if matches:
+            if len(matches) > 1:
+                logger.warning(
+                    "Multiple conditional price rules matched "
+                    "dimension=%s; using conservative highest unit price.",
+                    dimension,
+                )
+            elif not conditional_matches:
+                logger.warning(
+                    "No conditional price rule matched dimension=%s; "
+                    "using the unconditional unit price.",
+                    dimension,
+                )
             return max(matches, key=lambda tier: tier.unit_price)
-        fallback = max(conditional_tiers, key=lambda tier: tier.unit_price)
+        fallback = max(tiers, key=lambda tier: tier.unit_price)
         logger.warning(
             "No conditional price rule matched dimension=%s; "
             "using conservative highest unit price.",

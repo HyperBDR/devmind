@@ -1573,6 +1573,7 @@ class ChannelOfferingSerializer(serializers.ModelSerializer):
         model = ChannelOffering
         fields = "__all__"
         read_only_fields = ("created_at", "updated_at")
+        validators = []
 
     def validate(self, attrs):
         meta_model = attrs.get(
@@ -1584,6 +1585,18 @@ class ChannelOfferingSerializer(serializers.ModelSerializer):
             "source_offering",
             getattr(self.instance, "source_offering", None),
         )
+        channel = attrs.get(
+            "channel",
+            getattr(self.instance, "channel", None),
+        )
+        offering_key = attrs.get(
+            "offering_key",
+            getattr(self.instance, "offering_key", ""),
+        )
+        is_default = attrs.get(
+            "is_default",
+            getattr(self.instance, "is_default", False),
+        )
         errors = {}
         if model and meta_model and model.meta_model_id != meta_model.id:
             errors["model"] = "Model must belong to the offering meta model."
@@ -1594,6 +1607,29 @@ class ChannelOfferingSerializer(serializers.ModelSerializer):
         ):
             errors["source_offering"] = (
                 "Source offering must belong to the offering meta model."
+            )
+        queryset = ChannelOffering.objects.all()
+        if self.instance is not None:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if channel and offering_key and queryset.filter(
+            channel=channel,
+            offering_key=offering_key,
+        ).exists():
+            errors["offering_key"] = (
+                "Offering key must be unique within the channel."
+            )
+        if (
+            is_default
+            and channel
+            and meta_model
+            and queryset.filter(
+                channel=channel,
+                meta_model=meta_model,
+                is_default=True,
+            ).exists()
+        ):
+            errors["is_default"] = (
+                "Only one default offering is allowed per channel and model."
             )
         if errors:
             raise serializers.ValidationError(errors)
@@ -1721,6 +1757,7 @@ class ChannelPriceVersionSerializer(serializers.ModelSerializer):
         )
 
     def validate(self, attrs):
+        self._validate_immutable_version(attrs)
         offering = attrs.get(
             "offering",
             getattr(self.instance, "offering", None),
@@ -1805,7 +1842,64 @@ class ChannelPriceVersionSerializer(serializers.ModelSerializer):
                     )
                 }
             )
+        dimensions = attrs.get(
+            "discount_dimensions",
+            getattr(self.instance, "discount_dimensions", []),
+        )
+        valid_dimensions = {
+            value for value, _label in ModelPriceItem.DIMENSION_CHOICES
+        }
+        if not isinstance(dimensions, list) or any(
+            value not in valid_dimensions for value in dimensions
+        ):
+            raise serializers.ValidationError(
+                {
+                    "discount_dimensions": (
+                        "Discount dimensions must contain valid price "
+                        "dimensions."
+                    )
+                }
+            )
+        contract_currency = attrs.get(
+            "contract_currency",
+            getattr(self.instance, "contract_currency", ""),
+        )
+        contract_rate = attrs.get(
+            "contract_exchange_rate",
+            getattr(self.instance, "contract_exchange_rate", None),
+        )
+        if contract_rate is not None and not contract_currency:
+            raise serializers.ValidationError(
+                {
+                    "contract_currency": (
+                        "Contract currency is required for a contract "
+                        "exchange rate."
+                    )
+                }
+            )
         return attrs
+
+    def _validate_immutable_version(self, attrs):
+        instance = self.instance
+        if instance is None or instance.status == instance.STATUS_DRAFT:
+            return
+        immutable_fields = set(attrs) - {"status"}
+        if immutable_fields:
+            raise serializers.ValidationError(
+                {
+                    field: "Published price versions are immutable."
+                    for field in sorted(immutable_fields)
+                }
+            )
+        if "status" not in attrs:
+            return
+        allowed_statuses = {instance.status, instance.STATUS_EXPIRED}
+        if instance.status == instance.STATUS_SCHEDULED:
+            allowed_statuses.add(instance.STATUS_ACTIVE)
+        if attrs["status"] not in allowed_statuses:
+            raise serializers.ValidationError(
+                {"status": "Invalid published version status transition."}
+            )
 
     def validate_timezone(self, value):
         try:
@@ -1984,6 +2078,18 @@ class ChannelPriceItemSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        version = attrs.get(
+            "price_version",
+            getattr(self.instance, "price_version", None),
+        )
+        if version is not None and version.status != version.STATUS_DRAFT:
+            raise serializers.ValidationError(
+                {
+                    "price_version": (
+                        "Published price version items are immutable."
+                    )
+                }
+            )
         rows = channel_price_table_rows(attrs, instance=self.instance)
         validate_serializer_price_table(rows)
         return attrs
@@ -2436,6 +2542,17 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    def validate_business_timezone(self, value):
+        if not value:
+            return value
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise serializers.ValidationError(
+                "Unknown IANA timezone."
+            ) from exc
+        return value
+
     def _apply_calculation(self, attrs):
         channel = attrs.get("channel")
         model = attrs.get("model")
@@ -2474,6 +2591,9 @@ class UsageReconciliationRecordSerializer(serializers.ModelSerializer):
                     str(resolution.price_version.discount_value)
                     if resolution.price_version.discount_value is not None
                     else None
+                ),
+                "discount_dimensions": (
+                    resolution.price_version.discount_dimensions
                 ),
                 "rounding_mode": resolution.price_version.rounding_mode,
                 "rounding_places": resolution.price_version.rounding_places,

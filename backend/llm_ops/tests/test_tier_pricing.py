@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from django.test import SimpleTestCase
@@ -430,6 +431,76 @@ class TieredPricingKernelTests(SimpleTestCase):
         )
 
         self.assertEqual(derive_resale_pricing_format(schedule), "mixed")
+
+    def test_conditional_fallback_considers_unconditional_highest_price(self):
+        schedule = PriceSchedule(
+            tiers=(
+                self._flat_tier(
+                    "2",
+                    {
+                        "time_windows": [
+                            {
+                                "weekdays": list(range(7)),
+                                "start": "08:00",
+                                "end": "20:00",
+                            }
+                        ]
+                    },
+                ),
+                self._flat_tier("5", {}),
+            )
+        )
+
+        with self.assertLogs("llm_ops.tier_pricing", level="WARNING"):
+            prices = resolve_usage_unit_prices(schedule, UsageContext())
+
+        self.assertEqual(prices.input_per_million, Decimal("5"))
+
+    def test_overlapping_time_rules_warn_and_choose_highest_price(self):
+        window = {
+            "time_windows": [
+                {
+                    "weekdays": list(range(7)),
+                    "start": "08:00",
+                    "end": "20:00",
+                }
+            ],
+            "timezone": "UTC",
+        }
+        schedule = PriceSchedule(
+            tiers=(
+                self._flat_tier("1", window),
+                self._flat_tier("3", window),
+            )
+        )
+        usage = UsageContext(
+            input_tokens=1_000_000,
+            occurred_at=datetime(
+                2026,
+                8,
+                18,
+                12,
+                tzinfo=timezone.utc,
+            ),
+        )
+
+        with self.assertLogs("llm_ops.tier_pricing", level="WARNING"):
+            prices = resolve_usage_unit_prices(schedule, usage)
+
+        self.assertEqual(prices.input_per_million, Decimal("3"))
+
+    @staticmethod
+    def _flat_tier(unit_price, spec):
+        return PriceTier(
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price=Decimal(unit_price),
+            tier_type=ModelPriceItem.TIER_FLAT,
+            tier_start=None,
+            tier_end=None,
+            spec=spec,
+        )
 
     @staticmethod
     def _tier(

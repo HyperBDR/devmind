@@ -28,7 +28,11 @@ from rest_framework.views import APIView
 
 from accounts.permissions import HasRequiredFeature
 
-from .audit import record_audit_log, snapshot_instance
+from .audit import (
+    record_audit_log,
+    snapshot_channel_price_version,
+    snapshot_instance,
+)
 from .collection_services import (
     SUPPORTED_OFFICIAL_PRICE_SYNC_PROVIDER_CODES,
     ensure_supported_official_provider_source,
@@ -209,6 +213,10 @@ class AuditModelViewSetMixin:
 
     audit_category = None
 
+    def get_audit_snapshot(self, instance):
+        """Return the safe audit snapshot for one model instance."""
+        return snapshot_instance(instance)
+
     def perform_create(self, serializer):
         instance = serializer.save()
         record_audit_log(
@@ -217,13 +225,13 @@ class AuditModelViewSetMixin:
             category=self.audit_category,
             target=instance,
             summary=f"Created {instance}",
-            after=snapshot_instance(instance),
+            after=self.get_audit_snapshot(instance),
         )
 
     def perform_update(self, serializer):
-        before = snapshot_instance(serializer.instance)
+        before = self.get_audit_snapshot(serializer.instance)
         instance = serializer.save()
-        after = snapshot_instance(instance)
+        after = self.get_audit_snapshot(instance)
         record_audit_log(
             request=self.request,
             action=AuditLog.ACTION_UPDATE,
@@ -235,7 +243,7 @@ class AuditModelViewSetMixin:
         )
 
     def perform_destroy(self, instance):
-        before = snapshot_instance(instance)
+        before = self.get_audit_snapshot(instance)
         target_repr = str(instance)
         record_audit_log(
             request=self.request,
@@ -1615,14 +1623,21 @@ class ChannelModelPriceViewSet(
         prices = []
         with transaction.atomic():
             for item in items:
-                existing = (
-                    ChannelModelPrice.objects.select_for_update()
-                    .filter(
+                existing_queryset = (
+                    ChannelModelPrice.objects.select_for_update().filter(
                         channel_id=item.get("channel"),
                         model_id=item.get("model"),
                     )
-                    .first()
                 )
+                if item.get("offering") is not None:
+                    existing_queryset = existing_queryset.filter(
+                        offering_id=item.get("offering")
+                    )
+                else:
+                    existing_queryset = existing_queryset.filter(
+                        offering__is_default=True
+                    )
+                existing = existing_queryset.first()
                 before = snapshot_instance(existing)
                 serializer = self.get_serializer(
                     existing,
@@ -1807,6 +1822,17 @@ class ChannelPriceVersionViewSet(
     audit_category = AuditLog.CATEGORY_PRICING
     serializer_class = ChannelPriceVersionSerializer
 
+    def get_audit_snapshot(self, instance):
+        """Capture contract fields and nested normalized price rules."""
+        return snapshot_channel_price_version(instance)
+
+    def perform_destroy(self, instance):
+        if instance.status != ChannelPriceVersion.STATUS_DRAFT:
+            raise ValidationError(
+                "Published price versions are immutable."
+            )
+        super().perform_destroy(instance)
+
     def get_queryset(self):
         queryset = ChannelPriceVersion.objects.select_related(
             "offering",
@@ -1867,6 +1893,7 @@ class ChannelPriceItemViewSet(
         price_version = self.request.query_params.get("price_version")
         dimension = self.request.query_params.get("dimension")
         is_current = self.request.query_params.get("is_current")
+        is_effective = self.request.query_params.get("is_effective")
         if channel:
             queryset = queryset.filter(channel_id=channel)
         if meta_model:
@@ -1881,6 +1908,24 @@ class ChannelPriceItemViewSet(
             queryset = queryset.filter(dimension=dimension)
         if is_current in {"true", "false"}:
             queryset = queryset.filter(is_current=is_current == "true")
+        if is_effective == "true":
+            now = timezone.now()
+            queryset = queryset.filter(
+                Q(price_version__isnull=False) | Q(is_current=True)
+            ).filter(
+                Q(price_version__isnull=True)
+                | Q(
+                    price_version__status__in=(
+                        ChannelPriceVersion.STATUS_ACTIVE,
+                        ChannelPriceVersion.STATUS_SCHEDULED,
+                    ),
+                    price_version__effective_from__lte=now,
+                )
+            ).filter(
+                Q(price_version__isnull=True)
+                | Q(price_version__effective_to__isnull=True)
+                | Q(price_version__effective_to__gt=now)
+            )
         return queryset.order_by(
             "channel__name",
             "model__name",
@@ -1888,6 +1933,17 @@ class ChannelPriceItemViewSet(
             "tier_start",
             "id",
         )
+
+    def perform_destroy(self, instance):
+        if (
+            instance.price_version_id
+            and instance.price_version.status
+            != ChannelPriceVersion.STATUS_DRAFT
+        ):
+            raise ValidationError(
+                "Published price version items are immutable."
+            )
+        super().perform_destroy(instance)
 
 
 class ResalePlatformViewSet(

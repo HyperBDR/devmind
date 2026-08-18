@@ -1824,9 +1824,19 @@ def _resolve_channel_price_version_cost(
     rules = []
     for item in items:
         price = item.unit_price
-        if version.discount_type == ChannelPriceVersion.DISCOUNT_RATIO:
+        discount_applies = (
+            not version.discount_dimensions
+            or item.dimension in version.discount_dimensions
+        )
+        if (
+            discount_applies
+            and version.discount_type == ChannelPriceVersion.DISCOUNT_RATIO
+        ):
             price *= version.discount_value or ZERO
-        elif version.discount_type == ChannelPriceVersion.DISCOUNT_FIXED:
+        elif (
+            discount_applies
+            and version.discount_type == ChannelPriceVersion.DISCOUNT_FIXED
+        ):
             price = version.discount_value or ZERO
         price = (price * exchange_rate).quantize(quantum, rounding=rounding)
         spec = {
@@ -1969,9 +1979,17 @@ def calculate_channel_model_cost(
     )
     if contract is not None:
         return contract.total
+    override = None
+    if offering is not None:
+        override = ChannelModelPrice.objects.filter(
+            channel=channel,
+            model=model,
+            offering=offering,
+        ).first()
     schedule = resolve_channel_price_schedule(
         channel,
         model,
+        override=override,
         video_resolution=video_resolution,
     )
     return calculate_price_schedule_usage_cost(

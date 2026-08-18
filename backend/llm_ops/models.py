@@ -1465,6 +1465,7 @@ class ChannelPriceVersion(models.Model):
         blank=True,
         null=True,
     )
+    discount_dimensions = models.JSONField(blank=True, default=list)
     rounding_mode = models.CharField(
         max_length=20,
         choices=ROUNDING_MODE_CHOICES,
@@ -1569,12 +1570,28 @@ class ChannelPriceVersion(models.Model):
             errors["discount_value"] = (
                 "Discount value requires ratio or fixed discount type."
             )
+        valid_dimensions = {
+            value for value, _label in ModelPriceItem.DIMENSION_CHOICES
+        }
+        if not isinstance(self.discount_dimensions, list) or any(
+            value not in valid_dimensions
+            for value in self.discount_dimensions
+        ):
+            errors["discount_dimensions"] = (
+                "Discount dimensions must contain valid price dimensions."
+            )
         if (
             self.contract_exchange_rate is not None
             and self.contract_exchange_rate <= 0
         ):
             errors["contract_exchange_rate"] = (
                 "Contract exchange rate must be greater than zero."
+            )
+        if self.contract_exchange_rate is not None and not (
+            self.contract_currency or ""
+        ).strip():
+            errors["contract_currency"] = (
+                "Contract currency is required for a contract exchange rate."
             )
         if (
             self.exchange_rate_effective_from

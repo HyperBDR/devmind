@@ -8,6 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from llm_ops.models import (
+    AuditLog,
+    ChannelModelPrice,
     ChannelOffering,
     ChannelPriceItem,
     ChannelPriceVersion,
@@ -195,6 +197,183 @@ class ChannelPriceContractTests(TestCase):
 
         self.assertEqual(cost, Decimal("3.000000"))
 
+    def test_effective_price_filter_excludes_future_version_items(self):
+        now = timezone.now()
+        current = self._create_version(
+            version=1,
+            effective_from=now - timedelta(hours=1),
+            effective_to=now + timedelta(hours=1),
+            unit_price="1",
+        )
+        future = self._create_version(
+            version=2,
+            status=ChannelPriceVersion.STATUS_SCHEDULED,
+            effective_from=now + timedelta(hours=1),
+            unit_price="2",
+        )
+        legacy_current = self._legacy_price_item(
+            price_fingerprint="legacy-current",
+            is_current=True,
+        )
+        legacy_stale = self._legacy_price_item(
+            price_fingerprint="legacy-stale",
+            is_current=False,
+        )
+
+        response = self.client.get(
+            reverse("channel-price-item-list"),
+            {"is_effective": "true"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item_ids = {item["id"] for item in response.data["results"]}
+        self.assertIn(current.price_items.get().id, item_ids)
+        self.assertNotIn(future.price_items.get().id, item_ids)
+        self.assertIn(legacy_current.id, item_ids)
+        self.assertNotIn(legacy_stale.id, item_ids)
+
+    def test_discount_can_target_selected_price_dimensions(self):
+        now = timezone.now()
+        self._create_version(
+            version=1,
+            effective_from=now - timedelta(hours=1),
+            discount_type=ChannelPriceVersion.DISCOUNT_RATIO,
+            discount_value="0.5",
+            discount_dimensions=[ModelPriceItem.DIMENSION_TEXT_INPUT],
+            price_items=[
+                self._price_item("10"),
+                {
+                    **self._price_item("10"),
+                    "dimension": ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                },
+            ],
+        )
+
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            offering=self.offering,
+            occurred_at=now,
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+        )
+
+        self.assertEqual(cost, Decimal("15.000000"))
+
+    def test_active_version_price_items_are_immutable_through_api(self):
+        version = self._create_version(
+            version=1,
+            effective_from=timezone.now() - timedelta(hours=1),
+            unit_price="1",
+        )
+
+        response = self.client.patch(
+            reverse("channel-price-version-detail", args=[version.id]),
+            {"price_items": [self._price_item("99")]},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(version.price_items.get().unit_price, Decimal("1"))
+
+        item = version.price_items.get()
+        item_update = self.client.patch(
+            reverse("channel-price-item-detail", args=[item.id]),
+            {"unit_price": "98"},
+            format="json",
+        )
+        item_delete = self.client.delete(
+            reverse("channel-price-item-detail", args=[item.id]),
+        )
+        version_delete = self.client.delete(
+            reverse("channel-price-version-detail", args=[version.id]),
+        )
+
+        self.assertEqual(item_update.status_code, 400)
+        self.assertEqual(item_delete.status_code, 400)
+        self.assertEqual(version_delete.status_code, 400)
+        self.assertTrue(ChannelPriceVersion.objects.filter(pk=version.id))
+        item.refresh_from_db()
+        self.assertEqual(item.unit_price, Decimal("1"))
+
+    def test_draft_version_audit_keeps_nested_price_rule_changes(self):
+        version = self._create_version(
+            version=1,
+            status=ChannelPriceVersion.STATUS_DRAFT,
+            effective_from=timezone.now() + timedelta(days=1),
+            unit_price="1",
+        )
+
+        response = self.client.patch(
+            reverse("channel-price-version-detail", args=[version.id]),
+            {
+                "price_items": [self._price_item("2")],
+                "source_evidence": {"contract": "renewal"},
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        audit = AuditLog.objects.get(
+            target_type="llm_ops.ChannelPriceVersion",
+            target_id=str(version.id),
+            action=AuditLog.ACTION_UPDATE,
+        )
+        self.assertEqual(
+            audit.before["price_items"][0]["unit_price"],
+            "1.000000",
+        )
+        self.assertEqual(
+            audit.after["price_items"][0]["unit_price"],
+            "2.000000",
+        )
+        self.assertEqual(
+            audit.after["source_evidence"],
+            {"contract": "renewal"},
+        )
+
+    def test_legacy_cost_resolution_honors_explicit_offering(self):
+        first = ChannelOffering.objects.create(
+            channel=self.channel,
+            meta_model=self.model.meta_model,
+            offering_key="legacy-first",
+            display_name="Legacy First",
+        )
+        second = ChannelOffering.objects.create(
+            channel=self.channel,
+            meta_model=self.model.meta_model,
+            offering_key="legacy-second",
+            display_name="Legacy Second",
+        )
+        ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            offering=first,
+            custom_input_price_per_million="1",
+        )
+        ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            offering=second,
+            custom_input_price_per_million="4",
+        )
+
+        first_cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            offering=first,
+            input_tokens=1_000_000,
+        )
+        second_cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            offering=second,
+            input_tokens=1_000_000,
+        )
+
+        self.assertEqual(first_cost, Decimal("1.000000"))
+        self.assertEqual(second_cost, Decimal("4.000000"))
+
     def test_reconciliation_persists_resolution_snapshot(self):
         now = timezone.now()
         version = self._create_version(
@@ -289,3 +468,17 @@ class ChannelPriceContractTests(TestCase):
             "tier_type": ModelPriceItem.TIER_FLAT,
             "spec": spec,
         }
+
+    def _legacy_price_item(self, *, price_fingerprint, is_current):
+        return ChannelPriceItem.objects.create(
+            channel=self.channel,
+            model=self.model,
+            meta_model=self.model.meta_model,
+            offering=self.offering,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+            currency="USD",
+            unit_price="1",
+            price_fingerprint=price_fingerprint,
+            is_current=is_current,
+        )

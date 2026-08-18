@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -116,6 +118,43 @@ class ChannelOfferingAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("offering", response.data)
+
+    def test_legacy_bulk_upsert_updates_only_the_default_offering(self):
+        default_price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            settlement_ratio="0.9",
+        )
+        custom_offering = self._create_offering(
+            "sku-secondary",
+            "Secondary SKU",
+        )
+        custom_price = ChannelModelPrice.objects.create(
+            channel=self.channel,
+            model=self.model,
+            offering=custom_offering,
+            settlement_ratio="0.7",
+        )
+
+        response = self.client.post(
+            reverse("channel-model-price-bulk-upsert"),
+            {
+                "items": [
+                    {
+                        "channel": self.channel.id,
+                        "model": self.model.id,
+                        "settlement_ratio": "0.5",
+                    }
+                ]
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        default_price.refresh_from_db()
+        custom_price.refresh_from_db()
+        self.assertEqual(default_price.settlement_ratio, Decimal("0.5"))
+        self.assertEqual(custom_price.settlement_ratio, Decimal("0.7"))
 
     def _create_offering(self, key, name):
         response = self.client.post(
