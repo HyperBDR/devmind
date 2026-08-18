@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("quotation", "0020_exportjob_archive_folder_token"),
+        ("quotation", "0023_quotation_view_permission"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
