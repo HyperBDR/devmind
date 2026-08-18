@@ -36,23 +36,16 @@ const quotationApp = await readFile(
   new URL('../src/modules/quotation/App.vue', import.meta.url),
   'utf8',
 )
-const quotationListPage = await readFile(
+const quotationDetails = await readFile(
   new URL(
-    '../src/modules/quotation/pages/QuotationListPage.vue',
+    '../src/modules/quotation/components/QuotationDetails.vue',
     import.meta.url,
   ),
   'utf8',
 )
-const quotationDetailPage = await readFile(
+const quotationCreate = await readFile(
   new URL(
-    '../src/modules/quotation/pages/QuotationDetailPage.vue',
-    import.meta.url,
-  ),
-  'utf8',
-)
-const quotationCreatePage = await readFile(
-  new URL(
-    '../src/modules/quotation/pages/QuotationCreatePage.vue',
+    '../src/modules/quotation/components/QuotationCreate.vue',
     import.meta.url,
   ),
   'utf8',
@@ -147,9 +140,6 @@ test('empty, loading and failed request states stay inside the list panel', () =
   assert.match(quotationList, /<tr v-if="loading">/)
   assert.match(quotationList, /emptyResults/)
   assert.match(quotationApp, /triggerToast\(message, 'error'\)/)
-  assert.match(quotationListPage, /showToast\(.*'error'\)/s)
-  assert.doesNotMatch(quotationListPage, /v-if="loading && !quotations\.length"/)
-  assert.doesNotMatch(quotationListPage, /<QuotationList\s+v-else/)
 })
 
 test('rows open the details drawer without a separate view-details button', () => {
@@ -198,7 +188,6 @@ test('list column widths reserve stable space for longer headers and actions', (
 
 test('older list requests cannot overwrite newer results', () => {
   assert.match(quotationApp, /requestId !== quotationListRequestId/)
-  assert.match(quotationListPage, /currentRequest !== requestId/)
 })
 
 test('page requests do not wait for remote Feishu link checks', () => {
@@ -206,12 +195,7 @@ test('page requests do not wait for remote Feishu link checks', () => {
     quotationApp.indexOf('async function refreshQuotations'),
     quotationApp.indexOf('async function loadActiveQuote'),
   )
-  const routedListLoad = quotationListPage.slice(
-    quotationListPage.indexOf('async function load('),
-    quotationListPage.indexOf('async function handleFeishuUploadDone'),
-  )
   assert.doesNotMatch(appListLoad, /reconcileFeishuQuotationLinks/)
-  assert.doesNotMatch(routedListLoad, /reconcileFeishuQuotationLinks/)
   assert.match(
     quotationApp,
     /handleReconcileFeishuLinks[\s\S]*?reconcileFeishuQuotationLinks/,
@@ -221,8 +205,6 @@ test('page requests do not wait for remote Feishu link checks', () => {
 test('deleting the last row moves back one page', () => {
   assert.match(quotationApp, /quotations\.value\.length === 1/)
   assert.match(quotationApp, /currentPage - 1/)
-  assert.match(quotationListPage, /quotations\.value\.length === 1/)
-  assert.match(quotationListPage, /currentPage - 1/)
 })
 
 test('dashboard month navigation keeps quote-date filters in the list route', () => {
@@ -230,17 +212,16 @@ test('dashboard month navigation keeps quote-date filters in the list route', ()
   assert.match(quotationApp, /created_to/)
   assert.match(quotationApp, /listRouteLocation/)
   assert.match(quotationApp, /listDateFiltersFromRoute/)
-  assert.match(quotationListPage, /route\.query\.created_from/)
-  assert.match(quotationListPage, /route\.query\.created_to/)
-  assert.match(quotationListPage, /initial-created-from="query.createdFrom"/)
+  assert.match(quotationApp, /initial-created-from="quotationListQuery\.createdFrom"/)
 })
 
-test('detail and edit pages request quotations by ID', () => {
+test('detail and edit components are loaded by the quotation workspace', () => {
   assert.match(
-    quotationDetailPage,
-    /getQuotation\(String\(route\.params\.id\)\)/,
+    quotationApp,
+    /async function loadActiveQuote\(id: string\)/,
   )
-  assert.match(quotationCreatePage, /getQuotation\(editId\)/)
-  assert.doesNotMatch(quotationDetailPage, /listQuotations/)
-  assert.doesNotMatch(quotationCreatePage, /listQuotations/)
+  assert.match(quotationApp, /async function loadEditingQuote\(/)
+  assert.match(quotationApp, /getQuotationApi\(id\)/)
+  assert.doesNotMatch(quotationDetails, /listQuotations/)
+  assert.doesNotMatch(quotationCreate, /listQuotations/)
 })

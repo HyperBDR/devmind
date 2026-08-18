@@ -4,8 +4,6 @@ import assert from 'node:assert/strict'
 
 const files = [
   'src/modules/quotation/App.vue',
-  'src/modules/quotation/pages/QuotationListPage.vue',
-  'src/modules/quotation/pages/QuotationDetailPage.vue',
 ]
 
 function feishuLinkOnlyBranch(source) {

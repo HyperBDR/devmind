@@ -64,7 +64,7 @@
         "mixed": "Imported + manual"
       }
     },
-    "common": {
+      "common": {
       "view": "View",
       "edit": "Edit",
       "delete": "Delete",
@@ -72,7 +72,8 @@
       "upload": "Upload",
       "cancel": "Cancel",
       "confirm": "Confirm",
-      "refresh": "Refresh",
+        "refresh": "Refresh",
+        "refreshing": "Refreshing…",
       "reset": "Reset",
       "save": "Save",
       "back": "Back",
@@ -917,6 +918,35 @@
           "product_line": "Product line",
           "payment_term": "Payment term"
         }
+      },
+      "permissions": {
+        "menuLabel": "Access",
+        "title": "View access",
+        "subtitle": "Manage which Feishu folders and files ordinary users can view. Upload permissions are managed separately.",
+        "loadFailed": "Unable to load access settings.",
+        "selectRequired": "Select a user and the content they should be able to view.",
+        "grantSuccess": "View access granted.",
+        "grantFailed": "Unable to grant view access.",
+        "revokeConfirm": "Revoke this view permission?",
+        "revokeSuccess": "View access revoked.",
+        "revokeFailed": "Unable to revoke view access.",
+        "addTitle": "Grant view access",
+        "userLabel": "User",
+        "selectUser": "Select a user",
+        "scopeLabel": "Scope",
+        "folder": "Folder",
+        "document": "File",
+        "targetLabel": "Target",
+        "selectTarget": "Select content",
+        "grant": "Grant access",
+        "currentTitle": "Active access",
+        "empty": "No access grants yet",
+        "userColumn": "User",
+        "scopeColumn": "Scope",
+        "targetColumn": "Content",
+        "grantedByColumn": "Granted by",
+        "actionsColumn": "Actions",
+        "revoke": "Revoke"
       }
     },
     "app": {

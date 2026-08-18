@@ -46,6 +46,11 @@ class QuotationListAPITests(TestCase):
         salesperson: str = "Sales Person",
         created_at=None,
     ) -> Quotation:
+        if (
+            source_type == QuotationSourceType.DOCUMENT_IMPORT
+            and salesperson == "Sales Person"
+        ):
+            salesperson = self.user.username
         quotation = Quotation.objects.create(
             quote_no=f"Q-LIST-{index:03d}",
             source_quote_no=(
@@ -194,7 +199,7 @@ class QuotationListAPITests(TestCase):
             "page": 1,
             "page_size": 10,
             "total_pages": 0,
-            "facets": {"product_lines": []},
+            "facets": {"product_lines": [], "currencies": []},
         }
         assert beyond.status_code == 200
         assert beyond.data["items"] == []

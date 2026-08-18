@@ -16,14 +16,12 @@ export function syncJobFailureDetails(job) {
 
   return {
     items,
-    summary: syncJobError(job || {}),
+    summary: syncJobError(job || {})
   }
 }
 
 function buildFailureItem(key, result) {
-  const detail = isPlainObject(result.feishu_detail)
-    ? result.feishu_detail
-    : {}
+  const detail = isPlainObject(result.feishu_detail) ? result.feishu_detail : {}
   const headers = isPlainObject(detail.request_headers)
     ? detail.request_headers
     : {}
@@ -36,13 +34,10 @@ function buildFailureItem(key, result) {
     key: safeText(key, 150),
     logId: firstSafeText(headers, ['x-tt-logid', 'x-log-id']),
     message: safeText(result.message),
-    requestId: firstSafeText(headers, [
-      'x-request-id',
-      'x-lark-request-id',
-    ]),
+    requestId: firstSafeText(headers, ['x-request-id', 'x-lark-request-id']),
     stage: safeText(detail.stage, 100),
     suggestions: failureSuggestions(result),
-    tableUrl: safeFeishuTableUrl(detail.table_url),
+    tableUrl: safeFeishuTableUrl(detail.table_url)
   }
 }
 
@@ -78,9 +73,7 @@ function failureSuggestions(result) {
       '使用请求追踪 ID 检查飞书接口日志，确认分页 token 是否完整返回。'
     )
   } else if (issueCode === 'zero_records_unexpected') {
-    suggestions.push(
-      '检查源表数据量、视图过滤和应用可见范围是否发生变化。'
-    )
+    suggestions.push('检查源表数据量、视图过滤和应用可见范围是否发生变化。')
   }
 
   suggestions.push(

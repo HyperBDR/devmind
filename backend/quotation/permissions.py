@@ -1,6 +1,99 @@
 from django.contrib.auth.models import User
+from rest_framework.permissions import BasePermission
 
-from accounts.access import get_effective_feature_keys, get_effective_roles
+from accounts.access import (
+    get_effective_feature_keys,
+    get_effective_roles,
+)
+from quotation.models import (
+    QuotationMembership,
+    QuotationMembershipRole,
+)
+
+
+def ensure_default_quotation_membership(user: User) -> None:
+    """Create the default quotation role for an eligible first-time user."""
+    if not getattr(user, "is_authenticated", False):
+        return
+    if getattr(user, "is_staff", False) or getattr(
+        user,
+        "is_superuser",
+        False,
+    ):
+        return
+    if "quotation_management" not in get_effective_feature_keys(user):
+        return
+    if QuotationMembership.objects.filter(user=user).exists():
+        return
+    QuotationMembership.objects.create(
+        user=user,
+        role=QuotationMembershipRole.USER,
+    )
+
+
+class HasQuotationPlatformAccess(BasePermission):
+    """Require the first-layer Quote Desk platform permission."""
+
+    message = "Quotation platform access is required."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not getattr(user, "is_authenticated", False):
+            return False
+        allowed = "quotation_management" in get_effective_feature_keys(user)
+        if allowed:
+            ensure_default_quotation_membership(user)
+        return allowed
+
+
+def is_quotation_platform_admin(user: User) -> bool:
+    """Return whether a user is an admin of the quotation platform."""
+    if not getattr(user, "is_authenticated", False):
+        return False
+    if getattr(user, "is_staff", False) or getattr(
+        user,
+        "is_superuser",
+        False,
+    ):
+        return True
+    return QuotationMembership.objects.filter(
+        user=user,
+        role=QuotationMembershipRole.ADMIN,
+        is_active=True,
+    ).exists()
+
+
+def get_quotation_platform_role(user: User) -> str | None:
+    """Return the user's internal quotation role.
+
+    Users who already have the first-layer quotation platform feature are
+    ordinary quotation users until an administrator assigns the admin role.
+    This keeps first-time setup from creating an account with no quotation
+    role while still leaving users without the first-layer feature untouched.
+    """
+    if not getattr(user, "is_authenticated", False):
+        return None
+    if getattr(user, "is_staff", False) or getattr(
+        user,
+        "is_superuser",
+        False,
+    ):
+        return QuotationMembershipRole.ADMIN
+    membership = QuotationMembership.objects.filter(
+        user=user,
+        is_active=True,
+    ).only("role").first()
+    if membership:
+        return membership.role
+    if QuotationMembership.objects.filter(user=user).exists():
+        return None
+    ensure_default_quotation_membership(user)
+    return QuotationMembershipRole.USER
+
+
+def is_quotation_platform_user(user: User) -> bool:
+    """Return whether a user has an internal quotation role."""
+    return get_quotation_platform_role(user) is not None
 
 
 def is_quotation_admin(user: User) -> bool:
@@ -51,6 +144,7 @@ def user_role(user: User) -> str:
 
 
 def can_view_all_quotations(user: User) -> bool:
+    """Return whether legacy document access grants a global view."""
     if getattr(user, "is_superuser", False) or getattr(
         user, "is_staff", False
     ):

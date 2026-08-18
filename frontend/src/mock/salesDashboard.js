@@ -57,23 +57,121 @@ export const mockDashboard = {
   ],
 
   customer_stats: [
-    { company: '华润集团', count: 28, resolved_count: 22, resolve_rate: 78.6, avg_hours: 14.2, category: '企业版' },
-    { company: '招商银行', count: 24, resolved_count: 20, resolve_rate: 83.3, avg_hours: 12.8, category: '金融版' },
-    { company: '中国电信', count: 21, resolved_count: 16, resolve_rate: 76.2, avg_hours: 18.4, category: '企业版' },
-    { company: '平安科技', count: 18, resolved_count: 14, resolve_rate: 77.8, avg_hours: 15.6, category: '企业版' },
-    { company: '万科地产', count: 16, resolved_count: 12, resolve_rate: 75.0, avg_hours: 20.1, category: '企业版' },
-    { company: '比亚迪', count: 15, resolved_count: 11, resolve_rate: 73.3, avg_hours: 16.8, category: '企业版' },
-    { company: '京东科技', count: 14, resolved_count: 10, resolve_rate: 71.4, avg_hours: 17.2, category: '企业版' },
-    { company: '小米集团', count: 13, resolved_count: 9, resolve_rate: 69.2, avg_hours: 19.5, category: '企业版' },
-    { company: '美团', count: 12, resolved_count: 8, resolve_rate: 66.7, avg_hours: 21.3, category: '企业版' },
-    { company: '字节跳动', count: 11, resolved_count: 7, resolve_rate: 63.6, avg_hours: 22.8, category: '企业版' }
+    {
+      company: '华润集团',
+      count: 28,
+      resolved_count: 22,
+      resolve_rate: 78.6,
+      avg_hours: 14.2,
+      category: '企业版'
+    },
+    {
+      company: '招商银行',
+      count: 24,
+      resolved_count: 20,
+      resolve_rate: 83.3,
+      avg_hours: 12.8,
+      category: '金融版'
+    },
+    {
+      company: '中国电信',
+      count: 21,
+      resolved_count: 16,
+      resolve_rate: 76.2,
+      avg_hours: 18.4,
+      category: '企业版'
+    },
+    {
+      company: '平安科技',
+      count: 18,
+      resolved_count: 14,
+      resolve_rate: 77.8,
+      avg_hours: 15.6,
+      category: '企业版'
+    },
+    {
+      company: '万科地产',
+      count: 16,
+      resolved_count: 12,
+      resolve_rate: 75.0,
+      avg_hours: 20.1,
+      category: '企业版'
+    },
+    {
+      company: '比亚迪',
+      count: 15,
+      resolved_count: 11,
+      resolve_rate: 73.3,
+      avg_hours: 16.8,
+      category: '企业版'
+    },
+    {
+      company: '京东科技',
+      count: 14,
+      resolved_count: 10,
+      resolve_rate: 71.4,
+      avg_hours: 17.2,
+      category: '企业版'
+    },
+    {
+      company: '小米集团',
+      count: 13,
+      resolved_count: 9,
+      resolve_rate: 69.2,
+      avg_hours: 19.5,
+      category: '企业版'
+    },
+    {
+      company: '美团',
+      count: 12,
+      resolved_count: 8,
+      resolve_rate: 66.7,
+      avg_hours: 21.3,
+      category: '企业版'
+    },
+    {
+      company: '字节跳动',
+      count: 11,
+      resolved_count: 7,
+      resolve_rate: 63.6,
+      avg_hours: 22.8,
+      category: '企业版'
+    }
   ],
 
   sla_stats: [
-    { priority: 'P1', count: 52, sla_met: 44, sla_rate: 84.6, avg_hours: 3.2, sla_limit: 4 },
-    { priority: 'P2', count: 128, sla_met: 108, sla_rate: 84.4, avg_hours: 8.6, sla_limit: 12 },
-    { priority: 'P3', count: 186, sla_met: 152, sla_rate: 81.7, avg_hours: 18.4, sla_limit: 24 },
-    { priority: 'P4', count: 120, sla_met: 96, sla_rate: 80.0, avg_hours: 32.1, sla_limit: 48 }
+    {
+      priority: 'P1',
+      count: 52,
+      sla_met: 44,
+      sla_rate: 84.6,
+      avg_hours: 3.2,
+      sla_limit: 4
+    },
+    {
+      priority: 'P2',
+      count: 128,
+      sla_met: 108,
+      sla_rate: 84.4,
+      avg_hours: 8.6,
+      sla_limit: 12
+    },
+    {
+      priority: 'P3',
+      count: 186,
+      sla_met: 152,
+      sla_rate: 81.7,
+      avg_hours: 18.4,
+      sla_limit: 24
+    },
+    {
+      priority: 'P4',
+      count: 120,
+      sla_met: 96,
+      sla_rate: 80.0,
+      avg_hours: 32.1,
+      sla_limit: 48
+    }
   ],
 
   escalation_stats: {
