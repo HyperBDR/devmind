@@ -9,9 +9,12 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Archive,
   ArchiveRestore,
+  AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Clock3,
   Download,
   ExternalLink,
   FileSpreadsheet,
@@ -37,13 +40,19 @@ import {
 } from '../api/documents'
 import {
   checkFeishuFileAccess,
+  getFeishuSyncStatus,
   getFeishuSyncJob,
+  resolveFeishuSyncDifference,
   syncFeishuArchiveFolder,
   type FeishuArchiveFolder,
+  type FeishuSyncDifference,
+  type FeishuSyncOverview,
+  type FeishuSyncStateStatus,
 } from '../api/feishu'
 import { FORM_SELECT_COMPACT_TRIGGER_CLASS } from '../utils/formFieldClasses'
 import FormSelect from './FormSelect.vue'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import { useAuthStore } from '../stores/auth'
 
 const emit = defineEmits<{
   toast: [message: string, type?: 'success' | 'info' | 'error']
@@ -56,6 +65,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useQuotationI18n()
+const auth = useAuthStore()
 
 const docs = ref<ImportedDocument[]>([])
 const archiveFolders = ref<FeishuArchiveFolder[]>([])
@@ -71,7 +81,28 @@ const restoringId = ref<string | null>(null)
 const pendingArchiveDoc = ref<ImportedDocument | null>(null)
 const archiveConfirmButton = ref<HTMLButtonElement | null>(null)
 const parsingIds = ref<Set<string>>(new Set())
+const syncOverview = ref<FeishuSyncOverview | null>(null)
+const syncStatusLoading = ref(false)
+const resolvingDifferenceId = ref<string | null>(null)
 let reconcileTimer: number | undefined
+
+const canResolveSyncDifferences = computed(() =>
+  ['admin', 'quotation_admin'].includes(
+    String(auth.roleLabel || '').toLowerCase(),
+  ),
+)
+
+const visibleSyncDifferences = computed(
+  () => syncOverview.value?.differences.slice(0, 20) || [],
+)
+
+const syncAlertClass = computed(() => {
+  const status = syncOverview.value?.status
+  if (status === 'synced') return 'border-emerald-200 bg-emerald-50/60'
+  if (status === 'syncing') return 'border-blue-200 bg-blue-50/60'
+  if (status === 'has_diff') return 'border-amber-200 bg-amber-50/70'
+  return 'border-red-200 bg-red-50/60'
+})
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
@@ -90,11 +121,11 @@ async function waitForSyncJob(jobId: string) {
   throw new Error(t('quotation.pages.imports.syncFailed'))
 }
 
-function scheduleFeishuDocReconcile() {
+function scheduleFeishuDocReconcile(delay = 250) {
   window.clearTimeout(reconcileTimer)
   reconcileTimer = window.setTimeout(() => {
-    void refresh()
-  }, 250)
+    void Promise.all([refresh(), refreshSyncOverview()])
+  }, delay)
 }
 
 function handlePageVisible() {
@@ -231,6 +262,104 @@ async function refresh(options: {
   }
 }
 
+async function refreshSyncOverview() {
+  syncStatusLoading.value = true
+  try {
+    syncOverview.value = await getFeishuSyncStatus()
+    if (syncOverview.value.status === 'syncing') {
+      scheduleFeishuDocReconcile(1500)
+    }
+  } catch {
+    syncOverview.value = null
+  } finally {
+    syncStatusLoading.value = false
+  }
+}
+
+async function handleSyncNow() {
+  await refresh({ syncRemote: true, syncSource: 'user' })
+  await refreshSyncOverview()
+}
+
+async function handleResolveDifference(
+  difference: FeishuSyncDifference,
+  action: 'archive' | 'delete',
+) {
+  if (
+    action === 'delete'
+    && !window.confirm(
+      t('quotation.pages.imports.syncDeleteDifferenceConfirm', {
+        fileName: difference.file_name,
+      }),
+    )
+  ) {
+    return
+  }
+  resolvingDifferenceId.value = difference.id
+  try {
+    await resolveFeishuSyncDifference(difference.id, action)
+    notify(
+      action === 'delete'
+        ? t('quotation.pages.imports.syncDeleteDifferenceSuccess')
+        : t('quotation.pages.imports.syncArchiveDifferenceSuccess'),
+      'success',
+    )
+    await Promise.all([refresh(), refreshSyncOverview()])
+  } catch (error: unknown) {
+    notify(
+      error instanceof Error
+        ? error.message
+        : t('quotation.pages.imports.syncResolveDifferenceFailed'),
+      'error',
+    )
+  } finally {
+    resolvingDifferenceId.value = null
+  }
+}
+
+function syncStateLabel(status: FeishuSyncStateStatus): string {
+  const labels: Record<FeishuSyncStateStatus, string> = {
+    synced: t('quotation.pages.imports.syncSynced'),
+    syncing: t('quotation.pages.imports.syncSyncing'),
+    has_diff: t('quotation.pages.imports.syncHasDiff'),
+    failed: t('quotation.pages.imports.syncFailedState'),
+    permission: t('quotation.pages.imports.syncPermission'),
+    missing: t('quotation.pages.imports.syncMissing'),
+  }
+  return labels[status]
+}
+
+function syncStateClass(status: FeishuSyncStateStatus): string {
+  if (status === 'synced') {
+    return 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+  }
+  if (status === 'syncing') {
+    return 'bg-blue-50 text-blue-700 ring-blue-200'
+  }
+  if (status === 'has_diff') {
+    return 'bg-amber-50 text-amber-800 ring-amber-200'
+  }
+  return 'bg-red-50 text-red-700 ring-red-200'
+}
+
+function syncDifferenceLabel(difference: FeishuSyncDifference): string {
+  const labels: Record<FeishuSyncDifference['type'], string> = {
+    added: t('quotation.pages.imports.syncDifferenceAdded'),
+    deleted: t('quotation.pages.imports.syncDifferenceDeleted'),
+    moved: t('quotation.pages.imports.syncDifferenceMoved'),
+    renamed: t('quotation.pages.imports.syncDifferenceRenamed'),
+    modified: t('quotation.pages.imports.syncDifferenceModified'),
+  }
+  return labels[difference.type]
+}
+
+function formatSyncTime(value?: string | null): string {
+  if (!value) return t('quotation.pages.imports.syncNever')
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return t('quotation.pages.imports.syncNever')
+  return date.toLocaleString()
+}
+
 function applyParseResult(documentId: string, result: DocumentParseResult) {
   docs.value = docs.value.map((item) =>
     item.id === documentId
@@ -316,6 +445,7 @@ function parseStatusClass(doc: ImportedDocument): string {
 }
 
 void refresh()
+void refreshSyncOverview()
 
 const folderSearchState = computed(() => {
   const query = search.value.trim().toLowerCase()
@@ -622,6 +752,167 @@ async function handleRestore(doc: ImportedDocument, event?: Event) {
 
 <template>
   <div :class="rootClass">
+    <section
+      class="rounded-xl border p-4 shadow-xs"
+      :class="syncAlertClass"
+      aria-labelledby="feishu-sync-status-title"
+      aria-live="polite"
+    >
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div class="min-w-0 flex-1">
+          <div class="flex items-start gap-3">
+            <Loader2
+              v-if="syncStatusLoading || syncOverview?.status === 'syncing'"
+              class="mt-0.5 h-5 w-5 shrink-0 animate-spin text-blue-600"
+            />
+            <CheckCircle2
+              v-else-if="syncOverview?.status === 'synced'"
+              class="mt-0.5 h-5 w-5 shrink-0 text-emerald-600"
+            />
+            <AlertTriangle
+              v-else-if="syncOverview?.status === 'has_diff'"
+              class="mt-0.5 h-5 w-5 shrink-0 text-amber-600"
+            />
+            <AlertCircle v-else class="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 id="feishu-sync-status-title" class="text-sm font-bold text-dm-text">
+                  {{ t('quotation.pages.imports.syncStatus') }}
+                </h2>
+                <span
+                  v-if="syncOverview"
+                  class="inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset"
+                  :class="syncStateClass(syncOverview.status)"
+                >
+                  {{ syncStateLabel(syncOverview.status) }}
+                </span>
+              </div>
+
+              <p class="mt-1 text-sm text-dm-text-secondary">
+                {{
+                  syncOverview
+                    ? t(`quotation.pages.imports.syncHint.${syncOverview.status}`)
+                    : t('quotation.pages.imports.syncStatusUnavailable')
+                }}
+              </p>
+
+              <dl v-if="syncOverview" class="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-dm-text-tertiary">
+                <div class="flex items-center gap-1.5">
+                  <Clock3 class="h-3.5 w-3.5" />
+                  <dt>{{ t('quotation.pages.imports.syncLastLocal') }}</dt>
+                  <dd class="font-medium text-dm-text-secondary">
+                    {{ formatSyncTime(syncOverview.last_local_sync_at) }}
+                  </dd>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <Clock3 class="h-3.5 w-3.5" />
+                  <dt>{{ t('quotation.pages.imports.syncLatestCheck') }}</dt>
+                  <dd class="font-medium text-dm-text-secondary">
+                    {{ formatSyncTime(syncOverview.latest_feishu_check_at) }}
+                  </dd>
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <AlertTriangle class="h-3.5 w-3.5" />
+                  <dt>{{ t('quotation.pages.imports.syncDifferenceCount') }}</dt>
+                  <dd class="font-medium text-dm-text-secondary">
+                    {{ syncOverview.difference_count }}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          class="dm-btn-primary h-9 shrink-0 px-3 text-sm font-semibold disabled:cursor-wait disabled:opacity-60"
+          :disabled="loading || syncOverview?.status === 'syncing'"
+          @click="handleSyncNow"
+        >
+          <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
+          <RefreshCw v-else class="h-4 w-4" />
+          {{
+            ['failed', 'permission', 'missing'].includes(syncOverview?.status || '')
+              ? t('quotation.pages.imports.syncRetry')
+              : t('quotation.pages.imports.syncNow')
+          }}
+        </button>
+      </div>
+
+      <div
+        v-if="syncOverview?.states.some((state) => state.error_message)"
+        class="mt-3 space-y-1 border-t border-current/10 pt-3"
+      >
+        <p
+          v-for="state in syncOverview.states.filter((item) => item.error_message)"
+          :key="state.id"
+          class="text-xs text-red-700"
+        >
+          <span class="font-semibold">{{ state.folder_name }}:</span>
+          {{ state.error_message }}
+        </p>
+      </div>
+
+      <details v-if="visibleSyncDifferences.length" class="mt-3 border-t border-current/10 pt-3">
+        <summary class="cursor-pointer text-sm font-semibold text-dm-text-secondary focus:outline-hidden focus:ring-2 focus:ring-blue-200">
+          {{ t('quotation.pages.imports.syncDifferenceDetails') }}
+          <span class="font-normal text-dm-text-tertiary">
+            ({{ visibleSyncDifferences.length }})
+          </span>
+        </summary>
+        <ul class="mt-3 divide-y divide-slate-200/70 rounded-lg border border-slate-200 bg-white/80">
+          <li
+            v-for="difference in visibleSyncDifferences"
+            :key="difference.id"
+            class="flex flex-col gap-1 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="min-w-0">
+              <p class="truncate text-sm font-semibold text-dm-text">
+                {{ difference.file_name || t('quotation.pages.imports.syncUnnamedFile') }}
+              </p>
+              <p class="truncate text-xs text-dm-text-tertiary">
+                {{ difference.folder_name }}
+                <span v-if="difference.error_message"> · {{ difference.error_message }}</span>
+              </p>
+            </div>
+            <div class="flex shrink-0 items-center gap-2 text-xs">
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                {{ syncDifferenceLabel(difference) }}
+              </span>
+              <time class="text-dm-text-tertiary" :datetime="difference.detected_at">
+                {{ formatSyncTime(difference.detected_at) }}
+              </time>
+              <template
+                v-if="
+                  canResolveSyncDifferences
+                  && difference.type === 'deleted'
+                  && difference.status === 'pending_confirmation'
+                "
+              >
+                <button
+                  type="button"
+                  class="rounded-md px-2 py-1 font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-wait disabled:opacity-50"
+                  :disabled="resolvingDifferenceId === difference.id"
+                  @click="handleResolveDifference(difference, 'archive')"
+                >
+                  {{ t('quotation.pages.imports.syncArchiveDifference') }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md px-2 py-1 font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-wait disabled:opacity-50"
+                  :disabled="resolvingDifferenceId === difference.id"
+                  @click="handleResolveDifference(difference, 'delete')"
+                >
+                  {{ t('quotation.pages.imports.syncDeleteDifference') }}
+                </button>
+              </template>
+            </div>
+          </li>
+        </ul>
+      </details>
+    </section>
+
     <div
       id="import-filter-panel"
       data-filter-toolbar
