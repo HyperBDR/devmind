@@ -41,6 +41,11 @@ class DocumentType(models.TextChoices):
     SIGNATURE = "signature", "signature"
 
 
+class DocumentLifecycleState(models.TextChoices):
+    ACTIVE = "active", "Active"
+    ARCHIVED = "archived", "Archived"
+
+
 class SyncJobType(models.TextChoices):
     UPLOAD = "upload", "upload"
     PULL = "pull", "pull"
@@ -204,6 +209,13 @@ class Quotation(TimeStampedModel):
     created_by_email = models.CharField(
         max_length=255, blank=True, null=True, db_index=True
     )
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    archived_by_email = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    archive_reason = models.CharField(max_length=255, blank=True, default="")
 
     class Meta:
         db_table = "quotations"
@@ -472,6 +484,26 @@ class DocumentAsset(models.Model):
     )
     feishu_folder_path = models.JSONField(default=list, blank=True)
     created_by_email = models.CharField(max_length=255, blank=True, null=True)
+    lifecycle_state = models.CharField(
+        max_length=20,
+        choices=DocumentLifecycleState.choices,
+        default=DocumentLifecycleState.ACTIVE,
+        db_index=True,
+    )
+    archived_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    archived_by_email = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    archive_reason = models.CharField(max_length=255, blank=True, default="")
+    purge_after = models.DateTimeField(blank=True, null=True, db_index=True)
+    legal_hold_at = models.DateTimeField(blank=True, null=True, db_index=True)
+    legal_hold_reason = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -481,6 +513,10 @@ class DocumentAsset(models.Model):
             models.Index(
                 fields=["quotation", "doc_type", "-created_at", "-id"],
                 name="quote_doc_quote_type_created",
+            ),
+            models.Index(
+                fields=["lifecycle_state", "purge_after", "created_at"],
+                name="quote_doc_lifecycle_purge",
             ),
         ]
         constraints = [

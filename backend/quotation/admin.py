@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils import timezone
 from quotation.audit import record_audit_event
 from quotation.models import (
     AuditEvent,
@@ -29,10 +30,73 @@ admin.site.register(QuotationItem)
 admin.site.register(QuotationVersion)
 admin.site.register(QuotationTemplate)
 admin.site.register(ExportJob)
-admin.site.register(DocumentAsset)
 admin.site.register(DocumentParseResult)
 admin.site.register(FeishuConnection)
 admin.site.register(UserQuotationCatalog)
+
+
+@admin.register(DocumentAsset)
+class DocumentAssetAdmin(admin.ModelAdmin):
+    list_display = (
+        "file_name",
+        "source",
+        "lifecycle_state",
+        "archived_at",
+        "purge_after",
+        "legal_hold_at",
+    )
+    list_filter = ("source", "lifecycle_state", "legal_hold_at")
+    search_fields = ("id", "file_name", "created_by_email")
+    readonly_fields = (
+        "lifecycle_state",
+        "archived_at",
+        "archived_by_email",
+        "archive_reason",
+        "purge_after",
+        "legal_hold_at",
+        "legal_hold_reason",
+    )
+    actions = ("place_legal_hold", "release_legal_hold")
+
+    @admin.action(description="Place legal hold on selected documents")
+    def place_legal_hold(self, request, queryset):
+        for asset in queryset.filter(legal_hold_at__isnull=True):
+            asset.legal_hold_at = timezone.now()
+            asset.legal_hold_reason = "Placed through Django admin"
+            asset.save(
+                update_fields=["legal_hold_at", "legal_hold_reason"]
+            )
+            record_audit_event(
+                request=request,
+                module="document",
+                action="legal_hold_placed",
+                event_name="document.legal_hold_placed",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                target_type="document",
+                target_id=asset.id,
+                target_label=asset.file_name,
+                document_id=asset.id,
+            )
+
+    @admin.action(description="Release legal hold on selected documents")
+    def release_legal_hold(self, request, queryset):
+        for asset in queryset.filter(legal_hold_at__isnull=False):
+            asset.legal_hold_at = None
+            asset.legal_hold_reason = ""
+            asset.save(
+                update_fields=["legal_hold_at", "legal_hold_reason"]
+            )
+            record_audit_event(
+                request=request,
+                module="document",
+                action="legal_hold_released",
+                event_name="document.legal_hold_released",
+                result=AuditEvent.RESULT_SUCCEEDED,
+                target_type="document",
+                target_id=asset.id,
+                target_label=asset.file_name,
+                document_id=asset.id,
+            )
 
 
 @admin.register(StorageConnection)

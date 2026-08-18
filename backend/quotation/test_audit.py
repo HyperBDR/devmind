@@ -267,6 +267,8 @@ class QuotationAuditEventTests(TestCase):
             ("document", "upload"),
             ("document", "download"),
             ("document", "delete"),
+            ("document", "archive"),
+            ("document", "restore"),
             ("feishu", "upload"),
             ("feishu", "import"),
             ("catalog", "create"),

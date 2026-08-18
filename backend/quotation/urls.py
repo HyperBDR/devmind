@@ -14,10 +14,12 @@ from quotation.views.dashboard import (
     DashboardSummaryView,
 )
 from quotation.views.documents import (
+    DocumentDetailView,
     DocumentDownloadView,
     DocumentListView,
     DocumentParseConfirmView,
     DocumentParseView,
+    DocumentRestoreView,
     QuotationDocumentListCreateView,
 )
 from quotation.views.exports import (
@@ -84,7 +86,12 @@ urlpatterns = [
         ExportJobRetryUploadView.as_view(),
     ),
     path("documents", DocumentListView.as_view()),
+    path("documents/<str:document_id>", DocumentDetailView.as_view()),
     path("documents/<str:document_id>/download", DocumentDownloadView.as_view()),
+    path(
+        "documents/<str:document_id>/restore",
+        DocumentRestoreView.as_view(),
+    ),
     path(
         "documents/<str:document_id>/parse",
         DocumentParseView.as_view(),

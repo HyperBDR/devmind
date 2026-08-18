@@ -129,6 +129,47 @@ def dispatch_remote_file_cleanups_task():
 
 
 @shared_task(
+    name="quotation.tasks.purge_archived_documents",
+    acks_late=True,
+)
+def purge_archived_documents_task(
+    dry_run: bool = False,
+    batch_size: int | None = None,
+):
+    """Purge one bounded retention batch and emit low-cardinality metrics."""
+    from quotation.services.document_lifecycle import (
+        purge_archived_documents,
+    )
+
+    started = perf_counter()
+    configured_batch_size = int(
+        getattr(settings, "QUOTATION_DOCUMENT_PURGE_BATCH_SIZE", 100)
+    )
+    result = purge_archived_documents(
+        dry_run=bool(dry_run),
+        batch_size=batch_size or configured_batch_size,
+    )
+    metric_result = "dry_run" if dry_run else "success"
+    if result["failed"]:
+        metric_result = "partial_failure"
+        logger.error(
+            "quotation_document_retention_purge_incomplete",
+            extra={
+                "failed_count": result["failed"],
+                "purged_count": result["purged"],
+                "selected_count": result["selected"],
+            },
+        )
+    record_storage_operation(
+        provider="local",
+        operation="document_retention_purge",
+        result=metric_result,
+        duration_seconds=max(perf_counter() - started, 0),
+    )
+    return result
+
+
+@shared_task(
     bind=True,
     name="quotation.tasks.render_quotation_export",
     acks_late=True,

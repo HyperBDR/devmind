@@ -10,12 +10,17 @@ from rest_framework.views import APIView
 
 from quotation.access import (
     DocumentAction,
+    can_delete_document,
     filter_accessible_documents,
     get_accessible_document,
     get_accessible_quotation,
 )
 from quotation.audit import set_request_audit_target
-from quotation.models import DocumentAsset, DocumentParseResult, DocumentType
+from quotation.models import (
+    DocumentAsset,
+    DocumentParseResult,
+    DocumentType,
+)
 from quotation.permissions import user_display_email
 from quotation.serializers import (
     DocumentAssetSerializer,
@@ -34,6 +39,11 @@ from quotation.services.document_parsing.service import (
     confirm_document_parse_result,
     parse_and_create_quotation,
 )
+from quotation.services.document_lifecycle import (
+    DocumentLifecycleConflict,
+    archive_document,
+    restore_document,
+)
 from quotation.services.storage import (
     delete_document,
     document_storage_key,
@@ -48,10 +58,21 @@ class DocumentListView(APIView):
 
     def get(self, request):
         source = request.query_params.get("source")
+        lifecycle = request.query_params.get("lifecycle", "active")
+        if lifecycle not in {"active", "archived", "all"}:
+            return Response({"detail": "invalid lifecycle"}, status=400)
+
+        def apply_lifecycle(queryset):
+            if lifecycle == "all":
+                return queryset
+            return queryset.filter(lifecycle_state=lifecycle)
+
         if source == "feishu":
             qs = filter_accessible_documents(
                 request.user,
-                DocumentAsset.objects.filter(source="feishu"),
+                apply_lifecycle(
+                    DocumentAsset.objects.filter(source="feishu")
+                ),
             )
             qs = (
                 qs.select_related("quotation")
@@ -68,12 +89,20 @@ class DocumentListView(APIView):
                 documents.append(document)
                 if len(documents) >= 200:
                     break
-            return Response(DocumentAssetSerializer(documents, many=True).data)
+            return Response(
+                DocumentAssetSerializer(
+                    documents,
+                    many=True,
+                    context={"request": request},
+                ).data
+            )
 
         qs = filter_accessible_documents(
             request.user,
-            DocumentAsset.objects.select_related("quotation").prefetch_related(
-                "parse_results"
+            apply_lifecycle(
+                DocumentAsset.objects.select_related(
+                    "quotation"
+                ).prefetch_related("parse_results")
             ),
         )
         if source == "feishu_upload":
@@ -81,7 +110,95 @@ class DocumentListView(APIView):
         elif source:
             qs = qs.filter(source=source)
         qs = qs.order_by("-created_at")[:200]
-        return Response(DocumentAssetSerializer(qs, many=True).data)
+        return Response(
+            DocumentAssetSerializer(
+                qs,
+                many=True,
+                context={"request": request},
+            ).data
+        )
+
+
+class DocumentDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, document_id: str):
+        asset, denied = get_accessible_document(
+            request.user,
+            document_id,
+            DocumentAction.DELETE,
+        )
+        if denied:
+            return denied
+        if not can_delete_document(request.user, asset):
+            return Response({"detail": "Forbidden"}, status=403)
+        set_request_audit_target(
+            request,
+            target_id=asset.id,
+            target_label=asset.file_name,
+        )
+        reason = ""
+        if isinstance(request.data, dict):
+            reason = str(request.data.get("reason") or "")
+        try:
+            archived, impact = archive_document(
+                asset.id,
+                actor=request.user,
+                reason=reason,
+            )
+        except DocumentLifecycleConflict as exc:
+            return Response(
+                {"detail": exc.detail, "code": exc.code},
+                status=409,
+            )
+        return Response(
+            {
+                "document": DocumentAssetSerializer(
+                    archived,
+                    context={"request": request},
+                ).data,
+                "impact": impact.as_dict(),
+            }
+        )
+
+
+class DocumentRestoreView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, document_id: str):
+        asset, denied = get_accessible_document(
+            request.user,
+            document_id,
+            DocumentAction.DELETE,
+        )
+        if denied:
+            return denied
+        if not can_delete_document(request.user, asset):
+            return Response({"detail": "Forbidden"}, status=403)
+        set_request_audit_target(
+            request,
+            target_id=asset.id,
+            target_label=asset.file_name,
+        )
+        try:
+            restored, impact = restore_document(
+                asset.id,
+                actor=request.user,
+            )
+        except DocumentLifecycleConflict as exc:
+            return Response(
+                {"detail": exc.detail, "code": exc.code},
+                status=409,
+            )
+        return Response(
+            {
+                "document": DocumentAssetSerializer(
+                    restored,
+                    context={"request": request},
+                ).data,
+                "impact": impact.as_dict(),
+            }
+        )
 
 
 class QuotationDocumentListCreateView(APIView):
@@ -101,7 +218,13 @@ class QuotationDocumentListCreateView(APIView):
         qs = DocumentAsset.objects.filter(quotation_id=quotation_id).order_by(
             "-created_at"
         )
-        return Response(DocumentAssetSerializer(qs, many=True).data)
+        return Response(
+            DocumentAssetSerializer(
+                qs,
+                many=True,
+                context={"request": request},
+            ).data
+        )
 
     def post(self, request, quotation_id: str):
         quotation, denied = get_accessible_quotation(
@@ -145,7 +268,13 @@ class QuotationDocumentListCreateView(APIView):
         except Exception:
             delete_document(storage_key)
             raise
-        return Response(DocumentAssetSerializer(asset).data, status=201)
+        return Response(
+            DocumentAssetSerializer(
+                asset,
+                context={"request": request},
+            ).data,
+            status=201,
+        )
 
 
 class DocumentDownloadView(APIView):
