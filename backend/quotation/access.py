@@ -11,6 +11,7 @@ from quotation.models import (
     DocumentLifecycleState,
     Quotation,
     QuotationSourceType,
+    QuotationUploadPermission,
     QuotationViewPermission,
     QuotationViewPermissionTarget,
 )
@@ -35,8 +36,48 @@ class DocumentAction:
     PARSE = "parse"
 
 
+class UploadAuthorizationError(ValueError):
+    """Raised when a queued upload no longer has directory access."""
+
+
 def forbidden_response() -> Response:
     return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+
+def upload_forbidden_response() -> Response:
+    """Return the stable response for a denied directory upload."""
+    return Response(
+        {"detail": "Upload access to this directory is required."},
+        status=status.HTTP_403_FORBIDDEN,
+    )
+
+
+def active_upload_permissions(user):
+    """Return active, unexpired directory upload grants for one user."""
+    if not getattr(user, "is_authenticated", False):
+        return QuotationUploadPermission.objects.none()
+    now = timezone.now()
+    return QuotationUploadPermission.objects.filter(
+        user=user,
+        is_active=True,
+        revoked_at__isnull=True,
+    ).filter(Q(expires_at__isnull=True) | Q(expires_at__gt=now))
+
+
+def can_upload_to_folder(user, folder_token: str) -> bool:
+    """Return whether a user may upload to this exact directory."""
+    token = str(folder_token or "").strip()
+    if not token or not getattr(user, "is_authenticated", False):
+        return False
+    if is_quotation_platform_admin(user):
+        return True
+    return (
+        active_upload_permissions(user)
+        .filter(
+            folder_token=token,
+        )
+        .exists()
+    )
 
 
 def _normalized_owner(value) -> str:
@@ -95,8 +136,7 @@ def _granted_quotation_ids(user) -> set[str]:
     document_ids = {
         permission.document_id
         for permission in permissions
-        if permission.target_type
-        == QuotationViewPermissionTarget.DOCUMENT
+        if permission.target_type == QuotationViewPermissionTarget.DOCUMENT
         and permission.document_id
     }
     folder_tokens = {
@@ -140,8 +180,7 @@ def _granted_document_ids(user) -> set[str]:
     ids = set(
         permission.document_id
         for permission in permissions
-        if permission.target_type
-        == QuotationViewPermissionTarget.DOCUMENT
+        if permission.target_type == QuotationViewPermissionTarget.DOCUMENT
         and permission.document_id
     )
     folder_tokens = {
@@ -212,19 +251,23 @@ def filter_accessible_quotations(
     owner_filter = Lower(Trim("issuer_contact_name"))
     creator_filter = Lower(Trim("created_by_email"))
     granted_ids = _granted_quotation_ids(user)
-    return qs.annotate(
-        normalized_sales_owner=owner_filter,
-        normalized_creator=creator_filter,
-    ).filter(
-        Q(normalized_sales_owner=username)
-        | Q(id__in=folder_ids)
-        | Q(id__in=granted_ids)
-        | Q(documents__created_by_email__iexact=email)
-        | Q(
-            source_type=QuotationSourceType.MANUAL,
-            normalized_creator=email,
+    return (
+        qs.annotate(
+            normalized_sales_owner=owner_filter,
+            normalized_creator=creator_filter,
         )
-    ).distinct()
+        .filter(
+            Q(normalized_sales_owner=username)
+            | Q(id__in=folder_ids)
+            | Q(id__in=granted_ids)
+            | Q(documents__created_by_email__iexact=email)
+            | Q(
+                source_type=QuotationSourceType.MANUAL,
+                normalized_creator=email,
+            )
+        )
+        .distinct()
+    )
 
 
 def get_accessible_quotation(
@@ -286,9 +329,11 @@ def get_accessible_document(
 ):
     if not document_id:
         return None, None
-    asset = DocumentAsset.objects.select_related("quotation").filter(
-        pk=document_id
-    ).first()
+    asset = (
+        DocumentAsset.objects.select_related("quotation")
+        .filter(pk=document_id)
+        .first()
+    )
     if asset is None:
         return None, Response({"detail": "document not found"}, status=404)
     if not can_access_document(user, asset, action):

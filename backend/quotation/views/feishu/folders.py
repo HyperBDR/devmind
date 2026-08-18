@@ -4,10 +4,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from quotation.access import forbidden_response
-from quotation.services.feishu_client import (
-    FeishuAPIError,
+from quotation.access import (
+    active_upload_permissions,
+    can_upload_to_folder,
+    forbidden_response,
+    upload_forbidden_response,
 )
+from quotation.permissions import is_quotation_platform_admin
+from quotation.services.feishu_client import FeishuAPIError
 
 from . import common
 
@@ -16,6 +20,10 @@ class FeishuFolderView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        if request.query_params.get(
+            "intent"
+        ) == "upload" and not is_quotation_platform_admin(request.user):
+            return self._upload_folders(request)
         root_folder_token = ""
         try:
             client, access_token, root_folder_token = (
@@ -76,6 +84,55 @@ class FeishuFolderView(APIView):
                 "files": files,
                 "has_more": bool(data.get("has_more")),
                 "next_page_token": data.get("next_page_token"),
+                "listing_available": True,
+            }
+        )
+
+    @staticmethod
+    def _upload_folders(request):
+        requested_token = str(
+            request.query_params.get("folder_token") or ""
+        ).strip()
+        permissions = active_upload_permissions(request.user).order_by(
+            "folder_name",
+            "folder_token",
+        )
+        if requested_token:
+            if not can_upload_to_folder(request.user, requested_token):
+                return upload_forbidden_response()
+            permission = permissions.filter(
+                folder_token=requested_token
+            ).first()
+            return Response(
+                {
+                    "folder_token": requested_token,
+                    "folder_name": permission.folder_name or requested_token,
+                    "root_folder_token": "",
+                    "is_root": False,
+                    "files": [],
+                    "has_more": False,
+                    "next_page_token": None,
+                    "listing_available": True,
+                }
+            )
+        files = [
+            {
+                "token": permission.folder_token,
+                "open_token": permission.folder_token,
+                "name": permission.folder_name or permission.folder_token,
+                "type": "folder",
+            }
+            for permission in permissions
+        ]
+        return Response(
+            {
+                "folder_token": "",
+                "folder_name": "Authorized upload folders",
+                "root_folder_token": "",
+                "is_root": True,
+                "files": files,
+                "has_more": False,
+                "next_page_token": None,
                 "listing_available": True,
             }
         )

@@ -35,6 +35,9 @@ const files = ref<FeishuFileItem[]>([])
 const path = ref<BreadcrumbItem[]>([])
 
 const folders = computed(() => files.value.filter(isFeishuFolderItem))
+const uploadRoot = computed(
+  () => props.intent === 'upload' && path.value.length === 1 && !currentToken.value,
+)
 
 const title = computed(() =>
   props.intent === 'upload'
@@ -55,7 +58,7 @@ function close() {
 async function openFolder(token?: string, name?: string, replacePath = false) {
   loading.value = true
   try {
-    const listing = await listFeishuFolder(token)
+    const listing = await listFeishuFolder(token, props.intent)
     currentToken.value = listing.folder_token
     currentName.value = name || listing.folder_name
     rootToken.value = listing.root_folder_token || listing.folder_token
@@ -224,7 +227,7 @@ watch(
           <button
             type="button"
             class="dm-btn-primary px-4 py-2 text-sm font-semibold disabled:opacity-40"
-            :disabled="loading || !currentToken"
+            :disabled="loading || !currentToken || uploadRoot"
             @click="selectCurrentFolder"
           >
             <Check class="h-3.5 w-3.5" />
