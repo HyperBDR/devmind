@@ -5,7 +5,6 @@ import uuid
 from django.conf import settings
 from django.db import models, router, transaction
 from django.utils import timezone
-
 from hyperbdr_dashboard.encryption import encryption_service
 
 
@@ -62,6 +61,40 @@ class SyncJobStatus(models.TextChoices):
     RETRYING = "retrying", "retrying"
     SUCCESS = "success", "success"
     FAILED = "failed", "failed"
+
+
+class FeishuSyncStatus(models.TextChoices):
+    """User-facing state for one Feishu synchronization scope."""
+
+    SYNCED = "synced", "Synced"
+    SYNCING = "syncing", "Syncing"
+    HAS_DIFF = "has_diff", "Has differences"
+    FAILED = "failed", "Failed"
+    PERMISSION = "permission", "Permission denied"
+    MISSING = "missing", "Directory missing"
+
+
+class FeishuSyncDifferenceType(models.TextChoices):
+    """Remote changes detected between two durable snapshots."""
+
+    ADDED = "added", "Added"
+    DELETED = "deleted", "Deleted"
+    MOVED = "moved", "Moved"
+    RENAMED = "renamed", "Renamed"
+    MODIFIED = "modified", "Modified"
+
+
+class FeishuSyncDifferenceStatus(models.TextChoices):
+    """Resolution state for a detected Feishu change."""
+
+    DETECTED = "detected", "Detected"
+    APPLIED = "applied", "Applied"
+    PENDING_CONFIRMATION = (
+        "pending_confirmation",
+        "Pending confirmation",
+    )
+    FAILED = "failed", "Failed"
+    ARCHIVED = "archived", "Archived"
 
 
 EXPORT_ARCHIVE_SYNC_STAGE = "export_archive"
@@ -304,13 +337,21 @@ class Quotation(TimeStampedModel):
     expire_date = models.DateField()
     tax_label = models.CharField(max_length=40, default="VAT")
     vat_rate = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    vat_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    software_subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    others_subtotal = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    vat_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
+    software_subtotal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
+    others_subtotal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
     subtotal_before_vat = models.DecimalField(
         max_digits=18, decimal_places=2, default=0
     )
-    grand_total = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    grand_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
     remarks_disclaimer = models.TextField(blank=True, default="")
 
     issuer_company_name = models.CharField(
@@ -318,7 +359,9 @@ class Quotation(TimeStampedModel):
     )
     issuer_contact_name = models.CharField(max_length=120)
     issuer_contact_email = models.CharField(max_length=255)
-    issuer_contact_title = models.CharField(max_length=120, blank=True, default="")
+    issuer_contact_title = models.CharField(
+        max_length=120, blank=True, default=""
+    )
     issuer_signature = models.TextField(blank=True, default="")
 
     client_company = models.CharField(max_length=255)
@@ -408,10 +451,18 @@ class QuotationItem(TimeStampedModel):
     name = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     qty = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    list_price = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0)
-    net_unit_price = models.DecimalField(max_digits=18, decimal_places=2, default=0)
-    extended_price = models.DecimalField(max_digits=18, decimal_places=2, default=0)
+    list_price = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
+    discount_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0
+    )
+    net_unit_price = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
+    extended_price = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0
+    )
 
     class Meta:
         db_table = "quotation_items"
@@ -982,6 +1033,155 @@ class SyncJob(TimeStampedModel):
         db_table = "sync_jobs"
 
 
+class FeishuSyncState(TimeStampedModel):
+    """Durable synchronization status for one configured Feishu folder."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    storage_connection = models.ForeignKey(
+        StorageConnection,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feishu_sync_states",
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feishu_sync_states",
+    )
+    root_folder_token = models.CharField(max_length=255, db_index=True)
+    root_folder_name = models.CharField(max_length=255, blank=True, default="")
+    status = models.CharField(
+        max_length=24,
+        choices=FeishuSyncStatus.choices,
+        default=FeishuSyncStatus.SYNCED,
+        db_index=True,
+    )
+    last_local_sync_at = models.DateTimeField(blank=True, null=True)
+    latest_feishu_check_at = models.DateTimeField(blank=True, null=True)
+    difference_count = models.PositiveIntegerField(default=0)
+    error_code = models.CharField(max_length=100, blank=True, default="")
+    error_message = models.CharField(max_length=500, blank=True, default="")
+
+    class Meta:
+        db_table = "quotation_feishu_sync_states"
+        ordering = ["root_folder_name", "root_folder_token", "id"]
+        indexes = [
+            models.Index(
+                fields=["requested_by", "status", "-updated_at"],
+                name="quote_fsync_user_status",
+            ),
+        ]
+
+
+class FeishuFileSnapshot(TimeStampedModel):
+    """Last known Feishu metadata for one imported remote file."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    state = models.ForeignKey(
+        FeishuSyncState,
+        on_delete=models.CASCADE,
+        related_name="file_snapshots",
+    )
+    asset = models.ForeignKey(
+        DocumentAsset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feishu_snapshots",
+    )
+    remote_file_token = models.CharField(max_length=255, unique=True)
+    folder_token = models.CharField(max_length=255, db_index=True)
+    folder_path = models.JSONField(blank=True, default=list)
+    file_name = models.CharField(max_length=255)
+    file_type = models.CharField(max_length=40, blank=True, default="")
+    size_bytes = models.PositiveBigIntegerField(default=0)
+    modified_time = models.CharField(max_length=80, blank=True, default="")
+    metadata_fingerprint = models.CharField(max_length=64, db_index=True)
+    deleted_in_feishu = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(blank=True, null=True)
+    last_seen_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "quotation_feishu_file_snapshots"
+        ordering = ["file_name", "remote_file_token"]
+        indexes = [
+            models.Index(
+                fields=["state", "deleted_in_feishu", "folder_token"],
+                name="quote_fsnap_state_deleted",
+            ),
+        ]
+
+
+class FeishuSyncDifference(TimeStampedModel):
+    """One durable, visibility-filtered local-versus-Feishu change."""
+
+    id = models.CharField(
+        primary_key=True,
+        max_length=36,
+        default=_uuid,
+        editable=False,
+    )
+    state = models.ForeignKey(
+        FeishuSyncState,
+        on_delete=models.CASCADE,
+        related_name="differences",
+    )
+    sync_job = models.ForeignKey(
+        SyncJob,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="feishu_differences",
+    )
+    snapshot = models.ForeignKey(
+        FeishuFileSnapshot,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="differences",
+    )
+    difference_type = models.CharField(
+        max_length=20,
+        choices=FeishuSyncDifferenceType.choices,
+        db_index=True,
+    )
+    status = models.CharField(
+        max_length=24,
+        choices=FeishuSyncDifferenceStatus.choices,
+        default=FeishuSyncDifferenceStatus.DETECTED,
+        db_index=True,
+    )
+    file_token = models.CharField(max_length=255, db_index=True)
+    previous_metadata = models.JSONField(blank=True, default=dict)
+    current_metadata = models.JSONField(blank=True, default=dict)
+    error_message = models.CharField(max_length=500, blank=True, default="")
+    resolved_at = models.DateTimeField(blank=True, null=True)
+
+    class Meta:
+        db_table = "quotation_feishu_sync_differences"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sync_job", "file_token", "difference_type"],
+                condition=models.Q(sync_job__isnull=False),
+                name="quote_fdiff_job_file_type_unique",
+            ),
+        ]
+
+
 class AuditEvent(models.Model):
     """Append-only audit event for Quote Desk user activity."""
 
@@ -1206,8 +1406,12 @@ class FeishuConnection(TimeStampedModel):
     token_type = models.CharField(max_length=40, default="Bearer")
     expires_at = models.DateTimeField(null=True, blank=True)
     scope = models.TextField(blank=True, default="")
-    preferred_folder_token = models.CharField(max_length=128, blank=True, null=True)
-    preferred_folder_name = models.CharField(max_length=255, blank=True, null=True)
+    preferred_folder_token = models.CharField(
+        max_length=128, blank=True, null=True
+    )
+    preferred_folder_name = models.CharField(
+        max_length=255, blank=True, null=True
+    )
     shared_folder_bookmarks = models.JSONField(default=list, blank=True)
 
     class Meta:
@@ -1217,7 +1421,9 @@ class FeishuConnection(TimeStampedModel):
     def encrypt_token(cls, value: str) -> str:
         if not value or value.startswith(cls.ENCRYPTED_TOKEN_PREFIX):
             return value
-        return f"{cls.ENCRYPTED_TOKEN_PREFIX}{encryption_service.encrypt(value)}"
+        return (
+            f"{cls.ENCRYPTED_TOKEN_PREFIX}{encryption_service.encrypt(value)}"
+        )
 
     @classmethod
     def decrypt_token(cls, value: str) -> str:

@@ -1,10 +1,10 @@
 from celery.schedules import crontab
-
 from core.periodic_registry import TASK_REGISTRY
+from django.conf import settings
 
 
 def register_periodic_tasks() -> None:
-    """Register document lifecycle cleanup tasks."""
+    """Register Quote Desk cleanup and synchronization tasks."""
     TASK_REGISTRY.add(
         name="quotation_remote_file_cleanup_dispatch",
         task="quotation.tasks.dispatch_remote_file_cleanups",
@@ -22,4 +22,16 @@ def register_periodic_tasks() -> None:
         kwargs={"dry_run": False},
         queue="quotation_sync",
         enabled=True,
+    )
+    TASK_REGISTRY.add(
+        name="quotation_feishu_periodic_sync",
+        task="quotation.tasks.dispatch_feishu_sync",
+        schedule=max(
+            int(settings.QUOTATION_FEISHU_SYNC_INTERVAL_SECONDS),
+            60,
+        ),
+        args=(),
+        kwargs={},
+        queue="quotation_sync",
+        enabled=settings.QUOTATION_FEISHU_PERIODIC_SYNC_ENABLED,
     )

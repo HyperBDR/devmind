@@ -12,13 +12,12 @@ from .files import (
     FeishuFileContentView,
     FeishuFolderSyncView,
     FeishuImportView,
+    FeishuLoginSyncView,
+    FeishuSyncDifferenceResolveView,
     FeishuSyncJobDetailView,
+    FeishuSyncStatusView,
 )
-from .folders import (
-    FeishuDriveTreeView,
-    FeishuFolderView,
-    FeishuSearchView,
-)
+from .folders import FeishuDriveTreeView, FeishuFolderView, FeishuSearchView
 from .upload import FeishuUploadView
 
 _client = common._client
@@ -32,12 +31,15 @@ __all__ = [
     "FeishuFolderView",
     "FeishuHealthView",
     "FeishuImportView",
+    "FeishuLoginSyncView",
     "FeishuOAuthCallbackView",
     "FeishuOAuthStartView",
     "FeishuPreferredFolderView",
     "FeishuSearchView",
     "FeishuStatusView",
     "FeishuSyncJobDetailView",
+    "FeishuSyncDifferenceResolveView",
+    "FeishuSyncStatusView",
     "FeishuUploadView",
     "common",
     "_client",

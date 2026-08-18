@@ -960,7 +960,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(asset.feishu_file_token, "owner_token")
         self.assertEqual(quote.status, QuoteStatus.UPLOADED)
 
-    def test_regular_user_can_sync_archive_as_before(self):
+    def test_regular_user_without_folder_access_cannot_sync_archive(self):
         regular = User.objects.create_user(
             username="regular-sync-user",
             email="regular-sync@example.com",
@@ -982,7 +982,7 @@ class DocumentStorageEndpointTests(TestCase):
         ):
             response = api.post("/api/v1/quotation/feishu/sync-folder")
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 403)
 
     def test_presales_keeps_original_cross_quote_upload_access(self):
         quote = self.create_quote()
