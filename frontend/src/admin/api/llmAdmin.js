@@ -127,7 +127,9 @@ export const llmAdminApi = {
       try {
         const data = await res.json()
         if (data?.detail) err.detail = data.detail
-      } catch (_) {}
+      } catch (error) {
+        void error
+      }
       if (callbacks.onError) callbacks.onError(err.detail || err.message)
       throw err
     }
@@ -135,10 +137,12 @@ export const llmAdminApi = {
     const decoder = new TextDecoder()
     let buffer = ''
     try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
+      let streamDone = false
+      while (!streamDone) {
+        const chunk = await reader.read()
+        streamDone = chunk.done
+        if (streamDone) break
+        buffer += decoder.decode(chunk.value, { stream: true })
         const parts = buffer.split('\n\n')
         buffer = parts.pop() || ''
         for (const part of parts) {
@@ -164,7 +168,9 @@ export const llmAdminApi = {
               else if (!payload.ok && callbacks.onError)
                 callbacks.onError(payload.detail || 'Unknown error')
             }
-          } catch (_) {}
+          } catch (error) {
+            void error
+          }
         }
       }
       if (buffer.trim()) {
@@ -180,7 +186,9 @@ export const llmAdminApi = {
               callbacks.onError
             )
               callbacks.onError(payload.detail || 'Unknown error')
-          } catch (_) {}
+          } catch (error) {
+            void error
+          }
         }
       }
     } catch (readErr) {

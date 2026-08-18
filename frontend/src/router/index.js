@@ -139,6 +139,12 @@ const routes = [
     meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
   },
   {
+    path: '/quotation/permissions',
+    name: 'QuotationPermissions',
+    component: () => import('@/pages/Quotation.vue'),
+    meta: { requiresAuth: true, requiredFeature: 'quotation_management' }
+  },
+  {
     path: '/quotation/details/:id',
     name: 'QuotationDetails',
     component: () => import('@/pages/Quotation.vue'),

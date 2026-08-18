@@ -14,6 +14,8 @@ def _uuid() -> str:
 
 
 class QuoteStatus(models.TextChoices):
+    """Persisted quote lifecycle shared by manual and Feishu-imported quotes."""
+
     DRAFT = "draft", "draft"
     GENERATED = "generated", "generated"
     UPLOADED = "uploaded", "uploaded"
@@ -130,6 +132,126 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
+
+
+class QuotationMembershipRole(models.TextChoices):
+    """Supported roles inside the quotation platform."""
+
+    ADMIN = "quotation_admin", "Quotation administrator"
+    USER = "quotation_user", "Quotation user"
+
+
+class QuotationMembership(TimeStampedModel):
+    """A user's role inside the quotation platform."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quotation_memberships",
+    )
+    role = models.CharField(
+        max_length=40,
+        choices=QuotationMembershipRole.choices,
+    )
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_quotation_memberships",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = "quotation_memberships"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(is_active=True),
+                name="quotation_membership_active_user_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["user", "is_active"],
+                name="quotation_member_user_active",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.role}"
+
+
+class QuotationViewPermissionTarget(models.TextChoices):
+    """Supported targets for administrator-granted view access."""
+
+    FOLDER = "folder", "Feishu folder"
+    DOCUMENT = "document", "Feishu document"
+
+
+class QuotationViewPermission(TimeStampedModel):
+    """Administrator-granted view access to a Feishu folder or file."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="quotation_view_permissions",
+    )
+    target_type = models.CharField(
+        max_length=20,
+        choices=QuotationViewPermissionTarget.choices,
+    )
+    folder_token = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    folder_name = models.CharField(max_length=255, blank=True, default="")
+    document = models.ForeignKey(
+        "quotation.DocumentAsset",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="quotation_view_permissions",
+    )
+    granted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="granted_quotation_view_permissions",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        db_table = "quotation_view_permissions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "target_type", "folder_token"],
+                condition=(
+                    models.Q(
+                        is_active=True,
+                        target_type=QuotationViewPermissionTarget.FOLDER,
+                    )
+                    & ~models.Q(folder_token="")
+                ),
+                name="quotation_active_folder_view_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "target_type", "document"],
+                condition=(
+                    models.Q(
+                        is_active=True,
+                        target_type=QuotationViewPermissionTarget.DOCUMENT,
+                    )
+                    & models.Q(document__isnull=False)
+                ),
+                name="quotation_active_document_view_unique",
+            ),
+        ]
+
+    def __str__(self):
+        target = self.folder_name or self.document_id or "unknown"
+        return f"{self.user_id}:{self.target_type}:{target}"
 
 
 class QuotationQuerySet(models.QuerySet):

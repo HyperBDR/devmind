@@ -32,12 +32,16 @@ export const salsApi = {
   },
 
   async getAssigneeStats(params = {}) {
-    const response = await apiClient.get('/v1/sals/stats/assignee-stats/', { params })
+    const response = await apiClient.get('/v1/sals/stats/assignee-stats/', {
+      params
+    })
     return response
   },
 
   async getCustomerStats(params = {}) {
-    const response = await apiClient.get('/v1/sals/stats/customer-stats/', { params })
+    const response = await apiClient.get('/v1/sals/stats/customer-stats/', {
+      params
+    })
     return response
   },
 
@@ -62,7 +66,9 @@ export const salsApi = {
   },
 
   async getRecentIncidents(params = {}) {
-    const response = await apiClient.get('/v1/sals/incidents/recent/', { params })
+    const response = await apiClient.get('/v1/sals/incidents/recent/', {
+      params
+    })
     return response
   },
 

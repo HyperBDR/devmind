@@ -14,13 +14,13 @@ from rest_framework.views import APIView
 
 from quotation.audit import business_audit_events_query, record_audit_event
 from quotation.models import AuditEvent
-from quotation.permissions import is_quotation_admin
+from quotation.permissions import is_quotation_platform_admin
 from quotation.serializers import AuditEventSerializer
 
 
 def _can_export_audit(user) -> bool:
     """Return whether the user may export operation audit records."""
-    return is_quotation_admin(user)
+    return is_quotation_platform_admin(user)
 
 
 def _pagination(request) -> tuple[int, int]:
@@ -42,7 +42,7 @@ def _audit_queryset(request):
     include_internal = (
         request.query_params.get("include_internal", "").lower() == "true"
     )
-    if include_internal and not is_quotation_admin(request.user):
+    if include_internal and not is_quotation_platform_admin(request.user):
         record_audit_event(
             request=request,
             module="audit",

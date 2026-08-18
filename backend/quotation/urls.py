@@ -52,6 +52,10 @@ from quotation.views.quotations import (
     QuotationGenerateView,
     QuotationListCreateView,
 )
+from quotation.views.view_permissions import (
+    QuotationViewPermissionRevokeView,
+    QuotationViewPermissionView,
+)
 
 urlpatterns = [
     path("dashboard/summary", DashboardSummaryView.as_view()),
@@ -62,6 +66,11 @@ urlpatterns = [
     path("templates", QuotationTemplateListCreateView.as_view()),
     path("audit-events", AuditEventListView.as_view()),
     path("audit-events/export", AuditEventExportView.as_view()),
+    path("view-permissions", QuotationViewPermissionView.as_view()),
+    path(
+        "view-permissions/<int:permission_id>",
+        QuotationViewPermissionRevokeView.as_view(),
+    ),
     path("catalog", UserQuotationCatalogView.as_view()),
     path("catalog/import-legacy", LegacyCatalogImportView.as_view()),
     path("catalog/bootstrap", CatalogBootstrapView.as_view()),

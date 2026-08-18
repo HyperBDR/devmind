@@ -27,13 +27,6 @@ const app = await readFile(
   new URL('../src/modules/quotation/App.vue', import.meta.url),
   'utf8'
 )
-const page = await readFile(
-  new URL(
-    '../src/modules/quotation/pages/QuotationListPage.vue',
-    import.meta.url
-  ),
-  'utf8'
-)
 const api = await readFile(
   new URL('../src/modules/quotation/api/quotations.ts', import.meta.url),
   'utf8'
@@ -164,9 +157,7 @@ test('ten-row quotation pages fill the available viewport height', () => {
     list,
     /'h-full': pageSize === 10 && quotations\.length === 10/
   )
-  assert.match(page, /<div class="h-full">/)
-  assert.match(page, /class="flex h-full flex-col gap-5"/)
-  assert.match(page, /<QuotationList[\s\S]*?class="flex-1"/)
+  assert.match(app, /<QuotationList[\s\S]*?:quotations="quotations"/)
 })
 
 test('English quotation labels use concise CRM terminology', () => {

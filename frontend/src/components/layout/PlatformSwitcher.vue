@@ -1,5 +1,5 @@
 <template>
-  <div v-if="platforms.length > 1" class="relative" ref="switcherRef">
+  <div v-if="platforms.length > 0" class="relative" ref="switcherRef">
     <button
       @click="open = !open"
       class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium shadow-sm transition-colors"
