@@ -39,6 +39,20 @@ class TestAlibabaCloud:
         result = provider._extract_cash_balance(response)
         assert result == 100.50
 
+    def test_build_client_uses_configured_timeout(self):
+        """Alibaba SDK client should honor the configured request timeout."""
+        provider = self._make_provider()
+        provider.config.timeout = 45
+
+        with patch(
+            "cloud_billing.clouds.alibaba_provider.Client"
+        ) as client_class:
+            provider._build_client("business.aliyuncs.com")
+
+        sdk_config = client_class.call_args.args[0]
+        assert sdk_config.connect_timeout == 45_000
+        assert sdk_config.read_timeout == 45_000
+
     def test_extract_cash_balance_returns_cash_plus_credit(self):
         """Balance should be cash + credit for international accounts."""
         provider = self._make_provider()

@@ -140,9 +140,12 @@ class AlibabaCloud(BaseCloudProvider):
 
     def _build_client(self, endpoint: str) -> Client:
         """Build a BSS client for the given endpoint."""
+        timeout_ms = self.config.timeout * 1000
         config = Config(
             access_key_id=self.config.api_key,
             access_key_secret=self.config.api_secret,
+            connect_timeout=timeout_ms,
+            read_timeout=timeout_ms,
             endpoint=endpoint,
         )
         return Client(config)
