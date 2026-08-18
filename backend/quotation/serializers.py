@@ -6,6 +6,7 @@ from urllib.parse import quote, urlparse
 
 from django.conf import settings
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
 from quotation.models import (
@@ -19,7 +20,11 @@ from quotation.models import (
     ReplicaSyncStatus,
     UserQuotationCatalog,
 )
-from quotation.permissions import is_quotation_admin
+from quotation.permissions import (
+    can_delete_any_quotation_document,
+    is_quotation_admin,
+    user_display_email,
+)
 from quotation.services.storage_control import remote_document_reference
 
 MAX_QUOTATION_AMOUNT = Decimal("9999999999999999.99")
@@ -1168,6 +1173,8 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
     parse_confidence = serializers.SerializerMethodField()
     parsed_quotation_id = serializers.SerializerMethodField()
     parsed_quote_no = serializers.SerializerMethodField()
+    can_archive = serializers.SerializerMethodField()
+    can_restore = serializers.SerializerMethodField()
 
     def _latest_parse_result(
         self, obj: DocumentAsset
@@ -1230,6 +1237,39 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
             return None
         return quotation.source_quote_no or quotation.quote_no
 
+    def get_can_archive(self, obj: DocumentAsset) -> bool:
+        return (
+            obj.lifecycle_state == "active"
+            and not obj.legal_hold_at
+            and self._can_manage_lifecycle(obj)
+        )
+
+    def _can_manage_lifecycle(self, obj: DocumentAsset) -> bool:
+        request = self.context.get("request")
+        if request is None:
+            return False
+        owner = (obj.created_by_email or "").lower()
+        if owner and owner == user_display_email(request.user):
+            return True
+        if not hasattr(self, "_can_delete_any_document"):
+            self._can_delete_any_document = (
+                can_delete_any_quotation_document(request.user)
+            )
+        return self._can_delete_any_document
+
+    def get_can_restore(self, obj: DocumentAsset) -> bool:
+        request = self.context.get("request")
+        if (
+            request is None
+            or obj.lifecycle_state != "archived"
+            or (
+                obj.purge_after is not None
+                and obj.purge_after <= timezone.now()
+            )
+        ):
+            return False
+        return self._can_manage_lifecycle(obj)
+
     class Meta:
         model = DocumentAsset
         fields = [
@@ -1250,6 +1290,12 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
             "parsed_quotation_id",
             "parsed_quote_no",
             "created_by_email",
+            "lifecycle_state",
+            "archived_at",
+            "purge_after",
+            "legal_hold_at",
+            "can_archive",
+            "can_restore",
             "created_at",
         ]
 

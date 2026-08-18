@@ -95,7 +95,7 @@ class DocumentStorageEndpointTests(TestCase):
         )
         self.assertNotIn(asset.file_name, asset.storage_key)
 
-    def test_local_upload_download_and_delete_use_uuid_storage(self):
+    def test_local_upload_download_and_archive_use_uuid_storage(self):
         quote = self.create_quote()
         upload_content = minimal_xlsx_bytes(b"local-file")
         response = self.api.post(
@@ -131,9 +131,11 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertFalse(ExportJob.objects.exists())
 
         delete = self.api.delete(f"/api/v1/quotation/documents/{asset.id}")
-        self.assertEqual(delete.status_code, 404)
+        self.assertEqual(delete.status_code, 200)
         self.assertTrue((self.storage / asset.storage_key).exists())
         self.assertTrue(DocumentAsset.objects.filter(pk=asset.id).exists())
+        asset.refresh_from_db()
+        self.assertEqual(asset.lifecycle_state, "archived")
 
     def test_feishu_import_uses_uuid_storage_and_keeps_original_name(self):
         locked_references = []
@@ -811,7 +813,7 @@ class DocumentStorageEndpointTests(TestCase):
         self.assertEqual(download.status_code, 403)
 
         delete = other_api.delete(f"/api/v1/quotation/documents/{asset.id}")
-        self.assertEqual(delete.status_code, 404)
+        self.assertEqual(delete.status_code, 403)
         self.assertTrue(DocumentAsset.objects.filter(pk=asset.id).exists())
 
     def test_feishu_upload_rejects_inaccessible_quotation_before_remote_call(

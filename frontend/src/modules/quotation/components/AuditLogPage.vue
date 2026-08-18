@@ -57,6 +57,8 @@ const actionOptions = [
   'upload',
   'download',
   'import',
+  'archive',
+  'restore',
 ]
 const moduleFilterOptions = computed(() => [
   { value: '', label: t('quotation.pages.audit.allModules') },

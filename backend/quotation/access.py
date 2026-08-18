@@ -6,6 +6,7 @@ from rest_framework.response import Response
 
 from quotation.models import (
     DocumentAsset,
+    DocumentLifecycleState,
     Quotation,
     QuotationSourceType,
 )
@@ -38,7 +39,7 @@ def can_access_quotation(
     quotation: Quotation | None,
     action: str = DocumentAction.VIEW,
 ) -> bool:
-    if quotation is None:
+    if quotation is None or quotation.archived_at is not None:
         return False
     if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
         return True
@@ -53,6 +54,7 @@ def filter_accessible_quotations(
     qs: QuerySet[Quotation],
     action: str = DocumentAction.VIEW,
 ):
+    qs = qs.filter(archived_at__isnull=True)
     if can_view_all_quotations(user):
         return qs
     return qs.filter(
@@ -117,6 +119,14 @@ def get_accessible_document(
         return None, Response({"detail": "document not found"}, status=404)
     if not can_access_document(user, asset, action):
         return None, forbidden_response()
+    if (
+        asset.lifecycle_state == DocumentLifecycleState.ARCHIVED
+        and action not in {DocumentAction.VIEW, DocumentAction.DELETE}
+    ):
+        return None, Response(
+            {"detail": "document is archived"},
+            status=status.HTTP_409_CONFLICT,
+        )
     return asset, None
 
 

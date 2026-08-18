@@ -725,6 +725,11 @@ async function handleImportedQuotationCreated(id: string) {
   selectedQuotationId.value = id
 }
 
+async function handleImportedQuotationLifecycleChanged() {
+  await refreshQuotations()
+  await loadQuotationFormContext()
+}
+
 async function handleRefreshCustomers() {
   await loadQuotationFormContext()
 }
@@ -1156,6 +1161,7 @@ function reloadPage() {
             embedded
             @toast="triggerToast"
             @quotation-created="handleImportedQuotationCreated"
+            @quotation-lifecycle-changed="handleImportedQuotationLifecycleChanged"
           />
         </div>
 

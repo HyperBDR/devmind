@@ -98,6 +98,10 @@ async function handleImportedQuotationCreated(_id: string) {
   await load()
 }
 
+async function handleImportedQuotationLifecycleChanged() {
+  await load()
+}
+
 onMounted(() => {
   void load({
     page: 1,
@@ -285,6 +289,7 @@ function handleUpdateQuoteStatus(
           embedded
           @toast="showToast"
           @quotation-created="handleImportedQuotationCreated"
+          @quotation-lifecycle-changed="handleImportedQuotationLifecycleChanged"
         />
       </div>
 

@@ -21,7 +21,23 @@ export interface ImportedDocument {
   parsed_quotation_id?: string | null;
   parsed_quote_no?: string | null;
   created_by_email?: string | null;
+  lifecycle_state: 'active' | 'archived';
+  archived_at?: string | null;
+  purge_after?: string | null;
+  legal_hold_at?: string | null;
+  can_archive?: boolean;
+  can_restore?: boolean;
   created_at?: string | null;
+}
+
+export interface DocumentLifecycleResult {
+  document: ImportedDocument;
+  impact: {
+    quotation: 'archived' | 'restored' | 'retained';
+    versions: 'retained';
+    assets_affected: number;
+    remote_copies: string;
+  };
 }
 
 export interface ParsedQuotationItem {
@@ -96,8 +112,34 @@ export interface ConfirmDocumentParseResult {
   reused: boolean;
 }
 
-export function listImportedFeishuDocuments(): Promise<ImportedDocument[]> {
-  return apiRequest<ImportedDocument[]>('/documents?source=feishu');
+export function listImportedFeishuDocuments(
+  lifecycle: 'active' | 'archived' = 'active',
+): Promise<ImportedDocument[]> {
+  return apiRequest<ImportedDocument[]>(
+    `/documents?source=feishu&lifecycle=${lifecycle}`,
+  );
+}
+
+export function archiveImportedDocument(
+  documentId: string,
+  reason = '',
+): Promise<DocumentLifecycleResult> {
+  return apiRequest<DocumentLifecycleResult>(
+    `/documents/${encodeURIComponent(documentId)}`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ reason }),
+    },
+  );
+}
+
+export function restoreImportedDocument(
+  documentId: string,
+): Promise<DocumentLifecycleResult> {
+  return apiRequest<DocumentLifecycleResult>(
+    `/documents/${encodeURIComponent(documentId)}/restore`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
 }
 
 export function parseImportedDocument(

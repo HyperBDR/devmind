@@ -120,6 +120,8 @@ test('Audit Log uses concise, native English product copy', () => {
   assert.equal(copy.actions.updatedQuote, 'Updated quote')
   assert.equal(copy.actions.deletedQuote, 'Deleted quote')
   assert.equal(copy.actions.deletedCatalogItem, 'Deleted catalog item')
+  assert.equal(copy.actions.archive, 'Archived file')
+  assert.equal(copy.actions.restore, 'Restored file')
   assert.equal(copy.catalogItemTypes.software_product, 'Software product')
   assert.equal(copy.viewVersionHistory, 'View quote history')
   assert.equal(copy.succeeded, 'Succeeded')
@@ -137,6 +139,8 @@ test('Audit Log only offers approved business action filters', () => {
     'upload',
     'download',
     'import',
+    'archive',
+    'restore',
   ]) {
     assert.match(auditPage, new RegExp(`'${action}'`))
   }

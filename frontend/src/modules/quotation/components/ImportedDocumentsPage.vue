@@ -1,6 +1,15 @@
 <script setup lang="ts">
+import {
+  Dialog,
+  DialogPanel,
+  DialogTitle,
+  TransitionRoot,
+} from '@headlessui/vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
+  Archive,
+  ArchiveRestore,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Download,
@@ -14,13 +23,15 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
-  CheckCircle2,
+  ShieldAlert,
   X,
 } from 'lucide-vue-next'
 import {
+  archiveImportedDocument,
   downloadImportedDocument,
   listImportedFeishuDocuments,
   parseImportedDocument,
+  restoreImportedDocument,
   type DocumentParseResult,
   type ImportedDocument,
 } from '../api/documents'
@@ -37,6 +48,7 @@ import { useQuotationI18n } from '../composables/useQuotationI18n'
 const emit = defineEmits<{
   toast: [message: string, type?: 'success' | 'info' | 'error']
   quotationCreated: [quotationId: string]
+  quotationLifecycleChanged: []
 }>()
 
 const props = defineProps<{
@@ -52,7 +64,12 @@ const collapsedFolderTokens = ref<Set<string>>(new Set())
 const loading = ref(false)
 const search = ref('')
 const typeFilter = ref('ALL')
+const lifecycleFilter = ref<'active' | 'archived'>('active')
 const downloadingId = ref<string | null>(null)
+const archivingId = ref<string | null>(null)
+const restoringId = ref<string | null>(null)
+const pendingArchiveDoc = ref<ImportedDocument | null>(null)
+const archiveConfirmButton = ref<HTMLButtonElement | null>(null)
 const parsingIds = ref<Set<string>>(new Set())
 let reconcileTimer: number | undefined
 
@@ -102,6 +119,11 @@ const typeFilterOptions = computed(() => [
   { value: 'pdf', label: t('quotation.pages.imports.typePdf') },
 ])
 
+const lifecycleFilterOptions = computed(() => [
+  { value: 'active', label: t('quotation.pages.imports.lifecycleActive') },
+  { value: 'archived', label: t('quotation.pages.imports.lifecycleArchived') },
+])
+
 function formatBytes(size: number): string {
   if (!size || size < 0) return '—'
   if (size < 1024) return `${size} B`
@@ -148,7 +170,9 @@ async function refresh(options: {
   try {
     let createdQuotationIds: string[] = []
     if (options.syncRemote) {
-      const cachedItems = await listImportedFeishuDocuments().catch(
+      const cachedItems = await listImportedFeishuDocuments(
+        lifecycleFilter.value,
+      ).catch(
         () => null,
       )
       if (cachedItems) {
@@ -190,7 +214,7 @@ async function refresh(options: {
         }
       }
     }
-    const items = await listImportedFeishuDocuments()
+    const items = await listImportedFeishuDocuments(lifecycleFilter.value)
     docs.value = items
     rebuildArchiveTree(items)
     if (createdQuotationIds.length) {
@@ -235,7 +259,9 @@ async function handleParse(doc: ImportedDocument, event?: Event) {
     }
   } catch (err: unknown) {
     notify(err instanceof Error ? err.message : t('quotation.pages.imports.parseFailed'), 'error')
-    const items = await listImportedFeishuDocuments().catch(() => null)
+    const items = await listImportedFeishuDocuments(
+      lifecycleFilter.value,
+    ).catch(() => null)
     if (items) {
       docs.value = items
       rebuildArchiveTree(items)
@@ -365,7 +391,9 @@ const filtered = computed(() => {
 })
 
 const hasActiveFilters = computed(
-  () => search.value.trim().length > 0 || typeFilter.value !== 'ALL',
+  () => search.value.trim().length > 0
+    || typeFilter.value !== 'ALL'
+    || lifecycleFilter.value !== 'active',
 )
 
 type ArchiveTreeRow =
@@ -482,6 +510,7 @@ const rootClass = computed(() =>
 function handleResetFilters() {
   search.value = ''
   typeFilter.value = 'ALL'
+  lifecycleFilter.value = 'active'
 }
 
 function toggleFolder(folderToken: string) {
@@ -496,6 +525,11 @@ function toggleFolder(folderToken: string) {
 
 watch(search, () => {
   collapsedFolderTokens.value = new Set()
+})
+
+watch(lifecycleFilter, () => {
+  collapsedFolderTokens.value = new Set()
+  void refresh()
 })
 
 function handleOpenFeishu(doc: ImportedDocument, event?: Event) {
@@ -522,13 +556,74 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
   }
 }
 
+function handleArchive(doc: ImportedDocument, event?: Event) {
+  event?.stopPropagation()
+  pendingArchiveDoc.value = doc
+}
+
+function closeArchiveDialog() {
+  if (archivingId.value) return
+  pendingArchiveDoc.value = null
+}
+
+async function confirmArchive() {
+  const doc = pendingArchiveDoc.value
+  if (!doc) return
+  archivingId.value = doc.id
+  try {
+    await archiveImportedDocument(doc.id, 'user_requested')
+    pendingArchiveDoc.value = null
+    notify(
+      t('quotation.pages.imports.archiveSuccess', {
+        fileName: doc.file_name,
+      }),
+      'success',
+    )
+    await refresh()
+    emit('quotationLifecycleChanged')
+  } catch (err: unknown) {
+    notify(
+      err instanceof Error
+        ? err.message
+        : t('quotation.pages.imports.archiveFailed'),
+      'error',
+    )
+  } finally {
+    archivingId.value = null
+  }
+}
+
+async function handleRestore(doc: ImportedDocument, event?: Event) {
+  event?.stopPropagation()
+  restoringId.value = doc.id
+  try {
+    await restoreImportedDocument(doc.id)
+    notify(
+      t('quotation.pages.imports.restoreSuccess', {
+        fileName: doc.file_name,
+      }),
+      'success',
+    )
+    await refresh()
+    emit('quotationLifecycleChanged')
+  } catch (err: unknown) {
+    notify(
+      err instanceof Error
+        ? err.message
+        : t('quotation.pages.imports.restoreFailed'),
+      'error',
+    )
+  } finally {
+    restoringId.value = null
+  }
+}
+
 </script>
 
 <template>
   <div :class="rootClass">
     <div
       id="import-filter-panel"
-      v-show="false"
       data-filter-toolbar
       aria-label="Imported file filters"
       class="rounded-xl border border-dm-border-light bg-white p-3 shadow-xs"
@@ -570,6 +665,18 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
             />
           </div>
 
+          <div class="min-w-0 sm:w-40">
+            <label class="sr-only">
+              {{ t('quotation.pages.imports.lifecycleLabel') }}
+            </label>
+            <FormSelect
+              v-model="lifecycleFilter"
+              class-name="w-full"
+              :trigger-class-name="`${FORM_SELECT_COMPACT_TRIGGER_CLASS} rounded-lg border-dm-border-light bg-white focus:border-blue-300 focus:ring-2 focus:ring-blue-100`"
+              :options="lifecycleFilterOptions"
+            />
+          </div>
+
           <div class="flex h-10 items-center justify-center rounded-lg bg-slate-50 px-3 text-xs font-semibold text-dm-text-tertiary sm:min-w-24">
             {{ t('quotation.pages.imports.filterResultsCount', { count: filtered.length }) }}
           </div>
@@ -599,7 +706,6 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
 
     <div
       id="import-table-panel"
-      v-show="false"
       :class="[
         'overflow-hidden rounded-xl border border-dm-border-light bg-white shadow-xs',
         props.embedded ? '' : 'min-h-0 flex-1',
@@ -690,6 +796,19 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
                       >
                         {{ parseStatusLabel(row.doc) }}
                       </span>
+                      <span
+                        v-if="row.doc.lifecycle_state === 'archived'"
+                        class="ml-1 mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
+                      >
+                        {{ t('quotation.pages.imports.lifecycleArchived') }}
+                      </span>
+                      <span
+                        v-if="row.doc.legal_hold_at"
+                        class="ml-1 mt-1 inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700 ring-1 ring-inset ring-sky-200"
+                      >
+                        <ShieldAlert class="h-3 w-3" />
+                        {{ t('quotation.pages.imports.legalHoldBadge') }}
+                      </span>
                     </div>
                   </div>
                 </td>
@@ -699,7 +818,7 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
                 <td class="px-4 py-3.5">
                   <div class="flex items-center justify-center gap-1.5">
                     <button
-                      v-if="canParse(row.doc) && (!row.doc.parse_result_id || row.doc.parse_status === 'failed')"
+                      v-if="row.doc.lifecycle_state === 'active' && canParse(row.doc) && (!row.doc.parse_result_id || row.doc.parse_status === 'failed')"
                       type="button"
                       class="cursor-pointer rounded-sm p-1 text-blue-600 transition duration-100 hover:bg-blue-50 hover:text-blue-800 disabled:cursor-wait disabled:opacity-50"
                       :disabled="parsingIds.has(row.doc.id)"
@@ -710,7 +829,7 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
                       <FileSearch v-else class="h-4 w-4" />
                     </button>
                     <button
-                      v-else-if="canParse(row.doc) && row.doc.parse_result_id && row.doc.parse_status === 'confirmed'"
+                      v-else-if="row.doc.lifecycle_state === 'active' && canParse(row.doc) && row.doc.parse_result_id && row.doc.parse_status === 'confirmed'"
                       type="button"
                       class="cursor-pointer rounded-sm p-1 text-blue-600 transition duration-100 hover:bg-blue-50 hover:text-blue-800"
                       :title="t('quotation.pages.imports.viewQuotation')"
@@ -719,7 +838,7 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
                       <CheckCircle2 class="h-4 w-4 text-emerald-600" />
                     </button>
                     <button
-                      v-if="row.doc.remote_access_available && row.doc.feishu_url"
+                      v-if="row.doc.lifecycle_state === 'active' && row.doc.remote_access_available && row.doc.feishu_url"
                       type="button"
                       class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary transition duration-100 hover:bg-dm-primary-bg hover:text-blue-700"
                       :title="t('quotation.pages.imports.openFeishu')"
@@ -728,6 +847,7 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
                       <ExternalLink class="h-4 w-4" />
                     </button>
                     <button
+                      v-if="row.doc.lifecycle_state === 'active'"
                       type="button"
                       class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary transition duration-100 hover:bg-slate-100 hover:text-dm-text"
                       :title="t('quotation.common.download')"
@@ -735,6 +855,38 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
                     >
                       <Loader2 v-if="downloadingId === row.doc.id" class="h-4 w-4 animate-spin" />
                       <Download v-else class="h-4 w-4" />
+                    </button>
+                    <button
+                      v-if="row.doc.lifecycle_state === 'active' && row.doc.can_archive"
+                      type="button"
+                      class="cursor-pointer rounded-sm p-1 text-rose-600 transition duration-100 hover:bg-rose-50 hover:text-rose-800 disabled:cursor-wait disabled:opacity-50"
+                      :disabled="archivingId === row.doc.id"
+                      :title="t('quotation.pages.imports.archiveAction')"
+                      @click="handleArchive(row.doc, $event)"
+                    >
+                      <Loader2 v-if="archivingId === row.doc.id" class="h-4 w-4 animate-spin" />
+                      <Archive v-else class="h-4 w-4" />
+                    </button>
+                    <button
+                      v-else-if="row.doc.lifecycle_state === 'active' && row.doc.legal_hold_at"
+                      type="button"
+                      class="cursor-not-allowed rounded-sm p-1 text-sky-600 opacity-70"
+                      disabled
+                      :title="t('quotation.pages.imports.legalHoldProtected')"
+                      :aria-label="t('quotation.pages.imports.legalHoldProtected')"
+                    >
+                      <ShieldAlert class="h-4 w-4" />
+                    </button>
+                    <button
+                      v-if="row.doc.lifecycle_state === 'archived' && row.doc.can_restore"
+                      type="button"
+                      class="cursor-pointer rounded-sm p-1 text-blue-600 transition duration-100 hover:bg-blue-50 hover:text-blue-800 disabled:cursor-wait disabled:opacity-50"
+                      :disabled="restoringId === row.doc.id"
+                      :title="t('quotation.pages.imports.restoreAction')"
+                      @click="handleRestore(row.doc, $event)"
+                    >
+                      <Loader2 v-if="restoringId === row.doc.id" class="h-4 w-4 animate-spin" />
+                      <ArchiveRestore v-else class="h-4 w-4" />
                     </button>
                   </div>
                 </td>
@@ -744,6 +896,56 @@ async function handleDownload(doc: ImportedDocument, event?: Event) {
         </table>
       </div>
     </div>
+
+    <TransitionRoot as="template" :show="Boolean(pendingArchiveDoc)">
+      <Dialog
+        as="div"
+        class="relative z-50"
+        :initial-focus="archiveConfirmButton"
+        @close="closeArchiveDialog"
+      >
+        <div class="fixed inset-0 bg-slate-950/40" aria-hidden="true" />
+        <div class="fixed inset-0 overflow-y-auto p-4">
+          <div class="flex min-h-full items-center justify-center">
+            <DialogPanel
+              class="w-full max-w-md rounded-xl border border-dm-border-light bg-white p-5 shadow-xl"
+            >
+              <DialogTitle class="text-base font-semibold text-dm-text">
+                {{ t('quotation.pages.imports.archiveModalTitle') }}
+              </DialogTitle>
+              <p class="mt-2 text-sm leading-6 text-dm-text-secondary">
+                {{ t('quotation.pages.imports.archiveModalDesc', {
+                  fileName: pendingArchiveDoc?.file_name || '',
+                }) }}
+              </p>
+              <p class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+                {{ t('quotation.pages.imports.archiveImpact') }}
+              </p>
+              <div class="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  class="dm-btn-secondary h-9 px-3 text-sm"
+                  :disabled="Boolean(archivingId)"
+                  @click="closeArchiveDialog"
+                >
+                  {{ t('quotation.common.cancel') }}
+                </button>
+                <button
+                  ref="archiveConfirmButton"
+                  type="button"
+                  class="inline-flex h-9 items-center gap-2 rounded-lg bg-rose-600 px-3 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-wait disabled:opacity-50"
+                  :disabled="Boolean(archivingId)"
+                  @click="confirmArchive"
+                >
+                  <Loader2 v-if="archivingId" class="h-4 w-4 animate-spin" />
+                  {{ t('quotation.pages.imports.archiveConfirm') }}
+                </button>
+              </div>
+            </DialogPanel>
+          </div>
+        </div>
+      </Dialog>
+    </TransitionRoot>
 
   </div>
 </template>
