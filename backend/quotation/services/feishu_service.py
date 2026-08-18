@@ -21,6 +21,8 @@ def feishu_file_not_found(exc: FeishuAPIError) -> bool:
     message = str(exc).lower()
     hints = (
         "not found",
+        "does not exist",
+        "missing",
         "不存在",
         "已删除",
         "deleted",

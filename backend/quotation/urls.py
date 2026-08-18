@@ -1,8 +1,5 @@
 from django.urls import path
-from quotation.views.audit import (
-    AuditEventExportView,
-    AuditEventListView,
-)
+from quotation.views.audit import AuditEventExportView, AuditEventListView
 from quotation.views.catalog import (
     CatalogBootstrapView,
     LegacyCatalogImportView,
@@ -37,12 +34,15 @@ from quotation.views.feishu import (
     FeishuFolderView,
     FeishuHealthView,
     FeishuImportView,
+    FeishuLoginSyncView,
     FeishuOAuthCallbackView,
     FeishuOAuthStartView,
     FeishuPreferredFolderView,
     FeishuSearchView,
     FeishuStatusView,
+    FeishuSyncDifferenceResolveView,
     FeishuSyncJobDetailView,
+    FeishuSyncStatusView,
     FeishuUploadView,
 )
 from quotation.views.health import ExportMetricsView, StorageMetricsView
@@ -129,6 +129,12 @@ urlpatterns = [
     path("feishu/drive-tree", FeishuDriveTreeView.as_view()),
     path("feishu/search", FeishuSearchView.as_view()),
     path("feishu/sync-folder", FeishuFolderSyncView.as_view()),
+    path("feishu/sync-on-login", FeishuLoginSyncView.as_view()),
+    path("feishu/sync-status", FeishuSyncStatusView.as_view()),
+    path(
+        "feishu/sync-differences/<str:difference_id>/resolve",
+        FeishuSyncDifferenceResolveView.as_view(),
+    ),
     path(
         "feishu/sync-jobs/<str:job_id>",
         FeishuSyncJobDetailView.as_view(),

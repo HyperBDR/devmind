@@ -1846,15 +1846,19 @@ class DocumentParseEndpointTests(TestCase):
 
     def test_feishu_sync_can_enqueue_compatible_async_job(self):
         cache.delete("quotation:feishu:archive-folder-sync")
-        with patch(
-            "quotation.tasks.sync_feishu_folder_task.apply_async"
-        ) as enqueue:
-            enqueue.return_value.id = "celery-sync-task"
-            response = self.api.post(
-                "/api/v1/quotation/feishu/sync-folder",
-                data={"async": True},
-                format="json",
-            )
+        with self.settings(
+            QUOTATION_FEISHU_ARCHIVE_FOLDER_TOKEN="folder_token",
+            QUOTATION_STORAGE_ROUTER_ENABLED=False,
+        ):
+            with patch(
+                "quotation.tasks.sync_feishu_folder_task.apply_async"
+            ) as enqueue:
+                enqueue.return_value.id = "celery-sync-task"
+                response = self.api.post(
+                    "/api/v1/quotation/feishu/sync-folder",
+                    data={"async": True},
+                    format="json",
+                )
 
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.data["created_count"], 0)

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useUserStore } from '@/store/user'
+import { triggerFeishuLoginSync } from '../api/feishu'
 
 export interface AppUser {
   name: string
@@ -33,6 +34,24 @@ function mapDevMindUser(user: any): AppUser | null {
   }
 }
 
+function triggerScopedFeishuLoginSync(user: AppUser) {
+  const scope = encodeURIComponent(user.email || user.name)
+  const storageKey = `quotation-feishu-login-sync:${scope}`
+  try {
+    if (window.sessionStorage.getItem(storageKey)) return
+    window.sessionStorage.setItem(storageKey, 'started')
+  } catch {
+    // Authentication must remain available when browser storage is disabled.
+  }
+  void triggerFeishuLoginSync().catch(() => {
+    try {
+      window.sessionStorage.removeItem(storageKey)
+    } catch {
+      // A later manual or periodic synchronization can recover.
+    }
+  })
+}
+
 export const useAuthStore = defineStore('quotation-auth', () => {
   const userStore = useUserStore()
   const authReady = ref(false)
@@ -56,6 +75,8 @@ export const useAuthStore = defineStore('quotation-auth', () => {
       }
       if (!userStore.user) {
         authError.value = 'DevMind 登录状态不可用，请重新登录。'
+      } else if (currentUser.value) {
+        triggerScopedFeishuLoginSync(currentUser.value)
       }
     } catch (error: unknown) {
       authError.value =
