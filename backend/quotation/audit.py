@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from contextvars import ContextVar
 from hashlib import sha256
 from ipaddress import ip_address
-import re
 from typing import Any
 
 from django.db.models import Q
@@ -42,6 +42,7 @@ def set_request_audit_change_details(request, changes: dict) -> None:
     """Attach server-verified old/new business values to one request."""
     raw_request = getattr(request, "_request", request)
     raw_request.quotation_audit_change_details = changes
+
 
 SENSITIVE_KEY_PARTS = {
     "access_token",
@@ -114,6 +115,13 @@ EVENT_NAMES = {
     ("replica", "sync_succeeded"): "document.replica_sync_succeeded",
     ("replica", "sync_failed"): "document.replica_sync_failed",
     ("replica", "revoked"): "document.replica_revoked",
+    ("permissions", "assign_role"): "permissions.role_assigned",
+    ("permissions", "change_role"): "permissions.role_changed",
+    ("permissions", "grant_view"): "permissions.view_granted",
+    ("permissions", "change_view_expiry"): (
+        "permissions.view_expiry_changed"
+    ),
+    ("permissions", "revoke_view"): "permissions.view_revoked",
 }
 
 BUSINESS_AUDIT_OPERATIONS = frozenset(
@@ -209,7 +217,9 @@ def _safe_text(value: Any, max_length: int) -> str:
 def _safe_json_value(raw_value: Any, *, depth: int = 0) -> Any:
     """Return a bounded JSON-like value without sensitive nested content."""
     if isinstance(raw_value, (str, int, float, bool)) or raw_value is None:
-        return _safe_text(raw_value, 500) if isinstance(raw_value, str) else raw_value
+        if isinstance(raw_value, str):
+            return _safe_text(raw_value, 500)
+        return raw_value
     if depth >= 3:
         return _safe_text(raw_value, 100)
     if isinstance(raw_value, list):
@@ -261,6 +271,7 @@ def risk_level_for(module: str, action: str, result: str) -> str:
     if module in {
         "feishu",
         "catalog",
+        "permissions",
         "security",
         "storage",
         "replica",

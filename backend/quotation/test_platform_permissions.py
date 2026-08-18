@@ -1,17 +1,23 @@
+from datetime import timedelta
+
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from accounts.models import Role
+from quotation.access import can_access_quotation
 from quotation.models import (
+    AuditEvent,
     DocumentAsset,
     DocumentType,
+    Quotation,
     QuotationMembership,
     QuotationMembershipRole,
-    Quotation,
     QuotationSourceType,
+    QuotationViewPermission,
+    QuotationViewPermissionTarget,
 )
-from quotation.access import can_access_quotation
 from quotation.permissions import (
     get_quotation_platform_role,
     is_quotation_platform_admin,
@@ -99,6 +105,11 @@ class QuotationPlatformAccessTests(TestCase):
             email="bob@example.com",
             password="password",
         )
+        self.platform_role = Role.objects.create(
+            name="Quotation platform access",
+            visible_features=["quotation_management"],
+        )
+        self.platform_role.users.add(self.user)
         self.api = APIClient()
         self.api.force_authenticate(self.user)
 
@@ -194,6 +205,7 @@ class QuotationPlatformAccessTests(TestCase):
             user=admin,
             role=QuotationMembershipRole.ADMIN,
         )
+        self.platform_role.users.add(admin)
         quotation = self._quotation("Q-GRANTED", owner="bob")
         asset = self._feishu_asset(quotation, "bob")
         admin_api = APIClient()
@@ -228,6 +240,7 @@ class QuotationPlatformAccessTests(TestCase):
             user=admin,
             role=QuotationMembershipRole.ADMIN,
         )
+        self.platform_role.users.add(admin)
         quotation = self._quotation("Q-DOCUMENT-GRANTED", owner="bob")
         asset = self._feishu_asset(quotation, "bob")
         admin_api = APIClient()
@@ -245,7 +258,7 @@ class QuotationPlatformAccessTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         document_response = self.api.get(
-            f"/api/v1/quotation/documents?source=feishu"
+            "/api/v1/quotation/documents?source=feishu"
         )
         self.assertEqual(
             [item["id"] for item in document_response.data],
@@ -267,7 +280,7 @@ class QuotationPlatformAccessTests(TestCase):
             name="Context quotation access",
             visible_features=["quotation_management"],
         )
-        platform_role.users.add(ordinary)
+        platform_role.users.add(admin, ordinary)
         admin_api = APIClient()
         admin_api.force_authenticate(admin)
 
@@ -282,3 +295,323 @@ class QuotationPlatformAccessTests(TestCase):
         response = self.api.get("/api/v1/quotation/view-permissions")
 
         self.assertEqual(response.status_code, 403)
+
+
+class QuotationPermissionLifecycleTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_user("permission-admin")
+        QuotationMembership.objects.create(
+            user=self.admin,
+            role=QuotationMembershipRole.ADMIN,
+            assigned_by=self.admin,
+        )
+        self.member = User.objects.create_user("permission-member")
+        self.outsider = User.objects.create_user("permission-outsider")
+        self.platform_role = Role.objects.create(
+            name="Quote Desk access",
+            visible_features=["quotation_management"],
+        )
+        self.platform_role.users.add(self.admin, self.member)
+        self.api = APIClient()
+        self.api.force_authenticate(self.admin)
+
+    def _feishu_asset(self):
+        quotation = Quotation.objects.create(
+            quote_no="Q-PERMISSION-LIFECYCLE",
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+            project_name="Permission lifecycle",
+            currency="USD",
+            payment_terms="CIA",
+            quote_date="2026-08-01",
+            expire_date="2026-09-01",
+            issuer_contact_name="someone-else",
+            issuer_contact_email="sales@example.com",
+            client_company="Client",
+            contact_person="Contact",
+            email="client@example.com",
+        )
+        return DocumentAsset.objects.create(
+            quotation=quotation,
+            doc_type=DocumentType.PDF,
+            file_name="permission.pdf",
+            mime_type="application/pdf",
+            storage_key="quotations/permission.pdf",
+            source="feishu",
+            feishu_file_token="permission-file",
+            feishu_folder_token="permission-folder",
+            feishu_folder_path=[
+                {"token": "root", "name": "Quotation"},
+                {"token": "permission-folder", "name": "Permissions"},
+            ],
+        )
+
+    def test_admin_assigns_quote_desk_role_with_actor_audit(self):
+        response = self.api.post(
+            "/api/v1/quotation/memberships",
+            {
+                "user_id": self.member.id,
+                "role": QuotationMembershipRole.USER,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        membership = QuotationMembership.objects.get(user=self.member)
+        self.assertEqual(membership.assigned_by, self.admin)
+        event = AuditEvent.objects.get(
+            event_name="permissions.role_assigned",
+        )
+        self.assertEqual(event.actor, self.admin)
+        self.assertEqual(event.target_id, str(membership.id))
+        self.assertEqual(event.risk_level, AuditEvent.RISK_MEDIUM)
+        self.assertIsNotNone(event.created_at)
+
+    def test_admin_changes_role_without_creating_duplicate_membership(self):
+        membership = QuotationMembership.objects.create(
+            user=self.member,
+            role=QuotationMembershipRole.USER,
+            assigned_by=self.admin,
+        )
+
+        response = self.api.patch(
+            f"/api/v1/quotation/memberships/{membership.id}",
+            {"role": QuotationMembershipRole.ADMIN},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        membership.refresh_from_db()
+        self.assertEqual(membership.role, QuotationMembershipRole.ADMIN)
+        self.assertEqual(membership.assigned_by, self.admin)
+        self.assertEqual(
+            QuotationMembership.objects.filter(
+                user=self.member,
+                is_active=True,
+            ).count(),
+            1,
+        )
+        event = AuditEvent.objects.get(
+            event_name="permissions.role_changed",
+        )
+        self.assertEqual(
+            event.before_summary["role"],
+            QuotationMembershipRole.USER,
+        )
+        self.assertEqual(
+            event.after_summary["role"],
+            QuotationMembershipRole.ADMIN,
+        )
+
+    def test_duplicate_active_role_is_rejected(self):
+        QuotationMembership.objects.create(
+            user=self.member,
+            role=QuotationMembershipRole.USER,
+            assigned_by=self.admin,
+        )
+
+        response = self.api.post(
+            "/api/v1/quotation/memberships",
+            {
+                "user_id": self.member.id,
+                "role": QuotationMembershipRole.USER,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            QuotationMembership.objects.filter(
+                user=self.member,
+                is_active=True,
+            ).count(),
+            1,
+        )
+
+    def test_user_without_first_layer_access_cannot_be_managed(self):
+        response = self.api.post(
+            "/api/v1/quotation/memberships",
+            {
+                "user_id": self.outsider.id,
+                "role": QuotationMembershipRole.USER,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(
+            QuotationMembership.objects.filter(user=self.outsider).exists()
+        )
+
+    def test_admin_without_first_layer_access_cannot_manage_permissions(self):
+        self.platform_role.users.remove(self.admin)
+
+        membership_response = self.api.get(
+            "/api/v1/quotation/memberships"
+        )
+        permission_response = self.api.get(
+            "/api/v1/quotation/view-permissions"
+        )
+
+        self.assertEqual(membership_response.status_code, 403)
+        self.assertEqual(permission_response.status_code, 403)
+
+    def test_admin_sets_edits_and_lists_grant_expiry(self):
+        asset = self._feishu_asset()
+        first_expiry = timezone.now() + timedelta(days=1)
+        granted = self.api.post(
+            "/api/v1/quotation/view-permissions",
+            {
+                "user_id": self.member.id,
+                "target_type": QuotationViewPermissionTarget.DOCUMENT,
+                "target_id": asset.id,
+                "expires_at": first_expiry.isoformat(),
+            },
+            format="json",
+        )
+
+        self.assertEqual(granted.status_code, 201)
+        self.assertEqual(granted.data["status"], "active")
+        self.assertIsNotNone(granted.data["expires_at"])
+
+        second_expiry = timezone.now() + timedelta(days=2)
+        updated = self.api.patch(
+            f"/api/v1/quotation/view-permissions/{granted.data['id']}",
+            {"expires_at": second_expiry.isoformat()},
+            format="json",
+        )
+
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.data["status"], "active")
+        granted_event = AuditEvent.objects.get(
+            event_name="permissions.view_granted",
+        )
+        self.assertEqual(
+            granted_event.target_type,
+            "quotation_view_permission",
+        )
+        self.assertEqual(granted_event.target_id, str(granted.data["id"]))
+        self.assertEqual(granted_event.document_id_snapshot, "")
+        self.assertEqual(
+            granted_event.after_summary["target_id"],
+            str(asset.id),
+        )
+        self.assertEqual(granted_event.risk_level, AuditEvent.RISK_MEDIUM)
+        event = AuditEvent.objects.get(
+            event_name="permissions.view_expiry_changed",
+        )
+        self.assertEqual(event.actor, self.admin)
+        self.assertNotEqual(
+            event.before_summary["expires_at"],
+            event.after_summary["expires_at"],
+        )
+
+    def test_expired_grant_is_listed_but_does_not_provide_access(self):
+        asset = self._feishu_asset()
+        permission = QuotationViewPermission.objects.create(
+            user=self.member,
+            target_type=QuotationViewPermissionTarget.DOCUMENT,
+            document=asset,
+            granted_by=self.admin,
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        response = self.api.get("/api/v1/quotation/view-permissions")
+
+        row = next(
+            item
+            for item in response.data["permissions"]
+            if item["id"] == permission.id
+        )
+        self.assertEqual(row["status"], "expired")
+        self.assertFalse(can_access_quotation(self.member, asset.quotation))
+
+    def test_duplicate_active_grant_is_rejected(self):
+        asset = self._feishu_asset()
+        payload = {
+            "user_id": self.member.id,
+            "target_type": QuotationViewPermissionTarget.DOCUMENT,
+            "target_id": asset.id,
+        }
+
+        first = self.api.post(
+            "/api/v1/quotation/view-permissions",
+            payload,
+            format="json",
+        )
+        duplicate = self.api.post(
+            "/api/v1/quotation/view-permissions",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(
+            QuotationViewPermission.objects.filter(
+                user=self.member,
+                document=asset,
+                is_active=True,
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                event_name="permissions.view_granted",
+            ).count(),
+            1,
+        )
+
+    def test_regular_user_receives_403_for_management_endpoints(self):
+        asset = self._feishu_asset()
+        membership = QuotationMembership.objects.create(
+            user=self.member,
+            role=QuotationMembershipRole.USER,
+            assigned_by=self.admin,
+        )
+        permission = QuotationViewPermission.objects.create(
+            user=self.member,
+            target_type=QuotationViewPermissionTarget.DOCUMENT,
+            document=asset,
+            granted_by=self.admin,
+        )
+        regular_api = APIClient()
+        regular_api.force_authenticate(self.member)
+
+        requests = [
+            regular_api.get("/api/v1/quotation/memberships"),
+            regular_api.post(
+                "/api/v1/quotation/memberships",
+                {
+                    "user_id": self.member.id,
+                    "role": QuotationMembershipRole.USER,
+                },
+                format="json",
+            ),
+            regular_api.patch(
+                f"/api/v1/quotation/memberships/{membership.id}",
+                {"role": QuotationMembershipRole.ADMIN},
+                format="json",
+            ),
+            regular_api.get("/api/v1/quotation/view-permissions"),
+            regular_api.post(
+                "/api/v1/quotation/view-permissions",
+                {
+                    "user_id": self.member.id,
+                    "target_type": QuotationViewPermissionTarget.DOCUMENT,
+                    "target_id": asset.id,
+                },
+                format="json",
+            ),
+            regular_api.patch(
+                f"/api/v1/quotation/view-permissions/{permission.id}",
+                {"expires_at": None},
+                format="json",
+            ),
+            regular_api.delete(
+                f"/api/v1/quotation/view-permissions/{permission.id}"
+            ),
+        ]
+
+        self.assertTrue(
+            all(response.status_code == 403 for response in requests)
+        )

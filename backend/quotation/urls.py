@@ -46,6 +46,10 @@ from quotation.views.feishu import (
     FeishuUploadView,
 )
 from quotation.views.health import ExportMetricsView, StorageMetricsView
+from quotation.views.memberships import (
+    QuotationMembershipDetailView,
+    QuotationMembershipView,
+)
 from quotation.views.quotations import (
     QuotationDetailView,
     QuotationFormContextView,
@@ -66,6 +70,11 @@ urlpatterns = [
     path("templates", QuotationTemplateListCreateView.as_view()),
     path("audit-events", AuditEventListView.as_view()),
     path("audit-events/export", AuditEventExportView.as_view()),
+    path("memberships", QuotationMembershipView.as_view()),
+    path(
+        "memberships/<int:membership_id>",
+        QuotationMembershipDetailView.as_view(),
+    ),
     path("view-permissions", QuotationViewPermissionView.as_view()),
     path(
         "view-permissions/<int:permission_id>",
@@ -96,7 +105,10 @@ urlpatterns = [
     ),
     path("documents", DocumentListView.as_view()),
     path("documents/<str:document_id>", DocumentDetailView.as_view()),
-    path("documents/<str:document_id>/download", DocumentDownloadView.as_view()),
+    path(
+        "documents/<str:document_id>/download",
+        DocumentDownloadView.as_view(),
+    ),
     path(
         "documents/<str:document_id>/restore",
         DocumentRestoreView.as_view(),
