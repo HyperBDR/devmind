@@ -342,7 +342,9 @@ const sourceAddressLabel = computed(() => {
 const latestRunLabel = computed(() => {
   const run = props.catalog?.latest_run
   if (!run) return '-'
-  return `${run.status} · ${formatDateTime(run.finished_at || run.started_at)}`
+  const statusKey = run.status || 'unknown'
+  const status = t(`llmOps.taskLogs.status.${statusKey}`, statusKey)
+  return `${status} · ${formatDateTime(run.finished_at || run.started_at)}`
 })
 
 function closeDrawer() {

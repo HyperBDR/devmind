@@ -44,9 +44,7 @@ const operationErrorSources = [
   '../src/components/llm-ops/AgioneListingStatusBoard.vue',
   '../src/components/llm-ops/ChannelManagement.vue',
   '../src/components/llm-ops/ManualPriceEntryModal.vue',
-  '../src/components/llm-ops/MetaModelModal.vue',
   '../src/components/llm-ops/PriceSourceModal.vue',
-  '../src/components/llm-ops/ProviderModal.vue',
   '../src/components/llm-ops/ResalePublishingDrawer.vue',
   '../src/components/llm-ops/ResaleWorkflowConfigPanel.vue',
   '../src/composables/useLLMOpsResalePublishing.js'

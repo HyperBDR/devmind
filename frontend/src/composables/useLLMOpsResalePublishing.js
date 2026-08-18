@@ -225,11 +225,11 @@ export function useLLMOpsResalePublishing({
     preloadResalePublishingData()
   }
 
-  function mapWorkspaceListingToPayload(item) {
+  function mapWorkspaceListingToPayload(item, platformId) {
     const inApi = Number(item.priceIn) || 0
     const outApi = Number(item.priceOut) || 0
     return {
-      platform: agionePlatform.value?.id,
+      platform: platformId,
       model: item.modelId,
       channel: item.channelId,
       currency: normalizeDisplayCurrency(
@@ -255,13 +255,13 @@ export function useLLMOpsResalePublishing({
     return Object.keys(item.tierErrors || {}).length > 0
   }
 
-  async function saveTieredDrafts(items) {
+  async function saveTieredDrafts(items, platformId) {
     if (!items.length) return []
     if (items.some(tierDraftIsInvalid)) {
       throw new Error(t('llmOps.messages.invalidListingPrices'))
     }
     const response = await llmOpsApi.bulkDraftResaleListings(
-      items.map(mapWorkspaceListingToPayload)
+      items.map((item) => mapWorkspaceListingToPayload(item, platformId))
     )
     const draftListings = asArray(extract(response))
     return Promise.all(
@@ -276,8 +276,8 @@ export function useLLMOpsResalePublishing({
     )
   }
 
-  async function submitTieredListings(items) {
-    const drafts = await saveTieredDrafts(items)
+  async function submitTieredListings(items, platformId) {
+    const drafts = await saveTieredDrafts(items, platformId)
     const submitted = await Promise.all(
       drafts.map(async (draft) => {
         const response = await llmOpsApi.submitResaleListingPriceRevision(
@@ -300,14 +300,14 @@ export function useLLMOpsResalePublishing({
         ? llmOpsApi.bulkTransitionResaleListings({
             action: 'confirm_publish',
             listings: publishIds,
-            platform: agionePlatform.value?.id
+            platform: platformId
           })
         : null,
       updateIds.length
         ? llmOpsApi.bulkTransitionResaleListings({
             action: 'confirm_update',
             listings: updateIds,
-            platform: agionePlatform.value?.id
+            platform: platformId
           })
         : null
     ])
@@ -337,8 +337,11 @@ export function useLLMOpsResalePublishing({
         Number(item.priceIn) > 0 &&
         Number(item.priceOut) > 0
     )
+    const platformId = payload.platformId || agionePlatform.value?.id
     const tiered = tieredListings(payload)
-    const items = publishListings.map(mapWorkspaceListingToPayload)
+    const items = publishListings.map((item) =>
+      mapWorkspaceListingToPayload(item, platformId)
+    )
     if (!items.length && !tiered.length) {
       showError(t('llmOps.messages.invalidListingPrices'))
       return false
@@ -350,9 +353,10 @@ export function useLLMOpsResalePublishing({
       const submittedListings = asArray(extract(response))
       const autoConfirmedCount = await confirmAutoApprovedListings(
         submittedListings,
-        publishListings
+        publishListings,
+        platformId
       )
-      const tieredSubmitted = await submitTieredListings(tiered)
+      const tieredSubmitted = await submitTieredListings(tiered, platformId)
       const messageKey = autoConfirmedCount
         ? 'llmOps.messages.publishAutoConfirmed'
         : 'llmOps.messages.publishSubmitted'
@@ -373,7 +377,8 @@ export function useLLMOpsResalePublishing({
 
   async function confirmAutoApprovedListings(
     submittedListings,
-    sourceListings
+    sourceListings,
+    platformId
   ) {
     const policies = currentWorkflowPolicies()
     if (!policies.auto_approve_enabled || !policies.auto_apply_after_approval) {
@@ -405,7 +410,7 @@ export function useLLMOpsResalePublishing({
     await Promise.all(
       actions.map((item) =>
         llmOpsApi.bulkTransitionResaleListings({
-          platform: agionePlatform.value?.id,
+          platform: platformId,
           listings: item.ids,
           action: item.action
         })
@@ -436,15 +441,18 @@ export function useLLMOpsResalePublishing({
     const standardListings = changedListings.filter(
       (item) => !item.hasTieredPrices
     )
+    const platformId = payload.platformId || agionePlatform.value?.id
     const tiered = tieredListings(payload)
-    const items = standardListings.map(mapWorkspaceListingToPayload)
+    const items = standardListings.map((item) =>
+      mapWorkspaceListingToPayload(item, platformId)
+    )
     if (!items.length && !tiered.length) {
       showInfo(t('llmOps.messages.noChangesToSave'))
       return false
     }
     try {
       if (items.length) await llmOpsApi.bulkDraftResaleListings(items)
-      await saveTieredDrafts(tiered)
+      await saveTieredDrafts(tiered, platformId)
       showSuccess(
         t('llmOps.messages.draftsSaved', {
           count: items.length + tiered.length

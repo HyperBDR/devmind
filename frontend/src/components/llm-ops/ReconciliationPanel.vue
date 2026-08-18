@@ -157,7 +157,7 @@
         <button
           class="btn-primary btn-action-create"
           type="submit"
-          :disabled="!canCreateRecord"
+          :disabled="!canCreateRecord || saving"
           :title="createDisabledReason"
         >
           <svg
@@ -220,13 +220,13 @@
                 {{ record.model_name }}
               </td>
               <td class="table-cell text-right">
-                {{ money(record.charged_amount) }}
+                {{ money(record.charged_amount, record) }}
               </td>
               <td class="table-cell text-right">
-                {{ money(record.expected_amount) }}
+                {{ money(record.expected_amount, record) }}
               </td>
               <td class="table-cell text-right">
-                {{ money(record.discrepancy) }}
+                {{ money(record.discrepancy, record) }}
               </td>
               <td class="table-cell">{{ statusLabel(record.status) }}</td>
             </tr>
@@ -253,6 +253,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils/llmOpsPagination'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 
 const props = defineProps({
@@ -276,7 +278,9 @@ const props = defineProps({
 
 const emit = defineEmits(['refresh'])
 const { t } = useI18n()
+const { showError } = useToast()
 
+const saving = ref(false)
 const form = ref(defaults())
 
 watch(
@@ -391,7 +395,7 @@ const modelOptions = computed(() =>
 
 function defaults() {
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: todayLocalDate(),
     channel: '',
     model: '',
     input_tokens: '0',
@@ -405,6 +409,14 @@ function defaults() {
   }
 }
 
+function todayLocalDate() {
+  const now = new Date()
+  const offsetMinutes = now.getTimezoneOffset()
+  return new Date(now.getTime() - offsetMinutes * 60000)
+    .toISOString()
+    .slice(0, 10)
+}
+
 function normalizePayload(payload) {
   const clean = { ...payload }
   delete clean.id
@@ -412,9 +424,19 @@ function normalizePayload(payload) {
 }
 
 async function saveReconciliation() {
-  await llmOpsApi.createReconciliationRecord(normalizePayload(form.value))
-  form.value = defaults()
-  emit('refresh')
+  if (saving.value) return
+  saving.value = true
+  try {
+    await llmOpsApi.createReconciliationRecord(normalizePayload(form.value))
+    form.value = defaults()
+    emit('refresh')
+  } catch (error) {
+    showError(
+      errorMessage(error, t('llmOps.reconciliationPanel.errors.create'))
+    )
+  } finally {
+    saving.value = false
+  }
 }
 
 watch(
@@ -436,9 +458,19 @@ watch(
   }
 )
 
-function money(value) {
+const channelCurrencyById = computed(() => {
+  const byId = {}
+  props.channels.forEach((channel) => {
+    byId[String(channel.id)] = channel.currency || 'USD'
+  })
+  return byId
+})
+
+function money(value, record) {
   if (value === null || value === undefined || value === '') return '-'
-  return `$${Number(value).toFixed(4)}`
+  const currency =
+    channelCurrencyById.value[String(record?.channel || '')] || 'USD'
+  return `${currency} ${Number(value).toFixed(4)}`
 }
 
 function statusLabel(status) {

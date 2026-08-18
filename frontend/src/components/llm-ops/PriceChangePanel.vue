@@ -35,8 +35,12 @@
               <th class="table-head">
                 {{ t('llmOps.priceChangePanel.columns.type') }}
               </th>
-              <th class="table-head text-right">Input</th>
-              <th class="table-head text-right">Output</th>
+              <th class="table-head text-right">
+                {{ t('llmOps.priceChangePanel.columns.input') }}
+              </th>
+              <th class="table-head text-right">
+                {{ t('llmOps.priceChangePanel.columns.output') }}
+              </th>
               <th class="table-head">
                 {{ t('llmOps.priceChangePanel.columns.currency') }}
               </th>

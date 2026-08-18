@@ -22,7 +22,7 @@
         <span
           class="rounded-md bg-slate-100 px-2.5 py-1.5 font-mono text-[11px] font-semibold text-slate-600"
         >
-          {{ currency }} / 1M Tokens
+          {{ currency }} {{ t('llmOps.resaleTier.pricePerMillionTokens') }}
         </span>
         <button
           type="button"
@@ -126,7 +126,7 @@ const props = defineProps({
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
   modelValue: { type: Object, required: true },
-  pointLabel: { type: Function, default: () => '—' },
+  pointLabel: { type: Function, default: () => () => '' },
   previousPreview: { type: Object, default: null },
   preview: { type: Object, default: null },
   previewError: { type: String, default: '' },

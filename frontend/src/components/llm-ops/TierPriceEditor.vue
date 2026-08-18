@@ -77,7 +77,7 @@ const props = defineProps({
   currency: { type: String, default: 'USD' },
   errors: { type: Object, default: () => ({}) },
   modelValue: { type: Object, required: true },
-  pointLabel: { type: Function, default: () => '—' }
+  pointLabel: { type: Function, default: () => () => '' }
 })
 
 const emit = defineEmits(['update:modelValue'])

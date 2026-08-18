@@ -15,7 +15,7 @@
             <p
               class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
             >
-              Channel Models
+              {{ t('llmOps.channelModelDrawer.title') }}
             </p>
             <h3 class="mt-2 text-xl font-semibold text-slate-900">
               {{ channel.name }}
@@ -953,6 +953,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
+import { useToast } from '@/composables/useToast'
 import {
   normalizeSearch,
   useChannelModelDisplay
@@ -963,7 +964,7 @@ import { useChannelModelPricing } from '@/composables/useChannelModelPricing'
 import { useChannelModelRows } from '@/composables/useChannelModelRows'
 import { useChannelModelSelection } from '@/composables/useChannelModelSelection'
 import { channelPriceTierRows } from '@/utils/channelPriceCatalog'
-import { asArray } from '@/utils/llmOpsPagination'
+import { asArray, errorMessage } from '@/utils/llmOpsPagination'
 
 import CompactSelect from './CompactSelect.vue'
 import OperationIconButton from './OperationIconButton.vue'
@@ -1013,6 +1014,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'refresh', 'saved'])
 const { t } = useI18n()
+const { showError } = useToast()
 
 const search = ref('')
 const selectedVendorKey = ref('')
@@ -1451,6 +1453,10 @@ async function removeRow(row) {
         drafts.value[row.model.id]
       )
       pendingRefresh.value = true
+    } catch (error) {
+      showError(
+        errorMessage(error, t('llmOps.channelModelDrawer.errors.delete'))
+      )
     } finally {
       saving.value = false
     }
@@ -1469,6 +1475,8 @@ async function save() {
     )
     reset()
     emit('saved')
+  } catch (error) {
+    showError(errorMessage(error, t('llmOps.channelModelDrawer.errors.save')))
   } finally {
     saving.value = false
   }
