@@ -285,6 +285,95 @@ class TieredPricingKernelTests(SimpleTestCase):
                 usage=Decimal("10_000_000"),
             )
 
+    def test_resolves_multi_metric_glm_price_conditions(self):
+        def tier(dimension, price, start, end, conditions):
+            return PriceTier(
+                dimension=dimension,
+                billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
+                currency="CNY",
+                unit_price=Decimal(price),
+                tier_type=ModelPriceItem.TIER_USAGE_RANGE,
+                tier_start=Decimal(start),
+                tier_end=Decimal(end) if end is not None else None,
+                spec={
+                    **usage_range_spec(),
+                    "usage_conditions": conditions,
+                },
+            )
+
+        rules = (
+            (
+                "2",
+                "8",
+                "0",
+                "32000",
+                {
+                    "input_tokens": {"start": "0", "end": "32000"},
+                    "output_tokens": {"start": "0", "end": "200"},
+                },
+            ),
+            (
+                "3",
+                "14",
+                "0",
+                "32000",
+                {
+                    "input_tokens": {"start": "0", "end": "32000"},
+                    "output_tokens": {"start": "200", "end": None},
+                },
+            ),
+            (
+                "4",
+                "16",
+                "32000",
+                "200000",
+                {
+                    "input_tokens": {"start": "32000", "end": "200000"},
+                },
+            ),
+        )
+        tiers = []
+        for input_price, output_price, start, end, conditions in rules:
+            tiers.extend(
+                [
+                    tier(
+                        ModelPriceItem.DIMENSION_TEXT_INPUT,
+                        input_price,
+                        start,
+                        end,
+                        conditions,
+                    ),
+                    tier(
+                        ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+                        output_price,
+                        start,
+                        end,
+                        conditions,
+                    ),
+                ]
+            )
+        schedule = PriceSchedule(tiers=tuple(tiers))
+
+        short_output = resolve_usage_unit_prices(
+            schedule,
+            UsageContext(input_tokens=10_000, output_tokens=100),
+        )
+        long_output = resolve_usage_unit_prices(
+            schedule,
+            UsageContext(input_tokens=10_000, output_tokens=300),
+        )
+        long_input = resolve_usage_unit_prices(
+            schedule,
+            UsageContext(input_tokens=50_000, output_tokens=100),
+        )
+
+        self.assertEqual(short_output.input_per_million, Decimal("2"))
+        self.assertEqual(short_output.output_per_million, Decimal("8"))
+        self.assertEqual(long_output.input_per_million, Decimal("3"))
+        self.assertEqual(long_output.output_per_million, Decimal("14"))
+        self.assertEqual(long_input.input_per_million, Decimal("4"))
+        self.assertEqual(long_input.output_per_million, Decimal("16"))
+
     def test_derive_resale_pricing_format_classifies_flat_schedule(self):
         schedule = PriceSchedule(
             tiers=(

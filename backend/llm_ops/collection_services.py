@@ -3357,6 +3357,9 @@ def token_price_item_payloads(
     cache_price = first_decimal_from_row(values, *CACHE_INPUT_PRICE_KEYS)
     input_range = parse_price_range(values.get("input_token_range"))
     output_range = parse_price_range(values.get("output_token_range"))
+    primary_range = (
+        input_range if input_range != (None, None) else output_range
+    )
     if input_price is not None:
         payloads.append(
             price_item_payload(
@@ -3365,8 +3368,8 @@ def token_price_item_payloads(
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(input_price, item.unit),
                 spec=spec,
-                tier_start=input_range[0],
-                tier_end=input_range[1],
+                tier_start=primary_range[0],
+                tier_end=primary_range[1],
             )
         )
     if output_price is not None:
@@ -3377,8 +3380,8 @@ def token_price_item_payloads(
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(output_price, item.unit),
                 spec=spec,
-                tier_start=output_range[0],
-                tier_end=output_range[1],
+                tier_start=primary_range[0],
+                tier_end=primary_range[1],
             )
         )
     if cache_price is not None:
@@ -3389,8 +3392,8 @@ def token_price_item_payloads(
                 billing_unit=ModelPriceItem.UNIT_PER_1M_TOKENS,
                 unit_price=price_per_million(cache_price, item.unit),
                 spec=spec,
-                tier_start=input_range[0],
-                tier_end=input_range[1],
+                tier_start=primary_range[0],
+                tier_end=primary_range[1],
             )
         )
     return payloads
@@ -3428,6 +3431,24 @@ def row_price_spec(row) -> dict:
         value = values.get(key) or raw.get(key)
         if value:
             spec[key] = value
+    if values.get("usage_condition_mode") == "multi_metric":
+        usage_conditions = {}
+        for value_key, metric in (
+            ("input_token_range", "input_tokens"),
+            ("output_token_range", "output_tokens"),
+        ):
+            raw_range = values.get(value_key) or raw.get(value_key)
+            if not raw_range:
+                continue
+            start, end = parse_price_range(raw_range)
+            if start is None:
+                continue
+            usage_conditions[metric] = {
+                "start": str(start),
+                "end": str(end) if end is not None else None,
+            }
+        if usage_conditions:
+            spec["usage_conditions"] = usage_conditions
     return spec
 
 

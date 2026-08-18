@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -14,6 +15,8 @@ from .price_table_validation import (
 ZERO = Decimal("0")
 ONE = Decimal("1")
 SIX_PLACES = Decimal("0.000001")
+
+logger = logging.getLogger(__name__)
 
 
 class TieredPriceNotSupportedError(ValueError):
@@ -205,6 +208,27 @@ def resolve_usage_price_tier(
     tiers = schedule.for_dimension(dimension)
     if not tiers:
         raise ValueError(f"No price tier exists for {dimension}.")
+    conditional_tiers = tuple(
+        tier for tier in tiers if tier.spec.get("usage_conditions")
+    )
+    if conditional_tiers:
+        matches = tuple(
+            tier
+            for tier in conditional_tiers
+            if _usage_matches_conditions(
+                usage,
+                tier.spec.get("usage_conditions"),
+            )
+        )
+        if matches:
+            return max(matches, key=lambda tier: tier.unit_price)
+        fallback = max(conditional_tiers, key=lambda tier: tier.unit_price)
+        logger.warning(
+            "No conditional price rule matched dimension=%s; "
+            "using conservative highest unit price.",
+            dimension,
+        )
+        return fallback
     metric_value = ZERO
     if any(tier.tier_type != ModelPriceItem.TIER_FLAT for tier in tiers):
         metric_value = _decimal_or_zero(usage.input_tokens)
@@ -217,6 +241,29 @@ def resolve_usage_price_tier(
     except PriceTierNotFoundError:
         # Usage above the highest defined tier bills at the top tier rate.
         return tiers[-1]
+
+
+def _usage_matches_conditions(
+    usage: UsageContext,
+    conditions: object,
+) -> bool:
+    """Return whether all normalized request conditions match usage."""
+    if not isinstance(conditions, dict) or not conditions:
+        return False
+    usage_values = {
+        "input_tokens": _decimal_or_zero(usage.input_tokens),
+        "output_tokens": _decimal_or_zero(usage.output_tokens),
+    }
+    for metric, bounds in conditions.items():
+        if metric not in usage_values or not isinstance(bounds, dict):
+            return False
+        start = _decimal_or_zero(bounds.get("start"))
+        end_value = bounds.get("end")
+        end = None if end_value is None else _decimal_or_zero(end_value)
+        value = usage_values[metric]
+        if value < start or (end is not None and value >= end):
+            return False
+    return True
 
 
 def resolve_usage_unit_prices(

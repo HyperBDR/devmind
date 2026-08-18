@@ -29,6 +29,7 @@ TIER_CONTRACT_SPEC_KEYS = frozenset(
         "tier_metric",
         "tier_charge_mode",
         "aggregation_period",
+        "usage_conditions",
     }
 )
 SUPPORTED_TIER_DIMENSIONS = frozenset(
@@ -229,6 +230,10 @@ def _validate_usage_range_table(rows: Sequence[Any]) -> None:
             "Usage-range rows must use the request input token contract.",
         )
 
+    if any(spec.get("usage_conditions") for spec in specs):
+        _validate_conditional_usage_table(rows, specs)
+        return
+
     tiers = _sorted_tiers(rows)
     first_start = _decimal(_value(tiers[0], "tier_start"))
     if first_start != Decimal("0"):
@@ -273,6 +278,70 @@ def _validate_usage_range_table(rows: Sequence[Any]) -> None:
             if start > previous_end:
                 _raise(ERROR_GAP, "Tier ranges must not contain gaps.")
         previous_end = end
+
+
+def _validate_conditional_usage_table(
+    rows: Sequence[Any],
+    specs: Sequence[Mapping[str, Any]],
+) -> None:
+    """Validate multi-metric request conditions without flattening them."""
+    seen_conditions = set()
+    allowed_metrics = {"input_tokens", "output_tokens"}
+    for row, spec in zip(rows, specs):
+        conditions = spec.get("usage_conditions")
+        if not isinstance(conditions, Mapping) or not conditions:
+            _raise(
+                ERROR_INVALID_USAGE_RANGE_SPEC,
+                "Conditional price rows require usage_conditions.",
+            )
+        unknown_metrics = set(conditions) - allowed_metrics
+        if unknown_metrics:
+            _raise(
+                ERROR_INVALID_USAGE_RANGE_SPEC,
+                "Usage conditions contain unsupported metrics.",
+            )
+        condition_key = json.dumps(
+            conditions,
+            default=str,
+            sort_keys=True,
+        )
+        if condition_key in seen_conditions:
+            _raise(
+                ERROR_DUPLICATE_RANGE,
+                "Conditional price rules must be unique.",
+            )
+        seen_conditions.add(condition_key)
+        for bounds in conditions.values():
+            if not isinstance(bounds, Mapping):
+                _raise(
+                    ERROR_INVALID_USAGE_RANGE_SPEC,
+                    "Usage condition bounds must be JSON objects.",
+                )
+            start = _decimal(bounds.get("start"))
+            end = _decimal(bounds.get("end"))
+            if start is None or start < Decimal("0"):
+                _raise(
+                    ERROR_INVALID_BOUNDARY,
+                    "Usage condition starts must be non-negative.",
+                )
+            if end is not None and end <= start:
+                _raise(
+                    ERROR_INVALID_BOUNDARY,
+                    "Usage condition ends must be greater than starts.",
+                )
+
+        tier_start = _decimal(_value(row, "tier_start"))
+        tier_end = _decimal(_value(row, "tier_end"))
+        if tier_start is None or tier_start < Decimal("0"):
+            _raise(
+                ERROR_INVALID_BOUNDARY,
+                "Conditional tiers require a non-negative primary start.",
+            )
+        if tier_end is not None and tier_end <= tier_start:
+            _raise(
+                ERROR_INVALID_BOUNDARY,
+                "A conditional tier end must exceed its start.",
+            )
 
 
 def _require_consistent(
