@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from datetime import datetime, time, timezone as dt_timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .models import ModelPriceItem
 from .price_table_validation import (
@@ -14,6 +17,8 @@ from .price_table_validation import (
 ZERO = Decimal("0")
 ONE = Decimal("1")
 SIX_PLACES = Decimal("0.000001")
+
+logger = logging.getLogger(__name__)
 
 
 class TieredPriceNotSupportedError(ValueError):
@@ -84,6 +89,8 @@ class UsageContext:
     audio_output_seconds: Decimal | int | str = ZERO
     video_input_seconds: Decimal | int | str = ZERO
     video_output_seconds: Decimal | int | str = ZERO
+    occurred_at: datetime | None = None
+    timezone: str = "UTC"
 
 
 @dataclass(frozen=True)
@@ -205,6 +212,43 @@ def resolve_usage_price_tier(
     tiers = schedule.for_dimension(dimension)
     if not tiers:
         raise ValueError(f"No price tier exists for {dimension}.")
+    conditional_tiers = tuple(
+        tier
+        for tier in tiers
+        if tier.spec.get("usage_conditions") or tier.spec.get("time_windows")
+    )
+    if conditional_tiers:
+        conditional_matches = tuple(
+            tier
+            for tier in conditional_tiers
+            if _usage_matches_tier(usage, tier)
+        )
+        matches = tuple(
+            tier
+            for tier in tiers
+            if _usage_matches_tier(usage, tier)
+        )
+        if matches:
+            if len(matches) > 1:
+                logger.warning(
+                    "Multiple conditional price rules matched "
+                    "dimension=%s; using conservative highest unit price.",
+                    dimension,
+                )
+            elif not conditional_matches:
+                logger.warning(
+                    "No conditional price rule matched dimension=%s; "
+                    "using the unconditional unit price.",
+                    dimension,
+                )
+            return max(matches, key=lambda tier: tier.unit_price)
+        fallback = max(tiers, key=lambda tier: tier.unit_price)
+        logger.warning(
+            "No conditional price rule matched dimension=%s; "
+            "using conservative highest unit price.",
+            dimension,
+        )
+        return fallback
     metric_value = ZERO
     if any(tier.tier_type != ModelPriceItem.TIER_FLAT for tier in tiers):
         metric_value = _decimal_or_zero(usage.input_tokens)
@@ -217,6 +261,85 @@ def resolve_usage_price_tier(
     except PriceTierNotFoundError:
         # Usage above the highest defined tier bills at the top tier rate.
         return tiers[-1]
+
+
+def _usage_matches_conditions(
+    usage: UsageContext,
+    conditions: object,
+) -> bool:
+    """Return whether all normalized request conditions match usage."""
+    if not isinstance(conditions, dict) or not conditions:
+        return False
+    usage_values = {
+        "input_tokens": _decimal_or_zero(usage.input_tokens),
+        "output_tokens": _decimal_or_zero(usage.output_tokens),
+    }
+    for metric, bounds in conditions.items():
+        if metric not in usage_values or not isinstance(bounds, dict):
+            return False
+        start = _decimal_or_zero(bounds.get("start"))
+        end_value = bounds.get("end")
+        end = None if end_value is None else _decimal_or_zero(end_value)
+        value = usage_values[metric]
+        if value < start or (end is not None and value >= end):
+            return False
+    return True
+
+
+def _usage_matches_tier(usage: UsageContext, tier: PriceTier) -> bool:
+    """Match all quantity and local-time conditions on a price rule."""
+    conditions = tier.spec.get("usage_conditions")
+    if conditions and not _usage_matches_conditions(usage, conditions):
+        return False
+    windows = tier.spec.get("time_windows")
+    if windows and not _usage_matches_time_windows(
+        usage,
+        windows,
+        timezone_name=str(tier.spec.get("timezone") or usage.timezone),
+    ):
+        return False
+    return True
+
+
+def _usage_matches_time_windows(
+    usage: UsageContext,
+    windows: object,
+    *,
+    timezone_name: str,
+) -> bool:
+    """Match weekday/time windows, including intervals crossing midnight."""
+    if usage.occurred_at is None or not isinstance(windows, list):
+        return False
+    occurred_at = usage.occurred_at
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=dt_timezone.utc)
+    try:
+        local_time = occurred_at.astimezone(ZoneInfo(timezone_name))
+    except ZoneInfoNotFoundError:
+        return False
+
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        try:
+            start = time.fromisoformat(str(window.get("start")))
+            end = time.fromisoformat(str(window.get("end")))
+            weekdays = {int(day) for day in window.get("weekdays", [])}
+        except (TypeError, ValueError):
+            continue
+        current_time = local_time.timetz().replace(tzinfo=None)
+        weekday = local_time.weekday()
+        if start < end:
+            if weekday in weekdays and start <= current_time < end:
+                return True
+            continue
+        if start > end:
+            if current_time >= start and weekday in weekdays:
+                return True
+            previous_weekday = (weekday - 1) % 7
+            if current_time < end and previous_weekday in weekdays:
+                return True
+    return False
 
 
 def resolve_usage_unit_prices(
