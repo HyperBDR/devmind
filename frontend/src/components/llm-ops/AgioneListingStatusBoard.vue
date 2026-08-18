@@ -669,34 +669,35 @@ function actionPayloadForRows(targetRows, action = null) {
 
 async function handleDirectAction(row, kind) {
   if (!props.agionePlatform) return
-  if (
-    !(await askConfirmation(workflowConfirmText(kind), {
+  await withConfirmation(
+    workflowConfirmText(kind),
+    {
       danger: ['direct_offline', 'confirm_offline', 'delete'].includes(kind)
-    }))
-  ) {
-    return
-  }
-  savingListings.value = true
-  try {
-    if (kind === 'direct_offline') {
-      const response = await llmOpsApi.bulkOfflineResaleListings(
-        actionPayloadForRows([row])
-      )
-      emitUpdatedListings(response)
-      showSuccess(workflowSuccessText(kind))
-    } else if (isWorkflowTransition(kind)) {
-      const response = await llmOpsApi.bulkTransitionResaleListings(
-        actionPayloadForRows([row], kind)
-      )
-      emitUpdatedListings(response)
-      showSuccess(workflowSuccessText(kind))
+    },
+    async () => {
+      savingListings.value = true
+      try {
+        if (kind === 'direct_offline') {
+          const response = await llmOpsApi.bulkOfflineResaleListings(
+            actionPayloadForRows([row])
+          )
+          emitUpdatedListings(response)
+          showSuccess(workflowSuccessText(kind))
+        } else if (isWorkflowTransition(kind)) {
+          const response = await llmOpsApi.bulkTransitionResaleListings(
+            actionPayloadForRows([row], kind)
+          )
+          emitUpdatedListings(response)
+          showSuccess(workflowSuccessText(kind))
+        }
+        emit('refresh')
+      } catch (error) {
+        showError(userFacingApiError(error, actionErrorLabel(kind)))
+      } finally {
+        savingListings.value = false
+      }
     }
-    emit('refresh')
-  } catch (error) {
-    showError(userFacingApiError(error, actionErrorLabel(kind)))
-  } finally {
-    savingListings.value = false
-  }
+  )
 }
 
 async function handleBatchAction(kind) {
@@ -723,47 +724,50 @@ async function handleBatchAction(kind) {
         : t('llmOps.listingBoard.confirm.batchPrice', {
             count: modelIds.length
           })
-  if (
-    !(await askConfirmation(confirmMessage, {
-      danger: kind === 'offline'
-    }))
-  ) {
-    return
-  }
-  if (kind === 'price') {
-    emit('open-workspace', { modelId: null, kind: 'batch-price', modelIds })
-    return
-  }
-  savingListings.value = true
-  try {
-    if (kind === 'offline') {
-      const response = await llmOpsApi.bulkTransitionResaleListings(
-        actionPayloadForRows(targetRows, 'request_offline')
-      )
-      emitUpdatedListings(response)
-      showSuccess(t('llmOps.listingBoard.messages.batchOfflineRequested'))
-    } else if (kind === 'confirm') {
-      const response = await llmOpsApi.bulkTransitionResaleListings(
-        actionPayloadForRows(targetRows, batchConfirmAction.value)
-      )
-      emitUpdatedListings(response)
-      showSuccess(
-        t('llmOps.listingBoard.messages.batchConfirmed', {
-          action: batchConfirmLabel.value
+  await withConfirmation(
+    confirmMessage,
+    { danger: kind === 'offline' },
+    async () => {
+      if (kind === 'price') {
+        emit('open-workspace', {
+          modelId: null,
+          kind: 'batch-price',
+          modelIds
         })
-      )
+        return
+      }
+      savingListings.value = true
+      try {
+        if (kind === 'offline') {
+          const response = await llmOpsApi.bulkTransitionResaleListings(
+            actionPayloadForRows(targetRows, 'request_offline')
+          )
+          emitUpdatedListings(response)
+          showSuccess(t('llmOps.listingBoard.messages.batchOfflineRequested'))
+        } else if (kind === 'confirm') {
+          const response = await llmOpsApi.bulkTransitionResaleListings(
+            actionPayloadForRows(targetRows, batchConfirmAction.value)
+          )
+          emitUpdatedListings(response)
+          showSuccess(
+            t('llmOps.listingBoard.messages.batchConfirmed', {
+              action: batchConfirmLabel.value
+            })
+          )
+        }
+        setSelectedModelIds(
+          Array.from(selectedModelIds.value).filter(
+            (id) => !selectedKeys.includes(id)
+          )
+        )
+        emit('refresh')
+      } catch (error) {
+        showError(userFacingApiError(error, actionErrorLabel(kind)))
+      } finally {
+        savingListings.value = false
+      }
     }
-    setSelectedModelIds(
-      Array.from(selectedModelIds.value).filter(
-        (id) => !selectedKeys.includes(id)
-      )
-    )
-    emit('refresh')
-  } catch (error) {
-    showError(userFacingApiError(error, actionErrorLabel(kind)))
-  } finally {
-    savingListings.value = false
-  }
+  )
 }
 
 function askConfirmation(message, options = {}) {
@@ -779,10 +783,28 @@ function askConfirmation(message, options = {}) {
 function settleConfirmation(confirmed) {
   const request = confirmationRequest.value
   if (!request) return
+  if (!confirmed) {
+    confirmationRequest.value = null
+    request.resolve(false)
+    return
+  }
   confirmationBusy.value = true
+  request.resolve(true)
+}
+
+function closeConfirmation() {
   confirmationRequest.value = null
-  request.resolve(confirmed)
   confirmationBusy.value = false
+}
+
+async function withConfirmation(message, options, action) {
+  const confirmed = await askConfirmation(message, options)
+  if (!confirmed) return
+  try {
+    await action()
+  } finally {
+    closeConfirmation()
+  }
 }
 
 function emitUpdatedListings(response) {

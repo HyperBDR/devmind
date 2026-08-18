@@ -10,7 +10,7 @@
     >
       <div class="modal-header">
         <div class="min-w-0">
-          <p class="eyebrow">Manual Price Entry</p>
+          <p class="eyebrow">{{ t('llmOps.manualPriceEntry.title') }}</p>
           <h3 class="mt-2 text-lg font-semibold text-slate-900">
             {{ t('llmOps.manualPriceEntry.title') }}
           </h3>

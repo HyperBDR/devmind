@@ -14,7 +14,7 @@
             <p
               class="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-600"
             >
-              Price Source
+              {{ t('llmOps.priceSourceModal.title.eyebrow') }}
             </p>
             <h3 class="mt-2 text-lg font-semibold text-slate-900">
               {{
@@ -446,7 +446,7 @@ async function save() {
     if (!isAutoSyncMode.value) {
       payload.source_category = 'manual'
       payload.source_owner_type = 'internal'
-      payload.collection_method = 'manual_entry'
+      payload.collection_method = form.value.collection_method || 'manual_entry'
       payload.updates_model_prices = false
     }
     if (isEditing.value) {

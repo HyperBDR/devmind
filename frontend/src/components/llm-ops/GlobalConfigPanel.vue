@@ -2,7 +2,9 @@
   <section class="global-config-panel">
     <div class="global-config-toolbar">
       <div>
-        <p class="global-config-eyebrow">Global Config</p>
+        <p class="global-config-eyebrow">
+          {{ t('llmOps.globalConfigPanel.eyebrow') }}
+        </p>
         <h3>{{ t('llmOps.globalConfigPanel.settingsTitle') }}</h3>
         <p>{{ t('llmOps.globalConfigPanel.description') }}</p>
       </div>
@@ -348,7 +350,7 @@
         </p>
 
         <label class="config-field">
-          <span>App ID</span>
+          <span>{{ t('llmOps.globalConfigPanel.fields.feishuAppId') }}</span>
           <input
             v-model.trim="form.feishu_app_id"
             type="text"
@@ -356,7 +358,9 @@
           />
         </label>
         <label class="config-field">
-          <span>App Secret</span>
+          <span>{{
+            t('llmOps.globalConfigPanel.fields.feishuAppSecret')
+          }}</span>
           <input
             v-model.trim="form.feishu_app_secret"
             type="password"
@@ -377,7 +381,9 @@
           />
         </label>
         <label class="config-field">
-          <span>Tenant Key</span>
+          <span>{{
+            t('llmOps.globalConfigPanel.fields.feishuTenantKey')
+          }}</span>
           <input
             v-model.trim="form.feishu_tenant_key"
             type="text"

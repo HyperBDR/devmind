@@ -144,8 +144,8 @@ const riskRows = computed(() => {
     })
   })
   listingRows.value.forEach((listing) => {
-    const inputMargin = listing.input_margin?.margin_rate
-    const outputMargin = listing.output_margin?.margin_rate
+    const inputMargin = listing.input_margin?.gross_margin_rate
+    const outputMargin = listing.output_margin?.gross_margin_rate
     if (!isLowMargin(inputMargin) && !isLowMargin(outputMargin)) return
     rows.push({
       key: `listing-${listing.listing_id}`,
@@ -193,8 +193,8 @@ const metrics = computed(() => [
 ])
 
 function isLowMargin(value) {
-  if (value === null || value === undefined) return false
-  return Number(value) < 0.1
+  if (value === null || value === undefined || value === '') return false
+  return Number(value) < 10
 }
 
 function statusLabel(status) {
@@ -232,7 +232,7 @@ function riskRank(status) {
 
 function percent(value) {
   if (value === null || value === undefined || value === '') return '-'
-  return `${(Number(value) * 100).toFixed(2)}%`
+  return `${Number(value).toFixed(2)}%`
 }
 
 function channelDisplayName(value) {

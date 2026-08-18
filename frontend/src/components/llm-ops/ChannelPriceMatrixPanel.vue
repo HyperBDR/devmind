@@ -214,7 +214,7 @@ function isBest(row, channel) {
 function priceSummary(option) {
   const input = money(option.input_price_per_million, option.currency)
   const output = money(option.output_price_per_million, option.currency)
-  return `In ${input} / Out ${output}`
+  return t('llmOps.channelPriceMatrixPanel.summary.inOut', { input, output })
 }
 
 function money(value, currency) {

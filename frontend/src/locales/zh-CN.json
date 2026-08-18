@@ -791,7 +791,9 @@
         },
         "quality": {
           "title": "数据质量",
-          "questions": ["最近采集失败或数据异常的价格源有哪些？"]
+          "questions": [
+            "最近采集失败或数据异常的价格源有哪些？"
+          ]
         }
       }
     },
@@ -1030,7 +1032,8 @@
       "submitting": "提交中…",
       "submit": "提交上架",
       "saveFailed": "保存失败",
-      "submitFailed": "提交失败"
+      "submitFailed": "提交失败",
+      "eyebrow": "模型发布工作台"
     },
     "publishingWorkspace": {
       "actions": {
@@ -1433,7 +1436,12 @@
       "upstreamPrice": "上游价格",
       "upstreamSourceCount": "{count} 个上游价格源",
       "upstreamSummary": "上游 {value}",
-      "vendorAddableCount": "{count} 个可添加元模型"
+      "vendorAddableCount": "{count} 个可添加元模型",
+      "title": "渠道模型",
+      "errors": {
+        "save": "渠道模型价格保存失败",
+        "delete": "渠道模型价格删除失败"
+      }
     },
     "providerPricingDrawer": {
       "allSources": "全部来源",
@@ -1621,7 +1629,9 @@
         "currency": "币种",
         "object": "对象",
         "time": "时间",
-        "type": "类型"
+        "type": "类型",
+        "input": "输入",
+        "output": "输出"
       },
       "dimension": {
         "audioInput": "音频输入",
@@ -1830,7 +1840,10 @@
         "missing": "缺渠道价"
       },
       "subtitle": "按模型比较各渠道采购价格、最低价命中和覆盖缺口。",
-      "title": "渠道横向比价矩阵"
+      "title": "渠道横向比价矩阵",
+      "summary": {
+        "inOut": "进 {input} / 出 {output}"
+      }
     },
     "globalConfigPanel": {
       "actions": {
@@ -1863,7 +1876,10 @@
         "llmConfig": "Agent 使用的 LLM 配置",
         "schedule": "执行周期",
         "sourceUrl": "数据源 URL",
-        "updatedAt": "最近更新"
+        "updatedAt": "最近更新",
+        "feishuAppId": "应用 ID",
+        "feishuAppSecret": "应用密钥",
+        "feishuTenantKey": "租户 Key"
       },
       "feishu": {
         "description": "启用后，模型上架流程可选择外部飞书审批路径。",
@@ -1918,7 +1934,8 @@
         "disabled": "已停用",
         "enabled": "已启用"
       },
-      "title": "全局配置"
+      "title": "全局配置",
+      "eyebrow": "全局配置"
     },
     "workflowConfig": {
       "actions": {
@@ -2159,6 +2176,9 @@
         "amountRequired": "请输入渠道账单金额。",
         "channelRequired": "请选择账单归属的转发渠道。",
         "modelRequired": "请选择本次用量对应的调用模型。"
+      },
+      "errors": {
+        "create": "对账记录创建失败"
       }
     },
     "providerManagement": {
@@ -2332,7 +2352,8 @@
           "sourcesKept": "保留真实来源",
           "sourcesMatched": "匹配来源"
         },
-        "title": "重置官方价格数据"
+        "title": "重置官方价格数据",
+        "eyebrow": "官方价格重置"
       },
       "messages": {
         "deleted": "模型价格源已删除",
@@ -2357,8 +2378,9 @@
     },
     "priceSourceModal": {
       "title": {
-        "create": "新建模型价格源",
-        "edit": "编辑模型价格源"
+        "eyebrow": "价格来源",
+        "create": "新建价格来源",
+        "edit": "编辑价格来源"
       },
       "description": {
         "create": "新建官方采集、供货商或人工维护价格源，用于后续录价和采集模型价格。",
@@ -2707,7 +2729,6 @@
     "manualPriceImport": {
       "title": "导入人工价格表",
       "description": "适合无法自动采集的模型价格源，可从 Excel 复制整张表后粘贴。",
-      "updateModelPrices": "导入后同步更新模型价格源价格。关闭后只生成模型价格源和标准价格项，不覆盖模型主数据价格。",
       "supportedFieldsTitle": "支持字段",
       "emptyPreview": "粘贴带表头的价格表后会显示预览。",
       "fields": {
@@ -2767,6 +2788,9 @@
         "noPrice": "第 {line} 行至少需要一个价格字段。",
         "rowMissingModelCode": "第 {line} 行缺少 model_code。",
         "unsupportedCurrency": "第 {line} 行币种只支持 USD 或 CNY。"
+      },
+      "errors": {
+        "save": "手工价格导入失败"
       }
     },
     "channelManagement": {
@@ -3072,6 +3096,11 @@
         "pageSizeOption": "{size} 条",
         "previous": "上一页",
         "next": "下一页"
+      },
+      "duration": {
+        "seconds": "{count} 秒",
+        "minutesSeconds": "{minutes} 分 {seconds} 秒",
+        "hoursMinutes": "{hours} 小时 {minutes} 分"
       }
     },
     "auditLog": {
@@ -3411,6 +3440,10 @@
         }
       },
       "empty": "当前筛选条件下没有风险项。"
+    },
+    "resaleTier": {
+      "pricePerMillionTokens": "/ 百万 tokens",
+      "thousandTokensUnit": "K tokens"
     }
   },
   "sals": {

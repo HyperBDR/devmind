@@ -571,11 +571,20 @@ function formatDuration(row) {
   const end = row.finished_at ? new Date(row.finished_at).getTime() : Date.now()
   if (!Number.isFinite(start) || !Number.isFinite(end) || !start) return '-'
   const seconds = Math.max(Math.round((end - start) / 1000), 0)
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60)
+    return t('llmOps.taskLogs.duration.seconds', { count: seconds })
   const minutes = Math.floor(seconds / 60)
   const restSeconds = seconds % 60
-  if (minutes < 60) return `${minutes}m ${restSeconds}s`
+  if (minutes < 60) {
+    return t('llmOps.taskLogs.duration.minutesSeconds', {
+      minutes,
+      seconds: restSeconds
+    })
+  }
   const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
+  return t('llmOps.taskLogs.duration.hoursMinutes', {
+    hours,
+    minutes: minutes % 60
+  })
 }
 </script>

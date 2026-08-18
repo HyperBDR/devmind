@@ -7,7 +7,7 @@
     <div class="modal-panel">
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Manual Price Source</p>
+          <p class="eyebrow">{{ t('llmOps.manualPriceImport.title') }}</p>
           <h3 class="mt-1 text-lg font-semibold text-slate-900">
             {{ t('llmOps.manualPriceImport.title') }}
           </h3>
@@ -236,6 +236,8 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { llmOpsApi } from '@/api/llmOps'
+import { useToast } from '@/composables/useToast'
+import { errorMessage } from '@/utils/llmOpsPagination'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
 import {
   priceSourceCollectionMethod,
@@ -267,6 +269,7 @@ const { t } = useI18n()
 const rawTable = ref('')
 const saving = ref(false)
 const form = ref(defaultForm())
+const { showError } = useToast()
 
 const currencyOptions = [
   { label: 'USD', value: 'USD' },
@@ -352,8 +355,7 @@ watch(selectedSource, (source) => {
 function defaultForm() {
   return {
     source: '',
-    currency: 'USD',
-    updates_model_prices: false
+    currency: 'USD'
   }
 }
 
@@ -381,7 +383,6 @@ async function submit() {
       ...form.value,
       source_name: selectedSource.value.name,
       source_url: selectedSource.value.endpoint_url || '',
-      updates_model_prices: false,
       rows: parsedRows.value.map((row) => cleanRow(row))
     }
     if (selectedSourceProvider.value?.id) {
@@ -389,6 +390,8 @@ async function submit() {
     }
     await llmOpsApi.importManualPrices(payload)
     emit('imported')
+  } catch (error) {
+    showError(errorMessage(error, t('llmOps.manualPriceImport.errors.save')))
   } finally {
     saving.value = false
   }

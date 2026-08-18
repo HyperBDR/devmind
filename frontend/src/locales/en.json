@@ -1022,7 +1022,8 @@
       "submitting": "Submitting…",
       "submit": "Submit listing",
       "saveFailed": "Save failed",
-      "submitFailed": "Submit failed"
+      "submitFailed": "Submit failed",
+      "eyebrow": "Model Publishing Workspace"
     },
     "publishingWorkspace": {
       "actions": {
@@ -1425,7 +1426,12 @@
       "upstreamPrice": "Upstream price",
       "upstreamSourceCount": "{count} upstream price sources",
       "upstreamSummary": "Upstream {value}",
-      "vendorAddableCount": "{count} addable meta models"
+      "vendorAddableCount": "{count} addable meta models",
+      "title": "Channel Models",
+      "errors": {
+        "save": "Failed to save channel model prices",
+        "delete": "Failed to delete channel model price"
+      }
     },
     "providerPricingDrawer": {
       "allSources": "All sources",
@@ -1613,7 +1619,9 @@
         "currency": "Currency",
         "object": "Object",
         "time": "Time",
-        "type": "Type"
+        "type": "Type",
+        "input": "Input",
+        "output": "Output"
       },
       "dimension": {
         "audioInput": "Audio input",
@@ -1822,7 +1830,10 @@
         "missing": "Missing channel price"
       },
       "subtitle": "Compare procurement prices, lowest-price hits, and coverage gaps across channels by model.",
-      "title": "Channel Price Matrix"
+      "title": "Channel Price Matrix",
+      "summary": {
+        "inOut": "In {input} / Out {output}"
+      }
     },
     "globalConfigPanel": {
       "actions": {
@@ -1855,7 +1866,10 @@
         "llmConfig": "Agent LLM configuration",
         "schedule": "Schedule",
         "sourceUrl": "Source URL",
-        "updatedAt": "Last updated"
+        "updatedAt": "Last updated",
+        "feishuAppId": "App ID",
+        "feishuAppSecret": "App Secret",
+        "feishuTenantKey": "Tenant Key"
       },
       "feishu": {
         "description": "When enabled, listing workflows can use the external Feishu approval path.",
@@ -1910,7 +1924,8 @@
         "disabled": "Disabled",
         "enabled": "Enabled"
       },
-      "title": "Global Settings"
+      "title": "Global Settings",
+      "eyebrow": "Global Config"
     },
     "workflowConfig": {
       "actions": {
@@ -2151,6 +2166,9 @@
         "amountRequired": "Enter the channel billed amount.",
         "channelRequired": "Select the forwarding channel for this bill.",
         "modelRequired": "Select the model used for this usage."
+      },
+      "errors": {
+        "create": "Failed to create reconciliation record"
       }
     },
     "providerManagement": {
@@ -2324,7 +2342,8 @@
           "sourcesKept": "Real sources kept",
           "sourcesMatched": "Sources matched"
         },
-        "title": "Reset Official Price Data"
+        "title": "Reset Official Price Data",
+        "eyebrow": "Official Price Reset"
       },
       "messages": {
         "deleted": "Model price source deleted",
@@ -2349,8 +2368,9 @@
     },
     "priceSourceModal": {
       "title": {
-        "create": "New Model Price Source",
-        "edit": "Edit Model Price Source"
+        "eyebrow": "Price Source",
+        "create": "New Price Source",
+        "edit": "Edit Price Source"
       },
       "description": {
         "create": "Create an official collector, supplier, or manually maintained price source for later price entry and collection.",
@@ -2699,7 +2719,6 @@
     "manualPriceImport": {
       "title": "Import Manual Price Sheet",
       "description": "For model price sources that cannot be collected automatically. Copy a full table from Excel and paste it here.",
-      "updateModelPrices": "Also update model price source prices after import. When disabled, only the model price source and standard price items are created, without overwriting model master prices.",
       "supportedFieldsTitle": "Supported fields",
       "emptyPreview": "Paste a price table with headers to show the preview.",
       "fields": {
@@ -2759,6 +2778,9 @@
         "noPrice": "Line {line}: at least one price field is required.",
         "rowMissingModelCode": "Line {line}: missing model_code.",
         "unsupportedCurrency": "Line {line}: currency only supports USD or CNY."
+      },
+      "errors": {
+        "save": "Failed to import manual prices"
       }
     },
     "channelManagement": {
@@ -3064,6 +3086,11 @@
         "pageSizeOption": "{size} rows",
         "previous": "Previous",
         "next": "Next"
+      },
+      "duration": {
+        "seconds": "{count}s",
+        "minutesSeconds": "{minutes}m {seconds}s",
+        "hoursMinutes": "{hours}h {minutes}m"
       }
     },
     "auditLog": {
@@ -3403,6 +3430,10 @@
         }
       },
       "empty": "No risk items match the current filters."
+    },
+    "resaleTier": {
+      "pricePerMillionTokens": "/ 1M Tokens",
+      "thousandTokensUnit": "K Tokens"
     }
   },
   "sals": {

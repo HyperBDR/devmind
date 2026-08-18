@@ -41,7 +41,7 @@
                   <p
                     class="text-[11px] font-bold uppercase tracking-[0.18em] text-agione-600"
                   >
-                    Model Publishing Workspace
+                    {{ t('llmOps.publishingDrawer.eyebrow') }}
                   </p>
                   <h2
                     class="mt-0.5 truncate text-base font-bold text-slate-900"
@@ -222,6 +222,7 @@ function onWorkspaceChange(payload) {
 }
 
 function tryClose() {
+  if (saving.value) return
   emit('update:open', false)
 }
 
@@ -230,7 +231,6 @@ async function handleSaveDraft() {
   saving.value = true
   try {
     emit('draft', latestPayload.value)
-    tryClose()
   } catch (error) {
     showError(
       userFacingApiError(error, t('llmOps.publishingDrawer.saveFailed'))
@@ -245,7 +245,6 @@ async function handlePublish() {
   saving.value = true
   try {
     emit('saved', latestPayload.value)
-    tryClose()
   } catch (error) {
     showError(
       userFacingApiError(error, t('llmOps.publishingDrawer.submitFailed'))
