@@ -97,6 +97,64 @@ export interface FeishuSyncJob {
   finished_at?: string | null;
 }
 
+export type FeishuSyncStateStatus =
+  | 'synced'
+  | 'syncing'
+  | 'has_diff'
+  | 'failed'
+  | 'permission'
+  | 'missing';
+
+export type FeishuSyncDifferenceType =
+  | 'added'
+  | 'deleted'
+  | 'moved'
+  | 'renamed'
+  | 'modified';
+
+export interface FeishuSyncDifference {
+  id: string;
+  type: FeishuSyncDifferenceType;
+  status:
+    | 'detected'
+    | 'applied'
+    | 'pending_confirmation'
+    | 'failed'
+    | 'archived';
+  file_name: string;
+  folder_name: string;
+  previous: Record<string, unknown>;
+  current: Record<string, unknown>;
+  error_message: string;
+  detected_at: string;
+}
+
+export interface FeishuSyncFolderState {
+  id: string;
+  folder_name: string;
+  status: FeishuSyncStateStatus;
+  last_local_sync_at?: string | null;
+  latest_feishu_check_at?: string | null;
+  difference_count: number;
+  error_code: string;
+  error_message: string;
+}
+
+export interface FeishuSyncOverview {
+  status: FeishuSyncStateStatus;
+  last_local_sync_at?: string | null;
+  latest_feishu_check_at?: string | null;
+  difference_count: number;
+  states: FeishuSyncFolderState[];
+  differences: FeishuSyncDifference[];
+}
+
+export interface FeishuSyncTriggerResult {
+  sync_job_id?: string | null;
+  sync_status: string;
+  reused: boolean;
+}
+
 export class FeishuUploadConflictError extends Error {
   conflict: FeishuUploadConflict;
 
@@ -108,6 +166,29 @@ export class FeishuUploadConflictError extends Error {
 
 export function getFeishuStatus(): Promise<FeishuStatus> {
   return apiRequest<FeishuStatus>('/feishu/status');
+}
+
+export function triggerFeishuLoginSync(): Promise<FeishuSyncTriggerResult> {
+  return apiRequest<FeishuSyncTriggerResult>('/feishu/sync-on-login', {
+    method: 'POST',
+  });
+}
+
+export function getFeishuSyncStatus(): Promise<FeishuSyncOverview> {
+  return apiRequest<FeishuSyncOverview>('/feishu/sync-status');
+}
+
+export function resolveFeishuSyncDifference(
+  differenceId: string,
+  action: 'archive' | 'delete',
+): Promise<{ id: string; status: string; action: string }> {
+  return apiRequest<{ id: string; status: string; action: string }>(
+    `/feishu/sync-differences/${encodeURIComponent(differenceId)}/resolve`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    },
+  );
 }
 
 export function syncFeishuArchiveFolder(options: {

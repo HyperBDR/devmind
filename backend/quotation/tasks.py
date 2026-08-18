@@ -16,6 +16,8 @@ from quotation.metrics import record_export_operation, record_storage_operation
 from quotation.models import (
     DocumentAsset,
     DocumentParseStatus,
+    FeishuSyncState,
+    FeishuSyncStatus,
     RemoteFileCleanup,
     RemoteFileCleanupStatus,
     SyncJob,
@@ -25,10 +27,48 @@ from quotation.models import (
 from quotation.services.document_parsing.service import (
     parse_and_create_quotation,
 )
+from quotation.services.feishu_sync import enqueue_feishu_sync
 
 logger = logging.getLogger(__name__)
 
 FEISHU_SYNC_LOCK_KEY = "quotation:feishu:archive-folder-sync"
+
+
+@shared_task(
+    name="quotation.tasks.dispatch_feishu_sync",
+    acks_late=True,
+)
+def dispatch_feishu_sync():
+    """Enqueue one idempotent system-wide Feishu synchronization."""
+    job, reused = enqueue_feishu_sync(actor=None, trigger="periodic")
+    return {
+        "sync_job_id": job.id if job is not None else None,
+        "reused": reused,
+    }
+
+
+def _mark_feishu_sync_states_failed(job: SyncJob, exc: Exception) -> None:
+    """Keep folder status consistent when an async job exhausts retries."""
+    targets = (job.payload_json or {}).get("targets") or []
+    now = timezone.now()
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        folder_token = str(target.get("folder_token") or "").strip()
+        if not folder_token:
+            continue
+        filters = {"root_folder_token": folder_token}
+        connection_id = target.get("connection_id")
+        if connection_id:
+            filters["storage_connection_id"] = connection_id
+        else:
+            filters["storage_connection__isnull"] = True
+        FeishuSyncState.objects.filter(**filters).update(
+            status=FeishuSyncStatus.FAILED,
+            error_code="folder_sync_failed",
+            error_message=type(exc).__name__,
+            updated_at=now,
+        )
 
 
 def _duration_ms(started: float) -> int:
@@ -760,7 +800,11 @@ def ocr_document_task(self, job_id: str):
     soft_time_limit=600,
     time_limit=660,
 )
-def sync_feishu_folder_task(self, job_id: str, actor_id: int):
+def sync_feishu_folder_task(
+    self,
+    job_id: str,
+    actor_id: int | None = None,
+):
     """Discover Feishu files and enqueue isolated parser tasks."""
     started = perf_counter()
     cache.set(FEISHU_SYNC_LOCK_KEY, True, timeout=1500)
@@ -787,6 +831,8 @@ def sync_feishu_folder_task(self, job_id: str, actor_id: int):
         response = FeishuFolderSyncView()._sync(
             request,
             enqueue_parsing=True,
+            sync_job=job,
+            targets=(job.payload_json or {}).get("targets"),
         )
         if response.status_code >= 500:
             raise RuntimeError("Feishu folder synchronization failed")
@@ -869,6 +915,7 @@ def sync_feishu_folder_task(self, job_id: str, actor_id: int):
                 "updated_at",
             ]
         )
+        _mark_feishu_sync_states_failed(job, exc)
         _record_feishu_sync_observability(
             job,
             result="failure",
