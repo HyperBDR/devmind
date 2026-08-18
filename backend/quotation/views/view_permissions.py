@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from django.contrib.auth.models import User
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -21,7 +22,10 @@ from quotation.permissions import is_quotation_platform_admin
 
 
 def _require_admin(user):
-    if not is_quotation_platform_admin(user):
+    has_platform_access = (
+        "quotation_management" in get_effective_feature_keys(user)
+    )
+    if not has_platform_access or not is_quotation_platform_admin(user):
         raise PermissionDenied(
             "Only quotation platform administrators can manage view access."
         )
@@ -89,7 +93,11 @@ def _folder_asset(folder_token: str):
 
 def _folder_label(asset: DocumentAsset, folder_token: str) -> str:
     for item in asset.feishu_folder_path or []:
-        if isinstance(item, dict) and str(item.get("token") or "") == folder_token:
+        item_token = str(item.get("token") or "") if isinstance(
+            item,
+            dict,
+        ) else ""
+        if item_token == folder_token:
             return str(item.get("name") or folder_token)
     return _folder_name(asset) or folder_token
 
@@ -141,6 +149,54 @@ def _platform_users():
     return users
 
 
+def _parse_expires_at(value):
+    """Parse an optional future expiration timestamp."""
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValidationError(
+            {"expires_at": "Invalid expiration time."}
+        ) from error
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed)
+    if parsed <= timezone.now():
+        raise ValidationError(
+            {"expires_at": "Expiration must be in the future."}
+        )
+    return parsed
+
+
+def _permission_status(permission: QuotationViewPermission) -> str:
+    """Return the effective lifecycle status for a view grant."""
+    if not permission.is_active:
+        return "revoked"
+    if permission.expires_at and permission.expires_at <= timezone.now():
+        return "expired"
+    return "active"
+
+
+def _validate_grantee(user: User | None) -> User:
+    """Require an active ordinary user with first-layer access."""
+    if (
+        user is None
+        or user.is_staff
+        or user.is_superuser
+        or is_quotation_platform_admin(user)
+        or "quotation_management" not in get_effective_feature_keys(user)
+    ):
+        raise ValidationError(
+            {
+                "user_id": (
+                    "User must have first-layer Quote Desk access and "
+                    "an ordinary Quote Desk role."
+                )
+            }
+        )
+    return user
+
+
 def _permission_row(permission: QuotationViewPermission):
     target_id = (
         permission.folder_token
@@ -159,8 +215,26 @@ def _permission_row(permission: QuotationViewPermission):
         "folder_token": permission.folder_token,
         "document_id": permission.document_id,
         "expires_at": permission.expires_at,
+        "status": _permission_status(permission),
         "created_at": permission.created_at,
+        "updated_at": permission.updated_at,
         "granted_by": permission.granted_by.username,
+    }
+
+
+def _permission_target_summary(
+    permission: QuotationViewPermission,
+) -> dict:
+    """Return stable resource details for a view-permission audit event."""
+    target_id = (
+        permission.folder_token
+        if permission.target_type
+        == QuotationViewPermissionTarget.FOLDER
+        else permission.document_id
+    )
+    return {
+        "target_type": permission.target_type,
+        "target_id": str(target_id or ""),
     }
 
 
@@ -192,10 +266,12 @@ class QuotationViewPermissionView(APIView):
         try:
             user_id = int(request.data.get("user_id"))
         except (TypeError, ValueError) as error:
-            raise ValidationError({"user_id": "A valid user is required."}) from error
-        user = User.objects.filter(id=user_id, is_active=True).first()
-        if user is None:
-            raise ValidationError({"user_id": "User not found."})
+            raise ValidationError(
+                {"user_id": "A valid user is required."}
+            ) from error
+        user = _validate_grantee(
+            User.objects.filter(id=user_id, is_active=True).first()
+        )
         if target_type not in {
             QuotationViewPermissionTarget.FOLDER,
             QuotationViewPermissionTarget.DOCUMENT,
@@ -208,25 +284,27 @@ class QuotationViewPermissionView(APIView):
             "target_type": target_type,
             "granted_by": request.user,
             "is_active": True,
-            "expires_at": self._expires_at(request.data.get("expires_at")),
+            "expires_at": _parse_expires_at(
+                request.data.get("expires_at")
+            ),
         }
         if target_type == QuotationViewPermissionTarget.FOLDER:
             asset = _folder_asset(target_id)
             if asset is None:
                 raise ValidationError({"target_id": "Folder not found."})
-            defaults.update(
+            duplicate = QuotationViewPermission.objects.filter(
+                user=user,
+                target_type=target_type,
                 folder_token=target_id,
-                folder_name=_folder_label(asset, target_id),
-                document=None,
-            )
-            permission, created = (
-                QuotationViewPermission.objects.update_or_create(
-                    user=user,
-                    target_type=target_type,
-                    folder_token=target_id,
-                    defaults=defaults,
-                )
-            )
+                is_active=True,
+            ).exists()
+            create_fields = {
+                **defaults,
+                "user": user,
+                "folder_token": target_id,
+                "folder_name": _folder_label(asset, target_id),
+                "document": None,
+            }
         else:
             document = DocumentAsset.objects.filter(
                 pk=target_id,
@@ -234,48 +312,109 @@ class QuotationViewPermissionView(APIView):
             ).first()
             if document is None:
                 raise ValidationError({"target_id": "Document not found."})
-            defaults.update(document=document, folder_token="", folder_name="")
-            permission, created = (
-                QuotationViewPermission.objects.update_or_create(
-                    user=user,
-                    target_type=target_type,
-                    document=document,
-                    defaults=defaults,
-                )
+            duplicate = QuotationViewPermission.objects.filter(
+                user=user,
+                target_type=target_type,
+                document=document,
+                is_active=True,
+            ).exists()
+            create_fields = {
+                **defaults,
+                "user": user,
+                "document": document,
+                "folder_token": "",
+                "folder_name": "",
+            }
+        if duplicate:
+            raise ValidationError(
+                "An active view permission already exists."
             )
+        try:
+            with transaction.atomic():
+                permission = QuotationViewPermission.objects.create(
+                    **create_fields
+                )
+        except IntegrityError as error:
+            raise ValidationError(
+                "An active view permission already exists."
+            ) from error
+        target_label = permission.folder_name or (
+            permission.document.file_name if permission.document else ""
+        )
         record_audit_event(
             request=request,
             module="permissions",
             action="grant_view",
             result=AuditEvent.RESULT_SUCCEEDED,
-            target_type=target_type,
+            target_type="quotation_view_permission",
             target_id=str(permission.id),
-            target_label=permission.folder_name
-            or (permission.document.file_name if permission.document else ""),
+            target_label=target_label,
             summary="Granted quotation view access.",
-            metadata={"created": created, "user_id": user.id},
+            after_summary={
+                **_permission_target_summary(permission),
+                "user_id": user.id,
+                "expires_at": (
+                    permission.expires_at.isoformat()
+                    if permission.expires_at
+                    else None
+                ),
+                "status": _permission_status(permission),
+            },
         )
-        return Response(_permission_row(permission), status=201 if created else 200)
-
-    @staticmethod
-    def _expires_at(value):
-        if not value:
-            return None
-        try:
-            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        except ValueError as error:
-            raise ValidationError({"expires_at": "Invalid expiration time."}) from error
-        if timezone.is_naive(parsed):
-            parsed = timezone.make_aware(parsed)
-        if parsed <= timezone.now():
-            raise ValidationError({"expires_at": "Expiration must be in the future."})
-        return parsed
+        return Response(_permission_row(permission), status=201)
 
 
 class QuotationViewPermissionRevokeView(APIView):
-    """Revoke one administrator-granted quotation view permission."""
+    """Edit or revoke one administrator-granted view permission."""
 
     permission_classes = [IsAuthenticated]
+
+    def patch(self, request, permission_id: int):
+        _require_admin(request.user)
+        permission = QuotationViewPermission.objects.filter(
+            pk=permission_id,
+            is_active=True,
+        ).select_related("user", "document", "granted_by").first()
+        if permission is None:
+            raise ValidationError("View permission not found.")
+        if "expires_at" not in request.data:
+            raise ValidationError(
+                {"expires_at": "Expiration is required."}
+            )
+        before_expiry = permission.expires_at
+        expires_at = _parse_expires_at(request.data.get("expires_at"))
+        if expires_at == before_expiry:
+            raise ValidationError(
+                {"expires_at": "Expiration has not changed."}
+            )
+        permission.expires_at = expires_at
+        permission.save(update_fields=["expires_at", "updated_at"])
+        target_label = permission.folder_name or (
+            permission.document.file_name if permission.document else ""
+        )
+        record_audit_event(
+            request=request,
+            module="permissions",
+            action="change_view_expiry",
+            result=AuditEvent.RESULT_SUCCEEDED,
+            target_type="quotation_view_permission",
+            target_id=str(permission.id),
+            target_label=target_label,
+            summary="Changed quotation view access expiration.",
+            before_summary={
+                **_permission_target_summary(permission),
+                "expires_at": (
+                    before_expiry.isoformat() if before_expiry else None
+                )
+            },
+            after_summary={
+                **_permission_target_summary(permission),
+                "expires_at": (
+                    expires_at.isoformat() if expires_at else None
+                )
+            },
+        )
+        return Response(_permission_row(permission))
 
     def delete(self, request, permission_id: int):
         _require_admin(request.user)
@@ -285,6 +424,7 @@ class QuotationViewPermissionRevokeView(APIView):
         ).select_related("user", "document", "granted_by").first()
         if permission is None:
             raise ValidationError("View permission not found.")
+        before_status = _permission_status(permission)
         permission.is_active = False
         permission.save(update_fields=["is_active", "updated_at"])
         record_audit_event(
@@ -292,11 +432,19 @@ class QuotationViewPermissionRevokeView(APIView):
             module="permissions",
             action="revoke_view",
             result=AuditEvent.RESULT_SUCCEEDED,
-            target_type=permission.target_type,
+            target_type="quotation_view_permission",
             target_id=str(permission.id),
             target_label=permission.folder_name
             or (permission.document.file_name if permission.document else ""),
             summary="Revoked quotation view access.",
-            metadata={"user_id": permission.user_id},
+            before_summary={
+                **_permission_target_summary(permission),
+                "status": before_status,
+                "user_id": permission.user_id,
+            },
+            after_summary={
+                **_permission_target_summary(permission),
+                "status": "revoked",
+            },
         )
         return Response(status=204)
