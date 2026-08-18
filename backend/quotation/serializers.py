@@ -12,6 +12,7 @@ from quotation.models import (
     AuditEvent,
     DocumentAsset,
     DocumentParseResult,
+    ItemType,
     Quotation,
     QuotationItem,
     QuotationVersion,
@@ -20,6 +21,43 @@ from quotation.models import (
 )
 from quotation.permissions import is_quotation_admin
 from quotation.services.storage_control import remote_document_reference
+
+MAX_QUOTATION_AMOUNT = Decimal("9999999999999999.99")
+
+
+def _validate_total_amounts(attrs, quotation: Quotation | None = None) -> None:
+    """Reject quotation totals that exceed database decimal precision."""
+    items = attrs.get("items")
+    if items is None:
+        if quotation is None or "vat_rate" not in attrs:
+            return
+        extended_prices = [
+            item.extended_price for item in quotation.items.all()
+        ]
+    else:
+        extended_prices = [item["extended_price"] for item in items]
+
+    subtotal = sum(extended_prices, start=Decimal("0"))
+    vat_rate = attrs.get(
+        "vat_rate",
+        getattr(quotation, "vat_rate", Decimal("0")),
+    )
+    vat_amount = (subtotal * Decimal(vat_rate) / Decimal("100")).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+    if (
+        subtotal > MAX_QUOTATION_AMOUNT
+        or vat_amount > MAX_QUOTATION_AMOUNT
+        or subtotal + vat_amount > MAX_QUOTATION_AMOUNT
+    ):
+        raise serializers.ValidationError(
+            {
+                "items": (
+                    "Calculated quotation totals exceed the supported "
+                    f"amount limit of {MAX_QUOTATION_AMOUNT}."
+                )
+            }
+        )
 
 
 class DashboardCurrencyQuerySerializer(serializers.Serializer):
@@ -209,10 +247,17 @@ def trusted_feishu_file_url(asset: DocumentAsset) -> str | None:
         parsed = urlparse(candidate)
         hostname = (parsed.hostname or "").lower().rstrip(".")
         trusted_host = hostname in {"feishu.cn", "larksuite.com"} or any(
-            hostname.endswith(suffix) for suffix in (".feishu.cn", ".larksuite.com")
+            hostname.endswith(suffix)
+            for suffix in (".feishu.cn", ".larksuite.com")
         )
-        path_segments = {segment for segment in parsed.path.split("/") if segment}
-        if parsed.scheme == "https" and trusted_host and token in path_segments:
+        path_segments = {
+            segment for segment in parsed.path.split("/") if segment
+        }
+        if (
+            parsed.scheme == "https"
+            and trusted_host
+            and token in path_segments
+        ):
             return candidate
     return build_feishu_file_url(token)
 
@@ -236,13 +281,45 @@ class QuotationItemSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
 
+class QuotationItemListSerializer(serializers.ListSerializer):
+    """Validate bounded line-item collections before persistence."""
+
+    def validate(self, attrs):
+        """Reject oversized collections and duplicate line numbers."""
+        if len(attrs) > settings.QUOTATION_MAX_ITEMS:
+            raise serializers.ValidationError(
+                "Ensure this list has no more than "
+                f"{settings.QUOTATION_MAX_ITEMS} items."
+            )
+        line_numbers = [item["line_no"] for item in attrs]
+        if len(line_numbers) != len(set(line_numbers)):
+            raise serializers.ValidationError("Each line_no must be unique.")
+        return attrs
+
+
 class QuotationItemWriteSerializer(serializers.Serializer):
-    line_no = serializers.IntegerField(min_value=1)
-    type = serializers.CharField()
-    item_id = serializers.CharField(required=False, allow_null=True, allow_blank=True)
-    name = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+    line_no = serializers.IntegerField(
+        min_value=1,
+        max_value=2147483647,
+    )
+    type = serializers.ChoiceField(choices=ItemType.choices)
+    item_id = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=QuotationItem._meta.get_field("item_id").max_length,
+    )
+    name = serializers.CharField(
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=QuotationItem._meta.get_field("name").max_length,
+    )
     description = serializers.CharField(
-        required=False, allow_null=True, allow_blank=True
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+        max_length=settings.QUOTATION_MAX_ITEM_DESCRIPTION_LENGTH,
     )
     qty = serializers.DecimalField(
         max_digits=18,
@@ -274,6 +351,9 @@ class QuotationItemWriteSerializer(serializers.Serializer):
         required=False,
     )
 
+    class Meta:
+        list_serializer_class = QuotationItemListSerializer
+
     def validate(self, attrs):
         list_price = attrs.get("list_price", Decimal("0"))
         discount = attrs.get("discount_percent", Decimal("0"))
@@ -282,7 +362,17 @@ class QuotationItemWriteSerializer(serializers.Serializer):
             list_price * (Decimal("1") - discount / Decimal("100"))
         ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         attrs["net_unit_price"] = net_unit_price
-        attrs["extended_price"] = (net_unit_price * qty).quantize(
+        extended_price = net_unit_price * qty
+        if extended_price > MAX_QUOTATION_AMOUNT:
+            raise serializers.ValidationError(
+                {
+                    "extended_price": (
+                        "Ensure this value is less than or equal to "
+                        f"{MAX_QUOTATION_AMOUNT}."
+                    )
+                }
+            )
+        attrs["extended_price"] = extended_price.quantize(
             Decimal("0.01"),
             rounding=ROUND_HALF_UP,
         )
@@ -433,7 +523,9 @@ class QuotationSerializer(serializers.ModelSerializer):
     items = QuotationItemSerializer(many=True, read_only=True)
     versions = QuotationVersionSerializer(many=True, read_only=True)
     issuer_signature = serializers.CharField(allow_blank=True, required=False)
-    remarks_disclaimer = serializers.CharField(allow_blank=True, required=False)
+    remarks_disclaimer = serializers.CharField(
+        allow_blank=True, required=False
+    )
     feishu_file_token = serializers.SerializerMethodField()
     feishu_url = serializers.SerializerMethodField()
     feishu_path = serializers.SerializerMethodField()
@@ -458,12 +550,15 @@ class QuotationSerializer(serializers.ModelSerializer):
         if obj.source_type != "document_import":
             return None
 
-        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("documents")
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "documents"
+        )
         if prefetched is not None:
             imported = [
                 document
                 for document in prefetched
-                if document.source == "feishu" and document.doc_type in {"excel", "pdf"}
+                if document.source == "feishu"
+                and document.doc_type in {"excel", "pdf"}
             ]
             latest = max(
                 imported,
@@ -488,7 +583,9 @@ class QuotationSerializer(serializers.ModelSerializer):
         if hasattr(obj, cache_key):
             return getattr(obj, cache_key)
 
-        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("documents")
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "documents"
+        )
         if prefetched is not None:
             uploads = [
                 document
@@ -497,7 +594,9 @@ class QuotationSerializer(serializers.ModelSerializer):
             ]
             if doc_type:
                 uploads = [
-                    document for document in uploads if document.doc_type == doc_type
+                    document
+                    for document in uploads
+                    if document.doc_type == doc_type
                 ]
             latest = max(
                 uploads, key=lambda document: document.created_at, default=None
@@ -655,24 +754,44 @@ class QuotationSerializer(serializers.ModelSerializer):
 
 
 class QuotationCreateSerializer(serializers.Serializer):
-    quote_no = serializers.CharField()
+    quote_no = serializers.CharField(
+        max_length=Quotation._meta.get_field("quote_no").max_length,
+    )
     product_line = serializers.CharField(
         allow_blank=True,
         required=False,
         default="BDR",
+        max_length=Quotation._meta.get_field("product_line").max_length,
     )
     product_line_name = serializers.CharField(
         allow_blank=True,
         required=False,
         default="",
+        max_length=Quotation._meta.get_field("product_line_name").max_length,
     )
-    project_name = serializers.CharField()
-    currency = serializers.CharField(required=False, default="USD")
-    payment_term_option = serializers.CharField(required=False, default="CIA")
-    payment_terms = serializers.CharField()
+    project_name = serializers.CharField(
+        max_length=Quotation._meta.get_field("project_name").max_length,
+    )
+    currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
+        default="USD",
+    )
+    payment_term_option = serializers.ChoiceField(
+        choices=("CIA", "NET 30", "NET 45", "NET 60", "Mixed", "Others"),
+        required=False,
+        default="CIA",
+    )
+    payment_terms = serializers.CharField(
+        max_length=Quotation._meta.get_field("payment_terms").max_length,
+    )
     quote_date = serializers.DateField()
     expire_date = serializers.DateField()
-    tax_label = serializers.CharField(required=False, default="VAT")
+    tax_label = serializers.CharField(
+        required=False,
+        default="VAT",
+        max_length=Quotation._meta.get_field("tax_label").max_length,
+    )
     vat_rate = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -682,30 +801,74 @@ class QuotationCreateSerializer(serializers.Serializer):
         default=Decimal("0"),
     )
     remarks_disclaimer = serializers.CharField(
-        required=False, allow_blank=True, default=""
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=settings.QUOTATION_MAX_REMARKS_LENGTH,
     )
     issuer_company_name = serializers.CharField(
-        required=False, default="OnePro Cloud Limited"
+        required=False,
+        default="OnePro Cloud Limited",
+        max_length=Quotation._meta.get_field("issuer_company_name").max_length,
     )
-    issuer_contact_name = serializers.CharField(allow_blank=True)
-    issuer_contact_email = serializers.CharField(allow_blank=True)
+    issuer_contact_name = serializers.CharField(
+        allow_blank=True,
+        max_length=Quotation._meta.get_field("issuer_contact_name").max_length,
+    )
+    issuer_contact_email = serializers.EmailField(
+        allow_blank=True,
+        max_length=Quotation._meta.get_field(
+            "issuer_contact_email"
+        ).max_length,
+    )
     issuer_contact_title = serializers.CharField(
-        required=False, allow_blank=True, default=""
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=Quotation._meta.get_field(
+            "issuer_contact_title"
+        ).max_length,
     )
     issuer_signature = serializers.CharField(
-        required=False, allow_blank=True, default=""
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=settings.QUOTATION_MAX_SIGNATURE_LENGTH,
     )
-    client_company = serializers.CharField()
-    contact_person = serializers.CharField(allow_blank=True)
-    email = serializers.CharField(allow_blank=True)
+    client_company = serializers.CharField(
+        max_length=Quotation._meta.get_field("client_company").max_length,
+    )
+    contact_person = serializers.CharField(
+        allow_blank=True,
+        max_length=Quotation._meta.get_field("contact_person").max_length,
+    )
+    email = serializers.EmailField(
+        allow_blank=True,
+        max_length=Quotation._meta.get_field("email").max_length,
+    )
     billing_company = serializers.CharField(
-        required=False, allow_blank=True, default=""
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=Quotation._meta.get_field("billing_company").max_length,
     )
     billing_contact = serializers.CharField(
-        required=False, allow_blank=True, default=""
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=Quotation._meta.get_field("billing_contact").max_length,
     )
-    billing_email = serializers.CharField(required=False, allow_blank=True, default="")
-    created_by_email = serializers.CharField(required=False, allow_null=True)
+    billing_email = serializers.EmailField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=Quotation._meta.get_field("billing_email").max_length,
+    )
+    created_by_email = serializers.EmailField(
+        required=False,
+        allow_null=True,
+        max_length=Quotation._meta.get_field("created_by_email").max_length,
+    )
     items = QuotationItemWriteSerializer(many=True, required=False)
 
     def validate(self, attrs):
@@ -724,26 +887,47 @@ class QuotationCreateSerializer(serializers.Serializer):
             raise serializers.ValidationError(
                 {"expire_date": "Expiry date cannot be before quote date."}
             )
+        _validate_total_amounts(attrs)
         return attrs
 
 
 class QuotationUpdateSerializer(serializers.Serializer):
-    quote_no = serializers.CharField(required=False)
-    project_name = serializers.CharField(required=False)
+    quote_no = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("quote_no").max_length,
+    )
+    project_name = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("project_name").max_length,
+    )
     product_line = serializers.CharField(
         allow_blank=True,
         required=False,
+        max_length=Quotation._meta.get_field("product_line").max_length,
     )
     product_line_name = serializers.CharField(
         allow_blank=True,
         required=False,
+        max_length=Quotation._meta.get_field("product_line_name").max_length,
     )
-    currency = serializers.CharField(required=False)
-    payment_term_option = serializers.CharField(required=False)
-    payment_terms = serializers.CharField(required=False)
+    currency = serializers.ChoiceField(
+        choices=settings.QUOTATION_ALLOWED_CURRENCIES,
+        required=False,
+    )
+    payment_term_option = serializers.ChoiceField(
+        choices=("CIA", "NET 30", "NET 45", "NET 60", "Mixed", "Others"),
+        required=False,
+    )
+    payment_terms = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("payment_terms").max_length,
+    )
     quote_date = serializers.DateField(required=False)
     expire_date = serializers.DateField(required=False)
-    tax_label = serializers.CharField(required=False)
+    tax_label = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("tax_label").max_length,
+    )
     vat_rate = serializers.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -751,29 +935,66 @@ class QuotationUpdateSerializer(serializers.Serializer):
         max_value=Decimal("100"),
         required=False,
     )
-    remarks_disclaimer = serializers.CharField(required=False, allow_blank=True)
-    issuer_company_name = serializers.CharField(required=False)
-    issuer_contact_name = serializers.CharField(required=False)
-    issuer_contact_email = serializers.CharField(required=False)
-    issuer_contact_title = serializers.CharField(required=False, allow_blank=True)
-    issuer_signature = serializers.CharField(required=False, allow_blank=True)
-    client_company = serializers.CharField(required=False)
-    contact_person = serializers.CharField(required=False)
-    email = serializers.CharField(required=False)
-    billing_company = serializers.CharField(required=False, allow_blank=True)
-    billing_contact = serializers.CharField(required=False, allow_blank=True)
-    billing_email = serializers.CharField(required=False, allow_blank=True)
+    remarks_disclaimer = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=settings.QUOTATION_MAX_REMARKS_LENGTH,
+    )
+    issuer_company_name = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("issuer_company_name").max_length,
+    )
+    issuer_contact_name = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("issuer_contact_name").max_length,
+    )
+    issuer_contact_email = serializers.EmailField(
+        required=False,
+        max_length=Quotation._meta.get_field(
+            "issuer_contact_email"
+        ).max_length,
+    )
+    issuer_contact_title = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=Quotation._meta.get_field(
+            "issuer_contact_title"
+        ).max_length,
+    )
+    issuer_signature = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=settings.QUOTATION_MAX_SIGNATURE_LENGTH,
+    )
+    client_company = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("client_company").max_length,
+    )
+    contact_person = serializers.CharField(
+        required=False,
+        max_length=Quotation._meta.get_field("contact_person").max_length,
+    )
+    email = serializers.EmailField(
+        required=False,
+        max_length=Quotation._meta.get_field("email").max_length,
+    )
+    billing_company = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=Quotation._meta.get_field("billing_company").max_length,
+    )
+    billing_contact = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=Quotation._meta.get_field("billing_contact").max_length,
+    )
+    billing_email = serializers.EmailField(
+        required=False,
+        allow_blank=True,
+        max_length=Quotation._meta.get_field("billing_email").max_length,
+    )
     status = serializers.ChoiceField(
-        choices=[
-            "draft",
-            "generated",
-            "uploaded",
-            "sent",
-            "accepted",
-            "rejected",
-            "expired",
-            "cancelled",
-        ],
+        choices=Quotation._meta.get_field("status").choices,
         required=False,
     )
     notes = serializers.CharField(required=False, allow_blank=True, default="")
@@ -782,18 +1003,25 @@ class QuotationUpdateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         quotation = self.context.get("quotation")
-        quote_date = attrs.get("quote_date", getattr(quotation, "quote_date", None))
-        expire_date = attrs.get("expire_date", getattr(quotation, "expire_date", None))
+        quote_date = attrs.get(
+            "quote_date", getattr(quotation, "quote_date", None)
+        )
+        expire_date = attrs.get(
+            "expire_date", getattr(quotation, "expire_date", None)
+        )
         if quote_date and expire_date and expire_date < quote_date:
             raise serializers.ValidationError(
                 {"expire_date": "Expiry date cannot be before quote date."}
             )
+        _validate_total_amounts(attrs, quotation)
         return attrs
 
 
 class QuotationGenerateSerializer(serializers.Serializer):
     operator_email = serializers.CharField(required=False, allow_null=True)
-    notes = serializers.CharField(required=False, default="Generated quotation")
+    notes = serializers.CharField(
+        required=False, default="Generated quotation"
+    )
 
 
 class AuditEventSerializer(serializers.ModelSerializer):
@@ -941,10 +1169,14 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
     parsed_quotation_id = serializers.SerializerMethodField()
     parsed_quote_no = serializers.SerializerMethodField()
 
-    def _latest_parse_result(self, obj: DocumentAsset) -> DocumentParseResult | None:
+    def _latest_parse_result(
+        self, obj: DocumentAsset
+    ) -> DocumentParseResult | None:
         if hasattr(obj, "_latest_parse_result_for_serializer"):
             return obj._latest_parse_result_for_serializer
-        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get("parse_results")
+        prefetched = getattr(obj, "_prefetched_objects_cache", {}).get(
+            "parse_results"
+        )
         if prefetched is not None:
             result = max(
                 prefetched,
@@ -988,7 +1220,9 @@ class DocumentAssetSerializer(serializers.ModelSerializer):
     def get_parsed_quote_no(self, obj: DocumentAsset) -> str | None:
         result = self._latest_parse_result(obj)
         if result:
-            quote_no = str(result.normalized_json.get("quote_no") or "").strip()
+            quote_no = str(
+                result.normalized_json.get("quote_no") or ""
+            ).strip()
             if quote_no:
                 return quote_no
         quotation = obj.quotation

@@ -38,7 +38,7 @@ from quotation.services.storage import (
     delete_document,
     document_storage_key,
     resolve_document_path,
-    write_document,
+    write_document_stream,
 )
 from quotation.services.upload_validation import validate_quotation_upload
 
@@ -54,8 +54,7 @@ class DocumentListView(APIView):
                 DocumentAsset.objects.filter(source="feishu"),
             )
             qs = (
-                qs
-                .select_related("quotation")
+                qs.select_related("quotation")
                 .prefetch_related("parse_results")
                 .order_by("-created_at")[:1000]
             )
@@ -69,9 +68,7 @@ class DocumentListView(APIView):
                 documents.append(document)
                 if len(documents) >= 200:
                     break
-            return Response(
-                DocumentAssetSerializer(documents, many=True).data
-            )
+            return Response(DocumentAssetSerializer(documents, many=True).data)
 
         qs = filter_accessible_documents(
             request.user,
@@ -132,8 +129,7 @@ class QuotationDocumentListCreateView(APIView):
             return Response({"detail": "invalid doc_type"}, status=400)
         asset_id = str(uuid4())
         storage_key = document_storage_key(asset_id, quotation_id)
-        content = upload.read()
-        write_document(content, storage_key)
+        _, size_bytes = write_document_stream(upload, storage_key)
         try:
             asset = DocumentAsset.objects.create(
                 id=asset_id,
@@ -142,7 +138,7 @@ class QuotationDocumentListCreateView(APIView):
                 file_name=upload.name,
                 mime_type=upload.content_type or "application/octet-stream",
                 storage_key=storage_key,
-                size_bytes=len(content),
+                size_bytes=size_bytes,
                 source="local",
                 created_by_email=user_display_email(request.user),
             )

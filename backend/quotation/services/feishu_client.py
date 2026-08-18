@@ -12,6 +12,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from django.conf import settings as dj_settings
+
 from quotation.audit import AUDIT_CONTEXT
 from quotation.metrics import record_storage_operation
 
@@ -30,7 +31,9 @@ def _external_call(operation: str, storage_connection_id: str = ""):
     except Exception as exc:
         result = "failed"
         code = getattr(exc, "code", None)
-        error_code = f"feishu_{code}" if code is not None else "transport_error"
+        error_code = (
+            f"feishu_{code}" if code is not None else "transport_error"
+        )
         raise
     finally:
         duration_seconds = perf_counter() - started
@@ -121,8 +124,13 @@ class FeishuClient:
         self.storage_connection_id = storage_connection_id
 
     def _ensure_app_credentials(self) -> None:
-        if not self.settings.feishu_app_id or not self.settings.feishu_app_secret:
-            raise FeishuAPIError("Feishu App ID / App Secret is not configured")
+        if (
+            not self.settings.feishu_app_id
+            or not self.settings.feishu_app_secret
+        ):
+            raise FeishuAPIError(
+                "Feishu App ID / App Secret is not configured"
+            )
 
     def _request(
         self,
@@ -278,7 +286,9 @@ class FeishuClient:
             data = payload.get("data") or {}
         access_token = data.get("access_token")
         if not access_token:
-            raise FeishuAPIError("access_token missing after refresh", payload=payload)
+            raise FeishuAPIError(
+                "access_token missing after refresh", payload=payload
+            )
         return FeishuTokenBundle(
             access_token=access_token,
             refresh_token=data.get("refresh_token") or refresh_token,
@@ -442,7 +452,9 @@ class FeishuClient:
                                 if isinstance(payload, dict)
                                 else None
                             ),
-                            payload=(payload if isinstance(payload, dict) else {}),
+                            payload=(
+                                payload if isinstance(payload, dict) else {}
+                            ),
                         )
                     content_type = response.headers.get("content-type")
                     chunks = []
@@ -477,7 +489,9 @@ class FeishuClient:
         )
         ticket = (create_payload.get("data") or {}).get("ticket")
         if not ticket:
-            raise FeishuAPIError("export ticket missing", payload=create_payload)
+            raise FeishuAPIError(
+                "export ticket missing", payload=create_payload
+            )
 
         export_file_token = None
         for _ in range(20):
@@ -527,7 +541,11 @@ class FeishuClient:
                     "export download failed HTTP "
                     f"{response.status_code}: "
                     f"{payload.get('msg') or payload}",
-                    code=(payload.get("code") if isinstance(payload, dict) else None),
+                    code=(
+                        payload.get("code")
+                        if isinstance(payload, dict)
+                        else None
+                    ),
                     payload=payload if isinstance(payload, dict) else {},
                 )
             return response.content, response.headers.get("content-type")
@@ -594,7 +612,9 @@ class FeishuClient:
                     doc_type="sheet",
                     file_extension="xlsx",
                 )
-                if not name.lower().endswith((".xlsx", ".pdf", ".doc", ".docx")):
+                if not name.lower().endswith(
+                    (".xlsx", ".pdf", ".doc", ".docx")
+                ):
                     name = f"{name}.xlsx"
                 return content, mime, name
             raise
@@ -605,32 +625,46 @@ class FeishuClient:
         *,
         folder_token: str,
         file_name: str,
-        content: bytes,
+        content,
     ) -> dict[str, Any]:
         url = f"{self.base_url}/open-apis/drive/v1/files/upload_all"
         headers = {"Authorization": f"Bearer {user_access_token}"}
-        files = {
-            "file": (file_name, content, "application/octet-stream"),
-        }
+        files = {"file": (file_name, content, "application/octet-stream")}
         data = {
             "file_name": file_name,
             "parent_type": "explorer",
             "parent_node": folder_token,
             "size": str(len(content)),
         }
+        original_position = None
+        if hasattr(content, "tell") and hasattr(content, "seek"):
+            original_position = content.tell()
+            content.seek(0)
         with _external_call(
             "POST drive.file.upload",
             self.storage_connection_id,
         ):
-            with httpx.Client(timeout=120.0) as client:
-                response = client.post(url, headers=headers, data=data, files=files)
+            try:
+                with httpx.Client(timeout=120.0) as client:
+                    response = client.post(
+                        url,
+                        headers=headers,
+                        data=data,
+                        files=files,
+                    )
+            finally:
+                if original_position is not None:
+                    content.seek(original_position)
             try:
                 payload = response.json()
             except Exception as exc:  # noqa: BLE001
                 raise FeishuAPIError(
                     f"upload non-JSON response ({response.status_code})"
                 ) from exc
-            if response.status_code >= 400 or payload.get("code") not in (0, None):
+            if response.status_code >= 400 or payload.get("code") not in (
+                0,
+                None,
+            ):
                 raise FeishuAPIError(
                     f"upload failed: {payload.get('msg') or payload}",
                     code=payload.get("code"),
@@ -722,4 +756,6 @@ class FeishuClient:
 
 
 def token_expires_at(expires_in: int, *, skew_seconds: int = 60) -> datetime:
-    return datetime.utcnow() + timedelta(seconds=max(expires_in - skew_seconds, 60))
+    return datetime.utcnow() + timedelta(
+        seconds=max(expires_in - skew_seconds, 60)
+    )

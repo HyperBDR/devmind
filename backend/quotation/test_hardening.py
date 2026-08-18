@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -116,6 +116,202 @@ class QuotationBoundaryTests(TestCase):
         assert response.status_code == 400
         assert "expire_date" in response.data
 
+    def test_rejects_invalid_currency_and_email_fields(self):
+        invalid_fields = (
+            ("currency", "NOT-A-CURRENCY"),
+            ("email", "not-an-email"),
+            ("billing_email", "not-an-email"),
+            ("issuer_contact_email", "not-an-email"),
+        )
+        for index, (field, value) in enumerate(invalid_fields, start=1):
+            with self.subTest(field=field):
+                payload = quote_payload(f"QA-HARDEN-FIELD-{index}")
+                payload[field] = value
+
+                response = self.api.post(
+                    "/api/v1/quotation/quotations",
+                    payload,
+                    format="json",
+                )
+
+                assert response.status_code == 400
+                assert field in response.data
+
+    def test_rejects_model_field_lengths_and_invalid_item_type(self):
+        invalid_fields = (
+            ("quote_no", "Q" * 121),
+            ("product_line", "L" * 41),
+            ("product_line_name", "L" * 121),
+            ("project_name", "P" * 256),
+            ("payment_terms", "T" * 256),
+            ("tax_label", "T" * 41),
+            ("issuer_company_name", "I" * 256),
+            ("issuer_contact_name", "I" * 121),
+            ("issuer_contact_title", "I" * 121),
+            ("client_company", "C" * 256),
+            ("contact_person", "C" * 121),
+            ("billing_company", "B" * 256),
+            ("billing_contact", "B" * 121),
+        )
+        for index, (field, value) in enumerate(invalid_fields, start=1):
+            with self.subTest(field=field):
+                payload = quote_payload(f"QA-HARDEN-LENGTH-{index}")
+                payload[field] = value
+
+                response = self.api.post(
+                    "/api/v1/quotation/quotations",
+                    payload,
+                    format="json",
+                )
+
+                assert response.status_code == 400
+                assert field in response.data
+
+        item_payload = quote_payload("QA-HARDEN-ITEM-TYPE")
+        item_payload["items"][0]["type"] = "Unsupported"
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            item_payload,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert "type" in response.data["items"][0]
+
+        for field, value in (("item_id", "I" * 121), ("name", "N" * 256)):
+            with self.subTest(item_field=field):
+                payload = quote_payload(f"QA-HARDEN-ITEM-{field.upper()}")
+                payload["items"][0][field] = value
+
+                response = self.api.post(
+                    "/api/v1/quotation/quotations",
+                    payload,
+                    format="json",
+                )
+
+                assert response.status_code == 400
+                assert field in response.data["items"][0]
+
+    def test_rejects_bounded_text_and_payment_term_combinations(self):
+        invalid_values = (
+            ("remarks_disclaimer", "R" * 10001),
+            ("issuer_signature", "S" * (3 * 1024 * 1024 + 1)),
+        )
+        for index, (field, value) in enumerate(invalid_values, start=1):
+            with self.subTest(field=field):
+                payload = quote_payload(f"QA-HARDEN-TEXT-{index}")
+                payload[field] = value
+
+                response = self.api.post(
+                    "/api/v1/quotation/quotations",
+                    payload,
+                    format="json",
+                )
+
+                assert response.status_code == 400
+                assert field in response.data
+
+        description = quote_payload("QA-HARDEN-DESCRIPTION")
+        description["items"][0]["description"] = "D" * 4001
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            description,
+            format="json",
+        )
+        assert response.status_code == 400
+        assert "description" in response.data["items"][0]
+
+        terms = quote_payload("QA-HARDEN-PAYMENT-OPTION")
+        terms["payment_term_option"] = "Unsupported"
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            terms,
+            format="json",
+        )
+        assert response.status_code == 400
+        assert "payment_term_option" in response.data
+
+    @override_settings(QUOTATION_MAX_ITEMS=1)
+    def test_rejects_too_many_items_and_duplicate_line_numbers(self):
+        too_many = quote_payload("QA-HARDEN-ITEM-LIMIT")
+        too_many["items"].append(
+            {
+                **too_many["items"][0],
+                "line_no": 2,
+            }
+        )
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            too_many,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert "items" in response.data
+
+        duplicate = quote_payload("QA-HARDEN-DUPLICATE-LINE")
+        duplicate["items"].append(dict(duplicate["items"][0]))
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            duplicate,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert "items" in response.data
+
+    def test_rejects_derived_amount_that_exceeds_database_precision(self):
+        payload = quote_payload("QA-HARDEN-AMOUNT-OVERFLOW")
+        payload["items"][0]["qty"] = "9999999999999999.99"
+        payload["items"][0]["list_price"] = "9999999999999999.99"
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert "items" in response.data
+
+    def test_rejects_line_number_and_aggregate_amount_overflow(self):
+        line_number = quote_payload("QA-HARDEN-LINE-NUMBER")
+        line_number["items"][0]["line_no"] = 2147483648
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            line_number,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert "line_no" in response.data["items"][0]
+
+        total = quote_payload("QA-HARDEN-TOTAL-OVERFLOW")
+        total["vat_rate"] = "0"
+        total["items"] = [
+            {
+                **total["items"][0],
+                "line_no": line_no,
+                "qty": "1",
+                "list_price": "6000000000000000.00",
+                "discount_percent": "0",
+            }
+            for line_no in (1, 2)
+        ]
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            total,
+            format="json",
+        )
+
+        assert response.status_code == 400
+        assert "items" in response.data
+
     def test_rejects_partial_update_that_makes_date_range_invalid(self):
         created = self.api.post(
             "/api/v1/quotation/quotations",
@@ -131,6 +327,34 @@ class QuotationBoundaryTests(TestCase):
 
         assert response.status_code == 400
         assert "expire_date" in response.data
+
+    def test_update_reuses_field_and_item_collection_validation(self):
+        created = self.api.post(
+            "/api/v1/quotation/quotations",
+            quote_payload("QA-HARDEN-UPDATE-BOUNDARY"),
+            format="json",
+        )
+        invalid_updates = (
+            {"currency": "INVALID"},
+            {"email": "not-an-email"},
+            {"project_name": "P" * 256},
+            {
+                "items": [
+                    quote_payload()["items"][0],
+                    dict(quote_payload()["items"][0]),
+                ]
+            },
+        )
+
+        for payload in invalid_updates:
+            with self.subTest(payload=payload):
+                response = self.api.put(
+                    f"/api/v1/quotation/quotations/{created.data['id']}",
+                    payload,
+                    format="json",
+                )
+
+                assert response.status_code == 400
 
     def test_create_uses_authenticated_user_as_owner(self):
         payload = quote_payload("QA-HARDEN-OWNER-001")
@@ -259,11 +483,9 @@ class QuotationRollbackTests(TestCase):
 
         fake_client = FakeFeishuClient()
         upload = SimpleUploadedFile(
-            "QA-ROLLBACK-001.xlsx",
-            b"PK\x03\x04excel bytes",
-            content_type=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            ),
+            "QA-ROLLBACK-001.pdf",
+            b"%PDF-excel bytes",
+            content_type="application/pdf",
         )
         with (
             patch(

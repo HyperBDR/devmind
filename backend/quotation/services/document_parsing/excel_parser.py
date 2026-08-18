@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from openpyxl import load_workbook
 
 try:
@@ -32,7 +33,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.7.0"
+PARSER_VERSION = "2.8.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -59,11 +60,7 @@ def _text(value: Any) -> str:
 
 def _normalized(value: Any) -> str:
     return (
-        re.sub(r"\s+", " ", _text(value))
-        .strip()
-        .lower()
-        .rstrip(":")
-        .strip()
+        re.sub(r"\s+", " ", _text(value)).strip().lower().rstrip(":").strip()
     )
 
 
@@ -101,13 +98,12 @@ def _date(value: Any) -> date | None:
 
 def _rows_openpyxl(path: Path) -> list[list[Any]]:
     try:
-        with path.open("rb") as stream:
-            workbook = load_workbook(
-                stream,
-                read_only=False,
-                data_only=True,
-                rich_text=True,
-            )
+        workbook = load_workbook(
+            path,
+            read_only=True,
+            data_only=True,
+            rich_text=True,
+        )
     except Exception as exc:
         raise QuotationExcelParseError(
             f"Unable to open Excel workbook: {type(exc).__name__}: {exc}"
@@ -118,14 +114,20 @@ def _rows_openpyxl(path: Path) -> list[list[Any]]:
             sheet = workbook.worksheets[0] if workbook.worksheets else None
         if sheet is None:
             raise QuotationExcelParseError("Excel workbook has no worksheets")
-        if sheet.max_row > 5000 or sheet.max_column > 200:
+        if (
+            sheet.max_row > settings.QUOTATION_XLSX_MAX_ROWS
+            or sheet.max_column > settings.QUOTATION_XLSX_MAX_COLUMNS
+        ):
             raise QuotationExcelParseError("Excel worksheet is too large")
         return [
             [cell.value for cell in row]
             for row in sheet.iter_rows(
                 min_row=1,
                 max_row=sheet.max_row,
-                max_col=min(sheet.max_column, 20),
+                max_col=min(
+                    sheet.max_column,
+                    settings.QUOTATION_XLSX_PARSED_COLUMNS,
+                ),
             )
         ]
     finally:
@@ -150,9 +152,13 @@ def _rows_calamine(path: Path) -> list[list[Any]]:
         raise QuotationExcelParseError(
             f"Unable to stream Excel workbook: {type(exc).__name__}: {exc}"
         ) from exc
-    if len(rows) > 5000:
+    if len(rows) > settings.QUOTATION_XLSX_MAX_ROWS or any(
+        len(row) > settings.QUOTATION_XLSX_MAX_COLUMNS for row in rows
+    ):
         raise QuotationExcelParseError("Excel worksheet is too large")
-    return [list(row[:20]) for row in rows]
+    return [
+        list(row[: settings.QUOTATION_XLSX_PARSED_COLUMNS]) for row in rows
+    ]
 
 
 def _rows(path: Path) -> list[list[Any]]:
@@ -213,9 +219,7 @@ def _product_line(
     if explicit:
         return explicit_product_line(explicit)
     for item in items:
-        name, prefix = known_product_line(
-            item.name or item.description or ""
-        )
+        name, prefix = known_product_line(item.name or item.description or "")
         if name:
             return name, prefix
     for row in rows:
@@ -325,8 +329,7 @@ def _line_items(
     for index in range(section_row + 1, min(section_row + 5, len(rows))):
         normalized = [_normalized(value) for value in rows[index]]
         if "description" in normalized and any(
-            value == "qty" or value.startswith("qty ")
-            for value in normalized
+            value == "qty" or value.startswith("qty ") for value in normalized
         ):
             header_row = index
             break
@@ -359,10 +362,9 @@ def _line_items(
 
     def discount_value(value: Any) -> Decimal:
         parsed = _decimal(value)
-        if (
-            isinstance(value, (int, float, Decimal))
-            and Decimal("0") <= parsed <= Decimal("1")
-        ):
+        if isinstance(value, (int, float, Decimal)) and Decimal(
+            "0"
+        ) <= parsed <= Decimal("1"):
             return parsed * Decimal("100")
         return parsed
 

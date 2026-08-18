@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from hashlib import sha256
 import logging
+from hashlib import sha256
 from time import perf_counter
 
 from django.db import IntegrityError, transaction
@@ -31,7 +31,11 @@ from quotation.services.document_parsing.flexible_parser import (
 )
 from quotation.services.document_parsing.pdf_parser import (
     PARSER_NAME as PDF_PARSER_NAME,
+)
+from quotation.services.document_parsing.pdf_parser import (
     PARSER_VERSION as PDF_PARSER_VERSION,
+)
+from quotation.services.document_parsing.pdf_parser import (
     QuotationPdfParseError,
     parse_standard_quotation_pdf,
 )
@@ -41,6 +45,7 @@ from quotation.services.quotation_service import (
     replace_items,
 )
 from quotation.services.storage import resolve_document_path
+from quotation.services.upload_validation import validate_xlsx_archive
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,12 @@ def parse_document_asset(
     path = resolve_document_path(asset.storage_key)
     if not path.is_file():
         raise QuotationDocumentParseError("Document file is missing")
+    if str(asset.file_name or "").lower().endswith(".xlsx"):
+        try:
+            with path.open("rb") as stream:
+                validate_xlsx_archive(stream)
+        except ValueError as exc:
+            raise QuotationDocumentParseError(str(exc)) from exc
     started = perf_counter()
     hash_started = perf_counter()
     content_hash = _file_hash(path)
@@ -247,9 +258,11 @@ def _validation_errors_from_serializer(exc: serializers.ValidationError):
             {
                 "field": str(field),
                 "code": "invalid",
-                "detail": "; ".join(str(item) for item in value)
-                if isinstance(value, list)
-                else str(value),
+                "detail": (
+                    "; ".join(str(item) for item in value)
+                    if isinstance(value, list)
+                    else str(value)
+                ),
             }
             for field, value in detail.items()
         ]

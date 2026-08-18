@@ -11,6 +11,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import OperationalError, transaction
 from django.utils import timezone
+
 from quotation.metrics import record_export_operation, record_storage_operation
 from quotation.models import (
     DocumentAsset,
@@ -21,7 +22,9 @@ from quotation.models import (
     SyncJobStatus,
     SyncJobType,
 )
-from quotation.services.document_parsing.service import parse_and_create_quotation
+from quotation.services.document_parsing.service import (
+    parse_and_create_quotation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +54,15 @@ def _record_feishu_sync_observability(
     errors = sync_result.get("errors")
     error_count = len(errors) if isinstance(errors, list) else 0
     folders = sync_result.get("folders")
-    folder_names = [
-        str(folder.get("name") or "").strip()
-        for folder in folders
-        if isinstance(folder, dict) and folder.get("name")
-    ] if isinstance(folders, list) else []
+    folder_names = (
+        [
+            str(folder.get("name") or "").strip()
+            for folder in folders
+            if isinstance(folder, dict) and folder.get("name")
+        ]
+        if isinstance(folders, list)
+        else []
+    )
     record_storage_operation(
         provider="feishu",
         operation="archive_sync",
@@ -253,6 +260,7 @@ def sync_document_replica_task(
 ):
     """Archive one rendered asset without rerunning document rendering."""
     import httpx
+
     from quotation.services.export_archive import (
         begin_export_upload_tracking,
         is_transient_feishu_error,
@@ -327,7 +335,10 @@ def sync_document_replica_task(
             SyncJobStatus.SUCCESS,
         )
     except FeishuAPIError as exc:
-        if is_transient_feishu_error(exc) and self.request.retries < self.max_retries:
+        if (
+            is_transient_feishu_error(exc)
+            and self.request.retries < self.max_retries
+        ):
             persist_retry_state(exc)
             _record_export_stage("archive", "retry", started)
             raise self.retry(
@@ -406,7 +417,9 @@ def delete_owned_remote_file_task(
     cleanup_id: str,
 ):
     """Delete an unreferenced application-owned remote file asynchronously."""
-    from quotation.services.storage_control import delete_remote_file_if_unreferenced
+    from quotation.services.storage_control import (
+        delete_remote_file_if_unreferenced,
+    )
 
     try:
         status = delete_remote_file_if_unreferenced(
@@ -431,8 +444,8 @@ def delete_owned_remote_file_task(
     name="quotation.tasks.parse_document",
     acks_late=True,
     max_retries=2,
-    soft_time_limit=90,
-    time_limit=120,
+    soft_time_limit=settings.QUOTATION_PARSE_SOFT_TIME_LIMIT_SECONDS,
+    time_limit=settings.QUOTATION_PARSE_TIME_LIMIT_SECONDS,
 )
 def parse_document_task(self, asset_id: str, actor_id: int | None = None):
     """Parse one document in an isolated, idempotent Celery task."""
@@ -590,8 +603,12 @@ def ocr_document_task(self, job_id: str):
     from quotation.services.document_parsing.flexible_parser import (
         complete_document_parse,
     )
-    from quotation.services.document_parsing.ocr_parser import extract_pdf_text_with_ocr
-    from quotation.services.document_parsing.pdf_parser import parse_quotation_pdf_text
+    from quotation.services.document_parsing.ocr_parser import (
+        extract_pdf_text_with_ocr,
+    )
+    from quotation.services.document_parsing.pdf_parser import (
+        parse_quotation_pdf_text,
+    )
     from quotation.services.storage import resolve_document_path
 
     started = perf_counter()
@@ -615,7 +632,9 @@ def ocr_document_task(self, job_id: str):
         ]
     )
     try:
-        text = extract_pdf_text_with_ocr(resolve_document_path(asset.storage_key))
+        text = extract_pdf_text_with_ocr(
+            resolve_document_path(asset.storage_key)
+        )
         parsed = parse_quotation_pdf_text(text)
         parsed = complete_document_parse(
             asset,
