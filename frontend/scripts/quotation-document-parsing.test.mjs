@@ -104,10 +104,21 @@ test('quotation searches support quote numbers and one-click clearing', () => {
   assert.match(quotationList, /clearSearch/)
 })
 
-test('imported documents cannot be deleted from the list', () => {
-  assert.doesNotMatch(importedDocumentsPage, /deleteImportedDocuments/)
-  assert.doesNotMatch(importedDocumentsPage, /handleBatchDelete/)
-  assert.doesNotMatch(importedDocumentsPage, /type="checkbox"/)
+test('imported documents expose archive and recovery controls', () => {
+  assert.match(documentsApi, /archiveImportedDocument/)
+  assert.match(documentsApi, /restoreImportedDocument/)
+  assert.match(importedDocumentsPage, /handleArchive/)
+  assert.match(importedDocumentsPage, /handleRestore/)
+  assert.match(importedDocumentsPage, /lifecycleFilter/)
+  assert.match(importedDocumentsPage, /archiveModalDesc/)
+  assert.match(importedDocumentsPage, /legalHoldProtected/)
+  assert.match(importedDocumentsPage, /DialogPanel/)
+  assert.match(documentsApi, /assets_affected/)
+  assert.match(importedDocumentsPage, /quotationLifecycleChanged/)
+  assert.match(
+    quotationListPage,
+    /@quotation-lifecycle-changed="handleImportedQuotationLifecycleChanged"/,
+  )
 })
 
 test('quotation list shows one source indicator per quotation', () => {
@@ -207,7 +218,7 @@ test('quotation navigation preserves the mounted workspace', () => {
 
 test('imported documents render cached data before remote synchronization', () => {
   const cachedLoad = importedDocumentsPage.indexOf(
-    'const cachedItems = await listImportedFeishuDocuments()',
+    'const cachedItems = await listImportedFeishuDocuments(',
   )
   const remoteSync = importedDocumentsPage.indexOf(
     'let syncResult = await syncFeishuArchiveFolder',

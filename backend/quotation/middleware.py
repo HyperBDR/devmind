@@ -63,7 +63,9 @@ def _classify(method: str, path: str):
     if re.fullmatch(r"documents/[^/]+/download", relative):
         return "document", "download", "document"
     if re.fullmatch(r"documents/[^/]+", relative) and method == "DELETE":
-        return "document", "delete", "document"
+        return "document", "archive", "document"
+    if re.fullmatch(r"documents/[^/]+/restore", relative) and method == "POST":
+        return "document", "restore", "document"
 
     if relative == "feishu/sync-folder" and method == "POST":
         return "feishu", "sync", "folder"

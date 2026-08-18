@@ -63,18 +63,21 @@ test('Imported files panel no longer opens a personal Feishu drive picker', () =
   assert.match(importsPage, /syncButton/)
 })
 
-test('Imported files browser stays mounted while its visible panels are hidden', () => {
-  assert.match(importsPage, /id="import-filter-panel"\s+v-show="false"/)
-  assert.match(importsPage, /id="import-table-panel"\s+v-show="false"/)
+test('Imported files browser exposes lifecycle controls in its visible panels', () => {
+  assert.match(importsPage, /id="import-filter-panel"/)
+  assert.match(importsPage, /id="import-table-panel"/)
+  assert.doesNotMatch(importsPage, /id="import-filter-panel"\s+v-show="false"/)
+  assert.doesNotMatch(importsPage, /id="import-table-panel"\s+v-show="false"/)
   assert.match(importsPage, /void refresh\(\)/)
   assert.doesNotMatch(
     importsPage,
     /void refresh\(\{ syncRemote: true, syncSource: 'automatic' \}\)/,
   )
-  assert.match(importsPage, /listImportedFeishuDocuments\(\)/)
+  assert.match(importsPage, /listImportedFeishuDocuments\(lifecycleFilter\.value\)/)
   assert.match(importsPage, /syncFeishuArchiveFolder\(/)
   assert.match(importsPage, /downloadImportedDocument\(doc\.id, doc\.file_name\)/)
-  assert.doesNotMatch(importsPage, /deleteImportedDocuments/)
+  assert.match(importsPage, /archiveImportedDocument/)
+  assert.match(importsPage, /restoreImportedDocument/)
 })
 
 test('imported Feishu files live under the Quotes page', () => {
