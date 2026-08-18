@@ -10,7 +10,12 @@ from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from quotation.models import DocumentAsset, FeishuConnection, Quotation
+from quotation.models import (
+    DocumentAsset,
+    FeishuConnection,
+    Quotation,
+    QuotationUploadPermission,
+)
 from quotation.services.quotation_service import (
     build_quotation,
     create_version_snapshot,
@@ -447,6 +452,12 @@ class QuotationRollbackTests(TestCase):
             user_email=self.user.email,
             access_token="user-access-token",
             expires_at=timezone.now() + timedelta(hours=1),
+        )
+        QuotationUploadPermission.objects.create(
+            user=self.user,
+            folder_token="fld_test_folder",
+            folder_name="Test folder",
+            granted_by=self.user,
         )
 
         class FakeFeishuClient:

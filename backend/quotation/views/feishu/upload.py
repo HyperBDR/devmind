@@ -15,8 +15,10 @@ from rest_framework.views import APIView
 
 from quotation.access import (
     DocumentAction,
+    can_upload_to_folder,
     filter_accessible_documents,
     get_accessible_quotation,
+    upload_forbidden_response,
 )
 from quotation.audit import set_request_audit_target
 from quotation.models import (
@@ -111,6 +113,8 @@ class FeishuUploadView(APIView):
                 access_token=access_token,
                 requested_token=requested_folder or root_folder_token,
             )
+            if not can_upload_to_folder(request.user, folder_token):
+                return upload_forbidden_response()
             existing = common._find_existing_file_in_folder(
                 client=client,
                 access_token=access_token,

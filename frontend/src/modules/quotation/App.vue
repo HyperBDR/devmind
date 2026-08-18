@@ -66,14 +66,8 @@ import {
 } from './api/quotations'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
-import {
-  useQuotationViewPermissionAccess,
-} from './composables/useQuotationViewPermissionAccess'
 
 const auth = useAuthStore()
-const viewPermissionAccess = useQuotationViewPermissionAccess()
-const isViewPermissionAdmin = viewPermissionAccess.isAdmin
-const isViewPermissionLoading = viewPermissionAccess.isLoading
 const { t, quoteStatusLabel } = useQuotationI18n()
 const route = useRoute()
 const router = useRouter()
@@ -483,13 +477,6 @@ async function loadCurrentQuotationTab() {
   }
 }
 
-async function loadViewPermissionAccess() {
-  const allowed = await viewPermissionAccess.ensure()
-  if (!allowed && currentTab.value === 'permissions') {
-    await router.replace('/quotation/dashboard')
-  }
-}
-
 onMounted(async () => {
   await auth.bootstrap()
   if (auth.isAuthenticated) {
@@ -499,8 +486,6 @@ onMounted(async () => {
     ]
     await Promise.all(tasks)
   }
-  await loadViewPermissionAccess()
-
   const params = new URLSearchParams(window.location.search)
   if (params.get('feishu') === 'connected') {
     triggerToast(t('quotation.app.feishuConnected'), 'success')
@@ -531,7 +516,6 @@ async function handleLoginSuccess() {
   const tasks: Promise<unknown>[] = [
     hydrateUserCatalog(),
     loadCurrentQuotationTab(),
-    loadViewPermissionAccess(),
   ]
   await Promise.all(tasks)
   triggerToast(t('quotation.app.welcomeBack', { name: me.name }), 'success')
@@ -1231,21 +1215,7 @@ function reloadPage() {
 
         <AuditLogPage v-if="currentTab === 'audit'" />
 
-        <ViewPermissionPage
-          v-if="currentTab === 'permissions' && isViewPermissionAdmin"
-        />
-
-        <section
-          v-else-if="currentTab === 'permissions' && isViewPermissionLoading"
-          class="min-h-[420px] rounded-dm bg-white p-6"
-          aria-live="polite"
-        >
-          <div class="flex min-h-[360px] items-center justify-center">
-            <div class="text-sm text-dm-text-secondary">
-              {{ t('quotation.common.loading') }}
-            </div>
-          </div>
-        </section>
+        <ViewPermissionPage v-if="currentTab === 'permissions'" />
 
         <CustomerCenter
           v-if="currentTab === 'customers'"

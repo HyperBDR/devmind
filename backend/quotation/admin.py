@@ -9,11 +9,13 @@ from quotation.models import (
     ExportJob,
     FeishuConnection,
     Quotation,
+    QuotationAccessRequest,
     QuotationItem,
     QuotationMembership,
-    QuotationViewPermission,
     QuotationTemplate,
+    QuotationUploadPermission,
     QuotationVersion,
+    QuotationViewPermission,
     StorageConnection,
     StorageMount,
     SyncJob,
@@ -28,8 +30,10 @@ from quotation.services.storage_control import (
 )
 
 admin.site.register(Quotation)
+admin.site.register(QuotationAccessRequest)
 admin.site.register(QuotationItem)
 admin.site.register(QuotationMembership)
+admin.site.register(QuotationUploadPermission)
 admin.site.register(QuotationViewPermission)
 admin.site.register(QuotationVersion)
 admin.site.register(QuotationTemplate)
@@ -221,7 +225,9 @@ class StorageMountAdmin(admin.ModelAdmin):
             request=request,
             module="storage",
             action="mount_updated" if change else "mount_created",
-            event_name=("storage.mount_updated" if change else "storage.mount_created"),
+            event_name=(
+                "storage.mount_updated" if change else "storage.mount_created"
+            ),
             result=AuditEvent.RESULT_SUCCEEDED,
             target_type="storage_mount",
             target_id=obj.id,

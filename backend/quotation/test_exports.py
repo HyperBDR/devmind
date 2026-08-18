@@ -11,7 +11,10 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, OperationalError, transaction
 from django.db.models.deletion import RestrictedError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from openpyxl import load_workbook
+from rest_framework.test import APIClient
+
 from quotation.metrics import export_metrics_snapshot
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
@@ -25,6 +28,7 @@ from quotation.models import (
     QuotationSourceType,
     QuotationTemplate,
     QuotationTemplateStatus,
+    QuotationUploadPermission,
     QuotationVersion,
     RemoteFileCleanup,
     RemoteFileCleanupStatus,
@@ -57,13 +61,14 @@ from quotation.tasks import (
     render_quotation_export_task,
     sync_document_replica_task,
 )
-from rest_framework.test import APIClient
 
 
 class QuotationExportFixture(TestCase):
     def setUp(self):
         self.storage = TemporaryDirectory()
-        self.settings_override = override_settings(QUOTATION_STORAGE=self.storage.name)
+        self.settings_override = override_settings(
+            QUOTATION_STORAGE=self.storage.name
+        )
         self.settings_override.enable()
         self.user = get_user_model().objects.create_user(
             username="export-owner@example.com",
@@ -303,7 +308,9 @@ class QuotationExportApiTests(QuotationExportFixture):
         )
 
         self.assertEqual(response.status_code, 409)
-        self.assertTrue(Quotation.objects.filter(pk=self.quotation.pk).exists())
+        self.assertTrue(
+            Quotation.objects.filter(pk=self.quotation.pk).exists()
+        )
         self.assertTrue(ExportJob.objects.filter(pk=job.pk).exists())
 
     def test_orm_delete_uses_central_artifact_cleanup(self):
@@ -398,7 +405,9 @@ class QuotationExportApiTests(QuotationExportFixture):
 
         self.assertEqual(response.status_code, 204)
         cleanup_task.assert_called_once()
-        self.assertFalse(Quotation.objects.filter(pk=self.quotation.id).exists())
+        self.assertFalse(
+            Quotation.objects.filter(pk=self.quotation.id).exists()
+        )
 
         with patch(
             "quotation.services.storage_control.FeishuStorageProvider.delete",
@@ -480,7 +489,9 @@ class QuotationExportApiTests(QuotationExportFixture):
             args=[cleanup.id],
             queue="quotation_sync",
         )
-        self.assertFalse(DocumentReplica.objects.filter(pk=owned_replica.pk).exists())
+        self.assertFalse(
+            DocumentReplica.objects.filter(pk=owned_replica.pk).exists()
+        )
         with patch(
             "quotation.services.storage_control.FeishuStorageProvider.delete"
         ) as remote_delete:
@@ -654,7 +665,9 @@ class QuotationExportApiTests(QuotationExportFixture):
         cleanup = RemoteFileCleanup.objects.get(
             remote_file_token="broker-failure-token",
         )
-        self.assertFalse(Quotation.objects.filter(pk=self.quotation.pk).exists())
+        self.assertFalse(
+            Quotation.objects.filter(pk=self.quotation.pk).exists()
+        )
         self.assertEqual(cleanup.status, RemoteFileCleanupStatus.PENDING)
         with patch(
             "quotation.tasks.delete_owned_remote_file_task.apply_async"
@@ -703,7 +716,9 @@ class QuotationExportApiTests(QuotationExportFixture):
         self.assertEqual(response.status_code, 202)
 
         self.client.force_authenticate(self.other_user)
-        denied = self.client.get(f"/api/v1/quotation/exports/{response.data['job_id']}")
+        denied = self.client.get(
+            f"/api/v1/quotation/exports/{response.data['job_id']}"
+        )
 
         self.assertEqual(denied.status_code, 403)
 
@@ -728,7 +743,8 @@ class QuotationExportApiTests(QuotationExportFixture):
             "quotation-v3.xlsx",
             build_default_template_bytes(),
             content_type=(
-                "application/vnd.openxmlformats-officedocument." "spreadsheetml.sheet"
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
             ),
         )
 
@@ -769,6 +785,59 @@ class QuotationExportApiTests(QuotationExportFixture):
         response = self.client.get("/api/v1/quotation/templates")
 
         self.assertEqual(response.status_code, 403)
+
+    def test_archive_export_requires_exact_directory_upload_access(self):
+        with (
+            patch(
+                "quotation.views.exports.feishu_common._system_drive_context",
+                return_value=(Mock(), "access-token", "archive-root"),
+            ),
+            patch(
+                "quotation.views.exports.feishu_common._managed_folder_token",
+                side_effect=lambda **kwargs: kwargs["requested_token"],
+            ),
+        ):
+            denied = self.client.post(
+                f"/api/v1/quotation/quotations/{self.quotation.id}/exports",
+                {
+                    "formats": ["xlsx"],
+                    "archive_to_feishu": True,
+                    "archive_folder_token": "selected-folder",
+                },
+                format="json",
+            )
+            QuotationUploadPermission.objects.create(
+                user=self.user,
+                folder_token="selected-folder",
+                folder_name="Selected Folder",
+                granted_by=self.user,
+            )
+            allowed = self.client.post(
+                f"/api/v1/quotation/quotations/{self.quotation.id}/exports",
+                {
+                    "formats": ["xlsx"],
+                    "archive_to_feishu": True,
+                    "archive_folder_token": "selected-folder",
+                },
+                format="json",
+            )
+            changed_token = self.client.post(
+                f"/api/v1/quotation/quotations/{self.quotation.id}/exports",
+                {
+                    "formats": ["xlsx"],
+                    "archive_to_feishu": True,
+                    "archive_folder_token": "other-folder",
+                },
+                format="json",
+            )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(
+            denied.data["detail"],
+            "Upload access to this directory is required.",
+        )
+        self.assertEqual(allowed.status_code, 202)
+        self.assertEqual(changed_token.status_code, 403)
 
 
 class QuotationExportTaskTests(QuotationExportFixture):
@@ -860,6 +929,9 @@ class QuotationExportTaskTests(QuotationExportFixture):
         archive_to_feishu=False,
         archive_folder_token="",
     ):
+        resolved_folder_token = archive_folder_token
+        if archive_to_feishu and not resolved_folder_token:
+            resolved_folder_token = "folder-token"
         with patch("quotation.tasks.render_quotation_export_task.apply_async"):
             job, _ = create_export_job(
                 quotation=self.quotation,
@@ -867,7 +939,16 @@ class QuotationExportTaskTests(QuotationExportFixture):
                 actor=self.user,
                 quotation_version_no=1,
                 archive_to_feishu=archive_to_feishu,
-                archive_folder_token=archive_folder_token,
+                archive_folder_token=resolved_folder_token,
+            )
+        if archive_to_feishu:
+            QuotationUploadPermission.objects.get_or_create(
+                user=self.user,
+                folder_token=resolved_folder_token,
+                defaults={
+                    "folder_name": "Archive",
+                    "granted_by": self.user,
+                },
             )
         return job
 
@@ -909,12 +990,15 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.create_imported_excel_source(source_bytes)
         job = self.create_job(["xlsx", "pdf"])
 
-        with patch(
-            "quotation.services.export_pipeline.render_quotation_xlsx"
-        ) as render_xlsx, patch(
-            "quotation.services.export_pipeline.convert_xlsx_to_pdf",
-            return_value=b"%PDF-from-original",
-        ) as convert_pdf:
+        with (
+            patch(
+                "quotation.services.export_pipeline.render_quotation_xlsx"
+            ) as render_xlsx,
+            patch(
+                "quotation.services.export_pipeline.convert_xlsx_to_pdf",
+                return_value=b"%PDF-from-original",
+            ) as convert_pdf,
+        ):
             result = render_quotation_export_task.run(job.id)
 
         self.assertEqual(result["status"], ExportJobStatus.COMPLETED)
@@ -1139,7 +1223,9 @@ class QuotationExportTaskTests(QuotationExportFixture):
             retry_response.data["detail"],
             "archive uploads are still active",
         )
-        self.assertTrue(Quotation.objects.filter(pk=self.quotation.pk).exists())
+        self.assertTrue(
+            Quotation.objects.filter(pk=self.quotation.pk).exists()
+        )
 
     @patch(
         "quotation.tasks.sync_document_replica_task.apply_async",
@@ -1155,7 +1241,9 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(job.status, "upload_failed")
         self.assertEqual(job.error_code, "archive_enqueue_failed")
         self.assertEqual(job.assets.count(), 1)
-        self.assertTrue(resolve_document_path(job.assets.get().storage_key).is_file())
+        self.assertTrue(
+            resolve_document_path(job.assets.get().storage_key).is_file()
+        )
 
     def test_redelivered_render_recovers_an_in_progress_job(self):
         job = self.create_job(["xlsx"])
@@ -1509,6 +1597,39 @@ class QuotationExportTaskTests(QuotationExportFixture):
         "quotation.services.storage_control.FeishuStorageProvider.upload",
         return_value={"file_token": "remote-file", "url": "https://x"},
     )
+    def test_replica_task_rechecks_permission_before_upload(self, upload):
+        self.create_storage_route()
+        permission = QuotationUploadPermission.objects.create(
+            user=self.user,
+            folder_token="selected-folder",
+            folder_name="Selected Folder",
+            granted_by=self.user,
+        )
+        job = self.create_job(
+            ["xlsx"],
+            archive_to_feishu=True,
+            archive_folder_token="selected-folder",
+        )
+        with patch("quotation.tasks.sync_document_replica_task.apply_async"):
+            render_quotation_export_task.run(job.id)
+        asset = job.assets.get()
+        permission.is_active = False
+        permission.revoked_at = timezone.now()
+        permission.save(
+            update_fields=["is_active", "revoked_at", "updated_at"]
+        )
+
+        result = sync_document_replica_task.run(job.id, asset.id)
+
+        job.refresh_from_db()
+        self.assertEqual(result["status"], ExportJobStatus.UPLOAD_FAILED)
+        self.assertEqual(job.status, ExportJobStatus.UPLOAD_FAILED)
+        upload.assert_not_called()
+
+    @patch(
+        "quotation.services.storage_control.FeishuStorageProvider.upload",
+        return_value={"file_token": "remote-file", "url": "https://x"},
+    )
     def test_success_tracking_database_failure_retries_task(self, _upload):
         self.create_storage_route()
         job, asset = self.render_archived_job()
@@ -1548,7 +1669,9 @@ class QuotationExportTaskTests(QuotationExportFixture):
             "reused": True,
         },
     )
-    def test_replica_token_switch_does_not_inherit_old_ownership(self, _upload):
+    def test_replica_token_switch_does_not_inherit_old_ownership(
+        self, _upload
+    ):
         mount = self.create_storage_route()
         job, asset = self.render_archived_job()
         replica = DocumentReplica.objects.create(
@@ -1687,6 +1810,46 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(job.error_code, "feishu_999")
 
     @patch("quotation.tasks.sync_document_replica_task.apply_async")
+    def test_retry_upload_rechecks_directory_upload_permission(
+        self,
+        apply_async,
+    ):
+        job = self.create_job(
+            ["xlsx"],
+            archive_folder_token="selected-folder",
+        )
+        render_quotation_export_task.run(job.id)
+        ExportJob.objects.filter(pk=job.id).update(
+            status=ExportJobStatus.UPLOAD_FAILED,
+            archive_to_feishu=True,
+            error_code="feishu_999",
+        )
+
+        denied = self.client.post(
+            f"/api/v1/quotation/exports/{job.id}/retry-upload",
+            {},
+            format="json",
+        )
+
+        QuotationUploadPermission.objects.create(
+            user=self.user,
+            folder_token="selected-folder",
+            folder_name="Selected Folder",
+            granted_by=self.user,
+        )
+        apply_async.return_value.id = "retry-task"
+        with self.captureOnCommitCallbacks(execute=True):
+            allowed = self.client.post(
+                f"/api/v1/quotation/exports/{job.id}/retry-upload",
+                {},
+                format="json",
+            )
+
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(allowed.status_code, 202)
+        apply_async.assert_called_once()
+
+    @patch("quotation.tasks.sync_document_replica_task.apply_async")
     def test_retry_upload_requeues_existing_assets_only(self, apply_async):
         job = self.create_job(["xlsx"])
         render_quotation_export_task.run(job.id)
@@ -1694,7 +1857,14 @@ class QuotationExportTaskTests(QuotationExportFixture):
         ExportJob.objects.filter(pk=job.id).update(
             status="upload_failed",
             archive_to_feishu=True,
+            archive_folder_token="selected-folder",
             error_code="feishu_999",
+        )
+        QuotationUploadPermission.objects.create(
+            user=self.user,
+            folder_token="selected-folder",
+            folder_name="Selected Folder",
+            granted_by=self.user,
         )
         other_job = self.create_job(["pdf"])
         with patch(
@@ -1740,11 +1910,19 @@ class QuotationExportTaskTests(QuotationExportFixture):
         ExportJob.objects.filter(pk=job.id).update(
             status=ExportJobStatus.UPLOAD_FAILED,
             archive_to_feishu=True,
+            archive_folder_token="selected-folder",
             error_code="feishu_999",
+        )
+        QuotationUploadPermission.objects.create(
+            user=self.user,
+            folder_token="selected-folder",
+            folder_name="Selected Folder",
+            granted_by=self.user,
         )
 
         with patch(
-            "quotation.services.export_pipeline." "prepare_export_upload_tracking",
+            "quotation.services.export_pipeline."
+            "prepare_export_upload_tracking",
             side_effect=OperationalError("database unavailable"),
         ):
             with self.captureOnCommitCallbacks(execute=True):

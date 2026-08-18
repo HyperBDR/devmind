@@ -66,12 +66,14 @@ test('view grants support create, expiry edit, status, and revocation', () => {
   assert.match(viewGrantTable, /@click="revoke/)
 })
 
-test('permission management stays hidden from regular users', () => {
-  assert.match(
+test('access requests stay visible while management remains admin-only', () => {
+  assert.match(quotationApp, /currentTab === 'permissions'/)
+  assert.doesNotMatch(
     quotationApp,
     /currentTab === 'permissions' && isViewPermissionAdmin/
   )
-  assert.match(sidebar, /v-if="quotationViewPermissionAdmin"/)
+  assert.doesNotMatch(sidebar, /v-if="quotationViewPermissionAdmin"/)
+  assert.match(permissionPage, /<template v-if="isAdmin">/)
   assert.doesNotMatch(userPermissionSection, /v-html/)
   assert.doesNotMatch(viewGrantSection, /v-html/)
   assert.doesNotMatch(viewGrantForm, /v-html/)

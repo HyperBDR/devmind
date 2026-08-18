@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
-from quotation.access import can_access_quotation, forbidden_response
+from rest_framework import serializers, status
+from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from quotation.access import (
+    can_access_quotation,
+    can_upload_to_folder,
+    forbidden_response,
+    upload_forbidden_response,
+)
 from quotation.audit import set_request_audit_target
 from quotation.models import (
     EXPORT_ARCHIVE_SYNC_STAGE,
@@ -15,17 +26,15 @@ from quotation.models import (
     SyncJobStatus,
     SyncJobType,
 )
-from quotation.services.export_jobs import ExportRequestError, create_export_job
+from quotation.services.export_jobs import (
+    ExportRequestError,
+    create_export_job,
+)
 from quotation.services.export_renderer import (
     TemplateValidationError,
     register_template_version,
 )
 from quotation.views.feishu import common as feishu_common
-from rest_framework import serializers, status
-from rest_framework.parsers import MultiPartParser
-from rest_framework.permissions import IsAdminUser, IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.views import APIView
 
 
 class QuotationTemplateUploadSerializer(serializers.Serializer):
@@ -64,8 +73,12 @@ class QuotationTemplateListCreateView(APIView):
     parser_classes = [MultiPartParser]
 
     def get(self, request):
-        templates = QuotationTemplate.objects.select_related("created_by").all()
-        return Response([quotation_template_data(template) for template in templates])
+        templates = QuotationTemplate.objects.select_related(
+            "created_by"
+        ).all()
+        return Response(
+            [quotation_template_data(template) for template in templates]
+        )
 
     def post(self, request):
         serializer = QuotationTemplateUploadSerializer(data=request.data)
@@ -130,7 +143,9 @@ def export_job_data(job: ExportJob) -> dict:
             "mime_type": asset.mime_type,
             "size_bytes": asset.size_bytes,
             "content_hash": asset.content_hash,
-            "download_url": (f"/api/v1/quotation/documents/{asset.id}/download"),
+            "download_url": (
+                f"/api/v1/quotation/documents/{asset.id}/download"
+            ),
         }
         for asset in job.assets.all()
     ]
@@ -183,13 +198,22 @@ class QuotationExportCreateView(APIView):
                     access_token=access_token,
                     requested_token=archive_folder_token or root_folder_token,
                 )
+                if not can_upload_to_folder(
+                    request.user,
+                    archive_folder_token,
+                ):
+                    return upload_forbidden_response()
             except PermissionError as exc:
                 raise serializers.ValidationError(
                     {"archive_folder_token": str(exc)}
                 ) from exc
             except Exception as exc:
                 raise serializers.ValidationError(
-                    {"archive_folder_token": "Unable to validate upload folder"}
+                    {
+                        "archive_folder_token": (
+                            "Unable to validate upload folder"
+                        )
+                    }
                 ) from exc
         set_request_audit_target(
             request,
@@ -201,9 +225,13 @@ class QuotationExportCreateView(APIView):
                 quotation=quotation,
                 formats=serializer.validated_data["formats"],
                 actor=request.user,
-                quotation_version_no=serializer.validated_data.get("quotation_version"),
+                quotation_version_no=serializer.validated_data.get(
+                    "quotation_version"
+                ),
                 template_id=serializer.validated_data.get("template_id"),
-                archive_to_feishu=serializer.validated_data["archive_to_feishu"],
+                archive_to_feishu=serializer.validated_data[
+                    "archive_to_feishu"
+                ],
                 archive_folder_token=archive_folder_token,
                 request=request,
             )
@@ -262,7 +290,9 @@ class ExportJobRetryUploadView(APIView):
             )
         with transaction.atomic():
             quotation = (
-                Quotation.objects.select_for_update().filter(pk=quotation_id).first()
+                Quotation.objects.select_for_update()
+                .filter(pk=quotation_id)
+                .first()
             )
             if quotation is None:
                 return Response(
@@ -283,6 +313,11 @@ class ExportJobRetryUploadView(APIView):
                 )
             if not can_access_quotation(request.user, job.quotation):
                 return forbidden_response()
+            if not can_upload_to_folder(
+                request.user,
+                job.archive_folder_token,
+            ):
+                return upload_forbidden_response()
             if job.status != ExportJobStatus.UPLOAD_FAILED:
                 return Response(
                     {"detail": "only failed uploads can be retried"},
