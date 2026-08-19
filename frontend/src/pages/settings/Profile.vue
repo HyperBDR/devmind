@@ -19,6 +19,9 @@
         <!-- User Profile Section -->
         <UserProfileSection />
 
+        <!-- Display Name Card -->
+        <DisplayNameCard />
+
         <!-- Basic Information Card -->
         <BasicInfoCard />
 
@@ -36,6 +39,7 @@ import { useUserStore } from '@/store/user'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseLoading from '@/components/ui/BaseLoading.vue'
 import UserProfileSection from '@/components/settings/UserProfileSection.vue'
+import DisplayNameCard from '@/components/settings/DisplayNameCard.vue'
 import BasicInfoCard from '@/components/settings/BasicInfoCard.vue'
 import ChangePasswordCard from '@/components/settings/ChangePasswordCard.vue'
 
