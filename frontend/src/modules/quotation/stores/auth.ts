@@ -27,7 +27,14 @@ function mapDevMindUser(user: any): AppUser | null {
   const lastName = user.last_name || ''
   const fullName = `${firstName} ${lastName}`.trim()
   return {
-    name: profile.nickname || fullName || user.username || user.email || 'DevMind User',
+    name:
+      user.display_name ||
+      profile.display_name ||
+      profile.nickname ||
+      fullName ||
+      user.username ||
+      user.email ||
+      'DevMind User',
     title: profile.bio || '',
     email: user.email || user.username || '',
     role: roleLabelFromDevMind(user),

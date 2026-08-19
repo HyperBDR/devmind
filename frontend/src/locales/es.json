@@ -255,6 +255,14 @@
     "saveSettings": "Guardar configuración",
     "settingsSaved": "Configuración guardada exitosamente",
     "settingsError": "Error al guardar configuración",
+    "displayNameCard": {
+      "title": "Nombre para mostrar",
+      "desc": "Define el nombre que se muestra en todas las plataformas (incluidas las cotizaciones). Si está vacío, se usará el nombre o el nombre de usuario.",
+      "label": "Nombre para mostrar",
+      "placeholder": "Introduzca el nombre para mostrar",
+      "saved": "Nombre para mostrar guardado correctamente",
+      "error": "Error al guardar. Inténtelo de nuevo."
+    },
     "scene": "Escena",
     "sceneDesc": "Seleccione el modo de escena utilizado por la IA al procesar correos. Diferentes escenas utilizan diferentes métodos de procesamiento y plantillas de indicaciones.",
     "preferenceChangeWarning": "Nota: Cambiar esta configuración afectará el idioma de salida para resúmenes, etiquetas y metadatos de la IA en el procesamiento futuro de correos. Cambiar la escena afecta los métodos de procesamiento de la IA y las plantillas de indicaciones. La nueva configuración tendrá efecto en el próximo correo procesado.",

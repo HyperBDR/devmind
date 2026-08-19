@@ -314,6 +314,14 @@
     "saveSettings": "保存设置",
     "settingsSaved": "设置保存成功",
     "settingsError": "保存设置失败",
+    "displayNameCard": {
+      "title": "显示名称",
+      "desc": "设置在所有平台（含报价单）中展示的名称。留空时自动回退为姓名或用户名。",
+      "label": "显示名称",
+      "placeholder": "请输入显示名称",
+      "saved": "显示名称保存成功",
+      "error": "保存失败，请重试"
+    },
     "scene": "场景",
     "sceneDesc": "选择AI处理对话时使用的场景模式，不同场景使用不同的处理方式和提示词模板。",
     "preferenceChangeWarning": "提示：更改此设置将影响后续对话处理时的智能总结、标签和元数据的输出语言。场景切换会影响AI的处理方式和提示词模板。新设置将在下次处理对话时生效。",

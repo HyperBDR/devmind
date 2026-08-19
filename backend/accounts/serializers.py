@@ -422,13 +422,14 @@ class UserDetailsSerializer(serializers.ModelSerializer):
     Also includes authentication method information and password change
     capability.
     """
-    display_name = serializers.SerializerMethodField(
-        read_only=True,
+    display_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=Profile._meta.get_field('display_name').max_length,
         help_text=_(
-            "User-friendly display name, prioritizing "
-            "first_name + last_name from OAuth providers, "
-            "falling back to username"
-        )
+            "User-chosen display name. When empty the resolved name "
+            "falls back to first_name + last_name, then username."
+        ),
     )
 
     virtual_email = serializers.SerializerMethodField(
@@ -496,30 +497,10 @@ class UserDetailsSerializer(serializers.ModelSerializer):
             'virtual_email',
             'profile',
             'auth_info',
-            'display_name',
             'is_staff',
             'roles',
             'access_profile',
         ]
-
-    def get_display_name(self, obj):
-        """
-        Get user-friendly display name.
-
-        Priority order:
-        1. first_name + last_name (from OAuth providers like Google)
-        2. first_name only (if last_name is empty)
-        3. username (fallback)
-
-        This provides a more friendly name display for OAuth users
-        who typically have proper first_name and last_name from their provider.
-        """
-        if obj.first_name and obj.last_name:
-            return f"{obj.first_name} {obj.last_name}".strip()
-        elif obj.first_name:
-            return obj.first_name.strip()
-        else:
-            return obj.username
 
     def get_virtual_email(self, obj):
         """
@@ -545,6 +526,7 @@ class UserDetailsSerializer(serializers.ModelSerializer):
                 'language': profile.language,
                 'timezone': profile.timezone,
                 'nickname': profile.nickname,
+                'display_name': profile.display_name,
                 'avatar_url': profile.avatar_url
             }
         except Profile.DoesNotExist:
@@ -606,6 +588,12 @@ class UserDetailsSerializer(serializers.ModelSerializer):
 
         return auth_info
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        profile = getattr(instance, 'profile', None)
+        data['display_name'] = profile.display_name if profile else ''
+        return data
+
     def get_roles(self, obj):
         """Serialize effective roles for the current user."""
         effective_roles = get_effective_roles(obj)
@@ -630,19 +618,27 @@ class UserDetailsSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         """
-        Update user instance and profile language/timezone if provided.
+        Update user instance and profile fields if provided.
         """
+        display_name = validated_data.pop('display_name', None)
         profile_language = validated_data.pop('profile_language', None)
         profile_timezone = validated_data.pop('profile_timezone', None)
 
         # Update user fields
         instance = super().update(instance, validated_data)
 
-        # Update profile language and/or timezone if provided
-        if profile_language is not None or profile_timezone is not None:
+        # Update profile fields if provided
+        if (
+            display_name is not None
+            or profile_language is not None
+            or profile_timezone is not None
+        ):
             try:
                 profile = instance.profile
                 update_fields = []
+                if display_name is not None:
+                    profile.display_name = display_name.strip()
+                    update_fields.append('display_name')
                 if profile_language is not None:
                     normalized_lang = normalize_language_code(
                         profile_language
@@ -670,6 +666,11 @@ class UserDetailsSerializer(serializers.ModelSerializer):
                 )
                 Profile.objects.create(
                     user=instance,
+                    display_name=(
+                        display_name.strip()
+                        if display_name is not None
+                        else ''
+                    ),
                     language=default_lang,
                     timezone=default_tz
                 )
