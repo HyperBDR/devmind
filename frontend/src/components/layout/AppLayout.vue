@@ -72,10 +72,7 @@ const contentKey = computed(() =>
   route.path.startsWith('/quotation') ? 'quotation' : route.path
 )
 const resolvedShowSidebar = computed(() => {
-  if (
-    route.path.startsWith('/settings') &&
-    route.query.from_platform === 'operations_console'
-  ) {
+  if (route.path.startsWith('/settings')) {
     return false
   }
   return props.showSidebar
