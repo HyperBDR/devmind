@@ -237,7 +237,6 @@ import { useUserStore } from '@/store/user'
 import LanguageSwitcher from '@/components/ui/LanguageSwitcher.vue'
 import PlatformSwitcher from '@/components/layout/PlatformSwitcher.vue'
 import { appVersion } from '@/config/version'
-import { getCurrentPlatformKey } from '@/utils/platformAccess'
 
 defineProps({
   showMenuButton: {
@@ -259,17 +258,7 @@ const copied = ref(false)
 const displayVersion = computed(() => {
   return appVersion.startsWith('v') ? appVersion : `v${appVersion}`
 })
-const settingsRoute = computed(() => {
-  if (getCurrentPlatformKey(route.path) === 'operations_console') {
-    return {
-      name: 'SettingsProfile',
-      query: {
-        from_platform: 'operations_console'
-      }
-    }
-  }
-  return { name: 'SettingsProfile' }
-})
+const settingsRoute = computed(() => ({ name: 'SettingsProfile' }))
 
 const pageTitle = computed(() => {
   const routeNames = {
