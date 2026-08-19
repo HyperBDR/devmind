@@ -244,6 +244,11 @@ const existingQuoteNumbers = computed(() => props.quotations.map((quote) => quot
 const quoteNoIsUnique = computed(() =>
   isQuotationNumberUnique(quoteNo.value, props.quotations, props.editingQuote?.id),
 )
+const draftSubmittedQuoteNo = computed(() =>
+  props.editingQuote && quoteNoMode.value !== 'custom'
+    ? props.editingQuote.quoteNo
+    : quoteNo.value,
+)
 
 const customerHistory = computed(() => buildCustomerHistory(historySourceQuotations.value))
 const customerCompanyOptions = computed(() => getCompanyOptions(customerHistory.value))
@@ -932,12 +937,17 @@ const previewQuote = computed<Quotation>(() => ({
   createdAt: props.editingQuote ? props.editingQuote.createdAt : `${quoteDate.value} 00:00:00`,
 }))
 
-function validateForm() {
+function validateForm(status: 'Draft' | 'Generated') {
   const tempErrors: Record<string, string> = {}
-  if (!quoteNo.value.trim()) {
+  const targetQuoteNo =
+    status === 'Draft' ? draftSubmittedQuoteNo.value : quoteNo.value
+  if (!targetQuoteNo.trim()) {
     tempErrors.quoteNo = t('quotation.pages.create.errors.quoteNoRequired')
   }
-  if (quoteNo.value.trim() && !quoteNoIsUnique.value) {
+  if (
+    targetQuoteNo.trim() &&
+    !isQuotationNumberUnique(targetQuoteNo, props.quotations, props.editingQuote?.id)
+  ) {
     tempErrors.quoteNo = t('quotation.pages.create.errors.quoteNoDuplicate')
   }
   if (!paymentTerms.value.trim()) {
@@ -1000,7 +1010,7 @@ function validateForm() {
 }
 
 function handleSubmit(status: 'Draft' | 'Generated') {
-  const validationErrors = validateForm()
+  const validationErrors = validateForm(status)
   if (Object.keys(validationErrors).length > 0) {
     const firstErrorMsg =
       Object.values(validationErrors)[0] ||
@@ -1018,7 +1028,7 @@ function handleSubmit(status: 'Draft' | 'Generated') {
 
   const newQuote: Quotation = {
     id: props.editingQuote ? props.editingQuote.id : `quote-${Date.now()}`,
-    quoteNo: quoteNo.value,
+    quoteNo: status === 'Draft' ? draftSubmittedQuoteNo.value : quoteNo.value,
     productLine: productLine.value,
     productLineName: selectedProductLineOption.value?.label || '',
     projectName: projectName.value,
