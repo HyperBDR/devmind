@@ -133,6 +133,15 @@ class Profile(models.Model):
         help_text="User nickname."
     )
 
+    display_name = models.CharField(
+        max_length=120,
+        blank=True,
+        help_text=(
+            "User-chosen display name shown across platforms. "
+            "Falls back to first/last name or username when empty."
+        ),
+    )
+
     avatar_url = models.URLField(
         blank=True,
         help_text="URL link to the user's avatar."

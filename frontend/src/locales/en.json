@@ -304,6 +304,14 @@
     "saveSettings": "Save Settings",
     "settingsSaved": "Settings saved successfully",
     "settingsError": "Failed to save settings",
+    "displayNameCard": {
+      "title": "Display Name",
+      "desc": "Sets the name shown across platforms (including quotations). When empty, it falls back to the user's name or username.",
+      "label": "Display Name",
+      "placeholder": "Enter display name",
+      "saved": "Display name saved successfully",
+      "error": "Failed to save. Please try again."
+    },
     "scene": "Scene",
     "sceneDesc": "Select the scene mode used by AI when processing chats. Different scenes use different processing methods and prompt templates.",
     "preferenceChangeWarning": "Note: Changing this setting will affect the output language for AI summaries, tags, and metadata in future chat processing. Scene switching affects AI processing methods and prompt templates. The new setting will take effect on the next chat processed.",

@@ -33,6 +33,7 @@ class ProfileAdmin(admin.ModelAdmin):
         'language',
         'timezone',
         'nickname',
+        'display_name',
     ]
     list_filter = [
         'registration_completed',
@@ -42,7 +43,8 @@ class ProfileAdmin(admin.ModelAdmin):
     search_fields = [
         'user__username',
         'user__email',
-        'nickname'
+        'nickname',
+        'display_name'
     ]
     readonly_fields = [
         'registration_token',
@@ -62,6 +64,7 @@ class ProfileAdmin(admin.ModelAdmin):
         ('Profile Information', {
             'fields': (
                 'nickname',
+                'display_name',
                 'avatar_url',
                 'bio',
                 'language',
