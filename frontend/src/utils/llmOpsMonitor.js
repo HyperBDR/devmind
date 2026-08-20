@@ -24,7 +24,7 @@ export function isMonitorRowVisible(row, filter) {
     return scope === MARKET_REFERENCE_SCOPE
   }
   if (filter === 'priority') {
-    return scope === OPERATIONAL_SCOPE && Number(row.decision_priority || 8) < 8
+    return scope === OPERATIONAL_SCOPE && Number(row.decision_priority ?? 8) < 8
   }
   return scope === OPERATIONAL_SCOPE && row.decision_status === filter
 }
@@ -41,7 +41,7 @@ export function summarizeMonitorRows(rows = []) {
       (row) => row.decision_status === 'no_supply'
     ).length,
     needsAction: operationalRows.filter(
-      (row) => Number(row.decision_priority || 8) < 8
+      (row) => Number(row.decision_priority ?? 8) < 8
     ).length,
     operational: operationalRows.length,
     pendingListing: operationalRows.filter(

@@ -4058,6 +4058,7 @@ class LLMOpsViewTests(TestCase):
                 "decision_action",
                 "decision_priority",
                 "decision_status",
+                "action_price_source_id",
                 "last_data_event_at",
                 "model_code",
                 "model_id",
@@ -4077,6 +4078,7 @@ class LLMOpsViewTests(TestCase):
                 "currency",
                 "input_price_per_million",
                 "output_price_per_million",
+                "price_source_id",
             },
         )
         self.assertEqual(
@@ -4740,7 +4742,8 @@ class LLMOpsViewTests(TestCase):
         )
         old_time = timezone.now().replace(microsecond=0)
         old_time = old_time - timezone.timedelta(days=2)
-        price_time = old_time + timezone.timedelta(days=1)
+        price_time = timezone.now().replace(microsecond=0)
+        price_time = price_time - timezone.timedelta(hours=1)
         LLMModel.objects.filter(id=model.id).update(updated_at=old_time)
         ChannelModelPrice.objects.filter(id=channel_price.id).update(
             updated_at=price_time,
@@ -4758,6 +4761,121 @@ class LLMOpsViewTests(TestCase):
             diagnostic["last_data_event_at"],
             price_time.isoformat(),
         )
+
+    def test_summary_requires_refresh_for_stale_channel_price(self):
+        provider = LLMProvider.objects.create(
+            name="Stale Provider",
+            code="stale-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Stale-Test",
+            code="stale-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Stale Channel",
+            code="stale-channel",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Stale Source",
+            slug="stale-source",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-stale",
+            name="Agione Stale",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        channel_price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=source,
+            is_listed=True,
+            custom_input_price_per_million="1",
+            custom_output_price_per_million="2",
+        )
+        price_time = timezone.now() - timezone.timedelta(hours=25)
+        ChannelModelPrice.objects.filter(id=channel_price.id).update(
+            updated_at=price_time,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["data_event_type"], "stale")
+        self.assertEqual(diagnostic["decision_action"], "refresh_prices")
+        self.assertEqual(diagnostic["decision_priority"], 0)
+        self.assertEqual(
+            diagnostic["action_price_source_id"],
+            source.id,
+        )
+        self.assertTrue(diagnostic["is_data_anomaly"])
+
+    def test_summary_preserves_collection_failure_over_stale_price(self):
+        provider = LLMProvider.objects.create(
+            name="Failed Stale Provider",
+            code="failed-stale-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Failed-Stale-Test",
+            code="failed-stale-test",
+            input_price_per_million="1",
+            output_price_per_million="2",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Failed Stale Channel",
+            code="failed-stale-channel",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Failed Stale Source",
+            slug="failed-stale-source",
+        )
+        platform = ResalePlatform.objects.create(
+            code="agione-failed-stale",
+            name="Agione Failed Stale",
+        )
+        channel_price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=source,
+            is_listed=True,
+            custom_input_price_per_million="1",
+            custom_output_price_per_million="2",
+        )
+        failed_run = PriceCollectionRun.objects.create(
+            source=source,
+            status=PriceCollectionRun.STATUS_FAILED,
+        )
+        old_failure_time = timezone.now() - timezone.timedelta(days=3)
+        stale_price_time = timezone.now() - timezone.timedelta(days=2)
+        PriceCollectionRun.objects.filter(id=failed_run.id).update(
+            started_at=old_failure_time,
+            finished_at=old_failure_time,
+        )
+        ChannelModelPrice.objects.filter(id=channel_price.id).update(
+            updated_at=stale_price_time,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        diagnostic = response.data["agione"]["diagnostics"][0]
+        self.assertEqual(diagnostic["data_event_type"], "collection_failed")
+        self.assertNotEqual(diagnostic["decision_action"], "refresh_prices")
+        self.assertIsNone(diagnostic["action_price_source_id"])
 
     def test_summary_decision_current_listing_uses_display_currency(self):
         provider = LLMProvider.objects.create(

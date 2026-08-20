@@ -113,6 +113,7 @@ from .services import (
     approve_resale_listing_price_revision,
     build_currency_conversion_context,
     calculate_usage_cost,
+    channel_price_is_stale,
     compute_model_decision,
     convert_currency_amount,
     current_model_price_items_for_channel_price,
@@ -3641,6 +3642,7 @@ _DATA_EVENT_PRIORITY = {
     "reconciliation_anomaly": 1,
     "collection_failed": 2,
     "source_disabled": 3,
+    "stale": 0,
 }
 
 _REQUIRED_YIELD_CONFIG_FIELDS = (
@@ -3655,6 +3657,10 @@ _REQUIRED_YIELD_CONFIG_FIELDS = (
 def _prefer_data_event(current, candidate) -> bool:
     if current is None:
         return True
+    if current["type"] == "stale" and candidate["type"] != "stale":
+        return True
+    if current["type"] != "stale" and candidate["type"] == "stale":
+        return False
     current_at = current.get("at")
     candidate_at = candidate.get("at")
     if current_at and candidate_at and current_at != candidate_at:
@@ -3669,8 +3675,14 @@ def _prefer_data_event(current, candidate) -> bool:
     ) > _DATA_EVENT_PRIORITY.get(current["type"], 0)
 
 
-def _set_model_data_event(events_by_model, model_id, event_type, event_at):
-    candidate = {"type": event_type, "at": event_at}
+def _set_model_data_event(
+    events_by_model,
+    model_id,
+    event_type,
+    event_at,
+    **metadata,
+):
+    candidate = {"type": event_type, "at": event_at, **metadata}
     current = events_by_model.get(model_id)
     if _prefer_data_event(current, candidate):
         events_by_model[model_id] = candidate
@@ -4043,6 +4055,7 @@ _MONITOR_DIAGNOSTIC_FIELDS = (
     "decision_status",
     "decision_action",
     "decision_priority",
+    "action_price_source_id",
     "data_event_type",
     "last_data_event_at",
 )
@@ -4050,6 +4063,7 @@ _MONITOR_DIAGNOSTIC_FIELDS = (
 _MONITOR_RECOMMENDED_CHANNEL_FIELDS = (
     "channel_id",
     "channel_name",
+    "price_source_id",
     "currency",
     "input_price_per_million",
     "output_price_per_million",
@@ -4358,6 +4372,26 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         "collection_failed",
                         run.finished_at or run.started_at,
                     )
+        for row in procurement_rows:
+            stale_options = []
+            for option in row["options"]:
+                price_updated_at = _best_channel_price_updated_at(
+                    overrides,
+                    option,
+                    row["model_id"],
+                    latest_source_run_at_by_source,
+                )
+                if channel_price_is_stale(price_updated_at):
+                    stale_options.append((option, price_updated_at))
+            if stale_options:
+                stale_option, stale_price_time = stale_options[0]
+                _set_model_data_event(
+                    data_events_by_model,
+                    row["model_id"],
+                    "stale",
+                    stale_price_time,
+                    price_source_id=stale_option.get("price_source_id"),
+                )
         if best_channel_ids_by_model:
             reconciliation_rows = (
                 UsageReconciliationRecord.objects.exclude(
@@ -4600,6 +4634,11 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "yield_metrics": yield_metrics_payload,
                 **decision_payload,
             }
+            diagnostic["action_price_source_id"] = (
+                data_event.get("price_source_id")
+                if decision_payload["decision_action"] == "refresh_prices"
+                else None
+            )
             if not is_monitor_scope:
                 diagnostic = {**row, **diagnostic}
             diagnostics.append(diagnostic)

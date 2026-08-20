@@ -39,7 +39,7 @@ export function useLLMOpsMonitor({ summary }) {
     agioneDiagnostics.value.map((row) => {
       const operationScope = operationScopeForRow(row)
       const decisionStatus = row.decision_status || 'ready'
-      const decisionPriority = row.decision_priority || 8
+      const decisionPriority = row.decision_priority ?? 8
       return {
         ...row,
         operation_scope: operationScope,

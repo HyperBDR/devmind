@@ -832,8 +832,8 @@
         "description": "Review source freshness, success rate, and collection failures."
       },
       "modelWorkbench": {
-        "label": "Model Workbench",
-        "description": "Inspect standard prices, channel prices, listings, and reconciliation by model."
+        "label": "Channels & Listings",
+        "description": "Trace procurement channels, contract prices, listings, and reconciliation by model."
       },
       "priceChanges": {
         "label": "Price Changes",
@@ -1585,8 +1585,8 @@
       },
       "reconciliationRecords": "Reconciliation records",
       "standardPrices": "Standard price items",
-      "subtitle": "Inspect official prices, channel procurement, listing status, and reconciliation for a single model.",
-      "title": "Model Detail Workbench",
+      "subtitle": "Trace procurement channels, contract prices, listing status, and reconciliation for a single model.",
+      "title": "Channel & Listing Details",
       "workflowStatus": {
         "deleted": "Deleted",
         "draft": "Draft",
@@ -1823,18 +1823,58 @@
       "websitePrefix": "Provider website / endpoint: {website}"
     },
     "channelPriceMatrixPanel": {
+      "actions": {
+        "refreshPrices": "Review & refresh prices",
+        "viewDetail": "View channel & listing details"
+      },
       "columns": {
         "coverage": "Coverage",
+        "decision": "Decision",
         "lowestChannel": "Lowest channel"
       },
-      "empty": "No models match the current filters.",
+      "context": {
+        "normalized": "Contract FX normalized",
+        "platform": "Listing platform"
+      },
+      "coverageSummary": "{covered} / {total} channels",
+      "drawer": {
+        "contractFx": "Contract FX",
+        "currentChannel": "Current listing channel",
+        "effectiveWindow": "Effective window",
+        "eyebrow": "Channel price comparison",
+        "flatRule": "Flat price",
+        "freshness": "Price freshness",
+        "lowestPrice": "Current lowest",
+        "normalizedHint": "Offers are normalized using contract FX, settlement ratios, and the currently effective price version. Refresh stale prices before making a commercial decision.",
+        "openEnded": "Open ended",
+        "pricingRule": "Pricing rule",
+        "savings": "Estimated savings",
+        "settlementRatio": "Settlement ratio",
+        "viewDetail": "View channel & listing details"
+      },
+      "empty": "Adjust the filters or configure a price source and procurement channel first.",
+      "emptyTitle": "No matching channel prices",
       "filters": {
         "all": "All statuses",
+        "coverage": "Coverage",
+        "dimension": "Pricing dimension",
         "missing": "Missing channel price",
         "ready": "Multi-channel coverage",
-        "single": "Single-channel coverage"
+        "search": "Search models",
+        "single": "Single-channel coverage",
+        "stale": "Needs refresh"
+      },
+      "freshness": {
+        "days": "{count} days ago",
+        "hours": "{count} hours ago",
+        "minutes": "{count} minutes ago",
+        "unknown": "Update time unknown"
       },
       "metrics": {
+        "average": {
+          "hint": "Target at least 2 available channels",
+          "label": "Average coverage"
+        },
         "covered": {
           "hint": "Coverage {percent}%",
           "label": "Has channel price"
@@ -1847,16 +1887,34 @@
           "hint": "Only one procurement channel is available",
           "label": "Single-channel risk"
         },
+        "opportunities": {
+          "hint": "Listings not using the lowest channel",
+          "label": "Switch opportunities"
+        },
+        "stale": {
+          "hint": "Older than 24 hours; collect before deciding",
+          "label": "Prices to refresh"
+        },
         "total": {
-          "hint": "Active models participating in channel comparison",
-          "label": "Total models"
+          "hint": "Models in the current operational scope",
+          "label": "Models compared"
         }
       },
+      "priceCellLabel": "{model}, {channel}, {dimension} {price}",
+      "resetFilters": "Reset filters",
       "searchPlaceholder": "Search model or provider",
       "status": {
-        "missing": "Missing channel price"
+        "missing": "Missing channel price",
+        "stale": "Price needs refresh"
       },
-      "subtitle": "Compare procurement prices, lowest-price hits, and coverage gaps across channels by model.",
+      "subtitle": "Compare effective Input / Output procurement prices with contract versions, listing channels, and price freshness.",
+      "tableTitle": "Effective Procurement Price Matrix",
+      "tags": {
+        "current": "Current listing",
+        "lowest": "Current lowest",
+        "recommended": "Recommended",
+        "stale": "Stale price"
+      },
       "title": "Channel Price Matrix",
       "summary": {
         "inOut": "In {input} / Out {output}"

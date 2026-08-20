@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest import mock
 
@@ -25,6 +26,8 @@ from llm_ops.price_table_validation import usage_range_spec
 from llm_ops.services import (
     build_currency_conversion_context,
     calculate_channel_model_cost,
+    channel_price_is_stale,
+    compute_model_decision,
     import_manual_model_prices,
     match_meta_model_by_alias_or_name,
     price_role_for_source,
@@ -38,6 +41,55 @@ from llm_ops.services import (
     sync_dependent_channel_price_items_for_price_items,
 )
 from llm_ops.tier_pricing import TieredPriceNotSupportedError
+
+
+class ModelDecisionTests(SimpleTestCase):
+    def test_channel_price_becomes_stale_after_24_hours(self):
+        now = datetime(2026, 8, 20, 12, tzinfo=timezone.utc)
+
+        self.assertFalse(
+            channel_price_is_stale(now - timedelta(hours=24), now=now)
+        )
+        self.assertTrue(
+            channel_price_is_stale(
+                now - timedelta(hours=24, seconds=1),
+                now=now,
+            )
+        )
+        self.assertFalse(channel_price_is_stale(None, now=now))
+
+    def test_stale_price_requires_refresh_before_commercial_action(self):
+        result = compute_model_decision(
+            procurement_row={
+                "best_channel": {
+                    "channel_id": 1,
+                    "input_price_per_million": 2,
+                    "output_price_per_million": 8,
+                },
+                "options": [{"channel_id": 1}],
+            },
+            current_listing=None,
+            platform=None,
+            data_event_type="stale",
+        )
+
+        self.assertEqual(result["decision_status"], "platform_fee_unresolved")
+        self.assertEqual(result["decision_action"], "refresh_prices")
+        self.assertEqual(result["decision_priority"], 0)
+        self.assertTrue(result["is_data_anomaly"])
+
+    def test_stale_event_does_not_turn_market_reference_into_procurement(self):
+        result = compute_model_decision(
+            procurement_row={"best_channel": None, "options": []},
+            current_listing=None,
+            platform=None,
+            operation_scope="market_reference",
+            data_event_type="stale",
+        )
+
+        self.assertEqual(result["decision_status"], "market_reference")
+        self.assertEqual(result["decision_action"], "view_market_price")
+        self.assertEqual(result["decision_priority"], 9)
 
 
 class CurrencyConversionContextTests(SimpleTestCase):

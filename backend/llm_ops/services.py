@@ -3855,6 +3855,7 @@ DECISION_STATUS_MARKET_REFERENCE = "market_reference"
 
 OPERATION_SCOPE_OPERATIONAL = "operational"
 OPERATION_SCOPE_MARKET_REFERENCE = "market_reference"
+CHANNEL_PRICE_STALE_AFTER = timedelta(hours=24)
 
 
 _DECISION_PRIORITY = {
@@ -3887,7 +3888,28 @@ DECISION_ANOMALY_EVENT_TYPES = {
     "collection_failed",
     "source_disabled",
     "reconciliation_anomaly",
+    "stale",
 }
+
+
+def _decision_action_for(status, data_event_type):
+    if data_event_type == "stale":
+        return "refresh_prices"
+    return _DECISION_ACTION[status]
+
+
+def _decision_priority_for(status, data_event_type):
+    if data_event_type == "stale":
+        return 0
+    return _DECISION_PRIORITY[status]
+
+
+def channel_price_is_stale(updated_at, *, now=None) -> bool:
+    """Return whether a known channel price is older than its freshness SLA."""
+    if updated_at is None:
+        return False
+    reference_time = now or timezone.now()
+    return updated_at < reference_time - CHANNEL_PRICE_STALE_AFTER
 
 
 def _decimal(value, default=None):
@@ -4061,8 +4083,14 @@ def compute_model_decision(
             status = DECISION_STATUS_READY
         return {
             "decision_status": status,
-            "decision_action": _DECISION_ACTION[status],
-            "decision_priority": _DECISION_PRIORITY[status],
+            "decision_action": _decision_action_for(
+                status,
+                data_event_type,
+            ),
+            "decision_priority": _decision_priority_for(
+                status,
+                data_event_type,
+            ),
             "input_yield": input_yield,
             "output_yield": output_yield,
             "data_event_type": data_event_type,
@@ -4079,8 +4107,11 @@ def compute_model_decision(
 
     return {
         "decision_status": status,
-        "decision_action": _DECISION_ACTION[status],
-        "decision_priority": _DECISION_PRIORITY[status],
+        "decision_action": _decision_action_for(status, data_event_type),
+        "decision_priority": _decision_priority_for(
+            status,
+            data_event_type,
+        ),
         "input_yield": None,
         "output_yield": None,
         "data_event_type": data_event_type,

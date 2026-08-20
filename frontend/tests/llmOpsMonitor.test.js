@@ -70,6 +70,29 @@ test('keeps data-health anomalies out of the resale decision queue', () => {
   )
 })
 
+test('puts stale pricing ahead of commercial decisions', () => {
+  const staleRow = {
+    model_id: 5,
+    operation_scope: 'operational',
+    decision_status: 'not_lowest_channel',
+    decision_action: 'refresh_prices',
+    decision_priority: 0,
+    action_price_source_id: 12,
+    data_event_type: 'stale'
+  }
+
+  assert.equal(isMonitorRowVisible(staleRow, 'priority'), true)
+  assert.equal(summarizeMonitorRows([staleRow]).needsAction, 1)
+  assert.match(
+    monitorDashboardSource,
+    /refresh_prices: 'llmOps\.channelPriceMatrixPanel\.actions\.refreshPrices'/
+  )
+  assert.match(
+    monitorDashboardSource,
+    /row\.decision_action === 'refresh_prices'[\s\S]*?row\.action_price_source_id[\s\S]*?'providers'/
+  )
+})
+
 test('calculates action KPIs from operational models only', () => {
   assert.deepEqual(summarizeMonitorRows(rows), {
     lowYield: 0,

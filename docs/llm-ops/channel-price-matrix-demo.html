@@ -1,0 +1,1834 @@
+<!--AI-NOTES
+product-goal:
+  primary: 让运营人员先判断模型经营健康度，再定位最值得处理的渠道与定价机会
+  secondary: 在同一工作区完成渠道比价、合同价核验与进销存穿透
+data-contract:
+  - 运营队列基于 SummaryAPIView diagnostics 的 operation_scope / decision_status / decision_action
+  - 渠道矩阵基于 options[] 的当前有效价格、版本、生效窗口、汇率与数据更新时间
+  - 收益率沿用平台费用、税率与结算比例后的净收益口径
+rule-gap:
+  - rule: §1.2 Chrome 零漂移工作流
+    scene: 本轮是在现有 DevMind 单文件 demo 上继续完善，原文件未基于 shell-sample 且已有大量业务交互
+    decision: partial-comply
+  - rule: §1.4-11 字体走 .type-* utility class
+    scene: 旧 demo 使用 Tailwind 字号并已形成详情页，本轮仅对新增看板区使用统一语义字型 class
+    decision: partial-comply
+AI-NOTES-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DevMind LLM Ops — 大模型运营</title>
+
+<!-- Vue 3 -->
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<!-- Element Plus -->
+<link rel="stylesheet" href="https://unpkg.com/element-plus@2.9.1/dist/index.css" />
+<script src="https://unpkg.com/element-plus@2.9.1/dist/index.full.min.js"></script>
+<script src="https://unpkg.com/@element-plus/icons-vue@2.3.1/dist/index.iife.min.js"></script>
+<!-- Fonts -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/manrope/index.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/inter/index.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/ibm-plex-mono/400.css" />
+<!-- TailwindCSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Lucide Icons -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<style>
+/* ── Design DNA（沿用参考原型 code_artifact）── */
+:root {
+  --topnav-bg: #1a1025;
+  --topnav-accent: #2d2240;
+  --topnav-fg: #f0edf5;
+  --topnav-muted: #8b7fa0;
+  --topnav-active-bg: #312870;
+  --topnav-active-fg: #c4bdff;
+  --topnav-height: 56px;
+  --sidebar-bg: #fafafa;
+  --sidebar-border: #e4e4e7;
+  --sidebar-fg: #09090b;
+  --sidebar-muted: #71717a;
+  --sidebar-active-bg: #e4e4e7;
+  --sidebar-active-fg: #18181b;
+  --sidebar-width: 256px;
+  --body-bg: #f4f4f5;
+  --body-radius: 16px 16px 0 0;
+  --color-primary: #5f4ecf;
+  --color-primary-hover: #4a3eb0;
+  --color-primary-active: #3d3399;
+  --color-primary-subtle: #ece9f9;
+  --primary-foreground: #ffffff;
+  --foreground: #09090b;
+  --background: #ffffff;
+  --card: #ffffff;
+  --accent: #f4f4f5;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --input: #ffffff;
+  --color-success: #22c55e;
+  --color-warning: #e6a23c;
+  --color-destructive: #ef4444;
+  --badge-purple-bg: #f2eef8;  --badge-purple-fg: #6a4e9a;
+  --badge-blue-bg:   #eef1f8;  --badge-blue-fg:   #4a6298;
+  --badge-green-bg:  #eef5f0;  --badge-green-fg:  #3a7252;
+  --badge-orange-bg: #f8f1ec;  --badge-orange-fg: #8a5e38;
+  --badge-yellow-bg: #f7f4ea;  --badge-yellow-fg: #7a6228;
+  --badge-red-bg:    #fbeef0;  --badge-red-fg:    #9a3a48;
+  --badge-muted-bg:  var(--muted); --badge-muted-fg: var(--muted-foreground);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.12);
+  --radius-sm: 4px; --radius-md: 6px; --radius-lg: 8px; --radius-xl: 12px; --radius-2xl: 16px; --radius-pill: 9999px;
+  --font-heading: 'Manrope Variable', Inter, system-ui, sans-serif;
+  --font-base: 'Inter Variable', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+  --el-border-radius-base: 6px;
+  --el-border-color: var(--border);
+  --el-bg-color: var(--background);
+  --el-bg-color-page: var(--accent);
+  --el-text-color-primary: var(--foreground);
+  --el-text-color-regular: var(--muted-foreground);
+  --el-color-primary: var(--color-primary);
+  --el-fill-color-blank: var(--input);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { height: 100vh; background: var(--topnav-bg); font-family: var(--font-base); overflow: hidden; -webkit-font-smoothing: antialiased; }
+.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.body { display: flex; flex: 1; overflow: hidden; border-radius: var(--body-radius); background: var(--body-bg); }
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--body-bg); position: relative; }
+.list-layout { flex: 1; overflow-y: auto; padding: 24px 28px; display: flex; flex-direction: column; gap: 24px; min-height: 0; }
+.detail-layout { flex: 1; display: flex; flex-direction: column; background: var(--body-bg); overflow: hidden; min-height: 0; }
+.detail-header { padding: 16px 28px; background: var(--card); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-end; flex-shrink: 0; z-index: 10; gap: 12px; flex-wrap: wrap; }
+.detail-content { flex: 1; overflow-y: auto; padding: 24px 28px; min-height: 0; display: flex; flex-direction: column; gap: 24px; scroll-behavior: smooth; }
+
+.topnav { height: var(--topnav-height); min-height: var(--topnav-height); background: var(--topnav-bg); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; z-index: 100; }
+.topnav-left, .topnav-right { display: flex; align-items: center; gap: 8px; }
+.nav-logo { height: 28px; display: flex; align-items: center; justify-content: center; }
+.nav-brand-name { font-size: 15px; font-weight: 700; color: var(--topnav-fg); margin-right: 12px; }
+.nav-tab { padding: 6px 14px; border-radius: 6px; font-size: 13px; font-weight: 600; color: var(--topnav-muted); cursor: pointer; transition: all 0.2s; border: none; background: none; }
+.nav-tab.active { background: var(--topnav-active-bg); color: var(--topnav-active-fg); }
+.nav-tab:not(.active):hover { color: var(--topnav-fg); background: rgba(255,255,255,0.06); }
+.nav-icon-btn { width: 30px; height: 30px; border-radius: 6px; display: flex; align-items: center; justify-content: center; color: var(--topnav-muted); background: none; border: none; cursor: pointer; transition: background 0.2s; }
+.nav-icon-btn:hover { background: var(--topnav-accent); color: var(--topnav-fg); }
+.nav-avatar { width: 28px; height: 28px; border-radius: 9999px; background: #7c3aed; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #fff; cursor: pointer; margin-left: 8px; }
+
+.sidebar { width: var(--sidebar-width); min-width: var(--sidebar-width); background: var(--sidebar-bg); border-right: 1px solid var(--sidebar-border); padding: 12px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.sidebar-section-title { padding: 8px 8px 4px; font-size: 12px; font-weight: 500; color: var(--sidebar-muted); letter-spacing: 0.01em; margin-top: 8px; }
+.nav-item { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 6px; font-size: 14px; font-weight: 400; color: var(--sidebar-fg); cursor: pointer; border: none; background: none; width: 100%; text-align: left; transition: all 0.15s; }
+.nav-item.active { background: var(--sidebar-active-bg); font-weight: 500; color: var(--sidebar-active-fg); }
+.nav-item:hover:not(.active) { background: var(--accent); }
+.nav-item i { width: 18px; height: 18px; color: var(--sidebar-muted); }
+.nav-item.active i { color: var(--sidebar-active-fg); }
+
+.kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--shadow-sm); transition: all 0.25s; }
+.kpi-card:hover { border-color: var(--color-primary); }
+.kpi-title { font-size: 12px; color: var(--muted-foreground); font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.kpi-value { font-family: var(--font-mono); font-size: 24px; font-weight: 700; color: var(--foreground); line-height: 1.2; }
+.font-mono { font-family: var(--font-mono); }
+.page-title { font-family: var(--font-heading); font-size: 20px; font-weight: 800; color: var(--foreground); display: flex; align-items: center; gap: 12px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px; border-radius: var(--radius-pill); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.badge-green  { background: var(--badge-green-bg);  color: var(--badge-green-fg); }
+.badge-orange { background: var(--badge-orange-bg); color: var(--badge-orange-fg); }
+.badge-muted  { background: var(--badge-muted-bg);  color: var(--badge-muted-fg); }
+.badge-purple { background: var(--badge-purple-bg); color: var(--badge-purple-fg); }
+.badge-blue   { background: var(--badge-blue-bg);   color: var(--badge-blue-fg); }
+.badge-yellow { background: var(--badge-yellow-bg); color: var(--badge-yellow-fg); }
+.badge-red    { background: var(--badge-red-bg);    color: var(--badge-red-fg); }
+
+.el-table { --el-table-header-bg-color: var(--accent); --el-table-header-text-color: var(--muted-foreground); border-radius: var(--radius-lg); overflow: hidden; }
+.el-table th.el-table__cell { font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); }
+.el-table td.el-table__cell { border-bottom: 1px solid var(--border); font-size: 13px; color: var(--foreground); }
+
+/* 单轨对标区间条图 */
+.range-bar-wrapper { position: relative; width: 100%; height: 8px; background: var(--border); border-radius: 9999px; margin-top: 36px; margin-bottom: 24px; }
+.range-bar-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--card); box-shadow: var(--shadow-md); transition: left 0.3s ease, background-color 0.3s ease; z-index: 10; }
+.range-ref-marker { position: absolute; top: 50%; transform: translate(-50%, -50%); width: 2px; height: 20px; background-color: var(--muted-foreground); z-index: 5; }
+.range-ref-label { position: absolute; font-size: 11px; font-weight: 700; color: var(--muted-foreground); top: -30px; transform: translateX(-50%); white-space: nowrap; }
+.range-bar-value { position: absolute; font-size: 12px; font-weight: 800; bottom: -28px; transform: translateX(-50%); white-space: nowrap; transition: left 0.3s ease; }
+.range-market-zone { position: absolute; height: 100%; background: var(--color-primary); opacity: 0.15; border-radius: 9999px; }
+.range-bar-label { position: absolute; font-size: 10px; font-weight: 600; color: var(--muted-foreground); top: -18px; transform: translateX(-50%); white-space: nowrap; line-height: 1.3; }
+
+.el-breadcrumb__inner a, .el-breadcrumb__inner.is-link { font-weight: 600; color: var(--muted-foreground); transition: color 0.2s; }
+.el-breadcrumb__inner a:hover, .el-breadcrumb__inner.is-link:hover { color: var(--color-primary); }
+.el-breadcrumb__item:last-child .el-breadcrumb__inner { color: var(--foreground); font-weight: 800; }
+
+.animate-fade-in { animation: fadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+[v-cloak] { display: none; }
+
+.mapping-note { font-size: 12px; line-height: 1.9; }
+.mapping-note code { font-family: var(--font-mono); font-size: 11px; background: var(--accent); padding: 1px 5px; border-radius: 4px; color: var(--color-primary); }
+
+/* 功能操作按钮 */
+.op-btn { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px; border-radius: var(--radius-md); font-size: 12px; font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--card); color: var(--foreground); transition: all 0.15s; white-space: nowrap; }
+.op-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.op-btn.primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+.op-btn.primary:hover { background: var(--color-primary-hover); color: #fff; }
+.op-btn.danger { color: var(--color-destructive); }
+.op-btn.danger:hover { border-color: var(--color-destructive); color: var(--color-destructive); }
+.op-btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+.op-btn[disabled]:hover { border-color: var(--border); color: var(--foreground); }
+
+/* 编辑态价格输入 */
+.price-edit { width: 92px; height: 26px; border: 1px solid var(--color-primary); border-radius: var(--radius-md); padding: 0 6px; font-family: var(--font-mono); font-size: 12px; font-weight: 700; color: var(--foreground); background: var(--input); text-align: right; }
+.price-edit:focus { outline: none; box-shadow: 0 0 0 2px var(--color-primary-subtle); }
+
+.edit-banner { background: var(--badge-blue-bg); color: var(--badge-blue-fg); font-size: 11px; font-weight: 600; border-radius: var(--radius-md); padding: 3px 8px; display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── 大模型运营：运营看板 + 渠道比价矩阵 ── */
+.type-h1 { font-family: var(--font-heading); font-size: 22px; font-weight: 700; line-height: 1.25; }
+.type-h2 { font-family: var(--font-heading); font-size: 20px; font-weight: 700; line-height: 1.4; }
+.type-h3 { font-size: 16px; font-weight: 600; line-height: 1.4; }
+.type-body-sm { font-size: 13px; font-weight: 400; line-height: 1.43; }
+.type-caption { font-size: 12px; font-weight: 500; line-height: 1.33; }
+.type-data { font-family: var(--font-mono); font-size: 13px; font-weight: 400; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.type-kpi { font-family: var(--font-mono); font-size: 28px; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.type-hero-data { font-family: var(--font-mono); font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.type-table-header { font-size: 11px; font-weight: 600; line-height: 1.4; letter-spacing: .5px; text-transform: uppercase; }
+.tabs-segmented { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: var(--radius-lg); background: var(--accent); }
+.tabs-segmented__item { min-height: 28px; padding: 0 10px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.tabs-segmented__item.is-active { background: var(--card); color: var(--foreground); box-shadow: var(--shadow-sm); font-weight: 600; }
+
+:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.demo-mode-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--topnav-accent); border-radius: var(--radius-pill); color: var(--topnav-fg); background: var(--topnav-accent); cursor: pointer; }
+.demo-banner { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 34px; padding: 6px 16px; background: var(--badge-orange-bg); color: var(--badge-orange-fg); border-bottom: 1px solid var(--border); }
+
+.workspace-layout { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 28px 32px; }
+.page-header-pro { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.page-header-pro__title { display: flex; align-items: center; gap: 10px; color: var(--foreground); }
+.page-header-pro__meta { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.page-actions { display: flex; align-items: center; gap: 8px; }
+.view-tabs { display: flex; align-items: flex-end; gap: 24px; border-bottom: 1px solid var(--border); margin-bottom: 18px; }
+.view-tab { position: relative; display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 0 2px; border: 0; background: none; color: var(--muted-foreground); cursor: pointer; }
+.view-tab.is-active { color: var(--foreground); font-weight: 600; }
+.view-tab.is-active::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--color-primary); }
+.view-tab svg { width: 16px; height: 16px; }
+
+.ops-hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(360px, .65fr); gap: 22px; padding: 22px; margin-bottom: 18px; background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 9%, transparent), transparent 60%), var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); box-shadow: var(--shadow-sm); }
+.ops-hero__main { display: flex; align-items: center; gap: 22px; min-width: 0; }
+.ops-hero__number { color: var(--color-primary); min-width: 86px; }
+.ops-hero__copy { min-width: 0; }
+.ops-hero__title { color: var(--foreground); margin-bottom: 5px; }
+.ops-hero__hint { color: var(--muted-foreground); max-width: 650px; }
+.ops-hero__actions { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+.ops-hero__breakdown { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: stretch; border-left: 1px solid var(--border); padding-left: 22px; }
+.ops-breakdown-item { display: flex; flex-direction: column; justify-content: center; gap: 5px; padding: 10px 14px; }
+.ops-breakdown-item:nth-child(odd) { border-right: 1px solid var(--border); }
+.ops-breakdown-item:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
+.ops-breakdown-label { color: var(--muted-foreground); }
+.ops-breakdown-value { color: var(--foreground); }
+.ops-breakdown-value.is-danger { color: var(--color-destructive); }
+.ops-breakdown-value.is-warning { color: var(--color-warning); }
+
+.metrics-strip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 18px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); overflow: hidden; }
+.metric-cell { padding: 14px 16px; min-width: 0; }
+.metric-cell + .metric-cell { border-left: 1px solid var(--border); }
+.metric-label { color: var(--muted-foreground); margin-bottom: 5px; }
+.metric-value { display: flex; align-items: baseline; gap: 6px; color: var(--foreground); }
+.metric-hint { color: var(--muted-foreground); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ops-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(330px, .75fr); gap: 18px; margin-bottom: 18px; }
+.panel-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); overflow: hidden; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 50px; padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--foreground); }
+.panel-head__left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.panel-head__right { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.chart-type-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: var(--radius-pill); background: var(--accent); color: var(--muted-foreground); }
+.chart-type-badge::before { content: ''; width: 5px; height: 5px; border-radius: var(--radius-pill); background: var(--muted-foreground); }
+.trend-chart { padding: 18px 18px 12px; }
+.trend-chart__summary { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+.trend-chart__delta { color: var(--color-success); }
+.trend-chart svg { display: block; width: 100%; height: 190px; overflow: visible; }
+.chart-grid-line { stroke: var(--border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.chart-axis { display: flex; justify-content: space-between; color: var(--muted-foreground); padding: 0 2px; }
+.chart-legend { display: flex; align-items: center; gap: 16px; margin-top: 12px; color: var(--muted-foreground); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-line { width: 16px; height: 2px; border-radius: var(--radius-pill); }
+.decision-bars { padding: 14px 16px 18px; display: flex; flex-direction: column; gap: 14px; }
+.decision-bar__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.decision-bar__track { height: 7px; border-radius: var(--radius-pill); background: var(--accent); overflow: hidden; }
+.decision-bar__fill { height: 100%; border-radius: var(--radius-pill); background: var(--color-primary); }
+.decision-bar__fill.is-warning { background: var(--color-warning); }
+.decision-bar__fill.is-danger { background: var(--color-destructive); }
+.decision-bar__fill.is-success { background: var(--color-success); }
+.health-list { border-top: 1px solid var(--border); }
+.health-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 16px; }
+.health-row + .health-row { border-top: 1px solid var(--border); }
+.health-row__label { display: flex; align-items: center; gap: 8px; color: var(--foreground); }
+.health-row__value { color: var(--muted-foreground); }
+
+.queue-card { margin-bottom: 18px; }
+.queue-table-wrap { overflow-x: auto; }
+.queue-table { width: 100%; min-width: 1080px; border-collapse: collapse; }
+.queue-table th { padding: 10px 14px; background: var(--accent); color: var(--muted-foreground); border-bottom: 1px solid var(--border); text-align: left; }
+.queue-table td { padding: 13px 14px; border-bottom: 1px solid var(--border); color: var(--foreground); vertical-align: middle; }
+.queue-table tbody tr:last-child td { border-bottom: 0; }
+.queue-table tbody tr:hover { background: color-mix(in srgb, var(--accent) 68%, transparent); }
+.model-cell__name { color: var(--foreground); }
+.model-cell__meta { color: var(--muted-foreground); margin-top: 3px; }
+.price-pair { display: grid; grid-template-columns: 28px auto; gap: 2px 8px; }
+.price-pair__label { color: var(--muted-foreground); }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 9px; border-radius: var(--radius-pill); white-space: nowrap; }
+.status-pill::before { content: ''; width: 6px; height: 6px; border-radius: var(--radius-pill); background: currentColor; }
+.status-pill.is-success { background: var(--badge-green-bg); color: var(--badge-green-fg); }
+.status-pill.is-warning { background: var(--badge-orange-bg); color: var(--badge-orange-fg); }
+.status-pill.is-danger { background: var(--badge-red-bg); color: var(--badge-red-fg); }
+.status-pill.is-muted { background: var(--badge-muted-bg); color: var(--badge-muted-fg); }
+.event-text { display: block; margin-top: 4px; color: var(--muted-foreground); }
+.event-text.is-danger { color: var(--color-destructive); }
+.event-text.is-warning { color: var(--color-warning); }
+
+.matrix-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding: 14px 16px; margin-bottom: 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-xl); }
+.matrix-filters { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+.matrix-filter { display: flex; flex-direction: column; gap: 5px; }
+.matrix-filter label { color: var(--muted-foreground); }
+.matrix-context { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.matrix-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.matrix-legend { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--muted-foreground); }
+.matrix-legend__item { display: inline-flex; align-items: center; gap: 6px; }
+.matrix-legend__swatch { width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--border); background: var(--card); }
+.matrix-legend__swatch.is-best { background: var(--badge-green-bg); border-color: var(--badge-green-fg); }
+.matrix-legend__swatch.is-current { box-shadow: inset 0 0 0 2px var(--color-primary); }
+.matrix-legend__swatch.is-stale { background: var(--badge-orange-bg); border-color: var(--badge-orange-fg); }
+.matrix-table-wrap { overflow: auto; max-height: 590px; }
+.matrix-table { width: 100%; min-width: 1320px; border-collapse: separate; border-spacing: 0; }
+.matrix-table th { position: sticky; top: 0; z-index: 4; padding: 10px 12px; background: var(--accent); color: var(--muted-foreground); border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); text-align: left; }
+.matrix-table td { padding: 8px; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); vertical-align: top; background: var(--card); }
+.matrix-table tr:last-child td { border-bottom: 0; }
+.matrix-table th:last-child, .matrix-table td:last-child { border-right: 0; }
+.matrix-table .sticky-model { position: sticky; left: 0; z-index: 3; min-width: 220px; background: var(--card); }
+.matrix-table th.sticky-model { z-index: 6; background: var(--accent); }
+.matrix-table .sticky-action { position: sticky; right: 0; z-index: 3; min-width: 160px; background: var(--card); }
+.matrix-table th.sticky-action { z-index: 6; background: var(--accent); }
+.channel-head { display: flex; flex-direction: column; gap: 3px; min-width: 168px; }
+.channel-head__name { color: var(--foreground); }
+.channel-head__meta { color: var(--muted-foreground); }
+.price-cell { width: 100%; min-height: 78px; display: flex; flex-direction: column; align-items: stretch; gap: 5px; padding: 9px; border: 1px solid transparent; border-radius: var(--radius-lg); background: transparent; color: var(--foreground); text-align: left; cursor: pointer; }
+.price-cell:hover { border-color: var(--color-primary); background: var(--color-primary-subtle); }
+.price-cell.is-best { background: var(--badge-green-bg); border-color: color-mix(in srgb, var(--badge-green-fg) 44%, transparent); }
+.price-cell.is-current { box-shadow: inset 0 0 0 2px var(--color-primary); }
+.price-cell.is-stale { background: var(--badge-orange-bg); border-color: color-mix(in srgb, var(--badge-orange-fg) 44%, transparent); }
+.price-cell__value { color: var(--foreground); }
+.price-cell__meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: var(--muted-foreground); }
+.price-cell__tags { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.mini-tag { display: inline-flex; align-items: center; min-height: 18px; padding: 1px 6px; border-radius: var(--radius-pill); background: var(--accent); color: var(--muted-foreground); }
+.mini-tag.is-best { background: var(--badge-green-bg); color: var(--badge-green-fg); }
+.mini-tag.is-current { background: var(--color-primary-subtle); color: var(--color-primary); }
+.empty-price-cell { min-height: 78px; display: flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
+
+.compare-drawer .el-drawer__header { margin-bottom: 0; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.compare-drawer .el-drawer__body { padding: 0; }
+.compare-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
+.compare-summary__item { padding: 14px 16px; }
+.compare-summary__item + .compare-summary__item { border-left: 1px solid var(--border); }
+.compare-offers { padding: 16px 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+.compare-offer { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(100px, .65fr) minmax(150px, 1fr); gap: 12px; align-items: center; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.compare-offer.is-best { background: var(--badge-green-bg); border-color: color-mix(in srgb, var(--badge-green-fg) 44%, transparent); }
+.compare-offer.is-selected { box-shadow: inset 0 0 0 2px var(--color-primary); }
+.compare-offer__name { color: var(--foreground); }
+.compare-offer__meta { color: var(--muted-foreground); margin-top: 3px; }
+.compare-offer__price { text-align: right; color: var(--foreground); }
+.compare-offer__terms { color: var(--muted-foreground); }
+.compare-footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px; background: var(--card); border-top: 1px solid var(--border); }
+
+@media (max-width: 1280px) {
+  .ops-hero { grid-template-columns: 1fr; }
+  .ops-hero__breakdown { border-left: 0; border-top: 1px solid var(--border); padding-left: 0; padding-top: 12px; }
+  .metrics-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .metric-cell:nth-child(4) { border-left: 0; border-top: 1px solid var(--border); }
+  .metric-cell:nth-child(5) { border-top: 1px solid var(--border); }
+  .ops-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 900px) {
+  .sidebar { display: none; }
+  .workspace-layout { padding: 16px; }
+  .page-header-pro, .matrix-toolbar { align-items: stretch; flex-direction: column; }
+  .metrics-strip, .matrix-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metric-cell:nth-child(3) { border-left: 0; border-top: 1px solid var(--border); }
+  .ops-hero__main { align-items: flex-start; }
+  .compare-offer { grid-template-columns: 1fr; }
+  .compare-offer__price { text-align: left; }
+}
+@media (max-width: 640px) {
+  .nav-brand-name { display: none; }
+  .nav-tab { display: none; }
+  .demo-mode-chip .scenario-label { display: none; }
+  .ops-hero__main { flex-direction: column; gap: 10px; }
+  .ops-hero__breakdown { grid-template-columns: 1fr; }
+  .ops-breakdown-item { border-right: 0 !important; border-bottom: 1px solid var(--border); }
+  .ops-breakdown-item:last-child { border-bottom: 0; }
+  .metrics-strip, .matrix-metrics { grid-template-columns: 1fr; }
+  .metric-cell + .metric-cell { border-left: 0; border-top: 1px solid var(--border); }
+  .compare-summary { grid-template-columns: 1fr; }
+  .compare-summary__item + .compare-summary__item { border-left: 0; border-top: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+<div id="app" class="app" v-cloak>
+
+  <nav class="topnav">
+    <div class="topnav-left">
+      <div class="nav-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-[var(--topnav-muted)]"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      </div>
+      <span class="nav-brand-name">DevMind LLMOps</span>
+      <div style="width:1px; height:20px; background: var(--topnav-accent); margin: 0 8px;"></div>
+      <button class="nav-tab" :class="{active: activeTab==0}" type="button" :aria-pressed="activeTab === 0" @click="activeTab=0">{{ t.tabs[0] }}</button>
+      <button class="nav-tab" :class="{active: activeTab==1}" type="button" :aria-pressed="activeTab === 1" @click="activeTab=1">{{ t.tabs[1] }}</button>
+    </div>
+    <div class="topnav-right">
+      <el-dropdown trigger="click" @command="setScenario">
+        <button class="demo-mode-chip type-caption" type="button">
+          <i data-lucide="lightbulb" style="width:14px;"></i>
+          <span class="scenario-label">{{ scenarioLabel }}</span>
+          <i data-lucide="chevron-down" style="width:12px;"></i>
+        </button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="normal">{{ tr('默认 · 完整数据', 'Default · complete data') }}</el-dropdown-item>
+            <el-dropdown-item command="stale">{{ tr('风险 · 价格过期', 'Risk · stale prices') }}</el-dropdown-item>
+            <el-dropdown-item command="empty">{{ tr('空态 · 无运营模型', 'Empty · no operational models') }}</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <button class="nav-icon-btn" type="button" :title="tr('切换语言', 'Switch Language')" :aria-label="tr('切换语言', 'Switch Language')" @click="toggleLang"><i data-lucide="globe"></i></button>
+      <button class="nav-icon-btn" type="button" :title="tr('切换主题', 'Switch Theme')" :aria-label="tr('切换主题', 'Switch Theme')" @click="toggleTheme"><i :data-lucide="isDark ? 'moon' : 'sun'"></i></button>
+      <div class="nav-avatar">A</div>
+    </div>
+  </nav>
+
+  <div v-if="scenarioMode !== 'normal'" class="demo-banner type-caption" role="status">
+    <i data-lucide="triangle-alert" style="width:14px;"></i>
+    {{ scenarioBanner }}
+  </div>
+
+  <div class="body">
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">{{ tr('大模型运营', 'LLM Operations') }}</div>
+        <button class="nav-item" :class="{ active: currentView === 'list' && activeWorkspace === 'dashboard' }" @click="openWorkspace('dashboard')"><i data-lucide="layout-dashboard"></i> {{ tr('运营看板', 'Operations Dashboard') }}</button>
+        <button class="nav-item" :class="{ active: currentView === 'list' && activeWorkspace === 'matrix' }" @click="openWorkspace('matrix')"><i data-lucide="table-2"></i> {{ tr('渠道比价矩阵', 'Channel Price Matrix') }}</button>
+        <button class="nav-item" @click="notifyComingSoon"><i data-lucide="server"></i> {{ tr('模型挂售工作台', 'Listing Workspace') }}</button>
+        <button class="nav-item" @click="notifyComingSoon"><i data-lucide="cpu"></i> {{ tr('元模型库', 'Meta Model Catalog') }}</button>
+      </div>
+    </aside>
+
+    <main class="main">
+
+      <!-- ================= LEVEL 1: 大模型运营工作区 ================= -->
+      <div v-if="currentView === 'list'" class="workspace-layout animate-fade-in" data-component="llm-operations-workspace">
+        <header class="page-header-pro" data-component="page-header">
+          <div>
+            <h1 class="type-h1 page-header-pro__title">{{ tr('大模型运营', 'LLM Operations') }}</h1>
+            <div class="page-header-pro__meta type-caption">
+              <span>{{ summary.agione.platform_name }}</span>
+              <span>·</span>
+              <span>{{ tr('口径 CNY / 1M Tokens', 'CNY / 1M Tokens') }}</span>
+              <span>·</span>
+              <span>{{ tr('更新于 2 分钟前', 'Updated 2 min ago') }}</span>
+            </div>
+          </div>
+          <div class="page-actions">
+            <button class="op-btn" type="button" @click="refreshDashboard"><i data-lucide="refresh-cw" style="width:13px;"></i>{{ tr('刷新', 'Refresh') }}</button>
+            <button class="op-btn" type="button" @click="exportCsv" :disabled="!effectiveRows.length"><i data-lucide="download" style="width:13px;"></i>{{ tr('导出', 'Export') }}</button>
+          </div>
+        </header>
+
+        <nav class="view-tabs" role="tablist" :aria-label="tr('大模型运营视图', 'LLM operations views')">
+          <button class="view-tab type-body-sm" :class="{ 'is-active': activeWorkspace === 'dashboard' }" type="button" role="tab" :aria-selected="activeWorkspace === 'dashboard'" @click="openWorkspace('dashboard')"><i data-lucide="layout-dashboard"></i>{{ tr('运营看板', 'Operations Dashboard') }}</button>
+          <button class="view-tab type-body-sm" :class="{ 'is-active': activeWorkspace === 'matrix' }" type="button" role="tab" :aria-selected="activeWorkspace === 'matrix'" @click="openWorkspace('matrix')"><i data-lucide="table-2"></i>{{ tr('渠道比价矩阵', 'Channel Price Matrix') }}</button>
+        </nav>
+
+        <!-- 运营看板 -->
+        <section v-show="activeWorkspace === 'dashboard'" data-component="operations-dashboard">
+          <div v-if="effectiveRows.length">
+            <section class="ops-hero" data-component="operations-hero">
+              <div class="ops-hero__main">
+                <div class="type-hero-data ops-hero__number">{{ priorityCount }}</div>
+                <div class="ops-hero__copy">
+                  <h2 class="type-h2 ops-hero__title">{{ tr('项运营任务需要处理', 'operational tasks need attention') }}</h2>
+                  <p class="type-body-sm ops-hero__hint">{{ tr('优先处理缺供应、低收益和非最优渠道；已就绪模型不占用处理队列。', 'Prioritize missing supply, low yield, and non-optimal channels. Ready models stay outside the action queue.') }}</p>
+                  <div class="ops-hero__actions">
+                    <button class="op-btn primary" type="button" @click="scrollToQueue"><i data-lucide="list-checks" style="width:13px;"></i>{{ tr('处理优先队列', 'Review Priority Queue') }}</button>
+                    <button class="op-btn" type="button" @click="openWorkspace('matrix')">{{ tr('查看渠道机会', 'View Channel Opportunities') }}</button>
+                  </div>
+                </div>
+              </div>
+              <div class="ops-hero__breakdown">
+                <div class="ops-breakdown-item">
+                  <span class="type-caption ops-breakdown-label">{{ tr('利润风险', 'Yield Risk') }}</span>
+                  <strong class="type-kpi ops-breakdown-value is-danger">{{ dashboardStats.lowYield }}</strong>
+                </div>
+                <div class="ops-breakdown-item">
+                  <span class="type-caption ops-breakdown-label">{{ tr('非最优渠道', 'Non-optimal Channel') }}</span>
+                  <strong class="type-kpi ops-breakdown-value is-warning">{{ dashboardStats.nonOptimal }}</strong>
+                </div>
+                <div class="ops-breakdown-item">
+                  <span class="type-caption ops-breakdown-label">{{ tr('单渠道暴露', 'Single-channel Exposure') }}</span>
+                  <strong class="type-kpi ops-breakdown-value">{{ dashboardStats.singleChannel }}</strong>
+                </div>
+                <div class="ops-breakdown-item">
+                  <span class="type-caption ops-breakdown-label">{{ tr('数据异常', 'Data Anomalies') }}</span>
+                  <strong class="type-kpi ops-breakdown-value">{{ dashboardStats.dataAnomaly }}</strong>
+                </div>
+              </div>
+            </section>
+
+            <div class="metrics-strip" data-component="metrics-strip">
+              <div v-for="metric in dashboardMetrics" :key="metric.label" class="metric-cell">
+                <div class="type-caption metric-label">{{ metric.label }}</div>
+                <div class="metric-value"><strong class="type-kpi">{{ metric.value }}</strong><span v-if="metric.unit" class="type-caption">{{ metric.unit }}</span></div>
+                <div class="type-caption metric-hint">{{ metric.hint }}</div>
+              </div>
+            </div>
+
+            <div class="ops-grid">
+              <section class="panel-card" data-component="trend-chart">
+                <div class="panel-head">
+                  <div class="panel-head__left"><h2 class="type-h3">{{ tr('采购成本与挂售价指数', 'Procurement Cost vs Listing Price Index') }}</h2><span class="chart-type-badge type-caption">Time series</span></div>
+                  <div class="panel-head__right type-caption">{{ tr('近 7 天', 'Last 7 days') }}</div>
+                </div>
+                <div class="trend-chart">
+                  <div class="trend-chart__summary"><span class="type-kpi">1.38x</span><span class="type-caption trend-chart__delta">↑ 4.2%</span><span class="type-caption" style="color:var(--muted-foreground);">{{ tr('售价 / 成本指数', 'listing / cost index') }}</span></div>
+                  <svg viewBox="0 0 700 190" preserveAspectRatio="none" role="img" :aria-label="tr('采购成本与挂售价走势', 'Procurement cost and listing price trend')">
+                    <line v-for="y in [28,72,116,160]" :key="y" x1="0" :y1="y" x2="700" :y2="y" class="chart-grid-line"></line>
+                    <path d="M0 132 L116 126 L233 121 L350 113 L466 118 L583 104 L700 96 L700 180 L0 180 Z" fill="var(--color-primary)" fill-opacity="0.08"></path>
+                    <path d="M0 132 L116 126 L233 121 L350 113 L466 118 L583 104 L700 96" fill="none" stroke="var(--color-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+                    <path d="M0 154 L116 151 L233 148 L350 147 L466 143 L583 141 L700 139" fill="none" stroke="var(--color-warning)" stroke-width="2" stroke-dasharray="5 5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+                  </svg>
+                  <div class="chart-axis type-caption"><span>08-14</span><span>08-15</span><span>08-16</span><span>08-17</span><span>08-18</span><span>08-19</span><span>08-20</span></div>
+                  <div class="chart-legend type-caption"><span><i class="legend-line" style="background:var(--color-primary);"></i>{{ tr('挂售价指数', 'Listing Price Index') }}</span><span><i class="legend-line" style="background:var(--color-warning);"></i>{{ tr('采购成本指数', 'Procurement Cost Index') }}</span></div>
+                </div>
+              </section>
+
+              <section class="panel-card" data-component="decision-distribution">
+                <div class="panel-head">
+                  <div class="panel-head__left"><h2 class="type-h3">{{ tr('运营信号分布', 'Operations Signal Distribution') }}</h2><span class="chart-type-badge type-caption">Bar</span></div>
+                </div>
+                <div class="decision-bars">
+                  <div v-for="item in decisionDistribution" :key="item.label" class="decision-bar">
+                    <div class="decision-bar__top"><span class="type-body-sm">{{ item.label }}</span><strong class="type-data">{{ item.value }}</strong></div>
+                    <div class="decision-bar__track"><div class="decision-bar__fill" :class="item.tone" :style="{ width: item.width + '%' }"></div></div>
+                  </div>
+                </div>
+                <div class="health-list">
+                  <div class="health-row"><span class="type-body-sm health-row__label"><i data-lucide="database" style="width:14px;"></i>{{ tr('有效报价', 'Valid Offers') }}</span><span class="type-data health-row__value">{{ dataHealth.validOffers }} / {{ dataHealth.totalOffers }}</span></div>
+                  <div class="health-row"><span class="type-body-sm health-row__label"><i data-lucide="clock-3" style="width:14px;"></i>{{ tr('价格新鲜度', 'Price Freshness') }}</span><span class="type-data health-row__value">{{ dataHealth.freshness }}</span></div>
+                  <div class="health-row"><span class="type-body-sm health-row__label"><i data-lucide="scale" style="width:14px;"></i>{{ tr('对账异常', 'Reconciliation Anomalies') }}</span><span class="type-data health-row__value">0</span></div>
+                </div>
+              </section>
+            </div>
+
+            <section id="priority-queue" class="panel-card queue-card" data-component="decision-queue">
+              <div class="panel-head">
+                <div class="panel-head__left"><h2 class="type-h3">{{ tr('运营优先队列', 'Operations Priority Queue') }}</h2><span class="status-pill is-warning type-caption">{{ priorityCount }} {{ tr('项待处理', 'to review') }}</span></div>
+                <div class="panel-head__right type-caption">{{ tr('按决策优先级与数据时效排序', 'Sorted by decision priority and freshness') }}</div>
+              </div>
+              <div class="queue-table-wrap">
+                <table class="queue-table">
+                  <thead><tr><th class="type-table-header">{{ tr('模型', 'Model') }}</th><th class="type-table-header">{{ tr('建议采购', 'Recommended Supply') }}</th><th class="type-table-header">{{ tr('当前挂售', 'Current Listing') }}</th><th class="type-table-header">{{ tr('净收益率', 'Net Yield') }}</th><th class="type-table-header">{{ tr('状态', 'Status') }}</th><th class="type-table-header">{{ tr('数据时效', 'Data Freshness') }}</th><th class="type-table-header">{{ tr('建议操作', 'Recommended Action') }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="row in priorityRows" :key="row.model_id">
+                      <td><div class="type-body-sm model-cell__name">{{ row.model_name }}</div><div class="type-caption model-cell__meta">{{ row.provider_name }} · {{ row.meta_model_code }}</div></td>
+                      <td><div class="type-body-sm">{{ recommendedChannelName(row) }}</div><div class="type-caption model-cell__meta">{{ row.coverage_count }} {{ tr('个可用渠道', 'available channels') }}</div><div class="type-data model-cell__meta">In {{ optionMoney(row.best_channel, 'input') }} · Out {{ optionMoney(row.best_channel, 'output') }}</div></td>
+                      <td><div class="type-body-sm">{{ listingChannelName(row) }}</div><div class="type-data model-cell__meta">In {{ listingMoney(row, 'input') }} · Out {{ listingMoney(row, 'output') }}</div></td>
+                      <td><div class="price-pair type-data"><span class="price-pair__label">In</span><span>{{ yieldForRow(row, 'input') }}</span><span class="price-pair__label">Out</span><span>{{ yieldForRow(row, 'output') }}</span></div></td>
+                      <td><span class="status-pill type-caption" :class="decisionTone(row)">{{ decisionLabel(row) }}</span></td>
+                      <td><span class="type-body-sm">{{ eventTime(row) }}</span><span class="type-caption event-text" :class="eventToneClass(row)">{{ eventLabel(row) }}</span></td>
+                      <td><button class="op-btn" :class="effectiveAction(row) === 'keep' ? '' : 'primary'" type="button" @click="runSuggestedAction(row)"><i :data-lucide="actionIcon(effectiveAction(row))" style="width:13px;"></i>{{ actionLabel(effectiveAction(row)) }}</button></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div v-else class="panel-card" style="padding:48px 24px; text-align:center;" role="status">
+            <i data-lucide="inbox" style="width:40px;height:40px;color:var(--muted-foreground);margin:0 auto 12px;"></i>
+            <h2 class="type-h3" style="color:var(--foreground);">{{ tr('还没有可运营的模型', 'No Operational Models Yet') }}</h2>
+            <p class="type-body-sm" style="color:var(--muted-foreground);margin-top:6px;">{{ tr('为元模型配置采购渠道或挂售记录后，它会进入运营看板。', 'Configure a procurement channel or listing to bring a model into operations.') }}</p>
+            <button class="op-btn primary" type="button" style="margin-top:14px;" @click="setScenario('normal')">{{ tr('重新加载', 'Reload') }}</button>
+          </div>
+        </section>
+
+        <!-- 渠道比价矩阵 -->
+        <section v-show="activeWorkspace === 'matrix'" data-component="channel-price-matrix">
+          <div class="matrix-toolbar">
+            <div class="matrix-filters">
+              <div class="matrix-filter">
+                <label class="type-caption" for="matrix-search">{{ tr('搜索模型', 'Search Models') }}</label>
+                <el-input id="matrix-search" v-model="searchQuery" :placeholder="tr('模型名称或代码', 'Model name or code')" clearable style="width:240px;"><template #prefix><i data-lucide="search" style="width:15px;"></i></template></el-input>
+              </div>
+              <div class="matrix-filter">
+                <label class="type-caption">{{ tr('覆盖状态', 'Coverage') }}</label>
+                <el-select v-model="statusFilter" style="width:150px;">
+                  <el-option :label="tr('全部', 'All')" value="all"></el-option><el-option :label="tr('缺渠道', 'Missing')" value="missing"></el-option><el-option :label="tr('单渠道', 'Single')" value="single"></el-option><el-option :label="tr('多渠道', 'Multi-channel')" value="ready"></el-option>
+                </el-select>
+              </div>
+              <div class="matrix-filter">
+                <label class="type-caption">{{ tr('计费维度', 'Pricing Dimension') }}</label>
+                <div class="tabs-segmented" role="group" :aria-label="tr('计费维度', 'Pricing dimension')"><button class="tabs-segmented__item" :class="{ 'is-active': priceDimension === 'input' }" type="button" :aria-pressed="priceDimension === 'input'" @click="priceDimension='input'">Input</button><button class="tabs-segmented__item" :class="{ 'is-active': priceDimension === 'output' }" type="button" :aria-pressed="priceDimension === 'output'" @click="priceDimension='output'">Output</button></div>
+              </div>
+            </div>
+            <div class="matrix-context type-caption"><span>{{ tr('平台', 'Platform') }}</span><strong style="color:var(--foreground);">{{ summary.agione.platform_name }}</strong><span>·</span><span>{{ tr('合同汇率已换算', 'Contract FX normalized') }}</span></div>
+          </div>
+
+          <div v-if="matrixRows.length">
+            <div class="metrics-strip matrix-metrics" data-component="matrix-metrics">
+              <div v-for="metric in matrixMetrics" :key="metric.label" class="metric-cell"><div class="type-caption metric-label">{{ metric.label }}</div><div class="metric-value"><strong class="type-kpi">{{ metric.value }}</strong><span v-if="metric.unit" class="type-caption">{{ metric.unit }}</span></div><div class="type-caption metric-hint">{{ metric.hint }}</div></div>
+            </div>
+
+            <section class="panel-card">
+              <div class="panel-head">
+                <div class="panel-head__left"><h2 class="type-h3">{{ tr('有效采购价矩阵', 'Effective Procurement Price Matrix') }}</h2><span class="chart-type-badge type-caption">{{ priceDimension === 'input' ? 'Input' : 'Output' }}</span></div>
+                <div class="matrix-legend type-caption"><span class="matrix-legend__item"><i class="matrix-legend__swatch is-best"></i>{{ tr('当前最低', 'Lowest') }}</span><span class="matrix-legend__item"><i class="matrix-legend__swatch is-current"></i>{{ tr('当前挂售渠道', 'Current Listing') }}</span><span class="matrix-legend__item"><i class="matrix-legend__swatch is-stale"></i>{{ tr('价格过期', 'Stale Price') }}</span></div>
+              </div>
+              <div class="matrix-table-wrap">
+                <table class="matrix-table">
+                  <thead><tr><th class="sticky-model type-table-header">{{ tr('元模型', 'Meta Model') }}</th><th v-for="channel in visibleChannels" :key="channel.id"><div class="channel-head"><span class="type-body-sm channel-head__name">{{ channel.name }}</span><span class="type-caption channel-head__meta">{{ channel.typeLabel }}</span></div></th><th class="sticky-action type-table-header">{{ tr('决策建议', 'Decision') }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="row in matrixRows" :key="row.model_id">
+                      <td class="sticky-model"><div class="type-body-sm model-cell__name">{{ row.model_name }}</div><div class="type-caption model-cell__meta">{{ row.provider_name }} · {{ row.meta_model_code }}</div><div class="type-caption model-cell__meta">{{ row.coverage_count }} / {{ visibleChannels.length }} {{ tr('渠道', 'channels') }}</div></td>
+                      <td v-for="channel in visibleChannels" :key="row.model_id + '-' + channel.id">
+                        <button v-if="optionFor(row, channel)" class="price-cell" :class="{ 'is-best': isBestOption(row, channel), 'is-current': isCurrentOption(row, channel), 'is-stale': isOptionStale(optionFor(row, channel)) }" type="button" :aria-label="priceCellLabel(row, channel)" @click="openCompare(row, optionFor(row, channel))">
+                          <strong class="type-data price-cell__value">{{ optionMoney(optionFor(row, channel), priceDimension) }}</strong>
+                          <div class="price-cell__meta type-caption"><span>{{ optionFor(row, channel).price_version }}</span><span>{{ optionFreshness(optionFor(row, channel)) }}</span></div>
+                          <div class="price-cell__tags type-caption"><span v-if="isBestOption(row, channel)" class="mini-tag is-best">{{ tr('最低', 'Lowest') }}</span><span v-if="isCurrentOption(row, channel)" class="mini-tag is-current">{{ tr('挂售中', 'Listed') }}</span><span v-if="optionFor(row, channel).pricing_rule !== 'flat'" class="mini-tag">{{ optionFor(row, channel).pricing_rule }}</span></div>
+                        </button>
+                        <div v-else class="empty-price-cell type-caption">—</div>
+                      </td>
+                      <td class="sticky-action"><span class="status-pill type-caption" :class="decisionTone(row)">{{ decisionLabel(row) }}</span><button class="op-btn" :class="effectiveAction(row) === 'keep' ? '' : 'primary'" type="button" style="margin-top:8px;" @click="runSuggestedAction(row)">{{ actionLabel(effectiveAction(row)) }}</button></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div v-else class="panel-card" style="padding:48px 24px;text-align:center;" role="status"><i data-lucide="table-2" style="width:40px;height:40px;color:var(--muted-foreground);margin:0 auto 12px;"></i><h2 class="type-h3">{{ tr('没有匹配的渠道价格', 'No Matching Channel Prices') }}</h2><p class="type-body-sm" style="color:var(--muted-foreground);margin-top:6px;">{{ tr('调整筛选条件，或先为模型配置价格源与采购渠道。', 'Adjust filters or configure a price source and procurement channel first.') }}</p><button class="op-btn primary" type="button" style="margin-top:14px;" @click="resetMatrixFilters">{{ tr('重置筛选', 'Reset Filters') }}</button></div>
+        </section>
+      </div>
+
+      <!-- ================= LEVEL 2: DETAIL 穿透图（渠道分组 × SKU + 功能操作）================= -->
+      <div v-if="currentView === 'detail' && selectedModelData" class="detail-layout animate-fade-in">
+
+        <div class="detail-header">
+          <div class="flex flex-col gap-3">
+            <el-breadcrumb separator="/">
+              <el-breadcrumb-item><a @click="goToList" class="cursor-pointer flex items-center gap-1"><i data-lucide="arrow-left" style="width:14px;"></i> 渠道价格矩阵大盘</a></el-breadcrumb-item>
+              <el-breadcrumb-item>{{ selectedModelData.model_name }}</el-breadcrumb-item>
+            </el-breadcrumb>
+            <h1 class="page-title">
+              <div class="w-8 h-8 rounded bg-[var(--color-primary-subtle)] text-[var(--color-primary)] flex items-center justify-center">
+                <i :data-lucide="selectedModelData.icon" style="width:16px;"></i>
+              </div>
+              {{ selectedModelData.model_name }} 全渠道进销存穿透图
+            </h1>
+          </div>
+
+          <div class="flex items-center gap-6 flex-wrap">
+            <div class="text-right">
+              <div class="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider mb-1">平均净收益率</div>
+              <div class="font-mono text-2xl font-bold" :class="Number(detailSummary.avgMargin) >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-destructive)]'">{{ detailSummary.avgMargin }}%</div>
+            </div>
+            <div class="w-[1px] h-8 bg-[var(--border)]"></div>
+            <div class="text-right">
+              <div class="text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider mb-1">当前采购底板极值 (Input)</div>
+              <div class="font-mono text-xl font-bold text-[var(--foreground)]">¥{{ detailSummary.minCost }}</div>
+            </div>
+            <div class="ml-4 flex items-center gap-2">
+              <button class="op-btn" @click="toggleAllChannels(true)"><i data-lucide="chevrons-down" style="width:13px;"></i> 全部展开</button>
+              <button class="op-btn" @click="toggleAllChannels(false)"><i data-lucide="chevrons-up" style="width:13px;"></i> 全部收起</button>
+              <el-select v-model="selectedCurrency" size="small" style="width: 100px;">
+                <el-option label="CNY (¥)" value="CNY"></el-option>
+              </el-select>
+            </div>
+          </div>
+        </div>
+
+        <div class="detail-content">
+
+          <!-- 渠道分组矩阵体 -->
+          <div class="bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-sm overflow-hidden flex flex-col">
+            <div class="flex-1 overflow-y-auto">
+              <!-- 已上架渠道组 -->
+              <div v-for="(grp, gIdx) in detailMatrixData" :key="'g-'+gIdx" class="border-b-[6px] border-[var(--body-bg)] last:border-b-0">
+                <div class="bg-[var(--accent)] px-5 py-3 flex justify-between items-center border-b border-[var(--border)] cursor-pointer hover:bg-[var(--border)] transition-colors" @click="grp.expanded = !grp.expanded">
+                  <div class="font-bold text-[14px] text-[var(--foreground)] flex items-center gap-2">
+                    <i :data-lucide="grp.expanded ? 'chevron-down' : 'chevron-right'" style="width:16px; color:var(--muted-foreground)"></i>
+                    <i data-lucide="store" style="width:16px; color:var(--color-primary)"></i>
+                    供应渠道: {{ grp.channel_name }}
+                  </div>
+                  <div class="text-[11px] text-[var(--muted-foreground)] font-mono">
+                    共 {{ grp.skus.length }} 条供应链路在架
+                    <span v-if="grp.is_best" class="badge badge-green !ml-2">最优采购</span>
+                  </div>
+                </div>
+
+                <div v-show="grp.expanded" class="flex flex-col animate-fade-in">
+                  <div v-for="(sku, sIdx) in grp.skus" :key="'s-'+sIdx" class="flex flex-col hover:bg-[#fafafa] dark:hover:bg-[#111] transition-colors border-b border-[var(--border)] last:border-b-0 p-5">
+
+                    <!-- 上下文行 + 操作区 -->
+                    <div class="flex items-center gap-3 mb-4 flex-wrap">
+                      <span class="badge badge-purple !px-2 !font-bold"><i data-lucide="cpu" style="width:10px;"></i> {{ sku.skuId }}</span>
+                      <div class="w-[1px] h-3 bg-[var(--border)]"></div>
+                      <span class="badge badge-blue !px-2"><i data-lucide="server" style="width:10px;"></i> {{ sku.source }}</span>
+                      <span class="badge badge-muted !px-2"><i data-lucide="tag" style="width:10px;"></i> {{ sku.pricing_format }}</span>
+                      <span :class="wfBadge(sku.workflow_status)">{{ wfLabel(sku.workflow_status) }}</span>
+                      <span v-if="sku.on_lowest === false" class="badge badge-yellow"><i data-lucide="alert-triangle" style="width:10px;"></i> 非最优渠道</span>
+                      <span class="text-[12px] font-medium text-[var(--muted-foreground)]">由 <strong class="text-[var(--foreground)]">{{ sku.provider }}</strong> 供货接入</span>
+
+                      <div class="ml-auto flex items-center gap-2 flex-shrink-0">
+                        <span v-if="sku.editing" class="edit-banner"><i data-lucide="edit-3" style="width:11px;"></i> 编辑中 · 毛利实时重算</span>
+                        <button v-if="!sku.editing" class="op-btn" @click="startEdit(sku)"><i data-lucide="pen-line" style="width:12px;"></i> 编辑售价</button>
+                        <button v-if="sku.editing" class="op-btn" @click="saveDraft(sku)"><i data-lucide="save" style="width:12px;"></i> 保存草稿</button>
+                        <button v-if="sku.editing" class="op-btn primary" @click="submitEdit(sku)"><i data-lucide="send" style="width:12px;"></i> 提交发布</button>
+                        <button v-if="sku.editing" class="op-btn danger" @click="cancelEdit(sku)"><i data-lucide="rotate-ccw" style="width:12px;"></i> 撤销</button>
+
+                        <button v-if="['pending_publish','pending_update'].includes(sku.workflow_status)" class="op-btn primary" @click="confirmPublish(sku)"><i data-lucide="circle-check" style="width:12px;"></i> 确认发布</button>
+                        <button v-if="['draft','pending_publish','pending_update','update_draft'].includes(sku.workflow_status)" class="op-btn danger" @click="withdraw(sku)"><i data-lucide="x-circle" style="width:12px;"></i> 撤销</button>
+
+                        <button v-if="sku.on_lowest === false && !sku.editing" class="op-btn primary" @click="switchChannel(sku)"><i data-lucide="git-branch" style="width:12px;"></i> 切换最优渠道</button>
+                        <button v-if="sku.workflow_status === 'online' && !sku.editing" class="op-btn danger" @click="offline(sku)"><i data-lucide="power" style="width:12px;"></i> 下架</button>
+                        <button v-if="!sku.editing" class="op-btn" @click="openHistory(sku)"><i data-lucide="clock" style="width:12px;"></i> 价格历史</button>
+                      </div>
+                    </div>
+
+                    <div class="flex items-stretch gap-6">
+                      <!-- 数据块: 成本 / 毛利 / 售价 / Credit -->
+                      <div class="flex flex-col gap-0 bg-[var(--body-bg)] p-3 rounded-lg border border-[var(--border)] w-[470px] flex-shrink-0">
+                        <div class="flex items-center mb-2 pb-2 border-b border-[var(--border)] border-dashed">
+                          <div class="w-[40px]"></div>
+                          <div class="w-[100px] text-[10px] text-[var(--muted-foreground)] text-right pr-4 uppercase">采购成本</div>
+                          <div class="w-[80px] text-[10px] text-[var(--muted-foreground)] text-center uppercase">净收益率</div>
+                          <div class="w-[115px] text-[10px] text-[var(--color-success)] text-right pr-4 font-bold uppercase">终端售价</div>
+                          <div class="w-[105px] text-[10px] text-[var(--color-primary)] text-right font-bold uppercase">Credit 定价</div>
+                        </div>
+                        <div class="flex items-center h-8 hover:bg-[var(--accent)] rounded transition-colors">
+                          <div class="w-[40px] text-[10px] font-bold text-[var(--muted-foreground)] uppercase pl-1">In</div>
+                          <div class="w-[100px] font-mono text-[12px] font-bold text-[var(--foreground)] text-right pr-4">¥{{ money(sku.costIn) }}</div>
+                          <div class="w-[80px] flex justify-center"><span :class="marginBadge(marginFor(sku,'In'))">{{ pct(marginFor(sku,'In')) }}</span></div>
+                          <div class="w-[115px] text-right pr-4">
+                            <input v-if="sku.editing" v-model.number="sku.priceInEdit" class="price-edit" type="number" step="0.0001" min="0" />
+                            <span v-else class="font-mono text-[12px] font-bold text-[var(--color-success)]">¥{{ money(sku.priceIn) }}</span>
+                          </div>
+                          <div class="w-[105px] font-mono text-[12px] font-bold text-[var(--color-primary)] text-right pr-1">{{ credit(sku.editing ? sku.priceInEdit : sku.priceIn) }}</div>
+                        </div>
+                        <div class="flex items-center h-8 hover:bg-[var(--accent)] rounded transition-colors">
+                          <div class="w-[40px] text-[10px] font-bold text-[var(--muted-foreground)] uppercase pl-1">Out</div>
+                          <div class="w-[100px] font-mono text-[12px] font-bold text-[var(--foreground)] text-right pr-4">¥{{ money(sku.costOut) }}</div>
+                          <div class="w-[80px] flex justify-center"><span :class="marginBadge(marginFor(sku,'Out'))">{{ pct(marginFor(sku,'Out')) }}</span></div>
+                          <div class="w-[115px] text-right pr-4">
+                            <input v-if="sku.editing" v-model.number="sku.priceOutEdit" class="price-edit" type="number" step="0.0001" min="0" />
+                            <span v-else class="font-mono text-[12px] font-bold text-[var(--color-success)]">¥{{ money(sku.priceOut) }}</span>
+                          </div>
+                          <div class="w-[105px] font-mono text-[12px] font-bold text-[var(--color-primary)] text-right pr-1">{{ credit(sku.editing ? sku.priceOutEdit : sku.priceOut) }}</div>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1 text-[10px] text-[var(--muted-foreground)]">
+                          <span v-if="sku.editing" class="font-mono">
+                            编辑前: In ¥{{ money(sku.priceIn) }} / Out ¥{{ money(sku.priceOut) }}
+                          </span>
+                          <span v-if="marketChip(sku)" class="font-mono" :class="marketChip(sku).tone">{{ marketChip(sku).text }}</span>
+                        </div>
+                      </div>
+
+                      <!-- 对标区间条图 -->
+                      <div class="flex-1 flex flex-col justify-center pl-8 pr-12 relative gap-4">
+                        <div class="relative w-full">
+                          <div class="text-[10px] font-bold text-[var(--muted-foreground)] mb-1 flex items-center gap-1.5 absolute top-[-18px]"><i data-lucide="bar-chart-horizontal" style="width:10px;"></i> Input 对标</div>
+                          <div class="range-bar-wrapper !mt-[16px] !mb-0">
+                            <div class="range-market-zone" :style="{ left: '10%', width: '80%' }"></div>
+                            <div class="range-bar-label" :style="{ left: '10%', transform: 'none' }" style="text-align:left;">市面最低 ¥{{ displayMinIn }}</div>
+                            <div class="range-bar-label" :style="{ left: '90%', transform: 'translateX(-100%)' }" style="text-align:right;">市面最高 ¥{{ displayMaxIn }}</div>
+                            <div v-for="(ref, i) in currentMarketRefData" :key="'mr-in-'+i" class="range-ref-marker" :style="{ left: getMarkerPos(ref.priceIn, displayMinIn, displayMaxIn) + '%' }" :title="ref.source + ': ¥' + ref.priceIn">
+                              <div class="range-ref-label">{{ ref.source }}</div>
+                            </div>
+                            <div class="range-bar-marker" :style="{ left: getMarkerPos(markerPrice(sku,'In'), displayMinIn, displayMaxIn) + '%', backgroundColor: getMarkerColor(markerPrice(sku,'In'), displayMinIn, displayMaxIn) }"></div>
+                            <div class="range-bar-value" :style="{ left: getMarkerPos(markerPrice(sku,'In'), displayMinIn, displayMaxIn) + '%', color: getMarkerColor(markerPrice(sku,'In'), displayMinIn, displayMaxIn) }">售价 ¥{{ money(markerPrice(sku,'In')) }}</div>
+                          </div>
+                        </div>
+                        <div class="relative w-full mt-6">
+                          <div class="text-[10px] font-bold text-[var(--muted-foreground)] mb-1 flex items-center gap-1.5 absolute top-[-18px]"><i data-lucide="bar-chart-horizontal" style="width:10px;"></i> Output 对标</div>
+                          <div class="range-bar-wrapper !mt-[16px] !mb-0">
+                            <div class="range-market-zone" :style="{ left: '10%', width: '80%' }"></div>
+                            <div class="range-bar-label" :style="{ left: '10%', transform: 'none' }" style="text-align:left;">市面最低 ¥{{ displayMinOut }}</div>
+                            <div class="range-bar-label" :style="{ left: '90%', transform: 'translateX(-100%)' }" style="text-align:right;">市面最高 ¥{{ displayMaxOut }}</div>
+                            <div v-for="(ref, i) in currentMarketRefData" :key="'mr-out-'+i" class="range-ref-marker" :style="{ left: getMarkerPos(ref.priceOut, displayMinOut, displayMaxOut) + '%' }" :title="ref.source + ': ¥' + ref.priceOut">
+                              <div class="range-ref-label">{{ ref.source }}</div>
+                            </div>
+                            <div class="range-bar-marker" :style="{ left: getMarkerPos(markerPrice(sku,'Out'), displayMinOut, displayMaxOut) + '%', backgroundColor: getMarkerColor(markerPrice(sku,'Out'), displayMinOut, displayMaxOut) }"></div>
+                            <div class="range-bar-value" :style="{ left: getMarkerPos(markerPrice(sku,'Out'), displayMinOut, displayMaxOut) + '%', color: getMarkerColor(markerPrice(sku,'Out'), displayMinOut, displayMaxOut) }">售价 ¥{{ money(markerPrice(sku,'Out')) }}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 有供应未上架组（决策: 未上架 / 待上架） -->
+              <div v-if="supplyOnlyRows.length" class="border-b-[6px] border-[var(--body-bg)] last:border-b-0">
+                <div class="bg-[var(--badge-orange-bg)]/50 px-5 py-3 flex justify-between items-center border-b border-[var(--border)]">
+                  <div class="font-bold text-[14px] text-[var(--foreground)] flex items-center gap-2">
+                    <i data-lucide="alert-triangle" style="width:16px; color:var(--color-warning)"></i>
+                    有供应 · 未上架（可扩覆盖）
+                  </div>
+                  <div class="text-[11px] text-[var(--muted-foreground)]">共 {{ supplyOnlyRows.length }} 条供应路线上架后可提升覆盖与议价</div>
+                </div>
+                <div class="p-5 grid md:grid-cols-2 gap-4">
+                  <div v-for="(row, i) in supplyOnlyRows" :key="'sp-'+i" class="flex items-center justify-between bg-[var(--card)] border border-dashed border-[var(--border)] rounded-xl p-4 shadow-sm gap-3">
+                    <div class="flex items-center gap-3 min-w-0">
+                      <div class="w-8 h-8 rounded bg-[var(--badge-orange-bg)] text-[var(--badge-orange-fg)] flex items-center justify-center flex-shrink-0"><i data-lucide="store" style="width:15px;"></i></div>
+                      <div class="min-w-0">
+                        <p class="font-bold text-[13px] text-[var(--foreground)] truncate">{{ row.channel_name }}</p>
+                        <p class="text-[11px] text-[var(--muted-foreground)] truncate">{{ row.provider }} · {{ row.source }}</p>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-3 flex-shrink-0">
+                      <div class="text-right">
+                        <div class="text-[10px] text-[var(--muted-foreground)] uppercase">采购成本 In/Out</div>
+                        <div class="font-mono text-[12px] font-bold text-[var(--foreground)]">¥{{ money(row.costIn) }} / ¥{{ money(row.costOut) }}</div>
+                      </div>
+                      <button class="op-btn primary" @click="openPublish(row)"><i data-lucide="rocket" style="width:12px;"></i> 上架到平台</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 市场参考源底部面板 -->
+            <div class="p-5 bg-[var(--body-bg)] border-t border-[var(--border)] shadow-inner">
+              <div class="text-[12px] font-bold text-[var(--foreground)] mb-4 flex items-center gap-1.5">
+                <i data-lucide="bar-chart-2" style="width:16px; color:var(--color-primary)"></i> 全局公开市场参考源 & 真实底价探测 (Global Market Baseline)
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div v-for="(ref, i) in currentMarketRefData" :key="'bottom-ref-'+i" class="flex items-center justify-between bg-[var(--card)] p-4 rounded-xl border border-[var(--border)] shadow-sm">
+                  <div class="text-[13px] font-bold text-[var(--foreground)] w-[140px] truncate" :title="ref.source">{{ ref.source }}</div>
+                  <div class="flex-1 grid grid-cols-2 gap-4">
+                    <div class="flex flex-col gap-1 items-center">
+                      <span class="text-[10px] text-[var(--muted-foreground)]">Input (¥)</span>
+                      <span class="font-mono text-[14px] flex items-center gap-1" :class="{'text-[var(--color-success)] font-bold': isMinPrice(ref.priceIn, 'In')}">
+                        {{ money(ref.priceIn) }}
+                        <i v-if="isMinPrice(ref.priceIn, 'In')" data-lucide="medal" style="width:14px; color:var(--color-success)"></i>
+                      </span>
+                    </div>
+                    <div class="flex flex-col gap-1 items-center">
+                      <span class="text-[10px] text-[var(--muted-foreground)]">Output (¥)</span>
+                      <span class="font-mono text-[14px] flex items-center gap-1" :class="{'text-[var(--color-success)] font-bold': isMinPrice(ref.priceOut, 'Out')}">
+                        {{ money(ref.priceOut) }}
+                        <i v-if="isMinPrice(ref.priceOut, 'Out')" data-lucide="medal" style="width:14px; color:var(--color-success)"></i>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- 渠道比价详情 Drawer -->
+  <el-drawer v-if="compareOpen" v-model="compareOpen" class="compare-drawer" size="680px" :with-header="true">
+    <template #header>
+      <div>
+        <div class="type-h3" style="color:var(--foreground);">{{ compareRow?.model_name || '-' }}</div>
+        <div class="type-caption" style="color:var(--muted-foreground);margin-top:3px;">{{ tr('渠道比价详情', 'Channel Price Comparison') }} · {{ priceDimension === 'input' ? 'Input' : 'Output' }} · CNY / 1M Tokens</div>
+      </div>
+    </template>
+    <div v-if="compareRow">
+      <div class="compare-summary">
+        <div class="compare-summary__item"><div class="type-caption metric-label">{{ tr('当前最低价', 'Lowest Effective Price') }}</div><div class="type-kpi">{{ lowestComparePrice }}</div></div>
+        <div class="compare-summary__item"><div class="type-caption metric-label">{{ tr('当前挂售渠道', 'Current Listing Channel') }}</div><div class="type-body-sm">{{ listingChannelName(compareRow) }}</div></div>
+        <div class="compare-summary__item"><div class="type-caption metric-label">{{ tr('预估节省空间', 'Estimated Savings') }}</div><div class="type-kpi" style="color:var(--color-success);">{{ compareSavings }}</div></div>
+      </div>
+      <div class="compare-offers">
+        <div class="type-caption" style="color:var(--muted-foreground);">{{ tr('已按合同汇率、结算比例和当前生效版本换算。', 'Normalized using contract FX, settlement ratio, and the currently effective price version.') }}</div>
+        <article v-for="offer in compareOffers" :key="offer.channel_id" class="compare-offer" :class="{ 'is-best': String(offer.channel_id) === String(compareRow.best_channel?.channel_id), 'is-selected': String(offer.channel_id) === String(compareOption?.channel_id) }">
+          <div><div class="type-body-sm compare-offer__name">{{ offer.channel_name }}</div><div class="type-caption compare-offer__meta">{{ offer.source_name }} · {{ offer.price_version }}</div><div class="price-cell__tags type-caption" style="margin-top:6px;"><span v-if="String(offer.channel_id) === String(compareOption?.channel_id)" class="mini-tag is-current">{{ tr('已选择', 'Selected') }}</span><span v-if="String(offer.channel_id) === String(compareRow.best_channel?.channel_id)" class="mini-tag is-best">{{ tr('推荐', 'Recommended') }}</span><span v-if="String(offer.channel_id) === String(compareRow.current_listing?.channel_id)" class="mini-tag is-current">{{ tr('当前挂售', 'Current') }}</span><span v-if="isOptionStale(offer)" class="mini-tag">{{ tr('待更新', 'Needs Refresh') }}</span></div></div>
+          <div class="compare-offer__price"><div class="type-caption metric-label">{{ priceDimension === 'input' ? 'Input' : 'Output' }}</div><strong class="type-kpi">{{ optionMoney(offer, priceDimension) }}</strong></div>
+          <div class="compare-offer__terms type-caption"><div>{{ tr('生效窗口', 'Effective Window') }}：{{ offer.effective_window }}</div><div>{{ tr('定价规则', 'Pricing Rule') }}：{{ offer.pricing_rule }}</div><div>{{ tr('数据更新', 'Updated') }}：{{ optionFreshness(offer) }}</div></div>
+        </article>
+      </div>
+      <div class="compare-footer"><button class="op-btn" type="button" @click="openPriceChainDetail">{{ tr('查看进销存穿透', 'View Full Price Chain') }}</button><button class="op-btn primary" type="button" :disabled="effectiveAction(compareRow) === 'keep'" @click="applyCompareRecommendation">{{ actionLabel(effectiveAction(compareRow)) }}</button></div>
+    </div>
+  </el-drawer>
+
+  <!-- 上架到平台 Modal（publish_listing） -->
+  <el-dialog v-model="publishOpen" :title="'上架到平台 · ' + (publishTarget?.channel_name || '')" width="480px">
+    <div v-if="publishTarget" class="space-y-4">
+      <div class="bg-[var(--body-bg)] rounded-lg p-3 border border-[var(--border)]">
+        <div class="text-[11px] text-[var(--muted-foreground)] mb-1">供货信息</div>
+        <div class="text-[13px] font-bold text-[var(--foreground)]">{{ selectedModelData?.model_name }}</div>
+        <div class="text-[12px] text-[var(--muted-foreground)] mt-1">
+          渠道：{{ publishTarget.channel_name }} · 供应源：{{ publishTarget.source }} · 供货商：{{ publishTarget.provider }}
+        </div>
+        <div class="font-mono text-[12px] text-[var(--muted-foreground)] mt-1">采购成本 In/Out：¥{{ money(publishTarget.costIn) }} / ¥{{ money(publishTarget.costOut) }}</div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-[11px] text-[var(--muted-foreground)]">终端售价 In (¥)</label>
+          <el-input v-model.number="publishForm.priceIn" size="default" style="margin-top:4px;" />
+          <div class="text-[10px] text-[var(--muted-foreground)] mt-1 font-mono">建议 ¥{{ money(recommendPrice(publishTarget.costIn)) }}</div>
+        </div>
+        <div>
+          <label class="text-[11px] text-[var(--muted-foreground)]">终端售价 Out (¥)</label>
+          <el-input v-model.number="publishForm.priceOut" size="default" style="margin-top:4px;" />
+          <div class="text-[10px] text-[var(--muted-foreground)] mt-1 font-mono">建议 ¥{{ money(recommendPrice(publishTarget.costOut)) }}</div>
+        </div>
+      </div>
+
+      <div class="bg-[var(--body-bg)] rounded-lg p-3 border border-[var(--border)] grid grid-cols-3 gap-2 text-center">
+        <div>
+          <div class="text-[10px] text-[var(--muted-foreground)] uppercase">In 毛利</div>
+          <div :class="marginText(marginForObj(publishForm.priceIn, publishTarget.costIn))" class="font-mono font-bold">{{ pct(marginForObj(publishForm.priceIn, publishTarget.costIn)) }}</div>
+        </div>
+        <div>
+          <div class="text-[10px] text-[var(--muted-foreground)] uppercase">Out 毛利</div>
+          <div :class="marginText(marginForObj(publishForm.priceOut, publishTarget.costOut))" class="font-mono font-bold">{{ pct(marginForObj(publishForm.priceOut, publishTarget.costOut)) }}</div>
+        </div>
+        <div>
+          <div class="text-[10px] text-[var(--muted-foreground)] uppercase">Credit 定价</div>
+          <div class="font-mono font-bold text-[var(--color-primary)]">In {{ credit(publishForm.priceIn) }}</div>
+        </div>
+      </div>
+    </div>
+    <template #footer>
+      <button class="op-btn" @click="publishDraft"><i data-lucide="save" style="width:12px;"></i> 存为草稿</button>
+      <button class="op-btn primary" @click="publishSubmit"><i data-lucide="send" style="width:12px;"></i> 提交发布</button>
+      <button class="op-btn" @click="publishOpen = false">取消</button>
+    </template>
+  </el-dialog>
+
+  <!-- 价格历史 Modal -->
+  <el-dialog v-model="historyOpen" :title="'价格历史 · ' + (historySku?.skuId || '')" width="560px">
+    <el-table :data="historyRows" size="small" style="width: 100%">
+      <el-table-column prop="type" label="类型" width="90">
+        <template #default="scope"><span :class="scope.row.type === '采购价' ? 'badge badge-blue' : 'badge badge-green'">{{ scope.row.type }}</span></template>
+      </el-table-column>
+      <el-table-column prop="channel" label="渠道" min-width="110"></el-table-column>
+      <el-table-column prop="in" label="In (¥)" width="110" align="right">
+        <template #default="scope"><span class="font-mono">{{ money(scope.row.in) }}</span></template>
+      </el-table-column>
+      <el-table-column prop="out" label="Out (¥)" width="110" align="right">
+        <template #default="scope"><span class="font-mono">{{ money(scope.row.out) }}</span></template>
+      </el-table-column>
+      <el-table-column prop="at" label="生效时间" min-width="140"></el-table-column>
+      <el-table-column prop="actor" label="操作人" min-width="90"></el-table-column>
+    </el-table>
+  </el-dialog>
+
+</div>
+
+<script>
+const { createApp, ref, computed, nextTick } = Vue;
+
+/* Element Plus 全量 IIFE 包中，服务方法挂在 ElementPlus 全局上，须显式取用 */
+const ElMessage = ElementPlus.ElMessage;
+const ElMessageBox = ElementPlus.ElMessageBox;
+
+const darkVars = {
+  '--sidebar-bg': '#18181b', '--sidebar-border': '#27272a', '--sidebar-fg': '#fafafa', '--sidebar-muted': '#a1a1aa',
+  '--sidebar-active-bg': '#27272a', '--sidebar-active-fg': '#fafafa',
+  '--body-bg': '#09090b', '--background': '#09090b', '--card': '#18181b', '--accent': '#27272a',
+  '--muted': '#27272a', '--muted-foreground': '#a1a1aa', '--border': '#27272a', '--input': '#18181b', '--foreground': '#fafafa',
+  '--color-primary': '#7c6ff7', '--color-primary-subtle': '#221838',
+  '--badge-purple-bg': '#221838', '--badge-purple-fg': '#9878c8', '--badge-blue-bg': '#1c2438', '--badge-blue-fg': '#7a9ac8',
+  '--badge-green-bg': '#1a2820', '--badge-green-fg': '#5a9272', '--badge-orange-bg': '#2a1c12', '--badge-orange-fg': '#b07848',
+  '--badge-yellow-bg': '#261e0c', '--badge-yellow-fg': '#a08838', '--badge-red-bg': '#2a0e12', '--badge-red-fg': '#c06a78',
+  '--el-border-color': '#27272a', '--el-bg-color': '#09090b', '--el-bg-color-page': '#27272a',
+  '--el-text-color-primary': '#fafafa', '--el-text-color-regular': '#a1a1aa', '--el-color-primary': '#7c6ff7',
+};
+const lightVars = {
+  '--sidebar-bg': '#fafafa', '--sidebar-border': '#e4e4e7', '--sidebar-fg': '#09090b', '--sidebar-muted': '#71717a',
+  '--sidebar-active-bg': '#e4e4e7', '--sidebar-active-fg': '#18181b',
+  '--body-bg': '#f4f4f5', '--background': '#ffffff', '--card': '#ffffff', '--accent': '#f4f4f5',
+  '--muted': '#f4f4f5', '--muted-foreground': '#71717a', '--border': '#e4e4e7', '--input': '#ffffff', '--foreground': '#09090b',
+  '--color-primary': '#5f4ecf', '--color-primary-subtle': '#ece9f9',
+  '--badge-purple-bg': '#f2eef8', '--badge-purple-fg': '#6a4e9a', '--badge-blue-bg': '#eef1f8', '--badge-blue-fg': '#4a6298',
+  '--badge-green-bg': '#eef5f0', '--badge-green-fg': '#3a7252', '--badge-orange-bg': '#f8f1ec', '--badge-orange-fg': '#8a5e38',
+  '--badge-yellow-bg': '#f7f4ea', '--badge-yellow-fg': '#7a6228', '--badge-red-bg': '#fbeef0', '--badge-red-fg': '#9a3a48',
+  '--el-border-color': '#e4e4e7', '--el-bg-color': '#ffffff', '--el-bg-color-page': '#f4f4f5',
+  '--el-text-color-primary': '#09090b', '--el-text-color-regular': '#71717a', '--el-color-primary': '#5f4ecf',
+};
+
+const i18n = {
+  zh: { tabs: ['模型服务', 'AI 基础设施'], management: '模型管理' },
+  en: { tabs: ['Model Services', 'AI Infra'], management: 'Management' }
+};
+
+/* ══════════════════════════════════════════════════════════════════════
+   Mock 数据 —— 字段名对齐现有后端（backend/llm_ops/views.py summary）:
+   - diagnostics 行 = {model_id, model_name, meta_model_code, provider_name,
+       coverage_count, active_listing_count, best_channel, current_listing,
+       options[], status, decision_status, decision_action, ...}
+   - options[] = {channel_id, channel_name, channel_type, currency,
+       input_price_per_million, output_price_per_million, estimated_cost}
+   - point_conversion = {point_name, points_per_currency_unit, decimal_places,
+       currency, fee_rate, service_fee_rate, formula_label}
+   - priceItems = {source_name, dimension, unit_price, currency,
+       source_is_enabled, is_current}
+   ══════════════════════════════════════════════════════════════════════ */
+const summary = {
+  scope: 'full',
+  currency: { display_currency: 'CNY', usd_to_cny_rate: 7.15 },
+  point_conversion: {
+    platform_id: 1,
+    platform_name: 'AGIOne Pro',
+    point_name: 'Credit',
+    points_per_currency_unit: 10,   // 1 CNY = 10 Credit
+    rounding_mode: 'half_up',
+    decimal_places: 2,
+    currency: 'CNY',
+    fee_rate: 0.06,
+    service_fee_rate: 0.08,
+    auto_approve_max_margin_rate: 0.6,
+    formula_label: '1 CNY = 10 Credit'
+  },
+  agione: {
+    platform_id: 1,
+    platform_name: 'AGIOne Pro',
+    diagnostics: [
+      {
+        model_id: 11, model_name: 'DeepSeek-V4 Pro', meta_model_code: 'deepseek-v4',
+        provider_name: '深度求索 (DeepSeek)', currency: 'CNY',
+        coverage_count: 3, active_listing_count: 2, is_agione_listed: true,
+        status: 'ready', decision_status: 'ready', decision_action: 'keep',
+        best_channel: { channel_id: 2, channel_name: '阿里云 (白金代)', channel_type: 'fixed_channel', currency: 'CNY', input_price_per_million: 0.0015, output_price_per_million: 0.0060, estimated_cost: 0.0015 },
+        options: [
+          { channel_id: 2, channel_name: '阿里云 (白金代)', channel_type: 'fixed_channel', currency: 'CNY', input_price_per_million: 0.0015, output_price_per_million: 0.0060, estimated_cost: 0.0015 },
+          { channel_id: 1, channel_name: '深度求索 (直签)', channel_type: 'fixed_channel', currency: 'CNY', input_price_per_million: 0.0010, output_price_per_million: 0.0020, estimated_cost: 0.0010 },
+          { channel_id: 3, channel_name: '硅基流动 (代理)', channel_type: 'supplier', currency: 'CNY', input_price_per_million: 0.0013, output_price_per_million: 0.0051, estimated_cost: 0.0013 }
+        ]
+      },
+      {
+        model_id: 12, model_name: 'GPT-4o (Omni)', meta_model_code: 'gpt-4o',
+        provider_name: 'OpenAI', currency: 'CNY',
+        coverage_count: 2, active_listing_count: 2, is_agione_listed: true,
+        status: 'not_lowest_channel', decision_status: 'not_lowest_channel', decision_action: 'switch_lowest_channel',
+        best_channel: { channel_id: 2, channel_name: '阿里云 (白金代)', channel_type: 'fixed_channel', currency: 'CNY', input_price_per_million: 0.0025, output_price_per_million: 0.0100, estimated_cost: 0.0025 },
+        options: [
+          { channel_id: 2, channel_name: '阿里云 (白金代)', channel_type: 'fixed_channel', currency: 'CNY', input_price_per_million: 0.0025, output_price_per_million: 0.0100, estimated_cost: 0.0025 },
+          { channel_id: 4, channel_name: 'Microsoft Azure', channel_type: 'fixed_channel', currency: 'CNY', input_price_per_million: 0.0030, output_price_per_million: 0.0120, estimated_cost: 0.0030 }
+        ]
+      },
+      {
+        model_id: 13, model_name: 'Claude 3.5 Sonnet', meta_model_code: 'claude-3-5-sonnet',
+        provider_name: 'Anthropic', currency: 'CNY',
+        coverage_count: 1, active_listing_count: 1, is_agione_listed: true,
+        status: 'low_yield', decision_status: 'low_yield', decision_action: 'review_pricing_or_channel',
+        best_channel: { channel_id: 3, channel_name: '硅基流动 (代理)', channel_type: 'supplier', currency: 'CNY', input_price_per_million: 0.0020, output_price_per_million: 0.0080, estimated_cost: 0.0020 },
+        options: [
+          { channel_id: 3, channel_name: '硅基流动 (代理)', channel_type: 'supplier', currency: 'CNY', input_price_per_million: 0.0020, output_price_per_million: 0.0080, estimated_cost: 0.0020 }
+        ]
+      }
+    ]
+  }
+};
+
+const channelCatalog = [
+  { id: 1, name: '深度求索（直签）', typeLabel: '原厂直签' },
+  { id: 2, name: '阿里云（白金代）', typeLabel: '代理合同' },
+  { id: 3, name: '硅基流动（代理）', typeLabel: '聚合供应' },
+  { id: 4, name: 'Microsoft Azure', typeLabel: '海外直签' }
+];
+
+const optionContractMeta = {
+  1: { source_name: '深度求索企业合同', price_version: 'v2026.08', effective_window: '2026-08-01 → 2026-12-31', updated_at: '2026-08-20T09:45:00+08:00', pricing_rule: '忙闲时' },
+  2: { source_name: '百炼集团合同', price_version: 'v3.2', effective_window: '2026-08-15 → 2026-11-30', updated_at: '2026-08-20T10:12:00+08:00', pricing_rule: '用量阶梯' },
+  3: { source_name: '聚合供应池', price_version: 'v2026.07', effective_window: '2026-07-01 → 2026-09-30', updated_at: '2026-08-17T18:30:00+08:00', pricing_rule: 'flat' },
+  4: { source_name: 'Azure EA Contract', price_version: 'EA-2026-H2', effective_window: '2026-07-01 → 2026-12-31', updated_at: '2026-08-20T07:40:00+08:00', pricing_rule: 'flat', original_currency: 'USD', contract_fx: 7.15 }
+};
+
+const diagnosticRuntimeMeta = {
+  11: {
+    current_listing: { is_listed: true, channel_id: 1, channel_name: '深度求索（直签）', currency: 'CNY', retail_input_price_per_million: 1.8, retail_output_price_per_million: 3.6 },
+    input_yield: 0.322, output_yield: 0.322, last_data_event_at: '2026-08-20T10:12:00+08:00', data_event_type: 'updated'
+  },
+  12: {
+    current_listing: { is_listed: true, channel_id: 4, channel_name: 'Microsoft Azure', currency: 'CNY', retail_input_price_per_million: 4.8, retail_output_price_per_million: 19.2 },
+    input_yield: 0.263, output_yield: 0.263, last_data_event_at: '2026-08-20T07:40:00+08:00', data_event_type: 'updated'
+  },
+  13: {
+    current_listing: { is_listed: true, channel_id: 3, channel_name: '硅基流动（代理）', currency: 'CNY', retail_input_price_per_million: 2.1, retail_output_price_per_million: 8.4 },
+    input_yield: -0.019, output_yield: -0.019, last_data_event_at: '2026-08-17T18:30:00+08:00', data_event_type: 'source_disabled'
+  }
+};
+
+summary.agione.diagnostics.forEach((row) => {
+  row.operation_scope = 'operational';
+  Object.assign(row, diagnosticRuntimeMeta[row.model_id] || {});
+  row.options = (row.options || []).map((option) => ({
+    ...option,
+    input_price_per_million: Number(option.input_price_per_million) * 1000,
+    output_price_per_million: Number(option.output_price_per_million) * 1000,
+    estimated_cost: Number(option.estimated_cost) * 1000,
+    ...(optionContractMeta[option.channel_id] || {})
+  }));
+  if (row.model_id === 11) {
+    row.best_channel = row.options.find((option) => option.channel_id === 1);
+  } else {
+    row.best_channel = row.options.find(
+      (option) => option.channel_id === row.best_channel?.channel_id
+    ) || row.best_channel;
+  }
+});
+
+/* priceItems = modelPriceItems（市场参考源），按 meta_model_code 过滤 */
+const priceItems = [
+  { meta_model_code: 'deepseek-v4', source_name: 'DeepSeek 官方基准', dimension: 'text_input', unit_price: 0.0010, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'deepseek-v4', source_name: 'DeepSeek 官方基准', dimension: 'text_output', unit_price: 0.0020, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'deepseek-v4', source_name: '阿里云刊例价', dimension: 'text_input', unit_price: 0.0020, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'deepseek-v4', source_name: '阿里云刊例价', dimension: 'text_output', unit_price: 0.0080, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'deepseek-v4', source_name: '硅基流动标价', dimension: 'text_input', unit_price: 0.0015, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'deepseek-v4', source_name: '硅基流动标价', dimension: 'text_output', unit_price: 0.0060, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'gpt-4o', source_name: 'OpenAI 官方基准', dimension: 'text_input', unit_price: 0.0025, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'gpt-4o', source_name: 'OpenAI 官方基准', dimension: 'text_output', unit_price: 0.0100, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'gpt-4o', source_name: '阿里云刊例价', dimension: 'text_input', unit_price: 0.0028, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'gpt-4o', source_name: '阿里云刊例价', dimension: 'text_output', unit_price: 0.0112, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'claude-3-5-sonnet', source_name: 'Anthropic 官方基准', dimension: 'text_input', unit_price: 0.0020, currency: 'CNY', source_is_enabled: true, is_current: true },
+  { meta_model_code: 'claude-3-5-sonnet', source_name: 'Anthropic 官方基准', dimension: 'text_output', unit_price: 0.0080, currency: 'CNY', source_is_enabled: true, is_current: true }
+];
+priceItems.forEach((item) => { item.unit_price = Number(item.unit_price) * 1000; });
+
+/* L2 下钻：渠道分组（已上架 SKU）+ supplyOnly（有供应未上架）
+   SKU: cost 来自 options[]，price 为当前终端售价；margin 实时按 _compute_yield 计算
+   键 = diagnostics 行的 model_id（避免名称大小写/格式不一致） */
+const detailMatrixByModel = {
+  11: {
+    channels: [
+      { channel_id: 2, channel_name: '阿里云 (白金代)', channel_type: 'fixed_channel', is_best: false, expanded: false, skus: [
+        { skuId: 'deepseek-v4-pro-0409', source: '百炼集群 A', provider: '阿里云 (白金代)', pricing_format: 'flat',
+          costIn: 0.0015, costOut: 0.0060, priceIn: 0.0024, priceOut: 0.0096, on_lowest: true, workflow_status: 'online' }
+      ]},
+      { channel_id: 1, channel_name: '深度求索 (直签)', channel_type: 'fixed_channel', is_best: true, expanded: false, skus: [
+        { skuId: 'deepseek-v4-pro-latest', source: '官方企业池', provider: '深度求索 (直签)', pricing_format: 'flat',
+          costIn: 0.0010, costOut: 0.0020, priceIn: 0.0018, priceOut: 0.0036, on_lowest: true, workflow_status: 'online' }
+      ]}
+    ],
+    supplyOnly: [
+      { channel_id: 3, channel_name: '硅基流动 (代理)', provider: '硅基流动 (代理)', source: '共享池', costIn: 0.0013, costOut: 0.0051 }
+    ]
+  },
+  12: {
+    channels: [
+      { channel_id: 2, channel_name: '阿里云 (白金代)', channel_type: 'fixed_channel', is_best: true, expanded: false, skus: [
+        { skuId: 'gpt-4o-0409', source: '百炼集群 A', provider: '阿里云 (白金代)', pricing_format: 'flat',
+          costIn: 0.0025, costOut: 0.0100, priceIn: 0.0040, priceOut: 0.0160, on_lowest: true, workflow_status: 'online' }
+      ]},
+      { channel_id: 4, channel_name: 'Microsoft Azure', channel_type: 'fixed_channel', is_best: false, expanded: false, skus: [
+        { skuId: 'gpt-4o-overseas', source: '海外中转', provider: 'Microsoft Azure', pricing_format: 'flat',
+          costIn: 0.0030, costOut: 0.0120, priceIn: 0.0048, priceOut: 0.0192, on_lowest: false, workflow_status: 'online' }
+      ]}
+    ],
+    supplyOnly: []
+  },
+  13: {
+    channels: [
+      { channel_id: 3, channel_name: '硅基流动 (代理)', channel_type: 'supplier', is_best: true, expanded: false, skus: [
+        { skuId: 'claude-3-5-sonnet-shared', source: '共享池', provider: '硅基流动 (代理)', pricing_format: 'flat',
+          costIn: 0.0020, costOut: 0.0080, priceIn: 0.0021, priceOut: 0.0084, on_lowest: true, workflow_status: 'online' }
+      ]}
+    ],
+    supplyOnly: []
+  }
+};
+Object.values(detailMatrixByModel).forEach((detail) => {
+  (detail.channels || []).forEach((group) => (group.skus || []).forEach((sku) => {
+    ['costIn', 'costOut', 'priceIn', 'priceOut'].forEach((field) => {
+      sku[field] = Number(sku[field]) * 1000;
+    });
+  }));
+  (detail.supplyOnly || []).forEach((row) => {
+    row.costIn = Number(row.costIn) * 1000;
+    row.costOut = Number(row.costOut) * 1000;
+  });
+});
+
+/* 价格历史（模拟 channelPriceHistory / listingPriceHistory 结构） */
+const historyBySku = {
+  'deepseek-v4-pro-0409': [
+    { type: '采购价', channel: '阿里云 (白金代)', in: 0.0015, out: 0.0060, at: '2026-08-10 09:00', actor: '采集 Agent' },
+    { type: '终端售价', channel: '阿里云 (白金代)', in: 0.0024, out: 0.0096, at: '2026-08-01 14:20', actor: '王工' },
+    { type: '终端售价', channel: '阿里云 (白金代)', in: 0.0026, out: 0.0104, at: '2026-07-15 10:05', actor: '李工' },
+    { type: '采购价', channel: '阿里云 (白金代)', in: 0.0018, out: 0.0072, at: '2026-07-01 09:00', actor: '采集 Agent' }
+  ],
+  'gpt-4o-overseas': [
+    { type: '采购价', channel: 'Microsoft Azure', in: 0.0030, out: 0.0120, at: '2026-08-12 09:00', actor: '采集 Agent' },
+    { type: '终端售价', channel: 'Microsoft Azure', in: 0.0048, out: 0.0192, at: '2026-08-02 11:30', actor: '张工' },
+    { type: '终端售价', channel: 'Microsoft Azure', in: 0.0052, out: 0.0208, at: '2026-07-10 16:45', actor: '张工' }
+  ],
+  'claude-3-5-sonnet-shared': [
+    { type: '采购价', channel: '硅基流动 (代理)', in: 0.0020, out: 0.0080, at: '2026-08-14 09:00', actor: '采集 Agent' },
+    { type: '终端售价', channel: '硅基流动 (代理)', in: 0.0021, out: 0.0084, at: '2026-08-03 09:15', actor: '王工' },
+    { type: '终端售价', channel: '硅基流动 (代理)', in: 0.0028, out: 0.0112, at: '2026-07-20 15:00', actor: '李工' }
+  ]
+};
+Object.values(historyBySku).flat().forEach((row) => {
+  row.in = Number(row.in) * 1000;
+  row.out = Number(row.out) * 1000;
+});
+
+const app = createApp({
+  setup() {
+    const isDark = ref(false);
+    const lang = ref('zh');
+    const activeTab = ref(0);
+    const t = computed(() => i18n[lang.value]);
+    function tr(zh, en) { return lang.value === 'zh' ? zh : en; }
+
+    const currentView = ref('list');
+    const activeWorkspace = ref('dashboard');
+    const scenarioMode = ref('normal');
+    const searchQuery = ref('');
+    const statusFilter = ref('all');
+    const priceDimension = ref('input');
+    const selectedCurrency = ref('CNY');
+    const scenarioLabel = computed(() => ({
+      normal: tr('默认 · 完整数据', 'Default · complete data'),
+      stale: tr('风险 · 价格过期', 'Risk · stale prices'),
+      empty: tr('空态 · 无运营模型', 'Empty · no operational models')
+    }[scenarioMode.value]));
+    const scenarioBanner = computed(() => scenarioMode.value === 'stale'
+      ? tr('当前场景：多个合同价格已超过更新周期，切换渠道前应先重新采集。', 'Current scenario: multiple contract prices are stale. Refresh collection before switching channels.')
+      : tr('当前场景：尚无进入运营范围的模型。', 'Current scenario: no models are in operational scope yet.'));
+
+    /* 毛利公式（与 backend _compute_yield 一致）
+       net = retail*(1-fee-service-tax) - cost*settlement; yield = net/retail */
+    const FEE = 0.06, SERVICE = 0.08, TAX = 0.06, SETTLE = 0.86;
+    function computeYield(retail, cost) {
+      const r = Number(retail), c = Number(cost);
+      if (!Number.isFinite(r) || !Number.isFinite(c) || r <= 0) return null;
+      const net = r * (1 - FEE - SERVICE - TAX) - c * SETTLE;
+      return net / r;
+    }
+    function marginFor(sku, kind) {
+      const retail = sku.editing ? (kind === 'In' ? sku.priceInEdit : sku.priceOutEdit) : (kind === 'In' ? sku.priceIn : sku.priceOut);
+      return computeYield(retail, kind === 'In' ? sku.costIn : sku.costOut);
+    }
+    function marginForObj(retail, cost) { return computeYield(retail, cost); }
+    function marginText(m) {
+      if (m === null) return 'text-[var(--muted-foreground)]';
+      return m < 0 ? 'text-[var(--color-destructive)]' : m < (FEE + SERVICE) ? 'text-[var(--color-warning)]' : 'text-[var(--color-success)]';
+    }
+    function marginBadge(m) {
+      if (m === null) return 'badge badge-muted';
+      if (m < 0) return 'badge badge-red';
+      if (m < (FEE + SERVICE)) return 'badge badge-orange';
+      return 'badge badge-green';
+    }
+
+    /* L1: diagnostics 行 → 展示行 */
+    const baseModelsList = ref(
+      (summary.agione.diagnostics || []).map((row) => ({
+        ...row,
+        icon: { 'deepseek-v4': 'zap', 'gpt-4o': 'sparkles', 'claude-3-5-sonnet': 'box' }[row.meta_model_code] || 'cpu',
+        decision_action: row.decision_action || 'keep'
+      }))
+    );
+
+    const visibleChannels = channelCatalog;
+    const effectiveRows = computed(() => scenarioMode.value === 'empty' ? [] : baseModelsList.value);
+    const matrixRows = computed(() => {
+      const q = searchQuery.value.trim().toLowerCase();
+      return effectiveRows.value.filter((row) => {
+        const matches = !q || [row.model_name, row.meta_model_code, row.provider_name]
+          .some((value) => String(value || '').toLowerCase().includes(q));
+        if (!matches) return false;
+        if (statusFilter.value === 'missing') return Number(row.coverage_count || 0) === 0;
+        if (statusFilter.value === 'single') return Number(row.coverage_count || 0) === 1;
+        if (statusFilter.value === 'ready') return Number(row.coverage_count || 0) > 1;
+        return true;
+      });
+    });
+
+    const decisionPriority = {
+      no_supply: 1, currency_unresolved: 2, platform_fee_unresolved: 3,
+      low_yield: 4, not_lowest_channel: 5, unlisted: 6,
+      single_channel: 7, ready: 8, market_reference: 9
+    };
+    function hasStaleOffer(row) {
+      return (row?.options || []).some((option) => isOptionStale(option));
+    }
+    function effectiveAction(row) {
+      if (scenarioMode.value === 'stale' && hasStaleOffer(row)) return 'refresh_prices';
+      return row?.decision_action || 'keep';
+    }
+    const priorityRows = computed(() => effectiveRows.value
+      .filter((row) => effectiveAction(row) !== 'keep')
+      .sort((a, b) => {
+        const actionDelta = Number(effectiveAction(a) !== 'refresh_prices')
+          - Number(effectiveAction(b) !== 'refresh_prices');
+        if (actionDelta) return actionDelta;
+        return (decisionPriority[a.decision_status] || 99)
+          - (decisionPriority[b.decision_status] || 99);
+      }));
+    const priorityCount = computed(() => priorityRows.value.length);
+    const dashboardStats = computed(() => ({
+      lowYield: effectiveRows.value.filter((row) => row.decision_status === 'low_yield').length,
+      nonOptimal: effectiveRows.value.filter((row) => row.decision_status === 'not_lowest_channel').length,
+      singleChannel: effectiveRows.value.filter((row) => Number(row.coverage_count || 0) === 1).length,
+      dataAnomaly: effectiveRows.value.filter((row) => (
+        hasStaleOffer(row)
+        || (row.data_event_type && row.data_event_type !== 'updated')
+      )).length
+    }));
+    const dataHealth = computed(() => {
+      const offers = effectiveRows.value.flatMap((row) => row.options || []);
+      const validOffers = offers.filter((offer) => (
+        Number.isFinite(Number(offer.input_price_per_million))
+        && Number.isFinite(Number(offer.output_price_per_million))
+      )).length;
+      const freshOffers = offers.filter((offer) => !isOptionStale(offer)).length;
+      return {
+        validOffers,
+        totalOffers: offers.length,
+        freshness: `${percentage(freshOffers, offers.length)}%`
+      };
+    });
+    const dashboardMetrics = computed(() => {
+      const rows = effectiveRows.value;
+      const listed = rows.filter((row) => row.current_listing?.is_listed).length;
+      const healthy = rows.filter((row) => Number(row.input_yield) >= 0.1 && Number(row.output_yield) >= 0.1).length;
+      const avgCoverage = rows.length ? rows.reduce((sum, row) => sum + Number(row.coverage_count || 0), 0) / rows.length : 0;
+      return [
+        { label: tr('运营模型', 'Operational Models'), value: rows.length, hint: tr('仅含有渠道或挂售的模型', 'Models with channel or listing records') },
+        { label: tr('已挂售', 'Listed Models'), value: listed, hint: `${percentage(listed, rows.length)}% ${tr('已进入销售', 'in active listings')}` },
+        { label: tr('收益健康', 'Healthy Yield'), value: healthy, hint: tr('净收益率高于 10%', 'Net yield above 10%') },
+        { label: tr('平均渠道覆盖', 'Avg. Channel Coverage'), value: avgCoverage.toFixed(1), unit: tr('渠道/模型', 'channels/model'), hint: tr('建议至少 2 个可用渠道', 'Target at least 2 channels') },
+        { label: tr('价格新鲜度', 'Price Freshness'), value: dataHealth.value.freshness, hint: tr('24 小时内更新', 'Updated within 24 hours') }
+      ];
+    });
+    const decisionDistribution = computed(() => {
+      const total = Math.max(effectiveRows.value.length, 1);
+      const definitions = [
+        ...(scenarioMode.value === 'stale'
+          ? [{ status: 'stale_price', label: tr('价格过期', 'Stale Price'), tone: 'is-warning' }]
+          : []),
+        { status: 'ready', label: tr('已就绪', 'Ready'), tone: 'is-success' },
+        { status: 'not_lowest_channel', label: tr('非最优渠道', 'Non-optimal Channel'), tone: 'is-warning' },
+        { status: 'low_yield', label: tr('低收益', 'Low Yield'), tone: 'is-danger' },
+        { status: 'single_channel', label: tr('单渠道', 'Single Channel'), tone: '' }
+      ];
+      return definitions.map((item) => {
+        const value = item.status === 'stale_price'
+          ? effectiveRows.value.filter(hasStaleOffer).length
+          : item.status === 'single_channel'
+          ? effectiveRows.value.filter((row) => Number(row.coverage_count || 0) === 1).length
+          : effectiveRows.value.filter((row) => row.decision_status === item.status).length;
+        return { ...item, value, width: Math.max((value / total) * 100, value ? 8 : 0) };
+      });
+    });
+    const matrixMetrics = computed(() => {
+      const rows = matrixRows.value;
+      const avgCoverage = rows.length ? rows.reduce((sum, row) => sum + Number(row.coverage_count || 0), 0) / rows.length : 0;
+      const opportunities = rows.filter((row) => row.decision_status === 'not_lowest_channel').length;
+      const stale = rows.reduce((count, row) => count + (row.options || []).filter(isOptionStale).length, 0);
+      return [
+        { label: tr('参与比价模型', 'Models Compared'), value: rows.length, hint: tr('当前运营范围', 'Current operational scope') },
+        { label: tr('平均渠道覆盖', 'Avg. Channel Coverage'), value: avgCoverage.toFixed(1), unit: tr('渠道/模型', 'channels/model'), hint: tr('按有效价格版本计算', 'Based on effective price versions') },
+        { label: tr('可切换机会', 'Switch Opportunities'), value: opportunities, hint: tr('当前挂售未使用最低渠道', 'Listings not using the lowest channel') },
+        { label: tr('待刷新价格', 'Prices to Refresh'), value: stale, hint: scenarioMode.value === 'stale' ? tr('已超过更新周期', 'Past collection cadence') : tr('建议采集后再决策', 'Refresh before switching') }
+      ];
+    });
+
+    function percentage(value, total) { return total ? Math.round((Number(value || 0) / Number(total)) * 100) : 0; }
+    function optionFor(row, channel) { return (row.options || []).find((option) => String(option.channel_id) === String(channel.id)); }
+    function isBestOption(row, channel) { return String(row.best_channel?.channel_id) === String(channel.id); }
+    function isCurrentOption(row, channel) { return String(row.current_listing?.channel_id) === String(channel.id); }
+    function isOptionStale(option) {
+      if (!option) return false;
+      if (scenarioMode.value === 'stale') return option.channel_id !== 1;
+      return option.channel_id === 3;
+    }
+    function optionMoney(option, dimension) {
+      if (!option) return '-';
+      const field = dimension === 'output' ? 'output_price_per_million' : 'input_price_per_million';
+      const value = Number(option[field]);
+      return Number.isFinite(value) ? `${option.currency || 'CNY'} ${value.toFixed(4)}` : '-';
+    }
+    function priceCellLabel(row, channel) {
+      const option = optionFor(row, channel);
+      return tr(
+        `${row.model_name}，${channel.name}，${priceDimension.value === 'input' ? '输入' : '输出'}价 ${optionMoney(option, priceDimension.value)}`,
+        `${row.model_name}, ${channel.name}, ${priceDimension.value} price ${optionMoney(option, priceDimension.value)}`
+      );
+    }
+    function optionFreshness(option) {
+      if (!option?.updated_at) return '-';
+      if (isOptionStale(option)) return tr('3 天前', '3 days ago');
+      const labels = { 1: tr('25 分钟前', '25 min ago'), 2: tr('2 分钟前', '2 min ago'), 4: tr('2 小时前', '2 hours ago') };
+      return labels[option.channel_id] || tr('1 小时前', '1 hour ago');
+    }
+    function recommendedChannelName(row) { return row.best_channel?.channel_name || tr('未配置', 'Not configured'); }
+    function listingChannelName(row) { return row.current_listing?.is_listed ? (row.current_listing.channel_name || tr('自动最优', 'Auto Best')) : tr('未挂售', 'Not listed'); }
+    function listingMoney(row, dimension) {
+      const listing = row.current_listing;
+      if (!listing?.is_listed) return '-';
+      const field = dimension === 'output' ? 'retail_output_price_per_million' : 'retail_input_price_per_million';
+      const value = Number(listing[field]);
+      return Number.isFinite(value) ? `${listing.currency || 'CNY'} ${value.toFixed(4)}` : '-';
+    }
+    function yieldForRow(row, dimension) {
+      const value = Number(row[dimension === 'output' ? 'output_yield' : 'input_yield']);
+      return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '-';
+    }
+    const DECISION_LABELS = {
+      ready: ['已就绪', 'Ready'], low_yield: ['低收益', 'Low Yield'], not_lowest_channel: ['非最优渠道', 'Non-optimal Channel'],
+      single_channel: ['单渠道', 'Single Channel'], no_supply: ['缺供应', 'No Supply'], unlisted: ['待挂售', 'Unlisted'],
+      currency_unresolved: ['汇率待配置', 'FX Missing'], platform_fee_unresolved: ['费率待配置', 'Fee Config Missing']
+    };
+    function decisionLabel(row) {
+      if (scenarioMode.value === 'stale' && hasStaleOffer(row)) {
+        return tr('价格过期', 'Stale Price');
+      }
+      const label = DECISION_LABELS[row.decision_status] || DECISION_LABELS.ready;
+      return tr(label[0], label[1]);
+    }
+    function decisionTone(row) {
+      if (scenarioMode.value === 'stale' && hasStaleOffer(row)) return 'is-warning';
+      if (['low_yield', 'no_supply'].includes(row.decision_status)) return 'is-danger';
+      if (['not_lowest_channel', 'single_channel', 'currency_unresolved', 'platform_fee_unresolved'].includes(row.decision_status)) return 'is-warning';
+      return row.decision_status === 'ready' ? 'is-success' : 'is-muted';
+    }
+    function eventLabel(row) {
+      const labels = { updated: ['数据正常', 'Data current'], source_disabled: ['价格源已停用', 'Price source disabled'], collection_failed: ['采集失败', 'Collection failed'], reconciliation_anomaly: ['对账异常', 'Reconciliation anomaly'], stale: ['价格过期', 'Price stale'] };
+      const label = labels[scenarioMode.value === 'stale' ? 'stale' : row.data_event_type] || labels.updated;
+      return tr(label[0], label[1]);
+    }
+    function eventToneClass(row) { return (scenarioMode.value === 'stale' || row.data_event_type === 'source_disabled') ? 'is-warning' : ''; }
+    function eventTime(row) { return row.model_id === 13 || scenarioMode.value === 'stale' ? tr('3 天前', '3 days ago') : row.model_id === 12 ? tr('2 小时前', '2 hours ago') : tr('2 分钟前', '2 min ago'); }
+
+    /* 建议操作（决策动作） */
+    const DECISION_ACTIONS = {
+      keep: { label: '查看详情', labelEn: 'View Details', icon: 'arrow-right' },
+      switch_lowest_channel: { label: '评估切换', labelEn: 'Evaluate Switch', icon: 'git-branch' },
+      publish_listing: { label: '上架到平台', labelEn: 'Publish Listing', icon: 'rocket' },
+      add_channel_coverage: { label: '扩渠道覆盖', labelEn: 'Add Channel', icon: 'network' },
+      review_pricing_or_channel: { label: '复核定价', labelEn: 'Review Pricing', icon: 'percent' },
+      configure_channel: { label: '配置供应渠道', labelEn: 'Configure Supply', icon: 'store' },
+      configure_exchange_rate: { label: '配置汇率', labelEn: 'Configure FX', icon: 'circle-dollar-sign' },
+      configure_platform_fee: { label: '配置平台费率', labelEn: 'Configure Fees', icon: 'settings' },
+      refresh_prices: { label: '刷新价格', labelEn: 'Refresh Prices', icon: 'refresh-cw' },
+      view_market_price: { label: '查看市场价', labelEn: 'View Market Price', icon: 'line-chart' }
+    };
+    function actionLabel(action) {
+      const item = DECISION_ACTIONS[action] || DECISION_ACTIONS.keep;
+      return tr(item.label, item.labelEn);
+    }
+    function actionIcon(action) { return DECISION_ACTIONS[action]?.icon || 'circle-help'; }
+
+    function setScenario(mode) {
+      scenarioMode.value = mode;
+      if (mode === 'empty') searchQuery.value = '';
+      nextTick(() => lucide.createIcons());
+    }
+    function openWorkspace(workspace) {
+      currentView.value = 'list';
+      activeWorkspace.value = workspace;
+      nextTick(() => lucide.createIcons());
+    }
+    function notifyComingSoon() {
+      ElMessage({ type: 'info', message: tr('请在当前看板的建议操作中进入挂售工作台', 'Open the listing workspace from a recommended action in this dashboard') });
+    }
+    function refreshDashboard() {
+      ElMessage({ type: 'success', message: tr('看板数据已更新', 'Dashboard data refreshed') });
+    }
+    function scrollToQueue() { document.getElementById('priority-queue')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    function resetMatrixFilters() { searchQuery.value = ''; statusFilter.value = 'all'; if (scenarioMode.value === 'empty') setScenario('normal'); }
+    function runSuggestedAction(row) {
+      const action = effectiveAction(row);
+      if (action === 'refresh_prices') {
+        ElMessage({ type: 'success', message: tr('价格已重新采集，运营决策已更新', 'Prices refreshed and operational decisions updated') });
+        setScenario('normal');
+        return;
+      }
+      goToDetail(row);
+      nextTick(() => {
+        if (action === 'switch_lowest_channel') {
+          const sku = detailMatrixData.value.flatMap((g) => g.skus).find((s) => s.on_lowest === false);
+          if (sku) switchChannel(sku);
+        } else if (action === 'review_pricing_or_channel') {
+          const sku = detailMatrixData.value.flatMap((g) => g.skus)[0];
+          if (sku) startEdit(sku);
+        } else if (action === 'publish_listing') {
+          const row0 = supplyOnlyRows.value[0];
+          if (row0) openPublish(row0);
+        }
+      });
+    }
+
+    /* 渠道比价详情 */
+    const compareOpen = ref(false);
+    const compareRow = ref(null);
+    const compareOption = ref(null);
+    const compareOffers = computed(() => {
+      if (!compareRow.value) return [];
+      const field = priceDimension.value === 'output' ? 'output_price_per_million' : 'input_price_per_million';
+      return [...(compareRow.value.options || [])].sort((a, b) => Number(a[field]) - Number(b[field]));
+    });
+    const lowestComparePrice = computed(() => optionMoney(compareOffers.value[0], priceDimension.value));
+    const compareSavings = computed(() => {
+      if (!compareRow.value || !compareOffers.value.length) return '-';
+      const current = (compareRow.value.options || []).find((option) => String(option.channel_id) === String(compareRow.value.current_listing?.channel_id));
+      const field = priceDimension.value === 'output' ? 'output_price_per_million' : 'input_price_per_million';
+      const currentPrice = Number(current?.[field]);
+      const lowestPrice = Number(compareOffers.value[0]?.[field]);
+      if (!Number.isFinite(currentPrice) || !Number.isFinite(lowestPrice) || currentPrice <= 0) return '-';
+      return `${Math.max(0, ((currentPrice - lowestPrice) / currentPrice) * 100).toFixed(1)}%`;
+    });
+    function openCompare(row, option = null) {
+      compareRow.value = row;
+      compareOption.value = option;
+      compareOpen.value = true;
+      nextTick(() => lucide.createIcons());
+    }
+    function applyCompareRecommendation() {
+      const row = compareRow.value;
+      if (!row || effectiveAction(row) === 'keep') return;
+      compareOpen.value = false;
+      runSuggestedAction(row);
+    }
+    function openPriceChainDetail() {
+      const row = compareRow.value;
+      compareOpen.value = false;
+      if (row) goToDetail(row);
+    }
+
+    /* L2 state */
+    const selectedModelData = ref(null);
+    const detailMatrixData = ref([]);
+    const supplyOnlyRows = ref([]);
+
+    function goToDetail(row) {
+      selectedModelData.value = row;
+      const detail = detailMatrixByModel[row.model_id] || { channels: [], supplyOnly: [] };
+      detailMatrixData.value = detail.channels.map((g) => ({
+        ...g,
+        expanded: true,
+        skus: g.skus.map((s) => ({
+          ...s,
+          editing: false, priceInEdit: Number(s.priceIn), priceOutEdit: Number(s.priceOut)
+        }))
+      }));
+      supplyOnlyRows.value = (detail.supplyOnly || []).map((r) => ({ ...r }));
+      currentView.value = 'detail';
+      nextTick(() => lucide.createIcons());
+    }
+    function goToList() {
+      currentView.value = 'list';
+      selectedModelData.value = null;
+      nextTick(() => lucide.createIcons());
+    }
+    function toggleAllChannels(expand) {
+      detailMatrixData.value.forEach((g) => { g.expanded = expand; });
+    }
+
+    /* ── SKU 功能操作 ── */
+    function startEdit(sku) {
+      sku.editing = true;
+      sku.priceInEdit = Number(sku.priceIn);
+      sku.priceOutEdit = Number(sku.priceOut);
+      ElMessage({ type: 'info', message: '进入编辑：修改终端售价，毛利率 / Credit / 对标位置实时重算', duration: 2500 });
+    }
+    function cancelEdit(sku) {
+      sku.editing = false;
+      ElMessage({ type: 'info', message: '已撤销本次编辑，恢复原价' });
+    }
+    function saveDraft(sku) {
+      if (!validEdit(sku)) return;
+      sku.priceIn = sku.priceInEdit; sku.priceOut = sku.priceOutEdit;
+      sku.editing = false;
+      sku.workflow_status = 'update_draft';
+      ElMessage({ type: 'success', message: `已保存更新草稿（${sku.skuId}），等待提交发布` });
+    }
+    function submitEdit(sku) {
+      if (!validEdit(sku)) return;
+      sku.priceIn = sku.priceInEdit; sku.priceOut = sku.priceOutEdit;
+      sku.editing = false;
+      sku.workflow_status = 'pending_update';
+      ElMessage({ type: 'success', message: `已提交新售价，等待确认发布（${sku.skuId}）` });
+    }
+    function validEdit(sku) {
+      const pi = Number(sku.priceInEdit), po = Number(sku.priceOutEdit);
+      if (!Number.isFinite(pi) || !Number.isFinite(po) || pi <= 0 || po <= 0) {
+        ElMessage({ type: 'warning', message: '售价必须为正数' });
+        return false;
+      }
+      const m = Math.min(computeYield(pi, sku.costIn), computeYield(po, sku.costOut));
+      if (m !== null && m < 0) {
+        return window.confirm(`售价将导致毛利为负（${pct(m)}），确定继续？`);
+      }
+      return true;
+    }
+    function confirmPublish(sku) {
+      sku.workflow_status = 'online';
+      ElMessage({ type: 'success', message: `已确认发布，SKU ${sku.skuId} 已上线` });
+    }
+    function withdraw(sku) {
+      sku.workflow_status = 'online';
+      sku.editing = false;
+      ElMessage({ type: 'info', message: `已撤销发布操作，SKU ${sku.skuId} 保持在线` });
+    }
+    function offline(sku) {
+      ElMessageBox.confirm(`确认将 SKU ${sku.skuId} 下架？下架后该供应链路将不再对外售卖。`, '下架确认', {
+        confirmButtonText: '确认下架', cancelButtonText: '取消', type: 'warning'
+      }).then(() => {
+        sku.workflow_status = 'offline';
+        ElMessage({ type: 'success', message: `SKU ${sku.skuId} 已下架` });
+      }).catch(() => {});
+    }
+    function switchChannel(sku) {
+      const best = selectedModelData.value?.best_channel;
+      if (!best) return;
+      const before = Math.min(computeYield(sku.priceIn, sku.costIn), computeYield(sku.priceOut, sku.costOut));
+      ElMessageBox.confirm(
+        `当前经「${sku.provider}」供货，最优采购渠道为「${best.channel_name}」（成本更低）。` +
+        `切换后售价保持不变，毛利率将由 ${pct(before)} 提升。是否切换？`,
+        '切换最优渠道', { confirmButtonText: '确认切换', cancelButtonText: '取消', type: 'info' }
+      ).then(() => {
+        const group = detailMatrixData.value.find((g) => g.skus.includes(sku));
+        if (group) group.channel_name = best.channel_name; group.is_best = true;
+        sku.provider = best.channel_name;
+        sku.source = '最优渠道直连';
+        sku.costIn = Number(best.input_price_per_million);
+        sku.costOut = Number(best.output_price_per_million);
+        sku.on_lowest = true;
+        const after = Math.min(computeYield(sku.priceIn, sku.costIn), computeYield(sku.priceOut, sku.costOut));
+        selectedModelData.value.decision_action = 'keep';
+        ElMessage({ type: 'success', message: `已切换到最优渠道「${best.channel_name}」，毛利率 ${pct(before)} → ${pct(after)}` });
+      }).catch(() => {});
+    }
+
+    /* ── 上架（publish_listing）── */
+    const publishOpen = ref(false);
+    const publishTarget = ref(null);
+    const publishForm = ref({ priceIn: 0, priceOut: 0 });
+    function recommendPrice(cost) {
+      /* 目标毛利 35%: retail*0.8 - cost*0.86 = retail*0.35 → retail = cost*0.86/0.45 */
+      return Number(cost) * SETTLE / (1 - FEE - SERVICE - TAX - 0.35);
+    }
+    function openPublish(row) {
+      publishTarget.value = row;
+      publishForm.value = { priceIn: Number(recommendPrice(row.costIn).toFixed(4)), priceOut: Number(recommendPrice(row.costOut).toFixed(4)) };
+      publishOpen.value = true;
+      nextTick(() => lucide.createIcons());
+    }
+    function publishCreate(status) {
+      const row = publishTarget.value;
+      const grp = { channel_id: row.channel_id, channel_name: row.channel_name, channel_type: 'supplier', is_best: false, expanded: true, skus: [
+        { skuId: `${selectedModelData.value.meta_model_code}-${Date.now() % 100000}`, source: row.source, provider: row.provider, pricing_format: 'flat',
+          costIn: row.costIn, costOut: row.costOut, priceIn: publishForm.value.priceIn, priceOut: publishForm.value.priceOut,
+          on_lowest: String(row.channel_id) === String(selectedModelData.value.best_channel?.channel_id), workflow_status: status,
+          editing: false, priceInEdit: publishForm.value.priceIn, priceOutEdit: publishForm.value.priceOut }
+      ]};
+      detailMatrixData.value.push(grp);
+      supplyOnlyRows.value = supplyOnlyRows.value.filter((r) => r !== row);
+      publishOpen.value = false;
+      ElMessage({ type: 'success', message: status === 'draft' ? '已存为草稿，可在渠道组内继续提交发布' : '已提交发布，请确认发布后上线' });
+      nextTick(() => lucide.createIcons());
+    }
+    function publishDraft() { if (validPublish()) publishCreate('draft'); }
+    function publishSubmit() { if (validPublish()) publishCreate('pending_publish'); }
+    function validPublish() {
+      const pi = Number(publishForm.value.priceIn), po = Number(publishForm.value.priceOut);
+      if (!Number.isFinite(pi) || !Number.isFinite(po) || pi <= 0 || po <= 0) {
+        ElMessage({ type: 'warning', message: '售价必须为正数' });
+        return false;
+      }
+      return true;
+    }
+
+    /* ── 价格历史 ── */
+    const historyOpen = ref(false);
+    const historySku = ref(null);
+    const historyRows = ref([]);
+    function openHistory(sku) {
+      historySku.value = sku;
+      historyRows.value = historyBySku[sku.skuId] || [];
+      historyOpen.value = true;
+      nextTick(() => lucide.createIcons());
+    }
+
+    /* ── 导出 CSV ── */
+    function exportCsv() {
+      const header = ['model_name', 'meta_model_code', 'provider_name', 'coverage_count', 'active_listing_count', 'decision_status', 'decision_action'];
+      const lines = [header.join(',')];
+      const exportRows = activeWorkspace.value === 'matrix' ? matrixRows.value : priorityRows.value;
+      exportRows.forEach((r) => {
+        lines.push([r.model_name, r.meta_model_code, r.provider_name, r.coverage_count, r.active_listing_count, r.decision_status, r.decision_action].map(escapeCsv).join(','));
+      });
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'channel-price-matrix.csv'; a.click();
+      URL.revokeObjectURL(url);
+      ElMessage({ type: 'success', message: tr(`已导出 ${exportRows.length} 条模型记录`, `${exportRows.length} model records exported`) });
+    }
+    function escapeCsv(v) {
+      const s = String(v ?? '');
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }
+
+    /* 市场参考 / 区间条图 */
+    const currentMarketRefData = computed(() => {
+      if (!selectedModelData.value) return [];
+      const code = selectedModelData.value.meta_model_code;
+      const dims = { 'text_input': 'priceIn', 'text_output': 'priceOut' };
+      const bySource = {};
+      priceItems
+        .filter((item) => item.meta_model_code === code && item.source_is_enabled !== false && item.is_current !== false)
+        .forEach((item) => {
+          const field = dims[item.dimension];
+          if (!field) return;
+          bySource[item.source_name] = bySource[item.source_name] || { source: item.source_name, priceIn: null, priceOut: null };
+          bySource[item.source_name][field] = Number(item.unit_price);
+        });
+      return Object.values(bySource);
+    });
+
+    function minMaxFor(field) {
+      const values = [];
+      currentMarketRefData.value.forEach((r) => { if (Number.isFinite(r[field])) values.push(r[field]); });
+      detailMatrixData.value.forEach((g) => g.skus.forEach((s) => {
+        const v = Number(s.editing ? (field === 'priceIn' ? s.priceInEdit : s.priceOutEdit) : s[field]);
+        if (Number.isFinite(v)) values.push(v);
+      }));
+      if (!values.length) return { min: 0, max: 1 };
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      return { min, max: max * 1.25 };
+    }
+    const displayMinIn = computed(() => minMaxFor('priceIn').min.toFixed(4));
+    const displayMaxIn = computed(() => minMaxFor('priceIn').max.toFixed(4));
+    const displayMinOut = computed(() => minMaxFor('priceOut').min.toFixed(4));
+    const displayMaxOut = computed(() => minMaxFor('priceOut').max.toFixed(4));
+
+    function markerPrice(sku, kind) {
+      const field = kind === 'In' ? 'priceIn' : 'priceOut';
+      return Number(sku.editing ? (kind === 'In' ? sku.priceInEdit : sku.priceOutEdit) : sku[field]);
+    }
+    function getMarkerPos(price, minStr, maxStr) {
+      const p = Number(price); const min = Number(minStr); const max = Number(maxStr);
+      if (!Number.isFinite(p) || max === min) return 50;
+      return Math.max(0, Math.min(((p - min) / (max - min)) * 90 + 5, 100));
+    }
+    function getMarkerColor(price, minStr, maxStr) {
+      const p = Number(price); const min = Number(minStr); const max = Number(maxStr);
+      const avg = (min + max) / 2;
+      if (!Number.isFinite(p)) return 'var(--muted-foreground)';
+      if (p <= avg) return 'var(--color-success)';
+      if (p > max * 0.8) return 'var(--color-warning)';
+      return 'var(--color-primary)';
+    }
+    function isMinPrice(val, type) {
+      if (!currentMarketRefData.value.length) return false;
+      const field = type === 'In' ? 'priceIn' : 'priceOut';
+      const min = Math.min(...currentMarketRefData.value.map((r) => r[field]));
+      return Number(val) === min;
+    }
+    function marketChip(sku) {
+      if (!currentMarketRefData.value.length) return null;
+      const inAvg = currentMarketRefData.value.reduce((s, r) => s + r.priceIn, 0) / currentMarketRefData.value.length;
+      const outAvg = currentMarketRefData.value.reduce((s, r) => s + r.priceOut, 0) / currentMarketRefData.value.length;
+      const pi = Number(sku.editing ? sku.priceInEdit : sku.priceIn);
+      const po = Number(sku.editing ? sku.priceOutEdit : sku.priceOut);
+      const above = (pi > inAvg || po > outAvg);
+      if (above) return { text: '⚠ 高于市场均价', tone: 'text-[var(--color-warning)]' };
+      return { text: '✓ 低于/持平市场均价', tone: 'text-[var(--color-success)]' };
+    }
+
+    /* 汇总 */
+    const detailSummary = computed(() => {
+      const margins = []; const costs = [];
+      detailMatrixData.value.forEach((g) => g.skus.forEach((s) => {
+        const pi = Number(s.editing ? s.priceInEdit : s.priceIn);
+        const po = Number(s.editing ? s.priceOutEdit : s.priceOut);
+        [computeYield(pi, s.costIn), computeYield(po, s.costOut)].forEach((value) => {
+          if (Number.isFinite(value)) margins.push(value);
+        });
+        costs.push(Number(s.costIn));
+      }));
+      const avgM = margins.length
+        ? (margins.reduce((sum, value) => sum + value, 0) / margins.length * 100).toFixed(1)
+        : '0.0';
+      return { avgMargin: avgM, minCost: costs.length ? Math.min(...costs).toFixed(4) : '0.0000' };
+    });
+
+    /* 工作流 */
+    const WF = {
+      online: { label: '已上架', badge: 'badge badge-green' },
+      draft: { label: '草稿', badge: 'badge badge-muted' },
+      pending_publish: { label: '待发布', badge: 'badge badge-blue' },
+      pending_update: { label: '待更新', badge: 'badge badge-blue' },
+      update_draft: { label: '更新草稿', badge: 'badge badge-yellow' },
+      offline: { label: '已下架', badge: 'badge badge-muted' }
+    };
+    function wfLabel(status) { return WF[status]?.label || status; }
+    function wfBadge(status) { return WF[status]?.badge || 'badge badge-muted'; }
+
+    /* 格式化 */
+    function money(value) { return Number(value).toFixed(4); }
+    function pct(value) {
+      if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-';
+      return `${(Number(value) * 100).toFixed(1)}%`;
+    }
+    function credit(value) {
+      const rate = Number(summary.point_conversion?.points_per_currency_unit || 0);
+      if (!rate || !Number.isFinite(Number(value))) return '-';
+      return (Number(value) * rate).toFixed(Number(summary.point_conversion?.decimal_places ?? 2));
+    }
+
+    function toggleTheme() {
+      isDark.value = !isDark.value;
+      const vars = isDark.value ? darkVars : lightVars;
+      Object.entries(vars).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
+      nextTick(() => lucide.createIcons());
+    }
+    function toggleLang() {
+      lang.value = lang.value === 'en' ? 'zh' : 'en';
+      nextTick(() => lucide.createIcons());
+    }
+
+    return {
+      isDark, lang, activeTab, t, tr, toggleTheme, toggleLang,
+      currentView, activeWorkspace, openWorkspace, searchQuery, statusFilter, priceDimension,
+      scenarioMode, scenarioLabel, scenarioBanner, setScenario,
+      effectiveRows, matrixRows, visibleChannels, priorityRows, priorityCount,
+      dashboardStats, dataHealth, dashboardMetrics, decisionDistribution, matrixMetrics,
+      exportCsv, refreshDashboard, scrollToQueue, notifyComingSoon,
+      resetMatrixFilters, optionFor, isBestOption, isCurrentOption, isOptionStale,
+      priceCellLabel, effectiveAction,
+      optionMoney, optionFreshness, recommendedChannelName, listingChannelName,
+      listingMoney, yieldForRow, decisionLabel, decisionTone, eventLabel, eventToneClass, eventTime,
+      selectedModelData, selectedCurrency, detailMatrixData, supplyOnlyRows, detailSummary,
+      currentMarketRefData, displayMinIn, displayMaxIn, displayMinOut, displayMaxOut,
+      getMarkerPos, getMarkerColor, isMinPrice, marketChip, markerPrice,
+      toggleAllChannels, goToDetail, goToList,
+      runSuggestedAction, actionLabel, actionIcon,
+      startEdit, saveDraft, submitEdit, cancelEdit, confirmPublish, withdraw, offline, switchChannel,
+      marginFor, marginForObj, marginBadge, marginText, pct, money, credit,
+      publishOpen, publishTarget, publishForm, recommendPrice, openPublish, publishDraft, publishSubmit,
+      compareOpen, compareRow, compareOption, compareOffers, lowestComparePrice, compareSavings,
+      openCompare, applyCompareRecommendation, openPriceChainDetail,
+      historyOpen, historySku, historyRows, openHistory,
+      wfLabel, wfBadge, summary
+    };
+  }
+});
+
+for (const [key, comp] of Object.entries(ElementPlusIconsVue)) { app.component(key, comp); }
+app.use(ElementPlus);
+app.mount('#app');
+lucide.createIcons();
+</script>
+</body>
+</html>
