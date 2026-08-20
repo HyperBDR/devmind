@@ -242,6 +242,27 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertEqual(sheet.row_dimensions[34].height, 24)
         rendered.close()
 
+    def test_preview_rows_grow_for_wrapped_descriptions(self):
+        template = ensure_default_template()
+        content = render_quotation_xlsx(
+            template,
+            {
+                "items": [
+                    {
+                        "type": "Software",
+                        "description": (
+                            "License Type: Hypermotion license with a valid "
+                            "period of 3 months"
+                        ),
+                    }
+                ]
+            },
+        )
+
+        rendered = load_workbook(io.BytesIO(content))
+        self.assertGreater(rendered["Quotation"].row_dimensions[21].height, 24)
+        rendered.close()
+
     def test_preview_uses_the_managed_logo(self):
         template = ensure_default_template()
 

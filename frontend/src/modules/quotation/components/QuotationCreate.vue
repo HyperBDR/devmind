@@ -101,6 +101,7 @@ const props = withDefaults(
     services: Service[]
     discounts: DiscountOption[]
     quotations: Quotation[]
+    existingQuoteNumbers?: string[]
     historyQuotations?: Quotation[]
     lineItemHistory?: LineItemDescriptionHistory[]
     historyHasMore?: boolean
@@ -121,6 +122,7 @@ const props = withDefaults(
   }>(),
   {
     historyQuotations: undefined,
+    existingQuoteNumbers: () => [],
     lineItemHistory: () => [],
     historyHasMore: false,
     historyLoading: false,
@@ -240,7 +242,11 @@ const paymentTermSelectOptions = PAYMENT_TERM_OPTIONS.map((option) => ({
   label: option.label,
 }))
 
-const existingQuoteNumbers = computed(() => props.quotations.map((quote) => quote.quoteNo))
+const existingQuoteNumbers = computed(() =>
+  props.existingQuoteNumbers.length > 0
+    ? props.existingQuoteNumbers
+    : props.quotations.map((quote) => quote.quoteNo),
+)
 const quoteNoIsUnique = computed(() =>
   isQuotationNumberUnique(quoteNo.value, props.quotations, props.editingQuote?.id),
 )

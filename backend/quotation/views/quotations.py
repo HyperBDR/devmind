@@ -299,10 +299,17 @@ class QuotationFormContextView(APIView):
             build_line_item_description_history(page_queryset),
             many=True,
         ).data
+        quote_numbers = list(
+            filter_accessible_quotations(
+                request.user,
+                Quotation.objects.all(),
+            ).values_list("quote_no", flat=True)
+        )
         return Response(
             {
                 "items": items,
                 "line_item_history": line_item_history,
+                "quote_numbers": quote_numbers,
                 "page": page,
                 "page_size": page_size,
                 "total": total,
