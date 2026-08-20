@@ -108,7 +108,7 @@ class QuotationListAPITests(TestCase):
         )
         self._quote(
             2,
-            owner="other@example.com",
+            owner="owner@example.com",
             source_type=QuotationSourceType.MANUAL,
         )
 
@@ -126,6 +126,10 @@ class QuotationListAPITests(TestCase):
                 "currency": "USD",
             }
         ]
+        assert set(response.data["quote_numbers"]) == {
+            imported.quote_no,
+            "Q-LIST-002",
+        }
 
     def test_default_page_size_and_stable_second_page(self):
         quotes = self._create_quotes(12)
