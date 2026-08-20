@@ -799,9 +799,7 @@
         },
         "quality": {
           "title": "数据质量",
-          "questions": [
-            "最近采集失败或数据异常的价格源有哪些？"
-          ]
+          "questions": ["最近采集失败或数据异常的价格源有哪些？"]
         }
       }
     },
@@ -842,8 +840,8 @@
         "description": "查看价格源采集新鲜度、成功率和失败风险。"
       },
       "modelWorkbench": {
-        "label": "模型工作台",
-        "description": "按模型汇总标准价、渠道价、挂售与对账记录。"
+        "label": "渠道与挂售详情",
+        "description": "按模型穿透采购渠道、合同价格、挂售与对账链路。"
       },
       "priceChanges": {
         "label": "价格变化",
@@ -1595,8 +1593,8 @@
       },
       "reconciliationRecords": "对账记录",
       "standardPrices": "标准价格项",
-      "subtitle": "集中查看单个模型的官方价格、渠道采购、挂售状态和对账记录。",
-      "title": "模型详情工作台",
+      "subtitle": "集中穿透单个模型的采购渠道、合同价格、挂售状态和对账记录。",
+      "title": "渠道与挂售详情",
       "workflowStatus": {
         "deleted": "已删除",
         "draft": "草稿",
@@ -1833,18 +1831,58 @@
       "websitePrefix": "厂商官网 / 接入地址：{website}"
     },
     "channelPriceMatrixPanel": {
+      "actions": {
+        "refreshPrices": "检查并刷新价格",
+        "viewDetail": "查看渠道与挂售详情"
+      },
       "columns": {
         "coverage": "覆盖",
+        "decision": "决策建议",
         "lowestChannel": "最低价渠道"
       },
-      "empty": "当前筛选条件下没有模型。",
+      "context": {
+        "normalized": "已按合同汇率换算",
+        "platform": "挂售平台"
+      },
+      "coverageSummary": "{covered} / {total} 个渠道",
+      "drawer": {
+        "contractFx": "合同汇率",
+        "currentChannel": "当前挂售渠道",
+        "effectiveWindow": "生效窗口",
+        "eyebrow": "渠道比价详情",
+        "flatRule": "固定价格",
+        "freshness": "价格新鲜度",
+        "lowestPrice": "当前最低价",
+        "normalizedHint": "报价已按合同汇率、结算比例与当前生效价格版本换算；价格过期时必须先刷新再做商业决策。",
+        "openEnded": "长期有效",
+        "pricingRule": "价格规则",
+        "savings": "预计节省",
+        "settlementRatio": "结算比例",
+        "viewDetail": "查看渠道与挂售详情"
+      },
+      "empty": "调整筛选条件，或先为模型配置价格源与采购渠道。",
+      "emptyTitle": "没有匹配的渠道价格",
       "filters": {
         "all": "全部状态",
+        "coverage": "覆盖状态",
+        "dimension": "计费维度",
         "missing": "缺渠道价",
         "ready": "多渠道覆盖",
-        "single": "单渠道覆盖"
+        "search": "搜索模型",
+        "single": "单渠道覆盖",
+        "stale": "价格待刷新"
+      },
+      "freshness": {
+        "days": "{count} 天前",
+        "hours": "{count} 小时前",
+        "minutes": "{count} 分钟前",
+        "unknown": "更新时间未知"
       },
       "metrics": {
+        "average": {
+          "hint": "建议至少 2 个可用渠道",
+          "label": "平均渠道覆盖"
+        },
         "covered": {
           "hint": "覆盖率 {percent}%",
           "label": "有渠道价"
@@ -1857,17 +1895,35 @@
           "hint": "只有一个采购渠道，缺少备选",
           "label": "单渠道风险"
         },
+        "opportunities": {
+          "hint": "当前挂售未使用最低渠道",
+          "label": "可切换机会"
+        },
+        "stale": {
+          "hint": "超过 24 小时，建议先采集再决策",
+          "label": "待刷新价格"
+        },
         "total": {
-          "hint": "参与渠道比价的活跃模型",
-          "label": "模型总数"
+          "hint": "当前运营范围内的模型",
+          "label": "参与比价模型"
         }
       },
+      "priceCellLabel": "{model}，{channel}，{dimension} {price}",
+      "resetFilters": "重置筛选",
       "searchPlaceholder": "搜索模型或厂商",
       "status": {
-        "missing": "缺渠道价"
+        "missing": "缺渠道价",
+        "stale": "价格待刷新"
       },
-      "subtitle": "按模型比较各渠道采购价格、最低价命中和覆盖缺口。",
-      "title": "渠道横向比价矩阵",
+      "subtitle": "按 Input / Output 比较有效采购价，并核验合同版本、当前挂售渠道和价格时效。",
+      "tableTitle": "有效采购价矩阵",
+      "tags": {
+        "current": "当前挂售",
+        "lowest": "当前最低",
+        "recommended": "推荐",
+        "stale": "价格过期"
+      },
+      "title": "渠道比价矩阵",
       "summary": {
         "inOut": "进 {input} / 出 {output}"
       }

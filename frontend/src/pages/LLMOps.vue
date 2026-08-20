@@ -165,6 +165,10 @@
               v-else-if="activeSection === 'channelMatrix'"
               :summary="summary"
               :channels="channels"
+              :channel-offerings="channelOfferings"
+              :channel-price-versions="channelPriceVersions"
+              @navigate-to-detail="openChannelListingDetail"
+              @navigate-to-section="onNavigateToSection"
             />
 
             <ModelWorkbenchPanel
@@ -567,7 +571,16 @@ function onNavigateToSection(target) {
     operationTargetModelId.value = target.modelId
     operationTargetSection.value = section
   }
+  if (target && typeof target === 'object' && target.sourceId) {
+    operationTargetSourceId.value = target.sourceId
+  }
   activeSection.value = section
+}
+
+function openChannelListingDetail(modelId) {
+  operationTargetModelId.value = modelId || null
+  operationTargetSection.value = 'modelWorkbench'
+  activeSection.value = 'modelWorkbench'
 }
 
 function onInlineWorkspaceChange(payload) {

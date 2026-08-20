@@ -207,6 +207,15 @@ const emptyMessage = computed(() => {
 })
 
 function handleRowClick(row) {
+  if (row.decision_action === 'refresh_prices') {
+    emit('navigateToSection', {
+      section: row.action_price_source_id
+        ? 'providers'
+        : 'collectionHealth',
+      sourceId: row.action_price_source_id || null
+    })
+    return
+  }
   if (!isOperationalRow(row)) {
     emit('navigateToSection', {
       modelId: row.model_id,
@@ -338,6 +347,7 @@ function formatPrice(value, currency) {
 }
 
 const DECISION_ACTION_LABELS = {
+  refresh_prices: 'llmOps.channelPriceMatrixPanel.actions.refreshPrices',
   configure_channel: 'llmOps.decision.action.configureChannel',
   configure_exchange_rate: 'llmOps.decision.action.configureExchange',
   configure_platform_fee: 'llmOps.decision.action.configurePlatformFee',
