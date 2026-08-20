@@ -676,6 +676,8 @@
         "contactPerson": "Contact Person",
         "contactPersonPlaceholder": "请输入联系人姓名",
         "contactPersonHelper": "默认使用当前登录账号，可按需修改",
+        "issuerContactTitle": "联系人职务",
+        "issuerContactTitlePlaceholder": "例如：销售经理",
         "issuerEmail": "Email",
         "issuerEmailPlaceholder": "请输入联系人邮箱",
         "projectName": "项目名称",

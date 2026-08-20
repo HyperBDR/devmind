@@ -6,6 +6,7 @@ import fcntl
 import os
 import signal
 import subprocess
+import textwrap
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import copy
@@ -48,6 +49,16 @@ DEFAULT_TEMPLATE_NAME = "DevMind managed standard quotation"
 DEFAULT_TEMPLATE_VERSION = 2
 CURRENT_RENDERER_VERSION = "quotation-preview-xlsx-v5"
 DEFAULT_WORKSHEET = "Quotation"
+
+
+def estimate_wrapped_lines(value: str, *, width: int) -> int:
+    """Estimate rendered lines for wrapped text in a spreadsheet cell."""
+    safe_width = max(1, width)
+    lines = value.splitlines() or [""]
+    return sum(
+        max(1, len(textwrap.wrap(line, width=safe_width)) if line else 1)
+        for line in lines
+    )
 REQUIRED_TEMPLATE_NAMES = {
     "billing_company",
     "billing_contact",
@@ -789,6 +800,13 @@ def render_quotation_xlsx(
         result = snapshot.get(key)
         return fallback if result in (None, "") else result
 
+    is_imported_quotation = snapshot.get("source_type") == "document_import"
+
+    def issuer_value(key: str, fallback=""):
+        if is_imported_quotation:
+            return value(key)
+        return value(key, fallback)
+
     def number_text(value_):
         if value_ in (None, ""):
             return ""
@@ -932,9 +950,17 @@ def render_quotation_xlsx(
         alignment=Alignment(horizontal="center", vertical="center"),
     )
     billing_details = (
-        (12, "Company :", value("billing_company", value("client_company"))),
-        (13, "Name :", value("billing_contact", value("contact_person"))),
-        (14, "Email :", value("billing_email", value("email"))),
+        (
+            12,
+            "Company :",
+            issuer_value("billing_company", value("client_company")),
+        ),
+        (
+            13,
+            "Name :",
+            issuer_value("billing_contact", value("contact_person")),
+        ),
+        (14, "Email :", issuer_value("billing_email", value("email"))),
     )
     for row, label, content in billing_details:
         merged(
@@ -955,10 +981,10 @@ def render_quotation_xlsx(
         "Currency",
     )
     meta_values = [
-        value("issuer_contact_name", value("contact_person")),
-        value("issuer_contact_email", value("email")),
-        value("project_name", "-"),
-        value("payment_terms", "-"),
+        issuer_value("issuer_contact_name", value("contact_person")),
+        issuer_value("issuer_contact_email", value("email")),
+        issuer_value("project_name", "-"),
+        issuer_value("payment_terms", "-"),
         value("currency"),
     ]
     meta_positions = ((1, 1), (2, 2), (3, 5), (6, 6), (7, 7))
@@ -1157,9 +1183,16 @@ def render_quotation_xlsx(
         fill=muted_fill,
         alignment=Alignment(vertical="top", wrap_text=True),
     )
-    notes_lines = str(value("remarks_disclaimer")).count("\n") + 1
+    notes_lines = estimate_wrapped_lines(
+        str(value("remarks_disclaimer")),
+        width=100,
+    )
     sheet.row_dimensions[row].height = max(30, notes_lines * 12)
     row += 1
+    for _ in range(2):
+        merged(row, 1, 7, "")
+        sheet.row_dimensions[row].height = 12
+        row += 1
     merged(
         row,
         1,
@@ -1207,7 +1240,8 @@ def render_quotation_xlsx(
         row,
         5,
         7,
-        f"Name : {value('issuer_contact_name', value('contact_person'))}",
+        "Name : "
+        f"{issuer_value('issuer_contact_name', value('contact_person'))}",
     )
     row += 1
     merged(row, 1, 3, "Title :")
@@ -1215,7 +1249,7 @@ def render_quotation_xlsx(
         row,
         5,
         7,
-        f"Title : {value('issuer_contact_title', 'Sales Manager')}",
+        f"Title : {issuer_value('issuer_contact_title', 'Sales Manager')}",
     )
     row += 1
     merged(row, 1, 3, "Email :")
@@ -1223,7 +1257,7 @@ def render_quotation_xlsx(
         row,
         5,
         7,
-        f"Email : {value('issuer_contact_email', value('email'))}",
+        f"Email : {issuer_value('issuer_contact_email', value('email'))}",
     )
     sheet.print_area = f"A1:G{row}"
     sheet.page_setup.orientation = "portrait"

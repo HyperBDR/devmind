@@ -503,24 +503,29 @@ def complete_document_parse(
         return _not_quotation_result(parsed)
 
     stem = Path(asset.file_name).stem
-    quote.quote_no = quote.quote_no or _safe_source_number(asset)
-    quote.project_name = quote.project_name or stem[:255]
-    quote.payment_terms = quote.payment_terms or "CIA"
-    quote.client_company = quote.client_company or stem[:255]
-    quote.contact_person = quote.contact_person or ""
-    quote.email = quote.email or ""
-    quote.billing_company = quote.billing_company or quote.client_company
-    quote.billing_contact = quote.billing_contact or quote.contact_person
-    quote.billing_email = quote.billing_email or quote.email
-    quote.quote_date = quote.quote_date or source_date
-    quote.expire_date = quote.expire_date or (
-        quote.quote_date + timedelta(days=30)
-    )
-    if quote.expire_date < quote.quote_date:
-        quote.expire_date = quote.quote_date + timedelta(days=30)
+    is_imported_document = getattr(asset, "source", "") in {
+        "feishu",
+        "feishu_upload",
+    }
+    if not is_imported_document:
+        quote.quote_no = quote.quote_no or _safe_source_number(asset)
+        quote.project_name = quote.project_name or stem[:255]
+        quote.payment_terms = quote.payment_terms or "CIA"
+        quote.client_company = quote.client_company or stem[:255]
+        quote.contact_person = quote.contact_person or ""
+        quote.email = quote.email or ""
+        quote.billing_company = quote.billing_company or quote.client_company
+        quote.billing_contact = quote.billing_contact or quote.contact_person
+        quote.billing_email = quote.billing_email or quote.email
+        quote.quote_date = quote.quote_date or source_date
+        quote.expire_date = quote.expire_date or (
+            quote.quote_date + timedelta(days=30)
+        )
+        if quote.expire_date < quote.quote_date:
+            quote.expire_date = quote.quote_date + timedelta(days=30)
     missing_issuer_name = not quote.issuer_contact_name
     missing_issuer_email = not quote.issuer_contact_email
-    if not quote.items:
+    if not quote.items and not is_imported_document:
         quote.items = [
             ParsedQuotationItem(
                 line_no=1,

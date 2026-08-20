@@ -159,7 +159,7 @@ def sync_export_asset(export_job_id: str, asset_id: str) -> dict:
     with transaction.atomic():
         Quotation.objects.select_for_update().get(pk=quotation_id)
         job = (
-            ExportJob.objects.select_for_update()
+            ExportJob.objects.select_for_update(of=("self",))
             .select_related("requested_by")
             .get(pk=export_job_id)
         )

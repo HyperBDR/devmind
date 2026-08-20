@@ -94,6 +94,7 @@ const summaryLoading = ref(true)
 const summaryError = ref(false)
 const analyticsLoading = ref(true)
 const analyticsError = ref(false)
+const selectedQuoteBreakdownIndex = ref<number | null>(null)
 
 function normalizeDashboardCurrency(currency: string): string {
   const code = String(currency || '').trim().toUpperCase()
@@ -229,6 +230,11 @@ const quoteBreakdownChartRows = computed(() => {
   return rows
 })
 
+const selectedQuoteBreakdownRow = computed(() => {
+  const index = selectedQuoteBreakdownIndex.value
+  return index == null ? null : quoteBreakdownChartRows.value[index] || null
+})
+
 const quoteBreakdownRotation = computed(() => {
   const total = quoteBreakdownChartRows.value.reduce(
     (sum, row) => sum + row.value,
@@ -265,6 +271,23 @@ function arrangePieLineLabels(
     sorted[index].labelY = Math.min(sorted[index].labelY, ceiling)
   }
   return sorted
+}
+
+function truncateCanvasText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number
+): string {
+  if (ctx.measureText(text).width <= maxWidth) return text
+  const ellipsis = '...'
+  let next = text
+  while (
+    next.length > 0 &&
+    ctx.measureText(`${next}${ellipsis}`).width > maxWidth
+  ) {
+    next = next.slice(0, -1)
+  }
+  return `${next}${ellipsis}`
 }
 
 const quotePieLeaderLabelPlugin: Plugin<'pie'> = {
@@ -324,7 +347,11 @@ const quotePieLeaderLabelPlugin: Plugin<'pie'> = {
       ctx.font = '600 12px ui-monospace, SFMono-Regular, Menlo, monospace'
       ctx.textAlign = entry.side === 1 ? 'left' : 'right'
       ctx.textBaseline = 'bottom'
-      ctx.fillText(row.quoteNo, textX, entry.labelY - 2, maxTextWidth)
+      ctx.fillText(
+        truncateCanvasText(ctx, row.quoteNo, maxTextWidth),
+        textX,
+        entry.labelY - 2
+      )
       ctx.fillStyle = '#64748b'
       ctx.font = '11px ui-sans-serif, system-ui, sans-serif'
       ctx.textBaseline = 'top'
@@ -340,6 +367,9 @@ const quoteBreakdownPieData = computed<ChartData<'pie'>>(() => ({
     {
       data: quoteBreakdownChartRows.value.map((row) => row.value),
       backgroundColor: quoteBreakdownChartRows.value.map((row) => row.color),
+      offset: quoteBreakdownChartRows.value.map((_, index) =>
+        selectedQuoteBreakdownIndex.value === index ? 8 : 0
+      ),
       borderColor: '#ffffff',
       borderWidth: 2,
       radius: '92%',
@@ -386,6 +416,10 @@ const quoteBreakdownPieOptions = computed<ChartOptions<'pie'>>(() => ({
   onHover: (_event, elements, chart) => {
     const canvas = chart.canvas
     canvas.style.cursor = elements.length ? 'pointer' : 'default'
+  },
+  onClick: (_event, elements, chart) => {
+    selectedQuoteBreakdownIndex.value = elements[0]?.index ?? null
+    chart.update()
   }
 }))
 
@@ -612,6 +646,7 @@ async function loadRecentQuotations() {
 watch(dashboardCurrency, () => {
   void loadDashboardSummary()
   void loadDashboardAnalytics()
+  selectedQuoteBreakdownIndex.value = null
 })
 
 watch(
@@ -627,6 +662,7 @@ watch(
 )
 
 watch([selectedDateFrom, selectedDateTo], () => {
+  selectedQuoteBreakdownIndex.value = null
   if (
     selectedDateFrom.value
     && selectedDateTo.value
@@ -934,6 +970,27 @@ onMounted(async () => {
                   :options="quoteBreakdownPieOptions"
                   :plugins="[quotePieLeaderLabelPlugin]"
                 />
+                <div
+                  v-if="selectedQuoteBreakdownRow"
+                  id="quote-breakdown-selected-card"
+                  class="absolute right-2 top-2 z-10 w-[min(26rem,calc(100%-1rem))] rounded-xl border border-slate-200 bg-white p-4 text-left shadow-lg"
+                  @click.stop
+                >
+                  <button
+                    type="button"
+                    class="absolute right-3 top-2 text-lg leading-none text-slate-400 hover:text-slate-700"
+                    :aria-label="t('quotation.pages.list.drawerClose')"
+                    @click="selectedQuoteBreakdownIndex = null"
+                  >
+                    ×
+                  </button>
+                  <div class="pr-6 text-sm font-semibold leading-5 text-slate-800 break-words">
+                    {{ selectedQuoteBreakdownRow.quoteNo }}
+                  </div>
+                  <div class="mt-2 text-sm font-medium text-slate-500">
+                    {{ selectedQuoteBreakdownRow.amountLabel }}
+                  </div>
+                </div>
               </div>
             </div>
           </div>

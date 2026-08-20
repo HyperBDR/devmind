@@ -502,6 +502,12 @@ const headerCellClass =
             {{ model.remarksDisclaimer }}
           </td>
         </tr>
+        <tr class="h-3">
+          <td colspan="7" class="px-1.5 py-1 align-middle" />
+        </tr>
+        <tr class="h-3">
+          <td colspan="7" class="px-1.5 py-1 align-middle" />
+        </tr>
         <tr>
           <td colspan="7" class="px-1.5 py-1 pt-3 align-middle">
             To indicate Customer acceptance of this quotation, please sign below and return one copy of this

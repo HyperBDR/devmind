@@ -1557,7 +1557,7 @@ const itemErrorEntries = computed(() =>
               <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step3Title') }}</h3>
             </div>
 
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div>
                 <label class="mb-1 block font-semibold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.contactPerson') }}
@@ -1587,6 +1587,18 @@ const itemErrorEntries = computed(() =>
 
               <div>
                 <label class="mb-1 block font-semibold text-dm-text-tertiary">
+                  {{ t('quotation.pages.create.issuerContactTitle') }}
+                </label>
+                <input
+                  v-model="issuerContactTitle"
+                  type="text"
+                  :placeholder="t('quotation.pages.create.issuerContactTitlePlaceholder')"
+                  class="w-full rounded-lg border border-dm-border p-2 focus:border-blue-500 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label class="mb-1 block font-semibold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.issuerEmail') }}
                   <span class="text-red-500">*</span>
                 </label>
@@ -1602,7 +1614,7 @@ const itemErrorEntries = computed(() =>
                 </p>
               </div>
 
-              <div class="sm:col-span-2">
+              <div class="sm:col-span-3">
                 <label class="mb-1 block font-semibold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.projectName') }}
                   <span class="text-red-500">*</span>

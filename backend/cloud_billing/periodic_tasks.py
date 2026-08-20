@@ -31,9 +31,9 @@ def register_periodic_tasks():
         enabled=True,
     )
 
-    # Daily cost report (default 9:00 AM, configurable)
-    report_hour = os.getenv("CLOUD_BILLING_REPORT_HOUR", "9")
-    report_minute = os.getenv("CLOUD_BILLING_REPORT_MINUTE", "0")
+    # Daily cost report (default 5:30 PM, configurable)
+    report_hour = os.getenv("CLOUD_BILLING_REPORT_HOUR", "17")
+    report_minute = os.getenv("CLOUD_BILLING_REPORT_MINUTE", "30")
 
     TASK_REGISTRY.add(
         name="cloud_billing_daily_report",

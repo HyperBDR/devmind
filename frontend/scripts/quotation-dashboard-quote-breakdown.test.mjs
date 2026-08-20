@@ -209,6 +209,25 @@ test('dashboard pie labels use balanced reference-style leader lines', () => {
   assert.match(dashboardSource, /:plugins="\[quotePieLeaderLabelPlugin\]"/)
 })
 
+test('dashboard reveals the full quote after clicking a pie slice', () => {
+  assert.match(dashboardSource, /selectedQuoteBreakdownIndex/)
+  assert.match(
+    dashboardSource,
+    /onClick:\s*\(_event, elements, chart\) =>/
+  )
+  assert.match(
+    dashboardSource,
+    /selectedQuoteBreakdownIndex\.value = elements\[0\]\?\.index \?\? null/
+  )
+  assert.match(dashboardSource, /selectedQuoteBreakdownRow/)
+  assert.match(dashboardSource, /quote-breakdown-selected-card/)
+  assert.match(
+    dashboardSource,
+    /v-if="selectedQuoteBreakdownRow"[\s\S]*selectedQuoteBreakdownRow\.quoteNo/
+  )
+  assert.match(dashboardSource, /@click="selectedQuoteBreakdownIndex = null"/)
+})
+
 test('dashboard month card shows count delta against previous month', () => {
   assert.match(dashboardSource, /monthQuoteDeltaLabel/)
   assert.match(dashboardSource, /monthQuoteDeltaClass/)

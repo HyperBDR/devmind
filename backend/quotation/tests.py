@@ -7,7 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -16,6 +16,7 @@ from quotation.models import (
     DocumentType,
     FeishuConnection,
     Quotation,
+    QuotationUploadPermission,
     QuoteStatus,
 )
 from quotation.serializers import QuotationSerializer
@@ -340,6 +341,7 @@ class QuotationFeishuMetadataTests(TestCase):
         assert data["feishu_pdf_path"] == "Quote-Q-FEISHU-004.pdf"
 
 
+@override_settings(QUOTATION_FEISHU_ARCHIVE_FOLDER_TOKEN="test-folder")
 class FeishuImportMetadataTests(TestCase):
     def test_import_preserves_original_feishu_file_url(self):
         user = User.objects.create_user(
@@ -421,6 +423,7 @@ class FeishuImportMetadataTests(TestCase):
         ).exists()
 
 
+@override_settings(QUOTATION_FEISHU_ARCHIVE_FOLDER_TOKEN="test-folder")
 class FeishuUploadReuseTests(TestCase):
     def test_upload_reuses_same_named_file_in_target_folder(self):
         user = User.objects.create_user(
@@ -433,6 +436,12 @@ class FeishuUploadReuseTests(TestCase):
             user_email=user.email,
             access_token="user_access_token",
             expires_at=timezone.now() + timedelta(hours=1),
+        )
+        QuotationUploadPermission.objects.create(
+            user=user,
+            folder_token="test-folder",
+            folder_name="Test Folder",
+            granted_by=user,
         )
         quotation = Quotation.objects.create(
             quote_no="Q-FEISHU-002",
@@ -596,6 +605,12 @@ class FeishuUploadReuseTests(TestCase):
             access_token="user_access_token",
             expires_at=timezone.now() + timedelta(hours=1),
         )
+        QuotationUploadPermission.objects.create(
+            user=user,
+            folder_token="test-folder",
+            folder_name="Test Folder",
+            granted_by=user,
+        )
         quotation = Quotation.objects.create(
             quote_no="Q-FEISHU-005",
             status=QuoteStatus.GENERATED,
@@ -693,6 +708,12 @@ class FeishuUploadReuseTests(TestCase):
             access_token="user_access_token",
             expires_at=timezone.now() + timedelta(hours=1),
         )
+        QuotationUploadPermission.objects.create(
+            user=user,
+            folder_token="test-folder",
+            folder_name="Test Folder",
+            granted_by=user,
+        )
         quotation = Quotation.objects.create(
             quote_no="Q-FEISHU-003",
             status=QuoteStatus.GENERATED,
@@ -780,6 +801,7 @@ class FeishuUploadReuseTests(TestCase):
         ).exists()
 
 
+@override_settings(QUOTATION_FEISHU_ARCHIVE_FOLDER_TOKEN="test-folder")
 class FeishuDriveTreeTests(TestCase):
     def test_drive_tree_keeps_accessible_shared_nested_folders(self):
         user = User.objects.create_user(
@@ -1082,6 +1104,7 @@ class FeishuDriveTreeTests(TestCase):
         ]
 
 
+@override_settings(QUOTATION_FEISHU_ARCHIVE_FOLDER_TOKEN="test-folder")
 class FeishuFileAccessTests(TestCase):
     def test_access_clears_missing_file_links(self):
         user = User.objects.create_user(

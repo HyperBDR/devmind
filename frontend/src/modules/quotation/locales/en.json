@@ -676,6 +676,8 @@
         "contactPerson": "Prepared by",
         "contactPersonPlaceholder": "Sales contact name",
         "contactPersonHelper": "Defaults to you; change if needed",
+        "issuerContactTitle": "Contact title",
+        "issuerContactTitlePlaceholder": "e.g. Sales Manager",
         "issuerEmail": "Email",
         "issuerEmailPlaceholder": "Contact email",
         "projectName": "Project name",
