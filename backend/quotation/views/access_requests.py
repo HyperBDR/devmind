@@ -217,7 +217,7 @@ class QuotationAccessRequestDecisionView(APIView):
             raise ValidationError({"review_note": "Review note is too long."})
         with transaction.atomic():
             access_request = (
-                QuotationAccessRequest.objects.select_for_update()
+                QuotationAccessRequest.objects.select_for_update(of=("self",))
                 .select_related(
                     "applicant",
                     "document",

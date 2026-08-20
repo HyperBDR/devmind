@@ -190,6 +190,7 @@ const quotationListTotalPages = ref(0)
 const quotationListProductLines = ref<string[]>([])
 const quotationListCurrencies = ref<string[]>([])
 const activeQuote = ref<Quotation | null>(null)
+const activeQuoteLoading = ref(false)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
@@ -391,6 +392,7 @@ async function refreshQuotations(
 }
 
 async function loadActiveQuote(id: string) {
+  activeQuoteLoading.value = true
   try {
     activeQuote.value = await getQuotationApi(id)
   } catch (error) {
@@ -399,6 +401,8 @@ async function loadActiveQuote(id: string) {
       error instanceof Error ? error.message : t('quotation.app.loadFailed'),
       'error',
     )
+  } finally {
+    activeQuoteLoading.value = false
   }
 }
 
@@ -632,15 +636,14 @@ async function handleDeleteQuote(id: string) {
 }
 
 async function handleViewQuoteDetails(id: string) {
-  await loadActiveQuote(id)
+  activeQuote.value = null
+  selectedQuotationId.value = id
+  currentTab.value = 'details'
   if (auth.embeddedAuth) {
-    currentTab.value = 'details'
-    selectedQuotationId.value = id
     router.push(`/quotation/details/${id}`)
     return
   }
-  selectedQuotationId.value = id
-  currentTab.value = 'details'
+  void loadActiveQuote(id)
 }
 
 function handleOpenDetailDrawer(id: string) {
@@ -1186,6 +1189,12 @@ function reloadPage() {
           @back="handleBackToList"
           @update-quote-status="handleUpdateQuote"
           @edit-quote="handleEditQuote"
+        />
+
+        <div
+          v-else-if="currentTab === 'details' && activeQuoteLoading"
+          class="flex min-h-[420px] items-center justify-center rounded-xl bg-white"
+          aria-busy="true"
         />
 
         <ProductServiceManager

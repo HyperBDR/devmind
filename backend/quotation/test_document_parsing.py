@@ -401,6 +401,79 @@ class ExcelParserResourceLimitTests(SimpleTestCase):
 
 
 class StandardQuotationExcelParserTests(TestCase):
+    def test_parses_common_excel_template_variants(self):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Sheet1"
+        rows = {
+            1: ("JIXUN TECHNOLOGIES DE MEXICO",),
+            2: ("Quotation",),
+            3: ("Date :", "22-Jan-26"),
+            4: ("Quote No. :", "MX202602"),
+            5: ("Quote Valid Till :", "31-Mar-26"),
+            7: ("Ship to",),
+            8: ("Company :", "Alicloud"),
+            16: (
+                "Contact Person",
+                "Email",
+                "Project",
+                "Payment Terms",
+                "Currency",
+            ),
+            17: (
+                "Flora Yang",
+                "flora.yang@example.com",
+                "Alicloud Migration",
+                "CIA",
+                "USD",
+            ),
+            19: ("Software Subscription",),
+            20: (
+                "Item",
+                "Description",
+                "Qty",
+                "List Price",
+                "Discount (%)",
+                "Discounted Price",
+                "Extended Price",
+            ),
+            21: (
+                1,
+                "VMware to Alicloud Migration",
+                1,
+                32000,
+                "0%",
+                32000,
+                32000,
+            ),
+            23: ("Software Subscription Subtotal:", 32000),
+            25: ("Other",),
+            26: (
+                "Item",
+                "Description",
+                "Qty",
+                "List Price",
+                "Discount (%)",
+                "Discounted Price",
+                "Extended Price",
+            ),
+            29: ("Total Price VAT Included", 37120),
+        }
+        for row_number, values in rows.items():
+            for column, value in enumerate(values, start=1):
+                sheet.cell(row_number, column, value)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "variant.xlsx"
+            workbook.save(path)
+            workbook.close()
+            parsed = parse_standard_quotation_excel(path)
+
+        self.assertEqual(parsed.quotation.issuer_contact_name, "Flora Yang")
+        self.assertEqual(parsed.quotation.project_name, "Alicloud Migration")
+        self.assertEqual(len(parsed.quotation.items), 1)
+        self.assertEqual(parsed.quotation.items[0].extended_price, 32000)
+
     def test_parses_standard_export_and_validates_totals(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "quotation.xlsx"
@@ -1149,6 +1222,10 @@ class DocumentParseEndpointTests(TestCase):
         self.assertEqual(parsed.quotation.billing_email, "")
         self.assertEqual(parsed.quotation.issuer_contact_name, "")
         self.assertEqual(parsed.quotation.issuer_contact_email, "")
+        self.assertEqual(parsed.quotation.project_name, "")
+        self.assertEqual(parsed.quotation.client_company, "")
+        self.assertEqual(parsed.quotation.payment_terms, "")
+        self.assertEqual(parsed.quotation.items, [])
 
     def test_inventory_excel_is_marked_not_quotation(self):
         write_document(
@@ -1381,7 +1458,7 @@ class DocumentParseEndpointTests(TestCase):
 
         self.assertTrue(reused)
         self.assertNotEqual(new_result.id, old_result.id)
-        self.assertEqual(new_result.parser_version, "2.8.0")
+        self.assertEqual(new_result.parser_version, "2.9.0")
         self.assertEqual(new_result.status, "confirmed")
         self.assertEqual(new_result.quotation_id, quotation.id)
         self.assertEqual(Quotation.objects.count(), 1)
@@ -1414,7 +1491,7 @@ class DocumentParseEndpointTests(TestCase):
         self.assertEqual(str(quotation.grand_total), "1080.00")
         self.assertEqual(quotation.items.count(), 2)
 
-    def test_amount_warning_still_creates_quotation_automatically(self):
+    def test_amount_mismatch_does_not_invent_an_imported_quotation(self):
         source = BytesIO(standard_quotation_workbook())
         workbook = load_workbook(source)
         workbook["Quotation"].cell(27, 7, 999)
@@ -1430,9 +1507,9 @@ class DocumentParseEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], "confirmed", response.data)
+        self.assertEqual(response.data["status"], "failed", response.data)
         self.assertTrue(response.data["validation_warnings_json"])
-        self.assertEqual(Quotation.objects.count(), 1)
+        self.assertEqual(Quotation.objects.count(), 0)
 
     def test_flexible_excel_rejects_inventory_without_quote_markers(self):
         workbook = Workbook()
@@ -1459,7 +1536,7 @@ class DocumentParseEndpointTests(TestCase):
         )
         self.assertFalse(Quotation.objects.exists())
 
-    def test_flexible_pdf_fallback_creates_quotation(self):
+    def test_flexible_pdf_fallback_keeps_unparsed_fields_empty(self):
         asset = self.create_pdf_asset()
         content = _minimal_pdf(
             [
@@ -1478,12 +1555,12 @@ class DocumentParseEndpointTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201, response.data)
-        self.assertEqual(response.data["status"], "confirmed", response.data)
-        quotation = Quotation.objects.get()
-        self.assertEqual(quotation.source_quote_no, "LEGACY-001")
-        self.assertEqual(quotation.issuer_contact_name, "")
-        self.assertEqual(quotation.issuer_contact_email, "")
-        self.assertEqual(str(quotation.grand_total), "1234.50")
+        self.assertEqual(response.data["status"], "failed", response.data)
+        self.assertFalse(Quotation.objects.exists())
+        normalized = response.data["normalized_json"]
+        self.assertEqual(normalized["project_name"], "")
+        self.assertEqual(normalized["client_company"], "")
+        self.assertEqual(normalized["items"], [])
         self.assertIn(
             "missing_salesperson",
             {

@@ -20,10 +20,12 @@ from quotation.services.export_renderer import (
     build_default_template_bytes,
     convert_xlsx_to_pdf,
     ensure_default_template,
+    estimate_wrapped_lines,
     register_template_version,
     render_quotation_xlsx,
     validate_template_bytes,
 )
+
 
 class QuotationTemplateRendererTests(TestCase):
     def setUp(self):
@@ -97,10 +99,61 @@ class QuotationTemplateRendererTests(TestCase):
         self.assertEqual(sheet["G37"].value, 330)
         self.assertEqual(sheet["E36"].value, "GST Amount (10%):")
         self.assertEqual(sheet["A40"].value, "Immutable snapshot")
+        notes_row = 40
+        acceptance_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str)
+            and cell.value.startswith("To indicate Customer acceptance")
+        )
+        self.assertEqual(acceptance_row - notes_row, 3)
+        self.assertTrue(
+            all(
+                sheet.cell(row, 1).value in (None, "")
+                for row in range(notes_row + 1, acceptance_row)
+            )
+        )
         merged_ranges = {str(item) for item in sheet.merged_cells.ranges}
         self.assertIn("A19:G19", merged_ranges)
         self.assertIn("E35:F35", merged_ranges)
-        self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$47")
+        self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$49")
+
+    def test_estimates_wrapped_lines_for_long_notes(self):
+        notes = "This is a long paragraph that must wrap across the merged notes area."
+
+        self.assertGreater(estimate_wrapped_lines(notes, width=24), 1)
+        self.assertEqual(estimate_wrapped_lines("first\nsecond", width=24), 2)
+
+    def test_long_notes_receive_height_for_wrapped_content(self):
+        template = ensure_default_template()
+        notes = (
+            "This quotation is based on the information currently provided and "
+            "collected during the pre-sales stage. "
+            "Any changes to scope, environment, requirements, or deployment "
+            "complexity may result in adjustments to pricing and delivery "
+            "timelines.\n\n"
+            "The Professional Services scope covers product-level installation, "
+            "configuration, and deployment activities only. The customer is "
+            "responsible for ensuring the target environment is fully prepared "
+            "prior to implementation."
+        )
+
+        content = render_quotation_xlsx(
+            template,
+            {"remarks_disclaimer": notes},
+        )
+
+        workbook = load_workbook(io.BytesIO(content), data_only=False)
+        sheet = workbook["Quotation"]
+        notes_row = next(
+            cell.row
+            for row in sheet.iter_rows()
+            for cell in row
+            if cell.value == "Additional Notes & Disclaimers:"
+        ) + 1
+        self.assertGreater(sheet.row_dimensions[notes_row].height, 30)
+        workbook.close()
 
     def test_default_template_upgrades_legacy_active_version(self):
         legacy = register_template_version(

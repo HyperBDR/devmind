@@ -125,11 +125,26 @@ function fitTemplateRows(items: PreviewLineItem[], count: number, type: Quotatio
   );
 }
 
-export function resolveIssuerSigner(quote: Quotation, currentUser?: PreviewUser): PreviewUser {
+export function resolveIssuerSigner(
+  quote: Quotation,
+  currentUser?: PreviewUser,
+): PreviewUser {
+  const isImportedQuotation = quote.sourceType === 'document_import';
+  const fallbackUser = isImportedQuotation ? undefined : currentUser;
+  const fallbackSalesperson = isImportedQuotation ? '' : quote.salesperson?.trim();
+  const fallbackName = isImportedQuotation
+    ? ''
+    : fallbackUser?.name || fallbackSalesperson || 'Alice Chen';
+  const fallbackTitle = isImportedQuotation
+    ? ''
+    : fallbackUser?.title || 'Sales Manager';
+  const fallbackEmail = isImportedQuotation
+    ? ''
+    : fallbackUser?.email || 'sales@oneprocloud.com';
   return {
-    name: quote.issuerContactName?.trim() || currentUser?.name || quote.salesperson?.trim() || 'Alice Chen',
-    title: quote.issuerContactTitle?.trim() || currentUser?.title || 'Sales Manager',
-    email: quote.issuerContactEmail?.trim() || currentUser?.email || 'sales@oneprocloud.com',
+    name: quote.issuerContactName?.trim() || fallbackName,
+    title: quote.issuerContactTitle?.trim() || fallbackTitle,
+    email: quote.issuerContactEmail?.trim() || fallbackEmail,
     role: currentUser?.role,
   };
 }

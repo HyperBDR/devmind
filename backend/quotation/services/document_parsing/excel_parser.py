@@ -33,7 +33,7 @@ from quotation.services.document_parsing.schemas import (
 )
 
 PARSER_NAME = "devmind_standard_excel"
-PARSER_VERSION = "2.8.0"
+PARSER_VERSION = "2.9.0"
 MONEY_TOLERANCE = Decimal("0.02")
 
 
@@ -62,6 +62,20 @@ def _normalized(value: Any) -> str:
     return (
         re.sub(r"\s+", " ", _text(value)).strip().lower().rstrip(":").strip()
     )
+
+
+def _compact(value: Any) -> str:
+    """Normalize labels that may contain spaces between every letter."""
+    return re.sub(r"\s+", "", _normalized(value))
+
+
+def _label_matches(value: Any, *labels: str) -> bool:
+    normalized = _normalized(value)
+    compact = _compact(value)
+    return normalized in labels or compact in {
+        re.sub(r"\s+", "", label.lower().rstrip(":").strip())
+        for label in labels
+    }
 
 
 def _decimal(value: Any) -> Decimal:
@@ -235,14 +249,16 @@ def _section_fields(
 ) -> dict[str, str]:
     start = None
     for index, row in enumerate(rows):
-        if any(_normalized(value) == section_label.lower() for value in row):
+        if any(_label_matches(value, section_label) for value in row):
             start = index + 1
             break
     if start is None:
         return {}
     result = {}
     for row in rows[start : start + 8]:
-        if any(_normalized(value) in {"ship to", "bill to"} for value in row):
+        if any(
+            _label_matches(value, "ship to", "bill to") for value in row
+        ):
             break
         for value in row:
             for key, label in (
@@ -261,7 +277,7 @@ def _section_fields(
                 ("name", "Contact"),
                 ("email", "Email"),
             ):
-                if key in result or _normalized(value) != label.lower():
+                if key in result or not _label_matches(value, label):
                     continue
                 for candidate in row[column + 1 :]:
                     parsed = _text(candidate)
@@ -273,30 +289,28 @@ def _section_fields(
 
 def _project_fields(rows: list[list[Any]]) -> dict[str, str]:
     headers = {
-        "contact person": "issuer_contact_name",
-        "sales person": "issuer_contact_name",
+        "contactperson": "issuer_contact_name",
         "salesperson": "issuer_contact_name",
-        "sales representative": "issuer_contact_name",
-        "prepared by": "issuer_contact_name",
-        "account manager": "issuer_contact_name",
+        "salesrepresentative": "issuer_contact_name",
+        "preparedby": "issuer_contact_name",
+        "accountmanager": "issuer_contact_name",
         "email": "issuer_contact_email",
-        "job title": "issuer_contact_title",
+        "jobtitle": "issuer_contact_title",
         "position": "issuer_contact_title",
         "title": "issuer_contact_title",
         "project": "project_name",
-        "payment terms": "payment_terms",
+        "paymentterms": "payment_terms",
         "currency": "currency",
     }
     issuer_headers = {
-        "account manager",
-        "contact person",
-        "prepared by",
-        "sales person",
-        "sales representative",
+        "accountmanager",
+        "contactperson",
+        "preparedby",
         "salesperson",
+        "salesrepresentative",
     }
     for row_index, row in enumerate(rows[:-1]):
-        normalized = [_normalized(value) for value in row]
+        normalized = [_compact(value) for value in row]
         if "project" not in normalized or not (
             issuer_headers.intersection(normalized) or "email" in normalized
         ):
@@ -320,27 +334,38 @@ def _line_items(
 ) -> list[ParsedQuotationItem]:
     section_row = None
     for index, row in enumerate(rows):
-        if any(_normalized(value) == section.lower() for value in row):
+        section_aliases = {
+            "Software": ("Software", "Software Subscription"),
+            "Others": ("Others", "Other"),
+        }.get(section, (section,))
+        if any(
+            _label_matches(value, *section_aliases)
+            for value in row
+        ):
             section_row = index
             break
     if section_row is None:
         return []
     header_row = None
     for index in range(section_row + 1, min(section_row + 5, len(rows))):
-        normalized = [_normalized(value) for value in rows[index]]
+        normalized = [_compact(value) for value in rows[index]]
         if "description" in normalized and any(
-            value == "qty" or value.startswith("qty ") for value in normalized
+            value == "qty"
+            or value.startswith("qty")
+            or value.startswith("quantity")
+            for value in normalized
         ):
             header_row = index
             break
     if header_row is None:
         return []
-    headers = [_normalized(value) for value in rows[header_row]]
+    headers = [_compact(value) for value in rows[header_row]]
 
     def column_for(*labels: str) -> int | None:
         for column, header in enumerate(headers):
             if any(
-                header == label or header.startswith(f"{label} ")
+                header == _compact(label)
+                or header.startswith(_compact(label))
                 for label in labels
             ):
                 return column
@@ -376,6 +401,20 @@ def _line_items(
         description = _text(row_value(row, description_column))
         if not description:
             continue
+        if (
+            any(
+                marker in normalized
+                for marker in (
+                    "grand total",
+                    "total amount",
+                    "total price",
+                    "vat amount",
+                    "tax amount",
+                )
+            )
+            and not _text(row_value(row, list_price_column))
+        ):
+            break
         qty_raw = row_value(row, qty_column)
         qty = _decimal(qty_raw) if _text(qty_raw) else Decimal("1")
         list_price = _decimal(row_value(row, list_price_column))
@@ -419,6 +458,13 @@ def _tax_details(rows: list[list[Any]]) -> tuple[str, Decimal]:
             )
             if match:
                 return match.group(1).strip(), Decimal(match.group(2))
+            match = re.search(
+                r"(VAT|GST|Tax)\s*([0-9.]+)%",
+                raw,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return match.group(1).upper(), Decimal(match.group(2))
     return "VAT", Decimal("0")
 
 
@@ -518,12 +564,21 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
 
     tax_label, vat_rate = _tax_details(rows)
     total_amount = _amount_by_label(rows, "total amount")
+    if not total_amount:
+        total_amount = _amount_by_label(rows, "total price vat included")
+    if not total_amount:
+        total_amount = _amount_by_label(rows, "total price vat not included")
     subtotal_before_vat = _amount_by_label(rows, "subtotal before")
     grand_total = _amount_by_label(rows, "grand total")
-    if not subtotal_before_vat:
-        subtotal_before_vat = total_amount
     if not grand_total:
         grand_total = total_amount
+    if not subtotal_before_vat:
+        subtotal_before_vat = sum(
+            (item.extended_price for item in items),
+            Decimal("0"),
+        )
+    if not subtotal_before_vat and not items:
+        subtotal_before_vat = total_amount
     source_totals = {
         "software_subtotal": _decimal_string(
             _amount_by_label(rows, "software subscription subtotal")
@@ -535,6 +590,10 @@ def _parse_excel_rows(rows: list[list[Any]]) -> ParsedDocumentData:
         "vat_amount": _decimal_string(_amount_by_label(rows, "amount (")),
         "grand_total": _decimal_string(grand_total),
     }
+    if not source_totals["vat_amount"]:
+        source_vat = grand_total - subtotal_before_vat
+        if source_vat > 0:
+            source_totals["vat_amount"] = _decimal_string(source_vat)
     payment_terms = project.get("payment_terms", "")
     issuer_company = "OnePro Cloud Limited"
     for index, row in enumerate(rows):
