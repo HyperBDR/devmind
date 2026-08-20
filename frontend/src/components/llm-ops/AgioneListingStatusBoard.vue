@@ -11,7 +11,7 @@
       <div
         v-for="item in listingKpis"
         :key="item.label"
-        class="rounded-[12px] border border-slate-200 bg-white px-4 py-3 shadow-sm"
+        class="kpi-card"
       >
         <p class="text-xs font-medium text-slate-500">
           {{ item.label }}

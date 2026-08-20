@@ -60,6 +60,7 @@
               <p class="mt-1 text-xs leading-5 text-slate-500">
                 {{ t('llmOps.channelModelDrawer.addDescription') }}
               </p>
+              <PriceMeaningGuide class="mt-3" />
             </div>
             <div class="flex flex-wrap gap-2 text-xs text-slate-500">
               <span class="summary-pill">
@@ -968,6 +969,7 @@ import { asArray, errorMessage } from '@/utils/llmOpsPagination'
 
 import CompactSelect from './CompactSelect.vue'
 import OperationIconButton from './OperationIconButton.vue'
+import PriceMeaningGuide from './PriceMeaningGuide.vue'
 
 const props = defineProps({
   channel: {

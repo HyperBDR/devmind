@@ -82,7 +82,13 @@ export function useLLMOpsResalePublishing({
       localStorage.setItem('llm_ops_resale_platform', platformId)
     }
     loadResaleWorkflowConfig(platformId)
-    if (!['monitor', 'reseller'].includes(activeSection.value)) return
+    if (
+      !['listingRisk', 'modelWorkbench', 'monitor', 'reseller'].includes(
+        activeSection.value
+      )
+    ) {
+      return
+    }
     if (!loading.value) {
       refreshResalePlatformSelection(activeSection.value).catch((error) => {
         showError(errorMessage(error, t('llmOps.dataErrors.refreshSummary')))
@@ -151,6 +157,14 @@ export function useLLMOpsResalePublishing({
       if (item?.id) byId.set(String(item.id), item)
     })
     listings.value = Array.from(byId.values())
+  }
+
+  async function refreshAfterResaleSave() {
+    try {
+      await refreshLight()
+    } catch (error) {
+      showError(errorMessage(error, t('llmOps.dataErrors.refreshSummary')))
+    }
   }
 
   async function handleManualPriceSaved(payload) {
@@ -367,7 +381,7 @@ export function useLLMOpsResalePublishing({
         })
       )
       resalePublishingDrawerOpen.value = false
-      refreshLight()
+      await refreshAfterResaleSave()
       return true
     } catch (error) {
       showError(errorMessage(error, t('llmOps.messages.submitFailed')))
@@ -459,7 +473,7 @@ export function useLLMOpsResalePublishing({
         })
       )
       resalePublishingDrawerOpen.value = false
-      refreshLight()
+      await refreshAfterResaleSave()
       return true
     } catch (error) {
       showError(errorMessage(error, t('llmOps.messages.saveFailed')))

@@ -57,6 +57,13 @@ const resalePublishingSource = readFileSync(
   new URL('../src/composables/useLLMOpsResalePublishing.js', import.meta.url),
   'utf8'
 )
+const resaleWorkspaceSource = readFileSync(
+  new URL(
+    '../src/components/llm-ops/ResalePublishingWorkspace.vue',
+    import.meta.url
+  ),
+  'utf8'
+)
 
 test('replaces server and HTML errors with a safe page message', () => {
   const htmlError = {
@@ -181,6 +188,11 @@ test('uses a guided empty state when no workbench models exist', () => {
   )
 })
 
+test('disambiguates same-name models by provider and price source', () => {
+  assert.match(modelWorkbenchSource, /source_name: modelRecord\?\.source_name/)
+  assert.match(modelWorkbenchSource, /model\.source_name/)
+})
+
 test('requests meta-model drawer rows by release date descending', () => {
   assert.match(metaModelManagementSource, /ordering:\s*'-release_date'/)
 })
@@ -205,10 +217,32 @@ test('uses a recognizable create icon in the reconciliation action', () => {
   assert.match(reconciliationSource, /d="M12 5v14M5 12h14"/)
 })
 
-test('limits platform selection refreshes to platform-aware sections', () => {
+test('refreshes platform-bound data in every platform-aware section', () => {
   assert.match(
     resalePublishingSource,
-    /if \(!\['monitor', 'reseller'\]\.includes\(activeSection\.value\)\) return/
+    /'listingRisk',[\s\S]*'modelWorkbench',[\s\S]*'monitor',[\s\S]*'reseller'/
+  )
+  assert.match(
+    resalePublishingSource,
+    /refreshResalePlatformSelection\(activeSection\.value\)/
+  )
+})
+
+test('keeps workspace saves successful when the follow-up refresh fails', () => {
+  assert.match(
+    resalePublishingSource,
+    /async function refreshAfterResaleSave\(\)[\s\S]*await refreshLight\(\)[\s\S]*catch \(error\)/
+  )
+  assert.equal(
+    resalePublishingSource.match(/await refreshAfterResaleSave\(\)/g)?.length,
+    2
+  )
+})
+
+test('compares flat listing edits against flat prices', () => {
+  assert.match(
+    resaleWorkspaceSource,
+    /savedDraft && hasTieredResalePrices\(savedDraft\)/
   )
 })
 

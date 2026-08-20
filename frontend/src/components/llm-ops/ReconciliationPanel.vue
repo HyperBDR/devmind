@@ -495,7 +495,7 @@ function modalityLabel(modality) {
 
 <style scoped>
 .panel {
-  @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+  @apply rounded-xl border border-slate-200 bg-white p-5;
 }
 
 .panel-title {

@@ -823,6 +823,21 @@
       "cny": "CNY",
       "usd": "USD"
     },
+    "priceMeaningGuide": {
+      "kicker": "价格说明",
+      "title": "这些价格分别代表什么？",
+      "description": "先看计费维度，再看价格链路；不同币种会按当前显示货币换算展示。",
+      "inputLabel": "Input 输入",
+      "input": "未命中缓存的输入 Token，通常按每百万 Token 计价。",
+      "outputLabel": "Output 输出",
+      "output": "模型生成的输出 Token，通常按每百万 Token 计价。",
+      "cacheLabel": "Cache 缓存",
+      "cache": "命中缓存的输入 Token，通常使用独立的缓存输入单价。",
+      "upstream": "上游价格：供货源提供的原始成本",
+      "channelCost": "渠道成本：按折扣或合同规则换算后的采购成本",
+      "listingPrice": "挂售价：面向客户或平台的销售价格",
+      "formula": "参考链路：上游价格 × 折扣/合同规则 = 渠道成本；渠道成本再叠加服务费、平台抽佣等，形成挂售价参考。"
+    },
     "navGroups": {
       "overview": "运营概览",
       "catalog": "模型与价格源",
