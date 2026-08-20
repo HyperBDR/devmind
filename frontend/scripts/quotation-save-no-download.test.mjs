@@ -41,6 +41,31 @@ test('saving and generating a quote does not download a file', () => {
   assert.doesNotMatch(chinese.quotation.app.quoteGenerated, /下载/)
 })
 
+test(
+  'saving a quote refreshes the numbering context for the next quote',
+  () => {
+    const saveStart = app.indexOf('async function handleSaveQuotation')
+    const saveEnd = app.indexOf('async function handleFeishuUploadDone')
+    const saveFlow = app.slice(saveStart, saveEnd)
+
+    assert.match(
+      saveFlow,
+      /await refreshQuotations\(quotationListQuery\.value\)/,
+    )
+  assert.match(saveFlow, /await loadQuotationFormContext\(\)/)
+
+  assert.match(app, /:existing-quote-numbers="quotationFormContextQuoteNumbers"/)
+
+    const tabStart = app.indexOf('function goTab')
+    const tabEnd = app.indexOf('function handleCustomerQuote')
+    const tabFlow = app.slice(tabStart, tabEnd)
+    assert.match(
+      tabFlow,
+      /if \(tab === 'create'\) void loadQuotationFormContext\(\)/,
+    )
+  },
+)
+
 test('explicit download controls continue to use the export API', () => {
   assert.match(quotationList, /exportQuotationFile\(quote\.id, exportFormat/)
   assert.match(quotationDetails, /exportQuotationFile\(props\.quote\.id, 'xlsx'/)

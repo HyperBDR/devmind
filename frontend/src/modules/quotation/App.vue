@@ -193,6 +193,7 @@ const activeQuote = ref<Quotation | null>(null)
 const drawerQuoteId = ref<string | null>(null)
 const editingQuote = ref<Quotation | null>(null)
 const quotationFormContext = ref<Quotation[]>([])
+const quotationFormContextQuoteNumbers = ref<string[]>([])
 const lineItemDescriptionHistory = ref<LineItemDescriptionHistory[]>([])
 const quotationFormContextPage = ref(0)
 const quotationFormContextHasMore = ref(false)
@@ -433,11 +434,13 @@ async function loadQuotationFormContext(reset = true) {
           ...lineItemDescriptionHistory.value,
           ...context.lineItemHistory,
         ]
+    quotationFormContextQuoteNumbers.value = context.quoteNumbers
     quotationFormContextPage.value = context.page
     quotationFormContextHasMore.value = context.hasMore
   } catch (error) {
     if (reset) {
       quotationFormContext.value = []
+      quotationFormContextQuoteNumbers.value = []
       lineItemDescriptionHistory.value = []
     }
     triggerToast(
@@ -531,6 +534,7 @@ async function handleLogout() {
   drawerQuoteId.value = null
   editingQuote.value = null
   quotationFormContext.value = []
+  quotationFormContextQuoteNumbers.value = []
   lineItemDescriptionHistory.value = []
   quotationFormContextPage.value = 0
   quotationFormContextHasMore.value = false
@@ -559,6 +563,7 @@ function goTab(tab: string, listFilters?: ListDateFilters) {
   selectedQuotationId.value = null
   drawerQuoteId.value = null
   if (tab === 'create') editingQuoteId.value = null
+  if (tab === 'create') void loadQuotationFormContext()
   if (tab === 'list') {
     applyListDateFilters(listFilters)
   }
@@ -709,6 +714,7 @@ async function handleSaveQuotation(newQuote: Quotation) {
 
     editingQuoteId.value = null
     await refreshQuotations(quotationListQuery.value)
+    if (wasCreate) await loadQuotationFormContext()
   } catch (error: unknown) {
     console.error(error)
     const message = error instanceof Error ? error.message : t('quotation.app.saveFailed')
@@ -1157,6 +1163,7 @@ function reloadPage() {
           :services="services"
           :discounts="discounts"
           :quotations="quotationFormContext"
+          :existing-quote-numbers="quotationFormContextQuoteNumbers"
           :history-quotations="quotationFormContext"
           :line-item-history="lineItemDescriptionHistory"
           :history-has-more="quotationFormContextHasMore"
