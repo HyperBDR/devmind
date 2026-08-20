@@ -148,6 +148,7 @@ interface ApiLineItemDescriptionHistory {
 export interface QuotationFormContextResult {
   quotations: Quotation[];
   lineItemHistory: LineItemDescriptionHistory[];
+  quoteNumbers: string[];
 }
 
 export interface QuotationListParams {
@@ -613,6 +614,7 @@ export async function getQuotationFormContext(
   const data = await apiRequest<{
     items: ApiQuotationFormContextItem[];
     line_item_history: ApiLineItemDescriptionHistory[];
+    quote_numbers: string[];
     page: number;
     has_more: boolean;
   }>(`/quotations/form-context?page=${page}&page_size=${pageSize}`);
@@ -624,6 +626,7 @@ export async function getQuotationFormContext(
       listPrice: toNumber(item.list_price),
       currency: item.currency,
     })),
+    quoteNumbers: data.quote_numbers || [],
     hasMore: data.has_more,
     page: data.page,
   };

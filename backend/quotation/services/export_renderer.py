@@ -13,6 +13,7 @@ from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal
 from hashlib import sha256
 from io import BytesIO
+from math import ceil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
@@ -92,6 +93,13 @@ class PdfConversionBusyError(PdfConversionError):
 
 class PdfConversionTimeoutError(PdfConversionError, TimeoutError):
     pass
+
+
+def _description_row_height(description: str) -> float:
+    """Return enough height for wrapped description text."""
+    lines = str(description or "").splitlines() or [""]
+    line_count = sum(max(1, ceil(len(line) / 24)) for line in lines)
+    return min(120, max(24, 6 + line_count * 15))
 
 
 @contextmanager
@@ -1047,7 +1055,9 @@ def render_quotation_xlsx(
             for column, content in enumerate(values, 1):
                 sheet.cell(row, column, content)
             style_range(row, border=cell_border)
-            sheet.row_dimensions[row].height = 24
+            sheet.row_dimensions[row].height = _description_row_height(
+                description,
+            )
             for column in (1, 3, 5):
                 sheet.cell(row, column).alignment = Alignment(
                     horizontal="center",
