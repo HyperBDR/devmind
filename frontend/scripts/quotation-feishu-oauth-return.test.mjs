@@ -82,8 +82,8 @@ test('Imported files browser exposes lifecycle controls in its visible panels', 
 
 test('imported Feishu files live under the Quotes page', () => {
   assert.match(quotationApp, /QuotationList/)
-  assert.match(quotationApp, /ImportedDocumentsPage/)
-  assert.match(quotationApp, /embedded/)
+  assert.doesNotMatch(quotationApp, /ImportedDocumentsPage/)
+  assert.doesNotMatch(quotationApp, /handleImportedQuotation/)
   assert.doesNotMatch(quotationApp, /quoteListPanel/)
   assert.doesNotMatch(quotationApp, /tabImports/)
   assert.doesNotMatch(quotationApp, /setQuoteListPanel/)
