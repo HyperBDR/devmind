@@ -30,7 +30,6 @@ import QuotationList from './components/QuotationList.vue'
 import QuotationCreate from './components/QuotationCreate.vue'
 import QuotationDetails from './components/QuotationDetails.vue'
 import QuotationDetailsDrawer from './components/QuotationDetailsDrawer.vue'
-import ImportedDocumentsPage from './components/ImportedDocumentsPage.vue'
 import AuditLogPage from './components/AuditLogPage.vue'
 import ViewPermissionPage from './components/ViewPermissionPage.vue'
 import ProductServiceManager from './components/ProductServiceManager.vue'
@@ -727,17 +726,6 @@ async function handleFeishuUploadDone(_id: string) {
   await refreshQuotations()
 }
 
-async function handleImportedQuotationCreated(id: string) {
-  await refreshQuotations()
-  await loadQuotationFormContext()
-  selectedQuotationId.value = id
-}
-
-async function handleImportedQuotationLifecycleChanged() {
-  await refreshQuotations()
-  await loadQuotationFormContext()
-}
-
 async function handleRefreshCustomers() {
   await loadQuotationFormContext()
 }
@@ -1167,12 +1155,6 @@ function reloadPage() {
             @query-change="handleQuotationListQueryChange"
           />
 
-          <ImportedDocumentsPage
-            embedded
-            @toast="triggerToast"
-            @quotation-created="handleImportedQuotationCreated"
-            @quotation-lifecycle-changed="handleImportedQuotationLifecycleChanged"
-          />
         </div>
 
         <QuotationCreate

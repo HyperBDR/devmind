@@ -65,13 +65,12 @@ test('archive sync imports Excel and PDF files into normal quotations', () => {
   assert.doesNotMatch(importedDocumentsPage, /confirmDocumentParseResult/)
 })
 
-test('imported document controls stay mounted while their panel is hidden', () => {
-  assert.match(
+test('imported document controls are not mounted in the quotation list', () => {
+  assert.doesNotMatch(quotationListPage, /<ImportedDocumentsPage/)
+  assert.doesNotMatch(
     quotationListPage,
-    /<ImportedDocumentsPage\s+embedded/,
+    /handleImportedQuotationCreated|handleImportedQuotationLifecycleChanged/,
   )
-  assert.match(quotationListPage, /@quotation-created="handleImportedQuotationCreated"/)
-  assert.doesNotMatch(quotationListPage, /v-if="false"/)
 })
 
 test('imported documents page keeps only fallback parse states in the list', () => {
@@ -115,9 +114,9 @@ test('imported documents expose archive and recovery controls', () => {
   assert.match(importedDocumentsPage, /DialogPanel/)
   assert.match(documentsApi, /assets_affected/)
   assert.match(importedDocumentsPage, /quotationLifecycleChanged/)
-  assert.match(
+  assert.doesNotMatch(
     quotationListPage,
-    /@quotation-lifecycle-changed="handleImportedQuotationLifecycleChanged"/,
+    /handleImportedQuotationLifecycleChanged/,
   )
 })
 
