@@ -800,6 +800,9 @@
       "subtitle": "A dedicated view for pricing, channels, resale, and reconciliation",
       "navigationLabel": "LLM Operations navigation"
     },
+    "loading": {
+      "section": "Loading data required for “{section}”…"
+    },
     "toolbar": {
       "displayCurrency": "Display currency",
       "resalePlatform": "Resale platform",
@@ -1658,8 +1661,13 @@
     },
     "priceChangePanel": {
       "columns": {
+        "change": "Delta",
+        "current": "New / current",
         "currency": "Currency",
+        "dimension": "Dimension",
         "object": "Object",
+        "previous": "Previous",
+        "source": "Source",
         "time": "Time",
         "type": "Type",
         "input": "Input",
@@ -1676,6 +1684,7 @@
         "videoOutput": "Video output"
       },
       "empty": "No price change records yet.",
+      "rangeSummary": "Loaded the latest {channel} channel and {listing} listing versions; showing {shown}/{total} dimension records",
       "fallback": {
         "channel": "Channel {id}",
         "model": "Model {id}",
@@ -2005,9 +2014,9 @@
       "schedule": {
         "addHour": "Add run hour",
         "custom": "Custom schedule",
-        "customDescription": "The current schedule is outside the visual editor range. Saving other settings keeps it unchanged. Reselect run hours to switch it to minute 05.",
+        "customDescription": "The current schedule is outside the visual editor range. Saving other settings keeps it unchanged. Reselect run hours to adjust it.",
         "emptyHours": "Select at least one run time",
-        "fixedMinute": "After changes, runs at minute 05 in each selected hour.",
+        "fixedMinute": "Runs at minute {minute} in each selected hour.",
         "hours": "Run hours",
         "optionDescription": "Runs daily at {time}",
         "removeHour": "Remove run hour",
@@ -2188,7 +2197,7 @@
         "unknown": "Unknown"
       },
       "summary": {
-        "modelResult": "{total} meta models · {active} active",
+        "modelResult": "{total} meta models",
         "vendors": "Providers"
       },
       "table": {
@@ -2566,6 +2575,7 @@
       },
       "autoSyncPreset": {
         "empty": "No auto-sync sources are available to add.",
+        "existingSource": "Editing keeps the current sync source. Create a new price source to switch it.",
         "exists": "This sync source has already been added.",
         "existsBadge": "Added",
         "loading": "Loading sync sources.",
@@ -2994,15 +3004,15 @@
         "confirmOffline": "Batch confirm offline"
       },
       "kpis": {
-        "availableModels": {
-          "label": "Listable models",
-          "hint": "{count} unlisted",
-          "delta": "This period"
+        "workflowModels": {
+          "label": "Workflow models",
+          "hint": "{count} are not online yet",
+          "delta": "Current platform"
         },
-        "platforms": {
-          "label": "Resale platforms",
-          "hint": "Visible resale platform total",
-          "delta": "Stable"
+        "candidateModels": {
+          "label": "Awaiting workflow",
+          "hint": "Has procurement supply; use New listing to enter the workflow",
+          "delta": "Candidates"
         },
         "listed": {
           "label": "Listed",
@@ -3010,9 +3020,9 @@
           "activeDelta": "+ publishing",
           "pendingDelta": "Pending"
         },
-        "unlisted": {
-          "label": "Unlisted",
-          "hint": "Can be handled from the workspace",
+        "workflowUnlisted": {
+          "label": "Workflow not online",
+          "hint": "Already in this platform workflow but not online",
           "delta": "Needs action"
         },
         "averageMargin": {

@@ -224,6 +224,28 @@ class LLMOpsAssistantToolTests(TestCase):
         self.assertEqual(row["health_status"], "failed")
         self.assertEqual(row["latest_error"], "upstream timeout")
 
+    def test_source_health_uses_same_seven_day_freshness_window_as_console(
+        self,
+    ):
+        source = PriceCollectionSource.objects.create(
+            name="Manual Source",
+            slug="manual-source",
+            last_collected_at=timezone.now() - timedelta(days=3),
+        )
+
+        result = execute_llm_ops_tool(
+            "llm_ops_query_source_health",
+            {"status": "all"},
+        )
+
+        row = next(
+            item
+            for item in result["result"]["rows"]
+            if item["source_id"] == source.id
+        )
+        self.assertEqual(result["result"]["stale_hours"], 7 * 24)
+        self.assertEqual(row["health_status"], "healthy")
+
     def test_price_change_query_ranks_largest_change_first(self):
         now = timezone.now()
         for index, price in enumerate(("1", "3")):

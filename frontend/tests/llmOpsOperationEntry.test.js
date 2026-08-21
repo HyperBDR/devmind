@@ -83,7 +83,9 @@ test('applies assistant model targets to model-scoped LLM Ops sections', () => {
   assert.match(priceChangeSource, /focusModelId:/)
   assert.ok(
     priceChangeSource.indexOf('if (props.focusModelId)') <
-      priceChangeSource.indexOf('return rows.slice(0, 120)')
+      priceChangeSource.indexOf(
+        'allFilteredRows.value.slice(0, MAX_VISIBLE_ROWS)'
+      )
   )
   assert.doesNotMatch(priceChangeSource, /priceItems\.slice\(0, 80\)/)
   assert.match(

@@ -215,8 +215,7 @@
               <p class="drawer-result-note">
                 {{
                   t('llmOps.metaModelManagement.summary.modelResult', {
-                    total: drawerTotal,
-                    active: selectedVendorActiveCount
+                    total: drawerTotal
                   })
                 }}
               </p>
@@ -546,12 +545,6 @@ const metricCards = computed(() => {
       hint: t('llmOps.metaModelManagement.metrics.status.hint')
     }
   ]
-})
-
-const selectedVendorActiveCount = computed(() => {
-  if (statusFilter.value === 'active') return drawerTotal.value
-  if (statusFilter.value) return 0
-  return Number(selectedVendorRow.value?.active_model_count || 0)
 })
 
 const syncActionLabel = computed(() =>

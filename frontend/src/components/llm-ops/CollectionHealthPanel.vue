@@ -66,7 +66,7 @@
                 </span>
               </td>
               <td class="table-cell text-right font-mono">
-                {{ row.successRate }}%
+                {{ row.successRate === null ? '-' : `${row.successRate}%` }}
               </td>
               <td class="table-cell text-right font-mono">
                 {{ row.consecutiveFailures }}
@@ -117,6 +117,7 @@ const sourceRows = computed(() =>
         .sort((left, right) => runTime(right) - runTime(left))
       const succeeded = runs.filter((run) => run.status === 'succeeded').length
       const latestRun = runs[0] || null
+      const latestStatus = latestRun?.status || source.latest_run_status || ''
       const lastCollectedAt =
         source.last_collected_at ||
         latestRun?.finished_at ||
@@ -128,12 +129,12 @@ const sourceRows = computed(() =>
         enabled: source.is_enabled !== false,
         stale,
         failures,
-        latestStatus: latestRun?.status || ''
+        latestStatus
       })
       return {
         ...source,
-        latestStatus: latestRun?.status || '',
-        successRate: percentage(succeeded, runs.length),
+        latestStatus,
+        successRate: runs.length ? percentage(succeeded, runs.length) : null,
         consecutiveFailures: failures,
         lastCollectedAt,
         healthLabel: health.label,
