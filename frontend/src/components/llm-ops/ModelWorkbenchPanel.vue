@@ -54,6 +54,12 @@
           <p class="mt-2 font-mono text-xs text-slate-500">
             {{ selectedModel.code }}
           </p>
+          <p class="mt-2 text-xs text-slate-500">
+            {{ selectedModel.provider_name || '-' }}
+            <span v-if="selectedModel.source_name">
+              · {{ selectedModel.source_name }}
+            </span>
+          </p>
         </div>
         <div class="kpi-card">
           <p class="text-xs font-medium text-slate-500">
@@ -105,6 +111,7 @@
             </p>
           </div>
         </div>
+        <PriceMeaningGuide class="mx-4 mb-4 lg:mx-5" />
         <div class="overflow-x-auto">
           <table class="data-table">
             <thead>
@@ -295,6 +302,7 @@ import {
 } from '@/utils/channelContractRelations'
 import { userFacingApiError } from '@/utils/llmOpsErrors'
 import CompactSelect from './CompactSelect.vue'
+import PriceMeaningGuide from './PriceMeaningGuide.vue'
 
 const MiniTable = defineComponent({
   props: {
@@ -415,14 +423,20 @@ const reconciliationColumns = computed(() => [
 
 const diagnostics = computed(() => props.summary.agione?.diagnostics || [])
 const modelOptions = computed(() =>
-  diagnostics.value.map((row) => ({
-    id: row.model_id,
-    name: row.model_name,
-    code: row.model_code,
-    operation_scope: row.operation_scope,
-    provider_name: row.provider_name,
-    meta_model_name: row.meta_model_name
-  }))
+  diagnostics.value.map((row) => {
+    const modelRecord = props.models.find(
+      (model) => String(model.id) === String(row.model_id)
+    )
+    return {
+      id: row.model_id,
+      name: row.model_name,
+      code: row.model_code,
+      operation_scope: row.operation_scope,
+      provider_name: row.provider_name,
+      source_name: modelRecord?.source_name || '',
+      meta_model_name: row.meta_model_name
+    }
+  })
 )
 
 const filteredModelOptions = computed(() => {
@@ -434,8 +448,12 @@ const filteredModelOptions = computed(() => {
 
 const modelSelectOptions = computed(() =>
   filteredModelOptions.value.map((model) => ({
-    label: `${model.provider_name} / ${model.name}`,
-    searchText: `${model.provider_name} ${model.name} ${model.code}`,
+    label: [`${model.provider_name} / ${model.name}`, model.source_name]
+      .filter(Boolean)
+      .join(' · '),
+    searchText: [model.provider_name, model.name, model.code, model.source_name]
+      .filter(Boolean)
+      .join(' '),
     value: String(model.id)
   }))
 )

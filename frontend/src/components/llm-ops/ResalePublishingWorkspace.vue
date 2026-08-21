@@ -1329,7 +1329,9 @@ function baselineForRow(row) {
   const listing = listingForRow(row)
   if (!listing) return null
   const savedDraft = listingDraftFor(row, listing)
-  if (savedDraft) return { tierDraft: savedDraft }
+  if (savedDraft && hasTieredResalePrices(savedDraft)) {
+    return { tierDraft: savedDraft }
+  }
   return {
     priceIn: comparablePrice(
       convertToDisplay(listing.retail_input_price_per_million, listing.currency)

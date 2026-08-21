@@ -431,15 +431,15 @@ function relativeTime(value) {
 }
 .queue-summary-card {
   display: flex;
-  min-height: 4.5rem;
+  min-height: 8.75rem;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid var(--ui-border-soft);
+  border: 1px solid var(--ui-border-default);
   border-left: 0.2rem solid var(--ui-color-primary);
-  border-radius: 0.5rem;
+  border-radius: var(--ui-radius-card);
   background: var(--ui-bg-card);
-  padding: 0.875rem 1rem;
+  padding: var(--ui-space-card);
   color: var(--ui-text-primary);
   text-align: left;
   transition:
