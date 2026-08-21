@@ -39,6 +39,7 @@ DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
 DEFAULT_INPUT_TOKENS = 10_000_000
 DEFAULT_OUTPUT_TOKENS = 15_000_000
+SOURCE_HEALTH_STALE_HOURS = 7 * 24
 
 DECISION_STATUSES = {
     "all",
@@ -937,7 +938,7 @@ def query_source_health(arguments: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("invalid source health status")
     stale_hours = _bounded_int(
         arguments.get("stale_hours"),
-        48,
+        SOURCE_HEALTH_STALE_HOURS,
         1,
         8760,
         "stale_hours",

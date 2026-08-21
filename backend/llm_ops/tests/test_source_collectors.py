@@ -13,6 +13,8 @@ from llm_ops.collection_services import (
 from llm_ops.collectors import CollectedModelPricing, NormalizedPriceRow
 from llm_ops.global_config import price_sync_source_queryset
 from llm_ops.models import (
+    ChannelModelPrice,
+    ChannelPriceItem,
     CollectedModelPriceHistory,
     LLMProvider,
     MetaModel,
@@ -20,8 +22,10 @@ from llm_ops.models import (
     ModelSku,
     PriceCollectionRun,
     PriceCollectionSource,
+    ProcurementChannel,
     SourceSkuOffering,
 )
+from llm_ops.services import sync_channel_price_items
 from llm_ops.source_collectors import (
     collect_price_source,
     get_price_source_collector,
@@ -645,6 +649,94 @@ class PriceCollectionSkuPersistenceTests(TestCase):
         self.assertEqual(input_item.offering, offering)
         self.assertEqual(input_item.model.sku, sku)
         self.assertEqual(input_item.unit_price, Decimal("1.000000"))
+
+    def test_auto_source_sync_refreshes_dependent_channel_price_items(self):
+        first = self.collected_item()
+        catalog = mock.Mock(
+            models=[first],
+            source_url=self.source.endpoint_url,
+            total_models=1,
+        )
+        standard_catalog = {
+            "schema_version": "llm_ops.model_price_catalog.v1",
+            "source_type": "provider_adapter",
+            "models": [{}],
+            "raw_payload": {},
+        }
+        with (
+            mock.patch(
+                "llm_ops.collection_services.collect_vendor_price_catalog",
+                return_value=standard_catalog,
+            ),
+            mock.patch(
+                "llm_ops.collection_services."
+                "standard_catalog_to_collected_catalog",
+                return_value=catalog,
+            ),
+        ):
+            sync_vendor_price_source_catalog(
+                provider_code="deepseek",
+                source=self.source,
+                verify_source=False,
+            )
+
+        model = ModelPriceItem.objects.get(
+            source=self.source,
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+            is_current=True,
+        ).model
+        channel = ProcurementChannel.objects.create(
+            name="DeepSeek Official",
+            code="deepseek-official-channel",
+            currency="CNY",
+        )
+        channel_price = ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=self.source,
+            is_listed=True,
+        )
+        sync_channel_price_items(channel_price)
+
+        refreshed = self.collected_item()
+        refreshed.price_rows[0].values["input_price"] = "4.5"
+        refreshed.price_rows[0].values["output_price"] = "13.5"
+        refreshed_catalog = mock.Mock(
+            models=[refreshed],
+            source_url=self.source.endpoint_url,
+            total_models=1,
+        )
+        with (
+            mock.patch(
+                "llm_ops.collection_services.collect_vendor_price_catalog",
+                return_value=standard_catalog,
+            ),
+            mock.patch(
+                "llm_ops.collection_services."
+                "standard_catalog_to_collected_catalog",
+                return_value=refreshed_catalog,
+            ),
+        ):
+            result = sync_vendor_price_source_catalog(
+                provider_code="deepseek",
+                source=self.source,
+                verify_source=False,
+            )
+
+        current_items = ChannelPriceItem.objects.filter(
+            channel=channel,
+            model=model,
+            is_current=True,
+        )
+        input_item = current_items.get(
+            dimension=ModelPriceItem.DIMENSION_TEXT_INPUT,
+        )
+        output_item = current_items.get(
+            dimension=ModelPriceItem.DIMENSION_TEXT_OUTPUT,
+        )
+        self.assertEqual(input_item.unit_price, Decimal("4.500000"))
+        self.assertEqual(output_item.unit_price, Decimal("13.500000"))
+        self.assertEqual(result["channel_model_prices_synced"], 1)
 
     def test_siliconflow_mixed_flat_tiered_rows_persist_as_tiers(self):
         from llm_ops.price_collectors.parsers import siliconflow

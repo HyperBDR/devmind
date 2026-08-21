@@ -37,7 +37,30 @@
             @refresh="handleRefreshAll"
           />
 
-          <BaseLoading v-if="loading" class="py-20" />
+          <div
+            v-if="loading"
+            class="llm-ops-loading-skeleton px-5 py-6 lg:px-7"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="mb-4 flex items-center gap-3 text-sm text-slate-600">
+              <span
+                class="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600"
+                aria-hidden="true"
+              />
+              <span>{{ loadingSectionLabel }}</span>
+            </div>
+            <div class="grid animate-pulse gap-4 md:grid-cols-3">
+              <div
+                v-for="index in 3"
+                :key="index"
+                class="h-28 rounded-xl border border-slate-200 bg-white"
+              />
+            </div>
+            <div
+              class="mt-4 h-72 animate-pulse rounded-xl border border-slate-200 bg-white"
+            />
+          </div>
           <LLMOpsErrorState
             v-else-if="pageError"
             class="my-6"
@@ -515,6 +538,11 @@ const mobileNavigationOpen = ref(false)
 let desktopMediaQuery = null
 const inlineWorkspaceKey = computed(
   () => `inline-${resaleWorkspaceFocusModelId.value || 'new'}`
+)
+const loadingSectionLabel = computed(() =>
+  t('llmOps.loading.section', {
+    section: activeNav.value?.label || t('llmOps.shell.title')
+  })
 )
 
 const inlineCanPublish = computed(() => {

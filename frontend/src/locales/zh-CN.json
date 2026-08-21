@@ -808,6 +808,9 @@
       "subtitle": "价格、渠道、转售与对账的独立运营视图",
       "navigationLabel": "大模型运营管理导航"
     },
+    "loading": {
+      "section": "正在加载「{section}」所需数据…"
+    },
     "toolbar": {
       "displayCurrency": "显示货币",
       "resalePlatform": "挂售平台",
@@ -1666,8 +1669,13 @@
     },
     "priceChangePanel": {
       "columns": {
+        "change": "差额",
+        "current": "新值 / 当前值",
         "currency": "币种",
+        "dimension": "计价维度",
         "object": "对象",
+        "previous": "旧值",
+        "source": "来源",
         "time": "时间",
         "type": "类型",
         "input": "输入",
@@ -1684,6 +1692,7 @@
         "videoOutput": "视频输出"
       },
       "empty": "暂无价格变化记录。",
+      "rangeSummary": "已载入渠道最近 {channel} 个、挂售最近 {listing} 个价格版本；显示 {shown}/{total} 个维度记录",
       "fallback": {
         "channel": "渠道 {id}",
         "model": "模型 {id}",
@@ -2013,9 +2022,9 @@
       "schedule": {
         "addHour": "添加执行小时",
         "custom": "自定义周期",
-        "customDescription": "当前周期超出可视化编辑范围，保存其它配置时会保留原周期；如需调整，请重新选择执行小时，之后统一在 05 分执行。",
+        "customDescription": "当前周期超出可视化编辑范围，保存其它配置时会保留原周期；如需调整，请重新选择执行小时。",
         "emptyHours": "请选择至少一个执行时间",
-        "fixedMinute": "修改后统一在所选小时的 05 分执行。",
+        "fixedMinute": "在所选小时的 {minute} 分执行。",
         "hours": "执行小时",
         "optionDescription": "每天 {time} 执行",
         "removeHour": "删除执行小时",
@@ -2196,7 +2205,7 @@
         "unknown": "未知"
       },
       "summary": {
-        "modelResult": "{total} 个元模型 · {active} 个可用",
+        "modelResult": "{total} 个元模型",
         "vendors": "厂商"
       },
       "table": {
@@ -2574,6 +2583,7 @@
       },
       "autoSyncPreset": {
         "empty": "暂无可添加的自动同步来源。",
+        "existingSource": "编辑时保留当前同步来源；如需更换，请新建价格源。",
         "exists": "当前同步来源已经添加。",
         "existsBadge": "已添加",
         "loading": "正在加载同步来源。",
@@ -3002,15 +3012,15 @@
         "confirmOffline": "批量确认下架"
       },
       "kpis": {
-        "availableModels": {
-          "label": "可挂售模型",
-          "hint": "{count} 个未上架",
-          "delta": "本周期"
+        "workflowModels": {
+          "label": "流程内模型",
+          "hint": "其中 {count} 个尚未上线",
+          "delta": "当前平台"
         },
-        "platforms": {
-          "label": "挂售平台",
-          "hint": "可见挂售平台汇总",
-          "delta": "稳定"
+        "candidateModels": {
+          "label": "待进入流程",
+          "hint": "已有采购供应，需通过“新建上架”进入流程",
+          "delta": "候选模型"
         },
         "listed": {
           "label": "已上架",
@@ -3018,9 +3028,9 @@
           "activeDelta": "+ 上架中",
           "pendingDelta": "待上架"
         },
-        "unlisted": {
-          "label": "未上架",
-          "hint": "可在工作台一键处理",
+        "workflowUnlisted": {
+          "label": "流程内未上线",
+          "hint": "已进入当前平台流程但尚未在线",
           "delta": "需处理"
         },
         "averageMargin": {

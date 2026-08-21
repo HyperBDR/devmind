@@ -330,6 +330,7 @@ def sync_yunce_model_prices(
     base_url = resolve_collection_base_url(source=source, base_url=base_url)
     run = PriceCollectionRun.objects.create(source=source)
     active_offering_ids: set[int] = set()
+    changed_price_item_ids: set[int] = set()
     stats = {
         "models": 0,
         "created": 0,
@@ -373,11 +374,14 @@ def sync_yunce_model_prices(
                     run=run,
                     offering=offering,
                 )
-                sync_model_price_items(
+                price_items = sync_model_price_items(
                     item,
                     source=source,
                     offering=offering,
                     source_url=catalog.source_url,
+                )
+                changed_price_item_ids.update(
+                    price_item.id for price_item in price_items
                 )
                 active_offering_ids.add(offering.id)
                 stats["models"] += 1
@@ -388,6 +392,16 @@ def sync_yunce_model_prices(
                 source=source,
                 active_offering_ids=active_offering_ids,
             )
+            changed_price_item_ids.update(stale_stats["price_item_ids"])
+            channel_sync = sync_dependent_channel_price_items_for_price_items(
+                ModelPriceItem.objects.filter(id__in=changed_price_item_ids),
+            )
+            stats["channel_model_prices_synced"] = channel_sync[
+                "channel_model_prices"
+            ]
+            stats["channel_price_items_synced"] = channel_sync[
+                "channel_price_items"
+            ]
             source.last_collected_at = timezone.now()
             source.save(update_fields=["last_collected_at", "updated_at"])
             run.status = PriceCollectionRun.STATUS_SUCCEEDED
@@ -409,6 +423,12 @@ def sync_yunce_model_prices(
                 ),
                 "closed_stale_price_items": stale_stats["price_items"],
                 "closed_stale_history": stale_stats["history"],
+                "channel_model_prices_synced": channel_sync[
+                    "channel_model_prices"
+                ],
+                "channel_price_items_synced": channel_sync[
+                    "channel_price_items"
+                ],
             }
             run.save()
         return stats
@@ -448,6 +468,7 @@ def sync_vendor_price_source_catalog(
     )
     run = PriceCollectionRun.objects.create(source=source)
     active_offering_ids: set[int] = set()
+    changed_price_item_ids: set[int] = set()
     stats = {
         "models": 0,
         "created": 0,
@@ -505,11 +526,14 @@ def sync_vendor_price_source_catalog(
                     run=run,
                     offering=offering,
                 )
-                sync_model_price_items(
+                price_items = sync_model_price_items(
                     item,
                     source=source,
                     offering=offering,
                     source_url=catalog.source_url,
+                )
+                changed_price_item_ids.update(
+                    price_item.id for price_item in price_items
                 )
                 active_offering_ids.add(offering.id)
                 stats["models"] += 1
@@ -520,6 +544,16 @@ def sync_vendor_price_source_catalog(
                 source=source,
                 active_offering_ids=active_offering_ids,
             )
+            changed_price_item_ids.update(stale_stats["price_item_ids"])
+            channel_sync = sync_dependent_channel_price_items_for_price_items(
+                ModelPriceItem.objects.filter(id__in=changed_price_item_ids),
+            )
+            stats["channel_model_prices_synced"] = channel_sync[
+                "channel_model_prices"
+            ]
+            stats["channel_price_items_synced"] = channel_sync[
+                "channel_price_items"
+            ]
             source.last_collected_at = timezone.now()
             source.save(update_fields=["last_collected_at", "updated_at"])
             run.status = PriceCollectionRun.STATUS_SUCCEEDED
@@ -540,6 +574,12 @@ def sync_vendor_price_source_catalog(
                 ),
                 "closed_stale_price_items": stale_stats["price_items"],
                 "closed_stale_history": stale_stats["history"],
+                "channel_model_prices_synced": channel_sync[
+                    "channel_model_prices"
+                ],
+                "channel_price_items_synced": channel_sync[
+                    "channel_price_items"
+                ],
             }
             run.save()
         return stats

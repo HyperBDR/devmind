@@ -88,7 +88,14 @@
               <span class="field-label">
                 {{ t('llmOps.priceSourceModal.fields.autoSyncSource') }}
               </span>
+              <input
+                v-if="isEditing"
+                class="field"
+                :value="editingSyncSourceLabel"
+                disabled
+              />
               <CompactSelect
+                v-else
                 v-model="selectedAutoSyncSourceCode"
                 :disabled="
                   !shouldCreateAutoSyncPreset ||
@@ -348,10 +355,18 @@ const autoSyncSourceStatus = computed(() => {
 })
 
 const autoSyncSourceHelpText = computed(() => {
+  if (isEditing.value) {
+    return t('llmOps.priceSourceModal.autoSyncPreset.existingSource')
+  }
   if (!shouldCreateAutoSyncPreset.value) {
     return t('llmOps.priceSourceModal.autoSyncPreset.manualMode')
   }
   return autoSyncSourceStatus.value
+})
+
+const editingSyncSourceLabel = computed(() => {
+  const source = props.source || {}
+  return [source.provider_name, source.name].filter(Boolean).join(' · ') || '-'
 })
 
 const saveDisabled = computed(

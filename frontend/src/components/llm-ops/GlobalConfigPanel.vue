@@ -97,7 +97,7 @@
               v-if="metaSchedule.mode === 'custom'"
               type="button"
               class="schedule-reset-button"
-              @click="resetScheduleEditor(metaSchedule, [2])"
+              @click="resetScheduleEditor(metaSchedule, [2], 35)"
             >
               {{ t('llmOps.globalConfigPanel.schedule.reselect') }}
             </button>
@@ -109,7 +109,11 @@
             <div class="schedule-hour-selector">
               <span>{{ t('llmOps.globalConfigPanel.schedule.hours') }}</span>
               <small>
-                {{ t('llmOps.globalConfigPanel.schedule.fixedMinute') }}
+                {{
+                  t('llmOps.globalConfigPanel.schedule.fixedMinute', {
+                    minute: minuteLabel(metaSchedule.minute)
+                  })
+                }}
               </small>
             </div>
             <div class="schedule-hour-list">
@@ -184,7 +188,7 @@
               v-if="priceSchedule.mode === 'custom'"
               type="button"
               class="schedule-reset-button"
-              @click="resetScheduleEditor(priceSchedule, [1, 7, 13, 19])"
+              @click="resetScheduleEditor(priceSchedule, [1, 7, 13, 19], 15)"
             >
               {{ t('llmOps.globalConfigPanel.schedule.reselect') }}
             </button>
@@ -199,7 +203,11 @@
             <div class="schedule-hour-selector">
               <span>{{ t('llmOps.globalConfigPanel.schedule.hours') }}</span>
               <small>
-                {{ t('llmOps.globalConfigPanel.schedule.fixedMinute') }}
+                {{
+                  t('llmOps.globalConfigPanel.schedule.fixedMinute', {
+                    minute: minuteLabel(priceSchedule.minute)
+                  })
+                }}
               </small>
             </div>
             <div class="schedule-hour-list">
@@ -442,7 +450,6 @@ const sourceMode = ref('all')
 
 const metaSchedule = reactive(createScheduleEditor())
 const priceSchedule = reactive(createScheduleEditor())
-const FIXED_SCHEDULE_MINUTE = 5
 
 const form = reactive({
   meta_model_sync_enabled: true,
@@ -720,10 +727,10 @@ function applySchedule(target, nextSchedule) {
   target.touched = nextSchedule.touched
 }
 
-function resetScheduleEditor(target, hours) {
+function resetScheduleEditor(target, hours, minute) {
   applySchedule(target, {
     hours,
-    minute: FIXED_SCHEDULE_MINUTE,
+    minute,
     mode: 'hours',
     originalCron: '',
     touched: true
@@ -732,13 +739,12 @@ function resetScheduleEditor(target, hours) {
 
 function markScheduleTouched(schedule) {
   schedule.touched = true
-  schedule.minute = FIXED_SCHEDULE_MINUTE
 }
 
 function availableHourOptions(schedule, index) {
   const currentHour = schedule.hours[index]
   const usedHours = new Set(schedule.hours)
-  const minute = schedule.touched ? FIXED_SCHEDULE_MINUTE : schedule.minute
+  const minute = schedule.minute
   return hourOptions
     .filter((hour) => hour.value === currentHour || !usedHours.has(hour.value))
     .map((hour) => ({
@@ -788,7 +794,7 @@ function scheduleToCron(schedule) {
   const hours = Array.from(new Set(schedule.hours))
     .sort((left, right) => left - right)
     .join(',')
-  return `${FIXED_SCHEDULE_MINUTE} ${hours} * * *`
+  return `${schedule.minute} ${hours} * * *`
 }
 
 function scheduleSummary(schedule) {
@@ -796,7 +802,7 @@ function scheduleSummary(schedule) {
     return t('llmOps.globalConfigPanel.schedule.custom')
   }
 
-  const minute = schedule.touched ? FIXED_SCHEDULE_MINUTE : schedule.minute
+  const minute = schedule.minute
   const times = Array.from(new Set(schedule.hours))
     .sort((left, right) => left - right)
     .map((hour) => timeLabel(hour, minute))

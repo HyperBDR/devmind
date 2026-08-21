@@ -55,6 +55,17 @@ export function useAgioneListingDisplay({
   const listingKpis = computed(() => {
     const visibleRows = visibleListingRows.value
     const listedRows = visibleRows.filter((row) => row.is_listed)
+    const workflowModelIds = new Set(
+      visibleRows.map((row) => String(row.model?.id || ''))
+    )
+    const workflowCandidates = (props.summary?.procurement || []).filter(
+      (row) =>
+        (row.options || []).length > 0 &&
+        !workflowModelIds.has(String(row.model_id || ''))
+    )
+    const candidateModels = new Set(
+      workflowCandidates.map((row) => String(row.model_id))
+    ).size
     const rowMargins = listedRows
       .map((row) => listingUnifiedMarginRate(row))
       .filter((value) => value !== null)
@@ -68,20 +79,20 @@ export function useAgioneListingDisplay({
       : null
     return [
       {
-        label: t('llmOps.listingBoard.kpis.availableModels.label'),
+        label: t('llmOps.listingBoard.kpis.workflowModels.label'),
         value: visibleRows.length,
-        hint: t('llmOps.listingBoard.kpis.availableModels.hint', {
+        hint: t('llmOps.listingBoard.kpis.workflowModels.hint', {
           count: unlistedCount(visibleRows, listedRows)
         }),
-        delta: t('llmOps.listingBoard.kpis.availableModels.delta'),
+        delta: t('llmOps.listingBoard.kpis.workflowModels.delta'),
         deltaTone: 'text-slate-400'
       },
       {
-        label: t('llmOps.listingBoard.kpis.platforms.label'),
-        value: props.platformCount,
-        hint: t('llmOps.listingBoard.kpis.platforms.hint'),
-        delta: t('llmOps.listingBoard.kpis.platforms.delta'),
-        deltaTone: 'text-slate-400'
+        label: t('llmOps.listingBoard.kpis.candidateModels.label'),
+        value: candidateModels,
+        hint: t('llmOps.listingBoard.kpis.candidateModels.hint'),
+        delta: t('llmOps.listingBoard.kpis.candidateModels.delta'),
+        deltaTone: candidateModels ? 'text-amber-600' : 'text-slate-400'
       },
       {
         label: t('llmOps.listingBoard.kpis.listed.label'),
@@ -94,10 +105,10 @@ export function useAgioneListingDisplay({
         deltaTone: listedRows.length > 0 ? 'text-emerald-600' : 'text-amber-600'
       },
       {
-        label: t('llmOps.listingBoard.kpis.unlisted.label'),
+        label: t('llmOps.listingBoard.kpis.workflowUnlisted.label'),
         value: visibleRows.length - listedRows.length,
-        hint: t('llmOps.listingBoard.kpis.unlisted.hint'),
-        delta: t('llmOps.listingBoard.kpis.unlisted.delta'),
+        hint: t('llmOps.listingBoard.kpis.workflowUnlisted.hint'),
+        delta: t('llmOps.listingBoard.kpis.workflowUnlisted.delta'),
         deltaTone: 'text-amber-600'
       },
       {
