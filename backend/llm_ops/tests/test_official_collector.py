@@ -18,6 +18,8 @@ from llm_ops.collection_services import (
 from llm_ops.collectors.official import (
     OFFICIAL_PROVIDER_CONFIGS,
     collect_official_pricing_catalog,
+    extract_token_prices,
+    normalize_source_text,
 )
 from llm_ops.constants import canonical_meta_model_identity
 from llm_ops.models import (
@@ -51,6 +53,91 @@ class MockPricingResponse:
     def raise_for_status(self):
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
+
+
+class OfficialTokenPriceExtractionTests(TestCase):
+    def test_labeled_columns_keep_google_output_separate_from_cache(self):
+        prices = extract_token_prices(
+            "Input tokens $1.25; Output tokens $10.00; "
+            "Cached input tokens $0.13",
+            "USD",
+        )
+
+        self.assertEqual(
+            prices,
+            (Decimal("1.25"), Decimal("10.00"), Decimal("0.13")),
+        )
+
+    def test_google_table_rows_keep_first_cache_tier(self):
+        prices = extract_token_prices(
+            normalize_source_text(
+                """
+                <table>
+                  <tr>
+                    <th>Model</th>
+                    <th>Type</th>
+                    <th>Price (/1M tokens)</th>
+                    <th>Price (/1M tokens) &gt; 200K</th>
+                    <th>Price (/1M Context caching)</th>
+                    <th>Price (/1M Context caching) &gt; 200K</th>
+                  </tr>
+                  <tr>
+                    <td>Gemini 2.5 Pro</td>
+                    <td>Input (text, image, video, audio)</td>
+                    <td>$1.25</td>
+                    <td>$2.50</td>
+                    <td>$0.13</td>
+                    <td>$0.25</td>
+                  </tr>
+                  <tr>
+                    <td>Output (text)</td>
+                    <td>$10.00</td>
+                    <td>$15.00</td>
+                  </tr>
+                </table>
+                """
+            ),
+            "USD",
+        )
+
+        self.assertEqual(
+            prices,
+            (Decimal("1.25"), Decimal("10.00"), Decimal("0.13")),
+        )
+
+    def test_google_table_rows_read_standalone_context_caching_price(self):
+        prices = extract_token_prices(
+            normalize_source_text(
+                """
+                <table>
+                  <tr>
+                    <th>Model</th>
+                    <th>Type</th>
+                    <th>Price (/1M tokens)</th>
+                  </tr>
+                  <tr>
+                    <td>Gemini 2.5 Pro</td>
+                    <td>Input (text)</td>
+                    <td>$1.25</td>
+                  </tr>
+                  <tr>
+                    <td>Output (text)</td>
+                    <td>$10.00</td>
+                  </tr>
+                  <tr>
+                    <td>Context caching</td>
+                    <td>$0.13</td>
+                  </tr>
+                </table>
+                """
+            ),
+            "USD",
+        )
+
+        self.assertEqual(
+            prices,
+            (Decimal("1.25"), Decimal("10.00"), Decimal("0.13")),
+        )
 
 
 class OfficialCollectionSyncTests(TestCase):

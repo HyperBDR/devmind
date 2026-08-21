@@ -1,12 +1,13 @@
 const SECTION_DATA_GROUPS = {
   audit: ['channels'],
-  channelMatrix: ['channels', 'channelPricing', 'summary'],
+  channelMatrix: ['platforms', 'channels', 'channelPricing', 'summary'],
   channels: ['channels'],
   collectionHealth: ['sources', 'runs'],
   globalConfig: ['sources'],
-  listingRisk: ['summary'],
+  listingRisk: ['platforms', 'summary'],
   metaModels: ['providers'],
   modelWorkbench: [
+    'platforms',
     'models',
     'channels',
     'modelPrices',
@@ -16,7 +17,7 @@ const SECTION_DATA_GROUPS = {
     'summary'
   ],
   monitor: ['platforms', 'summary'],
-  priceChanges: ['modelPrices', 'priceHistory'],
+  priceChanges: ['platforms', 'modelPrices', 'priceHistory'],
   providers: ['sources', 'runs', 'providers'],
   reconciler: ['channels', 'models', 'records'],
   reseller: ['platforms', 'providers', 'models', 'listings', 'summary'],

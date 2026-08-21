@@ -120,7 +120,7 @@ export function useGlobalAssistant() {
         conversationId,
         {
           message,
-          page_context: { app_key: appKey }
+          page_context: pageContextFor(appKey)
         },
         {
           onProgress(event) {
@@ -176,6 +176,16 @@ export function useGlobalAssistant() {
       loading.value = false
       if (version === activationVersion) await loadHistory(version)
     }
+  }
+
+  function pageContextFor(appKey) {
+    const pageContext = { app_key: appKey }
+    if (appKey !== 'llm_ops' || typeof localStorage === 'undefined') {
+      return pageContext
+    }
+    const platformId = localStorage.getItem('llm_ops_resale_platform')
+    if (platformId) pageContext.resale_platform_id = platformId
+    return pageContext
   }
 
   function askQuestion(question) {

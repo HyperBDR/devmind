@@ -83,9 +83,14 @@ export function useLLMOpsResalePublishing({
     }
     loadResaleWorkflowConfig(platformId)
     if (
-      !['listingRisk', 'modelWorkbench', 'monitor', 'reseller'].includes(
-        activeSection.value
-      )
+      ![
+        'channelMatrix',
+        'listingRisk',
+        'modelWorkbench',
+        'monitor',
+        'priceChanges',
+        'reseller'
+      ].includes(activeSection.value)
     ) {
       return
     }
@@ -99,10 +104,7 @@ export function useLLMOpsResalePublishing({
   watch(
     activeResalePlatforms,
     (platforms) => {
-      if (!platforms.length) {
-        selectedResalePlatformId.value = ''
-        return
-      }
+      if (!platforms.length) return
       const exists = platforms.some(
         (platform) =>
           String(platform.id) === String(selectedResalePlatformId.value)

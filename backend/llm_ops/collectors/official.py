@@ -1295,6 +1295,10 @@ def extract_token_prices(
     if table_prices is not None:
         return table_prices
 
+    labeled_prices = extract_labeled_token_prices(text, currency)
+    if labeled_prices is not None:
+        return labeled_prices
+
     input_price = extract_labeled_price(
         text,
         labels=("input", "prompt", "输入", "输入价格"),
@@ -1312,6 +1316,7 @@ def extract_token_prices(
             "cache hit",
             "cache read",
             "cached input",
+            "context caching",
             "缓存命中",
         ),
         currency=currency,
@@ -1325,17 +1330,118 @@ def extract_token_prices(
     return None
 
 
+def extract_labeled_token_prices(
+    text: str,
+    currency: str,
+) -> tuple[Decimal, Decimal, Decimal | None] | None:
+    """Extract token prices from explicit input/output column labels."""
+    input_price = extract_labeled_price(
+        text,
+        labels=("input", "prompt", "输入", "输入价格"),
+        currency=currency,
+    )
+    output_price = extract_labeled_price(
+        text,
+        labels=("output", "completion", "输出", "输出价格"),
+        currency=currency,
+    )
+    if input_price is None or output_price is None:
+        return None
+    cache_price = extract_labeled_price(
+        text,
+        labels=(
+            "cache hits",
+            "cache hit",
+            "cache read",
+            "cached input",
+            "context caching",
+            "缓存命中",
+        ),
+        currency=currency,
+    )
+    return input_price, output_price, cache_price
+
+
 def extract_ordered_token_prices(
     text: str,
     currency: str,
 ) -> tuple[Decimal, Decimal, Decimal | None] | None:
     """Extract token prices from table rows with known column order."""
+    row_prices = extract_labeled_table_row_prices(text, currency)
+    if row_prices is not None:
+        return row_prices
+
     prices = extract_money_values(text, currency)
     if len(prices) >= 5 and has_cache_hit_header(text):
         return prices[0], prices[4], prices[3]
     if len(prices) >= 5 and has_anthropic_cache_write_shape(prices):
         return prices[0], prices[4], prices[3]
     return None
+
+
+def extract_labeled_table_row_prices(
+    text: str,
+    currency: str,
+) -> tuple[Decimal, Decimal, Decimal | None] | None:
+    """Extract token prices from rows labeled input and output."""
+    if "|" not in text:
+        return None
+
+    input_values = _table_row_money_values(
+        text,
+        labels=("input", "prompt", "输入"),
+        currency=currency,
+    )
+    output_values = _table_row_money_values(
+        text,
+        labels=("output", "completion", "输出"),
+        currency=currency,
+    )
+    if not input_values or not output_values:
+        return None
+
+    cache_price = None
+    if has_cache_hit_header(text):
+        if len(input_values) >= 3:
+            cache_price = input_values[2]
+        else:
+            cache_values = _table_row_money_values(
+                text,
+                labels=(
+                    "cache hits",
+                    "cache hit",
+                    "cache read",
+                    "cached input",
+                    "context caching",
+                    "缓存命中",
+                ),
+                currency=currency,
+            )
+            if cache_values:
+                cache_price = cache_values[0]
+    return input_values[0], output_values[0], cache_price
+
+
+def _table_row_money_values(
+    text: str,
+    *,
+    labels: tuple[str, ...],
+    currency: str,
+) -> list[Decimal]:
+    """Return amounts from the first table row matching one of the labels."""
+    for line in text.splitlines():
+        normalized = line.lower()
+        for label in labels:
+            match = re.search(
+                rf"(?<![a-z]){re.escape(label)}(?![a-z])",
+                normalized,
+            )
+            if not match:
+                continue
+            values = extract_money_values(line[match.end():], currency)
+            if values:
+                return values
+    return []
 
 
 def has_cache_hit_header(text: str) -> bool:
@@ -1346,6 +1452,7 @@ def has_cache_hit_header(text: str) -> bool:
         or "cache hit" in normalized
         or "cache read" in normalized
         or "cached input" in normalized
+        or "context caching" in normalized
     )
 
 
@@ -1479,6 +1586,7 @@ def normalize_source_text(content: str) -> str:
     text = html.unescape(str(content or ""))
     text = re.sub(r"<script\b[^>]*>.*?</script>", " ", text, flags=re.I | re.S)
     text = re.sub(r"<style\b[^>]*>.*?</style>", " ", text, flags=re.I | re.S)
+    text = re.sub(r">\s+<", "><", text)
     text = re.sub(r"</tr\s*>", "\n", text, flags=re.I)
     text = re.sub(r"</t[dh]\s*>", " | ", text, flags=re.I)
     text = re.sub(r"<[^>]+>", " ", text)

@@ -15,6 +15,8 @@ from llm_ops.assistant_tools import (
 
 INSTRUCTIONS = """
 你是大模型运营助手。
+如果页面上下文提供了当前挂售平台，所有涉及挂售、收益或未上架状态的
+查询都必须使用该平台；回答中明确写出平台名称，不得默认改用 Agione。
 回答必须先区分运营模型和市场参考模型：
 - operational 表示已有渠道配置或当前平台挂售意图，
   可以进入运营待办。
@@ -42,7 +44,11 @@ llm_ops_get_operation_entry，在回答中给出其返回的控制台链接。
 """
 
 
-def _execute_tool(name, _context, arguments):
+def _execute_tool(name, context, arguments):
+    page_context = context.page_context or {}
+    page_platform_id = page_context.get("resale_platform_id")
+    if str(page_platform_id).isdigit():
+        arguments = {**arguments, "platform_id": int(page_platform_id)}
     return execute_llm_ops_tool(name, arguments)
 
 
