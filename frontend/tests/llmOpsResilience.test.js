@@ -25,6 +25,10 @@ const llmOpsPageSource = readFileSync(
   new URL('../src/pages/LLMOps.vue', import.meta.url),
   'utf8'
 )
+const llmOpsHeaderSource = readFileSync(
+  new URL('../src/components/llm-ops/LLMOpsHeader.vue', import.meta.url),
+  'utf8'
+)
 const modelWorkbenchSource = readFileSync(
   new URL('../src/components/llm-ops/ModelWorkbenchPanel.vue', import.meta.url),
   'utf8'
@@ -55,6 +59,10 @@ const reconciliationSource = readFileSync(
 )
 const resalePublishingSource = readFileSync(
   new URL('../src/composables/useLLMOpsResalePublishing.js', import.meta.url),
+  'utf8'
+)
+const llmOpsDataSource = readFileSync(
+  new URL('../src/composables/useLLMOpsData.js', import.meta.url),
   'utf8'
 )
 const resaleWorkspaceSource = readFileSync(
@@ -218,13 +226,37 @@ test('uses a recognizable create icon in the reconciliation action', () => {
 })
 
 test('refreshes platform-bound data in every platform-aware section', () => {
+  const platformSections = [
+    'channelMatrix',
+    'listingRisk',
+    'modelWorkbench',
+    'monitor',
+    'priceChanges',
+    'reseller'
+  ]
+
+  platformSections.forEach((section) => {
+    assert.ok(dataGroupsForSection(section).includes('platforms'))
+    assert.match(llmOpsHeaderSource, new RegExp(`'${section}'`))
+  })
   assert.match(
     resalePublishingSource,
-    /'listingRisk',[\s\S]*'modelWorkbench',[\s\S]*'monitor',[\s\S]*'reseller'/
+    /'channelMatrix',[\s\S]*'listingRisk',[\s\S]*'modelWorkbench',[\s\S]*'monitor',[\s\S]*'priceChanges',[\s\S]*'reseller'/
   )
   assert.match(
     resalePublishingSource,
     /refreshResalePlatformSelection\(activeSection\.value\)/
+  )
+})
+
+test('keeps the persisted platform until platform options have loaded', () => {
+  assert.match(
+    resalePublishingSource,
+    /if \(!platforms\.length\) return/
+  )
+  assert.match(
+    llmOpsDataSource,
+    /const selectedResalePlatformId = ref\([\s\S]*readStorage\('llm_ops_resale_platform'\)/
   )
 })
 

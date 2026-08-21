@@ -6,6 +6,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from ai_assistant.contracts import ToolExecutionContext
 from ai_assistant.provider import AssistantCapabilityProvider
 from llm_ops.assistant import assistant_provider, get_assistant_capability
 from llm_ops.assistant_tools import execute_llm_ops_tool
@@ -19,6 +20,7 @@ from llm_ops.models import (
     PriceCollectionRun,
     PriceCollectionSource,
     ProcurementChannel,
+    ResalePlatform,
 )
 
 
@@ -113,6 +115,42 @@ class LLMOpsAssistantToolTests(TestCase):
         self.assertEqual(overview["operational_models"], 1)
         self.assertEqual(overview["market_reference_models"], 1)
         self.assertEqual(overview["decision_counts"]["no_supply"], 1)
+
+    def test_capability_uses_current_page_platform_for_queries(self):
+        platform = ResalePlatform.objects.create(
+            name="Secondary Platform",
+            code="secondary-platform",
+            platform_type=ResalePlatform.PLATFORM_TYPE_INTERNAL,
+            currency="CNY",
+            is_active=True,
+        )
+        other_platform = ResalePlatform.objects.create(
+            name="Other Platform",
+            code="other-platform",
+            platform_type=ResalePlatform.PLATFORM_TYPE_INTERNAL,
+            currency="CNY",
+            is_active=True,
+        )
+        tool = next(
+            tool
+            for tool in get_assistant_capability().tools
+            if tool.name == "llm_ops_get_overview"
+        )
+
+        result = tool.handler(
+            ToolExecutionContext(
+                user_id=None,
+                app_key="llm_ops",
+                conversation_id="test",
+                page_context={"resale_platform_id": str(platform.id)},
+            ),
+            {"platform_id": other_platform.id},
+        )
+
+        self.assertEqual(
+            result["result"]["platform"]["platform_id"],
+            platform.id,
+        )
 
     def test_decision_query_never_returns_market_reference_as_no_supply(self):
         result = execute_llm_ops_tool(

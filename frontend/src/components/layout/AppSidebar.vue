@@ -159,6 +159,36 @@
           <span v-if="isMobile || !collapsed">{{ t('dashboard.title') }}</span>
         </router-link>
 
+        <router-link
+          v-if="userStore.userHasFeature('llm_ops')"
+          to="/llm-ops"
+          class="nav-item"
+          :class="[
+            isActive('/llm-ops') ? 'nav-item-active' : '',
+            collapsed && !isMobile ? 'nav-item-collapsed' : ''
+          ]"
+          @click="isMobile && $emit('close')"
+          @mouseenter="preloadRoute('/llm-ops')"
+          :title="collapsed && !isMobile ? t('platforms.llmOps') : undefined"
+        >
+          <svg
+            class="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 3h6m-7 4h8m-9 4h10m-9 4h8m-9 4h6"
+            />
+          </svg>
+          <span v-if="isMobile || !collapsed">
+            {{ t('platforms.llmOps') }}
+          </span>
+        </router-link>
+
         <!-- Cloud Billing Menu with Submenu -->
         <div
           v-if="userStore.userHasFeature('operations_console')"

@@ -209,7 +209,14 @@ const selectedResalePlatformIdModel = computed({
 })
 
 const showPlatformControl = computed(() =>
-  ['monitor', 'reseller'].includes(props.activeSection)
+  [
+    'channelMatrix',
+    'listingRisk',
+    'modelWorkbench',
+    'monitor',
+    'priceChanges',
+    'reseller'
+  ].includes(props.activeSection)
 )
 const showPlatformActions = computed(() => props.activeSection === 'reseller')
 const toolbar = computed(() => toolbarForSection(props.activeSection))

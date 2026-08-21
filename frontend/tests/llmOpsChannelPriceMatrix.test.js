@@ -112,6 +112,7 @@ test('calculates savings against the currently listed channel', () => {
 
 test('loads contract pricing data only when the matrix is opened', () => {
   assert.deepEqual(dataGroupsForSection('channelMatrix'), [
+    'platforms',
     'channels',
     'channelPricing',
     'summary'

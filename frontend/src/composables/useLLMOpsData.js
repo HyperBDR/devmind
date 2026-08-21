@@ -29,6 +29,9 @@ export function useLLMOpsData() {
   const loading = ref(false)
   const pageError = ref('')
   const loadedSections = new Set()
+  let resaleListingsRequestId = 0
+  let priceHistoryRequestId = 0
+  let summaryRequestId = 0
 
   const sources = ref([])
   const collectionRuns = ref([])
@@ -103,8 +106,13 @@ export function useLLMOpsData() {
 
   async function refreshSectionData(section, options = {}) {
     const groups = dataGroupsForSection(section)
+    if (groups.includes('platforms')) {
+      await loadDataGroup('platforms', section, options)
+    }
     await Promise.all(
-      groups.map((group) => loadDataGroup(group, section, options))
+      groups
+        .filter((group) => group !== 'platforms')
+        .map((group) => loadDataGroup(group, section, options))
     )
   }
 
@@ -137,6 +145,7 @@ export function useLLMOpsData() {
       resalePlatforms.value = asArray(
         await fetchList(llmOpsApi.listResalePlatforms)
       )
+      ensureSelectedResalePlatform()
       await loadResaleWorkflowConfig()
       return
     }
@@ -190,22 +199,36 @@ export function useLLMOpsData() {
   async function refreshResaleListings(
     platformId = selectedResalePlatformId.value
   ) {
+    const requestId = ++resaleListingsRequestId
     const params = platformId ? { platform: platformId } : {}
-    listings.value = asArray(
+    const nextListings = asArray(
       await fetchList(llmOpsApi.listResaleListings, params)
     )
+    if (
+      requestId !== resaleListingsRequestId ||
+      String(platformId || '') !== String(selectedResalePlatformId.value || '')
+    ) {
+      return
+    }
+    listings.value = nextListings
   }
 
   async function refreshResalePlatformSelection(section) {
     const platformSections = [
+      'channelMatrix',
       'listingRisk',
       'modelWorkbench',
       'monitor',
+      'priceChanges',
       'reseller'
     ]
     platformSections.forEach((sectionKey) => loadedSections.delete(sectionKey))
     if (section === 'monitor') {
       await refreshSummary('monitor')
+      return
+    }
+    if (section === 'priceChanges') {
+      await refreshPriceHistoryData()
       return
     }
     await Promise.all([refreshResaleListings(), refreshSummary()])
@@ -270,8 +293,13 @@ export function useLLMOpsData() {
   }
 
   async function refreshPriceHistoryData(modelId = null) {
+    const requestId = ++priceHistoryRequestId
     const model = Number(modelId)
     const modelFilter = Number.isInteger(model) && model > 0 ? { model } : {}
+    const platformFilter = selectedResalePlatformId.value
+      ? { platform: selectedResalePlatformId.value }
+      : {}
+    const platformId = selectedResalePlatformId.value
     const [channelHistoryData, listingHistoryData] = await Promise.all([
       fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
         ...modelFilter,
@@ -279,9 +307,16 @@ export function useLLMOpsData() {
       }),
       fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
         ...modelFilter,
+        ...platformFilter,
         page_size: PRICE_HISTORY_PAGE_SIZE
       })
     ])
+    if (
+      requestId !== priceHistoryRequestId ||
+      String(platformId || '') !== String(selectedResalePlatformId.value || '')
+    ) {
+      return
+    }
     channelPriceHistory.value = asArray(channelHistoryData)
     listingPriceHistory.value = asArray(listingHistoryData)
   }
@@ -365,19 +400,11 @@ export function useLLMOpsData() {
 
   async function refreshPlatformData() {
     try {
-      const [platformData, listingData, summaryRes] = await Promise.all([
-        fetchList(llmOpsApi.listResalePlatforms),
-        fetchList(
-          llmOpsApi.listResaleListings,
-          selectedResalePlatformId.value
-            ? { platform: selectedResalePlatformId.value }
-            : {}
-        ),
-        llmOpsApi.getSummary(summaryParams())
-      ])
-      resalePlatforms.value = asArray(platformData)
-      listings.value = asArray(listingData)
-      summary.value = normalizeSummary(extract(summaryRes))
+      resalePlatforms.value = asArray(
+        await fetchList(llmOpsApi.listResalePlatforms)
+      )
+      ensureSelectedResalePlatform()
+      await Promise.all([refreshResaleListings(), refreshSummary()])
       await loadResaleWorkflowConfig()
     } catch (error) {
       showError(errorMessage(error, t('llmOps.dataErrors.refreshPlatforms')))
@@ -402,7 +429,15 @@ export function useLLMOpsData() {
   }
 
   async function refreshSummary(scope = 'full') {
+    const requestId = ++summaryRequestId
+    const platformId = selectedResalePlatformId.value
     const summaryRes = await llmOpsApi.getSummary(summaryParams(scope))
+    if (
+      requestId !== summaryRequestId ||
+      String(platformId || '') !== String(selectedResalePlatformId.value || '')
+    ) {
+      return
+    }
     summary.value = normalizeSummary(extract(summaryRes))
   }
 
@@ -418,6 +453,24 @@ export function useLLMOpsData() {
       resale_platform: selectedResalePlatformId.value || '',
       scope
     }
+  }
+
+  function ensureSelectedResalePlatform() {
+    const platforms = asArray(resalePlatforms.value).filter(
+      (platform) => platform.is_active !== false
+    )
+    if (!platforms.length) {
+      selectedResalePlatformId.value = ''
+      return
+    }
+    const exists = platforms.some(
+      (platform) =>
+        String(platform.id) === String(selectedResalePlatformId.value || '')
+    )
+    if (exists) return
+    const fallback =
+      platforms.find((platform) => platform.code === 'agione') || platforms[0]
+    selectedResalePlatformId.value = String(fallback.id)
   }
 
   function invalidateSectionCache() {
