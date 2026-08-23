@@ -3502,27 +3502,45 @@ def _price_item_indexes(overrides):
 def _indexed_price_items_for_override(override, indexes):
     if not override:
         return []
+
+    def select_rows(rows):
+        offering = getattr(override, "offering", None)
+        source_offering_id = getattr(
+            offering,
+            "source_offering_id",
+            None,
+        )
+        if source_offering_id:
+            offering_rows = [
+                item
+                for item in rows
+                if item.offering_id == source_offering_id
+            ]
+            if offering_rows:
+                rows = offering_rows
+        return selected_price_item_group(rows, model=override.model)
+
     if override.price_source_id:
         rows = indexes["model_by_source"].get(
             (override.model_id, override.price_source_id),
             [],
         )
         if rows:
-            return selected_price_item_group(rows, model=override.model)
+            return select_rows(rows)
         rows = indexes["meta_by_source"].get(
             (override.model.meta_model_id, override.price_source_id),
             [],
         )
         if rows:
-            return selected_price_item_group(rows, model=override.model)
+            return select_rows(rows)
         return []
 
     rows = indexes["model_any"].get(override.model_id, [])
     if rows:
-        return selected_price_item_group(rows, model=override.model)
+        return select_rows(rows)
     rows = indexes["meta_any"].get(override.model.meta_model_id, [])
     if rows:
-        return selected_price_item_group(rows, model=override.model)
+        return select_rows(rows)
     return []
 
 
@@ -3713,13 +3731,17 @@ def _best_channel_price_updated_at(
     if not best_channel:
         return None
     channel_id = best_channel.get("channel_id")
-    override = overrides.get((channel_id, model_id))
+    override_rows = overrides.get((channel_id, model_id), [])
     source_id = best_channel.get("price_source_id")
     source_run_at = None
     if source_id and source_run_at_by_source:
         source_run_at = source_run_at_by_source.get(source_id)
     return _latest_datetime(
-        override.updated_at if override else None,
+        *[
+            override.updated_at
+            for override in override_rows
+            if override is not None
+        ],
         best_channel.get("price_updated_at"),
         source_run_at,
     )
@@ -3862,26 +3884,39 @@ def _summary_listing_rows(
                 best_row.get("original_currency") or listing.model.currency
             )
         else:
-            override = overrides.get((channel.id, listing.model_id))
-            if (
-                not channel.is_active
-                or override is None
-                or not override.is_listed
-            ):
+            override_rows = [
+                item
+                for item in overrides.get((channel.id, listing.model_id), [])
+                if item.is_listed
+            ]
+            if not channel.is_active or not override_rows:
                 continue
-            schedule = resolve_channel_price_schedule(
-                channel,
-                listing.model,
-                override=override,
-                source_items=_indexed_price_items_for_override(
+            priced_rows = []
+            for override in override_rows:
+                source_items = _indexed_price_items_for_override(
                     override,
                     price_item_indexes,
+                )
+                schedule = resolve_channel_price_schedule(
+                    channel,
+                    listing.model,
+                    override=override,
+                    source_items=source_items,
+                    video_resolution=video_resolution,
+                )
+                unit_prices = resolve_usage_unit_prices(
+                    schedule,
+                    usage_context,
+                )
+                priced_rows.append((override, unit_prices))
+            override, unit_prices = min(
+                priced_rows,
+                key=lambda item: calculate_usage_cost(
+                    item[1],
+                    input_tokens=usage_context.input_tokens,
+                    output_tokens=usage_context.output_tokens,
+                    cache_input_tokens=usage_context.cache_input_tokens,
                 ),
-                video_resolution=video_resolution,
-            )
-            unit_prices = resolve_usage_unit_prices(
-                schedule,
-                usage_context,
             )
             cost_input = unit_prices.input_per_million
             cost_output = unit_prices.output_per_million
@@ -4150,18 +4185,24 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "id",
             )
         )
-        overrides = {
-            (item.channel_id, item.model_id): item
-            for item in ChannelModelPrice.objects.select_related(
-                "channel",
-                "model",
-                "model__meta_model",
-                "price_source",
+        overrides = {}
+        for item in ChannelModelPrice.objects.select_related(
+            "channel",
+            "model",
+            "model__meta_model",
+            "price_source",
+            "offering",
+            "offering__source_offering",
+        ):
+            overrides.setdefault((item.channel_id, item.model_id), []).append(
+                item
             )
-        }
-        channel_model_ids = {
-            override.model_id for override in overrides.values()
-        }
+        override_rows = [
+            override
+            for rows in overrides.values()
+            for override in rows
+        ]
+        channel_model_ids = {override.model_id for override in override_rows}
         platform_listing_model_ids = set()
         platform_excluded_model_ids = set()
         if selected_platform:
@@ -4176,7 +4217,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 ).values_list("model_id", flat=True)
             )
         listed_overrides = [
-            override for override in overrides.values() if override.is_listed
+            override for override in override_rows if override.is_listed
         ]
         price_item_indexes = _price_item_indexes(listed_overrides)
 
@@ -4184,83 +4225,110 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         for model in models:
             options = []
             for channel in channels:
-                override = overrides.get((channel.id, model.id))
-                if not override or not override.is_listed:
-                    continue
-                price_items = _indexed_price_items_for_override(
-                    override,
-                    price_item_indexes,
-                )
-                schedule = resolve_channel_price_schedule(
-                    channel,
-                    model,
-                    override=override,
-                    source_items=price_items,
-                    video_resolution=video_resolution,
-                )
-                unit_prices = resolve_usage_unit_prices(
-                    schedule,
-                    usage_context,
-                )
-                if not _has_procurement_text_price(unit_prices):
-                    continue
-                currency = resolve_channel_model_currency(
-                    channel,
-                    model,
-                    override=override,
-                )
-                estimated_cost = calculate_usage_cost(
-                    unit_prices,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    cache_input_tokens=cache_input_tokens,
-                )
-                option = {
-                    "channel_id": channel.id,
-                    "channel_name": channel.name,
-                    "price_source_id": _price_source_id_for_override(
+                channel_overrides = overrides.get((channel.id, model.id), [])
+                for override in channel_overrides:
+                    if not override.is_listed:
+                        continue
+                    price_items = _indexed_price_items_for_override(
                         override,
-                        price_items,
-                    ),
-                    "price_updated_at": _price_items_updated_at(price_items),
-                    "currency": currency,
-                    "input_price_per_million": _as_float(
-                        unit_prices.input_per_million
-                    ),
-                    "output_price_per_million": _as_float(
-                        unit_prices.output_per_million
-                    ),
-                    "cache_input_price_per_million": _as_float(
-                        unit_prices.cache_input_per_million
-                    ),
-                    "image_output_price_per_image": _as_float(
-                        unit_prices.image_output_per_image
-                    ),
-                    "audio_input_price_per_second": _as_float(
-                        unit_prices.audio_input_per_second
-                    ),
-                    "audio_output_price_per_second": _as_float(
-                        unit_prices.audio_output_per_second
-                    ),
-                    "video_input_price_per_second": _as_float(
-                        unit_prices.video_input_per_second
-                    ),
-                    "video_output_price_per_second": _as_float(
-                        unit_prices.video_output_per_second
-                    ),
-                    "tpm_limit": override.tpm_limit,
-                    "rpm_limit": override.rpm_limit,
-                    "latency_ms": override.latency_ms,
-                    "estimated_cost": _as_float(estimated_cost),
-                    **_cost_basis_payload(channel, override, unit_prices),
-                }
-                options.append(
-                    _apply_display_currency(
-                        option,
-                        currency,
-                        currency_context,
+                        price_item_indexes,
                     )
-                )
+                    schedule = resolve_channel_price_schedule(
+                        channel,
+                        model,
+                        override=override,
+                        source_items=price_items,
+                        video_resolution=video_resolution,
+                    )
+                    unit_prices = resolve_usage_unit_prices(
+                        schedule,
+                        usage_context,
+                    )
+                    if not _has_procurement_text_price(unit_prices):
+                        continue
+                    currency = resolve_channel_model_currency(
+                        channel,
+                        model,
+                        override=override,
+                    )
+                    estimated_cost = calculate_usage_cost(
+                        unit_prices,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cache_input_tokens=cache_input_tokens,
+                    )
+                    option = {
+                        "channel_id": channel.id,
+                        "channel_name": channel.name,
+                        "price_source_id": _price_source_id_for_override(
+                            override,
+                            price_items,
+                        ),
+                        "price_source_name": (
+                            override.price_source.name
+                            if override.price_source_id
+                            else ""
+                        ),
+                        "price_updated_at": _price_items_updated_at(
+                            price_items
+                        ),
+                        "currency": currency,
+                        "input_price_per_million": _as_float(
+                            unit_prices.input_per_million
+                        ),
+                        "output_price_per_million": _as_float(
+                            unit_prices.output_per_million
+                        ),
+                        "cache_input_price_per_million": _as_float(
+                            unit_prices.cache_input_per_million
+                        ),
+                        "image_output_price_per_image": _as_float(
+                            unit_prices.image_output_per_image
+                        ),
+                        "audio_input_price_per_second": _as_float(
+                            unit_prices.audio_input_per_second
+                        ),
+                        "audio_output_price_per_second": _as_float(
+                            unit_prices.audio_output_per_second
+                        ),
+                        "video_input_price_per_second": _as_float(
+                            unit_prices.video_input_per_second
+                        ),
+                        "video_output_price_per_second": _as_float(
+                            unit_prices.video_output_per_second
+                        ),
+                        "tpm_limit": override.tpm_limit,
+                        "rpm_limit": override.rpm_limit,
+                        "latency_ms": override.latency_ms,
+                        "estimated_cost": _as_float(estimated_cost),
+                        "offering_id": override.offering_id,
+                        "offering_key": (
+                            override.offering.offering_key
+                            if override.offering_id
+                            else ""
+                        ),
+                        "offering_name": (
+                            override.offering.display_name
+                            if override.offering_id
+                            else ""
+                        ),
+                        "source_offering_name": (
+                            override.offering.source_offering.exposed_model_name
+                            if (
+                                override.offering_id
+                                and override.offering.source_offering_id
+                            )
+                            else ""
+                        ),
+                        **_cost_basis_payload(channel, override, unit_prices),
+                    }
+                    options.append(
+                        _apply_display_currency(
+                            option,
+                            currency,
+                            currency_context,
+                        )
+                    )
 
             options.sort(
                 key=lambda item: (

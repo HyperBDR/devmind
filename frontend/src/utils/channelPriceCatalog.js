@@ -18,31 +18,55 @@ export function channelPriceTierRows(priceItems = []) {
     .slice()
     .sort(channelPriceItemSort)
     .forEach((item) => {
+      const specLabel = priceSpecLabel(item.spec)
       const key = [
         item.tier_type || 'flat',
         item.tier_start || '',
-        item.tier_end || ''
+        item.tier_end || '',
+        specLabel
       ].join(':')
       const tier = tiers.get(key) || {
         prices: [],
-        rangeLabel: tierRangeLabel(item)
+        rangeLabel: [tierRangeLabel(item), specLabel]
+          .filter(Boolean)
+          .join(' · ')
       }
 
-      tier.prices.push({
+      const price = {
         currency: item.currency,
         label: priceDimensionLabel(item.dimension),
         value: item.unit_price
-      })
+      }
+      if (specLabel) price.specLabel = specLabel
+      tier.prices.push(price)
       tiers.set(key, tier)
     })
 
   return Array.from(tiers.values())
 }
 
+export function priceSpecLabel(spec = {}) {
+  if (!spec || typeof spec !== 'object') return ''
+  const values = [
+    spec.region,
+    spec.deployment_scope,
+    spec.scope,
+    spec.source,
+    spec.provider,
+    spec.sku,
+    spec.variant
+  ]
+    .filter(Boolean)
+    .map((value) => String(value).trim())
+  return [...new Set(values)].join(' · ')
+}
+
 export function channelPriceItemLabel(item = {}) {
   const label = priceDimensionLabel(item.dimension)
-  if (item.tier_type !== 'usage_range') return label
-  return `${tierRangeLabel(item)} ${label}`
+  const tierLabel =
+    item.tier_type === 'usage_range' ? `${tierRangeLabel(item)} ` : ''
+  const specLabel = priceSpecLabel(item.spec)
+  return [tierLabel + label, specLabel].filter(Boolean).join(' · ')
 }
 
 function channelPriceItemSort(left, right) {

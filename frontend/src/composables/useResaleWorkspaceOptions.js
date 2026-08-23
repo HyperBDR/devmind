@@ -38,7 +38,13 @@ export function useResaleWorkspaceOptions({ form, props, t }) {
     const variants = new Map()
     ;(props.channelPriceItems || []).forEach((item) => {
       if (!item?.channel || !item?.model || !item?.dimension) return
-      const key = [item.channel, item.model].map(String).join(':')
+      const key = [
+        item.channel,
+        item.model,
+        item.offering || 'default'
+      ]
+        .map(String)
+        .join(':')
       const items = variants.get(key) || []
       items.push(item)
       variants.set(key, items)
@@ -48,7 +54,8 @@ export function useResaleWorkspaceOptions({ form, props, t }) {
         const key = channelPriceItemKey(
           item.channel,
           item.model,
-          item.dimension
+          item.dimension,
+          item.offering || 'default'
         )
         const dimensionItems = map.get(key) || []
         dimensionItems.push(item)

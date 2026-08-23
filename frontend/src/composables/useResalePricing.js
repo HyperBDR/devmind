@@ -420,7 +420,10 @@ export function useResalePricing({
 
   function priceDimensions(row) {
     const marketAvg = getMarketAvg()
-    return ['input', 'output', 'cache'].map((key) => {
+    const keys = row?.cacheEnabled === false
+      ? ['input', 'output']
+      : ['input', 'output', 'cache']
+    return keys.map((key) => {
       const config = priceMetricConfigs[key]
       const referencePrice = formatMinimumPrice(
         referencePriceForCost(row[config.costRawField])

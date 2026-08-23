@@ -12,6 +12,7 @@ from llm_ops.models import (
     AuditLog,
     ChannelModelPrice,
     ChannelModelPriceHistory,
+    ChannelOffering,
     ChannelPriceItem,
     CollectedModelPriceSnapshot,
     LLMModel,
@@ -2461,6 +2462,74 @@ class LLMOpsViewTests(TestCase):
             0.8,
         )
         self.assertEqual(row["best_channel"]["input_price_per_million"], 2.0)
+
+    def test_summary_keeps_multiple_offerings_for_one_channel_model(self):
+        provider = LLMProvider.objects.create(
+            name="OpenAI",
+            code="openai-multi-offering",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="GPT-5 Multi Offering",
+            code="gpt-5-multi-offering",
+            input_price_per_million="2.5",
+            output_price_per_million="5",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Multi Offering Channel",
+            code="multi-offering-channel",
+        )
+        first = ChannelOffering.objects.create(
+            channel=channel,
+            meta_model=model.meta_model,
+            model=model,
+            offering_key="primary",
+            display_name="Primary route",
+        )
+        second = ChannelOffering.objects.create(
+            channel=channel,
+            meta_model=model.meta_model,
+            model=model,
+            offering_key="backup",
+            display_name="Backup route",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            offering=first,
+            is_listed=True,
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            offering=second,
+            is_listed=True,
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"display_currency": "USD"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            item
+            for item in response.data["procurement"]
+            if item["model_id"] == model.id
+        )
+        options = [
+            item
+            for item in row["options"]
+            if item["channel_id"] == channel.id
+        ]
+        self.assertEqual(
+            {item["offering_id"] for item in options},
+            {first.id, second.id},
+        )
+        self.assertEqual(
+            {item["offering_name"] for item in options},
+            {"Primary route", "Backup route"},
+        )
 
     def test_channel_ratio_update_resyncs_listed_price_items(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")

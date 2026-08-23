@@ -201,6 +201,13 @@
                   {{ row.modelName }}
                 </span>
                 <span
+                  v-if="row.sourceOfferingName || row.offeringName"
+                  class="rounded border border-indigo-100 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700"
+                  :title="row.offeringKey || row.offeringName"
+                >
+                  {{ row.sourceOfferingName || row.offeringName }}
+                </span>
+                <span
                   v-if="row.isLowest"
                   class="rounded-full border border-emerald-100 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700"
                 >
@@ -306,6 +313,50 @@
                 class="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500"
                 >{{ row.source }}</span
               >
+              <label
+                class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium"
+                :class="
+                  row.hasCacheInput
+                    ? 'border-sky-100 bg-sky-50 text-sky-700'
+                    : 'border-slate-200 bg-slate-100 text-slate-400'
+                "
+                :title="
+                  row.hasCacheInput
+                    ? t('llmOps.publishingWorkspace.capabilities.cacheEnabledHint')
+                    : t('llmOps.publishingWorkspace.capabilities.cacheUnsupportedHint')
+                "
+              >
+                <input
+                  :checked="row.cacheEnabled"
+                  :disabled="!row.hasCacheInput"
+                  type="checkbox"
+                  @change="toggleCachePricing(row, $event)"
+                />
+                {{ t('llmOps.publishingWorkspace.capabilities.cache') }}
+              </label>
+              <label
+                class="inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium"
+                :class="
+                  row.hasTieredPricing
+                    ? 'border-violet-100 bg-violet-50 text-violet-700'
+                    : 'border-slate-200 bg-slate-100 text-slate-400'
+                "
+                :title="
+                  row.hasTieredPricing && canFlattenTierPricing(row)
+                    ? t('llmOps.publishingWorkspace.capabilities.tierEnabledHint')
+                    : row.hasTieredPricing
+                      ? t('llmOps.publishingWorkspace.capabilities.tierFlatFallbackUnsupportedHint')
+                      : t('llmOps.publishingWorkspace.capabilities.tierUnsupportedHint')
+                "
+              >
+                <input
+                  :checked="row.tierEnabled"
+                  :disabled="!row.hasTieredPricing || !canFlattenTierPricing(row)"
+                  type="checkbox"
+                  @change="toggleTierPricing(row, $event)"
+                />
+                {{ t('llmOps.publishingWorkspace.capabilities.tier') }}
+              </label>
             </div>
             <span
               v-if="row.isLowest"
@@ -868,7 +919,30 @@ function tierDraftFor(row) {
 }
 
 function hasTieredDraft(row) {
-  return hasTieredResalePrices(tierDraftFor(row))
+  return row?.tierEnabled !== false && hasTieredResalePrices(tierDraftFor(row))
+}
+
+function canFlattenTierPricing(row) {
+  const draft = tierDraftFor(row)
+  const dimensions = ['input', 'output']
+  if (row?.cacheEnabled && row.hasCacheInput) dimensions.push('cache')
+  return dimensions.every((dimension) =>
+    (draft?.[dimension] || []).some(
+      (item) => item.flat || item.start === null
+    )
+  )
+}
+
+function toggleCachePricing(row, event) {
+  if (!row.hasCacheInput) return
+  updateChainState(row, { cacheEnabled: Boolean(event?.target?.checked) })
+  emitChange()
+}
+
+function toggleTierPricing(row, event) {
+  if (!row.hasTieredPricing || !canFlattenTierPricing(row)) return
+  updateChainState(row, { tierEnabled: Boolean(event?.target?.checked) })
+  emitChange()
 }
 
 function displayDraftFromItems(items) {
@@ -1385,18 +1459,39 @@ function workspacePayload() {
       currency: currencyLabel.value.toUpperCase(),
       priceIn: row.priceInRaw,
       priceOut: row.priceOutRaw,
-      priceCacheIn: row.priceCacheInRaw,
+      priceCacheIn: row.cacheEnabled ? row.priceCacheInRaw : null,
       tierItems: normalizeResalePriceDraft(
-        tierDraftFor(row),
+        normalizedDraftForSubmission(row),
         currencyLabel.value
       ),
       tierErrors: tierErrorsFor(row),
-      hasTieredPrices: hasTieredResalePrices(tierDraftFor(row)),
+      hasTieredPrices: hasTieredResalePrices(
+        normalizedDraftForSubmission(row)
+      ),
       margin: row.margin,
       priceBelowReference: rowHasBelowReferencePrice(row),
       hasChanges: listingRowHasChanges(row)
     }))
   }
+}
+
+function normalizedDraftForSubmission(row) {
+  const draft = tierDraftFor(row)
+  const next = Object.fromEntries(
+    Object.entries(draft).filter(([dimension]) => {
+      return dimension !== 'cache' || row.cacheEnabled
+    })
+  )
+  if (row.tierEnabled === false) {
+    if (!canFlattenTierPricing(row)) return next
+    return Object.fromEntries(
+      Object.entries(next).map(([dimension, items]) => [
+        dimension,
+        items.length ? [{ ...items[0], flat: true, start: null, end: null }] : items
+      ])
+    )
+  }
+  return next
 }
 
 function payloadChannelId(row) {
