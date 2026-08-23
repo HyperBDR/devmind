@@ -835,6 +835,16 @@ class ModelPriceItemSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    offering_source_name = serializers.CharField(
+        source="offering.source.name",
+        read_only=True,
+        allow_null=True,
+    )
+    offering_source_type = serializers.CharField(
+        source="offering.source.source_type",
+        read_only=True,
+        allow_null=True,
+    )
     source_name = serializers.CharField(
         source="source.name",
         read_only=True,
@@ -1408,6 +1418,44 @@ class ProcurementChannelSerializer(serializers.ModelSerializer):
     def validate_currency(self, value):
         return validate_currency_code(value, required=True)
 
+    def validate_contract_currency(self, value):
+        return validate_currency_code(value, required=False)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        rate = attrs.get(
+            "contract_exchange_rate",
+            getattr(self.instance, "contract_exchange_rate", None),
+        )
+        currency = attrs.get(
+            "contract_currency",
+            getattr(self.instance, "contract_currency", ""),
+        )
+        starts = attrs.get(
+            "exchange_rate_effective_from",
+            getattr(self.instance, "exchange_rate_effective_from", None),
+        )
+        ends = attrs.get(
+            "exchange_rate_effective_to",
+            getattr(self.instance, "exchange_rate_effective_to", None),
+        )
+        errors = {}
+        if rate is not None and rate <= 0:
+            errors["contract_exchange_rate"] = (
+                "contract_exchange_rate must be greater than zero."
+            )
+        if rate is not None and not currency:
+            errors["contract_currency"] = (
+                "contract_currency is required for a contract exchange rate."
+            )
+        if starts and ends and ends <= starts:
+            errors["exchange_rate_effective_to"] = (
+                "exchange_rate_effective_to must be after the start."
+            )
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
+
 
 class ChannelModelPriceSerializer(serializers.ModelSerializer):
     """Serializer for channel model listing and price overrides."""
@@ -1565,6 +1613,16 @@ class ChannelOfferingSerializer(serializers.ModelSerializer):
     )
     source_offering_name = serializers.CharField(
         source="source_offering.exposed_model_name",
+        read_only=True,
+        allow_null=True,
+    )
+    source_name = serializers.CharField(
+        source="source_offering.source.name",
+        read_only=True,
+        allow_null=True,
+    )
+    source_offering_key = serializers.CharField(
+        source="source_offering.id",
         read_only=True,
         allow_null=True,
     )
@@ -1803,6 +1861,26 @@ class ChannelPriceVersionSerializer(serializers.ModelSerializer):
                 {
                     "effective_to": (
                         "Effective end must be after effective start."
+                    )
+                }
+            )
+        exchange_rate_from = attrs.get(
+            "exchange_rate_effective_from",
+            getattr(self.instance, "exchange_rate_effective_from", None),
+        )
+        exchange_rate_to = attrs.get(
+            "exchange_rate_effective_to",
+            getattr(self.instance, "exchange_rate_effective_to", None),
+        )
+        if (
+            exchange_rate_from
+            and exchange_rate_to
+            and exchange_rate_to <= exchange_rate_from
+        ):
+            raise serializers.ValidationError(
+                {
+                    "exchange_rate_effective_to": (
+                        "Exchange rate end must be after its start."
                     )
                 }
             )

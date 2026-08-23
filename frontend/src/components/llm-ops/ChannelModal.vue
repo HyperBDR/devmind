@@ -92,6 +92,63 @@
 
         <section class="form-section">
           <div class="section-heading">
+            <h4>{{ t('llmOps.channelModal.contractFxTitle') }}</h4>
+            <p>{{ t('llmOps.channelModal.contractFxHint') }}</p>
+          </div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.contractCurrency') }}
+              </span>
+              <CompactSelect
+                v-model="form.contract_currency"
+                :options="contractCurrencyOptions"
+              />
+              <span class="field-help">
+                {{ t('llmOps.channelModal.help.contractCurrency') }}
+              </span>
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.contractExchangeRate') }}
+              </span>
+              <input
+                v-model="form.contract_exchange_rate"
+                class="field"
+                min="0.00000001"
+                step="0.00000001"
+                type="number"
+                :placeholder="t('llmOps.channelModal.placeholders.contractExchangeRate')"
+              />
+              <span class="field-help">
+                {{ t('llmOps.channelModal.help.contractExchangeRate') }}
+              </span>
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.exchangeRateFrom') }}
+              </span>
+              <input
+                v-model="form.exchange_rate_effective_from"
+                class="field"
+                type="datetime-local"
+              />
+            </label>
+            <label class="field-group">
+              <span class="field-label">
+                {{ t('llmOps.channelModal.fields.exchangeRateTo') }}
+              </span>
+              <input
+                v-model="form.exchange_rate_effective_to"
+                class="field"
+                type="datetime-local"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section class="form-section">
+          <div class="section-heading">
             <h4>{{ t('llmOps.channelModal.settlementTitle') }}</h4>
             <p>{{ t('llmOps.channelModal.settlementHint') }}</p>
           </div>
@@ -225,6 +282,11 @@ const currencyOptions = [
   { label: 'CNY', value: 'CNY' },
   { label: 'USD', value: 'USD' }
 ]
+const contractCurrencyOptions = [
+  { label: t('llmOps.channelModal.currencyNone'), value: '' },
+  { label: 'CNY', value: 'CNY' },
+  { label: 'USD', value: 'USD' }
+]
 
 const settlementRatioPercent = computed({
   get() {
@@ -247,7 +309,9 @@ const settlementRatioPercent = computed({
 watch(
   () => [props.open, props.channel],
   () => {
-    form.value = props.channel ? { ...props.channel } : defaults()
+    form.value = props.channel
+      ? normalizeFormFromChannel(props.channel)
+      : defaults()
   },
   { immediate: true }
 )
@@ -260,6 +324,10 @@ function defaults() {
     api_endpoint: '',
     currency: 'CNY',
     settlement_ratio: '1',
+    contract_currency: '',
+    contract_exchange_rate: '',
+    exchange_rate_effective_from: '',
+    exchange_rate_effective_to: '',
     notes: '',
     is_active: true
   }
@@ -270,8 +338,47 @@ function normalizePayload(payload) {
   clean.currency = String(clean.currency || 'CNY')
     .trim()
     .toUpperCase()
+  clean.contract_currency = String(clean.contract_currency || '')
+    .trim()
+    .toUpperCase()
+  clean.contract_exchange_rate = clean.contract_exchange_rate || null
+  clean.exchange_rate_effective_from = toIsoOrNull(
+    clean.exchange_rate_effective_from
+  )
+  clean.exchange_rate_effective_to = toIsoOrNull(
+    clean.exchange_rate_effective_to
+  )
   delete clean.id
   return clean
+}
+
+function normalizeFormFromChannel(channel) {
+  return {
+    ...defaults(),
+    ...channel,
+    exchange_rate_effective_from: toLocalDateTime(
+      channel.exchange_rate_effective_from
+    ),
+    exchange_rate_effective_to: toLocalDateTime(
+      channel.exchange_rate_effective_to
+    )
+  }
+}
+
+function toLocalDateTime(value) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (part) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function toIsoOrNull(value) {
+  if (!value) return null
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date.toISOString()
 }
 
 function close() {

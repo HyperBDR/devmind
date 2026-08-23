@@ -173,6 +173,88 @@ class ChannelPriceContractTests(TestCase):
 
         self.assertEqual(cost, Decimal("56.000000"))
 
+    def test_channel_exchange_rate_is_used_when_version_has_no_override(self):
+        now = timezone.now()
+        self.channel.contract_currency = "CNY"
+        self.channel.contract_exchange_rate = Decimal("7")
+        self.channel.exchange_rate_effective_from = now - timedelta(days=1)
+        self.channel.exchange_rate_effective_to = now + timedelta(days=1)
+        self.channel.save()
+        self._create_version(
+            version=1,
+            effective_from=now - timedelta(hours=1),
+            unit_price="10",
+        )
+
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            offering=self.offering,
+            occurred_at=now,
+            input_tokens=1_000_000,
+        )
+
+        self.assertEqual(cost, Decimal("70.000000"))
+
+    def test_channel_exchange_rate_is_not_applied_for_matching_currency(self):
+        now = timezone.now()
+        self.channel.contract_currency = "CNY"
+        self.channel.contract_exchange_rate = Decimal("7")
+        self.channel.save()
+        self._create_version(
+            version=1,
+            effective_from=now - timedelta(hours=1),
+            price_items=[self._price_item("10", currency="CNY")],
+        )
+
+        cost = calculate_channel_model_cost(
+            self.channel,
+            self.model,
+            offering=self.offering,
+            occurred_at=now,
+            input_tokens=1_000_000,
+        )
+
+        self.assertEqual(cost, Decimal("10.000000"))
+
+    def test_contract_exchange_rate_requires_currency(self):
+        response = self.client.post(
+            reverse("channel-price-version-list"),
+            {
+                "offering": self.offering.id,
+                "model": self.model.id,
+                "version": 1,
+                "status": ChannelPriceVersion.STATUS_DRAFT,
+                "contract_exchange_rate": "7",
+                "price_items": [self._price_item("1")],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("contract_currency", response.data)
+
+    def test_exchange_rate_effective_end_must_follow_start(self):
+        start = timezone.now()
+        response = self.client.post(
+            reverse("channel-price-version-list"),
+            {
+                "offering": self.offering.id,
+                "model": self.model.id,
+                "version": 1,
+                "status": ChannelPriceVersion.STATUS_DRAFT,
+                "exchange_rate_effective_from": start.isoformat(),
+                "exchange_rate_effective_to": (
+                    (start - timedelta(minutes=1)).isoformat()
+                ),
+                "price_items": [self._price_item("1")],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("exchange_rate_effective_to", response.data)
+
     def test_overlapping_versions_fall_back_to_highest_cost_with_warning(self):
         now = timezone.now()
         self._create_version(
@@ -450,7 +532,14 @@ class ChannelPriceContractTests(TestCase):
         self.assertEqual(response.status_code, 201, response.data)
         return ChannelPriceVersion.objects.get(pk=response.data["id"])
 
-    def _price_item(self, unit_price, *, start=None, end=None):
+    def _price_item(
+        self,
+        unit_price,
+        *,
+        currency="USD",
+        start=None,
+        end=None,
+    ):
         spec = {}
         if start and end:
             spec["time_windows"] = [
@@ -463,7 +552,7 @@ class ChannelPriceContractTests(TestCase):
         return {
             "dimension": ModelPriceItem.DIMENSION_TEXT_INPUT,
             "billing_unit": ModelPriceItem.UNIT_PER_1M_TOKENS,
-            "currency": "USD",
+            "currency": currency,
             "unit_price": unit_price,
             "tier_type": ModelPriceItem.TIER_FLAT,
             "spec": spec,

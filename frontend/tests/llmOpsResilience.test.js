@@ -129,8 +129,13 @@ test('loads publishing-only data when the resale workspace opens', () => {
   ])
 })
 
-test('loads channel model data only when opening its management drawer', () => {
-  assert.deepEqual(dataGroupsForSection('channels'), ['channels'])
+test('loads channel pricing data for the contract editor', () => {
+  assert.deepEqual(dataGroupsForSection('channels'), [
+    'channels',
+    'models',
+    'channelPricing',
+    'modelPrices'
+  ])
   assert.deepEqual(dataGroupsForChannelModelManagement(), [
     'providers',
     'metaModels',

@@ -1920,7 +1920,12 @@ def _version_exchange_rate(
     items: list[ChannelPriceItem],
     business_time: datetime,
 ) -> tuple[Decimal, str]:
-    """Prefer an effective contract rate, then the platform default rate."""
+    """Prefer version, channel, then platform exchange rates."""
+    source_currency = normalize_currency(items[0].currency)
+    target_currency = normalize_currency(
+        version.contract_currency
+        or version.offering.channel.contract_currency
+    )
     rate = version.contract_exchange_rate
     starts = version.exchange_rate_effective_from
     ends = version.exchange_rate_effective_to
@@ -1929,10 +1934,29 @@ def _version_exchange_rate(
         and (starts is None or starts <= business_time)
         and (ends is None or business_time < ends)
     ):
+        if source_currency == target_currency:
+            return ONE, "contract"
         return rate, "contract"
 
-    source_currency = normalize_currency(items[0].currency)
-    target_currency = normalize_currency(version.contract_currency)
+    channel = version.offering.channel
+    channel_currency = normalize_currency(channel.contract_currency)
+    channel_rate = channel.contract_exchange_rate
+    channel_starts = channel.exchange_rate_effective_from
+    channel_ends = channel.exchange_rate_effective_to
+    if (
+        channel_rate is not None
+        and channel_currency
+        and (
+            not version.contract_currency
+            or target_currency == channel_currency
+        )
+        and (channel_starts is None or channel_starts <= business_time)
+        and (channel_ends is None or business_time < channel_ends)
+    ):
+        if source_currency == channel_currency:
+            return ONE, "channel_contract"
+        return channel_rate, "channel_contract"
+
     if not target_currency or source_currency == target_currency:
         return ONE, "platform_default"
     context = build_currency_conversion_context(target_currency)

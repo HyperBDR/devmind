@@ -1,7 +1,14 @@
 import { computed } from 'vue'
 
-export function channelPriceItemKey(channelId, modelId, dimension) {
-  return [channelId, modelId, dimension].map(String).join(':')
+export function channelPriceItemKey(
+  channelId,
+  modelId,
+  dimension,
+  offeringId = 'default'
+) {
+  return [channelId, modelId, offeringId || 'default', dimension]
+    .map(String)
+    .join(':')
 }
 
 export function useResaleChainRows({
@@ -21,6 +28,14 @@ export function useResaleChainRows({
   t
 }) {
   function channelPriceItems(option, modelId, dimension) {
+    const offeringKey = channelPriceItemKey(
+      option.channel_id,
+      modelId,
+      dimension,
+      option.offering_id
+    )
+    const rows = channelPriceItemsByKey.value.get(offeringKey)
+    if (rows?.length) return rows
     return (
       channelPriceItemsByKey.value.get(
         channelPriceItemKey(option.channel_id, modelId, dimension)
@@ -152,8 +167,16 @@ export function useResaleChainRows({
           option.cache_input_price_per_million_settlement_ratio ??
             cacheInputCost.ratio
         )
-        const uniqueId = `${option.channel_id}-${procurement.model_id}`
+        const uniqueId = [
+          option.channel_id,
+          procurement.model_id,
+          option.offering_id || 'default'
+        ].join('-')
         const state = getChainState(uniqueId)
+        const hasCacheInput = upstreamPriceItems.cache.length > 0
+        const hasTieredPricing = Object.values(upstreamPriceItems).some(
+          (items) => items.some((item) => item.tier_type === 'usage_range')
+        )
         const margin = normalizeMargin(
           state.margin ??
             state.marginIn ??
@@ -175,7 +198,16 @@ export function useResaleChainRows({
           channelId: option.channel_id,
           channelName: option.channel_name,
           supplierName: option.channel_name,
-          source: option.channel_name,
+          source:
+            option.source_offering_name ||
+            option.price_source_name ||
+            option.offering_name ||
+            option.channel_name,
+          offeringId: option.offering_id || null,
+          offeringKey: option.offering_key || '',
+          offeringName: option.offering_name || '',
+          sourceOfferingName: option.source_offering_name || '',
+          priceSourceName: option.price_source_name || '',
           metaVendorId: metaVendor.id,
           metaVendorName: metaVendor.name || metaVendor.code,
           metaVendorCode: metaVendor.code,
@@ -203,7 +235,10 @@ export function useResaleChainRows({
           costOut: outDisplay !== null ? outDisplay.toFixed(4) : '-',
           costCacheIn:
             cacheInDisplay !== null ? cacheInDisplay.toFixed(4) : '0.0000',
-          hasCacheInput: cacheInDisplay !== null && cacheInDisplay > 0,
+          hasCacheInput,
+          cacheEnabled: hasCacheInput && state.cacheEnabled !== false,
+          hasTieredPricing,
+          tierEnabled: hasTieredPricing && state.tierEnabled !== false,
           tpmLimit: numberOrNull(option.tpm_limit),
           rpmLimit: numberOrNull(option.rpm_limit),
           latencyMs: numberOrNull(option.latency_ms),

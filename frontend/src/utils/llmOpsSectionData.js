@@ -1,7 +1,7 @@
 const SECTION_DATA_GROUPS = {
   audit: ['channels'],
   channelMatrix: ['platforms', 'channels', 'channelPricing', 'summary'],
-  channels: ['channels'],
+  channels: ['channels', 'models', 'channelPricing', 'modelPrices'],
   collectionHealth: ['sources', 'runs'],
   globalConfig: ['sources'],
   listingRisk: ['platforms', 'summary'],

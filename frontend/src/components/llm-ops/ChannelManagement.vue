@@ -113,6 +113,13 @@
                         })
                       }}
                     </span>
+                    <span
+                      v-if="channel.contract_exchange_rate"
+                      class="config-chip"
+                      :title="contractRateTitle(channel)"
+                    >
+                      {{ contractRateLabel(channel) }}
+                    </span>
                   </div>
                 </div>
               </td>
@@ -176,6 +183,15 @@
       :channel="editingChannel"
       @close="closeChannelModal"
       @saved="handleChannelSaved"
+    />
+    <ChannelContractEditor
+      :channels="channels"
+      :models="models"
+      :channel-prices="channelPrices"
+      :channel-offerings="channelOfferings"
+      :channel-price-versions="channelPriceVersions"
+      :price-items="priceItems"
+      @refresh="emit('refresh')"
     />
     <ChannelModelDrawer
       :channel="selectedChannelForModels"
@@ -254,6 +270,7 @@ import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
+import ChannelContractEditor from '@/components/llm-ops/ChannelContractEditor.vue'
 import ChannelModelDrawer from '@/components/llm-ops/ChannelModelDrawer.vue'
 import ChannelModal from '@/components/llm-ops/ChannelModal.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -284,6 +301,14 @@ const props = defineProps({
   channelPrices: {
     type: Array,
     required: true
+  },
+  channelOfferings: {
+    type: Array,
+    default: () => []
+  },
+  channelPriceVersions: {
+    type: Array,
+    default: () => []
   },
   channelPriceItems: {
     type: Array,
@@ -423,6 +448,21 @@ async function deleteChannel() {
 function ratioLabel(value) {
   if (value === null || value === undefined || value === '') return '-'
   return `${(Number(value) * 100).toFixed(1)}%`
+}
+
+function contractRateLabel(channel) {
+  const currency = channel.contract_currency || channel.currency || 'USD'
+  return `FX ${Number(channel.contract_exchange_rate).toFixed(4)} ${currency}`
+}
+
+function contractRateTitle(channel) {
+  const from = channel.exchange_rate_effective_from
+    ? new Date(channel.exchange_rate_effective_from).toLocaleString()
+    : 'now'
+  const to = channel.exchange_rate_effective_to
+    ? new Date(channel.exchange_rate_effective_to).toLocaleString()
+    : 'open-ended'
+  return `${contractRateLabel(channel)} · ${from} — ${to}`
 }
 
 function errorMessage(error, fallback) {
