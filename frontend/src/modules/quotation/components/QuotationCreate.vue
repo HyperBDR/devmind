@@ -248,12 +248,25 @@ const existingQuoteNumbers = computed(() =>
     : props.quotations.map((quote) => quote.quoteNo),
 )
 const quoteNoIsUnique = computed(() =>
-  isQuotationNumberUnique(quoteNo.value, props.quotations, props.editingQuote?.id),
+  quoteNoMode.value === 'auto'
+    || isQuotationNumberUnique(
+      quoteNo.value,
+      props.quotations,
+      props.editingQuote?.id,
+    ),
 )
 const draftSubmittedQuoteNo = computed(() =>
   props.editingQuote && quoteNoMode.value !== 'custom'
     ? props.editingQuote.quoteNo
     : quoteNo.value,
+)
+
+const editingQuoteUsesRevisions = computed(() =>
+  Boolean(
+    props.editingQuote &&
+      ['Uploaded', 'Sent', 'Accepted', 'Rejected', 'Expired', 'Cancelled']
+        .includes(props.editingQuote.status),
+  ),
 )
 
 const customerHistory = computed(() => buildCustomerHistory(historySourceQuotations.value))
@@ -302,8 +315,12 @@ const productLineSelectOptions = computed(() => [
 ])
 
 function regenerateQuoteNo(line = productLine.value, date = quoteDate.value) {
-  if (props.editingQuote) {
+  if (props.editingQuote && editingQuoteUsesRevisions.value) {
     quoteNo.value = getNextRevisionQuoteNumber(props.editingQuote.quoteNo, existingQuoteNumbers.value)
+    return
+  }
+  if (props.editingQuote) {
+    quoteNo.value = props.editingQuote.quoteNo
     return
   }
   quoteNo.value = getNextAutoQuoteNumber(line, dateFromInput(date), existingQuoteNumbers.value)
@@ -506,7 +523,9 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   productLine.value =
     editingQuote.productLine ||
     inferProductLineFromQuoteNumber(editingQuote.quoteNo, props.productLineOptions)
-  quoteNo.value = getNextRevisionQuoteNumber(editingQuote.quoteNo, existingQuoteNumbers.value)
+  quoteNo.value = editingQuoteUsesRevisions.value
+    ? getNextRevisionQuoteNumber(editingQuote.quoteNo, existingQuoteNumbers.value)
+    : editingQuote.quoteNo
   projectName.value = editingQuote.projectName
   clientCompany.value = editingQuote.clientCompany
   contactPerson.value = editingQuote.contactPerson
@@ -659,6 +678,14 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
     Array.isArray(draft.items) && draft.items.length > 0
       ? JSON.parse(JSON.stringify(draft.items))
       : items.value
+  if (quoteNoMode.value === 'auto') {
+    quoteNo.value = getNextAutoQuoteNumber(
+      productLine.value,
+      dateFromInput(quoteDate.value),
+      existingQuoteNumbers.value,
+    )
+    preferDraftQuoteNo.value = false
+  }
   window.setTimeout(() => {
     applyingCreateDraft.value = false
   }, 0)
@@ -952,6 +979,7 @@ function validateForm(status: 'Draft' | 'Generated') {
   }
   if (
     targetQuoteNo.trim() &&
+    quoteNoMode.value === 'custom' &&
     !isQuotationNumberUnique(targetQuoteNo, props.quotations, props.editingQuote?.id)
   ) {
     tempErrors.quoteNo = t('quotation.pages.create.errors.quoteNoDuplicate')
@@ -1035,6 +1063,7 @@ function handleSubmit(status: 'Draft' | 'Generated') {
   const newQuote: Quotation = {
     id: props.editingQuote ? props.editingQuote.id : `quote-${Date.now()}`,
     quoteNo: status === 'Draft' ? draftSubmittedQuoteNo.value : quoteNo.value,
+    quoteNoMode: quoteNoMode.value,
     productLine: productLine.value,
     productLineName: selectedProductLineOption.value?.label || '',
     projectName: projectName.value,
@@ -1180,7 +1209,7 @@ const itemErrorEntries = computed(() =>
                 <span class="text-xs font-bold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.numberingSettings') }}
                 </span>
-                <span v-if="editingQuote" class="text-xs font-semibold text-dm-primary">
+                <span v-if="editingQuoteUsesRevisions" class="text-xs font-semibold text-dm-primary">
                   {{ t('quotation.pages.create.revisionAutoSuffix') }}
                 </span>
               </div>
@@ -1195,7 +1224,7 @@ const itemErrorEntries = computed(() =>
                       test-id="quote-product-line-select"
                       class-name="min-w-0 flex-1"
                       :model-value="productLine"
-                      :disabled="!!editingQuote && quoteNoMode === 'auto'"
+                      :disabled="editingQuoteUsesRevisions && quoteNoMode === 'auto'"
                       :options="productLineSelectOptions"
                       panel-class-name="qmp-dropdown-panel--product-line"
                       @update:model-value="onProductLineSelect"

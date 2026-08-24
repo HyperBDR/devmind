@@ -759,6 +759,11 @@ class QuotationSerializer(serializers.ModelSerializer):
 
 
 class QuotationCreateSerializer(serializers.Serializer):
+    numbering_mode = serializers.ChoiceField(
+        choices=("auto", "custom"),
+        required=False,
+        default="custom",
+    )
     quote_no = serializers.CharField(
         max_length=Quotation._meta.get_field("quote_no").max_length,
     )

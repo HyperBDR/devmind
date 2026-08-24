@@ -49,6 +49,7 @@ from quotation.services.quotation_service import (
     build_quotation,
     calculate_totals,
     create_version_snapshot,
+    get_next_auto_quote_number,
     replace_items,
 )
 
@@ -257,12 +258,24 @@ class QuotationListCreateView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
         data["created_by_email"] = user_display_email(request.user)
+        numbering_mode = data.pop("numbering_mode", "custom")
         items = data.pop("items", [])
-        try:
-            with transaction.atomic():
-                quotation = build_quotation(data=data, items_data=items)
-        except IntegrityError:
-            return Response({"detail": "quote_no already exists"}, status=409)
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    if numbering_mode == "auto":
+                        data["quote_no"] = get_next_auto_quote_number(
+                            data["product_line"],
+                            data["quote_date"],
+                        )
+                    quotation = build_quotation(data=data, items_data=items)
+                break
+            except IntegrityError:
+                if numbering_mode != "auto" or attempt == 2:
+                    return Response(
+                        {"detail": "quote_no already exists"},
+                        status=409,
+                    )
         quotation = Quotation.objects.prefetch_related(
             "items", "documents__replicas", "versions"
         ).get(pk=quotation.pk)
@@ -403,7 +416,32 @@ class QuotationDetailView(APIView):
                 items_changed = "items" in data
                 quotation.save()
                 skip_version = bool(data.get("skip_version"))
-                if not skip_version and (status_changed or items_changed):
+                draft_edit = (
+                    previous_status == QuoteStatus.DRAFT
+                    and quotation.status == QuoteStatus.DRAFT
+                )
+                revision_statuses = {
+                    QuoteStatus.UPLOADED,
+                    QuoteStatus.SENT,
+                    QuoteStatus.ACCEPTED,
+                    QuoteStatus.REJECTED,
+                    QuoteStatus.EXPIRED,
+                    QuoteStatus.CANCELLED,
+                }
+                if (
+                    not skip_version
+                    and not draft_edit
+                    and (
+                        (
+                            previous_status in revision_statuses
+                            and (status_changed or items_changed)
+                        )
+                        or (
+                            status_changed
+                            and quotation.status != QuoteStatus.DRAFT
+                        )
+                    )
+                ):
                     default_notes = (
                         f"Updated status to {data['status']}"
                         if status_changed

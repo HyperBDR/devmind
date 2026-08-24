@@ -73,6 +73,7 @@ export interface QuoteVersion {
 export interface Quotation {
   id: string;
   quoteNo: string;
+  quoteNoMode?: 'auto' | 'custom';
   sourceType?: 'manual' | 'document_import';
   sourceDocumentType?: 'excel' | 'pdf';
   sourceDocument?: {

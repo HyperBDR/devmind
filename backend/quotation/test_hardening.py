@@ -84,6 +84,34 @@ class QuotationBoundaryTests(TestCase):
         assert Decimal(response.data["vat_amount"]) == Decimal("18.00")
         assert Decimal(response.data["grand_total"]) == Decimal("198.00")
 
+    def test_auto_numbering_uses_quotes_created_by_other_users(self):
+        first_payload = quote_payload("ignored-by-auto-numbering")
+        first_payload["numbering_mode"] = "auto"
+        first = self.api.post(
+            "/api/v1/quotation/quotations",
+            first_payload,
+            format="json",
+        )
+        self.assertEqual(first.status_code, 201, first.data)
+        self.assertEqual(first.data["quote_no"], "BDR150726")
+
+        other = User.objects.create_user(
+            username="qa-hardening-other",
+            email="other@example.com",
+            password="password",
+        )
+        other_api = APIClient()
+        other_api.force_authenticate(user=other)
+        second_payload = quote_payload("also-ignored-by-auto-numbering")
+        second_payload["numbering_mode"] = "auto"
+        second = other_api.post(
+            "/api/v1/quotation/quotations",
+            second_payload,
+            format="json",
+        )
+        self.assertEqual(second.status_code, 201, second.data)
+        self.assertEqual(second.data["quote_no"], "BDR150726.1")
+
     def test_rejects_invalid_quantity_discount_price_and_vat_boundaries(self):
         invalid_values = [
             ("qty", "0", "10.00"),

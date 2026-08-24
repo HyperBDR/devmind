@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable
 
@@ -210,6 +212,26 @@ def build_quotation(
             extended_price=item.get("extended_price") or 0,
         )
     return quotation
+
+
+def get_next_auto_quote_number(product_line: str, quote_date) -> str:
+    """Return the next globally unique number for a product line and date."""
+    base = (
+        f"{str(product_line or 'BDR').strip()}"
+        f"{quote_date.day:02d}{quote_date.month:02d}"
+        f"{quote_date.year % 100:02d}"
+    )
+    existing = set(
+        Quotation.objects.filter(
+            quote_no__regex=rf"^{re.escape(base)}(?:\.[0-9]+)?$",
+        ).values_list("quote_no", flat=True)
+    )
+    if base not in existing:
+        return base
+    suffix = 1
+    while f"{base}.{suffix}" in existing:
+        suffix += 1
+    return f"{base}.{suffix}"
 
 
 def replace_items(
