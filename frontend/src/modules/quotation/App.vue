@@ -666,10 +666,18 @@ async function handleSaveQuotation(newQuote: Quotation) {
     const wasCreate = !editingQuoteId.value
     const exists = Boolean(editingQuoteId.value)
     const willGenerate = ownedQuote.status === 'Generated'
+    const usesQuoteRevisions = [
+      'Uploaded',
+      'Sent',
+      'Accepted',
+      'Rejected',
+      'Expired',
+      'Cancelled',
+    ].includes(ownedQuote.status)
     let saved = exists
       ? await updateQuotationApi(ownedQuote, {
           notes: t('quotation.app.versionNotesEditQuote'),
-          skipVersion: willGenerate,
+          skipVersion: !usesQuoteRevisions,
         })
       : await createQuotationApi(ownedQuote)
 

@@ -159,6 +159,44 @@ class QuotationVersionHistoryTests(TestCase):
         assert response.data["versions"] == []
         assert response.data["status"] == "generated"
 
+    def test_editing_draft_keeps_quote_number_and_has_no_version(self):
+        user = User.objects.create_user(
+            username="alice-draft-edit",
+            email="alice.chen@oneprocloud.com",
+            password="password",
+        )
+        quotation = build_quotation(
+            data=self._base_quote_data("BDR240826"),
+            items_data=[],
+        )
+        api = APIClient()
+        api.force_authenticate(user=user)
+        response = api.put(
+            f"/api/v1/quotation/quotations/{quotation.id}",
+            {
+                "quote_no": "BDR240826",
+                "status": "draft",
+                "project_name": "Edited draft",
+                "payment_terms": quotation.payment_terms,
+                "quote_date": str(quotation.quote_date),
+                "expire_date": str(quotation.expire_date),
+                "issuer_contact_name": quotation.issuer_contact_name,
+                "issuer_contact_email": quotation.issuer_contact_email,
+                "client_company": quotation.client_company,
+                "contact_person": quotation.contact_person,
+                "email": quotation.email,
+                "items": [],
+            },
+            format="json",
+        )
+
+        assert response.status_code == 200
+        assert response.data["quote_no"] == "BDR240826"
+        assert response.data["versions"] == []
+        quotation.refresh_from_db()
+        assert quotation.quote_no == "BDR240826"
+        assert quotation.version_current == 0
+
     def test_generate_after_edit_does_not_duplicate_same_snapshot(self):
         user = User.objects.create_user(
             username="alice-generate-dedupe",

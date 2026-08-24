@@ -635,7 +635,10 @@ export async function getQuotationFormContext(
 export async function createQuotation(quote: Quotation): Promise<Quotation> {
   const created = await apiRequest<ApiQuotation>('/quotations', {
     method: 'POST',
-    body: JSON.stringify(mapQuotationToCreatePayload(quote)),
+    body: JSON.stringify({
+      ...mapQuotationToCreatePayload(quote),
+      numbering_mode: quote.quoteNoMode || 'custom',
+    }),
   });
   return mapApiQuotation(created);
 }
