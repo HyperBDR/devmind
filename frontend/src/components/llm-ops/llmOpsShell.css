@@ -966,6 +966,14 @@ body.llm-ops-theme .llm-nav-item {
     box-shadow var(--ui-duration-fast) var(--ui-ease-out);
 }
 
+body.llm-ops-theme .llm-nav-group-button {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
 body.llm-ops-theme .llm-nav-group-button:hover,
 body.llm-ops-theme .llm-nav-item:hover {
   background: var(--ui-sidebar-hover-bg);
@@ -995,7 +1003,9 @@ body.llm-ops-theme .nav-group-items {
 }
 
 body.llm-ops-theme .nav-group-items .llm-nav-item {
-  font-size: 13px;
+  font-size: 14px;
+  line-height: 1.4;
+  letter-spacing: 0;
   padding-left: 10px;
 }
 

@@ -44,7 +44,7 @@
           </svg>
         </button>
       </div>
-      <p v-if="!collapsed" class="mt-2 text-xs leading-5 text-slate-400">
+      <p v-if="!collapsed" class="mt-2 text-[11px] leading-4 text-slate-400">
         {{ t('llmOps.shell.subtitle') }}
       </p>
     </div>
@@ -58,7 +58,7 @@
       <section v-for="group in navGroups" :key="group.key">
         <button
           type="button"
-          class="llm-nav-group-button flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-semibold"
+          class="llm-nav-group-button flex w-full items-center gap-3 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em]"
           :class="{ 'is-expanded': isExpanded(group.key) }"
           :aria-expanded="!collapsed && isExpanded(group.key)"
           :title="collapsed ? group.label : ''"
@@ -95,13 +95,13 @@
         </button>
         <div
           v-if="!collapsed && isExpanded(group.key)"
-          class="nav-group-items mt-1 space-y-1"
+          class="nav-group-items mt-1 space-y-0.5"
         >
           <button
             v-for="item in group.items"
             :key="item.key"
             type="button"
-            class="llm-nav-item flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm font-medium"
+            class="llm-nav-item flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm font-medium"
             :class="{ 'is-active': activeSection === item.key }"
             :title="collapsed ? item.label : ''"
             @click="$emit('select-item', group.key, item.key)"
