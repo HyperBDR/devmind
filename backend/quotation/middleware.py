@@ -38,6 +38,8 @@ def _classify(method: str, path: str):
     if relative.startswith("audit-events"):
         return None
     quotation = re.fullmatch(r"quotations/([^/]+)", relative)
+    if re.fullmatch(r"quotations/[^/]+/copy", relative):
+        return "quotation", "copy", "quotation"
     if relative == "quotations" and method == "POST":
         return "quotation", "create", "quotation"
     if quotation and method == "GET":

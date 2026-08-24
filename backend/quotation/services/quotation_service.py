@@ -234,6 +234,71 @@ def get_next_auto_quote_number(product_line: str, quote_date) -> str:
     return f"{base}.{suffix}"
 
 
+def copy_quotation(
+    quotation: Quotation,
+    *,
+    created_by_email: str | None,
+) -> Quotation:
+    """Create an editable draft copy without historical artifacts."""
+    quote_no = get_next_auto_quote_number(
+        quotation.product_line,
+        quotation.quote_date,
+    )
+    copied = Quotation.objects.create(
+        quote_no=quote_no,
+        status=QuoteStatus.DRAFT,
+        source_type="manual",
+        product_line=quotation.product_line,
+        product_line_name=quotation.product_line_name,
+        project_name=quotation.project_name,
+        currency=quotation.currency,
+        payment_term_option=quotation.payment_term_option,
+        payment_terms=quotation.payment_terms,
+        quote_date=quotation.quote_date,
+        expire_date=quotation.expire_date,
+        tax_label=quotation.tax_label,
+        vat_rate=quotation.vat_rate,
+        vat_amount=quotation.vat_amount,
+        software_subtotal=quotation.software_subtotal,
+        others_subtotal=quotation.others_subtotal,
+        subtotal_before_vat=quotation.subtotal_before_vat,
+        grand_total=quotation.grand_total,
+        remarks_disclaimer=quotation.remarks_disclaimer,
+        issuer_company_name=quotation.issuer_company_name,
+        issuer_contact_name=quotation.issuer_contact_name,
+        issuer_contact_email=quotation.issuer_contact_email,
+        issuer_contact_title=quotation.issuer_contact_title,
+        issuer_signature=quotation.issuer_signature,
+        client_company=quotation.client_company,
+        contact_person=quotation.contact_person,
+        email=quotation.email,
+        billing_company=quotation.billing_company,
+        billing_contact=quotation.billing_contact,
+        billing_email=quotation.billing_email,
+        created_by_email=created_by_email,
+        version_current=0,
+    )
+    QuotationItem.objects.bulk_create(
+        [
+            QuotationItem(
+                quotation=copied,
+                line_no=item.line_no,
+                type=item.type,
+                item_id=item.item_id,
+                name=item.name,
+                description=item.description,
+                qty=item.qty,
+                list_price=item.list_price,
+                discount_percent=item.discount_percent,
+                net_unit_price=item.net_unit_price,
+                extended_price=item.extended_price,
+            )
+            for item in quotation.items.all()
+        ]
+    )
+    return copied
+
+
 def replace_items(
     quotation: Quotation, items_data: list[dict[str, Any]]
 ) -> None:

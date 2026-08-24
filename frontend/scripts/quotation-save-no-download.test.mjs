@@ -71,3 +71,11 @@ test('explicit download controls continue to use the export API', () => {
   assert.match(quotationDetails, /exportQuotationFile\(props\.quote\.id, 'xlsx'/)
   assert.match(quotationDetails, /exportQuotationFile\(props\.quote\.id, 'pdf'/)
 })
+
+test('imported quotations do not render the copy action', () => {
+  const copyStart = quotationList.indexOf('t(\'quotation.pages.list.copyQuote\')')
+  const copyBlock = quotationList.slice(copyStart - 300, copyStart + 300)
+
+  assert.ok(copyStart >= 0)
+  assert.match(copyBlock, /v-if="quote\.sourceType !== 'document_import'"/)
+})
