@@ -967,11 +967,16 @@ body.llm-ops-theme .llm-nav-item {
 }
 
 body.llm-ops-theme .llm-nav-group-button {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   line-height: 1.25;
   text-transform: uppercase;
+}
+
+body.llm-ops-theme .llm-nav-top-level-item {
+  font-size: 15px;
+  line-height: 1.35;
 }
 
 body.llm-ops-theme .llm-nav-group-button:hover,

@@ -109,7 +109,6 @@
                     </div>
                     <p class="mt-1 text-xs text-slate-500">
                       {{ contractContext(offer).offering }} ·
-                      {{ contractContext(offer).version }}
                     </p>
                   </div>
                   <strong class="font-mono text-base text-slate-900">
@@ -118,16 +117,6 @@
                 </div>
 
                 <dl class="offer-context-grid">
-                  <div>
-                    <dt>
-                      {{
-                        t(
-                          'llmOps.channelPriceMatrixPanel.drawer.effectiveWindow'
-                        )
-                      }}
-                    </dt>
-                    <dd>{{ contractContext(offer).effectiveWindow }}</dd>
-                  </div>
                   <div>
                     <dt>
                       {{
@@ -197,7 +186,6 @@ import {
 } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { currentContractVersion } from '@/utils/channelContractRelations'
 import {
   compareChannelOptions,
   optionFreshness,
@@ -226,8 +214,7 @@ const props = defineProps({
   dimension: { type: String, default: 'input' },
   action: { type: String, default: 'keep' },
   actionText: { type: String, default: '' },
-  channelOfferings: { type: Array, default: () => [] },
-  priceVersions: { type: Array, default: () => [] }
+  channelOfferings: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['apply', 'close', 'view-detail'])
@@ -298,42 +285,19 @@ function freshnessLabel(offer) {
 }
 
 function contractContext(offer) {
-  const modelVersions = props.priceVersions.filter((version) =>
-    sameId(version.model, props.row?.model_id)
-  )
   const candidates = props.channelOfferings.filter((item) =>
     sameId(item.channel, offer.channel_id)
   )
-  const relation = candidates
-    .map((offering) => ({
-      offering,
-      version: currentContractVersion(modelVersions, offering.id)
-    }))
-    .filter((item) => item.version)
-    .sort((left, right) => right.version.version - left.version.version)[0]
   const offering =
-    relation?.offering ||
-    candidates.find((item) => sameId(item.model, props.row?.model_id))
-  const version = relation?.version || null
-  const start = version?.effective_from
-    ? new Date(version.effective_from).toLocaleString()
-    : '-'
-  const end = version?.effective_to
-    ? new Date(version.effective_to).toLocaleString()
-    : t('llmOps.channelPriceMatrixPanel.drawer.openEnded')
-  const pricingRule =
-    version?.discount_type && version.discount_type !== 'none'
-      ? [version.discount_basis, version.discount_type, version.discount_value]
-          .filter((item) => item !== null && item !== undefined && item !== '')
-          .join(' / ')
-      : t('llmOps.channelPriceMatrixPanel.drawer.flatRule')
+    candidates.find((item) => sameId(item.model, props.row?.model_id)) ||
+    candidates[0]
   const ratio = Number(offer.settlement_ratio)
   return {
     offering: offering?.display_name || offering?.offering_key || '-',
-    version: version?.version ? `v${version.version}` : '-',
-    effectiveWindow: version ? `${start} — ${end}` : '-',
-    pricingRule,
-    contractFx: version?.contract_exchange_rate || offer.exchange_rate || '-',
+    pricingRule: t(
+      'llmOps.channelPriceMatrixPanel.drawer.currentChannelRule'
+    ),
+    contractFx: offer.exchange_rate || '-',
     settlementRatio: Number.isFinite(ratio)
       ? `${(ratio * 100).toFixed(2)}%`
       : '-'

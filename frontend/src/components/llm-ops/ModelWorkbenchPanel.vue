@@ -127,17 +127,6 @@
                 <th class="table-head">
                   {{ t('llmOps.modelWorkbenchPanel.contractRelations.sales') }}
                 </th>
-                <th class="table-head">
-                  {{
-                    t('llmOps.modelWorkbenchPanel.contractRelations.current')
-                  }}
-                </th>
-                <th class="table-head">
-                  {{ t('llmOps.modelWorkbenchPanel.contractRelations.future') }}
-                </th>
-                <th class="table-head">
-                  {{ t('llmOps.modelWorkbenchPanel.contractRelations.rules') }}
-                </th>
               </tr>
             </thead>
             <tbody>
@@ -205,21 +194,9 @@
                     </label>
                   </div>
                 </td>
-                <td class="table-cell text-xs">
-                  {{ versionSummary(currentVersionFor(offering.id)) }}
-                </td>
-                <td class="table-cell text-xs">
-                  {{ versionSummary(futureVersionFor(offering.id)) }}
-                </td>
-                <td
-                  class="table-cell max-w-md text-xs"
-                  :title="ruleSummary(currentVersionFor(offering.id))"
-                >
-                  {{ ruleSummary(currentVersionFor(offering.id)) }}
-                </td>
               </tr>
               <tr v-if="!selectedOfferings.length">
-                <td class="table-cell text-slate-500" colspan="6">
+                <td class="table-cell text-slate-500" colspan="3">
                   {{ t('llmOps.modelWorkbenchPanel.contractRelations.empty') }}
                 </td>
               </tr>
@@ -295,11 +272,7 @@ import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
-import {
-  currentContractVersion,
-  futureContractVersion,
-  offeringsForModel
-} from '@/utils/channelContractRelations'
+import { offeringsForModel } from '@/utils/channelContractRelations'
 import { userFacingApiError } from '@/utils/llmOpsErrors'
 import CompactSelect from './CompactSelect.vue'
 import PriceMeaningGuide from './PriceMeaningGuide.vue'
@@ -366,7 +339,6 @@ const props = defineProps({
   channelOfferings: { type: Array, default: () => [] },
   priceItems: { type: Array, default: () => [] },
   channelPriceItems: { type: Array, default: () => [] },
-  channelPriceVersions: { type: Array, default: () => [] },
   focusModelId: { type: [Number, String], default: null },
   listings: { type: Array, default: () => [] },
   records: { type: Array, default: () => [] }
@@ -508,16 +480,9 @@ const anomalyRecords = computed(() =>
   modelRecords.value.filter((record) => record.status !== 'perfect')
 )
 
-const selectedVersions = computed(() =>
-  props.channelPriceVersions.filter(
-    (version) => String(version.model) === String(selectedModelId.value)
-  )
-)
-
 const selectedOfferings = computed(() => {
   return offeringsForModel({
     offerings: props.channelOfferings,
-    versions: selectedVersions.value,
     priceItems: props.channelPriceItems,
     modelId: selectedModelId.value
   })
@@ -578,44 +543,6 @@ function channelName(channelId) {
   )
 }
 
-function currentVersionFor(offeringId) {
-  return currentContractVersion(selectedVersions.value, offeringId)
-}
-
-function futureVersionFor(offeringId) {
-  return futureContractVersion(selectedVersions.value, offeringId)
-}
-
-function versionSummary(version) {
-  if (!version) return '-'
-  const effective = version.effective_from
-    ? new Date(version.effective_from).toLocaleString()
-    : '-'
-  return `v${version.version} · ${version.status} · ${effective}`
-}
-
-function ruleSummary(version) {
-  if (!version) return '-'
-  const prices = (version.price_items || []).map((item) => {
-    const windows = item.spec?.time_windows || []
-    const windowLabel = windows.length
-      ? windows.map((window) => `${window.start}-${window.end}`).join(', ')
-      : t('llmOps.modelWorkbenchPanel.contractRelations.allTime')
-    return `${dimensionLabel(item.dimension)} ${item.unit_price} ${
-      item.currency
-    } · ${windowLabel}`
-  })
-  const discount =
-    version.discount_type === 'none'
-      ? ''
-      : ` · ${version.discount_basis}/${version.discount_type} ${
-          version.discount_value
-        }`
-  const exchange = version.contract_exchange_rate
-    ? ` · FX ${version.contract_exchange_rate} (${version.contract_currency})`
-    : ''
-  return `${prices.join(' | ')}${discount}${exchange}`
-}
 
 async function toggleOffering(offering, field, value) {
   updatingOfferingId.value = offering.id
