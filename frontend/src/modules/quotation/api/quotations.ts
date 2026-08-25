@@ -607,6 +607,14 @@ export async function getQuotation(quoteId: string): Promise<Quotation> {
   return mapApiQuotation(data);
 }
 
+export async function copyQuotation(quoteId: string): Promise<Quotation> {
+  const copied = await apiRequest<ApiQuotation>(
+    `/quotations/${quoteId}/copy`,
+    { method: 'POST' },
+  );
+  return mapApiQuotation(copied);
+}
+
 export async function getQuotationFormContext(
   page = 1,
   pageSize = 20,

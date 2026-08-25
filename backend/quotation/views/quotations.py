@@ -48,6 +48,7 @@ from quotation.services.quotation_queries import (
 from quotation.services.quotation_service import (
     build_quotation,
     calculate_totals,
+    copy_quotation,
     create_version_snapshot,
     get_next_auto_quote_number,
     replace_items,
@@ -354,6 +355,48 @@ class QuotationDetailView(APIView):
             return denied
         set_request_audit_target(request, target_label=quotation.quote_no)
         return Response(QuotationSerializer(quotation).data)
+
+    def post(self, request, quotation_id: str):
+        quotation = (
+            Quotation.objects.prefetch_related("items")
+            .filter(pk=quotation_id)
+            .first()
+        )
+        if not quotation:
+            return Response({"detail": "quotation not found"}, status=404)
+        denied = _ensure_access(request.user, quotation)
+        if denied:
+            return denied
+        if quotation.source_type == QuotationSourceType.DOCUMENT_IMPORT:
+            return Response(
+                {"detail": "document-imported quotations cannot be copied"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        set_request_audit_target(request, target_label=quotation.quote_no)
+        for attempt in range(3):
+            try:
+                with transaction.atomic():
+                    locked = Quotation.objects.prefetch_related("items").get(
+                        pk=quotation_id,
+                    )
+                    copied = copy_quotation(
+                        locked,
+                        created_by_email=user_display_email(request.user),
+                    )
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    return Response(
+                        {"detail": "could not generate a unique quote_no"},
+                        status=status.HTTP_409_CONFLICT,
+                    )
+        copied = self.get_object(copied.pk)
+        set_request_audit_target(
+            request,
+            target_id=copied.pk,
+            target_label=copied.quote_no,
+        )
+        return Response(QuotationSerializer(copied).data, status=201)
 
     def put(self, request, quotation_id: str):
         quotation = self.get_object(quotation_id)

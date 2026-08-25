@@ -180,6 +180,68 @@ class QuotationListAPITests(TestCase):
                 assert len(response.data["items"]) == page_size
                 assert response.data["page_size"] == page_size
 
+    def test_copy_creates_independent_draft_with_new_number(self):
+        source = self._quote(1, status=QuoteStatus.ACCEPTED)
+        source.remarks_disclaimer = "Customer-specific notes"
+        source.save(update_fields=["remarks_disclaimer"])
+        QuotationItem.objects.create(
+            quotation=source,
+            line_no=1,
+            type="Service",
+            name="Migration",
+            description="Migration service",
+            qty=Decimal("2"),
+            list_price=Decimal("50"),
+            discount_percent=Decimal("10"),
+            net_unit_price=Decimal("45"),
+            extended_price=Decimal("90"),
+        )
+        QuotationVersion.objects.create(
+            quotation=source,
+            version_no=1,
+            status=source.status,
+            snapshot_json={"quote_no": source.quote_no},
+        )
+        self._quote(2, quote_date="2026-07-01")
+        Quotation.objects.filter(quote_no="Q-LIST-002").update(
+            quote_no="BDR010726"
+        )
+
+        response = self.api.post(f"{self.url}/{source.pk}/copy")
+
+        assert response.status_code == 201
+        copied = Quotation.objects.get(pk=response.data["id"])
+        assert copied.pk != source.pk
+        assert copied.quote_no == "BDR010726.1"
+        assert copied.status == QuoteStatus.DRAFT
+        assert copied.source_type == QuotationSourceType.MANUAL
+        assert copied.client_company == source.client_company
+        assert copied.email == source.email
+        assert copied.remarks_disclaimer == source.remarks_disclaimer
+        assert copied.created_by_email == self.user.email
+        assert copied.versions.count() == 0
+        assert list(
+            copied.items.values_list(
+                "line_no", "description", "extended_price"
+            )
+        ) == [(1, "Migration service", Decimal("90.00"))]
+
+    def test_copy_rejects_document_imported_quotation(self):
+        imported = self._quote(
+            3,
+            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+        )
+
+        response = self.api.post(f"{self.url}/{imported.pk}/copy")
+
+        assert response.status_code == 409
+        assert response.data["detail"] == (
+            "document-imported quotations cannot be copied"
+        )
+        assert Quotation.objects.filter(
+            pk=imported.pk,
+        ).count() == 1
+
     def test_invalid_page_and_page_size(self):
         for query in (
             "page=0",

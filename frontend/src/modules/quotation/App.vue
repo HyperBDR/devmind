@@ -55,6 +55,7 @@ import {
 } from './api/catalog'
 import {
   createQuotation as createQuotationApi,
+  copyQuotation as copyQuotationApi,
   deleteQuotation as deleteQuotationApi,
   generateQuotation as generateQuotationApi,
   getQuotation as getQuotationApi,
@@ -901,6 +902,32 @@ async function handleEditQuote(id: string) {
   currentTab.value = 'create'
 }
 
+async function handleCopyQuote(id: string) {
+  try {
+    const copied = await copyQuotationApi(id)
+    editingQuoteId.value = copied.id
+    editingQuote.value = copied
+    triggerToast(
+      t('quotation.app.quoteCopied', { quoteNo: copied.quoteNo }),
+      'success',
+    )
+    await refreshQuotations(quotationListQuery.value)
+    if (auth.embeddedAuth) {
+      await router.push({
+        path: '/quotation/create',
+        query: { edit: copied.id },
+      })
+    } else {
+      currentTab.value = 'create'
+    }
+  } catch (error: unknown) {
+    triggerToast(
+      error instanceof Error ? error.message : t('quotation.app.saveFailed'),
+      'error',
+    )
+  }
+}
+
 function handleBackToList() {
   if (auth.embeddedAuth) {
     router.push('/quotation/list')
@@ -1162,6 +1189,7 @@ function reloadPage() {
             @feishu-upload-done="handleFeishuUploadDone"
             @reconcile-feishu-links="handleReconcileFeishuLinks"
             @edit-quote="handleEditQuote"
+            @copy-quote="handleCopyQuote"
             @toast="triggerToast"
             @query-change="handleQuotationListQueryChange"
           />
