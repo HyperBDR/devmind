@@ -835,14 +835,14 @@
     },
     "navGroups": {
       "overview": "Overview",
-      "catalog": "Models & Sources",
-      "distribution": "Channels & Resale",
-      "dashboards": "Operations Dashboards",
+      "catalog": "Catalog",
+      "distribution": "Distribution",
+      "dashboards": "Dashboards",
       "governance": "Governance"
     },
     "nav": {
       "monitor": {
-        "label": "Operations Overview",
+        "label": "Overview",
         "description": "Track model pricing, channel coverage, procurement paths, and key operating metrics."
       },
       "collectionHealth": {
@@ -850,7 +850,7 @@
         "description": "Review source freshness, success rate, and collection failures."
       },
       "modelWorkbench": {
-        "label": "Channels & Listings",
+        "label": "Model Workspace",
         "description": "Trace procurement channels, contract prices, listings, and reconciliation by model."
       },
       "priceChanges": {
@@ -858,47 +858,47 @@
         "description": "Track channel procurement, listing, and standard price changes."
       },
       "metaModels": {
-        "label": "Meta Models",
+        "label": "Model Catalog",
         "description": "Manage vendors, model families, capability tags, and normalized model identities."
       },
       "providers": {
-        "label": "Model Price Sources",
+        "label": "Price Sources",
         "description": "Review supplier price sources and meta-model prices."
       },
       "taskLogs": {
-        "label": "Collection Task Logs",
+        "label": "Task Logs",
         "description": "Review model price collection status, write results, errors, and metadata."
       },
       "channels": {
-        "label": "Forwarding Channels",
+        "label": "Channels",
         "description": "Maintain channels and manage enabled provider models and pricing policies inside each channel."
       },
       "channelMatrix": {
-        "label": "Channel Matrix",
+        "label": "Price Matrix",
         "description": "Compare each model across procurement channels and coverage gaps."
       },
       "reseller": {
-        "label": "Resale Platforms",
+        "label": "Resale",
         "description": "Manage listing prices, credit conversion, and procurement channels."
       },
       "listingRisk": {
-        "label": "Listing Risks",
+        "label": "Risks",
         "description": "Handle low margin, non-lowest-channel, unlisted, and FX risks."
       },
       "workflow": {
-        "label": "Workflow Settings",
+        "label": "Workflow",
         "description": "Configure listing, auto-approval, approval, and offline paths per platform."
       },
       "globalConfig": {
-        "label": "Global Settings",
+        "label": "Settings",
         "description": "Configure meta-model sync, model price collection, and Feishu approval authentication."
       },
       "reconciler": {
-        "label": "Usage Reconciliation",
+        "label": "Reconciliation",
         "description": "Enter production usage and billing amounts to calculate payables and variances."
       },
       "audit": {
-        "label": "Audit Log",
+        "label": "Audit",
         "description": "Review channel configuration, price changes, model listings, and approval activity."
       }
     },
@@ -1569,7 +1569,7 @@
         "price": "Price",
         "source": "Source",
         "status": "Status",
-        "version": "Price version",
+        "version": "Price snapshot",
         "variance": "Variance"
       },
       "dimension": {
@@ -1693,7 +1693,7 @@
         "videoOutput": "Video output"
       },
       "empty": "No price change records yet.",
-      "rangeSummary": "Loaded the latest {channel} channel and {listing} listing versions; showing {shown}/{total} dimension records",
+      "rangeSummary": "Loaded the latest {channel} channel and {listing} listing price changes; showing {shown}/{total} dimension records",
       "fallback": {
         "channel": "Channel {id}",
         "model": "Model {id}",
@@ -1704,11 +1704,11 @@
       },
       "metrics": {
         "channelHistory": {
-          "hint": "Procurement channel price version records",
+          "hint": "Procurement channel price history records",
           "label": "Channel price history"
         },
         "listingHistory": {
-          "hint": "Platform listing price version records",
+          "hint": "Platform listing price history records",
           "label": "Listing price history"
         },
         "officialItems": {
@@ -1786,7 +1786,7 @@
       "createChannel": "Create channel",
       "createTitle": "New forwarding channel",
       "description": "Channels configure the supply entry point and default settlement rules for purchasable and forwardable models.",
-      "contractFxHint": "Set a channel contract FX rate. It is used when a model price version does not define its own effective rate.",
+      "contractFxHint": "Set the FX rate used to normalize this channel's current procurement prices.",
       "contractFxTitle": "Contract exchange rate",
       "disabled": "Channel disabled",
       "editTitle": "Edit forwarding channel",
@@ -1925,9 +1925,10 @@
         "effectiveWindow": "Effective window",
         "eyebrow": "Channel price comparison",
         "flatRule": "Flat price",
+        "currentChannelRule": "Current channel rule",
         "freshness": "Price freshness",
         "lowestPrice": "Current lowest",
-        "normalizedHint": "Offers are normalized using contract FX, settlement ratios, and the currently effective price version. Refresh stale prices before making a commercial decision.",
+        "normalizedHint": "Offers use the price source's current price and this channel's FX and settlement rules. Refresh stale prices before making a commercial decision.",
         "openEnded": "Open ended",
         "pricingRule": "Pricing rule",
         "savings": "Estimated savings",
@@ -1989,7 +1990,7 @@
         "missing": "Missing channel price",
         "stale": "Price needs refresh"
       },
-      "subtitle": "Compare effective Input / Output procurement prices with contract versions, listing channels, and price freshness.",
+      "subtitle": "Compare current Input / Output procurement prices across channels, listings, and price freshness.",
       "tableTitle": "Effective Procurement Price Matrix",
       "tags": {
         "current": "Current listing",

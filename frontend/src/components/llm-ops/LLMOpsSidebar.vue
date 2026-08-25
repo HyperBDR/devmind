@@ -57,6 +57,35 @@
     >
       <section v-for="group in navGroups" :key="group.key">
         <button
+          v-if="group.isSingleItem"
+          type="button"
+          class="llm-nav-item llm-nav-top-level-item flex w-full items-center gap-3 px-3 py-2.5 text-left text-base font-semibold"
+          :class="{ 'is-active': activeSection === group.items[0].key }"
+          :title="collapsed ? group.items[0].label : ''"
+          @click="$emit('select-item', group.key, group.items[0].key)"
+        >
+          <svg
+            class="nav-icon"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            viewBox="0 0 24 24"
+          >
+            <path
+              v-for="path in group.items[0].icon"
+              :key="path"
+              :d="path"
+            />
+          </svg>
+          <span v-if="!collapsed" class="min-w-0 flex-1 truncate">
+            {{ group.items[0].label }}
+          </span>
+        </button>
+        <button
+          v-else
           type="button"
           class="llm-nav-group-button flex w-full items-center gap-3 px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em]"
           :class="{ 'is-expanded': isExpanded(group.key) }"
@@ -94,7 +123,7 @@
           </svg>
         </button>
         <div
-          v-if="!collapsed && isExpanded(group.key)"
+          v-if="!group.isSingleItem && !collapsed && isExpanded(group.key)"
           class="nav-group-items mt-1 space-y-0.5"
         >
           <button
@@ -177,7 +206,12 @@
           :aria-label="t('llmOps.shell.navigationLabel')"
         >
           <section v-for="group in navGroups" :key="group.key">
-            <h3 class="llm-ops-mobile-drawer-group">{{ group.label }}</h3>
+            <h3
+              v-if="!group.isSingleItem"
+              class="llm-ops-mobile-drawer-group"
+            >
+              {{ group.label }}
+            </h3>
             <div class="mt-1 space-y-1">
               <button
                 v-for="item in group.items"

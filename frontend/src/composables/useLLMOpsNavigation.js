@@ -166,7 +166,8 @@ export function useLLMOpsNavigation() {
       key,
       label: t(labelKey),
       icon: items[0]?.icon || [],
-      items
+      items,
+      isSingleItem: items.length === 1
     }
   }
 

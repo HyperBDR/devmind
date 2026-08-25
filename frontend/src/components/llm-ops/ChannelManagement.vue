@@ -184,15 +184,6 @@
       @close="closeChannelModal"
       @saved="handleChannelSaved"
     />
-    <ChannelContractEditor
-      :channels="channels"
-      :models="models"
-      :channel-prices="channelPrices"
-      :channel-offerings="channelOfferings"
-      :channel-price-versions="channelPriceVersions"
-      :price-items="priceItems"
-      @refresh="emit('refresh')"
-    />
     <ChannelModelDrawer
       :channel="selectedChannelForModels"
       :initial-model-id="focusModelId"
@@ -270,7 +261,6 @@ import { useI18n } from 'vue-i18n'
 
 import { llmOpsApi } from '@/api/llmOps'
 import { useToast } from '@/composables/useToast'
-import ChannelContractEditor from '@/components/llm-ops/ChannelContractEditor.vue'
 import ChannelModelDrawer from '@/components/llm-ops/ChannelModelDrawer.vue'
 import ChannelModal from '@/components/llm-ops/ChannelModal.vue'
 import CompactSelect from '@/components/llm-ops/CompactSelect.vue'
@@ -303,10 +293,6 @@ const props = defineProps({
     required: true
   },
   channelOfferings: {
-    type: Array,
-    default: () => []
-  },
-  channelPriceVersions: {
     type: Array,
     default: () => []
   },
