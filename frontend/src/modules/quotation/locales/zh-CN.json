@@ -725,6 +725,12 @@
         "alertMinLineItems": "报价单必须包含至少一个明细行",
         "alertValidationFailed": "表单验证失败：{message}",
         "alertValidationDefault": "请检查表单中的必填项是否正确填写",
+        "spellCheck": {
+          "found": "发现疑似拼写问题",
+          "replace": "替换",
+          "ignore": "忽略",
+          "summary": "发现 {count} 个疑似拼写问题"
+        },
         "confirmDeleteProductLine": "确认删除产品线「{label} ({prefix})」吗？",
         "confirmDeleteProductLineUsage": "提示：已有 {count} 条报价使用该产品线，删除后这些报价仍可正常查看，只是新建时下拉中不再显示。",
         "errors": {

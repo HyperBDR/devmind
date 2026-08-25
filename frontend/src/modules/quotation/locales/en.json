@@ -725,6 +725,12 @@
         "alertMinLineItems": "Add at least one line item",
         "alertValidationFailed": "Fix these issues: {message}",
         "alertValidationDefault": "Check the required fields",
+        "spellCheck": {
+          "found": "Possible spelling issue",
+          "replace": "Replace",
+          "ignore": "Ignore",
+          "summary": "Found {count} possible spelling issue(s)"
+        },
         "confirmDeleteProductLine": "Delete product line \"{label} ({prefix})\"?",
         "confirmDeleteProductLineUsage": "{count} existing quotes use this product line. They stay available; it won’t appear for new quotes.",
         "errors": {
