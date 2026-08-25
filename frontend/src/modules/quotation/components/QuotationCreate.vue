@@ -145,9 +145,8 @@ function formatDateInput(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-function getDefaultExpireDate() {
-  const today = new Date()
-  return formatDateInput(new Date(today.getTime() + 30 * 24 * 60 * 60 * 1000))
+function getDefaultExpireDate(date = new Date()) {
+  return formatDateInput(new Date(date.getTime() + 30 * 24 * 60 * 60 * 1000))
 }
 
 const quoteNo = ref('')
@@ -546,8 +545,9 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
     loadedPaymentTermOption === 'Others' ? editingQuote.paymentTerms || '' : ''
   vatRateInput.value = formatVatRateForInput(editingQuote.vatRate)
   taxLabel.value = resolveTaxLabel(editingQuote.taxLabel)
-  quoteDate.value = editingQuote.quoteDate || formatDateInput(new Date())
-  expireDate.value = editingQuote.expireDate || getDefaultExpireDate()
+  const todayInput = formatDateInput(new Date())
+  quoteDate.value = todayInput
+  expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
   remarksDisclaimer.value = editingQuote.remarksDisclaimer ?? ''
   issuerCompanyName.value = editingQuote.issuerCompanyName ?? DEFAULT_ISSUER_COMPANY_NAME
   issuerContactName.value =
@@ -585,7 +585,7 @@ function resetCreateForm() {
   vatRateInput.value = ''
   taxLabel.value = DEFAULT_TAX_LABEL
   quoteDate.value = todayInput
-  expireDate.value = getDefaultExpireDate()
+  expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
   remarksDisclaimer.value = ''
   issuerCompanyName.value = DEFAULT_ISSUER_COMPANY_NAME
   issuerContactName.value = props.currentUser?.name ?? ''
@@ -766,6 +766,14 @@ watch(
     )
   },
 )
+
+watch(quoteDate, (nextDate, previousDate) => {
+  if (!previousDate || nextDate === previousDate) return
+  if (expireDate.value !== getDefaultExpireDate(dateFromInput(previousDate))) {
+    return
+  }
+  expireDate.value = getDefaultExpireDate(dateFromInput(nextDate))
+})
 
 watch(
   [
