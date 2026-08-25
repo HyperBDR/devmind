@@ -107,6 +107,10 @@ urlpatterns = [
     path("catalog/bootstrap", CatalogBootstrapView.as_view()),
     path("quotations", QuotationListCreateView.as_view()),
     path("quotations/form-context", QuotationFormContextView.as_view()),
+    path(
+        "quotations/<str:quotation_id>/copy",
+        QuotationDetailView.as_view(),
+    ),
     path("quotations/<str:quotation_id>", QuotationDetailView.as_view()),
     path(
         "quotations/<str:quotation_id>/generate",

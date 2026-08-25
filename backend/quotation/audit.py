@@ -83,6 +83,7 @@ ALLOWED_METADATA_KEYS = {
 
 EVENT_NAMES = {
     ("quotation", "create"): "quotation.created",
+    ("quotation", "copy"): "quotation.copied",
     ("quotation", "view"): "quotation.viewed",
     ("quotation", "update"): "quotation.updated",
     ("quotation", "delete"): "quotation.deleted",
@@ -137,6 +138,7 @@ BUSINESS_AUDIT_OPERATIONS = frozenset(
         ("feishu", "import"),
         ("feishu", "upload"),
         ("quotation", "create"),
+        ("quotation", "copy"),
         ("quotation", "delete"),
         ("quotation", "generate"),
         ("quotation", "update"),
@@ -155,6 +157,7 @@ BUSINESS_AUDIT_EVENT_NAMES = frozenset(
         "document.imported",
         "document.uploaded",
         "quotation.created",
+        "quotation.copied",
         "quotation.deleted",
         "quotation.generated",
         "quotation.status_changed",

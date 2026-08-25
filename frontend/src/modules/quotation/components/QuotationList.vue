@@ -10,6 +10,7 @@ import {
 import {
   Download,
   Columns3,
+  Copy,
   ExternalLink,
   FileSpreadsheet,
   FileText,
@@ -80,6 +81,7 @@ const emit = defineEmits<{
   feishuUploadDone: [id: string]
   reconcileFeishuLinks: []
   editQuote: [id: string]
+  copyQuote: [id: string]
   toast: [message: string, type?: 'success' | 'info' | 'error']
   queryChange: [query: QuotationListParams]
 }>()
@@ -1436,6 +1438,16 @@ function displayQuoteDate(quote: Quotation): string {
                     @click="quote.status !== 'Cancelled' && emit('editQuote', quote.id)"
                   >
                     <Pencil class="w-4 h-4" />
+                  </button>
+
+                  <button
+                    v-if="quote.sourceType !== 'document_import'"
+                    type="button"
+                    :title="t('quotation.pages.list.copyQuote')"
+                    class="cursor-pointer rounded-sm p-1 text-dm-text-tertiary transition duration-100 hover:bg-blue-50 hover:text-blue-600"
+                    @click.stop="emit('copyQuote', quote.id)"
+                  >
+                    <Copy class="h-4 w-4" />
                   </button>
 
                   <div
