@@ -42,7 +42,6 @@ export function useLLMOpsData() {
   const channelOfferings = ref([])
   const channelPrices = ref([])
   const channelPriceItems = ref([])
-  const channelPriceVersions = ref([])
   const channelPriceHistory = ref([])
   const modelPriceItems = ref([])
   const resalePlatforms = ref([])
@@ -175,18 +174,14 @@ export function useLLMOpsData() {
   }
 
   async function refreshChannelPricingData() {
-    const [offerings, prices, items, versions] = await Promise.all([
+    const [offerings, prices, items] = await Promise.all([
       fetchList(llmOpsApi.listChannelOfferings),
       fetchList(llmOpsApi.listChannelModelPrices),
-      fetchList(llmOpsApi.listChannelPriceItems, {
-        is_effective: 'true'
-      }),
-      fetchList(llmOpsApi.listChannelPriceVersions)
+      fetchList(llmOpsApi.listChannelPriceItems, { is_effective: 'true' })
     ])
     channelOfferings.value = asArray(offerings)
     channelPrices.value = asArray(prices)
     channelPriceItems.value = asArray(items)
-    channelPriceVersions.value = asArray(versions)
   }
 
   async function refreshModelPriceItems() {
@@ -247,8 +242,7 @@ export function useLLMOpsData() {
           return (
             !asArray(channelPrices.value).length ||
             !asArray(channelPriceItems.value).length ||
-            !asArray(channelOfferings.value).length ||
-            !asArray(channelPriceVersions.value).length
+            !asArray(channelOfferings.value).length
           )
         }
         return !asArray(groupValues[group]?.value).length
@@ -273,8 +267,7 @@ export function useLLMOpsData() {
           return (
             !asArray(channelPrices.value).length ||
             !asArray(channelPriceItems.value).length ||
-            !asArray(channelOfferings.value).length ||
-            !asArray(channelPriceVersions.value).length
+            !asArray(channelOfferings.value).length
           )
         }
         return !asArray(groupValues[group]?.value).length
@@ -482,7 +475,6 @@ export function useLLMOpsData() {
     channelPriceHistory,
     channelPriceItems,
     channelPrices,
-    channelPriceVersions,
     channels,
     collectionRuns,
     displayCurrency,

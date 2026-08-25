@@ -189,7 +189,6 @@
               :summary="summary"
               :channels="channels"
               :channel-offerings="channelOfferings"
-              :channel-price-versions="channelPriceVersions"
               @navigate-to-detail="openChannelListingDetail"
               @navigate-to-section="onNavigateToSection"
             />
@@ -203,7 +202,6 @@
               :channel-offerings="channelOfferings"
               :price-items="modelPriceItems"
               :channel-price-items="channelPriceItems"
-              :channel-price-versions="channelPriceVersions"
               :listings="listings"
               :records="records"
               @refresh="refreshAll(activeSection)"
@@ -268,7 +266,6 @@
               :channel-prices="channelPrices"
               :channel-offerings="channelOfferings"
               :channel-price-items="channelPriceItems"
-              :channel-price-versions="channelPriceVersions"
               :price-items="modelPriceItems"
               :display-currency="displayCurrency"
               :exchange-rate="exchangeRate"
@@ -435,7 +432,6 @@ const {
   channelPriceHistory,
   channelPriceItems,
   channelPrices,
-  channelPriceVersions,
   channels,
   collectionRuns,
   displayCurrency,

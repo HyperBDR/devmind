@@ -217,7 +217,6 @@
       :action="compareRow ? effectiveAction(compareRow) : 'keep'"
       :action-text="compareRow ? actionLabel(effectiveAction(compareRow)) : ''"
       :channel-offerings="channelOfferings"
-      :price-versions="channelPriceVersions"
       @close="closeCompare"
       @view-detail="openModelDetail"
       @apply="runAction"
@@ -242,8 +241,7 @@ import CompactSelect from './CompactSelect.vue'
 const props = defineProps({
   summary: { type: Object, default: () => ({}) },
   channels: { type: Array, default: () => [] },
-  channelOfferings: { type: Array, default: () => [] },
-  channelPriceVersions: { type: Array, default: () => [] }
+  channelOfferings: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['navigate-to-detail', 'navigate-to-section'])
