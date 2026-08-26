@@ -66,6 +66,7 @@ import {
 } from './api/quotations'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
+import { saveContactTitle } from './utils/contactTitleStorage'
 
 const auth = useAuthStore()
 const { t, quoteStatusLabel } = useQuotationI18n()
@@ -705,6 +706,8 @@ async function handleSaveQuotation(newQuote: Quotation) {
     if (wasCreate) {
       clearCreateQuoteDraft(auth.currentUser.email)
     }
+
+    saveContactTitle(auth.currentUser.email, ownedQuote.issuerContactTitle)
 
     if (willGenerate) {
       saved = await generateQuotationApi(saved.id, auth.currentUser.email)
