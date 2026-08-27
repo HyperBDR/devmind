@@ -1,31 +1,110 @@
 <template>
   <section class="space-y-4">
-    <div
-      class="queue-summary-grid"
-      :aria-label="t('llmOps.overview.queueSummaryLabel')"
-    >
-      <button
-        v-for="item in kpiCards"
-        :key="item.key"
-        type="button"
-        :aria-pressed="simulationStatus === item.filter"
-        :class="[
-          'queue-summary-card',
-          item.tone,
-          { 'is-active': simulationStatus === item.filter }
-        ]"
-        @click="simulationStatusModel = item.filter"
-      >
-        <span class="queue-summary-label">{{ item.label }}</span>
-        <strong class="queue-summary-value">{{ item.value }}</strong>
-      </button>
+    <div class="overview-intro">
+      <div>
+        <p class="overview-kicker">{{ t('llmOps.overview.kicker') }}</p>
+        <h2 class="overview-title">{{ t('llmOps.overview.title') }}</h2>
+        <p class="overview-subtitle">{{ t('llmOps.overview.subtitle') }}</p>
+      </div>
+      <span class="overview-live-dot">{{ t('llmOps.overview.live') }}</span>
+      <div class="overview-key-metrics">
+        <button
+          v-for="item in headlineKpiCards"
+          :key="item.key"
+          type="button"
+          :class="['headline-metric', item.tone]"
+          @click="handleKpiClick(item)"
+        >
+          <strong>{{ item.value }}</strong>
+          <span>{{ item.label }}</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="overview-insight-grid">
+      <section class="insight-panel">
+        <div class="insight-heading">
+          <div>
+            <p class="insight-eyebrow">{{ t('llmOps.overview.insights.healthEyebrow') }}</p>
+            <h3>{{ t('llmOps.overview.insights.healthTitle') }}</h3>
+          </div>
+          <span class="insight-value">{{ healthScore }}%</span>
+        </div>
+        <div class="health-track"><span :style="{ width: `${healthScore}%` }" /></div>
+        <div class="health-legend">
+          <span><i class="legend-dot success" />{{ t('llmOps.overview.insights.covered') }} {{ coveredCount }}</span>
+          <span><i class="legend-dot warn" />{{ t('llmOps.overview.insights.unlisted') }} {{ unlistedCount }}</span>
+          <span><i class="legend-dot danger" />{{ t('llmOps.overview.insights.risk') }} {{ riskCount }}</span>
+        </div>
+      </section>
+
+      <section class="insight-panel">
+        <div class="insight-heading">
+          <div>
+            <p class="insight-eyebrow">{{ t('llmOps.overview.insights.channelEyebrow') }}</p>
+            <h3>{{ t('llmOps.overview.insights.channelTitle') }}</h3>
+          </div>
+          <button class="insight-link" type="button" @click="emit('navigateToSection', 'channelMatrix')">
+            {{ t('llmOps.overview.insights.viewDetails') }}
+          </button>
+        </div>
+        <div v-if="channelBreakdown.length" class="channel-breakdown">
+          <div v-for="item in channelBreakdown" :key="item.name" class="channel-row">
+            <span>{{ item.name }}</span><strong>{{ item.count }}</strong>
+            <span class="channel-bar"><i :style="{ width: `${item.percent}%` }" /></span>
+          </div>
+        </div>
+        <p v-else class="insight-empty">{{ t('llmOps.overview.insights.noChannelData') }}</p>
+      </section>
+    </div>
+
+    <div class="overview-density-grid">
+      <section class="density-panel">
+        <div class="density-heading">
+          <div>
+            <p class="insight-eyebrow">{{ t('llmOps.overview.insights.structureEyebrow') }}</p>
+            <h3>{{ t('llmOps.overview.insights.structureTitle') }}</h3>
+          </div>
+        </div>
+        <div class="structure-grid">
+          <div v-for="item in structureStats" :key="item.label" class="structure-item">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+            <small>{{ item.hint }}</small>
+          </div>
+        </div>
+      </section>
+
+      <section class="density-panel">
+        <div class="density-heading">
+          <div>
+            <p class="insight-eyebrow">{{ t('llmOps.overview.insights.riskEyebrow') }}</p>
+            <h3>{{ t('llmOps.overview.insights.riskTitle') }}</h3>
+          </div>
+          <span class="risk-total">{{ riskCount }}</span>
+        </div>
+        <div class="risk-breakdown">
+          <button v-for="item in riskBreakdown" :key="item.key" type="button" class="risk-row" @click="simulationStatusModel = item.filter">
+            <span class="risk-mark" :class="item.tone" />
+            <span>{{ item.label }}</span>
+            <strong>{{ item.count }}</strong>
+          </button>
+        </div>
+      </section>
     </div>
 
     <div class="panel overflow-hidden p-0">
       <div class="table-toolbar gap-3">
-        <h3 class="panel-title">
-          {{ t('llmOps.overview.decisionTable.title') }}
-        </h3>
+        <div>
+          <h3 class="panel-title">
+            {{ t('llmOps.overview.decisionTable.title') }}
+          </h3>
+          <p class="yield-tip">
+            <strong>{{ t('llmOps.overview.yieldTip.label') }}</strong>
+            {{ t('llmOps.overview.yieldTip.formula') }}
+            <span>{{ t('llmOps.overview.yieldTip.requirement') }}</span>
+          </p>
+        </div>
         <div
           class="decision-filter-group"
           :aria-label="t('llmOps.overview.filters.label')"
@@ -63,8 +142,8 @@
               <th class="table-head">
                 {{ t('llmOps.overview.columns.yield') }}
               </th>
-              <th class="table-head">
-                {{ t('llmOps.overview.columns.decision') }}
+              <th class="table-head min-w-72">
+                {{ t('llmOps.overview.columns.recommendation') }}
               </th>
               <th class="table-head">
                 {{ t('llmOps.overview.columns.lastUpdate') }}
@@ -113,10 +192,19 @@
               <td class="table-cell min-w-36">
                 <PricePair :rows="yieldRows(row)" />
               </td>
-              <td class="table-cell min-w-52">
-                <span :class="['status-pill', row.status_tone]">
-                  {{ statusTitle(row) }}
-                </span>
+              <td class="table-cell min-w-72">
+                <div class="decision-advice">
+                  <div class="decision-advice-head">
+                    <span :class="['status-pill', row.status_tone]">
+                      {{ statusTitle(row) }}
+                    </span>
+                    <span class="decision-priority">
+                      {{ decisionPriorityLabel(row) }}
+                    </span>
+                  </div>
+                  <p class="decision-reason">{{ decisionReason(row) }}</p>
+                  <p class="decision-impact">{{ decisionImpact(row) }}</p>
+                </div>
                 <button
                   type="button"
                   class="decision-action-button"
@@ -188,11 +276,58 @@ const props = defineProps({
 
 const emit = defineEmits([
   'navigateToSection',
-  'navigateToWorkspace',
   'update:simulationStatus'
 ])
 
 const { t } = useI18n()
+
+const headlineKpiKeys = new Set([
+  'active_model_skus',
+  'channel_coverage_rate',
+  'listing_coverage_rate',
+  'overall_yield',
+  'risk_points'
+])
+
+const headlineKpiCards = computed(() =>
+  props.kpiCards.filter((item) => headlineKpiKeys.has(item.key))
+)
+
+const coveredCount = computed(() => props.monitorTableRows.filter((row) => Number(row.coverage_count || 0) > 0).length)
+const unlistedCount = computed(() => props.monitorTableRows.filter((row) => !row.current_listing?.is_listed).length)
+const riskCount = computed(() => props.monitorTableRows.filter((row) => Number(row.decision_priority ?? 8) < 8).length)
+const healthScore = computed(() => {
+  const total = props.monitorTableRows.length
+  if (!total) return 0
+  return Math.round((coveredCount.value / total) * 100)
+})
+const channelBreakdown = computed(() => {
+  const counts = new Map()
+  props.monitorTableRows.forEach((row) => {
+    const name = row.recommended_channel?.channel_name || t('llmOps.overview.insights.unassigned')
+    counts.set(name, (counts.get(name) || 0) + 1)
+  })
+  const max = Math.max(...counts.values(), 1)
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([name, count]) => ({ name, count, percent: Math.round((count / max) * 100) }))
+})
+
+const structureStats = computed(() => [
+  { label: t('llmOps.overview.insights.models'), value: props.monitorTableRows.length, hint: t('llmOps.overview.insights.modelsHint') },
+  { label: t('llmOps.overview.insights.providers'), value: new Set(props.monitorTableRows.map((row) => row.provider_name).filter(Boolean)).size, hint: t('llmOps.overview.insights.providersHint') },
+  { label: t('llmOps.overview.insights.channels'), value: new Set(props.monitorTableRows.map((row) => row.recommended_channel?.channel_name).filter(Boolean)).size, hint: t('llmOps.overview.insights.channelsHint') },
+  { label: t('llmOps.overview.insights.listed'), value: props.monitorTableRows.filter((row) => row.current_listing?.is_listed).length, hint: t('llmOps.overview.insights.listedHint') }
+])
+
+const riskBreakdown = computed(() => {
+  const rows = props.monitorTableRows
+  const count = (predicate) => rows.filter(predicate).length
+  return [
+    { key: 'unlisted', label: t('llmOps.overview.kpi.unlistedModels.label'), count: count((row) => !row.current_listing?.is_listed), filter: 'unlisted', tone: 'warn' },
+    { key: 'yield', label: t('llmOps.overview.kpi.unresolvedYieldModels.label'), count: count((row) => row.input_yield == null && row.output_yield == null), filter: 'priority', tone: 'info' },
+    { key: 'channel', label: t('llmOps.overview.kpi.missingChannel.label'), count: count((row) => Number(row.coverage_count || 0) === 0), filter: 'no_supply', tone: 'danger' },
+    { key: 'decision', label: t('llmOps.overview.kpi.needsAction.label'), count: count((row) => Number(row.decision_priority ?? 8) < 8), filter: 'priority', tone: 'danger' }
+  ]
+})
 
 const simulationStatusModel = computed({
   get: () => props.simulationStatus,
@@ -216,19 +351,18 @@ function handleRowClick(row) {
     })
     return
   }
-  if (!isOperationalRow(row)) {
-    emit('navigateToSection', {
-      modelId: row.model_id,
-      section: 'modelWorkbench'
-    })
+  emit('navigateToSection', {
+    modelId: row.model_id,
+    section: 'modelWorkbench'
+  })
+}
+
+function handleKpiClick(item) {
+  if (item.section) {
+    emit('navigateToSection', item.section)
     return
   }
-  emit('navigateToWorkspace', {
-    autoListing: Boolean(
-      row.current_listing?.is_listed && row.current_listing.channel_id === null
-    ),
-    modelId: row.model_id
-  })
+  if (item.filter) simulationStatusModel.value = item.filter
 }
 
 function handleDataEvent(type) {
@@ -265,6 +399,23 @@ function percent(value) {
 function statusTitle(row) {
   const key = `llmOps.decision.status.${row.decision_status || 'ready'}`
   return t(key)
+}
+
+function decisionPriorityLabel(row) {
+  const priority = Number(row.decision_priority ?? 8)
+  if (priority <= 2) return t('llmOps.overview.priority.urgent')
+  if (priority <= 5) return t('llmOps.overview.priority.attention')
+  return t('llmOps.overview.priority.normal')
+}
+
+function decisionReason(row) {
+  return t(`llmOps.overview.advice.${row.decision_status || 'ready'}.reason`, {
+    channels: Number(row.coverage_count || 0)
+  })
+}
+
+function decisionImpact(row) {
+  return t(`llmOps.overview.advice.${row.decision_status || 'ready'}.impact`)
 }
 
 function rowAriaLabel(row) {
@@ -424,33 +575,120 @@ function relativeTime(value) {
 </script>
 
 <style scoped>
-.queue-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-}
-.queue-summary-card {
+.overview-intro {
+  position: relative;
+  overflow: hidden;
   display: flex;
-  min-height: 8.75rem;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  border: 1px solid #dbeafe;
+  border-radius: 1.5rem;
+  background: radial-gradient(circle at 0% 0%, rgba(16,185,129,.15), transparent 38%), radial-gradient(circle at 100% 100%, rgba(14,165,233,.13), transparent 42%), linear-gradient(135deg, rgba(255,255,255,.98), rgba(248,250,252,.98));
+  box-shadow: 0 24px 60px -42px rgba(15,23,42,.45);
+  padding: 1.5rem 1.75rem;
+}
+.overview-key-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: min(100%, 48rem);
+  margin-left: auto;
+  border-left: 1px solid #dbeafe;
+}
+.headline-metric {
+  min-width: 0;
+  padding: .2rem .85rem;
+  border-right: 1px solid #dbeafe;
+  color: var(--ui-text-secondary);
+  text-align: left;
+}
+.headline-metric strong { display: block; color: var(--ui-text-primary); font-size: 1.45rem; letter-spacing: -.04em; }
+.headline-metric span { display: block; margin-top: .2rem; font-size: .68rem; line-height: 1.25; }
+.headline-metric.warn strong { color: #b45309; }
+.headline-metric.danger strong { color: #dc2626; }
+.overview-kicker {
+  color: #059669;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.overview-title {
+  margin-top: 0.2rem;
+  color: var(--ui-text-primary);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.overview-subtitle {
+  margin-top: 0.25rem;
+  color: var(--ui-text-secondary);
+  font-size: 0.82rem;
+}
+.overview-live-dot {
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.35rem 0.65rem;
+  text-transform: uppercase;
+}
+.overview-insight-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.insight-panel {
   border: 1px solid var(--ui-border-default);
-  border-left: 0.2rem solid var(--ui-color-primary);
   border-radius: var(--ui-radius-card);
   background: var(--ui-bg-card);
-  padding: var(--ui-space-card);
-  color: var(--ui-text-primary);
-  text-align: left;
-  transition:
-    border-color 0.16s ease,
-    background 0.16s ease;
+  padding: 1rem 1.1rem;
 }
+.insight-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.insight-eyebrow { color: var(--ui-text-muted); font-size: 0.67rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; }
+.insight-heading h3 { margin-top: 0.2rem; color: var(--ui-text-primary); font-size: 0.95rem; font-weight: 700; }
+.insight-value { color: var(--ui-color-primary); font-size: 1.45rem; font-weight: 750; }
+.health-track { height: 0.45rem; margin-top: 1rem; overflow: hidden; border-radius: 999px; background: var(--ui-bg-muted); }
+.health-track span { display: block; height: 100%; border-radius: inherit; background: var(--ui-color-success); }
+.health-legend { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-top: 0.8rem; color: var(--ui-text-secondary); font-size: 0.72rem; }
+.legend-dot { display: inline-block; width: 0.45rem; height: 0.45rem; margin-right: 0.3rem; border-radius: 50%; }
+.legend-dot.success { background: var(--ui-color-success); }
+.legend-dot.warn { background: var(--ui-color-warning); }
+.legend-dot.danger { background: var(--ui-color-destructive); }
+.insight-link { color: var(--ui-color-primary); font-size: 0.72rem; font-weight: 700; }
+.insight-link:hover { text-decoration: underline; }
+.channel-breakdown { display: grid; gap: 0.65rem; margin-top: 1rem; }
+.channel-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.5rem; color: var(--ui-text-secondary); font-size: 0.75rem; }
+.channel-row strong { color: var(--ui-text-primary); }
+.channel-bar { grid-column: 1 / -1; height: 0.28rem; overflow: hidden; border-radius: 999px; background: var(--ui-bg-muted); }
+.channel-bar i { display: block; height: 100%; border-radius: inherit; background: var(--ui-color-primary); }
+.insight-empty { margin-top: 1rem; color: var(--ui-text-muted); font-size: 0.78rem; }
+.overview-density-grid { display: grid; grid-template-columns: 1.2fr .8fr; gap: .75rem; }
+.density-panel { border: 1px solid #e5e7eb; border-radius: 1.15rem; background: #fff; padding: 1.1rem 1.2rem; box-shadow: 0 12px 28px -24px rgba(15,23,42,.45); }
+.density-heading { display: flex; align-items: flex-start; justify-content: space-between; }
+.density-heading h3 { margin-top: .2rem; color: var(--ui-text-primary); font-size: .95rem; font-weight: 700; }
+.structure-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: .6rem; margin-top: 1rem; }
+.structure-item { border-left: 2px solid #d1fae5; padding-left: .7rem; }
+.structure-item span, .structure-item small { display: block; color: var(--ui-text-muted); font-size: .7rem; }
+.structure-item strong { display: block; margin: .25rem 0; color: var(--ui-text-primary); font-size: 1.45rem; }
+.risk-total { color: #dc2626; font-size: 1.45rem; font-weight: 750; }
+.risk-breakdown { display: grid; gap: .25rem; margin-top: .75rem; }
+.risk-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .6rem; border-radius: .55rem; padding: .5rem .35rem; color: var(--ui-text-secondary); font-size: .78rem; text-align: left; }
+.risk-row:hover { background: #f8fafc; }
+.risk-row strong { color: var(--ui-text-primary); }
+.risk-mark { width: .5rem; height: .5rem; border-radius: 50%; background: #94a3b8; }
+.risk-mark.warn { background: #f59e0b; }
+.risk-mark.danger { background: #ef4444; }
+.risk-mark.info { background: #38bdf8; }
 .queue-summary-card:hover,
 .queue-summary-card:focus-visible,
 .queue-summary-card.is-active {
-  border-color: var(--ui-color-primary);
-  background: var(--ui-color-primary-subtle);
+  border-color: #bae6fd;
+  background: #f8fafc;
+  box-shadow: 0 18px 34px -24px rgba(15,23,42,.5);
+  transform: translateY(-2px);
   outline: none;
 }
 .queue-summary-card.danger {
@@ -479,6 +717,15 @@ function relativeTime(value) {
   border-radius: 0.5rem;
   background: var(--ui-bg-card);
 }
+.yield-tip {
+  max-width: 48rem;
+  margin-top: .35rem;
+  color: var(--ui-text-secondary);
+  font-size: .72rem;
+  line-height: 1.5;
+}
+.yield-tip strong { color: var(--ui-text-primary); }
+.yield-tip span { color: var(--ui-text-muted); }
 .decision-filter-button {
   min-height: 2rem;
   padding: 0.35rem 0.75rem;
@@ -551,6 +798,11 @@ function relativeTime(value) {
   font-weight: 600;
   text-align: left;
 }
+.decision-advice { display: grid; gap: .35rem; }
+.decision-advice-head { display: flex; align-items: center; gap: .5rem; }
+.decision-priority { color: var(--ui-text-muted); font-size: .68rem; font-weight: 650; }
+.decision-reason { color: var(--ui-text-primary); font-size: .78rem; font-weight: 600; line-height: 1.4; }
+.decision-impact { color: var(--ui-text-secondary); font-size: .72rem; line-height: 1.4; }
 .decision-action-button:hover,
 .decision-action-button:focus-visible {
   text-decoration: underline;
@@ -584,8 +836,12 @@ function relativeTime(value) {
   color: var(--ui-text-muted);
 }
 @media (min-width: 768px) {
-  .queue-summary-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
+}
+@media (max-width: 767px) {
+  .overview-insight-grid, .overview-density-grid { grid-template-columns: 1fr; }
+  .structure-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .overview-intro { flex-direction: column; }
+  .overview-key-metrics { width: 100%; margin: .5rem 0 0; border-top: 1px solid #dbeafe; border-left: 0; }
+  .headline-metric { padding: .7rem .45rem 0; }
 }
 </style>

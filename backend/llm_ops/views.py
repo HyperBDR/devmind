@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from decimal import Decimal
 
 import requests
@@ -1109,6 +1110,21 @@ class MetaModelViewSet(
         queryset = (
             MetaModel.objects.annotate(
                 provider_price_count=Count("provider_prices"),
+                current_price_source_count=Count(
+                    "price_items__source_id",
+                    distinct=True,
+                    filter=Q(price_items__is_current=True),
+                ),
+                current_price_item_count=Count(
+                    "price_items",
+                    distinct=True,
+                    filter=Q(price_items__is_current=True),
+                ),
+                current_priced_sku_count=Count(
+                    "price_items__sku_id",
+                    distinct=True,
+                    filter=Q(price_items__is_current=True),
+                ),
             )
             .exclude(
                 owner_code__in=SUPPLIER_SOURCE_OWNER_ALIASES.keys(),
@@ -4715,6 +4731,70 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             monitor_diagnostics = [
                 _monitor_diagnostic_payload(item) for item in diagnostics
             ]
+            operational_diagnostics = [
+                item
+                for item in diagnostics
+                if item["operation_scope"] == OPERATION_SCOPE_OPERATIONAL
+            ]
+            yield_values = [
+                Decimal(str(value))
+                for item in operational_diagnostics
+                for value in (
+                    item["yield_metrics"]["input_yield"],
+                    item["yield_metrics"]["output_yield"],
+                )
+                if value is not None
+            ]
+            overall_yield = (
+                sum(yield_values) / len(yield_values)
+                if yield_values
+                else None
+            )
+            sorted_yields = sorted(yield_values)
+            midpoint = len(sorted_yields) // 2
+            median_yield = None
+            if sorted_yields:
+                median_yield = sorted_yields[midpoint]
+                if len(sorted_yields) % 2 == 0:
+                    median_yield = (
+                        sorted_yields[midpoint - 1] + median_yield
+                    ) / Decimal("2")
+            enabled_price_sources = list(
+                PriceCollectionSource.objects.filter(is_enabled=True)
+                .exclude(
+                    source_type=PriceCollectionSource.SOURCE_TYPE_AGIONE,
+                )
+                .only("id", "last_collected_at")
+            )
+            healthy_price_sources = sum(
+                1
+                for source in enabled_price_sources
+                if (
+                    source.last_collected_at
+                    and source.last_collected_at
+                    >= timezone.now() - timedelta(days=7)
+                )
+            )
+            operational_model_count = len(operational_diagnostics)
+            models_with_channel = sum(
+                1
+                for item in operational_diagnostics
+                if item["coverage_count"] > 0
+            )
+            listed_models = sum(
+                1
+                for item in operational_diagnostics
+                if item["current_listing"]
+                and item["current_listing"]["is_listed"]
+            )
+            unresolved_yield_models = sum(
+                1
+                for item in operational_diagnostics
+                if (
+                    item["yield_metrics"]["input_yield"] is None
+                    and item["yield_metrics"]["output_yield"] is None
+                )
+            )
             return Response(
                 {
                     "scope": "monitor",
@@ -4726,6 +4806,52 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                         "platform_name": (
                             selected_platform.name if selected_platform else ""
                         ),
+                        "overview": {
+                            "active_model_skus": len(models),
+                            "meta_models": MetaModel.objects.filter(
+                                status=MetaModel.STATUS_ACTIVE,
+                            ).count(),
+                            "enabled_price_sources": len(
+                                enabled_price_sources,
+                            ),
+                            "active_channels": len(channels),
+                            "active_listings": len(active_listings),
+                            "operational_models": operational_model_count,
+                            "channel_coverage_rate": _as_optional_float(
+                                Decimal(models_with_channel)
+                                / operational_model_count
+                                if operational_model_count
+                                else None,
+                            ),
+                            "listing_coverage_rate": _as_optional_float(
+                                Decimal(listed_models)
+                                / operational_model_count
+                                if operational_model_count
+                                else None,
+                            ),
+                            "unlisted_models": (
+                                operational_model_count - listed_models
+                            ),
+                            "overall_yield": _as_optional_float(
+                                overall_yield,
+                            ),
+                            "median_yield": _as_optional_float(median_yield),
+                            "unresolved_yield_models": (
+                                unresolved_yield_models
+                            ),
+                            "healthy_price_sources": healthy_price_sources,
+                            "price_source_health_rate": _as_optional_float(
+                                Decimal(healthy_price_sources)
+                                / len(enabled_price_sources)
+                                if enabled_price_sources
+                                else None,
+                            ),
+                            "risk_points": sum(
+                                1
+                                for item in operational_diagnostics
+                                if item["decision_priority"] < 8
+                            ),
+                        },
                         "diagnostics": monitor_diagnostics,
                     },
                 }

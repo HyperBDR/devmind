@@ -1602,6 +1602,9 @@
         "operational": "运营模型"
       },
       "kpi": {
+        "activeModelSkus": {
+          "label": "活跃模型 SKU"
+        },
         "channelCoverage": "渠道覆盖",
         "channelCoverageHint": "可用采购渠道数量",
         "listingLinks": "挂售链路",
@@ -2258,6 +2261,19 @@
         "previous": "上一页",
         "summary": "共 {total} 个元模型，第 {current} / {pages} 页"
       },
+      "priceSources": {
+        "coverage": "{sources} 个价格源 · 覆盖 {skus} 个 SKU",
+        "hint": "默认按价格源聚合展示该元模型的 SKU 报价；计费维度和用量档位已汇总到同一 SKU。",
+        "empty": "当前元模型暂无有效价格。",
+        "unknown": "未命名价格源",
+        "unknownSku": "未命名 SKU",
+        "sourceSummary": "覆盖 {skus} 个 SKU",
+        "coveragePath": "价格覆盖：元模型 → 价格源 → SKU 报价",
+        "sourceLabel": "价格源",
+        "input": "输入",
+        "output": "输出",
+        "cache": "缓存"
+      },
       "status": {
         "active": "可用",
         "deprecated": "弃用",
@@ -2274,6 +2290,7 @@
         "metaModel": "元模型",
         "metaModels": "元模型",
         "releaseDate": "发布日期",
+        "priceSources": "模型价格源",
         "status": "状态",
         "vendor": "厂商"
       }
@@ -3470,7 +3487,53 @@
       }
     },
     "overview": {
+      "kicker": "平台运营脉搏",
+      "title": "大模型运营总览",
+      "subtitle": "实时掌握模型供给、渠道分发、收益表现与运营风险。",
+      "live": "实时",
       "kpi": {
+        "activeModelSkus": {
+          "label": "活跃模型 SKU"
+        },
+        "activeListings": {
+          "label": "活跃挂售"
+        },
+        "channels": {
+          "label": "活跃渠道"
+        },
+        "channelCoverageRate": {
+          "label": "渠道覆盖率"
+        },
+        "listingCoverageRate": {
+          "label": "挂售覆盖率"
+        },
+        "medianYield": {
+          "label": "收益率中位数"
+        },
+        "metaModels": {
+          "label": "元模型"
+        },
+        "overallYield": {
+          "label": "整体收益率"
+        },
+        "operationalModels": {
+          "label": "可运营模型"
+        },
+        "priceSources": {
+          "label": "启用价格源"
+        },
+        "priceSourceHealthRate": {
+          "label": "价格源健康率"
+        },
+        "riskPoints": {
+          "label": "运营风险点"
+        },
+        "unlistedModels": {
+          "label": "未挂售模型"
+        },
+        "unresolvedYieldModels": {
+          "label": "无法计算收益率"
+        },
         "needsAction": {
           "label": "运营待处理"
         },
@@ -3493,7 +3556,29 @@
         "lastUpdate": "数据时间",
         "model": "模型",
         "procurement": "采购",
-        "yield": "收益率"
+        "yield": "收益率",
+        "recommendation": "运营建议"
+      },
+      "priority": {
+        "urgent": "立即处理",
+        "attention": "需要复核",
+        "normal": "持续关注"
+      },
+      "yieldTip": {
+        "label": "收益率口径：",
+        "formula": "（售价 ×（1 − 平台佣金 − 服务费 − 税率）− 采购成本 × 结算比例）÷ 售价。",
+        "requirement": "税率、结算比例或采购/售价缺失时，不展示收益率。"
+      },
+      "advice": {
+        "no_supply": { "reason": "尚未配置可用的采购渠道。", "impact": "该模型无法可靠地销售或进行成本比较。" },
+        "currency_unresolved": { "reason": "渠道价格缺少币种换算汇率。", "impact": "收益率和最低成本比较暂不可靠。" },
+        "platform_fee_unresolved": { "reason": "平台手续费规则尚未配置完整。", "impact": "挂售决策前无法计算可信的收益率。" },
+        "low_yield": { "reason": "当前挂售收益率低于设定的预警阈值。", "impact": "该挂售可能拉低利润，应复核售价或采购渠道。" },
+        "not_lowest_channel": { "reason": "当前挂售未使用成本最低的可用采购渠道。", "impact": "切换供给渠道可在不调整售价的前提下改善收益。" },
+        "unlisted": { "reason": "采购链路已就绪，但尚未建立有效挂售。", "impact": "该模型当前不能对外销售。" },
+        "single_channel": { "reason": "当前只有 {channels} 个可用采购渠道。", "impact": "该渠道不可用时，模型供给会中断。" },
+        "ready": { "reason": "渠道覆盖、挂售和收益检查目前均正常。", "impact": "暂不需要额外运营动作。" },
+        "market_reference": { "reason": "这是市场参考数据，不是当前运营 SKU。", "impact": "可用于定价调研，无需进行挂售操作。" }
       },
       "coverageCount": "{count} 个渠道",
       "queueSummaryLabel": "运营待办筛选",
@@ -3517,7 +3602,31 @@
         "daysAgo": "{count} 天前"
       },
       "emptyDecisionAllReady": "当前没有需要处理的运营模型。",
-      "emptyDecisionFiltered": "当前筛选条件下没有匹配的模型。"
+      "emptyDecisionFiltered": "当前筛选条件下没有匹配的模型。",
+      "insights": {
+        "healthEyebrow": "运营健康度",
+        "healthTitle": "供给就绪度",
+        "channelEyebrow": "分发结构",
+        "channelTitle": "推荐渠道覆盖",
+        "covered": "已覆盖",
+        "unlisted": "未挂售",
+        "risk": "有风险",
+        "viewDetails": "查看矩阵",
+        "noChannelData": "暂无渠道数据。",
+        "unassigned": "未分配",
+        "structureEyebrow": "平台结构",
+        "structureTitle": "模型运营规模",
+        "riskEyebrow": "行动信号",
+        "riskTitle": "风险构成",
+        "models": "模型",
+        "modelsHint": "当前范围内",
+        "providers": "厂商",
+        "providersHint": "元模型归属",
+        "channels": "渠道",
+        "channelsHint": "有活跃覆盖",
+        "listed": "已挂售",
+        "listedHint": "有效销售链路"
+      }
     },
     "decision": {
       "status": {

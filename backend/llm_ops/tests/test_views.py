@@ -4163,6 +4163,75 @@ class LLMOpsViewTests(TestCase):
         self.assertIn("decision_status", diagnostic)
         self.assertIn("yield_metrics", diagnostic)
 
+    def test_summary_monitor_scope_returns_platform_overview_metrics(self):
+        provider = LLMProvider.objects.create(
+            name="Overview Provider",
+            code="overview-provider",
+        )
+        model = LLMModel.objects.create(
+            provider=provider,
+            name="Overview Model",
+            code="overview-model",
+            input_price_per_million="10",
+            output_price_per_million="20",
+        )
+        channel = ProcurementChannel.objects.create(
+            name="Overview Channel",
+            code="overview-channel",
+        )
+        source = PriceCollectionSource.objects.create(
+            name="Overview Source",
+            slug="overview-source",
+            is_enabled=True,
+        )
+        platform = ResalePlatform.objects.create(
+            code="overview-platform",
+            name="Overview Platform",
+            fee_rate="0.05",
+            service_fee_rate="0.02",
+            tax_rate="0.06",
+            settlement_rate="0.95",
+            yield_warning="0.15",
+        )
+        ChannelModelPrice.objects.create(
+            channel=channel,
+            model=model,
+            price_source=source,
+            is_listed=True,
+            custom_input_price_per_million="10",
+            custom_output_price_per_million="20",
+        )
+        self._create_online_listing(
+            platform=platform,
+            model=model,
+            channel=channel,
+            retail_input_price_per_million="20",
+            retail_output_price_per_million="40",
+        )
+
+        response = self.client.get(
+            reverse("llm-ops-summary"),
+            {"resale_platform": platform.id, "scope": "monitor"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        overview = response.data["agione"]["overview"]
+        self.assertEqual(overview["meta_models"], 1)
+        self.assertEqual(overview["enabled_price_sources"], 1)
+        self.assertEqual(overview["active_channels"], 1)
+        self.assertEqual(overview["active_listings"], 1)
+        self.assertEqual(overview["risk_points"], 1)
+        self.assertAlmostEqual(overview["overall_yield"], 0.395)
+        self.assertEqual(overview["active_model_skus"], 1)
+        self.assertEqual(overview["operational_models"], 1)
+        self.assertEqual(overview["channel_coverage_rate"], 1.0)
+        self.assertEqual(overview["listing_coverage_rate"], 1.0)
+        self.assertEqual(overview["unlisted_models"], 0)
+        self.assertAlmostEqual(overview["median_yield"], 0.395)
+        self.assertEqual(overview["unresolved_yield_models"], 0)
+        self.assertEqual(overview["healthy_price_sources"], 0)
+        self.assertEqual(overview["price_source_health_rate"], 0.0)
+
     def test_summary_separates_market_reference_from_operational_models(self):
         provider = LLMProvider.objects.create(
             name="Reference Provider",

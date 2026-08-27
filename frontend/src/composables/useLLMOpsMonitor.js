@@ -56,7 +56,108 @@ export function useLLMOpsMonitor({ summary }) {
 
   const kpiCards = computed(() => {
     const counts = summarizeMonitorRows(enrichedProcurementRows.value)
+    const overview = summary.value.agione?.overview || {}
     return [
+      {
+        key: 'active_model_skus',
+        label: t('llmOps.overview.kpi.activeModelSkus.label'),
+        value: Number(overview.active_model_skus || 0),
+        section: 'modelWorkbench',
+        tone: 'info'
+      },
+      {
+        key: 'operational_models',
+        label: t('llmOps.overview.kpi.operationalModels.label'),
+        value: Number(overview.operational_models || 0),
+        filter: 'operational',
+        tone: 'info'
+      },
+      {
+        key: 'channel_coverage_rate',
+        label: t('llmOps.overview.kpi.channelCoverageRate.label'),
+        value: formatPercent(overview.channel_coverage_rate),
+        section: 'channelMatrix',
+        tone: rateTone(overview.channel_coverage_rate)
+      },
+      {
+        key: 'listing_coverage_rate',
+        label: t('llmOps.overview.kpi.listingCoverageRate.label'),
+        value: formatPercent(overview.listing_coverage_rate),
+        section: 'listingRisk',
+        tone: rateTone(overview.listing_coverage_rate)
+      },
+      {
+        key: 'unlisted_models',
+        label: t('llmOps.overview.kpi.unlistedModels.label'),
+        value: Number(overview.unlisted_models || 0),
+        filter: 'unlisted',
+        tone: Number(overview.unlisted_models || 0) ? 'warn' : 'success'
+      },
+      {
+        key: 'meta_models',
+        label: t('llmOps.overview.kpi.metaModels.label'),
+        value: Number(overview.meta_models || 0),
+        section: 'metaModels',
+        tone: 'info'
+      },
+      {
+        key: 'price_sources',
+        label: t('llmOps.overview.kpi.priceSources.label'),
+        value: Number(overview.enabled_price_sources || 0),
+        section: 'providers',
+        tone: 'info'
+      },
+      {
+        key: 'channels',
+        label: t('llmOps.overview.kpi.channels.label'),
+        value: Number(overview.active_channels || 0),
+        section: 'channels',
+        tone: 'info'
+      },
+      {
+        key: 'listings',
+        label: t('llmOps.overview.kpi.activeListings.label'),
+        value: Number(overview.active_listings || 0),
+        section: 'listingRisk',
+        tone: 'success'
+      },
+      {
+        key: 'overall_yield',
+        label: t('llmOps.overview.kpi.overallYield.label'),
+        value: formatPercent(overview.overall_yield),
+        section: 'listingRisk',
+        tone: overview.overall_yield === null ? 'info' : 'success'
+      },
+      {
+        key: 'median_yield',
+        label: t('llmOps.overview.kpi.medianYield.label'),
+        value: formatPercent(overview.median_yield),
+        section: 'listingRisk',
+        tone: overview.median_yield === null ? 'info' : 'success'
+      },
+      {
+        key: 'unresolved_yield_models',
+        label: t('llmOps.overview.kpi.unresolvedYieldModels.label'),
+        value: Number(overview.unresolved_yield_models || 0),
+        filter: 'priority',
+        tone: Number(overview.unresolved_yield_models || 0)
+          ? 'warn'
+          : 'success'
+      },
+      {
+        key: 'price_source_health_rate',
+        label: t('llmOps.overview.kpi.priceSourceHealthRate.label'),
+        value: formatPercent(overview.price_source_health_rate),
+        section: 'collectionHealth',
+        tone: rateTone(overview.price_source_health_rate)
+      },
+      {
+        key: 'risk_points',
+        label: t('llmOps.overview.kpi.riskPoints.label'),
+        value: Number(overview.risk_points || 0),
+        filter: 'priority',
+        tone: Number(overview.risk_points || 0) ? 'danger' : 'success'
+      },
       {
         key: 'needs_action',
         label: t('llmOps.overview.kpi.needsAction.label'),
@@ -135,6 +236,18 @@ export function useLLMOpsMonitor({ summary }) {
     simulationStatus,
     simulationStatusOptions
   }
+}
+
+function formatPercent(value) {
+  if (value === null || value === undefined || value === '') return '-'
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return '-'
+  return `${(numericValue * 100).toFixed(1)}%`
+}
+
+function rateTone(value) {
+  if (value === null || value === undefined || value === '') return 'info'
+  return Number(value) < 1 ? 'warn' : 'success'
 }
 
 function monitorModelSubtitle(row) {
