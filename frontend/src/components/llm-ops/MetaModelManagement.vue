@@ -230,6 +230,7 @@
                   <col class="capability-col" />
                   <col class="context-col" />
                   <col class="release-col" />
+                  <col class="price-source-col" />
                   <col class="status-col" />
                 </colgroup>
                 <thead>
@@ -247,17 +248,21 @@
                       {{ t('llmOps.metaModelManagement.table.releaseDate') }}
                     </th>
                     <th class="table-head">
+                      {{ t('llmOps.metaModelManagement.table.priceSources') }}
+                    </th>
+                    <th class="table-head">
                       {{ t('llmOps.metaModelManagement.table.status') }}
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr v-if="drawerLoading">
-                    <td class="table-cell text-slate-500" colspan="5">
+                    <td class="table-cell text-slate-500" colspan="6">
                       {{ t('common.loading') }}
                     </td>
                   </tr>
-                  <tr v-for="item in paginatedVendorMetaRows" :key="item.id">
+                  <template v-for="item in paginatedVendorMetaRows" :key="item.id">
+                  <tr>
                     <td class="table-cell">
                       <div
                         class="meta-model-main"
@@ -334,6 +339,19 @@
                       </p>
                     </td>
                     <td class="table-cell">
+                      <button
+                        type="button"
+                        class="price-source-count"
+                        :title="t('llmOps.metaModelManagement.priceSources.hint')"
+                        @click="toggleMetaModelPrices(item)"
+                      >
+                        {{ t('llmOps.metaModelManagement.priceSources.coverage', {
+                          sources: item.current_price_source_count || 0,
+                          skus: item.current_priced_sku_count || 0
+                        }) }}
+                      </button>
+                    </td>
+                    <td class="table-cell">
                       <div class="meta-model-status">
                         <span :class="['status-pill', statusTone(item.status)]">
                           {{ statusLabel(item.status) }}
@@ -341,8 +359,40 @@
                       </div>
                     </td>
                   </tr>
+                  <tr v-if="expandedMetaModelId === item.id" class="price-detail-row">
+                    <td class="table-cell" colspan="6">
+                      <p v-if="expandedPricesLoading" class="text-xs text-slate-500">{{ t('common.loading') }}</p>
+                      <div v-else-if="priceSourceGroups.length" class="price-source-groups">
+                        <div class="price-coverage-intro">
+                          <span>{{ t('llmOps.metaModelManagement.priceSources.coveragePath') }}</span>
+                          <strong>{{ compactMetaModelName(item) }}</strong>
+                        </div>
+                        <section v-for="group in priceSourceGroups" :key="group.name" class="price-source-group">
+                          <div class="price-source-group-head">
+                            <div>
+                              <p class="price-source-label">{{ t('llmOps.metaModelManagement.priceSources.sourceLabel') }}</p>
+                              <strong>{{ group.name }}</strong>
+                            </div>
+                            <span>{{ t('llmOps.metaModelManagement.priceSources.sourceSummary', { skus: group.skus.length }) }}</span>
+                          </div>
+                          <div class="price-detail-list">
+                            <article v-for="sku in group.skus" :key="sku.key" class="price-sku-card">
+                              <strong>{{ sku.name }}</strong>
+                              <div class="price-token-list">
+                                <span v-for="price in sku.prices" :key="price.label" class="price-token">
+                                  <b>{{ price.label }}</b>{{ price.value }}
+                                </span>
+                              </div>
+                            </article>
+                          </div>
+                        </section>
+                      </div>
+                      <p v-else class="text-xs text-slate-500">{{ t('llmOps.metaModelManagement.priceSources.empty') }}</p>
+                    </td>
+                  </tr>
+                  </template>
                   <tr v-if="!drawerLoading && !vendorMetaRows.length">
-                    <td class="table-cell text-slate-500" colspan="5">
+                    <td class="table-cell text-slate-500" colspan="6">
                       {{ t('llmOps.metaModelManagement.empty.models') }}
                     </td>
                   </tr>
@@ -437,7 +487,56 @@ const ownerRows = ref([])
 const drawerRows = ref([])
 const drawerTotal = ref(0)
 const drawerLoading = ref(false)
+const expandedMetaModelId = ref(null)
+const expandedPrices = ref([])
+const expandedPricesLoading = ref(false)
 const ownerSummaryLoading = ref(false)
+
+const priceSourceGroups = computed(() => {
+  const groups = new Map()
+  expandedPrices.value.forEach((price) => {
+    const name = price.source_name || t('llmOps.metaModelManagement.priceSources.unknown')
+    const group = groups.get(name) || { name, items: [], skuMap: new Map() }
+    group.items.push(price)
+    const skuName = price.sku_display_name || price.model_name || price.sku_code || t('llmOps.metaModelManagement.priceSources.unknownSku')
+    const sku = group.skuMap.get(skuName) || { key: skuName, name: skuName, dimensions: new Map() }
+    const dimension = price.dimension || ''
+    if (!sku.dimensions.has(dimension)) sku.dimensions.set(dimension, price)
+    group.skuMap.set(skuName, sku)
+    groups.set(name, group)
+  })
+  return [...groups.values()].map((group) => ({
+    name: group.name,
+    items: group.items,
+    skus: [...group.skuMap.values()].map((sku) => ({
+      key: sku.key,
+      name: sku.name,
+      prices: [...sku.dimensions.values()]
+        .slice(0, 3)
+        .map((price) => ({
+          label: priceDimensionLabel(price.dimension),
+          value: `${price.currency} ${formatPrice(price.unit_price)}`
+        }))
+    }))
+  }))
+})
+
+function priceDimensionLabel(value) {
+  const labels = {
+    text_input: t('llmOps.metaModelManagement.priceSources.input'),
+    text_output: t('llmOps.metaModelManagement.priceSources.output'),
+    cache_input: t('llmOps.metaModelManagement.priceSources.cache')
+  }
+  return labels[value] || value
+}
+
+function formatPrice(value) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '-'
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 4
+  }).format(numeric)
+}
 
 const statusOptions = computed(() => [
   {
@@ -644,6 +743,29 @@ async function fetchVendorMetaModels() {
     )
   } finally {
     drawerLoading.value = false
+  }
+}
+
+async function toggleMetaModelPrices(item) {
+  if (expandedMetaModelId.value === item.id) {
+    expandedMetaModelId.value = null
+    expandedPrices.value = []
+    return
+  }
+  expandedMetaModelId.value = item.id
+  expandedPrices.value = []
+  expandedPricesLoading.value = true
+  try {
+    const response = await llmOpsApi.listModelPriceItems({
+      meta_model: item.id,
+      is_current: true,
+      page_size: 100
+    })
+    expandedPrices.value = paginationResults(paginationPayload(response))
+  } catch (error) {
+    showError(errorMessage(error, t('llmOps.metaModelManagement.errors.loadDetails')))
+  } finally {
+    expandedPricesLoading.value = false
   }
 }
 

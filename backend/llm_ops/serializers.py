@@ -644,6 +644,18 @@ class MetaModelSerializer(serializers.ModelSerializer):
         read_only=True,
         required=False,
     )
+    current_price_source_count = serializers.IntegerField(
+        read_only=True,
+        required=False,
+    )
+    current_price_item_count = serializers.IntegerField(
+        read_only=True,
+        required=False,
+    )
+    current_priced_sku_count = serializers.IntegerField(
+        read_only=True,
+        required=False,
+    )
     release_date = serializers.SerializerMethodField()
 
     class Meta:

@@ -1594,6 +1594,9 @@
         "operational": "Operational models"
       },
       "kpi": {
+        "activeModelSkus": {
+          "label": "Active model SKUs"
+        },
         "channelCoverage": "Channel coverage",
         "channelCoverageHint": "Available procurement channel count",
         "listingLinks": "Listing links",
@@ -2250,6 +2253,19 @@
         "previous": "Previous",
         "summary": "{total} meta models, page {current} / {pages}"
       },
+      "priceSources": {
+        "coverage": "{sources} sources · {skus} SKUs covered",
+        "hint": "SKU quotes are aggregated by price source. Billing dimensions and usage tiers are summarized within each SKU.",
+        "empty": "No current prices for this meta model.",
+        "unknown": "Unnamed source",
+        "unknownSku": "Unnamed SKU",
+        "sourceSummary": "{skus} SKUs covered",
+        "coveragePath": "Price coverage: Meta model → Source → SKU quotes",
+        "sourceLabel": "Price source",
+        "input": "Input",
+        "output": "Output",
+        "cache": "Cache"
+      },
       "status": {
         "active": "Active",
         "deprecated": "Deprecated",
@@ -2266,6 +2282,7 @@
         "metaModel": "Meta model",
         "metaModels": "Meta models",
         "releaseDate": "Release date",
+        "priceSources": "Price sources",
         "status": "Status",
         "vendor": "Provider"
       }
@@ -3462,7 +3479,53 @@
       }
     },
     "overview": {
+      "kicker": "Platform pulse",
+      "title": "LLM operations at a glance",
+      "subtitle": "A live view of model supply, distribution, margin, and operational risk.",
+      "live": "Live",
       "kpi": {
+        "activeModelSkus": {
+          "label": "Active model SKUs"
+        },
+        "activeListings": {
+          "label": "Active listings"
+        },
+        "channels": {
+          "label": "Active channels"
+        },
+        "channelCoverageRate": {
+          "label": "Channel coverage"
+        },
+        "listingCoverageRate": {
+          "label": "Listing coverage"
+        },
+        "medianYield": {
+          "label": "Median yield"
+        },
+        "metaModels": {
+          "label": "Meta models"
+        },
+        "overallYield": {
+          "label": "Overall yield"
+        },
+        "operationalModels": {
+          "label": "Operational models"
+        },
+        "priceSources": {
+          "label": "Enabled price sources"
+        },
+        "priceSourceHealthRate": {
+          "label": "Price-source health"
+        },
+        "riskPoints": {
+          "label": "Operational risk points"
+        },
+        "unlistedModels": {
+          "label": "Unlisted models"
+        },
+        "unresolvedYieldModels": {
+          "label": "Yield unavailable"
+        },
         "needsAction": {
           "label": "Needs action"
         },
@@ -3485,7 +3548,29 @@
         "lastUpdate": "Last update",
         "model": "Model",
         "procurement": "Procurement",
-        "yield": "Yield"
+        "yield": "Yield",
+        "recommendation": "Operational recommendation"
+      },
+      "priority": {
+        "urgent": "Act now",
+        "attention": "Needs review",
+        "normal": "Monitor"
+      },
+      "yieldTip": {
+        "label": "Yield formula: ",
+        "formula": "(retail price × (1 − platform fee − service fee − tax) − procurement cost × settlement rate) ÷ retail price.",
+        "requirement": "Yield is withheld when tax, settlement rate, procurement cost, or retail price is missing."
+      },
+      "advice": {
+        "no_supply": { "reason": "No usable procurement channel is configured.", "impact": "This model cannot be sold or cost-compared reliably." },
+        "currency_unresolved": { "reason": "The channel price needs a currency conversion rate.", "impact": "Margin and lowest-cost comparison remain unreliable." },
+        "platform_fee_unresolved": { "reason": "Platform fee rules are incomplete.", "impact": "A reliable yield cannot be calculated before listing decisions." },
+        "low_yield": { "reason": "Current listing yield is below the configured warning threshold.", "impact": "This listing may reduce margin; review price or procurement channel." },
+        "not_lowest_channel": { "reason": "The listing is not using the lowest available procurement channel.", "impact": "Switching the supply route may improve margin without changing the sale price." },
+        "unlisted": { "reason": "A procurement path is ready, but no active listing exists.", "impact": "This model is not currently available for sales." },
+        "single_channel": { "reason": "Only {channels} procurement channel is available.", "impact": "Supply continuity is exposed if this channel becomes unavailable." },
+        "ready": { "reason": "Coverage, listing, and yield checks are currently healthy.", "impact": "No immediate intervention is required." },
+        "market_reference": { "reason": "This is market reference data rather than an operational SKU.", "impact": "Use it for pricing research; no publishing action is needed." }
       },
       "coverageCount": "{count} channels",
       "queueSummaryLabel": "Operational queue filters",
@@ -3509,7 +3594,31 @@
         "daysAgo": "{count}d ago"
       },
       "emptyDecisionAllReady": "No operational models need handling.",
-      "emptyDecisionFiltered": "No models match the current filters."
+      "emptyDecisionFiltered": "No models match the current filters.",
+      "insights": {
+        "healthEyebrow": "Operational health",
+        "healthTitle": "Supply readiness",
+        "channelEyebrow": "Distribution mix",
+        "channelTitle": "Recommended channel coverage",
+        "covered": "Covered",
+        "unlisted": "Unlisted",
+        "risk": "At risk",
+        "viewDetails": "View matrix",
+        "noChannelData": "No channel data yet.",
+        "unassigned": "Unassigned",
+        "structureEyebrow": "Platform structure",
+        "structureTitle": "Model operations footprint",
+        "riskEyebrow": "Action signals",
+        "riskTitle": "Risk composition",
+        "models": "Models",
+        "modelsHint": "in current scope",
+        "providers": "Providers",
+        "providersHint": "model owners",
+        "channels": "Channels",
+        "channelsHint": "with active coverage",
+        "listed": "Listed",
+        "listedHint": "active sales links"
+      }
     },
     "decision": {
       "status": {

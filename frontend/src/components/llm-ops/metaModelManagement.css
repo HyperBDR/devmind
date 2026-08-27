@@ -173,11 +173,11 @@
 }
 
 .meta-model-management .meta-model-table .model-col {
-  width: 26%;
+  width: 24%;
 }
 
 .meta-model-management .meta-model-table .capability-col {
-  width: 32%;
+  width: 26%;
 }
 
 .meta-model-management .meta-model-table .context-col {
@@ -185,11 +185,17 @@
 }
 
 .meta-model-management .meta-model-table .release-col {
+  width: 12%;
+}
+
+.meta-model-management .meta-model-table .price-source-col {
   width: 14%;
+  min-width: 9rem;
 }
 
 .meta-model-management .meta-model-table .status-col {
   width: 10%;
+  min-width: 5.5rem;
 }
 
 .meta-model-management .control-field {
@@ -363,6 +369,74 @@
 
 .meta-model-management .meta-model-status {
   @apply mx-auto flex min-w-0 justify-center;
+}
+
+.meta-model-management .price-source-count {
+  @apply mx-auto block rounded-lg border border-indigo-100 bg-indigo-50/60 px-2.5 py-1.5 text-center text-xs font-semibold text-indigo-700 transition hover:border-indigo-200 hover:bg-indigo-100 hover:underline;
+}
+
+.meta-model-management .price-detail-row > td {
+  @apply border-t-0 bg-slate-50 px-5 py-5;
+}
+
+.meta-model-management .price-detail-list {
+  @apply grid gap-3 p-3 text-xs text-slate-600;
+}
+
+.meta-model-management .price-source-groups {
+  @apply grid gap-3;
+}
+
+.meta-model-management .price-coverage-intro {
+  @apply flex flex-wrap items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2 text-xs text-indigo-700;
+}
+
+.meta-model-management .price-coverage-intro strong {
+  @apply font-semibold text-indigo-900;
+}
+
+.meta-model-management .price-source-group {
+  @apply overflow-hidden rounded-xl border border-slate-200 bg-white;
+}
+
+.meta-model-management .price-source-group-head {
+  @apply flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-xs;
+}
+
+.meta-model-management .price-source-group-head strong {
+  @apply text-sm text-slate-800;
+}
+
+.meta-model-management .price-source-group-head span {
+  @apply text-slate-500;
+}
+
+.meta-model-management .price-source-label {
+  @apply mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400;
+}
+
+.meta-model-management .price-sku-card {
+  @apply grid gap-2 rounded-lg border border-slate-200 bg-white px-3 py-3 shadow-sm;
+}
+
+.meta-model-management .price-sku-card > strong {
+  @apply truncate text-sm font-semibold text-slate-800;
+}
+
+.meta-model-management .price-token-list {
+  @apply flex flex-wrap gap-1.5;
+}
+
+.meta-model-management .price-token {
+  @apply inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-1 font-mono text-[11px] text-slate-600;
+}
+
+.meta-model-management .price-token b {
+  @apply font-sans font-semibold text-slate-500;
+}
+
+@media (max-width: 640px) {
+  .meta-model-management .price-source-group-head { @apply items-start; }
 }
 
 .meta-model-management .status-pill {

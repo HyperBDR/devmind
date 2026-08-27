@@ -119,3 +119,46 @@ test('labels market references without implying a missing listing', () => {
     /function currentListingText\(row\) \{\s*if \(!isOperationalRow\(row\)\) \{\s*return t\('llmOps\.decision\.status\.market_reference'\)/
   )
 })
+
+test('opens read-only model details instead of the resale editing workspace', () => {
+  assert.match(
+    monitorDashboardSource,
+    /function handleRowClick\(row\)[\s\S]*?section: 'modelWorkbench'/
+  )
+  assert.doesNotMatch(
+    monitorDashboardSource,
+    /function handleRowClick\(row\)[\s\S]*?emit\('navigateToWorkspace'/
+  )
+})
+
+test('does not render an unresolved overall yield as zero', () => {
+  const monitorComposableSource = readFileSync(
+    new URL('../src/composables/useLLMOpsMonitor.js', import.meta.url),
+    'utf8'
+  )
+
+  assert.match(
+    monitorComposableSource,
+    /function formatPercent\(value\) \{\s*if \(value === null \|\| value === undefined \|\| value === ''\) return '-'/
+  )
+})
+
+test('includes the first-phase coverage and health indicators', () => {
+  const monitorComposableSource = readFileSync(
+    new URL('../src/composables/useLLMOpsMonitor.js', import.meta.url),
+    'utf8'
+  )
+
+  for (const key of [
+    'active_model_skus',
+    'operational_models',
+    'channel_coverage_rate',
+    'listing_coverage_rate',
+    'unlisted_models',
+    'median_yield',
+    'unresolved_yield_models',
+    'price_source_health_rate'
+  ]) {
+    assert.match(monitorComposableSource, new RegExp(`key: '${key}'`))
+  }
+})
