@@ -1930,6 +1930,7 @@
         "platform": "挂售平台"
       },
       "coverageSummary": "{covered} / {total} 个渠道",
+      "offerCount": "{count} 个货源",
       "drawer": {
         "contractFx": "合同汇率",
         "currentChannel": "当前挂售渠道",

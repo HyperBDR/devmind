@@ -726,6 +726,26 @@ class LLMModelSerializer(serializers.ModelSerializer):
         read_only=True,
         allow_null=True,
     )
+    sku_code = serializers.CharField(
+        source="sku.canonical_sku_code",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_display_name = serializers.CharField(
+        source="sku.display_name",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_region = serializers.CharField(
+        source="sku.region",
+        read_only=True,
+        allow_null=True,
+    )
+    sku_upstream_model_name = serializers.CharField(
+        source="sku.upstream_model_name",
+        read_only=True,
+        allow_null=True,
+    )
     business_source_category = serializers.SerializerMethodField()
     business_source_category_label = serializers.SerializerMethodField()
 
@@ -1635,6 +1655,16 @@ class ChannelOfferingSerializer(serializers.ModelSerializer):
     )
     source_offering_key = serializers.CharField(
         source="source_offering.id",
+        read_only=True,
+        allow_null=True,
+    )
+    source_sku_code = serializers.CharField(
+        source="source_offering.sku.canonical_sku_code",
+        read_only=True,
+        allow_null=True,
+    )
+    source_sku_region = serializers.CharField(
+        source="source_offering.sku.region",
         read_only=True,
         allow_null=True,
     )

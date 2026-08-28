@@ -4189,7 +4189,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
 
         models = list(
             LLMModel.objects.filter(is_active=True)
-            .select_related("meta_model", "provider")
+            .select_related("meta_model", "provider", "sku")
             .order_by("provider__name", "name", "id")
         )
         model_updated_at_by_id = {
@@ -4350,8 +4350,19 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 key=lambda item: (
                     item.get("requires_currency_conversion", False),
                     item["estimated_cost"],
+                    item.get("channel_id", 0),
+                    item.get("offering_id") or 0,
                 )
             )
+            offer_counts = {}
+            for option in options:
+                channel_id = option.get("channel_id")
+                offer_counts[channel_id] = offer_counts.get(channel_id, 0) + 1
+            for option in options:
+                option["channel_offer_count"] = offer_counts.get(
+                    option.get("channel_id"),
+                    1,
+                )
             best = _select_best_option(options) if options else None
             requires_currency_conversion = bool(
                 any(
@@ -4364,6 +4375,17 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                     "model_id": model.id,
                     "model_name": model.name,
                     "model_code": model.code,
+                    "sku_code": getattr(model.sku, "canonical_sku_code", "")
+                    if model.sku_id
+                    else "",
+                    "sku_region": getattr(model.sku, "region", "")
+                    if model.sku_id
+                    else "",
+                    "upstream_model_name": (
+                        getattr(model.sku, "upstream_model_name", "")
+                        if model.sku_id
+                        else model.code
+                    ),
                     "meta_model_id": model.meta_model_id,
                     "meta_model_name": model.meta_model.name,
                     "meta_model_code": model.meta_model.code,
@@ -4557,6 +4579,9 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
         diagnostics = []
         for row in procurement_rows:
             options = row["options"]
+            channel_coverage_count = len(
+                {option["channel_id"] for option in options}
+            )
             best_channel = row["best_channel"]
             active_model_listings = selected_platform_listings_by_model.get(
                 row["model_id"],
@@ -4590,7 +4615,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
             if not is_monitor_scope:
                 status_payload = _diagnostic_status(
                     best_channel=best_channel,
-                    coverage_count=len(options),
+                    coverage_count=channel_coverage_count,
                     is_agione_listed=bool(active_model_listings),
                     has_lowest_listing=has_lowest_listing,
                     operation_scope=scope_payload["operation_scope"],
@@ -4702,7 +4727,7 @@ class SummaryAPIView(LLMOpsPermissionMixin, APIView):
                 "requires_currency_conversion": row[
                     "requires_currency_conversion"
                 ],
-                "coverage_count": len(options),
+                "coverage_count": channel_coverage_count,
                 "is_agione_listed": bool(active_model_listings),
                 "has_lowest_listing": has_lowest_listing,
                 "active_listing_count": len(active_model_listings),

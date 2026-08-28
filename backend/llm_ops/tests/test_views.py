@@ -2530,6 +2530,16 @@ class LLMOpsViewTests(TestCase):
             {item["offering_name"] for item in options},
             {"Primary route", "Backup route"},
         )
+        self.assertEqual(
+            {item["channel_offer_count"] for item in options},
+            {2},
+        )
+        diagnostic = next(
+            item
+            for item in response.data["agione"]["diagnostics"]
+            if item["model_id"] == model.id
+        )
+        self.assertEqual(diagnostic["coverage_count"], 1)
 
     def test_channel_ratio_update_resyncs_listed_price_items(self):
         provider = LLMProvider.objects.create(name="OpenAI", code="openai")

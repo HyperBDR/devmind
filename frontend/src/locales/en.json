@@ -1922,6 +1922,7 @@
         "platform": "Listing platform"
       },
       "coverageSummary": "{covered} / {total} channels",
+      "offerCount": "{count} offers",
       "drawer": {
         "contractFx": "Contract FX",
         "currentChannel": "Current listing channel",

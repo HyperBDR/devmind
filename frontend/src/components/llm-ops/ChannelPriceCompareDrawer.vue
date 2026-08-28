@@ -187,6 +187,7 @@ import {
 import { useI18n } from 'vue-i18n'
 
 import {
+  channelOfferingForOption,
   compareChannelOptions,
   optionFreshness,
   savingsPercent
@@ -289,6 +290,10 @@ function contractContext(offer) {
     sameId(item.channel, offer.channel_id)
   )
   const offering =
+    channelOfferingForOption(candidates, offer) ||
+    candidates.find((item) =>
+      sameId(item.meta_model, props.row?.meta_model_id)
+    ) ||
     candidates.find((item) => sameId(item.model, props.row?.model_id)) ||
     candidates[0]
   const ratio = Number(offer.settlement_ratio)

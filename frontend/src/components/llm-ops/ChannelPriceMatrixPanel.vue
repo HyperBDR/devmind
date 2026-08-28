@@ -140,6 +140,15 @@
                 <p class="mt-1 text-xs text-slate-500">
                   {{ row.provider_name }} · {{ row.model_code }}
                 </p>
+                <p
+                  v-if="row.sku_code || row.sku_region"
+                  class="mt-1 text-[11px] text-slate-400"
+                >
+                  {{ row.sku_code || row.upstream_model_name }}
+                  <template v-if="row.sku_region">
+                    · {{ row.sku_region }}
+                  </template>
+                </p>
                 <p class="mt-1 text-[11px] text-slate-400">
                   {{
                     t('llmOps.channelPriceMatrixPanel.coverageSummary', {
@@ -166,6 +175,14 @@
                   </strong>
                   <span class="price-cell-meta">
                     {{ freshnessLabel(optionFor(row, channel)) }}
+                    <template v-if="offerCount(row, channel) > 1">
+                      ·
+                      {{
+                        t('llmOps.channelPriceMatrixPanel.offerCount', {
+                          count: offerCount(row, channel)
+                        })
+                      }}
+                    </template>
                   </span>
                   <span class="price-cell-tags">
                     <span v-if="isBest(row, channel)" class="is-best">
@@ -229,8 +246,10 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import {
+  bestOptionForChannel,
   effectiveMatrixAction,
   hasStaleChannelPrice,
+  optionsForChannel,
   optionFreshness
 } from '@/utils/llmOpsChannelPriceMatrix'
 import { asArray } from '@/utils/llmOpsPagination'
@@ -359,9 +378,11 @@ const metrics = computed(() => {
 })
 
 function optionFor(row, channel) {
-  return (row.options || []).find(
-    (option) => String(option.channel_id) === String(channel.id)
-  )
+  return bestOptionForChannel(row, channel.id)
+}
+
+function offerCount(row, channel) {
+  return optionsForChannel(row, channel.id).length
 }
 
 function isBest(row, channel) {

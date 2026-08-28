@@ -55,6 +55,36 @@ export function compareChannelOptions(row = {}, dimension = 'input') {
     .sort((left, right) => Number(left[field]) - Number(right[field]))
 }
 
+export function optionsForChannel(row = {}, channelId) {
+  return (row.options || [])
+    .filter((option) => String(option.channel_id) === String(channelId))
+    .slice()
+    .sort((left, right) => {
+      const leftCost = Number(left.estimated_cost)
+      const rightCost = Number(right.estimated_cost)
+      if (Number.isFinite(leftCost) && Number.isFinite(rightCost)) {
+        return leftCost - rightCost
+      }
+      return String(left.offering_name || '').localeCompare(
+        String(right.offering_name || '')
+      )
+    })
+}
+
+export function bestOptionForChannel(row = {}, channelId) {
+  return optionsForChannel(row, channelId)[0] || null
+}
+
+export function channelOfferingForOption(offerings = [], option = {}) {
+  return (
+    offerings.find(
+      (offering) =>
+        String(offering.channel) === String(option.channel_id) &&
+        String(offering.id) === String(option.offering_id)
+    ) || null
+  )
+}
+
 export function savingsPercent(row = {}, dimension = 'input') {
   const channelId = row.current_listing?.channel_id
   if (channelId === null || channelId === undefined) return null

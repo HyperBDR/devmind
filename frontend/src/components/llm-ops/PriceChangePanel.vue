@@ -109,6 +109,7 @@ const props = defineProps({
   channelHistory: { type: Array, default: () => [] },
   focusModelId: { type: [Number, String], default: null },
   listingHistory: { type: Array, default: () => [] },
+  officialHistory: { type: Array, default: () => [] },
   priceItems: { type: Array, default: () => [] }
 })
 
@@ -126,6 +127,7 @@ const changeRows = computed(() => {
   return buildPriceChangeRows({
     channelHistory: props.channelHistory,
     listingHistory: props.listingHistory,
+    officialHistory: props.officialHistory,
     priceItems: props.priceItems
   }).map((row) => ({
     ...row,

@@ -22,6 +22,7 @@ const listingDimensions = [
 export function buildPriceChangeRows({
   channelHistory = [],
   listingHistory = [],
+  officialHistory = [],
   priceItems = []
 } = {}) {
   const rows = [
@@ -41,7 +42,8 @@ export function buildPriceChangeRows({
       context: (item) => item.channel_name || item.platform_name || '',
       source: (item) => item.platform_name || ''
     }),
-    ...priceItems.map((item) => ({
+    ...officialHistoryRows(officialHistory),
+    ...(officialHistory.length ? [] : priceItems.map((item) => ({
       key: `official-${item.id}-${item.dimension}`,
       type: 'official',
       modelId: item.model,
@@ -53,11 +55,63 @@ export function buildPriceChangeRows({
       current: item.unit_price,
       currency: item.currency,
       time: item.effective_from || item.updated_at || item.created_at
-    }))
+    })))
   ]
   return rows.sort(
     (left, right) => new Date(right.time || 0) - new Date(left.time || 0)
   )
+}
+
+export function officialHistoryRows(items = []) {
+  const dimensions = [
+    ['text_input', 'input_price'],
+    ['text_output', 'output_price'],
+    ['cache_input', 'cache_input_price'],
+    ['image_input', 'image_input_price'],
+    ['image_output', 'image_output_price'],
+    ['audio_input', 'audio_input_price'],
+    ['audio_output', 'audio_output_price'],
+    ['video_input', 'video_input_price'],
+    ['video_output', 'video_output_price']
+  ]
+  const groups = new Map()
+  items.forEach((item) => {
+    const key = [
+      item.source,
+      item.offering || 'default',
+      item.source_platform_id,
+      item.model
+    ].join(':')
+    const versions = groups.get(key) || []
+    versions.push(item)
+    groups.set(key, versions)
+  })
+  const rows = []
+  groups.forEach((versions) => {
+    versions.sort((left, right) => historyTime(right) - historyTime(left))
+    versions.forEach((item, index) => {
+      const previous = versions[index + 1] || null
+      const currentValues = flattenHistoryValues(item)
+      const previousValues = flattenHistoryValues(previous)
+      dimensions.forEach(([dimension, field]) => {
+        if (!hasValue(currentValues[field])) return
+        rows.push({
+          key: `official-${item.id}-${dimension}`,
+          type: 'official',
+          modelId: item.model,
+          name: item.model_name || item.meta_model_name || '',
+          context: item.source_model_name || item.sku_code || '',
+          source: item.source_name || item.provider_name || '',
+          dimension,
+          previous: previousValues[field] ?? null,
+          current: currentValues[field],
+          currency: item.currency,
+          time: item.effective_from || item.collected_at
+        })
+      })
+    })
+  })
+  return rows
 }
 
 export function priceChangeDelta(row) {
@@ -116,4 +170,21 @@ function numericValue(value) {
   if (!hasValue(value)) return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function flattenHistoryValues(item) {
+  if (!item) return {}
+  const values = (item.normalized_price_rows || []).reduce((result, row) => {
+    Object.entries(row?.values || {}).forEach(([key, value]) => {
+      if (key !== 'currency' && hasValue(value)) result[key] = value
+    })
+    return result
+  }, {})
+  if (
+    !hasValue(values.cache_input_price) &&
+    hasValue(values.cache_hit_input_price)
+  ) {
+    values.cache_input_price = values.cache_hit_input_price
+  }
+  return values
 }
