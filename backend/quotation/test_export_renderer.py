@@ -91,15 +91,15 @@ class QuotationTemplateRendererTests(TestCase):
 
         workbook = load_workbook(io.BytesIO(content), data_only=False)
         sheet = workbook["Quotation"]
-        self.assertEqual(sheet["G6"].value, "PINNED-001")
-        self.assertEqual(sheet["B21"].value, "Software")
+        self.assertEqual(sheet["G7"].value, "PINNED-001")
+        self.assertEqual(sheet["B23"].value, "Software")
         self.assertEqual(sheet["B28"].value, "Service")
-        self.assertEqual(sheet["G35"].value, 300)
-        self.assertEqual(sheet["G35"].number_format, "#,##0")
-        self.assertEqual(sheet["G37"].value, 330)
-        self.assertEqual(sheet["E36"].value, "GST Amount (10%):")
-        self.assertEqual(sheet["A40"].value, "Immutable snapshot")
-        notes_row = 40
+        self.assertEqual(sheet["G31"].value, 300)
+        self.assertEqual(sheet["G31"].number_format, "#,##0")
+        self.assertEqual(sheet["G33"].value, 330)
+        self.assertEqual(sheet["E32"].value, "GST Amount (10%):")
+        self.assertEqual(sheet["A37"].value, "Immutable snapshot")
+        notes_row = 37
         acceptance_row = next(
             cell.row
             for row in sheet.iter_rows()
@@ -115,9 +115,15 @@ class QuotationTemplateRendererTests(TestCase):
             )
         )
         merged_ranges = {str(item) for item in sheet.merged_cells.ranges}
-        self.assertIn("A19:G19", merged_ranges)
-        self.assertIn("E35:F35", merged_ranges)
-        self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$49")
+        self.assertIn("A4:G4", merged_ranges)
+        self.assertIn("A5:G5", merged_ranges)
+        self.assertIn("A16:G16", merged_ranges)
+        self.assertIn("A17:G17", merged_ranges)
+        self.assertIn("A21:G21", merged_ranges)
+        self.assertIn("E31:F31", merged_ranges)
+        self.assertIn("A34:G34", merged_ranges)
+        self.assertIn("A35:G35", merged_ranges)
+        self.assertEqual(sheet.print_area, "'Quotation'!$A$1:$G$46")
 
     def test_estimates_wrapped_lines_for_long_notes(self):
         notes = "This is a long paragraph that must wrap across the merged notes area."
@@ -175,7 +181,7 @@ class QuotationTemplateRendererTests(TestCase):
         )
         rendered = load_workbook(io.BytesIO(content))
         self.assertEqual(
-            rendered["Quotation"]["E36"].value,
+            rendered["Quotation"]["E32"].value,
             "GST Amount (10%):",
         )
         rendered.close()
@@ -289,10 +295,34 @@ class QuotationTemplateRendererTests(TestCase):
 
         rendered = load_workbook(io.BytesIO(content))
         sheet = rendered["Quotation"]
-        self.assertEqual(sheet["B24"].value, "Item 4")
-        self.assertEqual(sheet["B34"].value, "Item 10")
-        self.assertEqual(sheet.row_dimensions[24].height, 24)
-        self.assertEqual(sheet.row_dimensions[34].height, 24)
+        self.assertEqual(sheet["B26"].value, "Item 4")
+        self.assertEqual(sheet["B36"].value, "Item 10")
+        self.assertEqual(sheet.row_dimensions[26].height, 24)
+        self.assertEqual(sheet.row_dimensions[36].height, 24)
+        rendered.close()
+
+    def test_preview_rows_match_items_with_one_empty_row_per_section(self):
+        template = ensure_default_template()
+        content = render_quotation_xlsx(
+            template,
+            {
+                "items": [
+                    {"type": "Software", "description": "Software 1"},
+                    {"type": "Software", "description": "Software 2"},
+                ]
+            },
+        )
+
+        rendered = load_workbook(io.BytesIO(content))
+        sheet = rendered["Quotation"]
+        self.assertEqual(
+            [sheet.cell(row, 2).value for row in range(23, 25)],
+            ["Software 1", "Software 2"],
+        )
+        self.assertEqual(sheet["E25"].value, "Software subscription subtotal:")
+        self.assertEqual(sheet["A27"].value, "Others")
+        self.assertIsNone(sheet["B29"].value)
+        self.assertEqual(sheet["E30"].value, "Others Subtotal:")
         rendered.close()
 
     def test_preview_rows_grow_for_wrapped_descriptions(self):
@@ -313,7 +343,7 @@ class QuotationTemplateRendererTests(TestCase):
         )
 
         rendered = load_workbook(io.BytesIO(content))
-        self.assertGreater(rendered["Quotation"].row_dimensions[21].height, 24)
+        self.assertGreater(rendered["Quotation"].row_dimensions[23].height, 24)
         rendered.close()
 
     def test_preview_uses_the_managed_logo(self):

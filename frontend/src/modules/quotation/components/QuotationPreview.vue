@@ -124,6 +124,9 @@ const headerCellClass =
         <tr class="h-5">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
+        <tr class="h-5">
+          <td colspan="7" class="px-1.5 py-1 align-middle" />
+        </tr>
         <tr>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
           <td class="whitespace-nowrap px-1.5 py-1 pr-1 text-right font-semibold align-middle">
@@ -231,6 +234,9 @@ const headerCellClass =
             <span class="font-semibold">Email :</span> {{ model.billingEmail || '' }}
           </td>
           <td colspan="5" class="px-1.5 py-1 align-middle" />
+        </tr>
+        <tr class="h-4">
+          <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr class="h-4">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
@@ -482,6 +488,9 @@ const headerCellClass =
           >
             {{ money(model.grandTotal) }}
           </td>
+        </tr>
+        <tr class="h-3">
+          <td colspan="7" class="px-1.5 py-1 align-middle" />
         </tr>
         <tr class="h-3">
           <td colspan="7" class="px-1.5 py-1 align-middle" />
