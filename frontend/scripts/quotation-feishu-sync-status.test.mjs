@@ -43,10 +43,10 @@ test('quotation UI renders synchronization state and safe differences', () => {
   assert.doesNotMatch(importsPage, /difference\.file_token/)
 })
 
-test('manual synchronization and retry use the same durable endpoint', () => {
-  assert.match(importsPage, /handleSyncNow/)
-  assert.match(importsPage, /syncFeishuArchiveFolder/)
-  assert.match(importsPage, /syncRetry/)
+test('manual synchronization and retry controls are not exposed', () => {
+  assert.doesNotMatch(importsPage, /handleSyncNow/)
+  assert.doesNotMatch(importsPage, /syncFeishuArchiveFolder/)
+  assert.doesNotMatch(importsPage, /syncRetry/)
 })
 
 test('administrators can resolve Feishu deletion differences', () => {
@@ -62,6 +62,6 @@ test('sync status copy is bilingual', () => {
     assert.match(source, /"syncHasDiff"/)
     assert.match(source, /"syncPermission"/)
     assert.match(source, /"syncMissing"/)
-    assert.match(source, /"syncRetry"/)
+    assert.doesNotMatch(source, /"syncRetry"/)
   }
 })

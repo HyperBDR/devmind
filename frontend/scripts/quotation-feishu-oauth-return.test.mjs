@@ -29,11 +29,12 @@ const router = readFileSync(
 )
 
 test('Feishu archive refresh keeps original access and uses document IDs', () => {
-  assert.match(feishuApi, /syncFeishuArchiveFolder/)
-  assert.match(feishuApi, /\/feishu\/sync-folder/)
-  assert.match(importsPage, /syncFeishuArchiveFolder/)
-  assert.match(importsPage, /syncSource: 'user'/)
-  assert.match(importsPage, /options\.syncSource !== 'automatic'/)
+  assert.match(feishuApi, /triggerFeishuLoginSync/)
+  assert.match(feishuApi, /\/feishu\/sync-on-login/)
+  assert.doesNotMatch(feishuApi, /syncFeishuArchiveFolder/)
+  assert.doesNotMatch(importsPage, /syncFeishuArchiveFolder/)
+  assert.doesNotMatch(importsPage, /syncSource: 'user'/)
+  assert.doesNotMatch(importsPage, /options\.syncSource !== 'automatic'/)
   assert.doesNotMatch(
     importsPage,
     /void refresh\(\{ syncRemote: true, syncSource: 'automatic' \}\)/,
@@ -60,7 +61,8 @@ test('Feishu archive refresh keeps original access and uses document IDs', () =>
 test('Imported files panel no longer opens a personal Feishu drive picker', () => {
   assert.doesNotMatch(importsPage, /FeishuDriveModal/)
   assert.doesNotMatch(importsPage, /startFeishuOAuth/)
-  assert.match(importsPage, /syncButton/)
+  assert.doesNotMatch(importsPage, /syncButton/)
+  assert.doesNotMatch(importsPage, /handleSyncNow/)
 })
 
 test('Imported files browser exposes lifecycle controls in its visible panels', () => {
@@ -74,7 +76,7 @@ test('Imported files browser exposes lifecycle controls in its visible panels', 
     /void refresh\(\{ syncRemote: true, syncSource: 'automatic' \}\)/,
   )
   assert.match(importsPage, /listImportedFeishuDocuments\(lifecycleFilter\.value\)/)
-  assert.match(importsPage, /syncFeishuArchiveFolder\(/)
+  assert.doesNotMatch(importsPage, /syncFeishuArchiveFolder\(/)
   assert.match(importsPage, /downloadImportedDocument\(doc\.id, doc\.file_name\)/)
   assert.match(importsPage, /archiveImportedDocument/)
   assert.match(importsPage, /restoreImportedDocument/)
