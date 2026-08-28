@@ -471,15 +471,21 @@ export function useChannelModelPricing({
     if (!model) {
       return translate('llmOps.channelModelDrawer.noUpstreamSelected')
     }
-    return upstreamSourceLabel(model)
+    const version = model.sku_code || model.sku_display_name || ''
+    const region = model.sku_region || ''
+    return [upstreamSourceLabel(model), version, region]
+      .filter(Boolean)
+      .join(' · ')
   }
 
   function channelRowSourceLabel(row) {
-    return (
+    const source =
       row.draft.price_source_name ||
       row.model.price_source_name ||
-      purchaseSourceLabel(row.model)
-    )
+      upstreamSourceLabel(row.model)
+    const version = row.model.sku_code || row.model.sku_display_name || ''
+    const region = row.model.sku_region || ''
+    return [source, version, region].filter(Boolean).join(' · ')
   }
 
   function modelSourceCategory(model) {

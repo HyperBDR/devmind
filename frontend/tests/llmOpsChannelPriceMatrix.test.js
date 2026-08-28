@@ -3,9 +3,12 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 import {
+  channelOfferingForOption,
   compareChannelOptions,
   effectiveMatrixAction,
+  bestOptionForChannel,
   optionFreshness,
+  optionsForChannel,
   savingsPercent
 } from '../src/utils/llmOpsChannelPriceMatrix.js'
 import { dataGroupsForSection } from '../src/utils/llmOpsSectionData.js'
@@ -94,6 +97,37 @@ test('sorts comparable offers by the selected pricing dimension', () => {
   assert.deepEqual(
     compareChannelOptions(row, 'output').map((item) => item.channel_id),
     [3, 1, 2]
+  )
+})
+
+test('selects the cheapest offer within a channel and preserves all offers', () => {
+  const row = {
+    options: [
+      { channel_id: 1, offering_id: 2, estimated_cost: 5 },
+      { channel_id: 1, offering_id: 1, estimated_cost: 3 },
+      { channel_id: 2, offering_id: 3, estimated_cost: 1 }
+    ]
+  }
+
+  assert.deepEqual(
+    optionsForChannel(row, 1).map((item) => item.offering_id),
+    [1, 2]
+  )
+  assert.equal(bestOptionForChannel(row, 1).offering_id, 1)
+})
+
+test('matches comparison details to the selected channel offering', () => {
+  const offerings = [
+    { id: 1, channel: 3, display_name: 'DeepSeek R1' },
+    { id: 6, channel: 3, display_name: 'DeepSeek V4 Flash' }
+  ]
+
+  assert.equal(
+    channelOfferingForOption(offerings, {
+      channel_id: 3,
+      offering_id: 6
+    }).display_name,
+    'DeepSeek V4 Flash'
   )
 })
 

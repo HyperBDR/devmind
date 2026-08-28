@@ -44,6 +44,7 @@ export function useLLMOpsData() {
   const channelPriceItems = ref([])
   const channelPriceHistory = ref([])
   const modelPriceItems = ref([])
+  const officialPriceHistory = ref([])
   const resalePlatforms = ref([])
   const resaleWorkflowConfig = ref(null)
   const listings = ref([])
@@ -293,17 +294,22 @@ export function useLLMOpsData() {
       ? { platform: selectedResalePlatformId.value }
       : {}
     const platformId = selectedResalePlatformId.value
-    const [channelHistoryData, listingHistoryData] = await Promise.all([
-      fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
-        ...modelFilter,
-        page_size: PRICE_HISTORY_PAGE_SIZE
-      }),
-      fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
-        ...modelFilter,
-        ...platformFilter,
-        page_size: PRICE_HISTORY_PAGE_SIZE
-      })
-    ])
+    const [channelHistoryData, listingHistoryData, officialHistoryData] =
+      await Promise.all([
+        fetchFirstPage(llmOpsApi.listChannelModelPriceHistory, {
+          ...modelFilter,
+          page_size: PRICE_HISTORY_PAGE_SIZE
+        }),
+        fetchFirstPage(llmOpsApi.listResaleListingPriceHistory, {
+          ...modelFilter,
+          ...platformFilter,
+          page_size: PRICE_HISTORY_PAGE_SIZE
+        }),
+        fetchFirstPage(llmOpsApi.listCollectedPriceHistory, {
+          ...modelFilter,
+          page_size: PRICE_HISTORY_PAGE_SIZE
+        })
+      ])
     if (
       requestId !== priceHistoryRequestId ||
       String(platformId || '') !== String(selectedResalePlatformId.value || '')
@@ -312,6 +318,7 @@ export function useLLMOpsData() {
     }
     channelPriceHistory.value = asArray(channelHistoryData)
     listingPriceHistory.value = asArray(listingHistoryData)
+    officialPriceHistory.value = asArray(officialHistoryData)
   }
 
   async function refreshLight() {
@@ -486,6 +493,7 @@ export function useLLMOpsData() {
     loading,
     metaModels,
     modelPriceItems,
+    officialPriceHistory,
     models,
     invalidateSectionCache,
     normalizeDisplayCurrency,

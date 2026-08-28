@@ -217,6 +217,7 @@
               :focus-model-id="operationTargetModelId"
               :channel-history="channelPriceHistory"
               :listing-history="listingPriceHistory"
+              :official-history="officialPriceHistory"
               :price-items="modelPriceItems"
             />
 
@@ -444,6 +445,7 @@ const {
   loading,
   metaModels,
   modelPriceItems,
+  officialPriceHistory,
   models,
   normalizeDisplayCurrency,
   pageError,

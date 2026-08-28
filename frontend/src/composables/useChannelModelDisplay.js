@@ -86,6 +86,8 @@ export function useChannelModelDisplay({
         option.models.map((model) => model.provider_name).join(' '),
         option.models.map((model) => model.provider_code).join(' '),
         option.models.map((model) => model.source_name).join(' '),
+        option.models.map((model) => model.sku_code).join(' '),
+        option.models.map((model) => model.sku_region).join(' '),
         option.models.map((model) => modelSourceCategory(model)).join(' '),
         modalityLabel(option.modality)
       ]
@@ -95,11 +97,15 @@ export function useChannelModelDisplay({
   }
 
   function providerModelDescription(model) {
+    const sku = model.sku_display_name || model.sku_code || ''
+    const region = model.sku_region || ''
     return [
       hasKnownSourceCategory(modelSourceCategory(model))
         ? sourceCategoryLabel(modelSourceCategory(model))
         : null,
-      model.currency || translate('llmOps.channelModelDrawer.defaultCurrency')
+      model.currency || translate('llmOps.channelModelDrawer.defaultCurrency'),
+      sku,
+      region
     ]
       .filter(Boolean)
       .join(' · ')

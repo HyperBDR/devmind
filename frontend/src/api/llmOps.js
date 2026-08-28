@@ -147,6 +147,13 @@ export const llmOpsApi = {
     return apiClient.get(`${base}/model-price-items/`, paramsOrEmpty(params))
   },
 
+  listCollectedPriceHistory(params) {
+    return apiClient.get(
+      `${base}/collected-price-history/`,
+      paramsOrEmpty(params)
+    )
+  },
+
   updateModelPriceItem(id, payload) {
     return apiClient.patch(`${base}/model-price-items/${id}/`, payload)
   },

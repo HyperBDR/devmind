@@ -111,6 +111,67 @@ test('builds distinguishable price changes for every pricing dimension', () => {
   assert.ok(Math.abs(priceChangeDelta(listing) - 0.3) < Number.EPSILON * 2)
 })
 
+test('builds official price changes from collected history versions', () => {
+  const rows = buildPriceChangeRows({
+    officialHistory: [
+      {
+        id: 2,
+        source: 4,
+        source_name: 'DeepSeek Official',
+        offering: 8,
+        source_platform_id: 'deepseek-v4-flash',
+        model: 7,
+        model_name: 'DeepSeek V4 Flash',
+        currency: 'CNY',
+        normalized_price_rows: [
+          {
+            values: {
+              input_price: '1.2',
+              output_price: '2.4',
+              cache_hit_input_price: '0.12'
+            }
+          }
+        ],
+        effective_from: '2026-08-21T02:00:00Z'
+      },
+      {
+        id: 1,
+        source: 4,
+        source_name: 'DeepSeek Official',
+        offering: 8,
+        source_platform_id: 'deepseek-v4-flash',
+        model: 7,
+        model_name: 'DeepSeek V4 Flash',
+        currency: 'CNY',
+        normalized_price_rows: [
+          {
+            values: {
+              input_price: '1',
+              output_price: '2',
+              cache_hit_input_price: '0.1'
+            }
+          }
+        ],
+        effective_from: '2026-08-20T02:00:00Z'
+      }
+    ]
+  })
+  const input = rows.find((row) => row.dimension === 'text_input')
+  const cache = rows.find((row) => row.dimension === 'cache_input')
+  assert.equal(input.previous, '1')
+  assert.equal(input.current, '1.2')
+  assert.equal(input.source, 'DeepSeek Official')
+  assert.equal(cache.previous, '0.1')
+  assert.equal(cache.current, '0.12')
+})
+
+test('passes collected official history from the page data composable', () => {
+  assert.match(
+    pageSource,
+    /const\s*\{[\s\S]*?officialPriceHistory[\s\S]*?\}\s*=\s*useLLMOpsData\(\)/
+  )
+})
+
 test('labels listing KPIs as workflow scope and counts supply candidates', () => {
   assert.match(listingDisplaySource, /workflowCandidates/)
   assert.match(listingDisplaySource, /candidateModels/)

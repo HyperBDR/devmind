@@ -139,7 +139,15 @@
                     {{ offering.display_name }}
                   </div>
                   <div class="font-mono text-[11px] text-slate-500">
-                    {{ offering.offering_key }}
+                    {{
+                      [
+                        offering.offering_key,
+                        offering.source_sku_code,
+                        offering.source_sku_region
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')
+                    }}
                   </div>
                 </td>
                 <td class="table-cell">
