@@ -610,7 +610,9 @@
         "confirmDeleteService": "Delete Others item {name}?",
         "confirmDeleteDiscount": "Delete discount {name}?",
         "deleteProduct": "Delete software product {name}",
+        "editProduct": "Edit software product {name}",
         "deleteService": "Delete Others item {name}",
+        "editService": "Edit Others item {name}",
         "deleteDiscount": "Delete discount {name}",
         "confirmDeleteAction": "Delete",
         "validationProductIncomplete": "Enter a product name. List price must be greater than 0.",
@@ -726,6 +728,12 @@
         "alertMinLineItems": "Add at least one line item",
         "alertValidationFailed": "Fix these issues: {message}",
         "alertValidationDefault": "Check the required fields",
+        "spellCheck": {
+          "found": "Possible spelling issue",
+          "replace": "Replace",
+          "ignore": "Ignore",
+          "summary": "Found {count} possible spelling issue(s)"
+        },
         "confirmDeleteProductLine": "Delete product line \"{label} ({prefix})\"?",
         "confirmDeleteProductLineUsage": "{count} existing quotes use this product line. They stay available; it won’t appear for new quotes.",
         "errors": {
@@ -1086,8 +1094,10 @@
       "versionNotesEditQuote": "Quote edited",
       "systemOperator": "System",
       "productAdded": "Added \"{name}\" to catalog",
+      "productUpdated": "Updated \"{name}\" in catalog",
       "productRemoved": "Software product removed",
       "serviceAdded": "Added Others item \"{name}\"",
+      "serviceUpdated": "Updated Others item \"{name}\"",
       "serviceRemoved": "Others item removed",
       "catalogDescriptionsSynced": "Saved {count} new description(s) to Catalog",
       "discountAdded": "Added discount \"{name}\"",

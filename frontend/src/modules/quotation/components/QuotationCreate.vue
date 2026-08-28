@@ -92,6 +92,11 @@ import {
   type CreateQuoteDraft,
 } from '../utils/createDraftStorage'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import {
+  checkSpelling,
+  replaceSpellIssue,
+  type SpellIssue,
+} from '../utils/spellCheck'
 
 const ADD_PRODUCT_LINE_OPTION = '__add_product_line__'
 
@@ -186,6 +191,7 @@ const newProductLinePrefix = ref('')
 const productLineError = ref('')
 const resizeContainerRef = ref<HTMLElement | null>(null)
 const errors = ref<Record<string, string>>({})
+const dismissedSpellIssues = ref<Set<string>>(new Set())
 const applyingCreateDraft = ref(false)
 const preferDraftQuoteNo = ref(false)
 let createDraftSaveTimer: number | undefined
@@ -225,6 +231,49 @@ const items = ref<QuotationLineItem[]>([
     extendedPrice: 0,
   },
 ])
+
+function spellIssueKey(field: string, issue: SpellIssue): string {
+  return `${field}:${issue.start}:${issue.word}`
+}
+
+function visibleSpellIssues(field: string, text: string): SpellIssue[] {
+  return checkSpelling(text).filter(
+    (issue) => !dismissedSpellIssues.value.has(spellIssueKey(field, issue)),
+  )
+}
+
+function dismissSpellIssue(field: string, issue: SpellIssue): void {
+  dismissedSpellIssues.value = new Set([
+    ...dismissedSpellIssues.value,
+    spellIssueKey(field, issue),
+  ])
+}
+
+function replaceItemSpellIssue(item: QuotationLineItem, issue: SpellIssue): void {
+  item.description = replaceSpellIssue(item.description || '', issue)
+  dismissedSpellIssues.value = new Set(
+    [...dismissedSpellIssues.value].filter(
+      (key) => !key.startsWith(`item-${item.id}:`),
+    ),
+  )
+}
+
+function replaceRemarksSpellIssue(issue: SpellIssue): void {
+  remarksDisclaimer.value = replaceSpellIssue(remarksDisclaimer.value, issue)
+  dismissedSpellIssues.value = new Set(
+    [...dismissedSpellIssues.value].filter(
+      (key) => !key.startsWith('remarks:'),
+    ),
+  )
+}
+
+const spellIssueCount = computed(() => {
+  const itemIssues = items.value.reduce(
+    (total, item) => total + visibleSpellIssues(`item-${item.id}`, item.description || '').length,
+    0,
+  )
+  return itemIssues + visibleSpellIssues('remarks', remarksDisclaimer.value).length
+})
 
 const paymentTerms = computed(() =>
   getPaymentTermsValue(paymentTermOption.value, paymentTermsCustom.value),
@@ -1811,6 +1860,40 @@ const itemErrorEntries = computed(() =>
                       :loading-more="historyLoading"
                       @load-more="$emit('loadHistoryMore')"
                     />
+                    <div
+                      v-if="visibleSpellIssues(`item-${item.id}`, item.description || '').length"
+                      data-testid="line-item-spell-issues"
+                      class="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"
+                    >
+                      <p class="font-semibold">
+                        {{ t('quotation.pages.create.spellCheck.found') }}
+                      </p>
+                      <div
+                        v-for="issue in visibleSpellIssues(`item-${item.id}`, item.description || '')"
+                        :key="spellIssueKey(`item-${item.id}`, issue)"
+                        class="flex items-center justify-between gap-2"
+                      >
+                        <span>
+                          {{ issue.word }} → <strong>{{ issue.suggestion }}</strong>
+                        </span>
+                        <span class="flex gap-2">
+                          <button
+                            type="button"
+                            class="font-semibold underline"
+                            @click="replaceItemSpellIssue(item, issue)"
+                          >
+                            {{ t('quotation.pages.create.spellCheck.replace') }}
+                          </button>
+                          <button
+                            type="button"
+                            class="underline"
+                            @click="dismissSpellIssue(`item-${item.id}`, issue)"
+                          >
+                            {{ t('quotation.pages.create.spellCheck.ignore') }}
+                          </button>
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   <div>
@@ -2021,11 +2104,53 @@ const itemErrorEntries = computed(() =>
                 :placeholder="t('quotation.pages.create.remarksPlaceholder')"
                 class="w-full rounded-lg border border-dm-border p-2 leading-relaxed text-dm-text focus:border-blue-500 focus:outline-hidden"
               />
+              <div
+                v-if="visibleSpellIssues('remarks', remarksDisclaimer).length"
+                data-testid="remarks-spell-issues"
+                class="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"
+              >
+                <p class="font-semibold">
+                  {{ t('quotation.pages.create.spellCheck.found') }}
+                </p>
+                <div
+                  v-for="issue in visibleSpellIssues('remarks', remarksDisclaimer)"
+                  :key="spellIssueKey('remarks', issue)"
+                  class="flex items-center justify-between gap-2"
+                >
+                  <span>
+                    {{ issue.word }} → <strong>{{ issue.suggestion }}</strong>
+                  </span>
+                  <span class="flex gap-2">
+                    <button
+                      type="button"
+                      class="font-semibold underline"
+                      @click="replaceRemarksSpellIssue(issue)"
+                    >
+                      {{ t('quotation.pages.create.spellCheck.replace') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="underline"
+                      @click="dismissSpellIssue('remarks', issue)"
+                    >
+                      {{ t('quotation.pages.create.spellCheck.ignore') }}
+                    </button>
+                  </span>
+                </div>
+              </div>
               <p class="mt-1 text-xs font-medium text-dm-text-tertiary">
                 {{ t('quotation.pages.create.remarksHint') }}
               </p>
             </div>
           </div>
+
+          <p
+            v-if="spellIssueCount"
+            data-testid="spell-check-summary"
+            class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900"
+          >
+            {{ t('quotation.pages.create.spellCheck.summary', { count: spellIssueCount }) }}
+          </p>
 
           <div class="space-y-3 dm-card p-5 shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">
