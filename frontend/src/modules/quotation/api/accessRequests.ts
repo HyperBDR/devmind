@@ -47,17 +47,6 @@ export function getAccessRequestContext(): Promise<AccessRequestContext> {
   return apiRequest<AccessRequestContext>('/access-requests')
 }
 
-export function submitAccessRequest(payload: {
-  request_type: AccessRequestType
-  target_id: string
-  reason: string
-}): Promise<AccessRequestRecord> {
-  return apiRequest<AccessRequestRecord>('/access-requests', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  })
-}
-
 export function decideAccessRequest(
   id: number,
   payload: {

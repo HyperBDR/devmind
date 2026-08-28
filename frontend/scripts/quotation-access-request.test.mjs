@@ -18,12 +18,15 @@ const quotationList = read(
 const quotationApp = read('../src/modules/quotation/App.vue')
 const sidebar = read('../src/components/layout/AppSidebar.vue')
 
-test('Quote Desk exposes access requests to ordinary users', () => {
+test('Quote Desk keeps permission changes administrator-managed', () => {
   assert.match(accessApi, /\/access-requests/)
   assert.match(accessApi, /request_type/)
-  assert.match(accessPage, /submitAccessRequest/)
-  assert.match(accessPage, /folder_upload/)
-  assert.match(accessPage, /document_view/)
+  assert.match(accessApi, /folder_upload/)
+  assert.match(accessApi, /document_view/)
+  assert.doesNotMatch(accessApi, /submitAccessRequest/)
+  assert.doesNotMatch(accessPage, /submitAccessRequest/)
+  assert.doesNotMatch(accessPage, /requestTypeOptions/)
+  assert.match(accessPage, /decideAccessRequest/)
   assert.match(quotationApp, /currentTab === 'permissions'/)
   assert.doesNotMatch(
     quotationApp,
@@ -46,5 +49,7 @@ test('upload folder browsing and actions fail closed without access', () => {
   assert.match(folderPicker, /uploadRoot/)
   assert.match(quotationList, /loadUploadAccess/)
   assert.match(quotationList, /hasUploadAccess/)
-  assert.match(quotationList, /uploadAccessRequired/)
+  assert.doesNotMatch(quotationList, /uploadAccessRequired/)
+  assert.doesNotMatch(quotationList, /requestUploadAccess/)
+  assert.doesNotMatch(quotationList, /data-feishu-sync-button/)
 })

@@ -1471,6 +1471,30 @@ class DocumentParseEndpointTests(TestCase):
         old_result.refresh_from_db()
         self.assertEqual(old_result.status, "superseded")
 
+    def test_same_parser_content_does_not_create_imported_version(self):
+        from quotation.services.document_parsing.service import (
+            parse_and_create_quotation,
+        )
+
+        old_result, _ = parse_and_create_quotation(
+            self.asset,
+            actor=self.user,
+        )
+        self.asset.refresh_from_db()
+        old_result.parser_version = "2.0.0"
+        old_result.save(update_fields=["parser_version", "updated_at"])
+
+        new_result, reused = parse_and_create_quotation(
+            self.asset,
+            actor=self.user,
+        )
+
+        self.assertTrue(reused)
+        self.assertNotEqual(new_result.id, old_result.id)
+        quotation = Quotation.objects.get()
+        self.assertEqual(quotation.version_current, 1)
+        self.assertEqual(quotation.versions.count(), 1)
+
     def test_auto_create_pdf_generates_visible_quote(self):
         from quotation.services.document_parsing.service import (
             parse_and_create_quotation,

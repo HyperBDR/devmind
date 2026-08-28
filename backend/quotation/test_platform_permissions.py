@@ -113,10 +113,17 @@ class QuotationPlatformAccessTests(TestCase):
         self.api = APIClient()
         self.api.force_authenticate(self.user)
 
-    def _quotation(self, quote_no, *, owner="", created_by=None):
+    def _quotation(
+        self,
+        quote_no,
+        *,
+        owner="",
+        created_by=None,
+        source_type=QuotationSourceType.DOCUMENT_IMPORT,
+    ):
         return Quotation.objects.create(
             quote_no=quote_no,
-            source_type=QuotationSourceType.DOCUMENT_IMPORT,
+            source_type=source_type,
             project_name=quote_no,
             currency="USD",
             payment_terms="CIA",
@@ -159,6 +166,21 @@ class QuotationPlatformAccessTests(TestCase):
         )
         self.assertTrue(can_access_quotation(self.user, visible))
         self.assertFalse(can_access_quotation(self.user, hidden))
+
+    def test_manual_sales_owner_can_open_detail(self):
+        quotation = self._quotation(
+            "Q-MANUAL-OWNER",
+            owner=" Alice ",
+            created_by="admin@example.com",
+            source_type=QuotationSourceType.MANUAL,
+        )
+
+        response = self.api.get(
+            f"/api/v1/quotation/quotations/{quotation.id}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], quotation.id)
 
     def test_empty_sales_owner_uses_last_feishu_folder_name(self):
         visible = self._quotation("Q-FOLDER")

@@ -10,6 +10,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from accounts.access import get_effective_feature_keys
+from quotation.audit import quotation_audit_label
 from quotation.models import (
     DocumentAsset,
     QuotationAccessRequest,
@@ -140,7 +141,7 @@ def document_rows() -> list[dict]:
             "folder_name": folder_name(asset),
             "quotation_id": asset.quotation_id,
             "quote_no": (
-                asset.quotation.quote_no
+                quotation_audit_label(asset.quotation)
                 if asset.quotation_id and asset.quotation
                 else ""
             ),

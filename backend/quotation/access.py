@@ -218,9 +218,11 @@ def _quotation_matches_user(user, quotation: Quotation) -> bool:
             _normalized_owner(_feishu_folder_name(asset)) == username
             for asset in quotation.documents.filter(source="feishu")
         )
-    return _normalized_owner(quotation.created_by_email) == _normalized_owner(
-        user_display_email(user)
+    sales_owner_matches = bool(sales_owner) and sales_owner == username
+    creator_matches = _normalized_owner(quotation.created_by_email) == (
+        _normalized_owner(user_display_email(user))
     )
+    return sales_owner_matches or creator_matches
 
 
 def can_access_quotation(

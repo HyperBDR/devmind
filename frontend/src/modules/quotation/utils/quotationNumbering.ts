@@ -143,16 +143,6 @@ export function getNextAutoQuoteNumber(productLine: QuoteProductLine, date: Date
   return `${base}.${suffix}`;
 }
 
-export function getNextRevisionQuoteNumber(currentQuoteNumber: string, existingNumbers: string[]): string {
-  const root = currentQuoteNumber.trim().replace(/_R\d+$/i, '');
-  const normalizedExisting = new Set(existingNumbers.map(normalize));
-  let revision = 1;
-  while (normalizedExisting.has(normalize(`${root}_R${revision}`))) {
-    revision += 1;
-  }
-  return `${root}_R${revision}`;
-}
-
 export function inferProductLineFromQuoteNumber(
   quoteNumber: string,
   options: ProductLineOption[] = PRODUCT_LINE_OPTIONS

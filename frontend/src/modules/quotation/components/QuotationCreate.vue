@@ -52,7 +52,6 @@ import {
   dateFromInput,
   getNextAutoQuoteNumber,
   getProductLineDeletionState,
-  getNextRevisionQuoteNumber,
   inferProductLineFromQuoteNumber,
   isProductLinePrefixUnique,
   isProductLinePrefixValid,
@@ -86,12 +85,18 @@ import {
   getBillingEmailOptions,
 } from '../utils/customerHistory'
 import { clearCurrentUserSignature, rememberUserSignature } from '../utils/signatureStorage'
+import { getSavedContactTitle } from '../utils/contactTitleStorage'
 import {
   loadCreateQuoteDraft,
   saveCreateQuoteDraft,
   type CreateQuoteDraft,
 } from '../utils/createDraftStorage'
 import { useQuotationI18n } from '../composables/useQuotationI18n'
+import {
+  checkSpelling,
+  replaceSpellIssue,
+  type SpellIssue,
+} from '../utils/spellCheck'
 
 const ADD_PRODUCT_LINE_OPTION = '__add_product_line__'
 
@@ -149,6 +154,10 @@ function getDefaultExpireDate(date = new Date()) {
   return formatDateInput(new Date(date.getTime() + 30 * 24 * 60 * 60 * 1000))
 }
 
+function getDefaultIssuerContactTitle() {
+  return getSavedContactTitle(props.currentUser?.email) || props.currentUser?.title || ''
+}
+
 const quoteNo = ref('')
 const quoteNoMode = ref<'auto' | 'custom'>('auto')
 const productLine = ref<QuoteProductLine>('BDR')
@@ -177,7 +186,7 @@ const remarksDisclaimer = ref('')
 const issuerCompanyName = ref(DEFAULT_ISSUER_COMPANY_NAME)
 const issuerContactName = ref(props.currentUser?.name ?? '')
 const issuerContactEmail = ref(props.currentUser?.email ?? '')
-const issuerContactTitle = ref(props.currentUser?.title ?? '')
+const issuerContactTitle = ref(getDefaultIssuerContactTitle())
 const issuerSignature = ref('')
 const previewWidthPercent = ref(DEFAULT_PREVIEW_WIDTH_PERCENT)
 const isAddingProductLine = ref(false)
@@ -186,6 +195,7 @@ const newProductLinePrefix = ref('')
 const productLineError = ref('')
 const resizeContainerRef = ref<HTMLElement | null>(null)
 const errors = ref<Record<string, string>>({})
+const dismissedSpellIssues = ref<Set<string>>(new Set())
 const applyingCreateDraft = ref(false)
 const preferDraftQuoteNo = ref(false)
 let createDraftSaveTimer: number | undefined
@@ -226,6 +236,49 @@ const items = ref<QuotationLineItem[]>([
   },
 ])
 
+function spellIssueKey(field: string, issue: SpellIssue): string {
+  return `${field}:${issue.start}:${issue.word}`
+}
+
+function visibleSpellIssues(field: string, text: string): SpellIssue[] {
+  return checkSpelling(text).filter(
+    (issue) => !dismissedSpellIssues.value.has(spellIssueKey(field, issue)),
+  )
+}
+
+function dismissSpellIssue(field: string, issue: SpellIssue): void {
+  dismissedSpellIssues.value = new Set([
+    ...dismissedSpellIssues.value,
+    spellIssueKey(field, issue),
+  ])
+}
+
+function replaceItemSpellIssue(item: QuotationLineItem, issue: SpellIssue): void {
+  item.description = replaceSpellIssue(item.description || '', issue)
+  dismissedSpellIssues.value = new Set(
+    [...dismissedSpellIssues.value].filter(
+      (key) => !key.startsWith(`item-${item.id}:`),
+    ),
+  )
+}
+
+function replaceRemarksSpellIssue(issue: SpellIssue): void {
+  remarksDisclaimer.value = replaceSpellIssue(remarksDisclaimer.value, issue)
+  dismissedSpellIssues.value = new Set(
+    [...dismissedSpellIssues.value].filter(
+      (key) => !key.startsWith('remarks:'),
+    ),
+  )
+}
+
+const spellIssueCount = computed(() => {
+  const itemIssues = items.value.reduce(
+    (total, item) => total + visibleSpellIssues(`item-${item.id}`, item.description || '').length,
+    0,
+  )
+  return itemIssues + visibleSpellIssues('remarks', remarksDisclaimer.value).length
+})
+
 const paymentTerms = computed(() =>
   getPaymentTermsValue(paymentTermOption.value, paymentTermsCustom.value),
 )
@@ -244,13 +297,19 @@ const paymentTermSelectOptions = PAYMENT_TERM_OPTIONS.map((option) => ({
 const existingQuoteNumbers = computed(() =>
   props.existingQuoteNumbers.length > 0
     ? props.existingQuoteNumbers
-    : props.quotations.map((quote) => quote.quoteNo),
+    : props.quotations
+        .filter((quote) => quote.status !== 'Draft')
+        .map((quote) => quote.quoteNo),
+)
+const draftLifecycleForm = computed(
+  () => !props.editingQuote || props.editingQuote.status === 'Draft',
 )
 const quoteNoIsUnique = computed(() =>
-  quoteNoMode.value === 'auto'
+  draftLifecycleForm.value
+    || quoteNoMode.value === 'auto'
     || isQuotationNumberUnique(
       quoteNo.value,
-      props.quotations,
+      props.quotations.filter((quote) => quote.status !== 'Draft'),
       props.editingQuote?.id,
     ),
 )
@@ -260,11 +319,10 @@ const draftSubmittedQuoteNo = computed(() =>
     : quoteNo.value,
 )
 
-const editingQuoteUsesRevisions = computed(() =>
+const editingQuoteIsFormal = computed(() =>
   Boolean(
     props.editingQuote &&
-      ['Uploaded', 'Sent', 'Accepted', 'Rejected', 'Expired', 'Cancelled']
-        .includes(props.editingQuote.status),
+      props.editingQuote.status !== 'Draft',
   ),
 )
 
@@ -314,11 +372,11 @@ const productLineSelectOptions = computed(() => [
 ])
 
 function regenerateQuoteNo(line = productLine.value, date = quoteDate.value) {
-  if (props.editingQuote && editingQuoteUsesRevisions.value) {
-    quoteNo.value = getNextRevisionQuoteNumber(props.editingQuote.quoteNo, existingQuoteNumbers.value)
+  if (props.editingQuote && editingQuoteIsFormal.value) {
+    quoteNo.value = props.editingQuote.quoteNo
     return
   }
-  if (props.editingQuote) {
+  if (props.editingQuote && !draftLifecycleForm.value) {
     quoteNo.value = props.editingQuote.quoteNo
     return
   }
@@ -518,13 +576,10 @@ watch(
 
 function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   preferDraftQuoteNo.value = false
-  quoteNoMode.value = 'auto'
+  quoteNoMode.value = editingQuote.quoteNoMode || 'auto'
   productLine.value =
     editingQuote.productLine ||
     inferProductLineFromQuoteNumber(editingQuote.quoteNo, props.productLineOptions)
-  quoteNo.value = editingQuoteUsesRevisions.value
-    ? getNextRevisionQuoteNumber(editingQuote.quoteNo, existingQuoteNumbers.value)
-    : editingQuote.quoteNo
   projectName.value = editingQuote.projectName
   clientCompany.value = editingQuote.clientCompany
   contactPerson.value = editingQuote.contactPerson
@@ -546,8 +601,22 @@ function loadEditingQuoteIntoForm(editingQuote: Quotation) {
   vatRateInput.value = formatVatRateForInput(editingQuote.vatRate)
   taxLabel.value = resolveTaxLabel(editingQuote.taxLabel)
   const todayInput = formatDateInput(new Date())
-  quoteDate.value = todayInput
-  expireDate.value = getDefaultExpireDate(dateFromInput(todayInput))
+  quoteDate.value = draftLifecycleForm.value
+    ? editingQuote.quoteDate || todayInput
+    : todayInput
+  expireDate.value = draftLifecycleForm.value
+    ? editingQuote.expireDate
+      || getDefaultExpireDate(dateFromInput(quoteDate.value))
+    : getDefaultExpireDate(dateFromInput(todayInput))
+  if (draftLifecycleForm.value && quoteNoMode.value === 'auto') {
+    quoteNo.value = getNextAutoQuoteNumber(
+      productLine.value,
+      dateFromInput(quoteDate.value),
+      existingQuoteNumbers.value,
+    )
+  } else {
+    quoteNo.value = editingQuote.quoteNo
+  }
   remarksDisclaimer.value = editingQuote.remarksDisclaimer ?? ''
   issuerCompanyName.value = editingQuote.issuerCompanyName ?? DEFAULT_ISSUER_COMPANY_NAME
   issuerContactName.value =
@@ -590,7 +659,7 @@ function resetCreateForm() {
   issuerCompanyName.value = DEFAULT_ISSUER_COMPANY_NAME
   issuerContactName.value = props.currentUser?.name ?? ''
   issuerContactEmail.value = props.currentUser?.email ?? ''
-  issuerContactTitle.value = props.currentUser?.title ?? ''
+  issuerContactTitle.value = getDefaultIssuerContactTitle()
   issuerSignature.value = ''
   items.value = [
     {
@@ -672,7 +741,7 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
   issuerContactEmail.value =
     draft.issuerContactEmail || props.currentUser?.email || ''
   issuerContactTitle.value =
-    draft.issuerContactTitle || props.currentUser?.title || ''
+    draft.issuerContactTitle || getDefaultIssuerContactTitle()
   issuerSignature.value = draft.issuerSignature || ''
   items.value =
     Array.isArray(draft.items) && draft.items.length > 0
@@ -740,7 +809,10 @@ watch(
 watch(
   [() => props.editingQuote, existingQuoteNumbers, productLine, quoteDate, quoteNoMode],
   (next, prev) => {
-    if (props.editingQuote || applyingCreateDraft.value) return
+    if (
+      applyingCreateDraft.value
+      || (props.editingQuote && !draftLifecycleForm.value)
+    ) return
     if (quoteNoMode.value !== 'auto') return
     if (preferDraftQuoteNo.value) {
       if (!prev) return
@@ -988,7 +1060,11 @@ function validateForm(status: 'Draft' | 'Generated') {
   if (
     targetQuoteNo.trim() &&
     quoteNoMode.value === 'custom' &&
-    !isQuotationNumberUnique(targetQuoteNo, props.quotations, props.editingQuote?.id)
+    !isQuotationNumberUnique(
+      targetQuoteNo,
+      props.quotations,
+      props.editingQuote?.id,
+    )
   ) {
     tempErrors.quoteNo = t('quotation.pages.create.errors.quoteNoDuplicate')
   }
@@ -1217,7 +1293,7 @@ const itemErrorEntries = computed(() =>
                 <span class="text-xs font-bold text-dm-text-tertiary">
                   {{ t('quotation.pages.create.numberingSettings') }}
                 </span>
-                <span v-if="editingQuoteUsesRevisions" class="text-xs font-semibold text-dm-primary">
+                <span v-if="editingQuoteIsFormal" class="text-xs font-semibold text-dm-primary">
                   {{ t('quotation.pages.create.revisionAutoSuffix') }}
                 </span>
               </div>
@@ -1232,7 +1308,6 @@ const itemErrorEntries = computed(() =>
                       test-id="quote-product-line-select"
                       class-name="min-w-0 flex-1"
                       :model-value="productLine"
-                      :disabled="editingQuoteUsesRevisions && quoteNoMode === 'auto'"
                       :options="productLineSelectOptions"
                       panel-class-name="qmp-dropdown-panel--product-line"
                       @update:model-value="onProductLineSelect"
@@ -1264,6 +1339,7 @@ const itemErrorEntries = computed(() =>
                     <button
                       type="button"
                       class="cursor-pointer rounded-lg border p-2 font-bold transition"
+                      :disabled="editingQuoteIsFormal"
                       :class="
                         quoteNoMode === 'auto'
                           ? 'border-blue-500 bg-dm-primary-bg text-dm-primary'
@@ -1281,6 +1357,7 @@ const itemErrorEntries = computed(() =>
                     <button
                       type="button"
                       class="cursor-pointer rounded-lg border p-2 font-bold transition"
+                      :disabled="editingQuoteIsFormal"
                       :class="
                         quoteNoMode === 'custom'
                           ? 'border-blue-500 bg-dm-primary-bg text-dm-primary'
@@ -1378,13 +1455,15 @@ const itemErrorEntries = computed(() =>
                   v-model="quoteNo"
                   data-testid="quote-number-input"
                   type="text"
-                  :readonly="quoteNoMode === 'auto'"
+                  :readonly="quoteNoMode === 'auto' || editingQuoteIsFormal"
                   class="w-full rounded-lg border p-2 font-mono focus:border-blue-500 focus:outline-hidden"
                   :class="[
                     quoteNoIsUnique
                       ? 'border-dm-border bg-white text-dm-text'
                       : 'border-red-400 bg-red-50/30 text-red-700',
-                    quoteNoMode === 'auto' ? 'cursor-default' : '',
+                    quoteNoMode === 'auto' || editingQuoteIsFormal
+                      ? 'cursor-default'
+                      : '',
                   ]"
                 />
                 <p
@@ -1392,7 +1471,9 @@ const itemErrorEntries = computed(() =>
                   :class="quoteNoIsUnique ? 'text-dm-text-tertiary' : 'text-red-500'"
                 >
                   {{
-                    quoteNoIsUnique
+                    draftLifecycleForm
+                      ? t('quotation.pages.create.quoteNumberHintDraft')
+                      : quoteNoIsUnique
                       ? t('quotation.pages.create.quoteNumberHintUnique')
                       : t('quotation.pages.create.quoteNumberHintDuplicate')
                   }}
@@ -1709,14 +1790,6 @@ const itemErrorEntries = computed(() =>
                 <Layers class="h-4 w-4 text-dm-text-tertiary" />
                 <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step4Title') }}</h3>
               </div>
-              <button
-                type="button"
-                class="flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-blue-400 px-2.5 py-1.5 text-sm font-semibold text-dm-primary transition duration-150 hover:bg-dm-primary-bg/50"
-                @click="handleAddLineItem"
-              >
-                <Plus class="h-3.5 w-3.5" />
-                {{ t('quotation.actions.addLineItem') }}
-              </button>
             </div>
 
             <div
@@ -1811,6 +1884,40 @@ const itemErrorEntries = computed(() =>
                       :loading-more="historyLoading"
                       @load-more="$emit('loadHistoryMore')"
                     />
+                    <div
+                      v-if="visibleSpellIssues(`item-${item.id}`, item.description || '').length"
+                      data-testid="line-item-spell-issues"
+                      class="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"
+                    >
+                      <p class="font-semibold">
+                        {{ t('quotation.pages.create.spellCheck.found') }}
+                      </p>
+                      <div
+                        v-for="issue in visibleSpellIssues(`item-${item.id}`, item.description || '')"
+                        :key="spellIssueKey(`item-${item.id}`, issue)"
+                        class="flex items-center justify-between gap-2"
+                      >
+                        <span>
+                          {{ issue.word }} → <strong>{{ issue.suggestion }}</strong>
+                        </span>
+                        <span class="flex gap-2">
+                          <button
+                            type="button"
+                            class="font-semibold underline"
+                            @click="replaceItemSpellIssue(item, issue)"
+                          >
+                            {{ t('quotation.pages.create.spellCheck.replace') }}
+                          </button>
+                          <button
+                            type="button"
+                            class="underline"
+                            @click="dismissSpellIssue(`item-${item.id}`, issue)"
+                          >
+                            {{ t('quotation.pages.create.spellCheck.ignore') }}
+                          </button>
+                        </span>
+                      </div>
+                    </div>
                   </div>
 
                   <div>
@@ -1892,6 +1999,17 @@ const itemErrorEntries = computed(() =>
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div class="border-t border-dm-border-light pt-3">
+              <button
+                type="button"
+                class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-200 bg-blue-50/40 px-4 py-2.5 text-sm font-semibold text-dm-primary transition duration-150 hover:border-blue-300 hover:bg-blue-50"
+                @click="handleAddLineItem"
+              >
+                <Plus class="h-4 w-4" />
+                {{ t('quotation.actions.addLineItem') }}
+              </button>
             </div>
           </div>
         </div>
@@ -2021,11 +2139,53 @@ const itemErrorEntries = computed(() =>
                 :placeholder="t('quotation.pages.create.remarksPlaceholder')"
                 class="w-full rounded-lg border border-dm-border p-2 leading-relaxed text-dm-text focus:border-blue-500 focus:outline-hidden"
               />
+              <div
+                v-if="visibleSpellIssues('remarks', remarksDisclaimer).length"
+                data-testid="remarks-spell-issues"
+                class="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900"
+              >
+                <p class="font-semibold">
+                  {{ t('quotation.pages.create.spellCheck.found') }}
+                </p>
+                <div
+                  v-for="issue in visibleSpellIssues('remarks', remarksDisclaimer)"
+                  :key="spellIssueKey('remarks', issue)"
+                  class="flex items-center justify-between gap-2"
+                >
+                  <span>
+                    {{ issue.word }} → <strong>{{ issue.suggestion }}</strong>
+                  </span>
+                  <span class="flex gap-2">
+                    <button
+                      type="button"
+                      class="font-semibold underline"
+                      @click="replaceRemarksSpellIssue(issue)"
+                    >
+                      {{ t('quotation.pages.create.spellCheck.replace') }}
+                    </button>
+                    <button
+                      type="button"
+                      class="underline"
+                      @click="dismissSpellIssue('remarks', issue)"
+                    >
+                      {{ t('quotation.pages.create.spellCheck.ignore') }}
+                    </button>
+                  </span>
+                </div>
+              </div>
               <p class="mt-1 text-xs font-medium text-dm-text-tertiary">
                 {{ t('quotation.pages.create.remarksHint') }}
               </p>
             </div>
           </div>
+
+          <p
+            v-if="spellIssueCount"
+            data-testid="spell-check-summary"
+            class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900"
+          >
+            {{ t('quotation.pages.create.spellCheck.summary', { count: spellIssueCount }) }}
+          </p>
 
           <div class="space-y-3 dm-card p-5 shadow-xs">
             <div class="flex items-center gap-2 border-b border-slate-50 pb-2">

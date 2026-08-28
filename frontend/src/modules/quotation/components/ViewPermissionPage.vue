@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   CheckCircle2,
   Clock3,
   FolderUp,
   RefreshCw,
   Save,
-  Send,
   ShieldCheck,
   Trash2,
   XCircle,
@@ -15,7 +14,6 @@ import {
 import {
   decideAccessRequest,
   getAccessRequestContext,
-  submitAccessRequest,
   type AccessRequestContext,
   type AccessRequestRecord,
   type AccessRequestType,
@@ -79,11 +77,6 @@ const decidingId = ref<number | null>(null)
 const error = ref('')
 const message = ref('')
 
-const requestType = ref<AccessRequestType>('folder_view')
-const requestTarget = ref('')
-const documentId = ref('')
-const requestReason = ref('')
-
 const uploadUserId = ref('')
 const uploadFolderToken = ref('')
 const uploadExpiresAt = ref('')
@@ -92,28 +85,6 @@ const decisionExpiryDrafts = ref<Record<number, string>>({})
 const reviewNotes = ref<Record<number, string>>({})
 
 const isAdmin = computed(() => accessContext.value.is_admin)
-
-const requestTypeOptions = computed<FormSelectOption[]>(() => [
-  {
-    value: 'folder_view',
-    label: t('quotation.pages.permissions.requestFolderView'),
-  },
-  {
-    value: 'document_view',
-    label: t('quotation.pages.permissions.requestDocumentView'),
-  },
-  {
-    value: 'folder_upload',
-    label: t('quotation.pages.permissions.requestFolderUpload'),
-  },
-])
-
-const requestFolderOptions = computed<FormSelectOption[]>(() =>
-  accessContext.value.folders.map((folder) => ({
-    value: folder.token,
-    label: folder.name,
-  })),
-)
 
 const adminUserOptions = computed<FormSelectOption[]>(() =>
   viewContext.value.users.map((user) => ({
@@ -197,36 +168,6 @@ async function load() {
       : t('quotation.pages.permissions.loadFailed')
   } finally {
     loading.value = false
-  }
-}
-
-async function submitRequest() {
-  const targetId = requestType.value === 'document_view'
-    ? documentId.value.trim()
-    : requestTarget.value
-  if (!targetId || !requestReason.value.trim()) {
-    error.value = t('quotation.pages.permissions.requestRequired')
-    return
-  }
-  saving.value = true
-  resetFeedback()
-  try {
-    await submitAccessRequest({
-      request_type: requestType.value,
-      target_id: targetId,
-      reason: requestReason.value.trim(),
-    })
-    requestTarget.value = ''
-    documentId.value = ''
-    requestReason.value = ''
-    message.value = t('quotation.pages.permissions.requestSuccess')
-    await load()
-  } catch (err: unknown) {
-    error.value = err instanceof Error
-      ? err.message
-      : t('quotation.pages.permissions.requestFailed')
-  } finally {
-    saving.value = false
   }
 }
 
@@ -397,11 +338,6 @@ function statusClass(status: AccessRequestRecord['status']): string {
   }[status]
 }
 
-watch(requestType, () => {
-  requestTarget.value = ''
-  documentId.value = ''
-})
-
 onMounted(() => {
   void load()
 })
@@ -439,72 +375,6 @@ onMounted(() => {
     <p v-if="message" class="rounded-dm bg-green-50 px-4 py-3 text-sm text-green-700">
       {{ message }}
     </p>
-
-    <div v-if="!isAdmin" class="dm-card p-4 md:p-5">
-      <div class="flex items-start gap-3">
-        <Send class="mt-0.5 h-5 w-5 text-dm-primary" />
-        <div>
-          <h3 class="font-semibold">
-            {{ t('quotation.pages.permissions.requestTitle') }}
-          </h3>
-          <p class="mt-1 text-sm text-dm-text-secondary">
-            {{ t('quotation.pages.permissions.requestDesc') }}
-          </p>
-        </div>
-      </div>
-      <div class="mt-4 grid gap-4 md:grid-cols-2">
-        <label class="text-sm">
-          <span class="mb-1.5 block text-dm-text-secondary">
-            {{ t('quotation.pages.permissions.requestTypeLabel') }}
-          </span>
-          <FormSelect v-model="requestType" :options="requestTypeOptions" />
-        </label>
-        <label v-if="requestType !== 'document_view'" class="text-sm">
-          <span class="mb-1.5 block text-dm-text-secondary">
-            {{ t('quotation.pages.permissions.targetLabel') }}
-          </span>
-          <FormSelect
-            v-model="requestTarget"
-            :options="requestFolderOptions"
-            :placeholder="t('quotation.pages.permissions.selectDirectory')"
-          />
-        </label>
-        <label v-else class="text-sm">
-          <span class="mb-1.5 block text-dm-text-secondary">
-            {{ t('quotation.pages.permissions.documentIdLabel') }}
-          </span>
-          <input
-            v-model="documentId"
-            type="text"
-            class="dm-input w-full"
-            :placeholder="t('quotation.pages.permissions.documentIdPlaceholder')"
-          >
-        </label>
-      </div>
-      <label class="mt-4 block text-sm">
-        <span class="mb-1.5 block text-dm-text-secondary">
-          {{ t('quotation.pages.permissions.reasonLabel') }}
-        </span>
-        <textarea
-          v-model="requestReason"
-          rows="3"
-          maxlength="2000"
-          class="dm-input w-full resize-y"
-          :placeholder="t('quotation.pages.permissions.reasonPlaceholder')"
-        />
-      </label>
-      <div class="mt-4 flex justify-end">
-        <button
-          type="button"
-          class="dm-btn-primary px-4 py-2 text-sm disabled:opacity-50"
-          :disabled="saving || loading"
-          @click="submitRequest"
-        >
-          <Send class="h-4 w-4" />
-          {{ t('quotation.pages.permissions.submitRequest') }}
-        </button>
-      </div>
-    </div>
 
     <div class="dm-card overflow-hidden">
       <div class="border-b border-dm-border-light bg-[#fafafa] px-4 py-3">

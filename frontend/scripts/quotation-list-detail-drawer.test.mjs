@@ -166,7 +166,6 @@ test('English quotation labels use concise CRM terminology', () => {
     '"tableSalesperson": "Sales owner"',
     '"tableQuoteDate": "Quote date"',
     '"sourceDocumentImport": "Imported from Feishu"',
-    '"feishuSync": "Sync from Feishu"',
     '"drawerTitle": "Quote details"',
   ]) {
     assert.match(enLocale, new RegExp(copy))

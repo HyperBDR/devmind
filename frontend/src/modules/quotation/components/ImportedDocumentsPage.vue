@@ -23,7 +23,6 @@ import {
   Folder,
   FolderInput,
   Loader2,
-  RefreshCw,
   RotateCcw,
   Search,
   ShieldAlert,
@@ -41,9 +40,7 @@ import {
 import {
   checkFeishuFileAccess,
   getFeishuSyncStatus,
-  getFeishuSyncJob,
   resolveFeishuSyncDifference,
-  syncFeishuArchiveFolder,
   type FeishuArchiveFolder,
   type FeishuSyncDifference,
   type FeishuSyncOverview,
@@ -103,23 +100,6 @@ const syncAlertClass = computed(() => {
   if (status === 'has_diff') return 'border-amber-200 bg-amber-50/70'
   return 'border-red-200 bg-red-50/60'
 })
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-}
-
-async function waitForSyncJob(jobId: string) {
-  const deadline = Date.now() + 10 * 60 * 1000
-  while (Date.now() < deadline) {
-    const job = await getFeishuSyncJob(jobId)
-    if (job.status === 'success') return job.result
-    if (job.status === 'failed') {
-      throw new Error(job.error_message || t('quotation.pages.imports.syncFailed'))
-    }
-    await wait(1000)
-  }
-  throw new Error(t('quotation.pages.imports.syncFailed'))
-}
 
 function scheduleFeishuDocReconcile(delay = 250) {
   window.clearTimeout(reconcileTimer)
@@ -193,64 +173,12 @@ function rebuildArchiveTree(items: ImportedDocument[]) {
   archiveFileFolders.value = locations
 }
 
-async function refresh(options: {
-  syncRemote?: boolean
-  syncSource?: 'automatic' | 'user'
-} = {}) {
+async function refresh() {
   loading.value = true
   try {
-    let createdQuotationIds: string[] = []
-    if (options.syncRemote) {
-      const cachedItems = await listImportedFeishuDocuments(
-        lifecycleFilter.value,
-      ).catch(
-        () => null,
-      )
-      if (cachedItems) {
-        docs.value = cachedItems
-        rebuildArchiveTree(cachedItems)
-      }
-      try {
-        let syncResult = await syncFeishuArchiveFolder({
-          source: options.syncSource || 'user',
-        })
-        if (syncResult.sync_job_id && syncResult.sync_status !== 'success') {
-          const completed = await waitForSyncJob(syncResult.sync_job_id)
-          syncResult = {
-            ...syncResult,
-            ...(completed as Partial<typeof syncResult>),
-          }
-        }
-        createdQuotationIds = [
-          ...(syncResult.created_quotation_ids || []),
-          ...(syncResult.updated_quotation_ids || []),
-        ]
-        if (
-          options.syncSource !== 'automatic'
-          && (syncResult.created_quotation_count || 0) > 0
-        ) {
-          notify(
-            t('quotation.pages.imports.autoImportComplete', {
-              count: syncResult.created_quotation_count || 0,
-            }),
-            'success',
-          )
-        }
-      } catch (err: unknown) {
-        if (options.syncSource !== 'automatic') {
-          notify(
-            err instanceof Error ? err.message : t('quotation.pages.imports.syncFailed'),
-            'error',
-          )
-        }
-      }
-    }
     const items = await listImportedFeishuDocuments(lifecycleFilter.value)
     docs.value = items
     rebuildArchiveTree(items)
-    if (createdQuotationIds.length) {
-      emit('quotationCreated', createdQuotationIds[0])
-    }
   } catch (err: unknown) {
     notify(
       err instanceof Error ? err.message : t('quotation.pages.imports.loadFailed'),
@@ -274,11 +202,6 @@ async function refreshSyncOverview() {
   } finally {
     syncStatusLoading.value = false
   }
-}
-
-async function handleSyncNow() {
-  await refresh({ syncRemote: true, syncSource: 'user' })
-  await refreshSyncOverview()
 }
 
 async function handleResolveDifference(
@@ -824,20 +747,6 @@ async function handleRestore(doc: ImportedDocument, event?: Event) {
           </div>
         </div>
 
-        <button
-          type="button"
-          class="dm-btn-primary h-9 shrink-0 px-3 text-sm font-semibold disabled:cursor-wait disabled:opacity-60"
-          :disabled="loading || syncOverview?.status === 'syncing'"
-          @click="handleSyncNow"
-        >
-          <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
-          <RefreshCw v-else class="h-4 w-4" />
-          {{
-            ['failed', 'permission', 'missing'].includes(syncOverview?.status || '')
-              ? t('quotation.pages.imports.syncRetry')
-              : t('quotation.pages.imports.syncNow')
-          }}
-        </button>
       </div>
 
       <div
@@ -982,15 +891,6 @@ async function handleRestore(doc: ImportedDocument, event?: Event) {
             {{ t('quotation.actions.resetFilters') }}
           </button>
 
-          <button
-            type="button"
-            class="dm-btn-primary col-span-2 h-10 px-3.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 sm:col-span-1"
-            :disabled="loading"
-            @click="refresh({ syncRemote: true, syncSource: 'user' })"
-          >
-            <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />
-            {{ t('quotation.pages.imports.syncButton') }}
-          </button>
         </div>
       </div>
     </div>

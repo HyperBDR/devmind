@@ -42,7 +42,6 @@ import {
 import { ensureQuoteOwnership } from './utils/quoteOwnership'
 import { clearCreateQuoteDraft } from './utils/createDraftStorage'
 import {
-  upsertDescriptionsToCatalog,
   type LineItemDescriptionHistory,
 } from './utils/descriptionCatalog'
 import { PAYMENT_TERM_OPTIONS } from './utils/paymentTerms'
@@ -66,6 +65,7 @@ import {
 } from './api/quotations'
 import { useAuthStore } from './stores/auth'
 import { useQuotationI18n } from './composables/useQuotationI18n'
+import { saveContactTitle } from './utils/contactTitleStorage'
 
 const auth = useAuthStore()
 const { t, quoteStatusLabel } = useQuotationI18n()
@@ -667,47 +667,28 @@ async function handleSaveQuotation(newQuote: Quotation) {
     const wasCreate = !editingQuoteId.value
     const exists = Boolean(editingQuoteId.value)
     const willGenerate = ownedQuote.status === 'Generated'
-    const usesQuoteRevisions = [
-      'Uploaded',
-      'Sent',
-      'Accepted',
-      'Rejected',
-      'Expired',
-      'Cancelled',
-    ].includes(ownedQuote.status)
     let saved = exists
       ? await updateQuotationApi(ownedQuote, {
           notes: t('quotation.app.versionNotesEditQuote'),
-          skipVersion: !usesQuoteRevisions,
         })
       : await createQuotationApi(ownedQuote)
-
-    const catalogSync = upsertDescriptionsToCatalog(
-      ownedQuote.items,
-      products.value,
-      services.value,
-      productLineOptions.value.find(
-        (option) => option.value === ownedQuote.productLine,
-      )?.label || ownedQuote.productLine || 'HyperBDR',
-      ownedQuote.currency,
-    )
-    if (catalogSync.added > 0) {
-      products.value = catalogSync.products
-      services.value = catalogSync.services
-      triggerToast(
-        t('quotation.app.catalogDescriptionsSynced', {
-          count: catalogSync.added,
-        }),
-        'info',
-      )
-    }
 
     if (wasCreate) {
       clearCreateQuoteDraft(auth.currentUser.email)
     }
 
+    saveContactTitle(auth.currentUser.email, ownedQuote.issuerContactTitle)
+
     if (willGenerate) {
-      saved = await generateQuotationApi(saved.id, auth.currentUser.email)
+      saved = await generateQuotationApi(
+        saved.id,
+        auth.currentUser.email,
+        {
+          quoteNoMode: ownedQuote.quoteNoMode,
+          draftQuoteNo: ownedQuote.quoteNo,
+        },
+      )
+      activeQuote.value = saved
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id
       if (auth.embeddedAuth) {
@@ -800,11 +781,19 @@ async function handleUpdateQuote(
           ? {
               ...q,
               status: saved.status,
+              quoteNo: saved.quoteNo,
+              quoteNoMode: saved.quoteNoMode,
               region: q.region,
               industry: q.industry,
             }
           : q,
       )
+      if (activeQuote.value?.id === id) {
+        activeQuote.value = {
+          ...activeQuote.value,
+          ...saved,
+        }
+      }
     } catch (err) {
       quotations.value = quotations.value.map((q) =>
         q.id === id ? previousListQuote : q,
@@ -850,6 +839,13 @@ function handleAddProduct(prod: Product) {
   triggerToast(t('quotation.app.productAdded', { name: prod.name }), 'success')
 }
 
+function handleUpdateProduct(product: Product) {
+  products.value = products.value.map((item) => (
+    item.id === product.id ? product : item
+  ))
+  triggerToast(t('quotation.app.productUpdated', { name: product.name }), 'success')
+}
+
 function handleDeleteProduct(id: string) {
   products.value = products.value.filter((p) => p.id !== id)
   triggerToast(t('quotation.app.productRemoved'), 'info')
@@ -858,6 +854,13 @@ function handleDeleteProduct(id: string) {
 function handleAddService(serv: Service) {
   services.value = [serv, ...services.value]
   triggerToast(t('quotation.app.serviceAdded', { name: serv.name }), 'success')
+}
+
+function handleUpdateService(service: Service) {
+  services.value = services.value.map((item) => (
+    item.id === service.id ? service : item
+  ))
+  triggerToast(t('quotation.app.serviceUpdated', { name: service.name }), 'success')
 }
 
 function handleDeleteService(id: string) {
@@ -1240,8 +1243,10 @@ function reloadPage() {
           :discounts="discounts"
           :product-line-options="productLineOptions"
           @add-product="handleAddProduct"
+          @update-product="handleUpdateProduct"
           @delete-product="handleDeleteProduct"
           @add-service="handleAddService"
+          @update-service="handleUpdateService"
           @delete-service="handleDeleteService"
           @add-discount="handleAddDiscount"
           @delete-discount="handleDeleteDiscount"

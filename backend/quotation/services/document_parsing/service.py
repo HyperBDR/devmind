@@ -42,6 +42,8 @@ from quotation.services.document_parsing.pdf_parser import (
 from quotation.services.quotation_service import (
     build_quotation,
     create_version_snapshot,
+    get_next_revision_quote_number,
+    quotation_business_signature,
     replace_items,
 )
 from quotation.services.storage import resolve_document_path
@@ -432,6 +434,7 @@ def update_imported_quotation_from_parse(
         quotation = Quotation.objects.select_for_update().get(
             pk=locked.asset.quotation_id
         )
+        previous_content = quotation_business_signature(quotation)
         data = dict(validated_data)
         source_totals = data.pop("_source_totals", {}) or {}
         items = data.pop("items", [])
@@ -468,8 +471,20 @@ def update_imported_quotation_from_parse(
                 setattr(quotation, field, source_totals[field])
         quotation.status = QuoteStatus.GENERATED
         quotation.source_type = QuotationSourceType.DOCUMENT_IMPORT
+        replace_items(quotation, items)
+        current_content = quotation_business_signature(
+            quotation,
+            items=list(quotation.items.order_by("line_no", "id")),
+        )
+        content_changed = previous_content != current_content
+        if content_changed:
+            quotation.quote_no = get_next_revision_quote_number(
+                quotation.quote_no,
+                quotation=quotation,
+            )
         quotation.save(
             update_fields=[
+                "quote_no",
                 "source_quote_no",
                 *field_names,
                 "subtotal_before_vat",
@@ -480,7 +495,6 @@ def update_imported_quotation_from_parse(
                 "updated_at",
             ]
         )
-        replace_items(quotation, items)
         operator_email = (
             user_display_email(actor)
             if actor is not None

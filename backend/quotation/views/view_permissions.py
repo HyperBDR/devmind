@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.access import get_effective_feature_keys
-from quotation.audit import record_audit_event
+from quotation.audit import quotation_audit_label, record_audit_event
 from quotation.models import (
     AuditEvent,
     DocumentAsset,
@@ -118,7 +118,7 @@ def _document_rows():
             "folder_token": asset.feishu_folder_token or "",
             "folder_name": _folder_name(asset),
             "quotation_id": asset.quotation_id,
-            "quote_no": asset.quotation.quote_no
+            "quote_no": quotation_audit_label(asset.quotation)
             if asset.quotation_id and asset.quotation
             else "",
         }
