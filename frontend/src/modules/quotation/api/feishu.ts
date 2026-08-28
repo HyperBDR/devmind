@@ -77,26 +77,6 @@ export interface FeishuArchiveFolder {
   parent_token: string | null;
 }
 
-export interface FeishuArchiveFileLocation {
-  document_id: string;
-  folder_token: string;
-}
-
-export interface FeishuSyncJob {
-  id: string;
-  status: 'pending' | 'queued' | 'running' | 'retrying' | 'success' | 'failed';
-  stage: string;
-  attempt_count: number;
-  max_attempts: number;
-  duration_ms: number;
-  result: Record<string, unknown>;
-  error_code: string;
-  error_message: string;
-  created_at: string;
-  updated_at: string;
-  finished_at?: string | null;
-}
-
 export type FeishuSyncStateStatus =
   | 'synced'
   | 'syncing'
@@ -188,58 +168,6 @@ export function resolveFeishuSyncDifference(
       method: 'POST',
       body: JSON.stringify({ action }),
     },
-  );
-}
-
-export function syncFeishuArchiveFolder(options: {
-  source?: 'automatic' | 'user';
-} = {}): Promise<{
-  created_count: number;
-  skipped_count: number;
-  errors?: Array<{ file?: string; detail?: string }>;
-  folders: FeishuArchiveFolder[];
-  file_locations: FeishuArchiveFileLocation[];
-  created_document_ids?: string[];
-  parsed_count?: number;
-  created_quotation_count?: number;
-  updated_quotation_count?: number;
-  parsed_document_ids?: string[];
-  created_quotation_ids?: string[];
-  updated_quotation_ids?: string[];
-  sync_job_id?: string;
-  sync_status?: string;
-  queued_parse_count?: number;
-  storage_connection_id?: string | null;
-}> {
-  return apiRequest<{
-    created_count: number;
-    skipped_count: number;
-    errors?: Array<{ file?: string; detail?: string }>;
-    folders: FeishuArchiveFolder[];
-    file_locations: FeishuArchiveFileLocation[];
-    created_document_ids?: string[];
-    parsed_count?: number;
-    created_quotation_count?: number;
-    updated_quotation_count?: number;
-    parsed_document_ids?: string[];
-    created_quotation_ids?: string[];
-    updated_quotation_ids?: string[];
-    sync_job_id?: string;
-    sync_status?: string;
-    queued_parse_count?: number;
-    storage_connection_id?: string | null;
-  }>('/feishu/sync-folder', {
-    method: 'POST',
-    headers: {
-      'X-Quotation-Audit-Source': options.source || 'user',
-    },
-    body: JSON.stringify({ async: true }),
-  });
-}
-
-export function getFeishuSyncJob(jobId: string): Promise<FeishuSyncJob> {
-  return apiRequest<FeishuSyncJob>(
-    `/feishu/sync-jobs/${encodeURIComponent(jobId)}`,
   );
 }
 

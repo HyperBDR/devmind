@@ -55,11 +55,12 @@ test('quotation API keeps product line names separate from number prefixes', () 
   assert.match(quotationsApi, /product_line: quote\.productLine/)
 })
 
-test('archive sync imports Excel and PDF files into normal quotations', () => {
-  assert.match(importedDocumentsPage, /syncResult\.created_quotation_ids/)
-  assert.match(importedDocumentsPage, /created_quotation_count/)
-  assert.match(importedDocumentsPage, /autoImportComplete/)
-  assert.match(importedDocumentsPage, /emit\('quotationCreated'/)
+test('imported document page reads synchronized files without a manual trigger', () => {
+  assert.match(importedDocumentsPage, /listImportedFeishuDocuments\(lifecycleFilter\.value\)/)
+  assert.doesNotMatch(importedDocumentsPage, /syncResult\.created_quotation_ids/)
+  assert.doesNotMatch(importedDocumentsPage, /created_quotation_count/)
+  assert.doesNotMatch(importedDocumentsPage, /autoImportComplete/)
+  assert.doesNotMatch(importedDocumentsPage, /syncFeishuArchiveFolder/)
   assert.doesNotMatch(importedDocumentsPage, /parseDocuments\(candidates\)/)
   assert.doesNotMatch(importedDocumentsPage, /DocumentParseReviewModal/)
   assert.doesNotMatch(importedDocumentsPage, /confirmDocumentParseResult/)
@@ -88,7 +89,7 @@ test('imported documents page keeps only fallback parse states in the list', () 
 
 test('temporary Office files stay visible without a parse action', () => {
   assert.match(importedDocumentsPage, /function isTemporaryFile/)
-  assert.match(importedDocumentsPage, /startsWith\('\~\$'\)/)
+  assert.match(importedDocumentsPage, /startsWith\('~\$'\)/)
   assert.match(importedDocumentsPage, /!isTemporaryFile\(doc\)/)
   assert.match(importedDocumentsPage, /statusTemporary/)
   assert.match(zhCnLocale, /"statusTemporary": "临时文件"/)
@@ -215,15 +216,14 @@ test('quotation navigation preserves the mounted workspace', () => {
   assert.doesNotMatch(appLayout, /:key="route\.path"/)
 })
 
-test('imported documents render cached data before remote synchronization', () => {
-  const cachedLoad = importedDocumentsPage.indexOf(
-    'const cachedItems = await listImportedFeishuDocuments(',
+test('imported documents render synchronized data without a manual trigger', () => {
+  assert.match(importedDocumentsPage, /async function refresh\(\)/)
+  assert.match(
+    importedDocumentsPage,
+    /listImportedFeishuDocuments\(lifecycleFilter\.value\)/,
   )
-  const remoteSync = importedDocumentsPage.indexOf(
-    'let syncResult = await syncFeishuArchiveFolder',
-  )
-  assert.ok(cachedLoad >= 0)
-  assert.ok(remoteSync > cachedLoad)
+  assert.doesNotMatch(importedDocumentsPage, /syncFeishuArchiveFolder/)
+  assert.doesNotMatch(importedDocumentsPage, /getFeishuSyncJob/)
 })
 
 test('confirmed document parse status is presented as parsed', () => {
