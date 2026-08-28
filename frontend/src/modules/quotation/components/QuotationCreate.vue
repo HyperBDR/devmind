@@ -86,6 +86,7 @@ import {
   getBillingEmailOptions,
 } from '../utils/customerHistory'
 import { clearCurrentUserSignature, rememberUserSignature } from '../utils/signatureStorage'
+import { getSavedContactTitle } from '../utils/contactTitleStorage'
 import {
   loadCreateQuoteDraft,
   saveCreateQuoteDraft,
@@ -154,6 +155,10 @@ function getDefaultExpireDate(date = new Date()) {
   return formatDateInput(new Date(date.getTime() + 30 * 24 * 60 * 60 * 1000))
 }
 
+function getDefaultIssuerContactTitle() {
+  return getSavedContactTitle(props.currentUser?.email) || props.currentUser?.title || ''
+}
+
 const quoteNo = ref('')
 const quoteNoMode = ref<'auto' | 'custom'>('auto')
 const productLine = ref<QuoteProductLine>('BDR')
@@ -182,7 +187,7 @@ const remarksDisclaimer = ref('')
 const issuerCompanyName = ref(DEFAULT_ISSUER_COMPANY_NAME)
 const issuerContactName = ref(props.currentUser?.name ?? '')
 const issuerContactEmail = ref(props.currentUser?.email ?? '')
-const issuerContactTitle = ref(props.currentUser?.title ?? '')
+const issuerContactTitle = ref(getDefaultIssuerContactTitle())
 const issuerSignature = ref('')
 const previewWidthPercent = ref(DEFAULT_PREVIEW_WIDTH_PERCENT)
 const isAddingProductLine = ref(false)
@@ -639,7 +644,7 @@ function resetCreateForm() {
   issuerCompanyName.value = DEFAULT_ISSUER_COMPANY_NAME
   issuerContactName.value = props.currentUser?.name ?? ''
   issuerContactEmail.value = props.currentUser?.email ?? ''
-  issuerContactTitle.value = props.currentUser?.title ?? ''
+  issuerContactTitle.value = getDefaultIssuerContactTitle()
   issuerSignature.value = ''
   items.value = [
     {
@@ -721,7 +726,7 @@ function applyCreateDraft(draft: CreateQuoteDraft) {
   issuerContactEmail.value =
     draft.issuerContactEmail || props.currentUser?.email || ''
   issuerContactTitle.value =
-    draft.issuerContactTitle || props.currentUser?.title || ''
+    draft.issuerContactTitle || getDefaultIssuerContactTitle()
   issuerSignature.value = draft.issuerSignature || ''
   items.value =
     Array.isArray(draft.items) && draft.items.length > 0
@@ -1758,14 +1763,6 @@ const itemErrorEntries = computed(() =>
                 <Layers class="h-4 w-4 text-dm-text-tertiary" />
                 <h3 class="text-sm font-bold text-dm-text">{{ t('quotation.pages.create.step4Title') }}</h3>
               </div>
-              <button
-                type="button"
-                class="flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-blue-400 px-2.5 py-1.5 text-sm font-semibold text-dm-primary transition duration-150 hover:bg-dm-primary-bg/50"
-                @click="handleAddLineItem"
-              >
-                <Plus class="h-3.5 w-3.5" />
-                {{ t('quotation.actions.addLineItem') }}
-              </button>
             </div>
 
             <div
@@ -1975,6 +1972,17 @@ const itemErrorEntries = computed(() =>
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div class="border-t border-dm-border-light pt-3">
+              <button
+                type="button"
+                class="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-200 bg-blue-50/40 px-4 py-2.5 text-sm font-semibold text-dm-primary transition duration-150 hover:border-blue-300 hover:bg-blue-50"
+                @click="handleAddLineItem"
+              >
+                <Plus class="h-4 w-4" />
+                {{ t('quotation.actions.addLineItem') }}
+              </button>
             </div>
           </div>
         </div>
