@@ -32,6 +32,16 @@ def set_request_audit_target(
         raw_request.quotation_audit_target_label = str(target_label)
 
 
+def quotation_audit_label(quotation) -> str:
+    """Return a stable audit label for formal and draft quotations."""
+    return (
+        quotation.source_quote_no
+        or quotation.quote_no
+        or quotation.draft_quote_no
+        or ""
+    )
+
+
 def set_request_audit_changed_fields(request, fields: list[str]) -> None:
     """Attach server-verified changed business fields to one request."""
     raw_request = getattr(request, "_request", request)

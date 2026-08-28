@@ -646,6 +646,7 @@
         "productLinePrefixPlaceholder": "e.g. CloudX",
         "productLineRule": "Prefix: 2–12 letters/numbers, starts with a letter. Quote no. = prefix + DDMMYY.",
         "quoteNumber": "Quote number",
+        "quoteNumberHintDraft": "Preview only while drafting; the formal number is assigned when the quote is generated.",
         "quoteNumberHintUnique": "Format: [ProductLine][DDMMYY]. Same-day quotes use .1/.2; revisions use _R1/_R2.",
         "quoteNumberHintDuplicate": "This quote number already exists. Use a custom number or regenerate.",
         "deleteProductLine": "Delete product line",

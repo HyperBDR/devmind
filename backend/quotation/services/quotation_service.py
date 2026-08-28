@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import re
-
+from datetime import timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Iterable
 
 from django.db import transaction
+from django.utils import timezone
 
 from quotation.models import (
     ItemType,
     Quotation,
     QuotationItem,
+    QuotationNumberingMode,
     QuotationVersion,
     QuoteStatus,
 )
@@ -165,7 +167,11 @@ def build_quotation(
         if source_totals.get(field) not in (None, ""):
             totals[field] = round_money(Decimal(str(source_totals[field])))
     quotation = Quotation(
-        quote_no=data["quote_no"],
+        quote_no=data.get("quote_no") or None,
+        draft_quote_no=data.get("draft_quote_no") or "",
+        numbering_mode=(
+            data.get("numbering_mode") or QuotationNumberingMode.AUTO
+        ),
         source_quote_no=data.get("source_quote_no") or "",
         status=QuoteStatus.DRAFT,
         product_line=data.get("product_line", "BDR"),
@@ -223,6 +229,11 @@ def get_next_auto_quote_number(product_line: str, quote_date) -> str:
     )
     existing = set(
         Quotation.objects.filter(
+            quote_no__isnull=False,
+            quote_no__gt="",
+        )
+        .exclude(status=QuoteStatus.DRAFT)
+        .filter(
             quote_no__regex=rf"^{re.escape(base)}(?:\.[0-9]+)?$",
         ).values_list("quote_no", flat=True)
     )
@@ -234,18 +245,78 @@ def get_next_auto_quote_number(product_line: str, quote_date) -> str:
     return f"{base}.{suffix}"
 
 
+def formalize_quotation(
+    quotation: Quotation,
+    *,
+    operator_email: str | None,
+    notes: str,
+    status: str = QuoteStatus.GENERATED,
+    numbering_mode: str | None = None,
+    draft_quote_no: str | None = None,
+) -> Quotation:
+    """Assign a formal number and create the first formal version."""
+    with transaction.atomic():
+        locked = Quotation.objects.select_for_update().get(pk=quotation.pk)
+        mode = numbering_mode or locked.numbering_mode
+        candidate = (
+            locked.draft_quote_no
+            if draft_quote_no is None
+            else draft_quote_no
+        )
+        candidate = str(candidate or "").strip()
+        if mode not in QuotationNumberingMode.values:
+            raise ValueError("invalid numbering mode")
+        if status not in QuoteStatus.values or status == QuoteStatus.DRAFT:
+            raise ValueError("invalid formal quotation status")
+
+        if locked.status == QuoteStatus.DRAFT or not locked.quote_no:
+            if mode == QuotationNumberingMode.AUTO:
+                quote_no = get_next_auto_quote_number(
+                    locked.product_line,
+                    locked.quote_date,
+                )
+            elif candidate:
+                quote_no = candidate
+            else:
+                raise ValueError("quote_no is required for custom numbering")
+            locked.quote_no = quote_no
+
+        locked.draft_quote_no = ""
+        locked.numbering_mode = mode
+        locked.status = status
+        locked.save(
+            update_fields=[
+                "quote_no",
+                "draft_quote_no",
+                "numbering_mode",
+                "status",
+                "updated_at",
+            ]
+        )
+        create_version_snapshot(
+            locked,
+            operator_email=operator_email,
+            notes=notes,
+        )
+        quotation.refresh_from_db()
+        return quotation
+
+
 def copy_quotation(
     quotation: Quotation,
     *,
     created_by_email: str | None,
 ) -> Quotation:
     """Create an editable draft copy without historical artifacts."""
+    copy_date = timezone.localdate()
     quote_no = get_next_auto_quote_number(
         quotation.product_line,
-        quotation.quote_date,
+        copy_date,
     )
     copied = Quotation.objects.create(
-        quote_no=quote_no,
+        quote_no=None,
+        draft_quote_no=quote_no,
+        numbering_mode=QuotationNumberingMode.AUTO,
         status=QuoteStatus.DRAFT,
         source_type="manual",
         product_line=quotation.product_line,
@@ -254,8 +325,8 @@ def copy_quotation(
         currency=quotation.currency,
         payment_term_option=quotation.payment_term_option,
         payment_terms=quotation.payment_terms,
-        quote_date=quotation.quote_date,
-        expire_date=quotation.expire_date,
+        quote_date=copy_date,
+        expire_date=copy_date + timedelta(days=30),
         tax_label=quotation.tax_label,
         vat_rate=quotation.vat_rate,
         vat_amount=quotation.vat_amount,

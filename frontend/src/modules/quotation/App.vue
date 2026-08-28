@@ -689,7 +689,14 @@ async function handleSaveQuotation(newQuote: Quotation) {
     saveContactTitle(auth.currentUser.email, ownedQuote.issuerContactTitle)
 
     if (willGenerate) {
-      saved = await generateQuotationApi(saved.id, auth.currentUser.email)
+      saved = await generateQuotationApi(
+        saved.id,
+        auth.currentUser.email,
+        {
+          quoteNoMode: ownedQuote.quoteNoMode,
+          draftQuoteNo: ownedQuote.quoteNo,
+        },
+      )
       triggerToast(t('quotation.app.quoteGenerated', { quoteNo: saved.quoteNo }), 'success')
       selectedQuotationId.value = saved.id
       if (auth.embeddedAuth) {
@@ -782,11 +789,19 @@ async function handleUpdateQuote(
           ? {
               ...q,
               status: saved.status,
+              quoteNo: saved.quoteNo,
+              quoteNoMode: saved.quoteNoMode,
               region: q.region,
               industry: q.industry,
             }
           : q,
       )
+      if (activeQuote.value?.id === id) {
+        activeQuote.value = {
+          ...activeQuote.value,
+          ...saved,
+        }
+      }
     } catch (err) {
       quotations.value = quotations.value.map((q) =>
         q.id === id ? previousListQuote : q,

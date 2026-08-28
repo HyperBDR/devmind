@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from hashlib import sha256
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from quotation.audit import AUDIT_CONTEXT
 from quotation.models import (
@@ -13,13 +13,17 @@ from quotation.models import (
     QuotationTemplate,
     QuotationTemplateStatus,
     QuotationVersion,
+    QuoteStatus,
 )
 from quotation.permissions import user_display_email
 from quotation.services.export_renderer import (
     CURRENT_RENDERER_VERSION,
     ensure_default_template,
 )
-from quotation.services.quotation_service import create_version_snapshot
+from quotation.services.quotation_service import (
+    create_version_snapshot,
+    formalize_quotation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,22 @@ def _resolve_version(
     version_no: int | None,
     actor,
 ) -> QuotationVersion:
+    if quotation.status == QuoteStatus.DRAFT:
+        for attempt in range(5):
+            try:
+                formalize_quotation(
+                    quotation,
+                    operator_email=user_display_email(actor),
+                    notes="Generated quotation for document export",
+                )
+                break
+            except IntegrityError:
+                if attempt == 4:
+                    raise ExportRequestError(
+                        "quote_no already exists"
+                    ) from None
+            except ValueError as exc:
+                raise ExportRequestError(str(exc)) from exc
     if version_no is not None:
         version = QuotationVersion.objects.filter(
             quotation=quotation,

@@ -124,7 +124,7 @@ class QuotationVersionHistoryTests(TestCase):
         assert "snapshot" in versions[0]
         assert versions[0]["snapshot"]["status"] == "sent"
 
-    def test_update_skip_version_does_not_append_snapshot(self):
+    def test_first_formal_update_always_appends_initial_snapshot(self):
         user = User.objects.create_user(
             username="alice-skip-version",
             email="alice.chen@oneprocloud.com",
@@ -156,17 +156,22 @@ class QuotationVersionHistoryTests(TestCase):
             format="json",
         )
         assert response.status_code == 200
-        assert response.data["versions"] == []
+        assert len(response.data["versions"]) == 1
+        assert response.data["versions"][0]["version_no"] == 1
         assert response.data["status"] == "generated"
 
-    def test_editing_draft_keeps_quote_number_and_has_no_version(self):
+    def test_editing_draft_keeps_preview_number_and_has_no_version(self):
         user = User.objects.create_user(
             username="alice-draft-edit",
             email="alice.chen@oneprocloud.com",
             password="password",
         )
         quotation = build_quotation(
-            data=self._base_quote_data("BDR240826"),
+            data={
+                **self._base_quote_data("BDR240826"),
+                "draft_quote_no": "BDR240826",
+                "numbering_mode": "custom",
+            },
             items_data=[],
         )
         api = APIClient()
@@ -191,10 +196,12 @@ class QuotationVersionHistoryTests(TestCase):
         )
 
         assert response.status_code == 200
-        assert response.data["quote_no"] == "BDR240826"
+        assert response.data["quote_no"] is None
+        assert response.data["display_quote_no"] == "BDR240826"
         assert response.data["versions"] == []
         quotation.refresh_from_db()
-        assert quotation.quote_no == "BDR240826"
+        assert quotation.quote_no is None
+        assert quotation.draft_quote_no == "BDR240826"
         assert quotation.version_current == 0
 
     def test_generate_after_edit_does_not_duplicate_same_snapshot(self):

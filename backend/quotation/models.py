@@ -25,6 +25,13 @@ class QuoteStatus(models.TextChoices):
     CANCELLED = "cancelled", "cancelled"
 
 
+class QuotationNumberingMode(models.TextChoices):
+    """Numbering strategy selected before formal generation."""
+
+    AUTO = "auto", "auto"
+    CUSTOM = "custom", "custom"
+
+
 class QuotationSourceType(models.TextChoices):
     MANUAL = "manual", "Manual"
     DOCUMENT_IMPORT = "document_import", "Document import"
@@ -464,7 +471,23 @@ class Quotation(TimeStampedModel):
     id = models.CharField(
         primary_key=True, max_length=36, default=_uuid, editable=False
     )
-    quote_no = models.CharField(max_length=120, unique=True, db_index=True)
+    quote_no = models.CharField(
+        max_length=120,
+        unique=True,
+        db_index=True,
+        blank=True,
+        null=True,
+    )
+    draft_quote_no = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+    )
+    numbering_mode = models.CharField(
+        max_length=10,
+        choices=QuotationNumberingMode.choices,
+        default=QuotationNumberingMode.AUTO,
+    )
     source_quote_no = models.CharField(
         max_length=120,
         blank=True,

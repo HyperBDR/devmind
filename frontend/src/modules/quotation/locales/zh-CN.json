@@ -646,6 +646,7 @@
         "productLinePrefixPlaceholder": "如：CloudX",
         "productLineRule": "规则：前缀 2-12 位英文字母/数字且以字母开头；报价号 = 前缀 + DDMMYY。",
         "quoteNumber": "报价单编号",
+        "quoteNumberHintDraft": "草稿阶段仅作预测展示；正式生成报价单时才会确认正式编号。",
         "quoteNumberHintUnique": "默认格式：[ProductLine][DDMMYY]；同日同产品线的新报价自动追加 .1/.2，修订同一报价追加 _R1/_R2。",
         "quoteNumberHintDuplicate": "该报价编号已存在，请切换为自定义并输入唯一编号，或重新生成。",
         "deleteProductLine": "删除当前产品线",

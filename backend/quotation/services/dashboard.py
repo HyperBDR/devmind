@@ -397,9 +397,14 @@ def _merge_trend_rows(
 
 
 def _breakdown_quote_no(row: dict, display_counts: dict[str, int]) -> str:
-    display = row["source_quote_no"] or row["quote_no"]
+    display = (
+        row["source_quote_no"]
+        or row["quote_no"]
+        or row["draft_quote_no"]
+        or ""
+    )
     if display_counts.get(display, 0) > 1:
-        return row["quote_no"]
+        return row["quote_no"] or row["draft_quote_no"] or ""
     return display
 
 
@@ -437,6 +442,7 @@ def build_dashboard_analytics(
         .values(
             "id",
             "quote_no",
+            "draft_quote_no",
             "source_quote_no",
             "currency",
             "grand_total",
@@ -449,7 +455,12 @@ def build_dashboard_analytics(
     )
     display_counts: dict[str, int] = {}
     for row in breakdown_rows:
-        display = row["source_quote_no"] or row["quote_no"]
+        display = (
+            row["source_quote_no"]
+            or row["quote_no"]
+            or row["draft_quote_no"]
+            or ""
+        )
         display_counts[display] = display_counts.get(display, 0) + 1
     breakdown = [
         {
@@ -519,6 +530,7 @@ def build_dashboard_recent(
     rows = queryset.order_by("-updated_at", "-id").values(
         "id",
         "quote_no",
+        "draft_quote_no",
         "source_quote_no",
         "project_name",
         "client_company",
@@ -533,7 +545,12 @@ def build_dashboard_recent(
         "items": [
             {
                 "id": row["id"],
-                "quote_no": row["source_quote_no"] or row["quote_no"],
+                "quote_no": (
+                    row["source_quote_no"]
+                    or row["quote_no"]
+                    or row["draft_quote_no"]
+                    or ""
+                ),
                 "project_name": row["project_name"],
                 "client_company": row["client_company"],
                 "salesperson": row["issuer_contact_name"],

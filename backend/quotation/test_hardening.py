@@ -19,6 +19,7 @@ from quotation.models import (
 from quotation.services.quotation_service import (
     build_quotation,
     create_version_snapshot,
+    formalize_quotation,
 )
 
 
@@ -84,7 +85,7 @@ class QuotationBoundaryTests(TestCase):
         assert Decimal(response.data["vat_amount"]) == Decimal("18.00")
         assert Decimal(response.data["grand_total"]) == Decimal("198.00")
 
-    def test_auto_numbering_uses_quotes_created_by_other_users(self):
+    def test_auto_numbering_is_deferred_until_formal_generation(self):
         first_payload = quote_payload("ignored-by-auto-numbering")
         first_payload["numbering_mode"] = "auto"
         first = self.api.post(
@@ -93,7 +94,8 @@ class QuotationBoundaryTests(TestCase):
             format="json",
         )
         self.assertEqual(first.status_code, 201, first.data)
-        self.assertEqual(first.data["quote_no"], "BDR150726")
+        self.assertIsNone(first.data["quote_no"])
+        self.assertEqual(first.data["display_quote_no"], "BDR150726")
 
         other = User.objects.create_user(
             username="qa-hardening-other",
@@ -110,7 +112,156 @@ class QuotationBoundaryTests(TestCase):
             format="json",
         )
         self.assertEqual(second.status_code, 201, second.data)
-        self.assertEqual(second.data["quote_no"], "BDR150726.1")
+        self.assertIsNone(second.data["quote_no"])
+        self.assertEqual(second.data["display_quote_no"], "BDR150726")
+
+        generate = self.api.post(
+            f"/api/v1/quotation/quotations/{first.data['id']}/generate",
+            {"numbering_mode": "auto"},
+            format="json",
+        )
+        self.assertEqual(generate.status_code, 200, generate.data)
+        self.assertEqual(generate.data["quote_no"], "BDR150726")
+
+        generate_other = other_api.post(
+            f"/api/v1/quotation/quotations/{second.data['id']}/generate",
+            {"numbering_mode": "auto"},
+            format="json",
+        )
+        self.assertEqual(generate_other.status_code, 200, generate_other.data)
+        self.assertEqual(generate_other.data["quote_no"], "BDR150726.1")
+
+    def test_draft_does_not_require_a_custom_number(self):
+        payload = quote_payload()
+        payload.pop("quote_no")
+        payload["numbering_mode"] = "custom"
+
+        response = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertIsNone(response.data["quote_no"])
+        self.assertEqual(response.data["display_quote_no"], "")
+        quotation = Quotation.objects.get(pk=response.data["id"])
+        self.assertEqual(quotation.version_current, 0)
+        self.assertEqual(quotation.versions.count(), 0)
+
+        generate = self.api.post(
+            f"/api/v1/quotation/quotations/{quotation.pk}/generate",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(generate.status_code, 400)
+        self.assertIn("quote_no", generate.data["detail"])
+
+    def test_status_transition_formalizes_a_draft_before_marking_it_sent(self):
+        payload = quote_payload("CUSTOM-SENT-DRAFT")
+        payload["numbering_mode"] = "custom"
+        created = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+
+        updated = self.api.put(
+            f"/api/v1/quotation/quotations/{created.data['id']}",
+            {
+                "status": "sent",
+                "quote_no": "CUSTOM-SENT-DRAFT",
+            },
+            format="json",
+        )
+
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertEqual(updated.data["status"], "sent")
+        self.assertEqual(updated.data["quote_no"], "CUSTOM-SENT-DRAFT")
+        self.assertEqual(updated.data["version_current"], 1)
+        self.assertEqual(len(updated.data["versions"]), 1)
+        self.assertEqual(updated.data["versions"][0]["status"], "sent")
+
+    def test_first_formal_generation_uses_final_draft_values(self):
+        payload = quote_payload("ignored-preview")
+        payload["numbering_mode"] = "auto"
+        created = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        created_at = created.data["created_at"]
+
+        updated = self.api.put(
+            f"/api/v1/quotation/quotations/{created.data['id']}",
+            {
+                "product_line": "CloudX",
+                "quote_date": "2026-07-16",
+                "expire_date": "2026-08-16",
+            },
+            format="json",
+        )
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.assertIsNone(updated.data["quote_no"])
+        self.assertEqual(updated.data["display_quote_no"], "CloudX160726")
+
+        generated = self.api.post(
+            f"/api/v1/quotation/quotations/{created.data['id']}/generate",
+            {},
+            format="json",
+        )
+        self.assertEqual(generated.status_code, 200, generated.data)
+        self.assertEqual(generated.data["quote_no"], "CloudX160726")
+        self.assertEqual(generated.data["version_current"], 1)
+        self.assertEqual(len(generated.data["versions"]), 1)
+        self.assertEqual(generated.data["created_at"], created_at)
+
+    def test_custom_number_is_validated_only_when_formally_generated(self):
+        payload = quote_payload("CUSTOM-DRAFT-001")
+        payload["numbering_mode"] = "custom"
+        created = self.api.post(
+            "/api/v1/quotation/quotations",
+            payload,
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.data)
+        self.assertIsNone(created.data["quote_no"])
+        self.assertEqual(created.data["display_quote_no"], "CUSTOM-DRAFT-001")
+
+        generated = self.api.post(
+            f"/api/v1/quotation/quotations/{created.data['id']}/generate",
+            {},
+            format="json",
+        )
+        self.assertEqual(generated.status_code, 200, generated.data)
+        self.assertEqual(generated.data["quote_no"], "CUSTOM-DRAFT-001")
+
+    def test_formalize_quotation_clears_draft_candidate(self):
+        payload = quote_payload("SERVICE-PREVIEW")
+        payload["numbering_mode"] = "custom"
+        items = payload.pop("items")
+        quotation = build_quotation(
+            data={
+                **payload,
+                "quote_no": None,
+                "draft_quote_no": "SERVICE-PREVIEW",
+            },
+            items_data=items,
+        )
+
+        formalize_quotation(
+            quotation,
+            operator_email=self.user.email,
+            notes="Generated quotation",
+        )
+
+        quotation.refresh_from_db()
+        self.assertEqual(quotation.quote_no, "SERVICE-PREVIEW")
+        self.assertEqual(quotation.draft_quote_no, "")
+        self.assertEqual(quotation.version_current, 1)
 
     def test_rejects_invalid_quantity_discount_price_and_vat_boundaries(self):
         invalid_values = [
@@ -444,7 +595,7 @@ class QuotationRollbackTests(TestCase):
         payload["status"] = "generated"
 
         with patch(
-            "quotation.views.quotations.create_version_snapshot",
+            "quotation.services.quotation_service.create_version_snapshot",
             side_effect=RuntimeError("snapshot unavailable"),
         ):
             response = self.api.put(
