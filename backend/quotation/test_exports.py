@@ -892,27 +892,27 @@ class QuotationExportTaskTests(QuotationExportFixture):
         self.assertEqual(sheet["A1"].value, None)
         self.assertEqual(sheet["A2"].value, "OnePro Cloud Limited")
         self.assertEqual(sheet["A3"].value, "Quotation")
-        self.assertEqual(sheet["F5"].value, "Date:")
-        self.assertEqual(sheet["A6"].value, "Ship to")
-        self.assertEqual(sheet["A11"].value, "Bill to:")
-        self.assertEqual(sheet["A16"].value, "Contact Person")
-        self.assertEqual(sheet["A19"].value, "Software")
-        self.assertEqual(sheet["A20"].value, "Item")
+        self.assertEqual(sheet["F6"].value, "Date:")
+        self.assertEqual(sheet["A7"].value, "Ship to")
+        self.assertEqual(sheet["A12"].value, "Bill to:")
+        self.assertEqual(sheet["A18"].value, "Contact Person")
+        self.assertEqual(sheet["A21"].value, "Software")
+        self.assertEqual(sheet["A22"].value, "Item")
         self.assertEqual(
-            [sheet.cell(row, 2).value for row in range(21, 25)],
+            [sheet.cell(row, 2).value for row in range(23, 27)],
             [f"Software item {index}" for index in range(1, 5)],
         )
-        self.assertEqual(sheet["C21"].value, 1)
-        self.assertEqual(sheet["C21"].number_format, "0")
-        self.assertEqual(sheet["D21"].value, 60000)
-        self.assertEqual(sheet["D21"].number_format, "#,##0")
-        self.assertEqual(sheet["E21"].value, 0)
-        self.assertEqual(sheet["E21"].number_format, '0"%"')
-        self.assertEqual(sheet["E25"].value, "Software subscription subtotal:")
-        self.assertEqual(sheet["A27"].value, "Others")
-        self.assertEqual(sheet["A28"].value, "Item")
+        self.assertEqual(sheet["C23"].value, 1)
+        self.assertEqual(sheet["C23"].number_format, "0")
+        self.assertEqual(sheet["D23"].value, 60000)
+        self.assertEqual(sheet["D23"].number_format, "#,##0")
+        self.assertEqual(sheet["E23"].value, 0)
+        self.assertEqual(sheet["E23"].number_format, '0"%"')
+        self.assertEqual(sheet["E27"].value, "Software subscription subtotal:")
+        self.assertEqual(sheet["A29"].value, "Others")
+        self.assertEqual(sheet["A30"].value, "Item")
         self.assertEqual(
-            [sheet.cell(row, 2).value for row in range(29, 35)],
+            [sheet.cell(row, 2).value for row in range(31, 37)],
             [f"Other item {index}" for index in range(1, 7)],
         )
         self.assertEqual(len(sheet._images), 2)
